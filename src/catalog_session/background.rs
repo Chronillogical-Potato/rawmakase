@@ -13,7 +13,7 @@ use std::{
 
 /// Called after each batch is read, so whoever shows it polls (a window
 /// asks for a repaint).
-pub type Wake = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type Wake = Arc<dyn Fn() + Send + Sync>;
 
 /// Photos read between two updates of the catalog.
 const BATCH: usize = 32;

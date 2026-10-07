@@ -95,7 +95,7 @@ pub(in crate::app) enum EditSource {
 impl EditSource {
     /// The recipe a photo is rendered with: its edit, or the defaults
     /// Develop would open it with (Adobe Default unless given).
-    pub fn recipe(edit: Option<&Self>, raw: &crate::raw::Raw) -> anyhow::Result<Recipe> {
+    pub(crate) fn recipe(edit: Option<&Self>, raw: &crate::raw::Raw) -> anyhow::Result<Recipe> {
         let m = &raw.metadata;
         let (profiles, _) = crate::camera_profiles::installed(m);
         Ok(match edit {
@@ -108,7 +108,7 @@ impl EditSource {
         })
     }
     /// Identifies this edit in the preview cache.
-    pub fn tag(&self) -> String {
+    pub(crate) fn tag(&self) -> String {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         match self {
@@ -270,14 +270,14 @@ pub(super) struct Progress {
 }
 
 impl Progress {
-    pub fn queued(&mut self) {
+    pub(crate) fn queued(&mut self) {
         if self.completed == self.total {
             *self = Self::default();
         }
         self.total += 1;
     }
 
-    pub fn finish(&mut self, result: &PreviewResult) {
+    pub(crate) fn finish(&mut self, result: &PreviewResult) {
         self.completed += 1;
         self.failed += usize::from(result.image.is_none());
         if let Some(error) = &result.cache_error {
@@ -286,17 +286,17 @@ impl Progress {
     }
 
     /// A preview could not be kept in the cache.
-    pub fn cache_failed(&mut self, error: String) {
+    pub(crate) fn cache_failed(&mut self, error: String) {
         self.cache_error = Some(error);
     }
 
     /// Worth a status line: still working, or something could not be prepared.
-    pub fn active(&self) -> bool {
+    pub(crate) fn active(&self) -> bool {
         self.completed < self.total || self.failed > 0 || self.cache_error.is_some()
     }
     /// One line of small text, the same height as the status row it sits in.
     /// In a right-to-left layout, so the spinner comes first and sits right.
-    pub fn show(&self, ui: &mut egui::Ui, edits_pending: usize) {
+    pub(crate) fn show(&self, ui: &mut egui::Ui, edits_pending: usize) {
         let building = self.completed < self.total || edits_pending > 0;
         if building {
             ui.add(egui::Spinner::new().size(11.));

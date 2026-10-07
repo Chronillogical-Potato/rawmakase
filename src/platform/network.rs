@@ -1,6 +1,6 @@
 //! Make desktop-mounted network shares accessible to filesystem-based RAW readers.
 #[cfg(target_os = "linux")]
-pub fn prepare_filesystem_bridge() {
+pub(crate) fn prepare_filesystem_bridge() {
     use std::{
         path::{Path, PathBuf},
         process::{Command, Stdio},
@@ -75,7 +75,7 @@ fn bridge_is_mounted(mountinfo: &str, path: &std::path::Path) -> bool {
     })
 }
 #[cfg(not(target_os = "linux"))]
-pub fn prepare_filesystem_bridge() {}
+pub(crate) fn prepare_filesystem_bridge() {}
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;

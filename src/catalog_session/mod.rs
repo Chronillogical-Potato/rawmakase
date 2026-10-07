@@ -5,12 +5,11 @@ pub(crate) mod background;
 
 use crate::catalog::{Catalog, Collection, CollectionId, Folder, Photo, PhotoId, RootId};
 use anyhow::Result;
-pub use backfill::Saved;
-pub use background::Wake;
+pub(crate) use background::Wake;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-pub struct CatalogSession {
+pub(crate) struct CatalogSession {
     pub catalog: Catalog,
     /// The catalog's photos, without macOS "._" metadata files.
     pub photos: Vec<Photo>,
@@ -25,7 +24,7 @@ pub struct CatalogSession {
 }
 
 /// A catalog just opened, with what opening it could not finish.
-pub struct Opened {
+pub(crate) struct Opened {
     pub session: CatalogSession,
     /// Lightroom's keyword export options could not be read; tried again on
     /// the next open.
@@ -33,7 +32,7 @@ pub struct Opened {
 }
 
 impl CatalogSession {
-    pub fn open(path: &Path) -> Result<Opened> {
+    pub(crate) fn open(path: &Path) -> Result<Opened> {
         crate::platform::network::prepare_filesystem_bridge();
         let mut catalog = Catalog::open(path)?;
         // Catalogs imported before history was kept: recover it from the
@@ -63,12 +62,12 @@ impl CatalogSession {
     }
     /// Calls `wake` whenever a background read has something to save, for
     /// whoever shows the catalog to poll it.
-    pub fn wake_with(&mut self, wake: Wake) {
+    pub(crate) fn wake_with(&mut self, wake: Wake) {
         self.wake = wake;
     }
     /// Sets rating, flag and label in the catalog, in one transaction, then
     /// in `photos`.
-    pub fn set_ratings(&mut self, values: &[(PhotoId, i32, i32, String)]) -> Result<()> {
+    pub(crate) fn set_ratings(&mut self, values: &[(PhotoId, i32, i32, String)]) -> Result<()> {
         self.catalog.set_metadata_of(values)?;
         for (id, rating, flag, label) in values {
             if let Some(p) = self.photos.iter_mut().find(|p| p.id == *id) {
@@ -82,7 +81,7 @@ impl CatalogSession {
     /// Reads rating, flag, label, capture time and keywords of `ids` again
     /// from the catalog into `photos`, after the catalog changed them. The
     /// photos keep their order.
-    pub fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
+    pub(crate) fn refresh_photos(&mut self, ids: &[PhotoId]) -> Result<()> {
         let wanted: HashSet<PhotoId> = ids.iter().copied().collect();
         let fresh: HashMap<PhotoId, Photo> = self
             .catalog
@@ -102,7 +101,7 @@ impl CatalogSession {
         self.refresh_keywords(ids)
     }
     /// Reads the keywords of `ids` again from the catalog into `photos`.
-    pub fn refresh_keywords(&mut self, ids: &[PhotoId]) -> Result<()> {
+    pub(crate) fn refresh_keywords(&mut self, ids: &[PhotoId]) -> Result<()> {
         let mut names = HashMap::new();
         for id in ids {
             let keywords: Vec<String> = self
@@ -121,7 +120,7 @@ impl CatalogSession {
         Ok(())
     }
     /// Lightroom's Quick Collection, once there is one.
-    pub fn quick_collection(&self) -> Option<CollectionId> {
+    pub(crate) fn quick_collection(&self) -> Option<CollectionId> {
         use crate::catalog::{CollectionKind, QUICK_COLLECTION};
         self.collections
             .iter()
@@ -131,7 +130,7 @@ impl CatalogSession {
             .map(|c| c.id)
     }
     /// The Quick Collection, made if there is none yet.
-    pub fn ensure_quick_collection(&mut self) -> Result<CollectionId> {
+    pub(crate) fn ensure_quick_collection(&mut self) -> Result<CollectionId> {
         if let Some(id) = self.quick_collection() {
             return Ok(id);
         }
@@ -142,7 +141,7 @@ impl CatalogSession {
     }
     /// Reads the photos, folders, collections and roots again. All or nothing:
     /// when a read fails, the lists stay as they were, still matching each other.
-    pub fn reload(&mut self) -> Result<()> {
+    pub(crate) fn reload(&mut self) -> Result<()> {
         // Earlier imports could pick up macOS "._" metadata files; never show them.
         let mut photos = self.catalog.photos()?;
         photos.retain(|p| !crate::storage::is_hidden(Path::new(&p.filename)));

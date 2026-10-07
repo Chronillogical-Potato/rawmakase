@@ -47,7 +47,7 @@ impl Drop for Outputs {
 }
 impl Outputs {
     /// Whether job `id` has finished: completed, failed, or unknown.
-    pub fn finished(&self, id: u64) -> bool {
+    pub(crate) fn finished(&self, id: u64) -> bool {
         self.jobs.get(&id).is_none_or(|j| {
             j.state
                 .lock()
@@ -57,12 +57,12 @@ impl Outputs {
         })
     }
     /// Cancels every job still running, after the stage it is in.
-    pub fn cancel_all(&self) {
+    pub(crate) fn cancel_all(&self) {
         for job in self.jobs.values() {
             job.cancel.store(true, Ordering::Relaxed);
         }
     }
-    pub fn state(&self, id: u64) -> Result<OutputState> {
+    pub(crate) fn state(&self, id: u64) -> Result<OutputState> {
         self.jobs
             .get(&id)
             .map(|j| {
@@ -78,7 +78,7 @@ impl Outputs {
                 )
             })
     }
-    pub fn start(
+    pub(crate) fn start(
         &mut self,
         photo: job::Photo,
         path: PathBuf,

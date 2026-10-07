@@ -95,7 +95,7 @@ fn full_loader(
         }
     })
 }
-pub fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
+pub(crate) fn loader(tx: Sender<Event>, ctx: egui::Context) -> Latest<LoadJob> {
     let prefetcher = Arc::new(prefetcher());
     let full = full_loader(tx.clone(), ctx.clone(), prefetcher.clone());
     Latest::new(move |mut job: LoadJob| {

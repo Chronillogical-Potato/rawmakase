@@ -11,7 +11,7 @@ use std::{
 };
 
 /// A loaded header can be installed as a unit before pixel development finishes.
-pub struct LoadedHeader {
+pub(crate) struct LoadedHeader {
     pub id: u64,
     pub path: PathBuf,
     pub metadata: Metadata,
@@ -20,7 +20,7 @@ pub struct LoadedHeader {
     pub status: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RenderStage {
+pub(crate) enum RenderStage {
     Draft,
     Fit,
     Region,
@@ -35,7 +35,7 @@ impl RenderStage {
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TaskKind {
+pub(crate) enum TaskKind {
     Load,
     Render(Pane),
 }
@@ -43,7 +43,7 @@ pub enum TaskKind {
 /// in Lightroom's Before/After views. Each has its own render lane and caches, so an
 /// edit renders only the After.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Pane {
+pub(crate) enum Pane {
     #[default]
     After,
     Before,
@@ -51,13 +51,13 @@ pub enum Pane {
 
 /// What an Auto request sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AutoKind {
+pub(crate) enum AutoKind {
     /// The six Tone sliders, as Lightroom's Auto button; white balance is kept.
     Settings,
     /// White balance alone, the WB menu's Auto.
     WhiteBalance,
 }
-pub enum Event {
+pub(crate) enum Event {
     DialogClosed,
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
@@ -178,7 +178,7 @@ pub enum Event {
 }
 /// Textures the renderer registered with the UI and no longer uses. Freed when
 /// dropped, so the UI releases them only once it no longer draws them.
-pub struct RetiredTextures {
+pub(crate) struct RetiredTextures {
     state: eframe::egui_wgpu::RenderState,
     ids: Vec<egui::TextureId>,
 }
@@ -191,7 +191,7 @@ impl Drop for RetiredTextures {
     }
 }
 /// A rendered preview as the viewport draws it.
-pub enum Preview {
+pub(crate) enum Preview {
     /// Rendered on the CPU: display bytes for a texture upload.
     Pixels {
         image: Rendered,
@@ -206,7 +206,7 @@ pub enum Preview {
         navigator: Option<(egui::TextureId, [usize; 2])>,
     },
 }
-pub struct LoadJob {
+pub(crate) struct LoadJob {
     pub id: u64,
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
@@ -220,14 +220,14 @@ pub struct LoadJob {
 /// A photo to develop into the decode cache ahead of time, so opening it next
 /// skips decoding. It has its own cancel flag: the photo on screen finishing
 /// must not stop it, moving to another photo must.
-pub struct Prefetch {
+pub(crate) struct Prefetch {
     pub path: PathBuf,
     pub cancel: Arc<AtomicBool>,
     pub demosaic: crate::camera_data::Demosaic,
 }
 /// What is drawn over (or instead of) the rendered photo.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum Overlay {
+pub(crate) enum Overlay {
     #[default]
     None,
     /// Visualize Spots with its threshold (0–1).
@@ -240,7 +240,7 @@ pub enum Overlay {
         opacity: f32,
     },
 }
-pub struct RenderJob {
+pub(crate) struct RenderJob {
     pub id: u64,
     pub pane: Pane,
     pub image: Arc<CameraImage>,
@@ -270,9 +270,9 @@ mod latest;
 mod loader;
 mod reference;
 mod renderer;
-pub use latest::Latest;
+pub(crate) use latest::Latest;
 pub(crate) use latest::panic_message;
-pub use loader::loader;
+pub(crate) use loader::loader;
 pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
-pub use renderer::Renderer;
+pub(crate) use renderer::Renderer;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

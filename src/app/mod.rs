@@ -17,7 +17,7 @@ use std::{
     sync::mpsc::{self, Receiver, Sender},
 };
 
-pub struct Editor {
+pub(crate) struct Editor {
     activity: activity::Activity,
     load: task::Task,
     presets: PresetBrowser,
@@ -99,7 +99,7 @@ pub struct Editor {
     automation: commands::Automation,
 }
 impl Editor {
-    pub fn new(
+    pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
         launch: crate::updates::Launch,
@@ -594,7 +594,7 @@ mod export;
 pub(crate) mod folder_locations;
 mod guided_tool;
 mod inspector;
-pub mod library;
+pub(crate) mod library;
 mod mask_tool;
 mod navigator;
 mod onboarding;
@@ -618,7 +618,7 @@ mod undo;
 mod upright;
 mod viewport;
 mod widgets;
-pub mod worker;
+pub(crate) mod worker;
 mod workflow;
 mod workspace;
 

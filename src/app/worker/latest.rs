@@ -11,16 +11,16 @@ struct Slot<T> {
     wake: Condvar,
     stopped: AtomicBool,
 }
-pub struct Latest<T> {
+pub(crate) struct Latest<T> {
     slot: Arc<Slot<T>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl<T: Send + 'static> Latest<T> {
-    pub fn new(run: impl FnMut(T) + Send + 'static) -> Self {
+    pub(crate) fn new(run: impl FnMut(T) + Send + 'static) -> Self {
         Self::with_lanes(1, run)
     }
     /// A mailbox with `lanes` lanes, which `submit_to` addresses.
-    pub fn with_lanes(lanes: usize, mut run: impl FnMut(T) + Send + 'static) -> Self {
+    pub(crate) fn with_lanes(lanes: usize, mut run: impl FnMut(T) + Send + 'static) -> Self {
         let slot = Arc::new(Slot {
             jobs: Mutex::new((0..lanes.max(1)).map(|_| None).collect()),
             wake: Condvar::new(),
@@ -54,11 +54,11 @@ impl<T: Send + 'static> Latest<T> {
         super::super::task::Stopping::new(self.thread.take())
     }
 
-    pub fn submit(&self, job: T) {
+    pub(crate) fn submit(&self, job: T) {
         self.submit_to(0, job);
     }
     /// Replaces the pending job of `lane`, leaving the other lanes' work queued.
-    pub fn submit_to(&self, lane: usize, job: T) {
+    pub(crate) fn submit_to(&self, lane: usize, job: T) {
         let mut jobs = self.slot.jobs.lock().unwrap();
         let last = jobs.len() - 1;
         jobs[lane.min(last)] = Some(job);

@@ -3,9 +3,9 @@ use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Key};
 
-pub const LABELS: [&str; 5] = ["Red", "Yellow", "Green", "Blue", "Purple"];
+pub(crate) const LABELS: [&str; 5] = ["Red", "Yellow", "Green", "Blue", "Purple"];
 #[derive(Clone, Debug, PartialEq)]
-pub enum Edit {
+pub(crate) enum Edit {
     Rating(i32),
     RatingDelta(i32),
     Flag(i32),
@@ -16,7 +16,7 @@ pub enum Edit {
     Label(String),
 }
 impl Edit {
-    pub fn values(&self, photo: &Photo) -> (i32, i32, String) {
+    pub(crate) fn values(&self, photo: &Photo) -> (i32, i32, String) {
         let (mut rating, mut flag, mut label) = (photo.rating, photo.flag, photo.label.clone());
         match self {
             Self::Rating(v) => rating = *v,
@@ -37,7 +37,7 @@ impl Edit {
     }
     /// The same edit with its toggle settled by `lead`, the active photo, so
     /// every photo of a batch gets the same value.
-    pub fn resolve(self, lead: &Photo) -> Self {
+    pub(crate) fn resolve(self, lead: &Photo) -> Self {
         match self {
             Self::TogglePick => Self::Flag(self.values(lead).1),
             Self::ToggleLabel(_) => Self::Label(self.values(lead).2),
@@ -46,7 +46,7 @@ impl Edit {
     }
 }
 
-pub fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {
+pub(crate) fn shortcut(ctx: &egui::Context) -> Option<(Edit, bool)> {
     if ctx.text_edit_focused() {
         return None;
     }
@@ -116,7 +116,7 @@ pub(super) fn label_color(palette: &theme::Palette, label: &str) -> Option<Color
 
 /// Rating, flag and label as fixed-size painted controls, so hovering never
 /// changes the layout.
-pub fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<Edit> {
+pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<Edit> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Rect, Sense, Stroke, StrokeKind, Vec2};
     let mut edit = None;

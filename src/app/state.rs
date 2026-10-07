@@ -368,7 +368,7 @@ impl PresetBrowser {
 }
 
 impl Document {
-    pub fn reset(&mut self, catalog_photo: Option<PhotoId>) {
+    pub(crate) fn reset(&mut self, catalog_photo: Option<PhotoId>) {
         *self = Self {
             catalog_photo,
             ..Default::default()
@@ -376,7 +376,7 @@ impl Document {
     }
 }
 impl PreviewState {
-    pub fn clear_document(&mut self) {
+    pub(crate) fn clear_document(&mut self) {
         self.task.invalidate();
         self.texture = None;
         self.region = None;
@@ -395,7 +395,7 @@ impl PreviewState {
         self.samples_requested = false;
     }
     /// Textures the renderer presented into that the viewport draws.
-    pub fn presented(&self) -> Vec<egui::TextureId> {
+    pub(crate) fn presented(&self) -> Vec<egui::TextureId> {
         [
             &self.texture,
             &self.region,
@@ -411,7 +411,7 @@ impl PreviewState {
     }
     /// Stops drawing textures the renderer presented into, once it has freed them.
     /// Not rendering again at once: a render that keeps failing would repeat.
-    pub fn forget_presented(&mut self) {
+    pub(crate) fn forget_presented(&mut self) {
         let [before, before_region] = self.before.pictures();
         for slot in [
             &mut self.texture,
@@ -427,19 +427,19 @@ impl PreviewState {
     }
 }
 impl ViewState {
-    pub fn is(&self, tool: Tool) -> bool {
+    pub(crate) fn is(&self, tool: Tool) -> bool {
         self.tool == tool
     }
     /// An eyedropper is active: White Balance, the Fringe Color Selector or Point
     /// Color's dropper.
-    pub fn picks_color(&self) -> bool {
+    pub(crate) fn picks_color(&self) -> bool {
         matches!(
             self.tool,
             Tool::WhiteBalance | Tool::Defringe | Tool::PointColor
         )
     }
     /// What the eyedropper's loupe asks for.
-    pub fn loupe_prompt(&self) -> &'static str {
+    pub(crate) fn loupe_prompt(&self) -> &'static str {
         match self.tool {
             Tool::Defringe => "Pick a purple or green fringe",
             Tool::PointColor => "Pick a color to adjust",
@@ -447,7 +447,7 @@ impl ViewState {
         }
     }
     /// Opens `tool`, or closes it when it is already open.
-    pub fn toggle(&mut self, tool: Tool) {
+    pub(crate) fn toggle(&mut self, tool: Tool) {
         self.tool = if self.tool == tool { Tool::None } else { tool };
         if matches!(self.tool, Tool::Crop) {
             self.zoom.on = false;
@@ -456,7 +456,7 @@ impl ViewState {
         self.ruler = Default::default();
         self.guided.drag = None;
     }
-    pub fn clear_document(&mut self) {
+    pub(crate) fn clear_document(&mut self) {
         self.zoom.on = false;
         self.zoom_anim = None;
         self.shown_rect = None;
@@ -481,7 +481,7 @@ impl ViewState {
     }
 }
 impl PresetBrowser {
-    pub fn clear_document(&mut self) {
+    pub(crate) fn clear_document(&mut self) {
         self.revision += 1;
         self.issues.clear();
         self.substitutes.clear();
@@ -493,16 +493,16 @@ impl PresetBrowser {
 }
 
 impl Document {
-    pub fn full(&self) -> Option<&Arc<CameraImage>> {
+    pub(crate) fn full(&self) -> Option<&Arc<CameraImage>> {
         self.image.as_ref()
     }
     /// What applying XMP or Lightroom settings measures for Auto, on the full-size
     /// image when it is decoded.
-    pub fn measures(&self) -> Option<crate::develop::Measures<'_>> {
+    pub(crate) fn measures(&self) -> Option<crate::develop::Measures<'_>> {
         self.full()
             .map(|image| crate::develop::Measures(image.as_ref()))
     }
-    pub fn set_image(&mut self, full: Arc<CameraImage>) {
+    pub(crate) fn set_image(&mut self, full: Arc<CameraImage>) {
         self.image = Some(full);
         self.color_spread = Default::default();
     }

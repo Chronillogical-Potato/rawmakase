@@ -9,7 +9,7 @@ use anyhow::Result;
 
 /// A change to a collection's photos, for the shared undo log.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CollectionCommand {
+pub(crate) struct CollectionCommand {
     /// Orders it among other changes made in the same frame.
     pub sequence: u64,
     pub collection: crate::catalog::CollectionId,

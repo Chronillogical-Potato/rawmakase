@@ -31,14 +31,14 @@ pub(in crate::app) struct ReferenceJob {
     pub demosaic: camera_data::Demosaic,
 }
 /// The reference photo, developed: the half-size decode first, then the full one.
-pub struct ReferenceImage {
+pub(crate) struct ReferenceImage {
     pub image: Arc<camera_data::CameraImage>,
     pub recipe: Recipe,
     pub resolution: Resolution,
 }
 /// How much of the photo's resolution an image has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Resolution {
+pub(crate) enum Resolution {
     /// The half-size decode: enough for Fit.
     Half,
     /// Every pixel, for 100%.

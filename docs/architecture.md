@@ -141,7 +141,10 @@ inject a temporary file, without changing the process-wide environment.
 
 The library API is internal: the RAWmakase binary, its examples and its tests are
 its only clients, so modules and functions change freely with them and nothing is
-kept for outside callers. The compatibility surface is the saved data: recipe and
+kept for outside callers. `src/lib.rs` exports only the modules they use; the rest
+(`catalog_session`, `decode`, `demosaic`, `edit_session`, `platform`, `time`)
+are `pub(crate)`, and the desktop app exposes only `app::run`, so the
+compiler reports what in them nothing uses. The compatibility surface is the saved data: recipe and
 preset envelopes are versioned and migrated by `model::saved_format`; a catalog must
 be exactly version 1 to open (other versions are refused, the file left
 unchanged), and its schema only ever gains tables, applied idempotently on open;

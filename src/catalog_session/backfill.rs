@@ -23,7 +23,7 @@ pub(super) struct Backfill {
 
 /// What one poll of a backfill saved.
 #[derive(Debug, Default)]
-pub struct Saved<T> {
+pub(crate) struct Saved<T> {
     /// What was saved in the catalog and is now in the session's lists.
     pub saved: T,
     /// Saving failed; what was read is read again after the next online check.
@@ -36,7 +36,7 @@ pub struct Saved<T> {
 impl CatalogSession {
     /// Reads the capture times still missing, of the photos `available` says
     /// are online and not tried since [`Self::retry_capture_times`].
-    pub fn start_capture_times(&mut self, available: impl Fn(&Path) -> bool) {
+    pub(crate) fn start_capture_times(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.capture.is_some() {
             return;
         }
@@ -62,16 +62,17 @@ impl CatalogSession {
     }
     /// Lets the next [`Self::start_capture_times`] try every photo again, as
     /// once more photos are online.
-    pub fn retry_capture_times(&mut self) {
+    pub(crate) fn retry_capture_times(&mut self) {
         self.backfill.capture_tried.clear();
     }
     /// Whether capture times are being read.
-    pub fn reading_capture_times(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn reading_capture_times(&self) -> bool {
         self.backfill.capture.is_some()
     }
     /// Saves the capture times read so far, a virtual copy taking its
     /// master's. Returns the times saved; the photos keep their order.
-    pub fn poll_capture_times(&mut self) -> Saved<Vec<(PhotoId, String)>> {
+    pub(crate) fn poll_capture_times(&mut self) -> Saved<Vec<(PhotoId, String)>> {
         let Some(reader) = &self.backfill.capture else {
             return Saved::default();
         };
@@ -115,7 +116,7 @@ impl CatalogSession {
     }
     /// Reads the info of the photos that have none, of those `available` says
     /// are online; asked while reading, it reads again once done.
-    pub fn start_photo_info(&mut self, available: impl Fn(&Path) -> bool) {
+    pub(crate) fn start_photo_info(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.info.is_some() {
             self.backfill.info_again = true;
             return;
@@ -135,12 +136,12 @@ impl CatalogSession {
         }
     }
     /// Whether photo info is being read.
-    pub fn reading_photo_info(&self) -> bool {
+    pub(crate) fn reading_photo_info(&self) -> bool {
         self.backfill.info.is_some()
     }
     /// Saves the photo info read so far. Returns how many photos' info was
     /// saved; a file that could not be read is left for the next online check.
-    pub fn poll_photo_info(&mut self) -> Saved<usize> {
+    pub(crate) fn poll_photo_info(&mut self) -> Saved<usize> {
         let Some(reader) = &self.backfill.info else {
             return Saved::default();
         };

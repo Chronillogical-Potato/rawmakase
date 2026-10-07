@@ -2,7 +2,7 @@
 use std::path::{Component, Path, PathBuf, Prefix};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Volume {
+pub(crate) struct Volume {
     /// Display name: the drive's name, a drive letter, or the startup disk.
     pub name: String,
     /// Where the volume is mounted, for external and network drives; `None`
@@ -13,7 +13,7 @@ pub struct Volume {
 /// The volume holding `path`: /Volumes/NAME on macOS, /media/USER/NAME,
 /// /run/media/USER/NAME or /mnt/NAME on Linux, a drive letter or UNC share
 /// on Windows, and otherwise the startup disk.
-pub fn volume_of(path: &Path) -> Volume {
+pub(crate) fn volume_of(path: &Path) -> Volume {
     let parts: Vec<Component> = path.components().collect();
     if let Some(Component::Prefix(prefix)) = parts.first() {
         let mount: PathBuf = parts.iter().take(2).collect();
@@ -86,7 +86,7 @@ fn startup_name() -> String {
 }
 /// Free and total bytes on the volume holding `path`, from `df` on macOS and
 /// Linux; `None` where that isn't available.
-pub fn space(path: &Path) -> Option<(u64, u64)> {
+pub(crate) fn space(path: &Path) -> Option<(u64, u64)> {
     if cfg!(windows) {
         return None;
     }

@@ -46,11 +46,11 @@ pub(super) enum Step {
 
 impl Library {
     /// The active photo.
-    pub fn selected(&self) -> Option<PhotoId> {
+    pub(crate) fn selected(&self) -> Option<PhotoId> {
         self.selection.active
     }
     /// Selects only `id`, or nothing.
-    pub fn select(&mut self, id: Option<PhotoId>) {
+    pub(crate) fn select(&mut self, id: Option<PhotoId>) {
         self.selection = Selection {
             active: id,
             selected: id.into_iter().collect(),
@@ -59,7 +59,7 @@ impl Library {
     }
     /// Makes `id` active and in view: kept in the selection when it is shown,
     /// else selected alone with the filters that hide it cleared.
-    pub fn reveal(&mut self, id: PhotoId) {
+    pub(crate) fn reveal(&mut self, id: PhotoId) {
         if self
             .visible
             .iter()
@@ -71,7 +71,7 @@ impl Library {
         }
     }
     /// Makes `id` active, keeping the selection when it is part of it.
-    pub fn make_active(&mut self, id: PhotoId) {
+    pub(crate) fn make_active(&mut self, id: PhotoId) {
         if self.selection.selected.contains(&id) {
             self.selection.active = Some(id);
             self.selection.anchor = Some(id);

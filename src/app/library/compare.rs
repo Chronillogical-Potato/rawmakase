@@ -50,12 +50,12 @@ impl Compare {
 
 impl Library {
     #[cfg(test)]
-    pub fn compare_open(&self) -> bool {
+    pub(crate) fn compare_open(&self) -> bool {
         self.compare.open
     }
     /// C: the active photo as the select, beside the next photo selected
     /// with it, or else the next one shown.
-    pub fn open_compare(&mut self) {
+    pub(crate) fn open_compare(&mut self) {
         let Some(select) = self
             .selection
             .active
@@ -103,7 +103,7 @@ impl Library {
         self.sync_compare_selection();
     }
     /// Esc or G: back to the grid, with both photos selected.
-    pub fn close_compare(&mut self) {
+    pub(crate) fn close_compare(&mut self) {
         if self.compare.open {
             self.compare.open = false;
             self.scroll_to_active = true;
@@ -193,7 +193,7 @@ impl Library {
     }
     /// A rating, flag or label key in Compare: the active photo only. With
     /// Shift, the candidate moves on.
-    pub fn edit_compared(
+    pub(crate) fn edit_compared(
         &mut self,
         edit: crate::app::photo_metadata::Edit,
         advance: bool,

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// The platform's own name for the action, e.g. "Reveal in Finder".
-pub const LABEL: &str = if cfg!(target_os = "macos") {
+pub(crate) const LABEL: &str = if cfg!(target_os = "macos") {
     "Reveal in Finder"
 } else if cfg!(windows) {
     "Show in Explorer"
@@ -15,7 +15,7 @@ pub const LABEL: &str = if cfg!(target_os = "macos") {
 /// Opens the file manager with `path` selected. On Linux this asks the
 /// desktop's FileManager1 service to select the file and falls back to
 /// opening the containing folder.
-pub fn reveal(path: &Path) -> Result<()> {
+pub(crate) fn reveal(path: &Path) -> Result<()> {
     if cfg!(target_os = "macos") {
         Command::new("open").arg("-R").arg(path).spawn()?;
     } else if cfg!(windows) {

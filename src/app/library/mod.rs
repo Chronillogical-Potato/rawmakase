@@ -6,7 +6,7 @@ use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Action {
+pub(crate) enum Action {
     None,
     Develop(PhotoId),
     RelinkRoot(RootId),
@@ -16,7 +16,7 @@ pub enum Action {
 impl Action {
     /// Combines the actions of panels drawn in turn: a later panel's action
     /// replaces an earlier one, and none keeps it.
-    pub fn then(self, later: Action) -> Action {
+    pub(crate) fn then(self, later: Action) -> Action {
         match later {
             Action::None => self,
             later => later,
@@ -26,7 +26,7 @@ impl Action {
 /// Where the Library was: its source, filter bar and selection, for undo to
 /// return to.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Place {
+pub(crate) struct Place {
     filters: filter::Filters,
     folder: String,
     selection: selection::Selection,
@@ -38,21 +38,21 @@ impl Place {
     }
 }
 pub(in crate::app) use cell::copy_suffix;
-pub use descriptive::DescriptiveCommand;
-pub use filmstrip::{DraggedPhoto, Module, Pick};
-pub use metadata::{Metadata, MetadataCommand};
+pub(crate) use descriptive::DescriptiveCommand;
+pub(crate) use filmstrip::{DraggedPhoto, Module, Pick};
+pub(crate) use metadata::{Metadata, MetadataCommand};
 pub(in crate::app) use previews::EditSource;
-pub use quick::CollectionCommand;
+pub(crate) use quick::CollectionCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum CopyAction {
+pub(crate) enum CopyAction {
     Create(PhotoId),
     SetMaster(PhotoId),
     /// Asks first, as Lightroom does.
     Remove(PhotoId),
 }
-pub struct Library {
+pub(crate) struct Library {
     /// The open catalog and the photos, folders and collections read from it.
     pub session: CatalogSession,
     /// The active photo and the photos selected with it.
@@ -145,7 +145,7 @@ pub struct Library {
 }
 impl Library {
     /// The Library over a catalog read with [`CatalogSession::open`].
-    pub fn new(opened: Opened, ctx: egui::Context) -> Self {
+    pub(crate) fn new(opened: Opened, ctx: egui::Context) -> Self {
         let Opened {
             mut session,
             keyword_export,
@@ -216,10 +216,12 @@ impl Library {
     }
     /// Opens the catalog at `path`, for tests.
     #[cfg(test)]
-    pub fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
+    pub(crate) fn load(path: &std::path::Path, ctx: egui::Context) -> Result<Self> {
         Ok(Self::new(CatalogSession::open(path)?, ctx))
     }
-    pub fn refresh(&mut self) -> Result<()> {
+    /// Reads the catalog again and checks which files are online, for tests.
+    #[cfg(test)]
+    pub(crate) fn refresh(&mut self) -> Result<()> {
         self.reload()?;
         self.check_files();
         Ok(())
@@ -263,7 +265,7 @@ impl Library {
         self.filter();
     }
     /// Waits for the online check, for callers that report on it.
-    pub fn wait_for_availability(&mut self) {
+    pub(crate) fn wait_for_availability(&mut self) {
         if self.availability.poll(true, &self.session.photos) {
             self.availability_known();
         }
@@ -322,7 +324,7 @@ impl Library {
         let photo = self.photo(id)?;
         develop_refusal(photo, photo.path.is_file())
     }
-    pub fn available_count(&self) -> usize {
+    pub(crate) fn available_count(&self) -> usize {
         self.availability.count(&self.session.photos)
     }
     fn filter(&mut self) {
@@ -359,7 +361,7 @@ impl Library {
             self.keep_in_place = anchor;
         }
     }
-    pub fn photo(&self, id: PhotoId) -> Option<&Photo> {
+    pub(crate) fn photo(&self, id: PhotoId) -> Option<&Photo> {
         self.session.photos.iter().find(|p| p.id == id)
     }
     /// What photo `id` is developed from, as Develop would open it: its saved edit
@@ -400,7 +402,7 @@ impl Library {
             edit,
         }))
     }
-    pub fn navigate(&self, id: PhotoId, delta: i32) -> Option<PhotoId> {
+    pub(crate) fn navigate(&self, id: PhotoId, delta: i32) -> Option<PhotoId> {
         let at = self
             .visible
             .iter()
@@ -749,7 +751,7 @@ mod collections;
 mod compare;
 mod copy_name;
 mod descriptive;
-pub mod filmstrip;
+pub(crate) mod filmstrip;
 mod filter;
 mod filter_bar;
 mod grid;

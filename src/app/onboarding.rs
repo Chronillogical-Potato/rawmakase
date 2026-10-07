@@ -53,7 +53,7 @@ pub(super) struct Onboarding {
 }
 /// What the setup view found on disk, refreshed when it opens.
 #[derive(Default)]
-pub struct Found {
+pub(crate) struct Found {
     /// The catalog's cameras as Adobe names them ("Sony ILCE-7CR").
     cameras: BTreeSet<String>,
     /// Adobe base and Camera Matching profiles for those cameras, then looks.

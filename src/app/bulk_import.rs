@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImportKind {
+pub(crate) enum ImportKind {
     CameraProfiles,
     LensProfiles,
     Presets,
@@ -127,7 +127,7 @@ fn gather(kind: ImportKind, picks: &[PathBuf]) -> Vec<Found> {
 
 /// What an import did.
 #[derive(Debug)]
-pub struct Summary {
+pub(crate) struct Summary {
     pub(super) kind: ImportKind,
     pub(super) imported: usize,
     /// Identical to one already imported, or repeated within this import.

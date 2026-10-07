@@ -59,20 +59,20 @@ impl Library {
         }
     }
     /// G: the grid, from any other view.
-    pub fn show_grid(&mut self) {
+    pub(crate) fn show_grid(&mut self) {
         self.close_loupe();
         self.close_compare();
         self.close_survey();
     }
     /// Whether rating, flag and label keys go to the active photo alone, as
     /// in the Loupe, Compare and Survey, rather than to every photo selected.
-    pub fn edits_active_only(&self) -> bool {
+    pub(crate) fn edits_active_only(&self) -> bool {
         self.view() != View::Grid
     }
     /// A rating, flag or label key, applied as the view shows photos: to
     /// every one selected in the grid, else to the active one. With
     /// `advance` (Shift), the view moves on to the next photo.
-    pub fn edit_shown(
+    pub(crate) fn edit_shown(
         &mut self,
         edit: crate::app::photo_metadata::Edit,
         advance: bool,

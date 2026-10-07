@@ -10,13 +10,13 @@ pub(super) enum Encoder {
     Absolute,
 }
 impl Encoder {
-    pub const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 4] = [
         Self::Absolute,
         Self::TwosComplement,
         Self::Offset,
         Self::SignMagnitude,
     ];
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Absolute => "Absolute (0–127)",
             Self::TwosComplement => "Relative (1 / 127)",
@@ -24,7 +24,7 @@ impl Encoder {
             Self::SignMagnitude => "Relative (1 / 65)",
         }
     }
-    pub fn ticks(self, value: u8) -> Option<i32> {
+    pub(crate) fn ticks(self, value: u8) -> Option<i32> {
         match self {
             Self::Absolute => None,
             Self::TwosComplement => Some(if value < 64 {
@@ -53,16 +53,16 @@ pub(super) struct Config {
 }
 impl Config {
     #[cfg(test)]
-    pub fn defaults() -> Self {
+    pub(crate) fn defaults() -> Self {
         Profile::Loupedeck.mapping()
     }
-    pub fn encoder(&self, cc: u8) -> Encoder {
+    pub(crate) fn encoder(&self, cc: u8) -> Encoder {
         self.encoders
             .get(&cc)
             .copied()
             .unwrap_or(self.default_encoder)
     }
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         let dials: std::collections::BTreeMap<_, _> = self
             .dials
             .iter()
@@ -75,7 +75,7 @@ impl Config {
             .collect();
         serde_json::json!({"dials":dials,"buttons":buttons,"photo_dial":self.photo_dial,"photo_detent":self.photo_detent,"default_encoder":self.default_encoder,"encoders":self.encoders,"sensitivity":self.sensitivity})
     }
-    pub fn from_json(value: &serde_json::Value) -> anyhow::Result<Self> {
+    pub(crate) fn from_json(value: &serde_json::Value) -> anyhow::Result<Self> {
         let mut config = Profile::Custom.mapping();
         config.apply(value);
         config.default_encoder = serde_json::from_value(value["default_encoder"].clone())?;
@@ -127,7 +127,7 @@ pub(super) struct DeviceConfig {
     pub mapping: Config,
 }
 impl DeviceConfig {
-    pub fn new(id: u64, profile: Profile) -> Self {
+    pub(crate) fn new(id: u64, profile: Profile) -> Self {
         Self {
             id,
             name: profile.label().into(),
@@ -140,7 +140,7 @@ impl DeviceConfig {
             mapping: profile.mapping(),
         }
     }
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({"id":self.id,"name":self.name,"enabled":self.enabled,"profile":self.profile,"port":self.port,"port_id":self.port_id,"exact":self.exact,"channel":self.channel,"mapping":self.mapping.to_json()})
     }
 }
@@ -150,7 +150,7 @@ pub(super) struct Settings {
     pub socket: bool,
 }
 impl Settings {
-    pub fn from_json(value: &serde_json::Value) -> anyhow::Result<Self> {
+    pub(crate) fn from_json(value: &serde_json::Value) -> anyhow::Result<Self> {
         let mut result = Self::default();
         if value.get("version").is_none() {
             let mut device = DeviceConfig::new(1, Profile::Loupedeck);
@@ -194,7 +194,7 @@ impl Settings {
         }
         Ok(result)
     }
-    pub fn load() -> anyhow::Result<Self> {
+    pub(crate) fn load() -> anyhow::Result<Self> {
         let dir = crate::storage::data_dir();
         let mut config = match std::fs::read(dir.join("midi.json")) {
             Ok(bytes) => Self::from_json(&serde_json::from_slice(&bytes)?)?,
@@ -212,10 +212,10 @@ impl Settings {
         }
         Ok(config)
     }
-    pub fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({"version":2,"devices":self.devices.iter().map(DeviceConfig::to_json).collect::<Vec<_>>()})
     }
-    pub fn save(&self) -> anyhow::Result<()> {
+    pub(crate) fn save(&self) -> anyhow::Result<()> {
         let dir = crate::storage::data_dir();
         crate::storage::atomic_json(&dir.join("midi.json"), &self.to_json())?;
         crate::storage::atomic_json(
@@ -223,7 +223,7 @@ impl Settings {
             &serde_json::json!({"protocol":commands::PROTOCOL,"socket":self.socket}),
         )
     }
-    pub fn add(&mut self, profile: Profile) -> u64 {
+    pub(crate) fn add(&mut self, profile: Profile) -> u64 {
         let id = (1..=u64::MAX)
             .find(|id| !self.devices.iter().any(|d| d.id == *id))
             .expect("available device ID");

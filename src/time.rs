@@ -18,6 +18,7 @@ pub fn utc(seconds: i64) -> [i64; 6] {
 }
 
 /// Days since 1970 of a UTC calendar date (days-from-civil, Howard Hinnant).
+#[cfg(any(test, feature = "telemetry"))]
 fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     let year = year - i64::from(month <= 2);
     let era = year.div_euclid(400);
@@ -29,6 +30,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 /// The ISO 8601 week of `seconds` since 1970, in UTC, e.g. "2026-W40".
+#[cfg(any(test, feature = "telemetry"))]
 pub fn iso_week(seconds: i64) -> String {
     let days = seconds.div_euclid(86_400);
     // 1970-01-01 was a Thursday; Monday is 0.

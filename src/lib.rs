@@ -23,19 +23,19 @@ pub use rawmakase_model::{
 };
 pub mod app;
 mod build_info;
-pub mod catalog_session;
+pub(crate) mod catalog_session;
 pub mod comparison;
-pub mod decode;
+pub(crate) mod decode;
 pub mod decode_cache;
-pub mod demosaic;
+pub(crate) mod demosaic;
 pub mod develop;
-pub mod edit_session;
+pub(crate) mod edit_session;
 pub mod export;
 pub mod photo;
-pub mod platform;
+pub(crate) mod platform;
 pub mod raw;
 #[cfg(feature = "telemetry")]
-pub mod stats;
-pub mod time;
+pub(crate) mod stats;
+pub(crate) mod time;
 pub mod updates;
 pub mod watermark;

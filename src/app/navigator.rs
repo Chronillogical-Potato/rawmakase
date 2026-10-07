@@ -37,7 +37,7 @@ impl Zoom {
     /// Screen rectangle of a whole photo of `size` image pixels laid out in `area`:
     /// fitted in Fit, otherwise `level` screen pixels per image pixel around `pan`,
     /// centred when smaller than `area`. `ppp` is pixels per point.
-    pub fn photo_rect(&self, area: egui::Rect, size: egui::Vec2, ppp: f32) -> egui::Rect {
+    pub(crate) fn photo_rect(&self, area: egui::Rect, size: egui::Vec2, ppp: f32) -> egui::Rect {
         if !self.on {
             let k = (area.width() / size.x).min(area.height() / size.y);
             return egui::Rect::from_center_size(area.center(), size * k);
@@ -59,7 +59,7 @@ impl Zoom {
     /// The 1:1 region `[x, y, w, h]` of a photo `width` × `height` image pixels
     /// that a view `viewport` pixels in size shows when zoomed to 100% or more;
     /// None below 100%, where the whole photo is rendered at the zoomed size.
-    pub fn region(&self, viewport: Vec2, width: u32, height: u32) -> Option<[u32; 4]> {
+    pub(crate) fn region(&self, viewport: Vec2, width: u32, height: u32) -> Option<[u32; 4]> {
         if !self.on || self.level < 1. {
             return None;
         }
@@ -77,7 +77,7 @@ impl Zoom {
     /// Lightroom's click on the photo: from Fit, zooms in keeping `pos` (on the
     /// photo drawn at `rect` in `area`, `size` image pixels) under the pointer;
     /// zoomed in, back to Fit.
-    pub fn toggle_at(&mut self, pos: Pos2, rect: Rect, area: Rect, size: Vec2, ppp: f32) {
+    pub(crate) fn toggle_at(&mut self, pos: Pos2, rect: Rect, area: Rect, size: Vec2, ppp: f32) {
         if !self.on {
             let point = (pos - rect.min) / rect.size();
             let size = size * (self.level / ppp);
@@ -88,11 +88,11 @@ impl Zoom {
         self.on = !self.on;
     }
     /// The level shown, 0 for Fit.
-    pub fn shown(&self) -> f32 {
+    pub(crate) fn shown(&self) -> f32 {
         if self.on { self.level } else { 0. }
     }
     /// Sets a level; 0 fits.
-    pub fn set(&mut self, level: f32) {
+    pub(crate) fn set(&mut self, level: f32) {
         self.on = level > 0.;
         if self.on {
             self.level = level;

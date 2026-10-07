@@ -37,7 +37,7 @@ pub(super) enum Completion {
 }
 impl Completion {
     /// Where the edit was saved, or the error to show.
-    pub fn into_result(self) -> Result<PathBuf, String> {
+    pub(crate) fn into_result(self) -> Result<PathBuf, String> {
         match self {
             Self::Saved(path) => Ok(path),
             Self::Failed(error) => Err(error),
@@ -71,7 +71,7 @@ impl Default for Autosave {
 }
 impl Autosave {
     /// Starts saving `job`, or hands it back if the saver cannot run.
-    pub fn submit(&mut self, job: Job, ctx: &egui::Context) -> Result<(), Box<Job>> {
+    pub(crate) fn submit(&mut self, job: Job, ctx: &egui::Context) -> Result<(), Box<Job>> {
         debug_assert!(!self.in_flight);
         if self.worker.is_none() {
             let (jobs, rx) = mpsc::channel();
@@ -94,11 +94,11 @@ impl Autosave {
         self.in_flight = true;
         Ok(())
     }
-    pub fn busy(&self) -> bool {
+    pub(crate) fn busy(&self) -> bool {
         self.in_flight
     }
     /// The finished save, if one finished.
-    pub fn poll(&mut self) -> Option<Completion> {
+    pub(crate) fn poll(&mut self) -> Option<Completion> {
         self.receive(|completions| match completions.try_recv() {
             Ok(completion) => Some(completion),
             Err(TryRecvError::Empty) => None,
@@ -106,7 +106,7 @@ impl Autosave {
         })
     }
     /// The save in flight, once it finishes.
-    pub fn wait(&mut self) -> Option<Completion> {
+    pub(crate) fn wait(&mut self) -> Option<Completion> {
         self.receive(|completions| Some(completions.recv().unwrap_or(Completion::WorkerLost)))
     }
     fn receive(
