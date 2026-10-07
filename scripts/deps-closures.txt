@@ -4,7 +4,6 @@
 # builds without LibRaw, the renderer, wgpu or the app.
 # File formats and presets are crates/rawmakase-interop, and the catalog with edit
 # resolution crates/rawmakase-catalog, both built without LibRaw, the renderer or
-# the app.
-edit_session never raw demosaic photo develop decode decode_cache app
-# Rendering never reaches the desktop app or export (the catalog is a crate below).
-develop never app export
+# the app. Rendering is crates/rawmakase-engine, built without LibRaw, the
+# catalog or the app, and LibRaw with decoding crates/rawmakase-native.
+edit_session never app

@@ -64,7 +64,7 @@ mod tests {
     fn dng_without_baseline_exposure_uses_the_dng_default() {
         let chart = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/corpus/charts/synthetic-d65.dng"
+            "/../../tests/corpus/charts/synthetic-d65.dng"
         );
         let mut bytes = std::fs::read(chart).unwrap();
         // BaselineExposure, SRATIONAL, count 1: give it an invalid type so it is unread.

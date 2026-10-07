@@ -177,12 +177,12 @@ impl Swatch {
 
 /// The active swatches of a recipe, ready to apply.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PointColors {
+pub struct PointColors {
     swatches: Vec<Swatch>,
 }
 
 impl PointColors {
-    pub(crate) fn new(list: &[PointColor]) -> Option<Self> {
+    pub fn new(list: &[PointColor]) -> Option<Self> {
         let swatches: Vec<_> = list
             .iter()
             .take(MAX_SWATCHES)
@@ -216,7 +216,7 @@ impl PointColors {
     /// `p` is linear ProPhoto RGB. Swatches apply in turn, each to the result of
     /// the ones before, as Camera Raw's do: a second swatch selects the color the
     /// first has made.
-    pub(crate) fn apply_prophoto(&self, p: [f32; 3]) -> [f32; 3] {
+    pub fn apply_prophoto(&self, p: [f32; 3]) -> [f32; 3] {
         self.render_prophoto(p).color
     }
 }

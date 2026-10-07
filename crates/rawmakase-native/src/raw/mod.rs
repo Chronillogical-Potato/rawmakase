@@ -203,7 +203,7 @@ fn fuji_crop(path: &Path) -> Option<[u32; 4]> {
     let ([left, top], [width, height]) = (origin?, size?);
     (width > 0 && height > 0).then_some([left, top, width, height])
 }
-pub(crate) fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
+pub fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
     use image::{ImageDecoder, metadata::Orientation};
     let bytes = raw.thumbnail()?;
     let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;

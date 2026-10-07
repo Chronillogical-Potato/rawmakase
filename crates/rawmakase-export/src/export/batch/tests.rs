@@ -174,7 +174,8 @@ fn fixture(names: &[&str]) -> Result<Fixture> {
     let dir = tempfile::tempdir()?;
     let folder = dir.path().join("photos");
     std::fs::create_dir(&folder)?;
-    let chart = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/charts/synthetic-d65.dng");
+    let chart =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/charts/synthetic-d65.dng");
     for name in names {
         if name.ends_with(".dng") {
             std::fs::copy(&chart, folder.join(name))?;

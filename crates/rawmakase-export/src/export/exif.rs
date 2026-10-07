@@ -71,8 +71,8 @@ pub(super) fn tiff_block(d: CameraExif) -> Vec<u8> {
 
 /// A small TIFF, or a JPEG when `jpeg`, taken at `original` with these
 /// subseconds, for tests.
-#[cfg(test)]
-pub(crate) fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
+#[cfg(any(test, feature = "test-support"))]
+pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
     use crate::exif::tag::{DATE_TIME_ORIGINAL, MAKE, SUBSEC_TIME_ORIGINAL};
     let mut exif = vec![Field::ascii(DATE_TIME_ORIGINAL, original)];
     if !subseconds.is_empty() {

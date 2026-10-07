@@ -15,7 +15,7 @@ pub(crate) fn vibrance_gain(hue: f32, chroma: f32, amount: f32) -> f32 {
     1. + amount * 0.8 * (1. - (chroma / 0.3).clamp(0., 1.)) * (1. - 0.5 * warm)
 }
 
-pub(crate) fn hue_rgb(hue: f32) -> [f32; 3] {
+pub fn hue_rgb(hue: f32) -> [f32; 3] {
     let h = hue.rem_euclid(1.) * 6.;
     let x = 1. - (h.rem_euclid(2.) - 1.).abs();
     match h as u32 {

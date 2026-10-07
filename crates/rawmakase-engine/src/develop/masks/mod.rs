@@ -10,10 +10,10 @@ mod eval;
 pub(crate) mod local;
 mod range;
 
-pub(crate) use brush::Space;
+pub use brush::Space;
 pub(crate) use eval::{MaskWeights, RasterCache, Selection, Weigher};
 pub(crate) use local::{LocalDelta, LocalMath};
-pub(crate) use range::oklab;
+pub use range::oklab;
 
 /// Weights (0–1) of mask `index` over a rendered preview, for the mask overlay. `out`
 /// is the render: the whole photo at its own size, or `region` of the full-size

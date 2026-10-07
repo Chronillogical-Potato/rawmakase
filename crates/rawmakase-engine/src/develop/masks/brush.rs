@@ -43,11 +43,11 @@ impl Raster {
 }
 /// Image-space positions scaled to long-edge units, so distances are round.
 #[derive(Clone, Copy)]
-pub(crate) struct Space {
+pub struct Space {
     pub(crate) scale: [f32; 2],
 }
 impl Space {
-    pub(crate) fn new(aspect: f32) -> Self {
+    pub fn new(aspect: f32) -> Self {
         Self {
             scale: if aspect >= 1. {
                 [1., 1. / aspect]
@@ -56,10 +56,10 @@ impl Space {
             },
         }
     }
-    pub(crate) fn to(&self, p: [f32; 2]) -> [f32; 2] {
+    pub fn to(&self, p: [f32; 2]) -> [f32; 2] {
         [p[0] * self.scale[0], p[1] * self.scale[1]]
     }
-    pub(crate) fn from(&self, p: [f32; 2]) -> [f32; 2] {
+    pub fn from(&self, p: [f32; 2]) -> [f32; 2] {
         [p[0] / self.scale[0], p[1] / self.scale[1]]
     }
 }
