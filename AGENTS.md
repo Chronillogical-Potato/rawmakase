@@ -1,5 +1,64 @@
 # Working on RAWmakase
 
+## Architecture and implementation
+
+- Before changing a module boundary, read `docs/architecture.md`,
+  `docs/code-map.md` and the relevant module documentation. Update them when
+  ownership or dependency direction changes.
+- Keep domain rules independent of UI and transport adapters. Parameter facts,
+  editing side effects, decode policies and protocol types each have one
+  authoritative owner.
+- Enforce invariants through APIs. Session operations should keep edits, history
+  and dirty state consistent; callers should not coordinate these through
+  unrelated mutable fields.
+- Preserve dependency direction and use narrow visibility. Do not weaken
+  architecture checks to make a change pass. Prefer concrete types and simple
+  boundaries over speculative abstractions.
+- Capture job inputs once; use the same inputs for execution and cache identity.
+  Reject stale results after document changes, deletion or replacement.
+- Keep mechanical refactors separate from behavior changes. Preserve saved-edit
+  compatibility, legacy operators, migrations and unknown fields. Never re-bless
+  rendering references merely to pass a refactor.
+- Use the existing task infrastructure. Failure, panic, cancellation and
+  disconnection must clear busy state. Document worker shutdown behavior; avoid
+  unbounded waits and blanket joins in `Drop`.
+- Handle save failures before navigation or termination becomes irreversible.
+  A pending save is not a successful save.
+
+## Tests and code review
+
+- Reproduce bugs with a failing regression test before fixing them. Test
+  observable behavior at the relevant boundary, including UI or protocol input
+  when translation is the risk.
+- For lifecycle changes, cover relevant failure and transition cases: stale
+  completion, deletion/recreation, cancellation, worker loss and save failure.
+  Prefer deterministic tests.
+- Review affected callers and error paths, not only the diff. Prioritize data
+  integrity, compatibility and user-visible behavior over structural preferences.
+- Support findings with a location, triggering scenario and consequence.
+  Distinguish confirmed bugs, potential risks, pre-existing issues and design
+  preferences.
+- Run relevant dependency, workspace and rendering checks alongside the required
+  CI checks. Report skipped coverage; do not infer correctness or architectural
+  isolation from passing tests alone.
+- Judge refactors against their intended outcomes. File moves, new structs and
+  new crates do not by themselves establish ownership or encapsulation.
+
+## Addressing code review comments
+
+- Evaluate each comment against the code, intended behavior and evidence. Do not
+  implement suggestions automatically.
+- Fix real defects and make improvements with a clear benefit. Choose the
+  smallest coherent solution, even when it differs from the suggested
+  implementation.
+- Decline suggestions that are incorrect, redundant, purely speculative or add
+  complexity without meaningful benefit. Explain the reasoning concretely and
+  respectfully.
+- When a concern is valid but belongs outside the change, identify a focused
+  follow-up rather than silently expanding scope.
+- Close the loop: state what changed and how it was verified, or why no change
+  is warranted.
+
 ## Before every push
 
 Run the checks CI runs (`.github/workflows/ci.yml`) and push only when they
