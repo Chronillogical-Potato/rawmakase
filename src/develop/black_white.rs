@@ -68,24 +68,6 @@ impl ColorSpread {
 /// Camera values above this fraction of the white level count as clipped.
 const CLIPPED: f32 = 0.94;
 
-/// Which operator renders the black & white mix.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum BlackWhiteModel {
-    /// A change to Oklab lightness by the hue-weighted mix times chroma: what
-    /// recipes saved before the chart tables keep, so they render as they did.
-    #[default]
-    Original,
-    /// Camera Raw 18.7's gray, measured on a dense synthetic chart: a table of the
-    /// gray's luminance against the color's, and one per band at −100, −50, +50 and
-    /// +100 (docs/color-mixer.md#chart-gray).
-    Chart,
-}
-impl BlackWhiteModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
-
 /// `BlackWhiteModel::Chart`'s tables, in the color mixer's grid (hue × saturation ×
 /// value of linear ProPhoto RGB): log2 of the gray's luminance over the color's at a
 /// zero mix, then each band's change at `GRAY_MIX_POSITIONS`. 1/4000 per step.

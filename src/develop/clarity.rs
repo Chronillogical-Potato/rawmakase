@@ -3,25 +3,8 @@
 //! log luminance, weighted by the local base level (`local_tone.rs`) relative to the
 //! photo's highlights. The gain is computed on the Shadows/Highlights map's grid, so
 //! previews, tiles and exports agree. See docs/tone-controls.md#clarity.
+use crate::model::operators::ClarityModel;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
-
-/// Which operator renders positive Clarity.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ClarityModel {
-    /// The detail gain of `quality::local`: what recipes saved before the measured one
-    /// keep, so they render as they did.
-    #[default]
-    Original,
-    /// Fitted to Camera Raw 18.7 (docs/tone-controls.md#clarity). Negative Clarity
-    /// keeps the original operator.
-    Measured,
-}
-impl ClarityModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// The Clarity this recipe renders with the measured operator, or 0 when its Clarity
 /// takes the original one (older recipes, negative values, earlier engines).

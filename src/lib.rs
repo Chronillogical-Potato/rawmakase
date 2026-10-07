@@ -35,6 +35,7 @@ mod jpeg;
 pub mod lens;
 pub mod lr_develop;
 pub mod metadata;
+pub mod model;
 pub mod optics;
 pub mod photo;
 pub mod platform;

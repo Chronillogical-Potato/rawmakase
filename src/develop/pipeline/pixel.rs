@@ -1,5 +1,6 @@
 //! The per-pixel stages: tone, the colour mixer and colour grading, then the finish into sRGB.
 use super::*;
+use crate::model::operators::GamutModel;
 
 /// A pixel's mask adjustments and the render's constants for them.
 #[derive(Clone, Copy)]
@@ -335,21 +336,7 @@ pub(super) fn finish_color(mut lab: [f32; 3], r: &Recipe, lut: &CurveSet) -> [f3
     })
 }
 
-/// How colors outside sRGB are brought into it at the end of the color stage.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum GamutModel {
-    /// Chroma compressed toward the neutral of the same lightness: what recipes saved
-    /// before the clipped model keep, so they render as they did.
-    #[default]
-    Compress,
-    /// Each channel clipped on its own, as Camera Raw's conversion to sRGB does
-    /// (docs/color-pipeline.md#out-of-gamut-colors).
-    Clip,
-}
 impl GamutModel {
-    pub(crate) fn is_compress(&self) -> bool {
-        *self == Self::Compress
-    }
     /// Linear sRGB inside 0–1; `lightness` is the color's Oklab lightness.
     pub(crate) fn into_srgb(self, rgb: [f32; 3], lightness: f32) -> [f32; 3] {
         match self {

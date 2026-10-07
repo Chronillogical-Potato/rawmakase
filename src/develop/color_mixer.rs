@@ -13,23 +13,9 @@
 //! (`color_mixer_chart.bin`, `MixerModel::Chart`). See docs/color-mixer.md.
 use super::Recipe;
 use crate::color::mul;
-use serde::{Deserialize, Serialize};
+use crate::model::operators::{MixerModel, SaturationModel, VibranceModel};
 
-/// Which measured tables render a recipe's color mixer.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MixerModel {
-    /// Tables measured on nine photos: what recipes saved before the chart tables
-    /// keep, so they render as they did.
-    #[default]
-    Original,
-    /// The eight bands' tables refitted to Camera Raw 18.7 on a dense synthetic
-    /// chart (docs/color-mixer.md#chart-tables); Saturation and Vibrance as before.
-    Chart,
-}
 impl MixerModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
     /// How much of a slider's measured change at ±100 applies at `s`. Camera Raw's
     /// band Luminance is not linear: at −50 it applies about a third of the −100
     /// change, at +50 about 58% of the +100 one (both measured on Blue and Purple).
@@ -60,40 +46,6 @@ const TABLE: usize = 3 * CELLS;
 /// 8 bands × (hue, saturation, luminance) × (−, +), then Saturation −/+, Vibrance −/+.
 const TABLES: usize = 52;
 const SCALE: f32 = 1. / 8000.;
-/// Which operator renders the global Saturation slider.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SaturationModel {
-    /// Tables measured on photos at ±50 and extrapolated: what recipes saved
-    /// before the gray fade keep, so they render as they did.
-    #[default]
-    Original,
-    /// The same tables down to −50, then a fade to the color's luminance, which
-    /// Camera Raw 18.7 reaches exactly at −100 (docs/color-mixer.md#saturation).
-    Gray,
-}
-impl SaturationModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
-
-/// Which tables render the Vibrance slider.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VibranceModel {
-    /// Tables measured on photos at ±50 and extrapolated: what recipes saved before
-    /// the chart tables keep, so they render as they did.
-    #[default]
-    Original,
-    /// The photo tables up to ±50, then Camera Raw 18.7's change at ±75 and ±100
-    /// measured on the dense synthetic chart, interpolated between
-    /// (docs/color-mixer.md#vibrance).
-    Chart,
-}
-impl VibranceModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// `VibranceModel::Chart`'s slider positions, each with a grid in
 /// `vibrance_chart.bin`: hue shift, log2 saturation and log2 value factors. The

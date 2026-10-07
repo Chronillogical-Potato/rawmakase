@@ -16,6 +16,7 @@ app -> export_settings
 app -> lens
 app -> lr_develop
 app -> metadata
+app -> model
 app -> optics
 app -> photo
 app -> platform
@@ -61,6 +62,7 @@ develop -> camera_data
 develop -> camera_profiles
 develop -> color
 develop -> lens
+develop -> model
 develop -> optics
 develop -> raw
 dng -> optics
@@ -141,4 +143,5 @@ xmp -> develop
 xmp -> exif
 xmp -> lens
 xmp -> metadata
+xmp -> model
 xmp -> xml

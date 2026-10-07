@@ -17,24 +17,7 @@
 use crate::camera_data::CameraImage;
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-
-/// Which operator renders a recipe's colour noise reduction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NoiseModel {
-    /// RAWmakase's first colour noise reduction, a 3×3 filter at sampling: what
-    /// recipes saved before the measured one keep, so they render as they did.
-    #[default]
-    Original,
-    /// The colour noise reduction measured in Camera Raw.
-    Measured,
-}
-impl NoiseModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
 
 /// The lowest Amount measured in Camera Raw, which already reduces the finest level as
 /// much as the default does.

@@ -15,9 +15,10 @@ use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::develop::panels::{Panel, PanelState};
 use crate::develop::params::ParameterId;
-use crate::develop::sharpening::{SharpeningModel, SharpeningSliders};
+use crate::develop::sharpening::SharpeningSliders;
 use crate::develop::targeted::Target;
 use crate::develop::{NamedWhiteBalance, Recipe, Treatment};
+use crate::model::operators::SharpeningModel;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
@@ -1181,9 +1182,9 @@ impl Editor {
             r.effects.luma_contrast = d.luma_contrast;
             // The oldest engines render only the original filter.
             r.set_color_noise_defaults(if r.engine >= 3 {
-                crate::develop::color_noise::NoiseModel::Measured
+                crate::model::operators::NoiseModel::Measured
             } else {
-                crate::develop::color_noise::NoiseModel::Original
+                crate::model::operators::NoiseModel::Original
             });
             // Reset brings the current defaults, with the measured operator.
             r.set_sharpening_defaults(SharpeningModel::Measured);

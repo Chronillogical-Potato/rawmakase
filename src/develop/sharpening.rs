@@ -10,23 +10,7 @@
 //! the strength (0.3× at 0, 2.1× at 100 against the default 25) and Masking leaves out
 //! the weakest detail. Radius maps to a slightly different blur than its value.
 use super::Recipe;
-use serde::{Deserialize, Serialize};
-
-/// Which operator renders a recipe's sharpening.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SharpeningModel {
-    /// RAWmakase's first unsharp mask: what recipes saved before the measured model
-    /// keep, so they render as they did.
-    #[default]
-    Original,
-    /// The sharpening measured in Camera Raw.
-    Measured,
-}
-impl SharpeningModel {
-    pub(crate) fn is_original(&self) -> bool {
-        *self == Self::Original
-    }
-}
+use crate::model::operators::SharpeningModel;
 
 /// The Sharpening sliders, in recipe units (Amount 1 is Lightroom's 150).
 #[derive(Clone, Copy, Debug, PartialEq)]
