@@ -78,14 +78,17 @@ impl LensCorrection {
             && self.distortion.iter().all(Radial::valid)
             && self.chromatic.iter().flatten().all(Radial::valid)
     }
+    #[cfg(test)]
     pub fn vignetting_gain(&self, r: f32) -> f32 {
         self.vignetting.as_ref().map_or(1., |v| v.eval(r))
     }
-    /// Source radius scale for red, green and blue at output radius `r`.
+    /// As `radial_scale_with` at 100%.
+    #[cfg(test)]
     pub fn radial_scale(&self, r: f32) -> [f32; 3] {
         self.radial_scale_with(r, 1.)
     }
-    /// As `radial_scale`, with Lightroom's Distortion amount (1 = 100%).
+    /// Source radius scale for red, green and blue at output radius `r`, with
+    /// Lightroom's Distortion amount (1 = 100%).
     pub fn radial_scale_with(&self, r: f32, amount: f32) -> [f32; 3] {
         self.radial_scale_ca(r, amount, None)
     }
@@ -108,14 +111,17 @@ impl LensCorrection {
             (None, None) => [g; 3],
         }
     }
-    /// Output radii are scaled by this factor so every corrected corner samples inside
-    /// the sensor, as Lightroom crops the undefined border after distortion correction.
+    /// As `fill_scale_with` at 100%.
+    #[cfg(test)]
     pub fn fill_scale(&self) -> f32 {
         if self.distortion.is_none() && self.chromatic.is_none() {
             return 1.;
         }
         self.fill_scale_with(1.)
     }
+    /// Output radii are scaled by this factor so every corrected corner samples inside
+    /// the sensor, as Lightroom crops the undefined border after distortion correction,
+    /// with Lightroom's Distortion amount (1 = 100%).
     pub fn fill_scale_with(&self, amount: f32) -> f32 {
         if self.distortion.is_none() && self.chromatic.is_none() {
             return 1.;

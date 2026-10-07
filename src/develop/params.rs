@@ -357,6 +357,7 @@ impl ParameterId {
         [Self::GreenPrimaryHue, Self::GreenPrimarySaturation],
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
+    #[cfg(test)]
     pub const ALL: [Self; 57] = [
         Self::Exposure,
         Self::Contrast,
@@ -621,6 +622,7 @@ const LOCAL_DESCRIPTORS: [Descriptor<LocalParameterId>; 17] = [
 
 impl LocalParameterId {
     /// In Lightroom's order.
+    #[cfg(test)]
     pub const ALL: [Self; 17] = [
         Self::Temperature,
         Self::Tint,

@@ -49,6 +49,7 @@ impl Compare {
 }
 
 impl Library {
+    #[cfg(test)]
     pub fn compare_open(&self) -> bool {
         self.compare.open
     }

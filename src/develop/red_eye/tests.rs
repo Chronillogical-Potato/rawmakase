@@ -1,3 +1,4 @@
+use super::detect::DetectError;
 use super::*;
 use crate::{develop::ImageFrame, raw::CameraImage};
 

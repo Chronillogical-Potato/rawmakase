@@ -282,7 +282,6 @@ fn hierarchy_includes_unregistered_parents_and_descendant_counts() {
         root.insert(&Folder {
             id: FolderId(id),
             root: RootId(1),
-            name: relative.into(),
             relative: relative.into(),
             path: PathBuf::from("/old").join(relative),
             count,

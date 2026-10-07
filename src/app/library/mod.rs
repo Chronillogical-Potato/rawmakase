@@ -31,7 +31,7 @@ pub struct Place {
     selection: selection::Selection,
 }
 pub(in crate::app) use cell::copy_suffix;
-pub use descriptive::{DescriptiveCommand, DescriptiveEdit};
+pub use descriptive::DescriptiveCommand;
 pub use filmstrip::{DraggedPhoto, Module, Pick};
 pub use metadata::{Metadata, MetadataCommand};
 pub(in crate::app) use previews::EditSource;

@@ -250,16 +250,18 @@ impl Effects {
         }
         (x + delta * 4. * x * (1. - x)).clamp(0., 1.)
     }
-    /// Lightroom's Fringe Color Selector: points the Purple or Green hue range at the
-    /// fringe colour `rgb` (encoded sRGB, as shown) and turns that Amount on if it is
-    /// off. Returns which (0 purple, 1 green), or `None` when the colour is neither.
+    /// As [`Self::pick_fringe_hue`], for the fringe colour `rgb` (encoded sRGB, as
+    /// shown).
+    #[cfg(test)]
     pub fn pick_fringe(&mut self, rgb: [f32; 3]) -> Option<usize> {
         let lab = crate::develop::pipeline::srgb_to_lab(rgb.map(crate::color::srgb_decode));
         let hue = lab[2].atan2(lab[1]).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
         self.pick_fringe_hue(hue, lab[1].hypot(lab[2]))
     }
-    /// As [`Self::pick_fringe`], for a colour of Oklab `hue` and `chroma` as Defringe
-    /// sees it.
+    /// Lightroom's Fringe Color Selector: points the Purple or Green hue range at the
+    /// fringe colour of Oklab `hue` and `chroma`, as Defringe sees it, and turns that
+    /// Amount on if it is off. Returns which (0 purple, 1 green), or `None` when the
+    /// colour is neither.
     pub(crate) fn pick_fringe_hue(&mut self, hue: f32, chroma: f32) -> Option<usize> {
         if chroma < 0.02 {
             return None;

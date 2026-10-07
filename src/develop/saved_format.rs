@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 /// The version written. Spots and masks are saved apart from the recipe (see
 /// `LocalEdits`), so recipes stay readable by releases that predate them.
 pub const SCHEMA: u32 = 6;
+#[cfg(test)]
 pub const PIPELINE: u32 = 6;
 /// The version written for a recipe whose look has a Profile Amount or internal
 /// Contrast or Blacks: releases that read 6 and 7 reject those profile fields, so

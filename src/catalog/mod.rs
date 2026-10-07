@@ -41,9 +41,9 @@ pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
-pub use ingest::{Added, Ambiguity, Choice, Conflict};
+pub use ingest::{Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
-pub use locations::{Computer, FolderLocation, Override, Overrides, RootLocations};
+pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
 pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
@@ -162,14 +162,6 @@ impl Catalog {
                 let path = locations::resolve_in(&original, own, &relative, cfg!(windows))
                     .unwrap_or_default();
                 Folder {
-                    name: if relative.is_empty() {
-                        locations::resolve_in(&original, own, "", false)
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned()
-                    } else {
-                        relative.clone()
-                    },
                     relative,
                     id,
                     root,
@@ -180,11 +172,9 @@ impl Catalog {
             .collect())
     }
     pub fn collections(&self) -> Result<Vec<Collection>> {
-        let mut query = self.db.prepare(
-            "SELECT id, name, parent, kind,
-                    (SELECT count(*) FROM collection_photos WHERE collection=c.id)
-             FROM collections c ORDER BY name",
-        )?;
+        let mut query = self
+            .db
+            .prepare("SELECT id, name, parent, kind FROM collections ORDER BY name")?;
         Ok(query
             .query_map([], |row| {
                 let name: String = row.get(1)?;
@@ -193,7 +183,6 @@ impl Catalog {
                     kind: CollectionKind::from_lightroom(&row.get::<_, String>(3)?, &name),
                     name,
                     parent: row.get(2)?,
-                    count: row.get::<_, i64>(4)? as usize,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)

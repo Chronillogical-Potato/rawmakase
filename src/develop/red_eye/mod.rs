@@ -14,7 +14,7 @@ mod render;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Deserializer, Serialize};
 
-pub use detect::{DetectError, Glow, Pupil, find_pupil};
+pub use detect::{Glow, find_pupil};
 pub(crate) use render::Placed;
 
 /// Lightroom's Type menu.

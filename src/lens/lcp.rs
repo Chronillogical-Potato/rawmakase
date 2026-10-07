@@ -144,6 +144,7 @@ enum LensEntries {
 }
 
 /// The correction for a photo from matching profile entries.
+#[cfg(test)]
 pub fn correction(entries: &[Entry], m: &Metadata) -> Option<LensCorrection> {
     correction_from(entries, m, LensEntries::ThisLens)
 }

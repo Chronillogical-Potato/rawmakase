@@ -1,5 +1,5 @@
 use crate::xmp::{Preset, parse};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -91,25 +91,6 @@ pub fn load_favorites() -> BTreeSet<String> {
 }
 pub fn save_favorites(favorites: &BTreeSet<String>) -> Result<()> {
     crate::storage::atomic_json(&favorite_path(), favorites)
-}
-pub fn import_file(path: &Path) -> Result<PathBuf> {
-    let text = std::fs::read_to_string(path)?;
-    parse(path, &text)?;
-    let dir = crate::storage::data_dir().join("xmp-presets/Imported");
-    std::fs::create_dir_all(&dir)?;
-    let target = dir.join(path.file_name().context("Missing filename")?);
-    if target.exists() {
-        ensure!(
-            std::fs::read(&target)? == text.as_bytes(),
-            "A different preset with this filename is already installed"
-        );
-    } else {
-        use std::io::Write;
-        crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
-            Ok(f.write_all(text.as_bytes())?)
-        })?;
-    }
-    Ok(target)
 }
 pub fn display_name(name: &str) -> String {
     name.replace('⁺', "+")

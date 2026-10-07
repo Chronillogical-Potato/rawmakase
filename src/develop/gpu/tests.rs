@@ -595,9 +595,12 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             // A value within float rounding of a clipping threshold may land on
             // either side of it; such pixels are compared without the overlay.
             let near = |v: f32| {
-                [crate::develop::HIGHLIGHT_CLIP, crate::develop::SHADOW_CLIP]
-                    .iter()
-                    .any(|t| (v - t).abs() < 1e-4)
+                [
+                    crate::develop::rendered::HIGHLIGHT_CLIP,
+                    crate::develop::rendered::SHADOW_CLIP,
+                ]
+                .iter()
+                .any(|t| (v - t).abs() < 1e-4)
             };
             for ((a, e), orig) in actual
                 .as_chunks_mut::<3>()
@@ -841,12 +844,12 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
     r.whites = 0.3;
     for (model, whites) in [
         (
-            crate::develop::ContrastModel::Original,
-            crate::develop::WhitesModel::Original,
+            crate::develop::basic_tone::ContrastModel::Original,
+            crate::develop::basic_tone::WhitesModel::Original,
         ),
         (
-            crate::develop::ContrastModel::Adaptive,
-            crate::develop::WhitesModel::Adaptive,
+            crate::develop::basic_tone::ContrastModel::Adaptive,
+            crate::develop::basic_tone::WhitesModel::Adaptive,
         ),
     ] {
         r.contrast_model = model;
