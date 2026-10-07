@@ -75,6 +75,9 @@ pub(crate) struct Editor {
     /// Progress of a running profile or preset import.
     importing: Option<std::sync::Arc<bulk_import::ImportProgress>>,
     close_confirm: bool,
+    /// The close was refused only to let work finish (an export, Sync Settings, a
+    /// folder change, a command output): it is asked for again once that is done.
+    close_after_work: bool,
     /// The dialog blocking the editor, if one is open.
     modal: Option<Modal>,
     /// A photo Develop could not open and why, until the user dismisses it.
@@ -245,6 +248,7 @@ impl Editor {
             catalog_work: None,
             importing: None,
             close_confirm: false,
+            close_after_work: false,
             modal: None,
             not_editable: None,
             undo_log: Default::default(),

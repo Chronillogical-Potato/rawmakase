@@ -505,12 +505,6 @@ impl Editor {
     /// A finished Sync: one command for Undo, and a status line naming what failed.
     pub(super) fn synced(&mut self, result: SyncResult) {
         self.activity.finish_sync();
-        // A close asked for during the Sync is asked again, now that it can go ahead.
-        if self.close_confirm {
-            self.close_confirm = false;
-            self.context
-                .send_viewport_cmd(eframe::egui::ViewportCommand::Close);
-        }
         // A result for a catalog no longer open must not reach this one's undo log.
         if self.library.as_ref().map(|l| &l.session.catalog.path) != Some(&result.catalog) {
             return;

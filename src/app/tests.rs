@@ -4736,19 +4736,26 @@ fn closing_while_the_catalog_does_not_answer_keeps_the_window_open() -> anyhow::
     Ok(())
 }
 #[test]
-fn closing_during_a_folder_change_keeps_the_window_open() {
+fn closing_during_a_folder_change_waits_for_it_then_closes() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     assert!(e.activity.begin_folder_change());
     assert!(e.quitting_would_cut_off_work());
-    let mut output = ctx.run_ui(close_request(), |ui| e.pending_work(ui.ctx()));
-    output.textures_delta.clear();
-    assert!(
+    let commands = |e: &mut Editor, input| {
+        let mut output = ctx.run_ui(input, |ui| e.pending_work(ui.ctx()));
+        output.textures_delta.clear();
         output.viewport_output[&egui::ViewportId::ROOT]
             .commands
-            .contains(&egui::ViewportCommand::CancelClose)
-    );
+            .clone()
+    };
+    assert!(commands(&mut e, close_request()).contains(&egui::ViewportCommand::CancelClose));
     assert!(e.close_confirm);
+    // Still running: the window stays open and asks nothing more.
+    assert!(!commands(&mut e, Default::default()).contains(&egui::ViewportCommand::Close));
+    // Once the catalog opens again, the close goes ahead.
+    e.activity.finish_dialog();
+    assert!(commands(&mut e, Default::default()).contains(&egui::ViewportCommand::Close));
+    assert!(!e.close_confirm);
 }
 /// The input of a frame in which the window is asked to close.
 fn close_request() -> egui::RawInput {

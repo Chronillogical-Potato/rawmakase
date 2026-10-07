@@ -1176,12 +1176,18 @@ impl Editor {
             // Just after it is due, so the frame finds it ready.
             ctx.request_repaint_after(due + Duration::from_millis(10));
         }
-        if ctx.input(|i| i.viewport().close_requested())
-            && (self.closing_waits_for().is_some()
-                || self.flush_by(Instant::now() + super::exit::DEADLINE) != Flushed::Saved)
-        {
-            refuse_close(ctx);
-            self.close_confirm = true;
+        if ctx.input(|i| i.viewport().close_requested()) {
+            let waits = self.closing_waits_for().is_some();
+            if waits || self.flush_by(Instant::now() + super::exit::DEADLINE) != Flushed::Saved {
+                refuse_close(ctx);
+                self.close_confirm = true;
+                self.close_after_work = waits;
+            }
+        }
+        if self.close_after_work && self.closing_waits_for().is_none() {
+            self.close_confirm = false;
+            self.close_after_work = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if self.close_confirm {
             let waits_for = self.closing_waits_for();
@@ -1197,6 +1203,7 @@ impl Editor {
                 });
                 if ui.button("Keep editing").clicked() {
                     self.close_confirm = false;
+                    self.close_after_work = false;
                 }
                 if waits_for.is_none() && ui.button("Close without saving").clicked() {
                     self.document.edit.save_state_mut().saved();
