@@ -2,11 +2,12 @@
 //! becomes a dark neutral, Darken orders its brightness, and the iris beyond the
 //! correction's reach is untouched.
 use crate::{chart_path, develop, embedded_profiles, measure};
+use rawmakase::model::red_eye::RedEyeOp;
 use rawmakase::{
     camera_data::CameraImage,
     develop::{
         ImageFrame, Recipe, ViewMapping,
-        red_eye::{Glow, RedEyeOp, find_pupil},
+        red_eye::{Glow, find_pupil},
         render,
     },
 };

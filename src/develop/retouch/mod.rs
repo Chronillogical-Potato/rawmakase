@@ -27,14 +27,6 @@ impl RetouchModel {
         }
     }
 }
-/// A long-edge fraction as normalised x and y radii.
-pub(crate) fn radii(r: f32, aspect: f32) -> (f32, f32) {
-    if aspect >= 1. {
-        (r, r * aspect)
-    } else {
-        (r / aspect, r)
-    }
-}
 
 #[cfg(test)]
 mod tests;

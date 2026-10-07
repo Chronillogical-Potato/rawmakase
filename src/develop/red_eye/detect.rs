@@ -8,7 +8,7 @@
 //! inside filled in. Its ellipse has the area's centre, and semi-axes and correlation
 //! from its second moments (a filled ellipse has semi-axes of twice the standard
 //! deviation).
-use super::MAX_CORRELATION;
+use crate::model::red_eye::MAX_CORRELATION;
 use crate::{camera_data::CameraImage, develop::ImageFrame};
 
 /// Why no pupil was found.
@@ -305,7 +305,10 @@ pub fn find_pupil(
             correlation,
         )
     };
-    if radius.iter().any(|r| *r > super::MAX_RADIUS) {
+    if radius
+        .iter()
+        .any(|r| *r > crate::model::red_eye::MAX_RADIUS)
+    {
         return Err(DetectError::TooLarge);
     }
     Ok(Pupil {

@@ -11,8 +11,8 @@
 use crate::develop::{
     ImageFrame,
     masks::{self, BrushStroke, LocalAdjust, MaskComponent, MaskGroup, MaskOp, MaskShape},
-    red_eye::{self, EyeKind, RedEyeOp},
 };
+use crate::model::red_eye::{EyeKind, RedEyeOp};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::BTreeMap;
@@ -488,9 +488,10 @@ fn key_values(text: &str) -> Node {
 }
 /// The ellipse's correlation in the unrotated frame.
 fn alpha_of(eye: &Node) -> f32 {
-    eye.num("alpha")
-        .unwrap_or(0.)
-        .clamp(-red_eye::MAX_CORRELATION, red_eye::MAX_CORRELATION)
+    eye.num("alpha").unwrap_or(0.).clamp(
+        -crate::model::red_eye::MAX_CORRELATION,
+        crate::model::red_eye::MAX_CORRELATION,
+    )
 }
 fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
     let kind = if eye.flag("adaptivePupilColor") == Some(true) {
@@ -505,7 +506,7 @@ fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
             })
             .filter(|h| {
                 let offset = h.map(|v| 2. * (v - 0.5));
-                red_eye::catchlight_inside(offset, alpha_of(eye))
+                crate::model::red_eye::catchlight_inside(offset, alpha_of(eye))
             })
             .map(|h| {
                 // Turned with the photo, as positions are.
@@ -534,14 +535,17 @@ fn red_eye(eye: &Node, frame: &Frame) -> Result<RedEyeOp> {
         kind,
         center: frame.point(x, y),
         radius,
-        correlation: correlation.clamp(-red_eye::MAX_CORRELATION, red_eye::MAX_CORRELATION),
+        correlation: correlation.clamp(
+            -crate::model::red_eye::MAX_CORRELATION,
+            crate::model::red_eye::MAX_CORRELATION,
+        ),
         pupil_size: eye
             .num("pupilSize")
-            .unwrap_or(red_eye::DEFAULT_PUPIL_SIZE)
+            .unwrap_or(crate::model::red_eye::DEFAULT_PUPIL_SIZE)
             .clamp(0., 1.),
         darken: eye
             .num("pupilDarkenAmount")
-            .unwrap_or(red_eye::DEFAULT_DARKEN)
+            .unwrap_or(crate::model::red_eye::DEFAULT_DARKEN)
             .clamp(0., 1.),
     };
     op.validate()?;

@@ -1,8 +1,7 @@
 use super::widgets::tone_curve_ui;
 use super::*;
 use crate::camera_data::{CameraImage, Metadata};
-use crate::catalog::PhotoId;
-use crate::develop;
+use crate::{catalog::PhotoId, develop};
 use eframe::egui::{Pos2, Rect};
 use std::sync::Arc;
 #[test]
@@ -1113,7 +1112,7 @@ fn a_new_red_eye_correction_turns_the_red_eye_switch_on() {
 }
 #[test]
 fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
-    use crate::develop::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
+    use crate::model::red_eye::{DEFAULT_CATCHLIGHT, EyeKind};
     let ctx = egui::Context::default();
     let mut editor =
         Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);

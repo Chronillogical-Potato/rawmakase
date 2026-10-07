@@ -257,9 +257,9 @@ pub struct Recipe {
     /// Red eye corrections, in order; saved apart, as `retouch`.
     #[serde(
         default,
-        skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank"
+        skip_serializing_if = "crate::model::red_eye::RedEyeList::is_blank"
     )]
-    pub red_eye: crate::develop::red_eye::RedEyeList,
+    pub red_eye: crate::model::red_eye::RedEyeList,
     /// Masks with local adjustments; saved apart, as `retouch`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
@@ -277,8 +277,8 @@ pub struct Recipe {
 pub struct LocalEdits {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub retouch: Vec<crate::model::retouch::RetouchOp>,
-    #[serde(skip_serializing_if = "crate::develop::red_eye::RedEyeList::is_blank")]
-    pub red_eye: crate::develop::red_eye::RedEyeList,
+    #[serde(skip_serializing_if = "crate::model::red_eye::RedEyeList::is_blank")]
+    pub red_eye: crate::model::red_eye::RedEyeList,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub masks: Vec<crate::develop::masks::MaskGroup>,
 }
@@ -288,7 +288,7 @@ impl LocalEdits {
     }
     pub fn validate(&self) -> Result<()> {
         crate::model::retouch::validate(&self.retouch)?;
-        crate::develop::red_eye::validate(&self.red_eye)?;
+        crate::model::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)
     }
 }
@@ -673,7 +673,7 @@ impl Recipe {
         );
         // Every other number is range-checked above, which also rejects NaN.
         crate::model::retouch::validate(&self.retouch)?;
-        crate::develop::red_eye::validate(&self.red_eye)?;
+        crate::model::red_eye::validate(&self.red_eye)?;
         crate::develop::masks::validate(&self.masks)?;
         Ok(())
     }

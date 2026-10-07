@@ -118,7 +118,7 @@ fn spots_and_masks_save_beside_a_compatible_sidecar() -> Result<()> {
         },
         ..Default::default()
     });
-    r.red_eye.push(crate::develop::red_eye::RedEyeOp {
+    r.red_eye.push(crate::model::red_eye::RedEyeOp {
         kind: Default::default(),
         center: [0.3, 0.4],
         radius: [0.01, 0.012],

@@ -1,5 +1,8 @@
 use super::detect::DetectError;
 use super::*;
+use crate::model::red_eye::{
+    DEFAULT_CATCHLIGHT, DEFAULT_DARKEN, DEFAULT_PUPIL_SIZE, RedEyeList, RedEyeOp,
+};
 use crate::{camera_data::CameraImage, develop::ImageFrame};
 
 const SKIN: [f32; 3] = [0.55, 0.35, 0.25];
