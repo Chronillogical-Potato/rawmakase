@@ -2,7 +2,7 @@ use super::masks::{
     LocalDelta, LocalMath, MaskWeights,
     local::{self, slot},
 };
-use super::{Geometry, Recipe, Rendered, mul, srgb_encode};
+use super::{Geometry, Recipe, Rendered, ValidRecipe, mul, srgb_encode};
 use crate::color::srgb_decode;
 use crate::{
     develop::curve::{CurveLut, refine_saturation},

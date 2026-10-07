@@ -587,8 +587,8 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
         ..on.clone()
     };
     let lum = |p: [f32; 3]| p.iter().sum::<f32>();
-    let a = render_legacy(&im, &on, 0).unwrap();
-    let b = render_legacy(&im, &off, 0).unwrap();
+    let a = render_legacy(&im, &on.checked().unwrap(), 0).unwrap();
+    let b = render_legacy(&im, &off.checked().unwrap(), 0).unwrap();
     let corner = |r: &Rendered| lum(r.pixels[0]);
     let centre = |r: &Rendered| lum(r.pixels[(4 * r.width + 6) as usize]);
     assert!(corner(&a) > corner(&b) + 0.01);
