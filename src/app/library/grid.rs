@@ -20,10 +20,14 @@ impl Library {
                     ui.add_space(12.);
                     self.cell_style_menu(ui);
                     ui.add_space(12.);
-                    ui.small(if self.visible.len() == self.photos.len() {
-                        format!("{} photos", self.photos.len())
+                    ui.small(if self.visible.len() == self.session.photos.len() {
+                        format!("{} photos", self.session.photos.len())
                     } else {
-                        format!("{} of {} photos", self.visible.len(), self.photos.len())
+                        format!(
+                            "{} of {} photos",
+                            self.visible.len(),
+                            self.session.photos.len()
+                        )
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().slider_width = 110.;
@@ -99,7 +103,10 @@ impl Library {
             scroll = scroll.vertical_scroll_offset(row * height);
         }
         if let Some((id, before)) = self.keep_in_place.take()
-            && let Some(after) = self.visible.iter().position(|i| self.photos[*i].id == id)
+            && let Some(after) = self
+                .visible
+                .iter()
+                .position(|i| self.session.photos[*i].id == id)
         {
             let rows = (after / columns) as f32 - (before / columns) as f32;
             scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * height).max(0.));
@@ -109,10 +116,11 @@ impl Library {
             .show(ui, |ui| {
                 // A key moved the active photo: bring its row into view.
                 if std::mem::take(&mut self.scroll_to_active)
-                    && let Some(at) = self
-                        .selection
-                        .active
-                        .and_then(|id| self.visible.iter().position(|i| self.photos[*i].id == id))
+                    && let Some(at) = self.selection.active.and_then(|id| {
+                        self.visible
+                            .iter()
+                            .position(|i| self.session.photos[*i].id == id)
+                    })
                 {
                     let top = (at / columns) as f32 * height;
                     let view = ui.available_height();
@@ -134,7 +142,7 @@ impl Library {
                                     let Some(&index) = self.visible.get(row * columns + col) else {
                                         break;
                                     };
-                                    let p = self.photos[index].clone();
+                                    let p = self.session.photos[index].clone();
                                     let exists = self.is_available(&p.path);
                                     self.request_previews(&p, ui.ctx());
                                     let shown = cell::Shown {

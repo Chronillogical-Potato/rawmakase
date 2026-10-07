@@ -120,7 +120,7 @@ impl Editor {
         let view = self
             .preferences
             .locations
-            .get_or_insert_with(|| LocationsView::load(&library.catalog, &ctx));
+            .get_or_insert_with(|| LocationsView::load(&library.session.catalog, &ctx));
         group(ui, "Folder locations");
         if let Some(error) = &view.error {
             form_row(ui, "", |ui| hint(ui, error));
@@ -254,7 +254,7 @@ impl Editor {
         if !std::mem::take(&mut view.computer_dirty) {
             return;
         }
-        if let Err(e) = library.catalog.rename_computer(&view.computer) {
+        if let Err(e) = library.session.catalog.rename_computer(&view.computer) {
             self.status = format!("Computer not renamed: {e:#}");
         }
     }
@@ -264,7 +264,11 @@ impl Editor {
         if !self.ready_for_catalog() {
             return;
         }
-        let Some(catalog) = self.library.as_ref().map(|l| l.catalog.path.clone()) else {
+        let Some(catalog) = self
+            .library
+            .as_ref()
+            .map(|l| l.session.catalog.path.clone())
+        else {
             return;
         };
         let ctx = self.context.clone();
@@ -518,14 +522,15 @@ pub(super) fn reopened(
     ctx: &egui::Context,
 ) -> Event {
     Event::CatalogReady(
-        crate::app::library::Library::load(path, ctx.clone())
+        crate::catalog_session::CatalogSession::open(path)
+            .map(|opened| crate::app::library::Library::new(opened, ctx.clone()))
             .map(|mut l| {
                 if relinked {
                     l.wait_for_availability();
                     let available = l.available_count();
                     l.message = format!(
                         "Folder location changed. {available} of {} photos are available.",
-                        l.photos.len()
+                        l.session.photos.len()
                     );
                     if available == 0 {
                         l.message.push_str(

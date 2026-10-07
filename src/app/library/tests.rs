@@ -2,7 +2,7 @@ use super::cell::photo_cell;
 use super::filter::{Kind, Label, RatingOp};
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::*;
-use crate::catalog::PhotoId;
+use crate::catalog::{Folder, PhotoId};
 use eframe::egui::{Color32, Vec2};
 use std::{collections::HashMap, path::PathBuf};
 #[test]
@@ -46,7 +46,7 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     Catalog::create(&path)?.add_folder(&folder)?;
     let ctx = egui::Context::default();
     let library = Library::load(&path, ctx.clone())?;
-    let photo = library.photos[0].clone();
+    let photo = library.session.photos[0].clone();
     assert_eq!(
         develop_refusal(&photo, true),
         Some(Refusal::NotRaw("JPG".into()))
@@ -80,7 +80,7 @@ fn a_file_found_again_is_checked_back_online() -> Result<()> {
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
     // As the catalog stores it, which on Windows differs from `file`.
-    let stored = library.photos[0].path.clone();
+    let stored = library.session.photos[0].path.clone();
     std::fs::rename(&file, folder.join("moved"))?;
     library.refresh()?;
     library.wait_for_availability();
@@ -165,7 +165,7 @@ fn metadata_edits_persist_toggle_and_advance_through_filtered_photos() -> Result
     catalog.add_folder(&folder)?;
     drop(catalog);
     let mut library = Library::load(&path, egui::Context::default())?;
-    let ids: Vec<_> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<_> = library.session.photos.iter().map(|p| p.id).collect();
     library.select(Some(ids[0]));
     library.edit_metadata(ids[0], Edit::Rating(5), false)?;
     library.edit_metadata(ids[0], Edit::Flag(1), false)?;
@@ -313,12 +313,12 @@ fn root_mapping_survives_reopen() -> Result<()> {
     std::fs::rename(&old, &new)?;
     let ctx = egui::Context::default();
     let l = Library::load(&db, ctx.clone())?;
-    l.catalog.relink_root(root, &new)?;
+    l.session.catalog.relink_root(root, &new)?;
     drop(l);
     let mut l = Library::load(&db, ctx)?;
-    assert_eq!(l.photos[0].path, new.join("image.ARW"));
+    assert_eq!(l.session.photos[0].path, new.join("image.ARW"));
     l.wait_for_availability();
-    assert!(l.is_available(&l.photos[0].path));
+    assert!(l.is_available(&l.session.photos[0].path));
     Ok(())
 }
 
@@ -334,7 +334,7 @@ fn library_opens_before_the_online_check_and_then_marks_missing_photos() -> Resu
     std::fs::remove_file(d.path().join("gone.ARW"))?;
     let mut l = Library::load(&db, egui::Context::default())?;
     let gone = d.path().canonicalize()?.join("gone.ARW");
-    assert!(l.photos.iter().any(|p| p.path == gone));
+    assert!(l.session.photos.iter().any(|p| p.path == gone));
     assert_eq!(l.available_count(), 2);
     l.filters.only_missing = true;
     l.filter();
@@ -418,7 +418,7 @@ fn copy_previews_ignore_stale_results_and_reuse_of_a_removed_id() -> Result<()> 
     Catalog::create(&path)?.add_folder(&folder)?;
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
-    let master = library.photos[0].id;
+    let master = library.session.photos[0].id;
     let (tx, rx) = std::sync::mpsc::channel();
     library.cache.edit_rx = rx;
     let copy = library.create_virtual_copy(master)?;
@@ -463,10 +463,10 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     let path = directory.path().join("names.rawmakase");
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
-    let copy = library.create_virtual_copy(library.photos[0].id)?;
+    let copy = library.create_virtual_copy(library.session.photos[0].id)?;
     library.copy_names.draft = Some((copy, " B&W ".into()));
     library.commit_drafts()?;
-    let saved = library.catalog.photos()?;
+    let saved = library.session.catalog.photos()?;
     assert_eq!(
         saved.iter().find(|p| p.id == copy).unwrap().copy_name,
         "B&W"
@@ -474,7 +474,7 @@ fn a_copy_name_being_typed_is_saved_when_committed() -> Result<()> {
     assert_eq!(library.photo(copy).unwrap().copy_name, "B&W");
     // A removed copy's draft never renames a new copy that reuses its id.
     library.remove_virtual_copy(copy)?;
-    let next = library.create_virtual_copy(library.photos[0].id)?;
+    let next = library.create_virtual_copy(library.session.photos[0].id)?;
     library.commit_drafts()?;
     assert_eq!(library.photo(next).unwrap().copy_name, "Copy 1");
     Ok(())
@@ -489,7 +489,7 @@ fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
     Catalog::create(&path)?.add_folder(&folder)?;
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
-    let master = library.photos[0].id;
+    let master = library.session.photos[0].id;
     let first = library.create_virtual_copy(master)?;
     let second = library.create_virtual_copy(master)?;
     library.copy_names.draft = Some((first, "B&W".into()));
@@ -497,9 +497,12 @@ fn selecting_another_copy_keeps_the_name_being_typed() -> Result<()> {
     // reports losing focus.
     let photo = library.photo(second).unwrap().clone();
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let _ = library
-            .copy_names
-            .row(ui, &photo, &library.catalog, &mut library.photos);
+        let _ = library.copy_names.row(
+            ui,
+            &photo,
+            &library.session.catalog,
+            &mut library.session.photos,
+        );
     });
     output.textures_delta.clear();
     assert_eq!(library.photo(first).unwrap().copy_name, "B&W");
@@ -516,18 +519,21 @@ fn a_copy_name_that_fails_to_save_survives_selecting_another_copy() -> Result<()
     Catalog::create(&path)?.add_folder(&folder)?;
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
-    let master = library.photos[0].id;
+    let master = library.session.photos[0].id;
     let first = library.create_virtual_copy(master)?;
     let second = library.create_virtual_copy(master)?;
     // Renaming fails once the copy is gone from the catalog.
-    library.catalog.remove_virtual_copy(first)?;
+    library.session.catalog.remove_virtual_copy(first)?;
     library.copy_names.draft = Some((first, "B&W".into()));
     let photo = library.photo(second).unwrap().clone();
     for _ in 0..2 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            let _ = library
-                .copy_names
-                .row(ui, &photo, &library.catalog, &mut library.photos);
+            let _ = library.copy_names.row(
+                ui,
+                &photo,
+                &library.session.catalog,
+                &mut library.session.photos,
+            );
         });
         output.textures_delta.clear();
     }
@@ -555,7 +561,7 @@ fn visible_names(library: &Library) -> Vec<&str> {
     library
         .visible
         .iter()
-        .map(|i| library.photos[*i].filename.as_str())
+        .map(|i| library.session.photos[*i].filename.as_str())
         .collect()
 }
 #[test]
@@ -563,6 +569,7 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     let id = |library: &Library, name: &str| {
         library
+            .session
             .photos
             .iter()
             .find(|p| p.filename == name)
@@ -574,9 +581,9 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
         id(&library, "b.RAF"),
         id(&library, "c.RAF"),
     );
-    library.catalog.set_metadata(a, 3, 1, "Red")?;
-    library.catalog.set_metadata(b, 5, 0, "")?;
-    library.catalog.set_metadata(c, 0, -1, "Client")?;
+    library.session.catalog.set_metadata(a, 3, 1, "Red")?;
+    library.session.catalog.set_metadata(b, 5, 0, "")?;
+    library.session.catalog.set_metadata(c, 0, -1, "Client")?;
     library.refresh()?;
     library.wait_for_availability();
     assert_eq!(visible_names(&library), ["a.RAF", "b.RAF", "c.RAF"]);
@@ -631,10 +638,13 @@ fn filters_combine_and_a_hidden_selection_is_cleared() -> Result<()> {
 fn attribute_filters_match_lightroom() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
     let ids = ids_of(&library);
-    library.catalog.set_metadata(ids[0], 3, 1, "Red")?;
-    library.catalog.set_metadata(ids[1], 5, 0, "")?;
-    library.catalog.set_metadata(ids[2], 0, -1, "Client")?;
-    library.catalog.set_metadata(ids[3], 1, 0, "Blue")?;
+    library.session.catalog.set_metadata(ids[0], 3, 1, "Red")?;
+    library.session.catalog.set_metadata(ids[1], 5, 0, "")?;
+    library
+        .session
+        .catalog
+        .set_metadata(ids[2], 0, -1, "Client")?;
+    library.session.catalog.set_metadata(ids[3], 1, 0, "Blue")?;
     library.refresh()?;
     library.wait_for_availability();
     let copy = library.create_virtual_copy(ids[1])?;
@@ -700,8 +710,9 @@ fn restore_source_scopes_to_the_folder_and_its_subfolders() -> Result<()> {
     Catalog::create(&path)?.add_folder(&root)?;
     let mut library = Library::load(&path, egui::Context::default())?;
     assert_eq!(library.visible.len(), 4);
-    let root_id = library.roots[0].0;
+    let root_id = library.session.roots[0].0;
     let in_day2 = library
+        .session
         .photos
         .iter()
         .find(|p| p.path.ends_with("day2/image.RAF"))
@@ -729,7 +740,7 @@ fn thumbnail_requests_are_not_repeated_while_pending_or_failed() -> Result<()> {
     let ctx = library.ctx.clone();
     let (tx, rx) = std::sync::mpsc::sync_channel(8);
     library.cache.thumb_tx = tx;
-    let path = library.photos[0].path.clone();
+    let path = library.session.photos[0].path.clone();
     library.cache.request_thumbnail(&path, &ctx);
     library.cache.request_thumbnail(&path, &ctx);
     assert_eq!(rx.try_iter().count(), 1);
@@ -744,7 +755,7 @@ fn thumbnail_requests_are_not_repeated_while_pending_or_failed() -> Result<()> {
         .insert_thumb(&ctx, path.clone(), &image::RgbImage::new(2, 2));
     library.cache.request_thumbnail(&path, &ctx);
     assert_eq!(rx.try_iter().count(), 0);
-    assert!(library.texture(&library.photos[0]).is_some());
+    assert!(library.texture(&library.session.photos[0]).is_some());
     Ok(())
 }
 #[test]
@@ -777,7 +788,7 @@ fn preview_textures_keep_the_newest_192() -> Result<()> {
 fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF"])?;
     let ctx = library.ctx.clone();
-    let id = library.photos[0].id;
+    let id = library.session.photos[0].id;
     let (job_tx, jobs) = std::sync::mpsc::channel();
     let (result_tx, results) = std::sync::mpsc::channel();
     let (thumb_tx, _thumbs) = std::sync::mpsc::sync_channel(8);
@@ -785,7 +796,7 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
     library.cache.edit_rx = results;
     library.cache.thumb_tx = thumb_tx;
     // A photo without an edit asks the catalog once and sends nothing.
-    let photo = library.photos[0].clone();
+    let photo = library.session.photos[0].clone();
     library.request_previews(&photo, &ctx);
     library.request_previews(&photo, &ctx);
     assert!(jobs.try_recv().is_err());
@@ -815,8 +826,8 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
 #[test]
 fn collections_panel_shows_imported_collections_and_filters_through_them() -> Result<()> {
     let (directory, library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
-    let path = library.catalog.path.clone();
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let path = library.session.catalog.path.clone();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     drop(library);
     {
         let db = rusqlite::Connection::open(&path)?;
@@ -838,7 +849,10 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
         }
     }
     let mut library = Library::load(&path, egui::Context::default())?;
-    let tree = collections::tree(&library.collections, &library.collection_photos);
+    let tree = collections::tree(
+        &library.session.collections,
+        &library.session.collection_photos,
+    );
     // Sets first, then collections, by name; smart and system ones hidden,
     // and a set left empty by hiding them is dropped too.
     let names: Vec<_> = tree.iter().map(|n| n.name.as_str()).collect();
@@ -855,7 +869,7 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
     assert_eq!(library.source_name(), "Japan");
     assert_eq!(library.source_key(), "collection:11");
     // The filter bar still applies inside a collection.
-    library.catalog.set_metadata(ids[0], 0, 1, "")?;
+    library.session.catalog.set_metadata(ids[0], 0, 1, "")?;
     library.reload()?;
     library.filters.flags = [1].into();
     library.filter();
@@ -874,7 +888,7 @@ fn collections_panel_shows_imported_collections_and_filters_through_them() -> Re
     assert_eq!(other.visible.len(), 3);
 
     // Choosing a folder clears the collection.
-    let root = library.roots[0].0;
+    let root = library.session.roots[0].0;
     library.restore_source(&format!("root:{root}"), None);
     assert_eq!(library.filters.collection, None);
     assert_eq!(library.visible.len(), 3);
@@ -908,7 +922,7 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
         visible_names(&library),
         ["a.tif", "b.jpg", "c.jpg", "z.ARW"]
     );
-    let a = library.photos[0].id;
+    let a = library.session.photos[0].id;
     library.select(Some(a));
     library.wait_for_availability();
     let started = std::time::Instant::now();
@@ -922,7 +936,10 @@ fn capture_times_are_read_in_the_background_and_resort_in_place() -> Result<()> 
         visible_names(&library),
         ["z.ARW", "c.jpg", "b.jpg", "a.tif"]
     );
-    assert_eq!(library.photos[1].captured, "2024-03-02T10:00:01.100");
+    assert_eq!(
+        library.session.photos[1].captured,
+        "2024-03-02T10:00:01.100"
+    );
     // The selection stays, and the grid follows it from where it was.
     assert_eq!(library.selected(), Some(a));
     assert_eq!(library.keep_in_place, Some((a, 0)));
@@ -940,7 +957,7 @@ fn ids_of(library: &Library) -> Vec<PhotoId> {
     library
         .visible
         .iter()
-        .map(|i| library.photos[*i].id)
+        .map(|i| library.session.photos[*i].id)
         .collect()
 }
 fn selected_names(library: &Library) -> Vec<&str> {
@@ -1028,11 +1045,12 @@ fn a_rejected_range_leaves_the_unflagged_view_in_one_write() -> Result<()> {
     assert_eq!(visible_names(&library), ["a.RAF", "e.RAF"]);
     assert_eq!(library.selected(), Some(ids[4]));
     assert_eq!(library.message, "3 photos · Reject");
-    let saved = library.catalog.photos()?;
+    let saved = library.session.catalog.photos()?;
     assert_eq!(saved.iter().filter(|p| p.flag == -1).count(), 3);
     // One failing photo saves none of the batch.
     assert!(
         library
+            .session
             .catalog
             .set_metadata_of(&[
                 (ids[0], 5, 0, String::new()),
@@ -1040,7 +1058,14 @@ fn a_rejected_range_leaves_the_unflagged_view_in_one_write() -> Result<()> {
             ])
             .is_err()
     );
-    assert!(library.catalog.photos()?.iter().all(|p| p.rating == 0));
+    assert!(
+        library
+            .session
+            .catalog
+            .photos()?
+            .iter()
+            .all(|p| p.rating == 0)
+    );
     Ok(())
 }
 #[test]
@@ -1053,9 +1078,9 @@ fn a_toggle_on_a_selection_follows_the_active_photo() -> Result<()> {
     library.select_all();
     // The active photo is picked, so the toggle unflags all three.
     library.edit_selection(Edit::TogglePick, false)?;
-    assert!(library.photos.iter().all(|p| p.flag == 0));
+    assert!(library.session.photos.iter().all(|p| p.flag == 0));
     library.edit_selection(Edit::ToggleLabel("Red".into()), false)?;
-    assert!(library.photos.iter().all(|p| p.label == "Red"));
+    assert!(library.session.photos.iter().all(|p| p.label == "Red"));
     // Shift does not advance a multi-photo selection.
     assert_eq!(library.edit_selection(Edit::Rating(3), true)?, None);
     assert_eq!(library.selected_ids().len(), 3);
@@ -1271,7 +1296,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
     library.wait_for_availability();
-    library.select(Some(library.photos[0].id));
+    library.select(Some(library.session.photos[0].id));
     library.open_loupe();
     assert!(library.loupe_open());
     let input = || egui::RawInput {
@@ -1340,7 +1365,7 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     let ctx = egui::Context::default();
     let mut library = Library::load(&path, ctx.clone())?;
     library.wait_for_availability();
-    library.select(Some(library.photos[0].id));
+    library.select(Some(library.session.photos[0].id));
     library.open_loupe();
     let mut zoom = crate::app::navigator::Zoom::default();
     let frame = |library: &mut Library, zoom: &mut crate::app::navigator::Zoom| {
@@ -1404,7 +1429,7 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     let path = directory.path().join("library.rawmakase");
     Catalog::create(&path)?.add_folder(&folder)?;
     let mut library = Library::load(&path, egui::Context::default())?;
-    let id = library.photos[0].id;
+    let id = library.session.photos[0].id;
     library.wait_for_availability();
     let started = std::time::Instant::now();
     while library.info_reader.is_some() {
@@ -1416,7 +1441,7 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     let info = library.active_info().unwrap();
     assert_eq!(info.dimensions_text().as_deref(), Some("300 × 200"));
     // Kept: nothing is left to read on the next open.
-    assert!(library.catalog.photos_without_info()?.is_empty());
+    assert!(library.session.catalog.photos_without_info()?.is_empty());
     Ok(())
 }
 #[test]
@@ -1627,7 +1652,7 @@ fn survey_shows_the_selection_and_rates_the_active_photo() -> Result<()> {
 fn a_filter_hiding_the_active_candidate_passes_its_role_on() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     let ids = ids_of(&library);
-    library.catalog.set_metadata(ids[1], 0, -1, "")?;
+    library.session.catalog.set_metadata(ids[1], 0, -1, "")?;
     library.refresh()?;
     library.wait_for_availability();
     library.select(Some(ids[0]));
@@ -1652,7 +1677,7 @@ fn compare_follows_a_restored_place_that_hides_its_active_photo() -> Result<()> 
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
     let ids = ids_of(&library);
     for id in [ids[0], ids[1], ids[3]] {
-        library.catalog.set_metadata(id, 1, 0, "")?;
+        library.session.catalog.set_metadata(id, 1, 0, "")?;
     }
     library.refresh()?;
     library.wait_for_availability();
@@ -1681,7 +1706,7 @@ fn compare_follows_a_restored_place_within_its_pair() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF"])?;
     let ids = ids_of(&library);
     for id in [ids[0], ids[1]] {
-        library.catalog.set_metadata(id, 1, 0, "")?;
+        library.session.catalog.set_metadata(id, 1, 0, "")?;
     }
     library.refresh()?;
     library.wait_for_availability();
@@ -1753,7 +1778,7 @@ fn grid_cells_cycle_through_lightrooms_styles() -> Result<()> {
         library.poll_photo_info();
     }
     // Expanded cells add a line of details: dimensions and format.
-    let photo = library.photos[0].clone();
+    let photo = library.session.photos[0].clone();
     assert_eq!(library.cell_details(&photo), "300 × 200 · PNG");
     assert_eq!(cell::Style::Expanded.height(200.), 216.);
     assert_eq!(cell::Style::Plain.height(200.), 200.);
@@ -1775,6 +1800,7 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
     let (_directory, mut library) = library_of(&["b10.RAF", "a.NEF", "b9.RAF"])?;
     let id = |library: &Library, name: &str| {
         library
+            .session
             .photos
             .iter()
             .find(|p| p.filename == name)
@@ -1786,9 +1812,9 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
         id(&library, "a.NEF"),
         id(&library, "b9.RAF"),
     );
-    library.catalog.set_metadata(b10, 2, 1, "Green")?;
-    library.catalog.set_metadata(a, 5, -1, "")?;
-    library.catalog.set_metadata(b9, 0, 0, "Red")?;
+    library.session.catalog.set_metadata(b10, 2, 1, "Green")?;
+    library.session.catalog.set_metadata(a, 5, -1, "")?;
+    library.session.catalog.set_metadata(b9, 0, 0, "Red")?;
     library.refresh()?;
     library.wait_for_availability();
     let order = |library: &mut Library, sort| {
@@ -1814,7 +1840,7 @@ fn photos_sort_in_lightrooms_orders() -> Result<()> {
     library.filters.reverse = false;
     // Edit time: photos never edited first, then by when.
     let path = library.photo(b9).unwrap().path.clone();
-    library.catalog.save_edit(
+    library.session.catalog.save_edit(
         b9,
         &path,
         &crate::develop::Recipe::default(),
@@ -1878,8 +1904,9 @@ fn typed_keywords_follow_lightroom_and_refuse_the_separator() -> Result<()> {
 fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> Result<()> {
     use crate::metadata::{LangAlt, TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library
+        .session
         .catalog
         .set_text(&ids[..1], TextField::Title, "Only a")?;
     library.selection.selected = ids.iter().copied().collect();
@@ -1889,7 +1916,7 @@ fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> R
     // Leaving the field without typing.
     library.commit_fields()?;
     assert!(library.take_descriptive_done().is_empty());
-    assert_eq!(library.catalog.descriptive(ids[1])?.title, None);
+    assert_eq!(library.session.catalog.descriptive(ids[1])?.title, None);
     // Typing then moving the selection saves it for the photos it was typed for.
     library.fields.drafts.title = "Both".into();
     library.selection.selected = [ids[1]].into();
@@ -1897,7 +1924,7 @@ fn a_mixed_field_left_alone_changes_nothing_and_typing_replaces_it_on_all() -> R
     library.sync_fields();
     for id in &ids {
         assert_eq!(
-            library.catalog.descriptive(*id)?.title,
+            library.session.catalog.descriptive(*id)?.title,
             Some(Value::Set(LangAlt::new("Both")))
         );
     }
@@ -1910,8 +1937,9 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     use super::descriptive::DescriptiveEdit;
     use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library
+        .session
         .catalog
         .set_text(&ids[1..], TextField::Copyright, "")?;
     library.edit_descriptive(
@@ -1925,33 +1953,36 @@ fn a_descriptive_edit_is_one_command_that_restores_each_photo() -> Result<()> {
     library.edit_descriptive(&ids, DescriptiveEdit::Creators(vec![]))?;
     let done = library.take_descriptive_done();
     assert_eq!(done.len(), 3);
-    assert!(library.photos.iter().all(|p| p.keywords == "City"));
+    assert!(library.session.photos.iter().all(|p| p.keywords == "City"));
     for command in done.iter().rev() {
         library.restore_descriptive(&command.before, &command.ratings_before)?;
     }
-    assert_eq!(library.catalog.descriptive(ids[0])?, Default::default());
     assert_eq!(
-        library.catalog.descriptive(ids[1])?.copyright,
+        library.session.catalog.descriptive(ids[0])?,
+        Default::default()
+    );
+    assert_eq!(
+        library.session.catalog.descriptive(ids[1])?.copyright,
         Some(Value::Cleared)
     );
-    assert!(library.photos.iter().all(|p| p.keywords.is_empty()));
+    assert!(library.session.photos.iter().all(|p| p.keywords.is_empty()));
     // Removing a keyword only some photos have, from all of them.
-    let city = library.catalog.keyword_at(&["City".into()])?;
-    library.catalog.add_keyword(&ids[..1], city)?;
+    let city = library.session.catalog.keyword_at(&["City".into()])?;
+    library.session.catalog.add_keyword(&ids[..1], city)?;
     library.edit_descriptive(&ids, DescriptiveEdit::RemoveKeyword(city))?;
-    assert!(library.catalog.keywords(ids[0])?.is_empty());
+    assert!(library.session.catalog.keywords(ids[0])?.is_empty());
     Ok(())
 }
 #[test]
 fn a_draft_that_fails_to_save_stays_with_its_photos() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library.selection.selected = [ids[0]].into();
     library.selection.active = Some(ids[0]);
     library.sync_fields();
     library.fields.drafts.title = "For a".into();
     // A write that fails, as on a full disk.
-    library.catalog.fail_metadata_writes()?;
+    library.session.catalog.fail_metadata_writes()?;
     library.selection.selected = [ids[1]].into();
     library.selection.active = Some(ids[1]);
     library.sync_fields();
@@ -1962,7 +1993,7 @@ fn a_draft_that_fails_to_save_stays_with_its_photos() -> Result<()> {
 #[test]
 fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library.selection.selected = [ids[0]].into();
     library.selection.active = Some(ids[0]);
     library.sync_fields();
@@ -1977,13 +2008,14 @@ fn a_keyword_being_typed_is_dropped_when_the_selection_moves() -> Result<()> {
 fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
     use crate::metadata::{LangAlt, TextField, Value};
     let (dir, mut library) = library_of(&["a.ARW"])?;
-    let id = library.photos[0].id;
+    let id = library.session.photos[0].id;
     library
+        .session
         .catalog
         .set_text(&[id], TextField::Title, "My edit")?;
-    library.catalog.set_metadata(id, 1, 0, "Blue")?;
-    library.photos[0].rating = 1;
-    library.photos[0].label = "Blue".into();
+    library.session.catalog.set_metadata(id, 1, 0, "Blue")?;
+    library.session.photos[0].rating = 1;
+    library.session.photos[0].label = "Blue".into();
     std::fs::write(
         dir.path().join("photos/a.ARW.xmp"),
         r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -1998,22 +2030,28 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
         library.poll_reread();
     }
     assert_eq!(
-        library.catalog.descriptive(id)?.title,
+        library.session.catalog.descriptive(id)?.title,
         Some(Value::Set(LangAlt::new("From the file")))
     );
     assert_eq!(
-        (library.photos[0].rating, library.photos[0].label.as_str()),
+        (
+            library.session.photos[0].rating,
+            library.session.photos[0].label.as_str()
+        ),
         (5, "Red")
     );
     let done = library.take_descriptive_done();
     assert_eq!(done.len(), 1);
     library.restore_descriptive(&done[0].before, &done[0].ratings_before)?;
     assert_eq!(
-        library.catalog.descriptive(id)?.title,
+        library.session.catalog.descriptive(id)?.title,
         Some(Value::Set(LangAlt::new("My edit")))
     );
     assert_eq!(
-        (library.photos[0].rating, library.photos[0].label.as_str()),
+        (
+            library.session.photos[0].rating,
+            library.session.photos[0].label.as_str()
+        ),
         (1, "Blue")
     );
     Ok(())
@@ -2022,8 +2060,9 @@ fn read_metadata_from_files_is_one_command_that_undo_reverses() -> Result<()> {
 fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> {
     use crate::metadata::{TextField, Value};
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library
+        .session
         .catalog
         .set_text(&ids[..1], TextField::Title, "Only a")?;
     library.selection.selected = ids.iter().copied().collect();
@@ -2035,7 +2074,7 @@ fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> 
     library.commit_fields()?;
     for id in &ids {
         assert_eq!(
-            library.catalog.descriptive(*id)?.title,
+            library.session.catalog.descriptive(*id)?.title,
             Some(Value::Cleared)
         );
     }
@@ -2044,7 +2083,7 @@ fn emptying_a_mixed_field_after_typing_clears_it_on_every_photo() -> Result<()> 
 #[test]
 fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW", "b.ARW"])?;
-    let ids: Vec<PhotoId> = library.photos.iter().map(|p| p.id).collect();
+    let ids: Vec<PhotoId> = library.session.photos.iter().map(|p| p.id).collect();
     library.selection.selected = ids.iter().copied().collect();
     library.selection.active = Some(ids[0]);
     library.sync_fields();
@@ -2058,7 +2097,7 @@ fn the_same_photos_in_another_order_keep_what_is_typed() -> Result<()> {
 fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Result<()> {
     use crate::metadata::{LangAlt, Value};
     let (_dir, mut library) = library_of(&["a.ARW"])?;
-    let id = library.photos[0].id;
+    let id = library.session.photos[0].id;
     library.selection.selected = [id].into();
     library.selection.active = Some(id);
     library.sync_fields();
@@ -2070,7 +2109,7 @@ fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Resu
     )?;
     library.sync_fields();
     assert_eq!(
-        library.catalog.descriptive(id)?.title,
+        library.session.catalog.descriptive(id)?.title,
         Some(Value::Set(LangAlt::new("Typed")))
     );
     assert_eq!(library.fields.drafts.title, "Typed");
@@ -2085,7 +2124,7 @@ fn a_draft_in_a_hidden_section_is_saved_when_the_values_are_read_again() -> Resu
 #[test]
 fn a_saved_draft_is_not_saved_again_after_undo() -> Result<()> {
     let (_dir, mut library) = library_of(&["a.ARW"])?;
-    let id = library.photos[0].id;
+    let id = library.session.photos[0].id;
     library.selection.selected = [id].into();
     library.selection.active = Some(id);
     library.sync_fields();
@@ -2097,7 +2136,7 @@ fn a_saved_draft_is_not_saved_again_after_undo() -> Result<()> {
     library.restore_descriptive(&done[0].before, &done[0].ratings_before)?;
     library.commit_fields()?;
     assert!(library.take_descriptive_done().is_empty());
-    assert_eq!(library.catalog.descriptive(id)?.title, None);
+    assert_eq!(library.session.catalog.descriptive(id)?.title, None);
     Ok(())
 }
 #[test]
