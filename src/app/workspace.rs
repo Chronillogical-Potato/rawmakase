@@ -2,6 +2,7 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
 use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
+use crate::app::Module;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Vec2};
 use std::time::Duration;
@@ -12,9 +13,9 @@ impl Editor {
             return;
         }
         // With a brush tool open, [ and ] size the brush instead of rating the photo.
-        let brushing = !self.library_mode && self.tool_has_size();
+        let brushing = self.module == Module::Develop && self.tool_has_size();
         // With the Crop tool open, X swaps the crop's orientation instead of rejecting.
-        let cropping = !self.library_mode && self.view.is(Tool::Crop);
+        let cropping = self.module == Module::Develop && self.view.is(Tool::Crop);
         let auto_advance = self.auto_advance;
         let shortcut = crate::app::photo_metadata::shortcut(ctx)
             .filter(|(e, _)| {
@@ -33,7 +34,7 @@ impl Editor {
             {
                 self.status = format!("Metadata could not be saved: {}", error.message);
             }
-        } else if self.library_mode
+        } else if self.module == Module::Library
             && let Some(library) = &mut self.library
         {
             library.selection_keys(ctx);
@@ -73,7 +74,7 @@ impl Editor {
         }
         if self.onboarding.visible {
             self.onboarding_ui(ui);
-        } else if self.library_mode {
+        } else if self.module == Module::Library {
             self.left_develop();
             self.library_workspace(ui);
         } else {
@@ -177,14 +178,14 @@ impl Editor {
             };
             // The Loupe zooms with Develop's keys, whatever the photo; a menu
             // or popup takes the keys first.
-            if self.library_mode
+            if self.module == Module::Library
                 && !egui::Popup::is_any_open(ctx)
                 && self.library.as_ref().is_some_and(|l| l.loupe_open())
             {
                 self.zoom_keys(ctx);
             }
             // Develop has its own keys; the log is the same.
-            if self.library_mode {
+            if self.module == Module::Library {
                 // Consumed, with the modifiers held for the key, so an undo
                 // that opens Develop is not run again by Develop's keys.
                 use egui::{Key, Modifiers};
@@ -202,18 +203,18 @@ impl Editor {
                 }
             }
             if plain(egui::Key::G) && self.flush() {
-                self.library_mode = true;
+                self.module = Module::Library;
                 if let Some(library) = &mut self.library {
                     library.show_grid();
                 }
             }
             // E from Develop: the photo in the Library's Loupe.
-            if !self.library_mode
+            if self.module == Module::Develop
                 && plain(egui::Key::E)
                 && self.flush()
                 && let (Some(library), Some(id)) = (&mut self.library, self.document.catalog_photo)
             {
-                self.library_mode = true;
+                self.module = Module::Library;
                 library.reveal(id);
                 library.open_loupe();
             }
@@ -234,7 +235,7 @@ impl Editor {
                     })
             });
             if create {
-                let id = if self.library_mode {
+                let id = if self.module == Module::Library {
                     self.library.as_ref().and_then(|l| l.selected())
                 } else {
                     self.document.catalog_photo
@@ -244,12 +245,12 @@ impl Editor {
                 }
             }
             if plain(egui::Key::D) {
-                if self.library_mode {
+                if self.module == Module::Library {
                     if let Some(id) = self.library.as_mut().and_then(|l| l.selected_or_first()) {
                         self.develop_catalog_photo(id);
                     }
                 } else {
-                    self.library_mode = false;
+                    self.module = Module::Develop;
                 }
             }
         }
@@ -371,8 +372,11 @@ impl Editor {
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
                             let setup = self.onboarding.visible;
                             // The setup assistant shows neither module as active.
-                            let selected =
-                                (!setup).then_some(if self.library_mode { 0 } else { 1 });
+                            let selected = (!setup).then_some(if self.module == Module::Library {
+                                0
+                            } else {
+                                1
+                            });
                             let [library, develop] = segment_bar(
                                 ui,
                                 ["Library", "Develop"],
@@ -381,7 +385,7 @@ impl Editor {
                             );
                             if develop.on_hover_text("Develop · D").clicked() {
                                 self.onboarding.visible = false;
-                                if self.library_mode
+                                if self.module == Module::Library
                                     && let Some(id) = self
                                         .library
                                         .as_mut()
@@ -389,12 +393,12 @@ impl Editor {
                                 {
                                     self.develop_catalog_photo(id);
                                 } else {
-                                    self.library_mode = false;
+                                    self.module = Module::Develop;
                                 }
                             }
                             if library.on_hover_text("Library · G").clicked() && self.flush() {
                                 self.onboarding.visible = false;
-                                self.library_mode = true;
+                                self.module = Module::Library;
                             }
                             ui.add_space(12.);
                             let hover = format!(

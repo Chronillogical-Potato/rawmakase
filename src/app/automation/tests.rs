@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::Module;
 use crate::develop::params::ParameterId;
 mod mapping_tests {
     use super::*;
@@ -391,13 +392,13 @@ mod integration_tests {
         let first = library.photos[0].id;
         library.make_active(first);
         let second = library.navigate(first, 1).unwrap();
-        e.library_mode = true;
+        e.module = Module::Library;
         e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
-        assert!(e.library_mode);
+        assert!(e.module == Module::Library);
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
         e.library.as_mut().unwrap().open_loupe();
         e.control_messages(vec![Msg::Cc(48, 1)], &ctx).unwrap();
-        assert!(e.library_mode);
+        assert!(e.module == Module::Library);
         assert!(e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
         // Semantic API navigation and device arrows preserve Loupe too.
@@ -408,7 +409,7 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
         e.control_messages(
             vec![Msg::Command(Command::new(commands::Operation::Action(
@@ -417,7 +418,7 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(second));
         e.library.as_mut().unwrap().show_grid();
         e.control_messages(
@@ -427,12 +428,12 @@ mod integration_tests {
             &ctx,
         )
         .unwrap();
-        assert!(e.library_mode && !e.library.as_ref().unwrap().loupe_open());
+        assert!(e.module == Module::Library && !e.library.as_ref().unwrap().loupe_open());
         assert_eq!(e.library.as_ref().unwrap().selected(), Some(first));
-        e.library_mode = false;
+        e.module = Module::Develop;
         e.document.catalog_photo = Some(second);
         e.control_messages(vec![Msg::Cc(48, 127)], &ctx).unwrap();
-        assert!(!e.library_mode);
+        assert!(e.module == Module::Develop);
         assert_eq!(e.document.catalog_photo, Some(first));
         Ok(())
     }

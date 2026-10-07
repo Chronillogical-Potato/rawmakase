@@ -4,6 +4,7 @@ mod output;
 mod parameter;
 mod preset;
 mod reply;
+use crate::app::Module;
 use reply::{
     Capabilities, CurveCapabilities, Curves, MaskState, PhotoIdentity, PhotoSummary, State,
 };
@@ -301,7 +302,7 @@ impl Editor {
     }
     pub(super) fn command_state(&mut self) -> State {
         self.sync_command_revision();
-        let develop = !self.library_mode && self.document.metadata.is_some();
+        let develop = self.module == Module::Develop && self.document.metadata.is_some();
         let mut recipe = self.document.edit.recipe.clone();
         let mut values = std::collections::BTreeMap::new();
         if develop {
@@ -334,7 +335,7 @@ impl Editor {
         State {
             protocol: PROTOCOL,
             message: self.status.clone(),
-            mode: if self.library_mode {
+            mode: if self.module == Module::Library {
                 "library"
             } else {
                 "develop"
@@ -424,7 +425,7 @@ impl Editor {
         Ok(())
     }
     fn require_develop(&self) -> Result<()> {
-        if self.library_mode || self.document.metadata.is_none() {
+        if self.module == Module::Library || self.document.metadata.is_none() {
             return Err(Error::new("no_document", "Open a photo in Develop first"));
         }
         if self.load.is_running() || self.document.full().is_none() {
@@ -522,7 +523,7 @@ impl Editor {
             Operation::Presets { group } => {
                 self.require_presets()?;
                 // The issues are the open photo's, and the Library has none open.
-                let develop = !self.library_mode && self.document.metadata.is_some();
+                let develop = self.module == Module::Develop && self.document.metadata.is_some();
                 let issues = if develop {
                     &self.presets.issues[..]
                 } else {
@@ -538,7 +539,7 @@ impl Editor {
             }
             _ => {}
         }
-        let library_metadata = self.library_mode
+        let library_metadata = self.module == Module::Library
             && matches!(operation, Operation::Action(a) if a.metadata().is_some());
         let mut checked = target.clone();
         if library_metadata && let Some(id) = target.photo_id {
@@ -682,7 +683,9 @@ impl Editor {
             Operation::Module(develop) => return self.command_module(develop),
             Operation::Navigate(step) => return self.command_navigate(step),
             Operation::DeviceNavigate(step) => {
-                if !self.library_mode || self.library.as_ref().is_some_and(|l| l.loupe_open()) {
+                if self.module == Module::Develop
+                    || self.library.as_ref().is_some_and(|l| l.loupe_open())
+                {
                     return self.command_navigate(step);
                 }
             }
@@ -782,7 +785,7 @@ impl Editor {
     pub(super) fn execute_action(&mut self, action: Action, photo: Option<i64>) -> Result<Outcome> {
         use Action::*;
         if let Some(edit) = action.metadata() {
-            if self.library_mode && photo.is_none() {
+            if self.module == Module::Library && photo.is_none() {
                 return Err(Error::new(
                     "target_required",
                     "Library metadata actions require an explicit photo_id; use photos to find it",
@@ -905,14 +908,14 @@ impl Editor {
             .library
             .as_mut()
             .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
-        let id = photo.or(if self.library_mode {
+        let id = photo.or(if self.module == Module::Library {
             None
         } else {
             self.document.catalog_photo
         });
         let next = if let Some(id) = id {
             library.edit_metadata(id, edit, advance)
-        } else if self.library_mode {
+        } else if self.module == Module::Library {
             library.edit_shown(edit, advance).map(|_| None)
         } else {
             return Err(Error::new("no_document", "No catalog photo is open"));
@@ -932,7 +935,7 @@ impl Editor {
     }
     fn command_module(&mut self, develop: bool) -> Result<Outcome> {
         if develop {
-            if !self.library_mode {
+            if self.module == Module::Develop {
                 return Ok(Outcome::Empty);
             }
             let id = self
@@ -948,7 +951,7 @@ impl Editor {
             if !self.flush() {
                 return Err(Error::new("save_failed", "The edit could not be saved"));
             }
-            self.library_mode = true;
+            self.module = Module::Library;
             if let Some(library) = &mut self.library {
                 library.show_grid();
             }
@@ -960,7 +963,7 @@ impl Editor {
             .library
             .as_ref()
             .ok_or_else(|| Error::new("no_catalog", "No catalog is open"))?;
-        let current = if self.library_mode {
+        let current = if self.module == Module::Library {
             library.selected()
         } else {
             self.document.catalog_photo
@@ -968,7 +971,7 @@ impl Editor {
         let next = current
             .and_then(|id| library.navigate(id, step))
             .ok_or_else(|| Error::new("end_of_list", "No next photo in this direction"))?;
-        if self.library_mode {
+        if self.module == Module::Library {
             self.library
                 .as_mut()
                 .expect("checked above")
@@ -1006,7 +1009,7 @@ impl Editor {
             return Err(Error::new("save_failed", "The edit could not be saved"));
         }
         self.develop_catalog_photo(id);
-        if self.library_mode || self.document.catalog_photo != Some(id) {
+        if self.module == Module::Library || self.document.catalog_photo != Some(id) {
             return Err(Error::new(
                 "open_failed",
                 "The requested photo could not be opened",

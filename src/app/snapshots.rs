@@ -262,6 +262,7 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::Module;
     use crate::develop::Recipe;
 
     #[test]
@@ -305,7 +306,7 @@ mod tests {
         e.snapshot_action(SnapshotAction::Delete(id));
         assert!(e.document.snapshots.list.is_empty());
         // Typing a name and pressing Return in the panel names the new snapshot.
-        e.library_mode = false;
+        e.module = Module::Develop;
         e.snapshot_action(SnapshotAction::New);
         let mut frame = |events: Vec<egui::Event>| {
             let mut output = ctx.run_ui(

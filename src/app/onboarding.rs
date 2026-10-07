@@ -5,6 +5,7 @@ use super::dialogs::{CatalogDialog, FileDialog};
 use super::task::Task;
 use super::widgets::pretty_path;
 use super::worker::Event;
+use crate::app::Module;
 use crate::app::theme;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::collections::BTreeSet;
@@ -563,7 +564,11 @@ impl Editor {
     fn finish_onboarding(&mut self, done: bool) {
         self.onboarding.visible = false;
         self.onboarding_done = done;
-        self.library_mode = self.library.is_some();
+        self.module = if self.library.is_some() {
+            Module::Library
+        } else {
+            Module::Develop
+        };
         let _ = self.save_session();
     }
     /// Scans in the background; until the result arrives the steps say so.
