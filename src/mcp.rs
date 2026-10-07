@@ -319,7 +319,7 @@ impl Server {
         self.send(request, Some(p.target)).await
     }
     #[tool(
-        description = "Run a named application action, including undo/redo, treatment, rating or reset. Requires fresh target guards. Some actions open dialogs; prefer export_photo for unattended export. Never blindly retry toggle/relative actions."
+        description = "Run a named application action, including undo/redo, treatment, rating, reset, or hiding and showing panels (panels:sides, panels:all, panels:left, panels:right, panels:filmstrip; get_state reports panels). Requires fresh target guards. Some actions open dialogs; prefer export_photo for unattended export. Never blindly retry toggle/relative actions."
     )]
     async fn run_action(&self, Parameters(p): Parameters<Action>) -> CallToolResult {
         let request = Request::Action { action: p.action };

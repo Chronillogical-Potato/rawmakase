@@ -77,6 +77,13 @@ Device rating/flag buttons retain Shift and Photo > Auto Advance behavior; label
 buttons toggle their labels. Named `label:red` sets a label idempotently, while
 `toggle_label:red` toggles it explicitly.
 
+Panel actions hide or show the open module's panels, as the keyboard does:
+`panels:sides` (Tab), `panels:all` (Shift+Tab, with the filmstrip and status
+bar), and `panels:left`, `panels:right` and `panels:filmstrip` (F7, F8, F6).
+They need no photo. `state.panels` reports each panel of the open module as
+`shown` or `hidden`. A device button can also be set to `tab`, `shift+tab` or
+`f6`–`f8`.
+
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.
 Prefer the explicit `export` command for unattended output.
