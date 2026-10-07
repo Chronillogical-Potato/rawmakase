@@ -120,9 +120,12 @@ impl Catalog {
 
 fn insert(db: &Connection, id: PhotoId, info: &PhotoInfo) -> Result<()> {
     db.execute(
-        "INSERT OR REPLACE INTO photo_info
+        "INSERT INTO photo_info
          (photo, camera, lens, focal, aperture, exposure, iso, width, height)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(photo) DO UPDATE SET camera=excluded.camera, lens=excluded.lens,
+             focal=excluded.focal, aperture=excluded.aperture, exposure=excluded.exposure,
+             iso=excluded.iso, width=excluded.width, height=excluded.height",
         params![
             id,
             info.camera,

@@ -93,9 +93,12 @@ impl Catalog {
         )?;
         // Photo info is kept by master; the new one takes it over.
         tx.execute(
-            "INSERT OR REPLACE INTO photo_info
+            "INSERT INTO photo_info
              SELECT ?1, camera, lens, focal, aperture, exposure, iso, width, height
-             FROM photo_info WHERE photo=?2",
+             FROM photo_info WHERE photo=?2
+             ON CONFLICT(photo) DO UPDATE SET camera=excluded.camera, lens=excluded.lens,
+                 focal=excluded.focal, aperture=excluded.aperture, exposure=excluded.exposure,
+                 iso=excluded.iso, width=excluded.width, height=excluded.height",
             [id, master],
         )?;
         tx.execute(

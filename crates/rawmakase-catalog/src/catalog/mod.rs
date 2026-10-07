@@ -219,7 +219,8 @@ impl Catalog {
         let tx = self.db.transaction()?;
         for photo in add {
             tx.execute(
-                "INSERT OR IGNORE INTO collection_photos(collection, photo) VALUES (?, ?)",
+                "INSERT INTO collection_photos(collection, photo) VALUES (?, ?)
+                 ON CONFLICT DO NOTHING",
                 params![collection, photo],
             )?;
         }
@@ -318,7 +319,8 @@ impl Catalog {
 /// Records a fact about the catalog in its `meta` table.
 fn set_meta(db: &Connection, key: &str, value: &str) -> Result<()> {
     db.execute(
-        "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+        "INSERT INTO meta(key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![key, value],
     )?;
     Ok(())

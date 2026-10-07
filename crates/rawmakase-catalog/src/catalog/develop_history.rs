@@ -215,7 +215,8 @@ impl Catalog {
             }
             HistoryUpdate::Replace(h) => {
                 tx.execute(
-                    "INSERT OR REPLACE INTO develop_history(photo, data) VALUES (?, ?)",
+                    "INSERT INTO develop_history(photo, data) VALUES (?, ?)
+                     ON CONFLICT(photo) DO UPDATE SET data=excluded.data",
                     params![id, encode(h)?],
                 )?;
             }

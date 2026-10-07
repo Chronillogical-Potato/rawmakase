@@ -27,7 +27,7 @@ impl Catalog {
     pub fn put_bitmap(&self, bitmap: &crate::storage::bitmaps::Bitmap) -> Result<String> {
         let hash = bitmap.hash();
         self.db.execute(
-            "INSERT OR IGNORE INTO bitmaps(hash, data) VALUES (?, ?)",
+            "INSERT INTO bitmaps(hash, data) VALUES (?, ?) ON CONFLICT DO NOTHING",
             params![hash, bitmap.compress()?],
         )?;
         Ok(hash)
@@ -77,6 +77,7 @@ impl Catalog {
                 let _ = self.load_edit(e.id, e.path)?;
             }
         }
+        let edited_at = rawmakase_model::time::now_text();
         let tx = self.db.unchecked_transaction()?;
         let mut identities = identities.into_iter();
         for change in changes {
@@ -91,12 +92,25 @@ impl Catalog {
             };
             let identity = identities.next().expect("one identity per save");
             let (saved, local) = e.recipe.split_local();
-            ensure!(tx.execute("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=CURRENT_TIMESTAMP WHERE id=?",params![serde_json::to_string(&saved)?,serde_json::to_string(e.export)?,serde_json::to_string(&identity)?,e.id])?==1,"Unknown photo");
+            ensure!(
+                tx.execute(
+                    "UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=? WHERE id=?",
+                    params![
+                        serde_json::to_string(&saved)?,
+                        serde_json::to_string(e.export)?,
+                        serde_json::to_string(&identity)?,
+                        edited_at,
+                        e.id
+                    ]
+                )? == 1,
+                "Unknown photo"
+            );
             if local.is_empty() {
                 tx.execute("DELETE FROM local_edits WHERE photo=?", [e.id])?;
             } else {
                 tx.execute(
-                    "INSERT OR REPLACE INTO local_edits(photo, data) VALUES (?, ?)",
+                    "INSERT INTO local_edits(photo, data) VALUES (?, ?)
+                     ON CONFLICT(photo) DO UPDATE SET data=excluded.data",
                     params![e.id, serde_json::to_string(&local)?],
                 )?;
             }

@@ -227,7 +227,7 @@ impl Catalog {
 /// Gives `photo` `keyword`, unless it has it already.
 pub(super) fn tag_photo(db: &Connection, photo: PhotoId, keyword: i64) -> Result<()> {
     db.execute(
-        "INSERT OR IGNORE INTO photo_keywords(photo, keyword) VALUES (?, ?)",
+        "INSERT INTO photo_keywords(photo, keyword) VALUES (?, ?) ON CONFLICT DO NOTHING",
         params![photo, keyword],
     )?;
     Ok(())
@@ -377,8 +377,10 @@ pub(super) fn write(db: &Connection, id: PhotoId, d: &Descriptive) -> Result<()>
                 state(db, key(field), true)?;
                 for (position, (lang, value)) in langs.0.iter().enumerate() {
                     db.execute(
-                        "INSERT OR REPLACE INTO photo_text(photo, field, lang, position, value)
-                         VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO photo_text(photo, field, lang, position, value)
+                         VALUES (?, ?, ?, ?, ?)
+                         ON CONFLICT(photo, field, lang)
+                         DO UPDATE SET position=excluded.position, value=excluded.value",
                         params![id, key(field), lang, position as i64, value],
                     )?;
                 }

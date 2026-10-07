@@ -9,11 +9,12 @@ use rusqlite::Connection;
 const HISTORY_BACKFILLED: &str = "lightroom_history_backfilled";
 /// Copies history steps from an attached Lightroom catalog named `lr`.
 pub(super) const COPY_LIGHTROOM_HISTORY: &str =
-    "INSERT OR IGNORE INTO lightroom_history(photo,position,name,created,text)
+    "INSERT INTO lightroom_history(photo,position,name,created,text)
     SELECT image, row_number() OVER (PARTITION BY image ORDER BY dateCreated, id_local),
            COALESCE(name,''), dateCreated, text
     FROM lr.Adobe_libraryImageDevelopHistoryStep
-    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos);";
+    WHERE text IS NOT NULL AND image IN (SELECT id FROM photos)
+    ON CONFLICT DO NOTHING;";
 /// Largest history snapshot accepted. A step's text is a develop-settings string
 /// of a few kilobytes; the cap is far above that and only exists so a corrupt
 /// catalog cannot name a length the allocation would follow.
