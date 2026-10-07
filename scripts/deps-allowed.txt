@@ -23,6 +23,7 @@ app -> platform
 app -> presets
 app -> raw
 app -> raw_defaults
+app -> rendered
 app -> stats
 app -> storage
 app -> time
@@ -66,6 +67,7 @@ develop -> lens
 develop -> model
 develop -> optics
 develop -> raw
+develop -> rendered
 develop -> xmp
 dng -> optics
 dng -> tiff
@@ -98,6 +100,7 @@ export -> model
 export -> photo
 export -> raw
 export -> raw_defaults
+export -> rendered
 export -> storage
 export -> tiff
 export -> time
@@ -141,7 +144,7 @@ raw_defaults -> xmp
 stats -> storage
 stats -> time
 stats -> updates
-watermark -> develop
+watermark -> rendered
 watermark -> storage
 xmp -> build_info
 xmp -> camera_data

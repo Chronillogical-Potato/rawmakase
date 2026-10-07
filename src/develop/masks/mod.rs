@@ -23,7 +23,7 @@ pub fn overlay_weights(
     image: &crate::camera_data::CameraImage,
     recipe: &crate::model::recipe::Recipe,
     index: usize,
-    out: &crate::develop::Rendered,
+    out: &crate::rendered::Rendered,
     region: Option<[u32; 4]>,
 ) -> Option<Vec<f32>> {
     recipe

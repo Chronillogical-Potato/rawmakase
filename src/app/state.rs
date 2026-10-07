@@ -151,7 +151,7 @@ pub(super) struct PreviewState {
     pub(super) region: Option<Picture>,
     /// Small copy of the last whole-photo render for the Navigator.
     pub(super) navigator: Option<Picture>,
-    pub(super) histogram: crate::develop::Histogram,
+    pub(super) histogram: crate::rendered::Histogram,
     /// The shown pixels of `texture` and `region` while the white balance selector
     /// is active, for its loupe.
     pub(super) samples: Option<image::RgbImage>,
@@ -181,7 +181,7 @@ impl Default for PreviewState {
             texture: None,
             region: None,
             navigator: None,
-            histogram: crate::develop::Histogram::EMPTY,
+            histogram: crate::rendered::Histogram::EMPTY,
             samples: None,
             region_samples: None,
             samples_requested: false,
@@ -381,7 +381,7 @@ impl PreviewState {
         self.texture = None;
         self.region = None;
         self.navigator = None;
-        self.histogram = crate::develop::Histogram::EMPTY;
+        self.histogram = crate::rendered::Histogram::EMPTY;
         self.status.clear();
         self.last_fit_edge = 0;
         self.last_region = None;

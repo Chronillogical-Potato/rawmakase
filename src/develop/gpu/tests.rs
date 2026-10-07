@@ -489,8 +489,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let cancel = AtomicBool::new(false);
     // `ca`: 1 the measured aberration alone, 2 with the built-in distortion. Each
     // spatial run has another vignette style and amount.
-    use crate::develop::ClipOverlay;
     use crate::model::effects::VignetteStyle::*;
+    use crate::rendered::ClipOverlay;
     let (none, both) = (
         ClipOverlay::NONE,
         ClipOverlay {
@@ -596,8 +596,8 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             // either side of it; such pixels are compared without the overlay.
             let near = |v: f32| {
                 [
-                    crate::develop::rendered::HIGHLIGHT_CLIP,
-                    crate::develop::rendered::SHADOW_CLIP,
+                    crate::rendered::HIGHLIGHT_CLIP,
+                    crate::rendered::SHADOW_CLIP,
                 ]
                 .iter()
                 .any(|t| (v - t).abs() < 1e-4)
@@ -631,7 +631,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             let histogram = expected.histogram();
             // Counted from the same values, so within the GPU's float rounding.
             let clipped =
-                |h: &crate::develop::Histogram| [h.clipped.shadows, h.clipped.highlights].concat();
+                |h: &crate::rendered::Histogram| [h.clipped.shadows, h.clipped.highlights].concat();
             for (gpu, cpu) in clipped(&frame.histogram).iter().zip(clipped(&histogram)) {
                 assert!(
                     gpu.abs_diff(cpu) <= cpu / 100 + 2,
@@ -709,7 +709,7 @@ fn panning_never_writes_the_drawn_region() -> Result<()> {
     for x in [0, 4, 8, 12, 16] {
         let display = super::Display {
             slot: super::Slot::Region,
-            clipping: crate::develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             monitor: None,
             navigator: None,
             thumbnail: None,

@@ -36,7 +36,6 @@ pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
 pub mod red_eye;
-mod rendered;
 pub mod retouch;
 mod stage_cache;
 
@@ -53,5 +52,3 @@ pub use pipeline::{
     neutral_pick, pick_fringe, preview, render, render_legacy, render_region, render_region_legacy,
 };
 pub(crate) use pipeline::{profile_matrix, render_base};
-pub(crate) use rendered::unit_to_u8;
-pub use rendered::{ClipOverlay, Histogram, Rendered};

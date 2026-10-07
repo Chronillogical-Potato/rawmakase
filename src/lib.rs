@@ -42,6 +42,7 @@ pub mod platform;
 pub mod presets;
 pub mod raw;
 pub mod raw_defaults;
+pub mod rendered;
 #[cfg(feature = "telemetry")]
 pub mod stats;
 pub mod storage;

@@ -11,9 +11,9 @@ pub mod queue;
 pub use crate::storage::Replace;
 use crate::{
     camera_data::Metadata,
-    develop::Rendered,
     export_settings::{ExportOptions, Format},
     raw,
+    rendered::Rendered,
     storage::is_raw,
 };
 use anyhow::{Result, bail, ensure};

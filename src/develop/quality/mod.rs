@@ -6,11 +6,11 @@ use crate::develop::{
     preview_renderer::Stages,
     stage_cache::{BlurKey, LocalKey, ReducedKey, StageCache, TextureKey},
 };
-use crate::model::recipe::Recipe;
-use crate::model::valid::ValidRecipe;
+use crate::rendered::Rendered;
 use crate::{
     camera_data::CameraImage,
-    develop::{self, Geometry, Rendered},
+    develop::{self, Geometry},
+    model::{recipe::Recipe, valid::ValidRecipe},
 };
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;

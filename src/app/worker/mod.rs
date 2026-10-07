@@ -1,8 +1,8 @@
 use crate::model::recipe::Recipe;
 use crate::{
     camera_data::{CameraImage, Metadata},
-    develop::Rendered,
     export_settings::ExportOptions,
+    rendered::Rendered,
 };
 use eframe::egui;
 use std::{
@@ -144,7 +144,7 @@ pub enum Event {
         id: u64,
         pane: Pane,
         preview: Preview,
-        histogram: Box<crate::develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
         /// A reduced copy for the library, without overlays, when the job asked for one.
         thumbnail: Option<image::RgbImage>,
         /// The shown pixels without overlays or monitor profile, when the job asked.
@@ -155,7 +155,7 @@ pub enum Event {
     /// The whole photo's histogram, for a render that showed a 100% region.
     Histogram {
         id: u64,
-        histogram: Box<crate::develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
     },
     Failed {
         id: u64,
@@ -250,7 +250,7 @@ pub struct RenderJob {
     pub region: Option<[u32; 4]>,
     pub monitor: Option<PathBuf>,
     /// The clipping warnings painted over the shown pixels.
-    pub clipping: crate::develop::ClipOverlay,
+    pub clipping: crate::rendered::ClipOverlay,
     /// Update the Navigator (Fit views).
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.

@@ -21,7 +21,7 @@ mod retouch;
 
 use chart::{Camera, Illuminant, Layout, Patch};
 use measure::{chroma, delta_e2000, hue_difference, lab};
-use rawmakase::{camera_data::CameraImage, camera_profiles::CameraProfile, develop::Rendered};
+use rawmakase::{camera_data::CameraImage, camera_profiles::CameraProfile, rendered::Rendered};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{

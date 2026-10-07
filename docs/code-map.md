@@ -112,7 +112,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [gpu/uniforms.rs](../src/develop/gpu/uniforms.rs) | The `present.wgsl` and `finish.wgsl` parameter blocks as Rust structs; a naga test checks their fields and offsets against the shaders. |
 | [gpu/present.rs](../src/develop/gpu/present.rs), [gpu/present.wgsl](../src/develop/gpu/present.wgsl), [gpu/reduce.wgsl](../src/develop/gpu/reduce.wgsl) | Finishing developed pixels straight into the viewport texture (sharpening, effects, clipping overlay, monitor profile, histogram) and box-reducing it for the Navigator and thumbnails. |
 | [gpu/weights.rs](../src/develop/gpu/weights.rs) | CPU-generated resampling coefficients matching reference boundaries and normalization. |
-| [rendered.rs](../src/develop/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
+| [rendered.rs](../src/rendered.rs) | Float RGB output buffers, integer pixel conversion, histogram generation with per-channel clipping counts, the clipping thresholds and the clipping overlay. |
 | [color/curve.rs](../src/color/curve.rs) | Tone-curve points, validation, interpolation and lookup tables. |
 | [effects.rs](../src/develop/effects.rs) | Additional recipe controls used by XMP and spatial finishing such as grain and vignette. |
 | [color.rs](../src/develop/color.rs) | Reference color behavior, including vibrance and grading math. |

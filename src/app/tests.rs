@@ -456,7 +456,7 @@ fn stale_preview_results_are_discarded() {
         id: old,
         pane: worker::Pane::After,
         preview: worker::Preview::Pixels {
-            image: develop::Rendered {
+            image: crate::rendered::Rendered {
                 width: 1,
                 height: 1,
                 pixels: vec![[1.; 3]],
@@ -464,7 +464,7 @@ fn stale_preview_results_are_discarded() {
             display_rgb: vec![255; 3],
             navigator: None,
         },
-        histogram: Box::new(develop::Histogram::EMPTY),
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
         thumbnail: None,
         samples: None,
         stage: worker::RenderStage::Fit,
@@ -488,7 +488,7 @@ fn before_and_after_renders_go_to_their_own_side() {
         id: after,
         pane,
         preview: worker::Preview::Pixels {
-            image: develop::Rendered {
+            image: crate::rendered::Rendered {
                 width: 1,
                 height: 1,
                 pixels: vec![[0.5; 3]],
@@ -496,7 +496,7 @@ fn before_and_after_renders_go_to_their_own_side() {
             display_rgb: vec![value; 3],
             navigator: None,
         },
-        histogram: Box::new(develop::Histogram::EMPTY),
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
         thumbnail: None,
         samples: None,
         stage: worker::RenderStage::Fit,
@@ -644,7 +644,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                 id: current,
                 pane: worker::Pane::After,
                 preview: worker::Preview::Pixels {
-                    image: develop::Rendered {
+                    image: crate::rendered::Rendered {
                         width: 1,
                         height: 1,
                         pixels: vec![[0.5; 3]],
@@ -652,7 +652,7 @@ fn worker_failures_are_scoped_and_render_stages_do_not_depend_on_status_text() {
                     display_rgb: vec![128; 3],
                     navigator: None,
                 },
-                histogram: Box::new(develop::Histogram::EMPTY),
+                histogram: Box::new(crate::rendered::Histogram::EMPTY),
                 thumbnail: None,
                 samples: None,
                 stage,
@@ -2569,7 +2569,7 @@ fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     };
     frame(vec![], false, &mut e);
     frame(vec![j()], false, &mut e);
-    let both = develop::ClipOverlay {
+    let both = crate::rendered::ClipOverlay {
         shadows: true,
         highlights: true,
     };
@@ -2580,7 +2580,10 @@ fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     assert_eq!(e.view.clipping.overlay(), both);
     frame(vec![], false, &mut e);
     frame(vec![j()], false, &mut e);
-    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
+    assert_eq!(
+        e.view.clipping.overlay(),
+        crate::rendered::ClipOverlay::NONE
+    );
 }
 #[test]
 fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
@@ -2597,7 +2600,10 @@ fn a_hovered_clipping_triangle_shows_its_warning_until_the_pointer_leaves() {
     // was turned on.
     let frame = e.begin_edit_frame();
     e.finish_edit_frame(frame, &ctx);
-    assert_eq!(e.view.clipping.overlay(), develop::ClipOverlay::NONE);
+    assert_eq!(
+        e.view.clipping.overlay(),
+        crate::rendered::ClipOverlay::NONE
+    );
 }
 #[test]
 fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result<()> {

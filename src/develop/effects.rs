@@ -1,7 +1,7 @@
 //! Additional photographic controls used by imported XMP recipes.
-use crate::develop::Rendered;
 use crate::model::effects::{Effects, VignetteStyle};
 use crate::model::recipe::Recipe;
+use crate::rendered::Rendered;
 use rayon::prelude::*;
 mod grain;
 mod lens_vignette;

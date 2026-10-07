@@ -34,20 +34,20 @@ struct Shown {
     recipe: Recipe,
     max_edge: u32,
     region: Option<[u32; 4]>,
-    clipping: develop::ClipOverlay,
+    clipping: crate::rendered::ClipOverlay,
     monitor: Option<PathBuf>,
     navigator: bool,
     overlay: super::Overlay,
     out: Shot,
 }
 enum Shot {
-    Pixels(develop::Rendered),
+    Pixels(crate::rendered::Rendered),
     /// A presented frame, valid while its texture still holds `generation`.
     Frame {
         texture: wgpu::Texture,
         generation: u64,
         preview: Presented,
-        histogram: Box<develop::Histogram>,
+        histogram: Box<crate::rendered::Histogram>,
     },
 }
 impl Shown {
@@ -316,7 +316,7 @@ fn render(
             )
         };
         // CPU pixels: display bytes, overlays and reduced copies here, off the UI thread.
-        let publish_pixels = |out: develop::Rendered, stage: RenderStage, gpu: bool| {
+        let publish_pixels = |out: crate::rendered::Rendered, stage: RenderStage, gpu: bool| {
             if job.cancel.load(Ordering::Relaxed) {
                 return;
             }
@@ -554,7 +554,7 @@ fn render(
     }
 }
 
-type Histogram = Box<develop::Histogram>;
+type Histogram = Box<crate::rendered::Histogram>;
 
 /// At 100% the view shows a region, but the histogram describes the whole
 /// photo, as Lightroom's does: from the Fit render of the same edit when there
@@ -662,7 +662,7 @@ mod tests {
             recipe: recipe.clone(),
             region,
             monitor: None,
-            clipping: develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             navigator: region.is_none(),
             thumbnail: false,
             samples: false,
@@ -757,7 +757,7 @@ mod tests {
             recipe: recipe.clone(),
             region: None,
             monitor: None,
-            clipping: develop::ClipOverlay::NONE,
+            clipping: crate::rendered::ClipOverlay::NONE,
             navigator: true,
             thumbnail: false,
             samples: false,
@@ -794,7 +794,7 @@ mod tests {
                 recipe: recipe.clone(),
                 region,
                 monitor: None,
-                clipping: develop::ClipOverlay::NONE,
+                clipping: crate::rendered::ClipOverlay::NONE,
                 navigator: region.is_none(),
                 thumbnail: false,
                 samples: false,

@@ -17,7 +17,7 @@ pub(super) struct EditFrame {
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct RenderModes {
     crop: bool,
-    clipping: crate::develop::ClipOverlay,
+    clipping: crate::rendered::ClipOverlay,
     compare: super::before_after::Compare,
     zoom: bool,
     /// The swatch Point Color's Visualize Range shows.
