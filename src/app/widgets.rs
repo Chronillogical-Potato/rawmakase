@@ -1062,7 +1062,8 @@ pub(super) fn slider_styled(
         );
         let mut displayed = *value * scale;
         // The arrow keys step a focused number; egui's DragValue consumes them while
-        // it draws, so they are read before.
+        // it draws, so they are read before. A screen reader steps it with
+        // accessibility actions instead, which reach it without focus.
         let arrows = ui.input(|i| {
             [
                 egui::Key::ArrowUp,
@@ -1072,6 +1073,18 @@ pub(super) fn slider_styled(
             ]
             .into_iter()
             .any(|key| i.key_pressed(key))
+        });
+        let assistive_step = ui.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::AccessKitActionRequest(request)
+                        if matches!(
+                            request.action,
+                            egui::accesskit::Action::Increment | egui::accesskit::Action::Decrement
+                        )
+                )
+            })
         });
         // A fixed field that fits the widest value ("50000", "+5.00"): typing or
         // dragging never widens it over the rail.
@@ -1095,9 +1108,10 @@ pub(super) fn slider_styled(
             })
             .inner;
         if value_response.changed() {
-            // Dragging the number, or the arrow keys stepping it while it has focus,
-            // move it relative to where it was; anything else was typed.
-            let stepped = value_response.has_focus() && arrows;
+            // Dragging the number, the arrow keys stepping it while it has focus, or a
+            // screen reader stepping it, move it relative to where it was; anything
+            // else was typed.
+            let stepped = (value_response.has_focus() && arrows) || assistive_step;
             let input = if value_response.dragged() || stepped {
                 NumberInput::Relative
             } else {
@@ -1980,6 +1994,56 @@ mod slider_tests {
             output.textures_delta.clear();
         }
         value
+    }
+
+    /// Exposure's slider from `start`, stepped up `steps` times by a screen reader's
+    /// Increment action on its number.
+    fn increment_exposure_assistively(start: f32, steps: usize) -> f32 {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut value = start;
+        let input = |events| egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 40.))),
+            events,
+            ..Default::default()
+        };
+        let mut run = |events| {
+            let mut output = ctx.run_ui(input(events), |ui| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ui, |ui| {
+                        setting_slider(ui, ParameterId::Exposure, &mut value, 0.);
+                    });
+            });
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update
+        };
+        let update = run(vec![]).expect("accessibility is on");
+        let (number, _) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::SpinButton)
+            .expect("the number is a spin button");
+        let number = *number;
+        for _ in 0..steps {
+            run(vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Increment,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: number,
+                    data: None,
+                },
+            )]);
+        }
+        run(vec![]);
+        value
+    }
+
+    #[test]
+    fn a_screen_reader_steps_the_number_within_the_rail() {
+        assert!(increment_exposure_assistively(0., 1) > 0.);
+        assert_eq!(increment_exposure_assistively(5., 3), 5.);
+        assert_eq!(increment_exposure_assistively(6.5, 3), 6.5);
     }
 
     #[test]
