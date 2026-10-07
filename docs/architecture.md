@@ -91,10 +91,14 @@ inject a temporary file, without changing the process-wide environment.
   `scripts/deps-allowed.txt`, and `scripts/deps.py check` (CI and `make check`)
   fails on a new one or on a cycle; add a line only when the new dependency
   points down the intended layering. `scripts/deps-closures.txt` lists what some
-  modules must never reach, even through others: the model, file formats, the
-  catalog and the edit session never reach LibRaw, the renderer or the app, and
-  the renderer never reaches the app, export or the catalog. The check prints the
-  chain that breaks a rule.
+  modules must never reach, even through others: the edit session never reaches
+  LibRaw, the renderer or the app, and the renderer never reaches the app or
+  export. The check prints the chain that breaks a rule.
+- The model, file formats, catalog and control protocol are crates, so Cargo
+  rules out a dependency back on the app. `scripts/crate-closures.sh` (CI and
+  `make check`) fails when one of them gains the app, a GPU or GUI crate, or a
+  LibRaw or Little CMS binding; CI also builds and tests them on a machine
+  without LibRaw or Little CMS. The catalog's bundled SQLite is intended.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate
