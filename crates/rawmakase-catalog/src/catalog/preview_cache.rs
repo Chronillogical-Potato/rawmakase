@@ -388,6 +388,19 @@ impl PreviewCache {
         self.db.execute_batch("PRAGMA incremental_vacuum;")?;
         Ok(())
     }
+    /// Lightroom's Automatically Discard 1:1 Previews: drops the previews of
+    /// `kind` not shown or built for `unused`. Returns how many went.
+    pub fn expire(&mut self, kind: PreviewKind, unused: Duration) -> Result<usize> {
+        let before = now() - unused.as_secs() as i64;
+        let gone = self.db.execute(
+            "DELETE FROM sized_previews WHERE kind=? AND last_used<?",
+            params![kind.code(), before],
+        )?;
+        if gone > 0 {
+            self.db.execute_batch("PRAGMA incremental_vacuum;")?;
+        }
+        Ok(gone)
+    }
     /// Records that the user asked for `kind` previews of this catalog photo,
     /// so they are rebuilt when its edit changes.
     pub fn record_intent(
@@ -899,6 +912,39 @@ mod tests {
         assert!(
             cache
                 .load_sized(&raw, "a", PreviewKind::Standard)?
+                .is_some()
+        );
+        Ok(())
+    }
+    #[test]
+    fn unused_previews_of_one_kind_expire() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let (raw, mut cache) = photo(&d)?;
+        let stamp = Stamp::read(&raw)?;
+        let im = image::RgbImage::new(32, 16);
+        cache.store_sized(&raw, "old", PreviewKind::OneToOne, &stamp, 0, &im)?;
+        cache.store_sized(&raw, "new", PreviewKind::OneToOne, &stamp, 0, &im)?;
+        cache.store_sized(&raw, "old", PreviewKind::Standard, &stamp, 2048, &im)?;
+        let long_ago = now() - 40 * 86400;
+        cache.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE identity='old'",
+            [long_ago],
+        )?;
+        let month = Duration::from_secs(30 * 86400);
+        assert_eq!(cache.expire(PreviewKind::OneToOne, month)?, 1);
+        assert!(
+            cache
+                .load_sized(&raw, "old", PreviewKind::OneToOne)?
+                .is_none()
+        );
+        assert!(
+            cache
+                .load_sized(&raw, "new", PreviewKind::OneToOne)?
+                .is_some()
+        );
+        assert!(
+            cache
+                .load_sized(&raw, "old", PreviewKind::Standard)?
                 .is_some()
         );
         Ok(())

@@ -67,6 +67,10 @@ pub(crate) struct Session {
     /// Preferences > Standard Preview Size, the long edge in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_preview_size: Option<u32>,
+    /// Preferences > Automatically Discard 1:1 Previews, in days unused; 0 is
+    /// Never.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_to_one_discard_days: Option<u32>,
 }
 impl Session {
     /// The Standard Preview Size, or the default when none of the offered
@@ -75,6 +79,15 @@ impl Session {
         self.standard_preview_size
             .filter(|size| crate::app::preview_build::STANDARD_SIZES.contains(size))
             .unwrap_or(crate::app::preview_build::DEFAULT_STANDARD_SIZE)
+    }
+    /// After how many days unused 1:1 previews are discarded; `None` keeps them.
+    pub(crate) fn discard_one_to_one_after(&self) -> Option<u32> {
+        use crate::app::preview_build::{DEFAULT_DISCARD_DAYS, DISCARD_CHOICES};
+        match self.one_to_one_discard_days {
+            Some(0) => None,
+            Some(days) if DISCARD_CHOICES.iter().any(|(d, _)| *d == Some(days)) => Some(days),
+            _ => DEFAULT_DISCARD_DAYS,
+        }
     }
 }
 

@@ -271,12 +271,16 @@ impl Loupe {
     }
 }
 
-/// The stored Standard preview of an offline RAW.
+/// The stored Standard preview of an offline RAW, else its 1:1 preview.
 fn stored(path: &std::path::Path, identity: &str) -> anyhow::Result<image::RgbImage> {
     use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
-    PreviewCache::open(&PreviewCache::path())?
-        .load_sized(path, identity, PreviewKind::Standard)?
-        .ok_or_else(|| anyhow::anyhow!("No stored preview"))
+    let cache = PreviewCache::open(&PreviewCache::path())?;
+    match cache.load_sized(path, identity, PreviewKind::Standard)? {
+        Some(image) => Ok(image),
+        None => cache
+            .load_sized(path, identity, PreviewKind::OneToOne)?
+            .ok_or_else(|| anyhow::anyhow!("No stored preview")),
+    }
 }
 fn key(photo: &Photo, edge: u32) -> Key {
     (
@@ -475,7 +479,9 @@ impl Library {
             .zip(fit)
             .is_some_and(|(pos, fit)| fit.contains(pos));
         let double = response.double_clicked() || response.triple_clicked();
-        if response.clicked() && !double && available && (zoom.on || on_photo) {
+        // An offline RAW zooms into its stored 1:1 preview.
+        let zoomable = available || stored.is_some();
+        if response.clicked() && !double && zoomable && (zoom.on || on_photo) {
             if let Some((pos, fit)) = response
                 .interact_pointer_pos()
                 .zip(fit)
@@ -503,7 +509,7 @@ impl Library {
         let regions = &mut self.loupe.regions;
         let full = regions
             .full
-            .filter(|_| zoom.on && available && regions.photo == Some(photo.id));
+            .filter(|_| zoom.on && zoomable && regions.photo == Some(photo.id));
         let shown = match full {
             Some(full) => {
                 // `level` screen pixels per image pixel.
@@ -530,11 +536,12 @@ impl Library {
             }
             None => fit,
         };
-        if zoom.on && available {
+        if zoom.on && zoomable {
             // The image pixels that fill the view at this level.
             let size =
                 [rect.width(), rect.height()].map(|side| (side * ppp / zoom.level).ceil() as u32);
-            regions.request(photo.id, &photo.path, zoom.pan, size, zoom.level);
+            let stored = stored.as_deref().filter(|_| !available);
+            regions.request(photo.id, &photo.path, stored, zoom.pan, size, zoom.level);
         }
         let painter = ui.painter().with_clip_rect(rect);
         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
@@ -551,7 +558,7 @@ impl Library {
             );
             painter.image(region.id(), place, uv, Color32::WHITE);
         }
-        if zoom.on && available {
+        if zoom.on && zoomable {
             ui.ctx().set_cursor_icon(if response.dragged() {
                 egui::CursorIcon::Grabbing
             } else {
@@ -559,6 +566,11 @@ impl Library {
             });
         }
         let note = match (&self.loupe.state, available, texture.is_some()) {
+            _ if zoom.on && stored.is_some() => match &self.loupe.regions.error {
+                Some(e) => format!("Zoom unavailable offline: {e}"),
+                None if self.loupe.regions.pending || full.is_none() => "Loading…".into(),
+                None => "Offline: showing the 1:1 preview".into(),
+            },
             (_, false, true) => {
                 "Offline: showing the cached preview. Full detail needs the original.".into()
             }

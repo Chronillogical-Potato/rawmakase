@@ -92,6 +92,13 @@ struct Export {
 }
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct BuildPreviews {
+    /// "standard" (the default) for Standard-Sized Previews, "one_to_one" for
+    /// full-size 1:1 previews.
+    kind: Option<String>,
+}
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Job {
     job_id: u64,
 }
@@ -386,13 +393,21 @@ impl Server {
         self.send(request, Some(p.target)).await
     }
     #[tool(
-        description = "Build Standard-Sized Previews of the selected photos (the Library selection, or in Develop the Filmstrip's) in the background, for Develop to show while each photo opens. Returns how many were queued and skipped (offline or not RAW); queueing is not completion: get_state's building_previews shows progress."
+        description = "Build previews of the selected photos (the Library selection, or in Develop the Filmstrip's) in the background: Standard-Sized Previews, which Develop shows while each photo opens, or 1:1 previews, which let an offline photo be zoomed to 100% in the Loupe. Returns how many were queued and skipped (offline or not RAW); queueing is not completion: get_state's building_previews shows progress."
     )]
-    async fn build_previews(&self) -> CallToolResult {
-        let request = Request::BuildPreviews {
-            kind: Default::default(),
+    async fn build_previews(&self, Parameters(p): Parameters<BuildPreviews>) -> CallToolResult {
+        use rawmakase_protocol::request::PreviewKind;
+        let kind = match p.kind.as_deref() {
+            None | Some("standard") => PreviewKind::Standard,
+            Some("one_to_one") => PreviewKind::OneToOne,
+            Some(other) => {
+                return error(
+                    "invalid_request",
+                    format!("Unknown kind {other}; use standard or one_to_one"),
+                );
+            }
         };
-        self.send(request, None).await
+        self.send(Request::BuildPreviews { kind }, None).await
     }
     #[tool(
         description = "Save the current Develop edit to its catalog. Success confirms persistence; protected edits return an error."

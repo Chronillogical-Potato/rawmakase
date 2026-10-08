@@ -185,7 +185,7 @@ use target guards for a sequence that must refer to the same edit.
 | `save` | optional `target` | `saved: true` |
 | `preview`, `export` | absolute `path`, optional `max_edge`, optional `target` | Captured output job |
 | `job` | `job_id` | Output status |
-| `build_previews` | optional `kind`: `standard` (the default) | `queued` and `skipped` (offline or not RAW) counts for the selection, as the thumbnail menu's Build Standard-Sized Previews; state's `building_previews` (`done`, `total`) shows progress while they build |
+| `build_previews` | optional `kind`: `standard` (the default) or `one_to_one` | `queued` and `skipped` (offline or not RAW) counts for the selection, as the thumbnail menu's Build Standard-Sized Previews; state's `building_previews` (`done`, `total`) shows progress while they build |
 | `wait` | `until`: `loaded` with `photo_id`, or `job` with `job_id`; optional `timeout_ms` (1…5000, default 1000) | State once the photo is loaded (or replaced by another) or the job finished, status `applied`; or at `timeout_ms`, status `timed_out` |
 | `cc` | integer `cc`, `value` (0…127) | Legacy device mapping |
 | `note` | integer `note` (0…127), `press`: `click`, `down`, `up` | Legacy device mapping |

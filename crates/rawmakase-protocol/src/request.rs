@@ -244,6 +244,8 @@ pub enum PreviewKind {
     /// Lightroom's Standard-Sized Previews, at the app's Standard Preview Size.
     #[default]
     Standard,
+    /// Lightroom's 1:1 Previews, at full size.
+    OneToOne,
 }
 
 /// The module a `module` command switches to.
@@ -640,6 +642,12 @@ mod tests {
             parse(json!({"cmd":"build_previews","kind":"standard"})).unwrap(),
             Request::BuildPreviews {
                 kind: PreviewKind::Standard
+            }
+        );
+        assert_eq!(
+            parse(json!({"cmd":"build_previews","kind":"one_to_one"})).unwrap(),
+            Request::BuildPreviews {
+                kind: PreviewKind::OneToOne
             }
         );
         assert!(parse(json!({"cmd":"build_previews","kind":"huge"})).is_err());

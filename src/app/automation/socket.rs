@@ -128,6 +128,7 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
         },
         Request::BuildPreviews { kind } => Operation::BuildPreviews(match kind {
             wire::PreviewKind::Standard => crate::catalog::preview_cache::PreviewKind::Standard,
+            wire::PreviewKind::OneToOne => crate::catalog::preview_cache::PreviewKind::OneToOne,
         }),
         Request::Job { job_id } => Operation::Job(job_id),
         // Answered once the photo is loaded or the job finished, or after

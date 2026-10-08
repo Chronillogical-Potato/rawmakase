@@ -238,9 +238,11 @@ impl Library {
                     kind,
                 ));
             }
-            PhotoAction::DiscardPreviews => {
-                self.previews_request =
-                    Some(super::PreviewsRequest::Discard(self.menu_scope(photo.id)));
+            PhotoAction::DiscardPreviews(kinds) => {
+                self.previews_request = Some(super::PreviewsRequest::Discard(
+                    self.menu_scope(photo.id),
+                    kinds,
+                ));
             }
             PhotoAction::ReadMetadata => {
                 let ids = if whole_selection && self.selection.selected.contains(&photo.id) {

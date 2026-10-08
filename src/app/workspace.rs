@@ -116,7 +116,7 @@ impl Editor {
         {
             match request {
                 PreviewsRequest::Build(ids, kind) => self.build_previews_from_menu(&ids, kind),
-                PreviewsRequest::Discard(ids) => self.discard_previews(&ids),
+                PreviewsRequest::Discard(ids, kinds) => self.discard_previews(&ids, &kinds),
             }
         }
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
