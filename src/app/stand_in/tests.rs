@@ -69,9 +69,11 @@ fn the_stored_preview_shows_before_or_after_the_embedded_one() {
     assert!(e.preview.standing_in());
     assert!(e.preview.texture.is_none());
     // The embedded JPEG first: the stored preview replaces it.
-    let load = open(&mut e, ids[0], None);
+    e.preview.clear_document();
+    let (load, _) = e.load.start();
     embedded(&mut e, load);
     assert!(e.preview.texture.is_some() && e.preview.embedded);
+    e.request_stand_ins(load, ids[0], None);
     until(&mut e, |e| e.preview.stand_in.is_some());
     assert!(e.preview.standing_in());
     // Nothing that reads the photo sees it.
