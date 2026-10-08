@@ -50,8 +50,33 @@ pub(super) fn model_dir() -> PathBuf {
 pub(super) fn runtime_dir() -> PathBuf {
     crate::storage::local_data_dir().join("runtime")
 }
+/// Installed: every file there with its size, and the receipt the installer wrote
+/// after checking each one's SHA-256 says so for exactly these files.
 fn is_installed(dir: &Path) -> bool {
     all_files().iter().all(|f| has(dir, f))
+        && std::fs::read_to_string(dir.join(RECEIPT)).is_ok_and(|r| r == receipt())
+}
+/// The file recording which files were checked, and against which digests.
+const RECEIPT: &str = "verified.txt";
+fn receipt() -> String {
+    all_files()
+        .iter()
+        .map(|f| format!("{} {} {}\n", f.sha256, f.size_bytes, f.name))
+        .collect()
+}
+/// The SHA-256 of the file at `path`, read in chunks.
+fn digest_of(path: &Path) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut sha = Sha256::new();
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buffer).ok()?;
+        if n == 0 {
+            break;
+        }
+        sha.update(&buffer[..n]);
+    }
+    Some(sha.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 fn has(dir: &Path, file: &ModelFile) -> bool {
     std::fs::metadata(dir.join(file.name)).is_ok_and(|m| m.is_file() && m.len() == file.size_bytes)
@@ -174,17 +199,19 @@ impl Installer {
 
 /// Fetches or copies each file of the model into a temporary file beside its final
 /// place, checks it and publishes it by renaming. `import` is a folder holding the
-/// files. A file already in place with the right size was checked when it was
-/// published, so a retry fetches only what is missing.
+/// files. A file already in place is kept if its SHA-256 matches, so a retry fetches
+/// only what is missing; the receipt is written once every file has been checked.
 fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     let dir = model_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     remove_abandoned(&dir);
+    // The receipt goes first: until it is written again, nothing counts as installed.
+    let _ = std::fs::remove_file(dir.join(RECEIPT));
     // Bytes of files already there count as done.
     let mut finished = 0u64;
     for file in &all_files() {
-        if has(&dir, file) {
+        if has(&dir, file) && digest_of(&dir.join(file.name)).as_deref() == Some(file.sha256) {
             finished += file.size_bytes;
             progress.done.store(finished, Ordering::Relaxed);
             continue;
@@ -214,6 +241,10 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
             }
             out.sync_all().map_err(|e| e.to_string())?;
             drop(out);
+            // Cancelled while the last bytes were written out: not published.
+            if progress.cancel.load(Ordering::Relaxed) {
+                return Err("Cancelled".to_string());
+            }
             let target = dir.join(file.name);
             // Windows will not rename over a file; only a damaged one can be there.
             let _ = std::fs::remove_file(&target);
@@ -226,6 +257,15 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
         finished += file.size_bytes;
         progress.done.store(finished, Ordering::Relaxed);
     }
+    crate::storage::write_atomic(
+        &dir.join(RECEIPT),
+        crate::storage::Replace::Overwrite,
+        |out| {
+            out.write_all(receipt().as_bytes())?;
+            Ok(())
+        },
+    )
+    .map_err(|e| format!("could not record the install: {e}"))?;
     let _ = crate::storage::sync_dir(&dir);
     Ok(())
 }
@@ -404,14 +444,21 @@ mod tests {
     }
 
     #[test]
-    fn a_model_is_installed_only_when_every_file_is_there_with_its_size() {
+    fn a_model_is_installed_only_when_every_file_is_there_with_its_size_and_checked() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!is_installed(dir.path()));
         for file in all_files() {
             let f = std::fs::File::create(dir.path().join(file.name)).unwrap();
             f.set_len(file.size_bytes).unwrap();
         }
+        // The right sizes are not enough without the installer's receipt.
+        assert!(!is_installed(dir.path()));
+        std::fs::write(dir.path().join(RECEIPT), receipt()).unwrap();
         assert!(is_installed(dir.path()));
+        assert_eq!(
+            digest_of(&dir.path().join(all_files()[0].name)).map(|d| d.len()),
+            Some(64)
+        );
         std::fs::File::create(dir.path().join(all_files()[1].name))
             .unwrap()
             .set_len(5)

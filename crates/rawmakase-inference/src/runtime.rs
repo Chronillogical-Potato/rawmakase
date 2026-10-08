@@ -399,6 +399,7 @@ impl Session {
             || logits.len() != 3 * side * side
             || object.len() != 1
             || scores.iter().any(|s| !s.is_finite())
+            || logits.iter().any(|l| !l.is_finite())
             || !object[0].is_finite()
         {
             return Err(InferenceError::OutputInvalid(format!(

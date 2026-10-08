@@ -100,7 +100,12 @@ impl Db {
             backup.display()
         );
         let published = (|| -> Result<()> {
-            db.execute("VACUUM INTO ?", [backup.to_string_lossy()])?;
+            // SQLite takes the name as text; a path that is not valid UTF-8 cannot be
+            // passed to it unchanged, and a changed one would put the copy elsewhere.
+            let name = backup
+                .to_str()
+                .context("The catalog's folder name cannot be used for its backup")?;
+            db.execute("VACUUM INTO ?", [name])?;
             let copy = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
             ensure!(
                 copy.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))? == "ok"
