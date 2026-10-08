@@ -397,13 +397,20 @@ impl PreviewCache {
         Ok(())
     }
     /// Lightroom's Automatically Discard 1:1 Previews: drops the previews of
-    /// `kind` not shown or built for `unused`. Returns how many went.
+    /// `kind` not shown or built for `unused`, and the requests for files left
+    /// without one, so an edit does not build them again. Returns how many went.
     pub fn expire(&mut self, kind: PreviewKind, unused: Duration) -> Result<usize> {
         let before = now() - unused.as_secs() as i64;
-        let gone = self.db.execute(
-            "DELETE FROM sized_previews WHERE kind=? AND last_used<?",
+        let tx = self.db.transaction()?;
+        let gone = tx.execute(
+            "DELETE FROM sized_previews WHERE kind=?1 AND last_used<?2",
             params![kind.code(), before],
         )?;
+        tx.execute(
+            "DELETE FROM preview_intent WHERE kind=?1 AND source_path NOT IN (SELECT source_path FROM sized_previews WHERE kind=?1)",
+            [kind.code()],
+        )?;
+        tx.commit()?;
         if gone > 0 {
             self.db.execute_batch("PRAGMA incremental_vacuum;")?;
         }
@@ -955,6 +962,27 @@ mod tests {
                 .load_sized(&raw, "old", PreviewKind::Standard)?
                 .is_some()
         );
+        // The request for a file whose previews of that kind all went goes too.
+        let catalog = CatalogLocation::File(d.path().join("c.rawmakase"));
+        let other = d.path().join("other.ARW");
+        std::fs::write(&other, b"other raw")?;
+        cache.record_intent(&catalog, PhotoId(1), &raw, PreviewKind::OneToOne)?;
+        cache.record_intent(&catalog, PhotoId(2), &other, PreviewKind::OneToOne)?;
+        cache.store_sized(
+            &other,
+            "x",
+            PreviewKind::OneToOne,
+            &Stamp::read(&other)?,
+            0,
+            &im,
+        )?;
+        cache.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE source_path=?",
+            params![long_ago, key(&other)],
+        )?;
+        cache.expire(PreviewKind::OneToOne, month)?;
+        assert!(cache.has_intent(&catalog, PhotoId(1), &raw, PreviewKind::OneToOne)?);
+        assert!(!cache.has_intent(&catalog, PhotoId(2), &other, PreviewKind::OneToOne)?);
         // Asked for again, a preview starts its time again.
         cache
             .db
