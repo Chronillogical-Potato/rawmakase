@@ -251,6 +251,8 @@ struct State {
     ops: VecDeque<Op>,
     closed: bool,
     progress: Progress,
+    /// Bumped by Cancel and Discard: a refresh taken before then queues nothing.
+    generation: u64,
 }
 
 struct Shared {
@@ -284,13 +286,13 @@ impl Builder {
             let mut cache = PreviewCache::open(&cache_path).ok();
             while let Some(next) = worker.next() {
                 let (item, cancel) = match next {
-                    Next::Op(Op::Refresh(items)) => {
+                    Next::Op(Op::Refresh(items), generation) => {
                         if let Some(cache) = &cache {
-                            worker.refresh(cache, items);
+                            worker.refresh(cache, items, generation);
                         }
                         continue;
                     }
-                    Next::Op(op) => {
+                    Next::Op(op, _) => {
                         if let Some(cache) = &mut cache {
                             // Best effort, and never worth ending the worker for.
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -359,8 +361,9 @@ impl Builder {
         let mut state = self.shared.state.lock().expect("preview builds");
         let dropped = state.waiting.len();
         state.waiting.clear();
-        // A refresh not yet looked at would queue builds again.
+        // A refresh not yet looked at, or being looked at, would queue builds again.
         state.ops.retain(|op| !matches!(op, Op::Refresh(_)));
+        state.generation += 1;
         state.progress.total -= dropped;
         state.cancel.store(true, Ordering::Relaxed);
         state.cancel = Arc::default();
@@ -373,6 +376,7 @@ impl Builder {
         state.waiting.retain(|item| !photos.contains(&item.photo));
         let dropped = before - state.waiting.len();
         state.progress.total -= dropped;
+        state.generation += 1;
         for op in &mut state.ops {
             if let Op::Refresh(items) = op {
                 items.retain(|item| !photos.contains(&item.photo));
@@ -418,7 +422,8 @@ impl Drop for Builder {
 }
 
 enum Next {
-    Op(Op),
+    /// Upkeep, with the generation it was taken in.
+    Op(Op, u64),
     Build(Item, Arc<AtomicBool>),
 }
 
@@ -458,14 +463,21 @@ impl State {
 
 impl Shared {
     /// The items of a refresh that are to be built again.
-    fn refresh(&self, cache: &PreviewCache, items: Vec<Item>) {
-        let Ok(mut state) = self.state.lock() else {
-            return;
+    /// The cache and file checks run without the lock the interface queues
+    /// through, as a file on a stalled share can hold them up.
+    fn refresh(&self, cache: &PreviewCache, items: Vec<Item>, generation: u64) {
+        let pending: Vec<bool> = match self.state.lock() {
+            Ok(state) => items
+                .iter()
+                .map(|item| state.pending(item.photo, item.kind))
+                .collect(),
+            Err(_) => return,
         };
         let stale: Vec<Item> = items
             .into_iter()
-            .filter(|item| {
-                let asked = state.pending(item.photo, item.kind)
+            .zip(pending)
+            .filter(|(item, pending)| {
+                let asked = *pending
                     || cache
                         .has_intent(&item.catalog, item.photo, &item.path, item.kind)
                         .unwrap_or(false);
@@ -474,8 +486,13 @@ impl Shared {
                         .sized_fresh(&item.path, &item.identity, item.kind, item.edge)
                         .unwrap_or(false)
             })
+            .map(|(item, _)| item)
             .collect();
-        state.enqueue(stale);
+        if let Ok(mut state) = self.state.lock()
+            && state.generation == generation
+        {
+            state.enqueue(stale);
+        }
     }
     /// Upkeep first, then the next photo; `None` once closed.
     fn next(&self) -> Option<Next> {
@@ -484,7 +501,7 @@ impl Shared {
             // Upkeep asked for goes through even at exit: a Discard already
             // reported must not come back on the next launch.
             if let Some(op) = state.ops.pop_front() {
-                return Some(Next::Op(op));
+                return Some(Next::Op(op, state.generation));
             }
             if state.closed {
                 return None;

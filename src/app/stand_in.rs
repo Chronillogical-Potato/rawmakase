@@ -3,10 +3,11 @@
 //! reads the photo (samples, the readout, white balance picking, the histogram,
 //! tools, Before/After, export) ever reads it.
 //!
-//! A worker reads the preview cache off the UI thread, decodes the JPEG and
-//! converts it through the monitor profile. It has two lanes, so preparing the
-//! neighbour never replaces the request for the photo being opened; the last
-//! two neighbours prepared are kept, so moving on can show one in the first frame.
+//! Workers read the preview cache off the UI thread, decode the JPEG and
+//! convert it through the monitor profile: one for the photo being opened and
+//! one for its neighbour, so preparing the neighbour never replaces or holds up
+//! the photo's own read. The last two neighbours prepared are kept, so moving
+//! on can show one in the first frame.
 use super::Editor;
 use super::worker::{Event, Latest};
 use crate::catalog::PhotoId;
@@ -16,8 +17,6 @@ use std::{collections::VecDeque, path::PathBuf, sync::mpsc::Sender};
 
 /// Prepared neighbours kept.
 const KEPT: usize = 2;
-const OPENING: usize = 0;
-const NEIGHBOUR: usize = 1;
 
 /// Which stored preview, for which photo, as which load asked for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,7 +42,11 @@ pub(crate) struct StandIn {
 }
 
 pub(super) struct StandIns {
-    worker: Latest<Job>,
+    /// Reads the photo being opened.
+    opening: Latest<Job>,
+    /// Reads the neighbour, on its own thread so a read stalled on a network
+    /// share never holds up the photo being opened.
+    ahead: Latest<Job>,
     /// Neighbours prepared ahead, oldest first.
     prepared: VecDeque<StandIn>,
     /// The neighbour last asked for, so it is not asked for every time.
@@ -53,48 +56,53 @@ pub(super) struct StandIns {
     opened: Option<(PhotoId, String)>,
 }
 
+/// A reader of stored previews, its cache opened on first use.
+fn reader(tx: Sender<Event>, ctx: egui::Context, cache_path: PathBuf) -> Latest<Job> {
+    let mut cache: Option<PreviewCache> = None;
+    Latest::new(move |job: Job| {
+        if cache.is_none() {
+            cache = PreviewCache::open(&cache_path).ok();
+        }
+        let Some(image) = cache.as_ref().and_then(|c| {
+            c.load_sized(
+                &job.wanted.path,
+                &job.wanted.identity,
+                PreviewKind::Standard,
+            )
+            .ok()
+            .flatten()
+        }) else {
+            return;
+        };
+        let size = [image.width() as usize, image.height() as usize];
+        let mut rgb = image.into_raw();
+        // As the renderer does: a failed transform shows the sRGB pixels.
+        if let Some(monitor) = &job.wanted.monitor {
+            let _ = crate::raw::display_transform(monitor, &mut rgb);
+        }
+        let image = egui::ColorImage::from_rgb(size, &rgb);
+        let _ = tx.send(Event::StandIn(Box::new(StandIn {
+            load: job.load,
+            wanted: job.wanted,
+            image,
+        })));
+        ctx.request_repaint();
+    })
+}
+
 impl StandIns {
     pub(super) fn new(tx: Sender<Event>, ctx: egui::Context, cache_path: PathBuf) -> Self {
-        let mut cache: Option<PreviewCache> = None;
-        let worker = Latest::with_lanes(2, move |job: Job| {
-            if cache.is_none() {
-                cache = PreviewCache::open(&cache_path).ok();
-            }
-            let Some(image) = cache.as_ref().and_then(|c| {
-                c.load_sized(
-                    &job.wanted.path,
-                    &job.wanted.identity,
-                    PreviewKind::Standard,
-                )
-                .ok()
-                .flatten()
-            }) else {
-                return;
-            };
-            let size = [image.width() as usize, image.height() as usize];
-            let mut rgb = image.into_raw();
-            // As the renderer does: a failed transform shows the sRGB pixels.
-            if let Some(monitor) = &job.wanted.monitor {
-                let _ = crate::raw::display_transform(monitor, &mut rgb);
-            }
-            let image = egui::ColorImage::from_rgb(size, &rgb);
-            let _ = tx.send(Event::StandIn(Box::new(StandIn {
-                load: job.load,
-                wanted: job.wanted,
-                image,
-            })));
-            ctx.request_repaint();
-        });
         Self {
-            worker,
+            opening: reader(tx.clone(), ctx.clone(), cache_path.clone()),
+            ahead: reader(tx, ctx, cache_path),
             prepared: VecDeque::new(),
             asked: None,
             opened: None,
         }
     }
-    /// Stops the worker at exit; it ends after the read in hand.
-    pub(super) fn stop(&mut self) -> super::task::Stopping {
-        self.worker.stop()
+    /// Stops both readers at exit; each ends after the read in hand.
+    pub(super) fn stop(&mut self) -> [super::task::Stopping; 2] {
+        [self.opening.stop(), self.ahead.stop()]
     }
     /// A neighbour already prepared, taken out to be shown.
     fn take_prepared(&mut self, wanted: &Wanted) -> Option<StandIn> {
@@ -143,13 +151,10 @@ impl Editor {
         if let Some(wanted) = wanted {
             match self.stand_ins.take_prepared(&wanted) {
                 Some(ready) => self.show_stand_in(&self.context.clone(), ready.image),
-                None => self.stand_ins.worker.submit_to(
-                    OPENING,
-                    Job {
-                        load: Some(load),
-                        wanted,
-                    },
-                ),
+                None => self.stand_ins.opening.submit(Job {
+                    load: Some(load),
+                    wanted,
+                }),
             }
         }
         let Some(next) = neighbour.and_then(|n| self.stand_in_for(n)) else {
@@ -159,13 +164,10 @@ impl Editor {
             || self.stand_ins.prepared.iter().any(|p| p.wanted == next);
         if !known {
             self.stand_ins.asked = Some(next.clone());
-            self.stand_ins.worker.submit_to(
-                NEIGHBOUR,
-                Job {
-                    load: None,
-                    wanted: next,
-                },
-            );
+            self.stand_ins.ahead.submit(Job {
+                load: None,
+                wanted: next,
+            });
         }
     }
     /// Whether the photo open, `photo`, is left with an edit other than the one
