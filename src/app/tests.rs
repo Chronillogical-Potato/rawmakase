@@ -5244,3 +5244,56 @@ fn a_click_on_a_window_edge_hides_and_shows_its_panel() {
     click(&mut e, Pos2::new(600., 796.));
     assert!(!e.panel_shown(WorkspacePanel::Filmstrip));
 }
+
+#[test]
+fn long_lens_names_keep_the_develop_panel_on_screen() {
+    // Issues 362 and 363: a long lens or lens profile name widened the panel past
+    // the window, and the photo was drawn over the panel's left part.
+    let viewport = |lens: &str, profile: &str| {
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        let mut m = Metadata {
+            make: "Testcam".into(),
+            lens_model: lens.into(),
+            focal: 35.,
+            aperture: 2.,
+            width: 600,
+            height: 400,
+            ..Default::default()
+        };
+        let lcp = crate::lens::lcp::test_profile("Testcam", lens, profile, -0.05, -0.5);
+        m.lens_profiles =
+            crate::lens::lcp::Library::from_texts([("Testcam - RAW.lcp", lcp.as_str())])
+                .for_photo(&m);
+        assert_eq!(m.lens_profiles.all().len(), 1);
+        editor.document.metadata = Some(m);
+        editor.document.edit.setup_mut().lens_profile = true;
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1400., 800.));
+        for _ in 0..5 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| editor.draw(ui),
+            );
+            output.textures_delta.clear();
+        }
+        let panel = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("adjustments"))
+            .expect("the Develop panel is shown");
+        assert!(
+            panel.outer_rect.max.x <= screen.max.x,
+            "panel {:?} leaves the window",
+            panel.outer_rect
+        );
+        editor.view.viewport
+    };
+    let long = "AF-S VR Zoom-Nikkor 70-200mm f/2.8G IF-ED with a converter's long description";
+    let short = viewport("35mm F2", "Adobe (35mm F2)");
+    assert_eq!(viewport(long, "Adobe (35mm F2)"), short);
+    assert_eq!(
+        viewport("35mm F2", &format!("Adobe ({long}, Testcam)")),
+        short
+    );
+}

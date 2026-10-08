@@ -1705,7 +1705,8 @@ fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
 /// 83 px label column, controls from the rail start (88 px) to the right edge,
-/// and the same height as a slider row.
+/// and the same height as a slider row. Text too long for the row, such as a lens
+/// or profile name, is cut short: wider rows push the panel past the window.
 fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::hover());
     ui.painter().text(
@@ -1722,6 +1723,7 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.;
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             add(ui)
         },
     )
