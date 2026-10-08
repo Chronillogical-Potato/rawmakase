@@ -16,7 +16,11 @@ set -euo pipefail
 
 gui='egui.*|eframe|epaint|winit|fastframe-fonts'
 native='rawmakase-native|lcms2.*|libraw.*'
-leaf="rawmakase|wgpu.*|naga|$gui|$native"
+# The ONNX Runtime binding opens a library at run time. Only the app composes it: no
+# value, file-format, catalog or rendering crate may reach it, so saved masks render
+# without any inference installed.
+inference='rawmakase-inference|ort.*'
+leaf="rawmakase|wgpu.*|naga|$gui|$native|$inference"
 status=0
 check() {
     local crate=$1 forbidden="^($2) "
@@ -32,8 +36,11 @@ check() {
 for crate in rawmakase-model rawmakase-interop rawmakase-catalog rawmakase-protocol; do
     check "$crate" "$leaf"
 done
-check rawmakase-engine "rawmakase|rawmakase-catalog|rawmakase-export|$gui|$native"
-check rawmakase-native "rawmakase|rawmakase-catalog|rawmakase-export|$gui"
-check rawmakase-export "rawmakase|eframe|winit|egui-wgpu|egui-winit|egui_extras|lcms2.*|libraw.*"
+check rawmakase-engine "rawmakase|rawmakase-catalog|rawmakase-export|$gui|$native|$inference"
+check rawmakase-native "rawmakase|rawmakase-catalog|rawmakase-export|$gui|$inference"
+check rawmakase-export "rawmakase|eframe|winit|egui-wgpu|egui-winit|egui_extras|lcms2.*|libraw.*|$inference"
+# Inference itself is a leaf: it takes pixels and returns coverage, and knows no
+# workspace crate, window, GPU or imaging library.
+check rawmakase-inference "rawmakase|rawmakase-model|rawmakase-catalog|rawmakase-engine|rawmakase-export|rawmakase-interop|rawmakase-native|rawmakase-protocol|wgpu.*|naga|$gui|$native"
 [ "$status" -eq 0 ] && echo "The extracted crates depend on no app, GPU, GUI or native imaging crate beyond their own."
 exit "$status"

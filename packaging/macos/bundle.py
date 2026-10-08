@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import re
 import shutil
+import sys
 import subprocess
 import tempfile
 import urllib.request
@@ -118,6 +119,16 @@ def main():
     for destination, old, name in edges:
         relative = "@executable_path/../Frameworks/" if destination == executable else "@loader_path/"
         subprocess.run(["install_name_tool", "-change", old, relative + name, str(destination)], check=True)
+
+    # The ONNX Runtime that runs the subject selection model, opened lazily from
+    # here; it is signed with the rest, which hardened-runtime library validation
+    # requires of anything the app loads.
+    sys.path.insert(0, str(root / "packaging"))
+    import onnxruntime
+    runtime = onnxruntime.fetch("macos", run("lipo", "-archs", str(args.binary)).split()[0],
+                                frameworks, notices)
+    copies[runtime.resolve()] = runtime
+    subprocess.run(["install_name_tool", "-id", "@rpath/" + runtime.name, str(runtime)], check=True)
 
     # Preserve the exact Homebrew source/version metadata and upstream notices.
     for formula in sorted(formulae):

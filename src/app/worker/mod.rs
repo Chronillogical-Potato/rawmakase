@@ -59,6 +59,18 @@ pub(crate) enum AutoKind {
 }
 pub(crate) enum Event {
     DialogClosed,
+    /// A Subject or Background selection finished (or failed).
+    Selection(Box<crate::app::subject_mask::Done>),
+    /// The selection model finished installing, or why not.
+    ModelInstalled(Result<(), String>),
+    ModelRemoved(Result<(), String>),
+    /// A file chosen to import as the selection model.
+    ModelFile(PathBuf),
+    /// A catalog upgrade for raster masks finished: the backup it made, or why not.
+    CatalogUpgraded {
+        generation: u64,
+        result: Result<Option<PathBuf>, String>,
+    },
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),

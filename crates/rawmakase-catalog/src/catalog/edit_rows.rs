@@ -18,6 +18,14 @@ pub(super) struct CheckedChange<'a> {
     id: PhotoId,
     save: Option<Checked<'a>>,
 }
+impl CheckedChange<'_> {
+    /// Notes that the change committed: its mask rasters are stored.
+    pub(super) fn committed(&self) {
+        if let Some(save) = &self.save {
+            save.assets.saved();
+        }
+    }
+}
 
 /// A validated edit, as its rows store it.
 struct Checked<'a> {
@@ -27,6 +35,8 @@ struct Checked<'a> {
     /// Spots and masks, `None` without any.
     local: Option<String>,
     history: HistoryUpdate<'a>,
+    /// The mask rasters the recipe and a replaced History refer to.
+    assets: super::mask_assets::Assets,
 }
 
 impl Catalog {
@@ -49,6 +59,11 @@ impl Catalog {
         // Refuse replacing an edit after the underlying source changed.
         let _ = self.load_edit(e.id, e.path)?;
         let (saved, local) = e.recipe.split_local();
+        let history_ids = match e.history {
+            HistoryUpdate::Replace(h) => h.mask_asset_ids(),
+            HistoryUpdate::Keep => Default::default(),
+        };
+        let assets = self.assets_of(e.recipe.mask_asset_ids().chain(history_ids))?;
         Ok(CheckedChange {
             id: e.id,
             save: Some(Checked {
@@ -59,6 +74,7 @@ impl Catalog {
                     .then(|| serde_json::to_string(&local))
                     .transpose()?,
                 history: e.history,
+                assets,
             }),
         })
     }
@@ -89,6 +105,7 @@ pub(super) fn write_edit(
         w.execute(sql!("DELETE FROM develop_history WHERE photo=?"), &[id])?;
         return Ok(());
     };
+    e.assets.write(w)?;
     ensure!(
         w.execute(
             sql!("UPDATE photos SET recipe=?,export_options=?,identity=?,edited_at=? WHERE id=?"),

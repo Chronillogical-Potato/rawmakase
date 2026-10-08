@@ -15,7 +15,7 @@ $install = Start-Process -FilePath $Setup -Wait -PassThru -ArgumentList @(
 if ($install.ExitCode -ne 0) { Get-Content $log; throw "Setup exited with $($install.ExitCode)" }
 
 $exe = Join-Path $directory 'rawmakase.exe'
-foreach ($file in $exe, (Join-Path $directory 'LICENSE')) {
+foreach ($file in $exe, (Join-Path $directory 'LICENSE'), (Join-Path $directory 'onnxruntime.dll')) {
     if (-not (Test-Path $file)) { throw "Setup did not install $file" }
 }
 if ((Get-Content (Join-Path $directory 'rawmakase-installer.txt')).Trim() -ne 'rawmakase-installer-v1') {

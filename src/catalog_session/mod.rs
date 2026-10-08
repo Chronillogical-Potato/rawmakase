@@ -39,6 +39,9 @@ impl CatalogSession {
     pub(crate) fn open(location: &CatalogLocation) -> Result<Opened> {
         crate::platform::network::prepare_filesystem_bridge();
         let mut catalog = Catalog::open(location)?;
+        // Masks made from a selection are read back from this catalog wherever they
+        // are rendered: Develop, the Library's thumbnails, previews and exports.
+        crate::storage::mask_assets::set_loader(Some(catalog.mask_asset_loader()));
         // Catalogs imported before history was kept: recover it from the
         // stored Lightroom catalog. Best effort; a failure only hides history.
         let _ = catalog.backfill_lightroom_history();

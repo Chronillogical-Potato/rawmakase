@@ -333,17 +333,23 @@ fn keyword_lookup_uses_the_first_of_lightroom_duplicates() -> Result<()> {
 }
 
 #[test]
-fn catalogs_with_the_new_tables_stay_version_1() -> Result<()> {
+fn new_catalogs_are_version_2_and_older_ones_open_as_they_are() -> Result<()> {
     let (dir, cat, _) = catalog(1)?;
     let CatalogLocation::File(path) = cat.location().clone();
     drop(cat);
     let db = Connection::open(&path)?;
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-        1
+        2
     );
+    // A catalog of the first format is read and left at it until it is upgraded.
+    db.execute_batch("PRAGMA user_version=1")?;
     drop(db);
     Catalog::open(&path)?;
+    assert_eq!(
+        Connection::open(&path)?.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+        1
+    );
     drop(dir);
     Ok(())
 }

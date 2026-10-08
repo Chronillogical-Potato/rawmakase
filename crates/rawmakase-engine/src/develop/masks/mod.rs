@@ -45,5 +45,41 @@ pub fn overlay_weights(
     Some(w.data.iter().map(|v| *v as f32 / 255.).collect())
 }
 
+/// Version of [`selection_input`]'s policy; part of what a generated selection records.
+pub const SELECTION_INPUT_VERSION: u32 = 1;
+
+/// The settings a selection model sees the photo with: the camera's rendering
+/// without the user's tone, colour, profile or geometry, so one photo gives one input
+/// however it is edited. Spot removal and red eye stay, since they change the content
+/// to select; lens distortion, crop, rotation and finishing do not, so the result
+/// registers exactly with the image frame.
+pub fn selection_input_recipe(user: &crate::model::recipe::Recipe) -> crate::model::recipe::Recipe {
+    let mut r = crate::model::recipe::Recipe {
+        lens_builtin: false,
+        sharpening: 0.,
+        camera_exposure: user.camera_exposure,
+        retouch: user.retouch.clone(),
+        red_eye: user.red_eye.clone(),
+        ..Default::default()
+    };
+    r.profile_tone = true;
+    r
+}
+
+/// The photo as a selection model takes it: sRGB, oriented, over the camera's default
+/// crop (the image frame), at most `max_edge` pixels on the long side.
+pub fn selection_input(
+    image: &crate::camera_data::CameraImage,
+    user: &crate::model::recipe::Recipe,
+    max_edge: u32,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> anyhow::Result<crate::rendered::Rendered> {
+    let recipe = selection_input_recipe(user);
+    // The model looks at about a megapixel: reduce the sensor image first, as Fit
+    // does, instead of developing every pixel only to throw most of them away.
+    let reduced = crate::develop::preview(image, max_edge);
+    crate::develop::render_cancellable(&reduced, &recipe.checked()?, max_edge, cancel)
+}
+
 #[cfg(test)]
 mod tests;

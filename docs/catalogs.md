@@ -72,9 +72,11 @@ Older releases still open the catalog: they read and write a single mapping for 
 
 Keep only one computer using a catalog at a time: close it on one before opening it on another. SQLite over a network share isn't safe for two computers writing at once.
 
-## SQLite format, version 1
+## SQLite format, versions 1 and 2
 
-A `.rawmakase` file is SQLite with application ID `0x4f4d4152` and `PRAGMA user_version=1`. Core tables: `sources`, `roots`, `folders`, `photos`, `collections`, `collection_photos`, `keywords`, `photo_keywords`, `folder_mappings`. Per-computer folder locations live in `computers`, `folder_paths` (each folder's logical path, names joined by `/`) and `folder_locations`; `roots.mapped_path` and `folder_mappings` are kept for older releases. Foreign keys are enabled. Photo recipes and export options are JSON fields, separate from `lightroom_develop`. Saved recipes include source identity checks, so a replaced file cannot silently overwrite a previous edit. Unknown future catalog versions are refused.
+New and imported catalogs are version 2; a version 1 catalog opens and works as before, and stays version 1 until you enable Select Subject or Select Background in it. Version 2 can hold raster masks (content-addressed in the `bitmaps` table, referenced by recipes, History and snapshots, never deleted), so releases that predate it refuse a version 2 catalog. The upgrade (Masking drawer, **Upgrade catalog…**) first writes a verified SQLite copy beside the catalog (`<name>.before-upgrade-backup`, as large as the catalog; it is a recovery copy, not a second catalog), then changes the version in one immediate transaction. Close the catalog on every other computer and copy first; mixed-version concurrent use is not safe.
+
+A `.rawmakase` file is SQLite with application ID `0x4f4d4152` and `PRAGMA user_version=1` or `2`. Core tables: `sources`, `roots`, `folders`, `photos`, `collections`, `collection_photos`, `keywords`, `photo_keywords`, `folder_mappings`. Per-computer folder locations live in `computers`, `folder_paths` (each folder's logical path, names joined by `/`) and `folder_locations`; `roots.mapped_path` and `folder_mappings` are kept for older releases. Foreign keys are enabled. Photo recipes and export options are JSON fields, separate from `lightroom_develop`. Saved recipes include source identity checks, so a replaced file cannot silently overwrite a previous edit. Unknown future catalog versions are refused.
 
 Creation/import publish atomically without clobbering another file. SQLite transactions protect metadata and recipe writes. Back up the `.rawmakase` file with RAWmakase closed. No Lightroom file or RAW is modified by catalog operations.
 

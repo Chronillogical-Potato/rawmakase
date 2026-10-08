@@ -20,6 +20,12 @@ struct Preset {
 }
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;
+    anyhow::ensure!(
+        !r.masks
+            .iter()
+            .any(crate::model::masks::MaskGroup::has_raster),
+        "A preset cannot hold masks made from a selection; leave Masking out of it"
+    );
     // Spot removal is specific to its photo; Lightroom presets never include it.
     let (mut recipe, local) = r.split_local();
     // Auto white balance was estimated for this photo; applied elsewhere its values are
@@ -41,6 +47,12 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     let mut v: serde_json::Value = serde_json::from_reader(File::open(path)?)?;
     migrate_recipe(&mut v)?;
     let p: Preset = serde_json::from_value(v)?;
+    anyhow::ensure!(
+        !p.masks
+            .iter()
+            .any(crate::model::masks::MaskGroup::has_raster),
+        "This preset refers to a photo's selection mask, which a preset cannot hold"
+    );
     let mut recipe = p.recipe.with_local(crate::model::recipe::LocalEdits {
         retouch: Vec::new(),
         red_eye: Default::default(),
@@ -98,5 +110,28 @@ mod tests {
         assert_eq!(applied.retouch_model, photo.retouch_model);
         assert_eq!(applied.panels.state(Panel::RedEye), PanelState::On);
         assert_eq!(applied.panels.state(Panel::SpotRemoval), PanelState::On);
+    }
+    #[test]
+    fn a_preset_refuses_masks_made_from_a_selection() {
+        use crate::model::masks::{
+            BITMAP_SAMPLING, BitmapMask, MaskComponent, MaskGroup, MaskShape,
+        };
+        let r = Recipe {
+            masks: vec![MaskGroup {
+                components: vec![MaskComponent::new(MaskShape::Bitmap(BitmapMask {
+                    id: format!("sha256:{}", "ab".repeat(32)),
+                    width: 2,
+                    height: 2,
+                    sampling: BITMAP_SAMPLING,
+                    source: None,
+                }))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        assert!(save_preset(&path, &r).is_err());
+        assert!(!path.exists());
     }
 }

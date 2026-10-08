@@ -5,8 +5,42 @@ against Lightroom yet, and details may change.
 
 The Masking tool (Shift+W) works like Lightroom Classic's Masking panel for the
 masks that need no AI model: Brush, Linear Gradient, Radial Gradient, Color Range and
-Luminance Range. Subject, Sky, Background, Objects, People and Depth masks are not
-implemented yet.
+Luminance Range, plus **Select Subject** and **Select Background**, which run a model on
+this computer (below). Sky, Objects, People and Depth masks are not implemented yet.
+
+## Select Subject and Select Background
+
+Two actions above the Create row make a mask from the photo's salient foreground
+(Background is the same selection inverted as a component, so adding a brush to it
+still adds coverage). They are also in each mask's Add, Subtract and Intersect menus.
+A result is one named mask and one History step with neutral sliders and its overlay
+shown; **Regenerate** on a selected generated component replaces only its raster.
+Clean up with ordinary Add or Subtract brush components. Subject means the model's
+foreground, possibly several objects, not one person; when it finds nothing the
+drawer says "No subject found" and nothing is added.
+
+- **On this computer.** The first use asks to download the model (IS-Net general use,
+  179 MB, checked against a pinned SHA-256) or to import the file yourself; nothing
+  downloads at startup, on opening a catalog or the drawer, or at an update. It runs on
+  the CPU through ONNX Runtime, which ships with the app (beside the executable;
+  source builds put `libonnxruntime` in the data folder's `runtime/` or name it in
+  `RAWMAKASE_ORT_LIB`). No photo leaves the computer. **Remove selection model**
+  deletes it; saved masks keep working without it or the runtime.
+- **Catalog only.** The result is a raster stored in the catalog, so it needs a catalog
+  photo. A catalog of the first format asks to **Upgrade catalog…**: a backup copy is
+  written beside it, then it becomes format version 2, which older releases refuse.
+  Close it on other computers first.
+- **What the model sees:** the photo at the camera's default crop with the camera
+  rendering (no tone, colour, profile or geometry edits; spots and red eye included),
+  about 1280 pixels on the long side. Sliders and crop edits during or after selecting
+  do not matter; changing spots or red eye meanwhile discards the result, as does any
+  change to the masks' structure (adding, removing, Undo).
+- **Not copied:** masks made from a selection belong to their photo. Copy, Paste and
+  Sync leave them out (and say so), and presets cannot hold them.
+- **Limits:** one 4096-pixel, 8-bit raster per selection; rasters are never
+  garbage-collected, so a catalog only grows with them. Grow/shrink and feather are
+  not implemented. No calibrated "faint result" threshold: only an exactly empty
+  result counts as no subject.
 
 ## Using it
 

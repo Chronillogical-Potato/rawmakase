@@ -3,6 +3,7 @@
 pub mod bitmaps;
 mod files;
 mod identity;
+pub mod mask_assets;
 
 pub use files::{Replace, data_dir, is_hidden, is_raw, list_raws, local_data_dir};
 pub use files::{

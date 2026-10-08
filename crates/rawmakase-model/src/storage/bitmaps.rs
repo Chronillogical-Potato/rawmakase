@@ -23,6 +23,13 @@ pub struct Bitmap {
     pub data: Vec<u8>,
 }
 impl Bitmap {
+    /// Decoded size in bytes, `None` when it overflows.
+    fn byte_len(width: u32, height: u32, channels: u8, depth: u8) -> Option<usize> {
+        (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(channels as usize)?
+            .checked_mul(depth as usize)
+    }
     fn validate(&self) -> Result<()> {
         ensure!(
             (1..=4).contains(&self.channels)
@@ -31,9 +38,9 @@ impl Bitmap {
                 && self.height > 0,
             "Invalid bitmap"
         );
-        let len = self.width as usize * self.height as usize * self.channels as usize;
+        let len = Self::byte_len(self.width, self.height, self.channels, self.depth);
         ensure!(
-            len * self.depth as usize == self.data.len() && self.data.len() <= MAX_BYTES,
+            len == Some(self.data.len()) && self.data.len() <= MAX_BYTES,
             "Bitmap size mismatch"
         );
         Ok(())
@@ -48,6 +55,44 @@ impl Bitmap {
         .concat();
         let fnv = |seed| fnv1a(fnv1a(seed, &header), &self.data);
         format!("{:016x}{:016x}", fnv(FNV_OFFSET), fnv(0x84222325cbf29ce4))
+    }
+    /// The content ID new assets are stored under: `sha256:` and the hex SHA-256 of
+    /// a canonical header (format, dimensions, channels, sample depth) and the
+    /// uncompressed samples. Older assets keep their [`Self::hash`] names.
+    pub fn content_id(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut sha = Sha256::new();
+        sha.update(b"RMBM1");
+        sha.update(self.width.to_le_bytes());
+        sha.update(self.height.to_le_bytes());
+        sha.update([self.channels, self.depth]);
+        sha.update(&self.data);
+        let digest = sha.finalize();
+        let mut id = String::with_capacity(7 + 64);
+        id.push_str("sha256:");
+        for byte in digest.iter() {
+            id.push_str(&format!("{byte:02x}"));
+        }
+        id
+    }
+    /// Whether `id` names a bitmap by either scheme: a legacy 128-bit FNV hash or
+    /// a [`Self::content_id`].
+    pub fn is_valid_id(id: &str) -> bool {
+        let hex = |s: &str, len: usize| {
+            s.len() == len
+                && s.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        };
+        id.strip_prefix("sha256:")
+            .map_or_else(|| hex(id, 32), |h| hex(h, 64))
+    }
+    /// Whether `self` is what `id` names.
+    pub fn matches_id(&self, id: &str) -> bool {
+        if id.starts_with("sha256:") {
+            self.content_id() == id
+        } else {
+            self.hash() == id
+        }
     }
     /// Header plus zlib-compressed samples.
     pub fn compress(&self) -> Result<Vec<u8>> {
@@ -69,8 +114,9 @@ impl Bitmap {
         let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
         let (width, height) = (u32_at(4), u32_at(8));
         let (channels, depth) = (bytes[12], bytes[13]);
-        let expected = width as usize * height as usize * channels as usize * depth as usize;
-        ensure!(expected <= MAX_BYTES, "Stored bitmap too large");
+        let expected = Self::byte_len(width, height, channels, depth)
+            .filter(|len| *len <= MAX_BYTES)
+            .context("Stored bitmap too large")?;
         let mut data = Vec::with_capacity(expected);
         ZlibDecoder::new(&bytes[14..])
             .take(expected as u64 + 1)

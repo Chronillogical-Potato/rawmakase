@@ -129,6 +129,32 @@ enum Shape {
     },
     Color(Vec<[f32; 3]>, f32),
     Luminance(f32, f32, [f32; 2]),
+    /// Coverage over the whole image frame; `None` when its raster could not be
+    /// provided, which contributes nothing (the app reports the missing asset before
+    /// anything is shown, so this only keeps a render from failing).
+    Bitmap(Option<Arc<rawmakase_model::storage::bitmaps::Bitmap>>),
+}
+/// Bilinear coverage of a frame-sized raster at image-space `p` (`[0,1]²` over the
+/// frame), sampled at pixel centres and clamped at the raster's edge; zero outside
+/// the frame.
+fn raster_coverage(raster: &rawmakase_model::storage::bitmaps::Bitmap, p: [f32; 2]) -> Option<f32> {
+    if !(0. ..=1.).contains(&p[0]) || !(0. ..=1.).contains(&p[1]) {
+        return None;
+    }
+    let (w, h) = (raster.width as usize, raster.height as usize);
+    let fx = p[0] * w as f32 - 0.5;
+    let fy = p[1] * h as f32 - 0.5;
+    let (x0, y0) = (fx.floor(), fy.floor());
+    let (tx, ty) = (fx - x0, fy - y0);
+    let at = |x: f32, y: f32| {
+        let x = (x as isize).clamp(0, w as isize - 1) as usize;
+        let y = (y as isize).clamp(0, h as isize - 1) as usize;
+        raster.data[y * w + x] as f32 / 255.
+    };
+    Some(
+        (at(x0, y0) * (1. - tx) + at(x0 + 1., y0) * tx) * (1. - ty)
+            + (at(x0, y0 + 1.) * (1. - tx) + at(x0 + 1., y0 + 1.) * tx) * ty,
+    )
 }
 struct Component {
     op: MaskOp,
@@ -232,6 +258,11 @@ impl Weigher {
                         MaskShape::LuminanceRange { low, high, falloff } => {
                             Shape::Luminance(*low, *high, *falloff)
                         }
+                        MaskShape::Bitmap(b) => Shape::Bitmap(
+                            rawmakase_model::storage::mask_assets::resolve(&b.id)
+                                .ok()
+                                .filter(|r| (r.width, r.height) == (b.width, b.height)),
+                        ),
                     },
                 })
                 .collect();
@@ -266,6 +297,17 @@ impl Weigher {
         let q = self.space.to(p);
         let mut m = 0f32;
         for c in &g.components {
+            // A raster's contribution is zero outside the frame, inverted or not.
+            if let Shape::Bitmap(raster) = &c.shape {
+                let inside = raster.as_ref().and_then(|r| raster_coverage(r, p));
+                let v = inside.map_or(0., |v| if c.invert { 1. - v } else { v }) * c.opacity;
+                m = match c.op {
+                    MaskOp::Add => m.max(v),
+                    MaskOp::Subtract => (m - v).max(0.),
+                    MaskOp::Intersect => m.min(v),
+                };
+                continue;
+            }
             let v = match &c.shape {
                 Shape::Brush(r) => r.sample(q),
                 Shape::Linear(a, d) => {
@@ -289,6 +331,7 @@ impl Weigher {
                 Shape::Luminance(low, high, falloff) => lab.map_or(0., |lab| {
                     range::luminance_weight(*low, *high, *falloff, lab)
                 }),
+                Shape::Bitmap(_) => unreachable!("handled above"),
             };
             let v = if c.invert { 1. - v } else { v } * c.opacity;
             m = match c.op {
