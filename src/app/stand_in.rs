@@ -135,6 +135,9 @@ impl Editor {
         photo: PhotoId,
         neighbour: Option<PhotoId>,
     ) {
+        // A preview asked for and left stale (its edit saved as the app quit or
+        // the catalog closed) is built again once the photo is opened.
+        self.refresh_previews(&[photo]);
         let wanted = self.stand_in_for(photo);
         self.stand_ins.opened = wanted.as_ref().map(|w| (photo, w.identity.clone()));
         if let Some(wanted) = wanted {

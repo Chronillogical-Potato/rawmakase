@@ -180,3 +180,20 @@ fn an_offline_raw_in_the_loupe_gets_its_stored_preview_identity() {
         Some(&(ids[0], wanted.identity))
     );
 }
+
+#[test]
+fn a_load_that_fails_lets_go_of_the_stored_preview() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);
+    store(&e, &cache, ids[0], 200);
+    let load = open(&mut e, ids[0], None);
+    until(&mut e, |e| e.preview.stand_in.is_some());
+    e.tx.send(Event::Failed {
+        id: load,
+        task: crate::app::worker::TaskKind::Load,
+        error: "unreadable".into(),
+    })
+    .unwrap();
+    let ctx = e.context.clone();
+    e.events(&ctx);
+    assert!(!e.preview.standing_in());
+}

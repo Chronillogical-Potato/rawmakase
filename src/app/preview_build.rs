@@ -359,6 +359,8 @@ impl Builder {
         let mut state = self.shared.state.lock().expect("preview builds");
         let dropped = state.waiting.len();
         state.waiting.clear();
+        // A refresh not yet looked at would queue builds again.
+        state.ops.retain(|op| !matches!(op, Op::Refresh(_)));
         state.progress.total -= dropped;
         state.cancel.store(true, Ordering::Relaxed);
         state.cancel = Arc::default();
@@ -371,6 +373,11 @@ impl Builder {
         state.waiting.retain(|item| !photos.contains(&item.photo));
         let dropped = before - state.waiting.len();
         state.progress.total -= dropped;
+        for op in &mut state.ops {
+            if let Op::Refresh(items) = op {
+                items.retain(|item| !photos.contains(&item.photo));
+            }
+        }
     }
 
     pub(super) fn progress(&self) -> Progress {
@@ -586,6 +593,17 @@ impl PreviewBuilds {
     }
 }
 
+/// How a request finds out which photos are online.
+#[derive(Clone, Copy)]
+enum Files {
+    /// Asks the file system, as a request the user made does.
+    Check,
+    /// Goes by what the Library last found, as work done on the way to another
+    /// photo does: a stalled share must not hold up navigation. The worker reads
+    /// each file's stamp anyway.
+    Known,
+}
+
 /// What a build request did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct Queued {
@@ -619,7 +637,7 @@ impl Editor {
                 self.status
             ));
         }
-        let (items, skipped) = self.build_items(ids, kind)?;
+        let (items, skipped) = self.build_items(ids, kind, Files::Check)?;
         let catalog = self
             .library
             .as_ref()
@@ -657,6 +675,7 @@ impl Editor {
         &self,
         ids: &[PhotoId],
         kind: PreviewKind,
+        files: Files,
     ) -> Result<(Vec<Item>, usize), String> {
         let Some(library) = &self.library else {
             return Err("No catalog is open".into());
@@ -666,7 +685,12 @@ impl Editor {
         let mut skipped = 0;
         for &id in ids {
             match library.photo(id) {
-                Some(photo) if library.export_refusal(id).is_none() => {
+                Some(photo)
+                    if match files {
+                        Files::Check => library.export_refusal(id).is_none(),
+                        Files::Known => library.known_developable(id),
+                    } =>
+                {
                     let name = format!(
                         "{}{}",
                         photo.filename,
@@ -714,7 +738,7 @@ impl Editor {
             return;
         };
         let catalog = library.session.catalog.location().clone();
-        let Ok((items, _)) = self.build_items(ids, PreviewKind::Standard) else {
+        let Ok((items, _)) = self.build_items(ids, PreviewKind::Standard, Files::Known) else {
             return;
         };
         if !items.is_empty() {

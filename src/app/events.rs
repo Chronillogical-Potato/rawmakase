@@ -251,6 +251,8 @@ impl Editor {
                 } if id == self.load.id() => {
                     self.status = error;
                     self.load.finish(id);
+                    // No render is coming to take over from the stored preview.
+                    self.preview.stand_in = None;
                 }
                 Event::Failed {
                     id,
@@ -259,6 +261,7 @@ impl Editor {
                 } if id == self.preview.task.id() => {
                     self.status = error;
                     self.preview.task.finish(id);
+                    self.preview.stand_in = None;
                     // A failed render on the GPU retires Before's textures too: render
                     // Before again, not the edit that failed.
                     let before = &mut self.preview.before;

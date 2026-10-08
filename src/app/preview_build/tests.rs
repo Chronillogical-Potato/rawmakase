@@ -677,3 +677,39 @@ fn another_copy_or_catalog_of_the_same_file_does_not_inherit_requests() {
     e.refresh_previews(&[there]);
     wait_renders(&path, 1);
 }
+
+#[test]
+fn opening_a_photo_whose_preview_went_stale_builds_it_again() {
+    let (_dir, mut e, ids, _) = editor(&["a.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    // Saved as the app quit, say: no photo was left to notice.
+    save_edit(&mut e, ids[0], 1.);
+    open(&mut e, ids[0]);
+    wait_renders(&path, 2);
+}
+
+#[test]
+fn cancel_drops_refreshes_not_yet_looked_at() {
+    let (_dir, mut e, ids, _) = editor(&["slow-refresh.ARW", "b.ARW"]);
+    let named = |e: &Editor, name: &str| {
+        ids.iter()
+            .copied()
+            .find(|id| path_of(e, *id).ends_with(name))
+            .unwrap()
+    };
+    let (a, b) = (named(&e, "slow-refresh.ARW"), named(&e, "b.ARW"));
+    let path = path_of(&e, a);
+    e.build_previews(&[b], PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    e.build_previews(&[a], PreviewKind::Standard).unwrap();
+    wait_started(&path);
+    // While a builds, b's edit changes; then everything is cancelled.
+    save_edit(&mut e, b, 1.);
+    e.refresh_previews(&[b]);
+    e.preview_builds.builder.as_ref().unwrap().cancel();
+    settle(&mut e);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(renders_of(&path_of(&e, b)), 1);
+}

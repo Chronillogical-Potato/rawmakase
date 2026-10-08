@@ -345,6 +345,12 @@ impl Library {
         let photo = self.photo(id)?;
         develop_refusal(photo, photo.path.is_file())
     }
+    /// Whether Develop could open photo `id`, by what the Library last found
+    /// online rather than by asking the file system.
+    pub(in crate::app) fn known_developable(&self, id: PhotoId) -> bool {
+        self.photo(id)
+            .is_some_and(|p| develop_refusal(p, self.is_available(&p.path)).is_none())
+    }
     pub(crate) fn available_count(&self) -> usize {
         self.availability.count(&self.session.photos)
     }
