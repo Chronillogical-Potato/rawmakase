@@ -806,9 +806,7 @@ fn a_different_mask_of_the_same_kind_in_the_same_place_is_not_the_one_asked_for(
 
 #[test]
 fn a_box_starts_over_without_the_clicks_before_it() {
-    let mut f = fixture();
-    let e = &mut f.editor;
-    e.selection.prompting = Some(Prompting {
+    let mut p = Prompting {
         request: SUBJECT,
         points: vec![Point {
             x: 0.2,
@@ -817,9 +815,8 @@ fn a_box_starts_over_without_the_clicks_before_it() {
         }],
         bounds: None,
         applied: None,
-    });
-    e.prompt_box([0.3, 0.3], [0.7, 0.8]);
-    let p = e.selection.prompting.as_ref().unwrap();
+    };
+    p.set_box([0.3, 0.3, 0.7, 0.8]);
     assert!(p.points.is_empty());
     assert_eq!(p.bounds, Some([0.3, 0.3, 0.7, 0.8]));
 }

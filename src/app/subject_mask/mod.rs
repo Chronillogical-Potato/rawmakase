@@ -223,6 +223,13 @@ pub(super) struct Prompting {
     /// The mask and component the first result made (or the one being regenerated).
     applied: Option<(usize, usize)>,
 }
+impl Prompting {
+    /// A box starts over: the clicks so far were about the previous outline.
+    fn set_box(&mut self, bounds: [f32; 4]) {
+        self.points.clear();
+        self.bounds = Some(bounds);
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Selection {
@@ -446,9 +453,7 @@ impl Editor {
         {
             return;
         }
-        // A box starts over: the clicks so far were about the previous outline.
-        p.points.clear();
-        p.bounds = Some(bounds);
+        p.set_box(bounds);
         self.run_prompt();
     }
     /// Forgets the clicks and box, so the next click starts the selection over (the
