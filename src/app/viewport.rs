@@ -141,15 +141,23 @@ impl Editor {
             );
             return;
         }
+        // The stored Standard preview, else the Library's.
         let thumb = self
-            .document
-            .catalog_photo
-            .and_then(|id| self.library.as_ref()?.thumbnail(id));
-        if let Some(texture) = thumb {
-            let size = texture.size_vec2();
+            .preview
+            .stand_in
+            .as_ref()
+            .map(|p| (p.id(), p.size_vec2()))
+            .or_else(|| {
+                let t = self
+                    .document
+                    .catalog_photo
+                    .and_then(|id| self.library.as_ref()?.thumbnail(id))?;
+                Some((t.id(), t.size_vec2()))
+            });
+        if let Some((texture, size)) = thumb {
             let k = (area.width() / size.x).min(area.height() / size.y);
             ui.painter().image(
-                texture.id(),
+                texture,
                 Rect::from_center_size(area.center(), size * k),
                 Rect::from_min_max(Pos2::ZERO, Pos2::new(1., 1.)),
                 Color32::WHITE,
@@ -269,7 +277,11 @@ impl Editor {
             TextureMode::Region(_) => self.preview.region.clone(),
             TextureMode::Whole => None,
         };
-        let Some(texture) = self.preview.texture.clone().or(region_texture.clone()) else {
+        // The stored preview outranks the embedded JPEG until the first render.
+        let shown = (!self.preview.standing_in())
+            .then(|| self.preview.texture.clone().or(region_texture.clone()))
+            .flatten();
+        let Some(texture) = shown else {
             // The reference stays on screen, and takes drops, while the Active photo
             // loads.
             if self.reference_view() {

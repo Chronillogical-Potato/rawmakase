@@ -363,6 +363,46 @@ Through the real loader, in a folder of three X100F photos: the first open showe
 the half-size image at 166 ms and the full image at 884 ms; reopening it showed the
 full image at 140 ms, and the two prefetched neighbours opened in 190 and 300 ms.
 
+## Stored Standard previews — 2026-10-08
+
+A photo with a Standard preview built (Library › Previews, see
+[catalogs](catalogs.md)) shows it as soon as it starts opening, until the first live
+render replaces it; the neighbour's is read ahead, so moving on shows it in the
+first frame. Without one, Develop shows the Library's 640 px thumbnail at once and
+then the camera's embedded JPEG.
+
+`examples/stand_in_benchmark`, release build, Apple M1 Pro with other work loading
+the machine (load average 17–33 on 10 cores), the default edit, a 1600-pixel Fit,
+best of two runs. The handoff difference is the mean absolute difference between
+the stored preview scaled to the Fit and the live Fit, in 8-bit sRGB on a 0–1 scale.
+
+| | X100F DSCF7853, 6032×4032 | Sony A7CR, 9504×6336 |
+| --- | ---: | ---: |
+| Embedded JPEG read (before its resize to 2560 px) | 17 ms, 1920×1280 | 193 ms, 9504×6336 |
+| Stored Standard preview read, decoded and made a texture image | 14 ms | 19 ms |
+| First live Fit from the decode cache | 336–372 ms | 695–883 ms |
+| First live Fit after a decode | 575–609 ms | 1995–2150 ms |
+| Building the Standard preview (2048 px, half-size decode) | 1.08 s | 2.75 s |
+| Building it from the full decode instead | 3.9 s | 8.5 s |
+| Handoff difference, half-size build | 0.0038 | 0.0173 |
+| Handoff difference, full-decode build | 0.0036 | 0.0164 |
+
+The stored preview is therefore on screen within about 20 ms on both cameras,
+against 0.3–2 s for the first render. On the A7CR it also arrives well before the
+embedded JPEG, which is full size and is resized before it shows. The handoff
+difference comes from the stored preview being an export render (sharpened at its
+own size, JPEG at quality 85, then scaled by the viewport) where the live Fit is the
+pyramid approximation (see [Resolution pyramid](#resolution-pyramid)); building
+from the full decode barely changes it, so builds keep the half-size decode when it
+is large enough. On the A7CR the difference is about four 8-bit levels on average,
+a visible but small shift when the live render lands.
+
+A build running in the background (two threads at background priority) did not
+measurably slow the first live Fit: from the decode cache, 330–343 ms against
+347–356 ms with a build running on the X100F, and 695–852 ms against 727–912 ms
+on the A7CR, within the run-to-run spread on this loaded machine. Builds are
+therefore not paused while Develop loads or renders.
+
 ## GPU finishing measurements — 2026-09-26
 
 Release build on Apple M1 Pro, private Fujifilm X100F RAW (6032×4032), installed

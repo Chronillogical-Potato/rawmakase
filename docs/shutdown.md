@@ -52,6 +52,7 @@ Each worker the exit hook waits for keeps its `JoinHandle`, and hands it over as
 | Control socket listener | `app/automation/socket.rs` | A blocking `accept`; then its connections, which it joins | The stop flag, seen after a wake-up connection | Yes, under the deadline: if the wake-up connection fails, `accept` never returns |
 | Control socket connections | `app/automation/socket.rs` | A 5 s read; **a wait for the UI thread's reply: 3 s, or up to 8 s for a `wait` command**; a 5 s write | The stop flag; the request queue's receiver dropped, which answers the wait at once | Through the listener, after the request queue's receiver is dropped |
 | Library thumbnails | `app/library/previews.rs` | The request channel; preview cache and file reads; **a send on a result channel bounded at 24** | Its channels dropped | Yes, after dropping the result receiver |
+| Stored preview readers (opening, neighbour) | `app/stand_in.rs` | A job; one preview cache read and JPEG decode | Both `Latest`s stopped, between jobs | Yes, both |
 | Library edited previews | `app/library/previews.rs` | A queue of renders | Its closed flag, which cancels the render under way; its channels dropped | Yes, after closing |
 | Library screen previews | `app/library/screen.rs` | A job; renders | `ScreenPreviews` closed, which cancels the renders under way | Yes, after closing |
 | Library background readers | `app/library/background.rs` | File reads in batches, possibly on a network share | The reader's cancel, per batch | No: a stalled share can hang a read |

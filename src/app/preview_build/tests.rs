@@ -573,3 +573,143 @@ fn upkeep_asked_for_before_exit_still_happens() {
     );
     assert_eq!(cache.usage().unwrap().standard, 0);
 }
+
+/// Waits until `path` was rendered `n` times, then a little longer to see no more.
+fn wait_renders(path: &Path, n: usize) {
+    let until = Instant::now() + Duration::from_secs(10);
+    while renders_of(path) < n {
+        assert!(
+            Instant::now() < until,
+            "rendered {} times",
+            renders_of(path)
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(renders_of(path), n);
+}
+/// Opens `id` as Develop or the Loupe would, leaving the photo open before.
+fn open(e: &mut Editor, id: PhotoId) {
+    let path = path_of(e, id);
+    assert!(e.load_raw(path, Some(id)));
+}
+
+#[test]
+fn leaving_a_photo_saved_with_another_edit_builds_it_again() {
+    let (_dir, mut e, ids, _) = editor(&["a.ARW", "b.ARW"]);
+    let (a, b) = (ids[0], ids[1]);
+    e.build_previews(&[a], PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    let path = path_of(&e, a);
+    open(&mut e, a);
+    // Left unchanged: nothing to do.
+    open(&mut e, b);
+    open(&mut e, a);
+    // Saved with another edit, as autosave does, then left.
+    save_edit(&mut e, a, 1.);
+    open(&mut e, b);
+    wait_renders(&path, 2);
+    settle(&mut e);
+    assert_eq!(renders_of(&path_of(&e, b)), 0);
+}
+
+#[test]
+fn an_edit_saved_while_the_first_build_runs_is_built_after_it() {
+    let (_dir, mut e, ids, _) = editor(&["slow-first.ARW", "z.ARW"]);
+    let (a, b) = (ids[0], ids[1]);
+    let path = path_of(&e, a);
+    e.build_previews(&[a], PreviewKind::Standard).unwrap();
+    wait_started(&path);
+    open(&mut e, a);
+    save_edit(&mut e, a, 1.);
+    open(&mut e, b);
+    release(&path);
+    wait_renders(&path, 2);
+}
+
+#[test]
+fn edits_written_elsewhere_rebuild_only_photos_asked_for() {
+    let (_dir, mut e, ids, _) = editor(&["a.ARW", "b.ARW"]);
+    let (a, b) = (ids[0], ids[1]);
+    e.build_previews(&[a], PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    // As Sync and its Undo do.
+    save_edit(&mut e, a, 1.);
+    save_edit(&mut e, b, 1.);
+    e.refresh_previews(&[a, b]);
+    wait_renders(&path_of(&e, a), 2);
+    assert_eq!(renders_of(&path_of(&e, b)), 0);
+    // Unchanged since: nothing.
+    e.refresh_previews(&[a]);
+    wait_renders(&path_of(&e, a), 2);
+}
+
+#[test]
+fn another_copy_or_catalog_of_the_same_file_does_not_inherit_requests() {
+    let (dir, mut e, ids, _) = editor(&["a.ARW"]);
+    let master = ids[0];
+    let path = path_of(&e, master);
+    let copy = e
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(master)
+        .unwrap()
+        .value;
+    e.build_previews(&[master], PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    open(&mut e, copy);
+    save_edit(&mut e, copy, 1.);
+    open(&mut e, master);
+    // The same file in a second catalog.
+    let other = dir.path().join("other.rawmakase");
+    crate::catalog::Catalog::create(&other)
+        .unwrap()
+        .add_folder(path.parent().unwrap())
+        .unwrap();
+    let library = crate::app::library::Library::load(&other, e.context.clone()).unwrap();
+    let there = library.session.photos[0].id;
+    e.document.reset(None);
+    e.library = Some(Box::new(library));
+    open(&mut e, there);
+    save_edit(&mut e, there, 2.);
+    e.document.catalog_photo = Some(there);
+    e.refresh_previews(&[there]);
+    wait_renders(&path, 1);
+}
+
+#[test]
+fn opening_a_photo_whose_preview_went_stale_builds_it_again() {
+    let (_dir, mut e, ids, _) = editor(&["a.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    // Saved as the app quit, say: no photo was left to notice.
+    save_edit(&mut e, ids[0], 1.);
+    open(&mut e, ids[0]);
+    wait_renders(&path, 2);
+}
+
+#[test]
+fn cancel_drops_refreshes_not_yet_looked_at() {
+    let (_dir, mut e, ids, _) = editor(&["slow-refresh.ARW", "b.ARW"]);
+    let named = |e: &Editor, name: &str| {
+        ids.iter()
+            .copied()
+            .find(|id| path_of(e, *id).ends_with(name))
+            .unwrap()
+    };
+    let (a, b) = (named(&e, "slow-refresh.ARW"), named(&e, "b.ARW"));
+    let path = path_of(&e, a);
+    e.build_previews(&[b], PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    e.build_previews(&[a], PreviewKind::Standard).unwrap();
+    wait_started(&path);
+    // While a builds, b's edit changes; then everything is cancelled.
+    save_edit(&mut e, b, 1.);
+    e.refresh_previews(&[b]);
+    e.preview_builds.builder.as_ref().unwrap().cancel();
+    settle(&mut e);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(renders_of(&path_of(&e, b)), 1);
+}

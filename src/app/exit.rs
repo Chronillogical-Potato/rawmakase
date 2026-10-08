@@ -81,6 +81,7 @@ impl Editor {
             task::Stopping::new(self.exports.close()),
             task::Stopping::new(self.preview_builds.close()),
         ]);
+        stopping.extend(self.stand_ins.stop());
         stopping.extend(self.automation.stop_outputs());
         stopping.extend(self.controls.stop());
         if let Some(library) = &mut self.library {

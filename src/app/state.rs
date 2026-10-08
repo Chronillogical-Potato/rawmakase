@@ -173,6 +173,11 @@ pub(super) struct PreviewState {
     pub(super) pending_crop: [f32; 4],
     /// Before's render, while it shows beside the edit.
     pub(super) before: super::before_after::BeforePreview,
+    /// The photo's stored Standard preview, shown while it opens until the
+    /// first live render; nothing else reads it.
+    pub(super) stand_in: Option<Picture>,
+    /// `texture` is the camera's embedded JPEG, not a render.
+    pub(super) embedded: bool,
 }
 impl Default for PreviewState {
     fn default() -> Self {
@@ -195,6 +200,8 @@ impl Default for PreviewState {
             crop: None,
             pending_crop: [0., 0., 1., 1.],
             before: Default::default(),
+            stand_in: None,
+            embedded: false,
         }
     }
 }
@@ -393,6 +400,16 @@ impl PreviewState {
         self.region_samples = None;
         self.samples_recipe = None;
         self.samples_requested = false;
+        self.stand_in = None;
+        self.embedded = false;
+    }
+    /// Whether a live render of the photo is shown.
+    pub(crate) fn live(&self) -> bool {
+        self.texture.is_some() && !self.embedded || self.region.is_some()
+    }
+    /// The stored preview is what shows: there is one, and no live render yet.
+    pub(crate) fn standing_in(&self) -> bool {
+        self.stand_in.is_some() && !self.live()
     }
     /// Textures the renderer presented into that the viewport draws.
     pub(crate) fn presented(&self) -> Vec<egui::TextureId> {

@@ -236,6 +236,9 @@ enum Op {
     /// requests of these photos, of every kind.
     Discard(CatalogLocation, Vec<PhotoId>, Vec<PathBuf>),
     Clear(PreviewKind),
+    /// Edits saved: each photo with previews asked for (built, waiting or being
+    /// built) is built again, unless its preview is still fresh.
+    Refresh(Vec<Item>),
 }
 
 #[derive(Default)]
@@ -248,6 +251,8 @@ struct State {
     ops: VecDeque<Op>,
     closed: bool,
     progress: Progress,
+    /// Bumped by Cancel and Discard: a refresh taken before then queues nothing.
+    generation: u64,
 }
 
 struct Shared {
@@ -281,7 +286,13 @@ impl Builder {
             let mut cache = PreviewCache::open(&cache_path).ok();
             while let Some(next) = worker.next() {
                 let (item, cancel) = match next {
-                    Next::Op(op) => {
+                    Next::Op(Op::Refresh(items), generation) => {
+                        if let Some(cache) = &cache {
+                            worker.refresh(cache, items, generation);
+                        }
+                        continue;
+                    }
+                    Next::Op(op, _) => {
                         if let Some(cache) = &mut cache {
                             // Best effort, and never worth ending the worker for.
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -324,26 +335,12 @@ impl Builder {
     /// place, and one being built queues behind itself. Returns how many were
     /// added.
     pub(super) fn submit(&self, items: Vec<Item>) -> usize {
-        let mut state = self.shared.state.lock().expect("preview builds");
-        if !state.progress.running() {
-            state.progress = Progress::default();
-        }
-        let mut added = 0;
-        for item in items {
-            let waiting = state
-                .waiting
-                .iter_mut()
-                .find(|w| w.photo == item.photo && w.kind == item.kind);
-            match waiting {
-                Some(waiting) => *waiting = item,
-                None => {
-                    state.waiting.push_back(item);
-                    added += 1;
-                }
-            }
-        }
-        state.progress.total += added;
-        drop(state);
+        let added = self
+            .shared
+            .state
+            .lock()
+            .expect("preview builds")
+            .enqueue(items);
         self.shared.wake.notify_one();
         added
     }
@@ -364,6 +361,9 @@ impl Builder {
         let mut state = self.shared.state.lock().expect("preview builds");
         let dropped = state.waiting.len();
         state.waiting.clear();
+        // A refresh not yet looked at, or being looked at, would queue builds again.
+        state.ops.retain(|op| !matches!(op, Op::Refresh(_)));
+        state.generation += 1;
         state.progress.total -= dropped;
         state.cancel.store(true, Ordering::Relaxed);
         state.cancel = Arc::default();
@@ -376,6 +376,12 @@ impl Builder {
         state.waiting.retain(|item| !photos.contains(&item.photo));
         let dropped = before - state.waiting.len();
         state.progress.total -= dropped;
+        state.generation += 1;
+        for op in &mut state.ops {
+            if let Op::Refresh(items) = op {
+                items.retain(|item| !photos.contains(&item.photo));
+            }
+        }
     }
 
     pub(super) fn progress(&self) -> Progress {
@@ -416,11 +422,78 @@ impl Drop for Builder {
 }
 
 enum Next {
-    Op(Op),
+    /// Upkeep, with the generation it was taken in.
+    Op(Op, u64),
     Build(Item, Arc<AtomicBool>),
 }
 
+impl State {
+    /// Queues `items`, each in the place of a waiting request for its photo and
+    /// kind; returns how many were added.
+    fn enqueue(&mut self, items: Vec<Item>) -> usize {
+        if !self.progress.running() {
+            self.progress = Progress::default();
+        }
+        let mut added = 0;
+        for item in items {
+            let waiting = self
+                .waiting
+                .iter_mut()
+                .find(|w| w.photo == item.photo && w.kind == item.kind);
+            match waiting {
+                Some(waiting) => *waiting = item,
+                None => {
+                    self.waiting.push_back(item);
+                    added += 1;
+                }
+            }
+        }
+        self.progress.total += added;
+        added
+    }
+    /// Whether a build of the photo is waiting or running.
+    fn pending(&self, photo: PhotoId, kind: PreviewKind) -> bool {
+        self.running == Some((photo, kind))
+            || self
+                .waiting
+                .iter()
+                .any(|item| item.photo == photo && item.kind == kind)
+    }
+}
+
 impl Shared {
+    /// The items of a refresh that are to be built again.
+    /// The cache and file checks run without the lock the interface queues
+    /// through, as a file on a stalled share can hold them up.
+    fn refresh(&self, cache: &PreviewCache, items: Vec<Item>, generation: u64) {
+        let pending: Vec<bool> = match self.state.lock() {
+            Ok(state) => items
+                .iter()
+                .map(|item| state.pending(item.photo, item.kind))
+                .collect(),
+            Err(_) => return,
+        };
+        let stale: Vec<Item> = items
+            .into_iter()
+            .zip(pending)
+            .filter(|(item, pending)| {
+                let asked = *pending
+                    || cache
+                        .has_intent(&item.catalog, item.photo, &item.path, item.kind)
+                        .unwrap_or(false);
+                asked
+                    && !cache
+                        .sized_fresh(&item.path, &item.identity, item.kind, item.edge)
+                        .unwrap_or(false)
+            })
+            .map(|(item, _)| item)
+            .collect();
+        if let Ok(mut state) = self.state.lock()
+            && state.generation == generation
+        {
+            state.enqueue(stale);
+        }
+    }
     /// Upkeep first, then the next photo; `None` once closed.
     fn next(&self) -> Option<Next> {
         let mut state = self.state.lock().ok()?;
@@ -428,7 +501,7 @@ impl Shared {
             // Upkeep asked for goes through even at exit: a Discard already
             // reported must not come back on the next launch.
             if let Some(op) = state.ops.pop_front() {
-                return Some(Next::Op(op));
+                return Some(Next::Op(op, state.generation));
             }
             if state.closed {
                 return None;
@@ -479,6 +552,7 @@ fn maintain(cache: &mut PreviewCache, op: Op) {
             })
         }
         Op::Clear(kind) => cache.clear(kind),
+        Op::Refresh(_) => Ok(()),
     };
 }
 
@@ -536,6 +610,17 @@ impl PreviewBuilds {
     }
 }
 
+/// How a request finds out which photos are online.
+#[derive(Clone, Copy)]
+enum Files {
+    /// Asks the file system, as a request the user made does.
+    Check,
+    /// Goes by what the Library last found, as work done on the way to another
+    /// photo does: a stalled share must not hold up navigation. The worker reads
+    /// each file's stamp anyway.
+    Known,
+}
+
 /// What a build request did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct Queued {
@@ -569,13 +654,60 @@ impl Editor {
                 self.status
             ));
         }
-        let library = self.library.as_ref().expect("checked above");
+        let (items, skipped) = self.build_items(ids, kind, Files::Check)?;
+        let catalog = self
+            .library
+            .as_ref()
+            .expect("checked above")
+            .session
+            .catalog
+            .location()
+            .clone();
+        let intent = items
+            .iter()
+            .map(|item| (item.photo, item.path.clone()))
+            .collect();
+        let builder = self.catalog_builder(&catalog);
+        builder.maintain(Op::RecordIntent(catalog, intent, kind));
+        let queued = builder.submit(items);
+        Ok(Queued { queued, skipped })
+    }
+
+    /// The builder, for builds in `catalog`; those of another catalog are cancelled.
+    fn catalog_builder(&mut self, catalog: &CatalogLocation) -> &Builder {
+        let ctx = self.context.clone();
+        let builds = &mut self.preview_builds;
+        if builds.catalog.as_ref() != Some(catalog) {
+            if let Some(builder) = &builds.builder {
+                builder.cancel();
+            }
+            builds.catalog = Some(catalog.clone());
+        }
+        builds.builder(&ctx)
+    }
+
+    /// What building `ids` would capture now: an item per available RAW, and how
+    /// many others were skipped.
+    fn build_items(
+        &self,
+        ids: &[PhotoId],
+        kind: PreviewKind,
+        files: Files,
+    ) -> Result<(Vec<Item>, usize), String> {
+        let Some(library) = &self.library else {
+            return Err("No catalog is open".into());
+        };
         let catalog = library.session.catalog.location().clone();
         let mut chosen = Vec::new();
         let mut skipped = 0;
         for &id in ids {
             match library.photo(id) {
-                Some(photo) if library.export_refusal(id).is_none() => {
+                Some(photo)
+                    if match files {
+                        Files::Check => library.export_refusal(id).is_none(),
+                        Files::Known => library.known_developable(id),
+                    } =>
+                {
                     let name = format!(
                         "{}{}",
                         photo.filename,
@@ -594,7 +726,7 @@ impl Editor {
             .photo_records(&photo_ids)
             .map_err(|e| format!("The catalog could not be read: {e:#}"))?;
         let edge = self.preview_builds.edge(kind);
-        let items: Vec<Item> = chosen
+        let items = chosen
             .into_iter()
             .zip(records)
             .map(|((photo, name, path), record)| Item {
@@ -613,22 +745,22 @@ impl Editor {
                 edge,
             })
             .collect();
-        let intent = items
-            .iter()
-            .map(|item| (item.photo, item.path.clone()))
-            .collect();
-        let ctx = self.context.clone();
-        let builds = &mut self.preview_builds;
-        if builds.catalog.as_ref() != Some(&catalog) {
-            if let Some(builder) = &builds.builder {
-                builder.cancel();
-            }
-            builds.catalog = Some(catalog.clone());
+        Ok((items, skipped))
+    }
+
+    /// Edits of `ids` were saved: the photos whose previews were asked for, and
+    /// are no longer fresh, are built again with their new edits.
+    pub(super) fn refresh_previews(&mut self, ids: &[PhotoId]) {
+        let Some(library) = &self.library else {
+            return;
+        };
+        let catalog = library.session.catalog.location().clone();
+        let Ok((items, _)) = self.build_items(ids, PreviewKind::Standard, Files::Known) else {
+            return;
+        };
+        if !items.is_empty() {
+            self.catalog_builder(&catalog).maintain(Op::Refresh(items));
         }
-        let builder = builds.builder(&ctx);
-        builder.maintain(Op::RecordIntent(catalog, intent, kind));
-        let queued = builder.submit(items);
-        Ok(Queued { queued, skipped })
     }
 
     /// The photos `build_previews` acts on, as Export: the Library's selection,

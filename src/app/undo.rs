@@ -306,6 +306,8 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     library.edits_changed(sync.edits.iter().map(|e| e.id));
                 }
+                let changed: Vec<_> = sync.edits.iter().map(|e| e.id).collect();
+                self.refresh_previews(&changed);
                 // A synchronized photo open here opens again with what was written
                 // back (or with no edit at all), so nothing stale is saved over it.
                 if let Some(open) = self.document.catalog_photo

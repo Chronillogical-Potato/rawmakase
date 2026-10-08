@@ -56,10 +56,17 @@ impl Editor {
         if !self.flush() {
             return false;
         }
+        // The photo left, saved with another edit: its built previews follow it.
+        if let Some(left) = self.document.catalog_photo
+            && self.left_edited(left)
+        {
+            self.refresh_previews(&[left]);
+        }
         // Moving on cancels the previous photo's prefetch.
         self.prefetch_cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
         self.prefetch_cancel = Default::default();
+        let neighbour = photo.and_then(|id| self.neighbour_of(id));
         let prefetch = photo
             .and_then(|id| self.prefetch_neighbour(id))
             .map(|path| super::worker::Prefetch {
@@ -86,6 +93,9 @@ impl Editor {
         }
         self.presets.clear_document();
         self.view.clear_document();
+        if let Some(photo) = photo {
+            self.request_stand_ins(id, photo, neighbour);
+        }
         self.status = "Reading RAW…".into();
         self.loader.submit(LoadJob {
             id,
@@ -102,14 +112,17 @@ impl Editor {
     /// The photo to decode ahead of time while `id` is shown: the next one in
     /// the filmstrip, or the previous one after stepping back.
     pub(super) fn prefetch_neighbour(&self, id: PhotoId) -> Option<PathBuf> {
+        let photo = self.library.as_ref()?.photo(self.neighbour_of(id)?)?;
+        (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
+    }
+    /// The photo next to `id` in the direction of travel.
+    fn neighbour_of(&self, id: PhotoId) -> Option<PhotoId> {
         let library = self.library.as_ref()?;
         let step = match self.document.catalog_photo {
             Some(previous) if previous != id && library.navigate(previous, -1) == Some(id) => -1,
             _ => 1,
         };
-        let neighbour = library.navigate(id, step).filter(|n| *n != id)?;
-        let photo = library.photo(neighbour)?;
-        (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
+        library.navigate(id, step).filter(|n| *n != id)
     }
     /// Saves a Copy Name or metadata field still being typed in the Library;
     /// false, with the error on the status line, if it could not be saved.
@@ -416,6 +429,8 @@ impl Editor {
         let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
         if region {
             Picture::upload(&mut self.preview.region, ctx, "photo region", image);
+            // Zoomed in before the photo was decoded: the region is the live render.
+            self.preview.stand_in = None;
             return;
         }
         // Zoomed in, a whole render still fills a Navigator that has none,
@@ -430,6 +445,10 @@ impl Editor {
             Picture::upload(&mut self.preview.navigator, ctx, "navigator", small);
         }
         Picture::upload(&mut self.preview.texture, ctx, "photo", image);
+        // A live render replaces the stored preview; the embedded JPEG sets this
+        // again once shown.
+        self.preview.embedded = false;
+        self.preview.stand_in = None;
     }
     /// A GPU render, presented into textures the renderer registered.
     pub(super) fn set_presented(
@@ -441,6 +460,7 @@ impl Editor {
         let picture = Some(Picture::presented(id, size));
         if region {
             self.preview.region = picture;
+            self.preview.stand_in = None;
             return;
         }
         if (!self.view.zoom.on || self.preview.navigator.is_none())
@@ -449,6 +469,8 @@ impl Editor {
             self.preview.navigator = Some(Picture::presented(id, size));
         }
         self.preview.texture = picture;
+        self.preview.embedded = false;
+        self.preview.stand_in = None;
     }
     pub(super) fn navigate(&mut self, delta: isize) {
         if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo)

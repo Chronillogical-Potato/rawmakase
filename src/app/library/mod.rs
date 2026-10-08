@@ -144,6 +144,9 @@ pub(crate) struct Library {
     read_request: Option<Vec<PhotoId>>,
     /// A thumbnail menu's Build or Discard Previews, for the editor to carry out.
     previews_request: Option<PreviewsRequest>,
+    /// The offline RAW in the Loupe and its stored preview's identity, as the
+    /// editor works it out.
+    loupe_stored: Option<(PhotoId, String)>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -215,6 +218,7 @@ impl Library {
             message_detail: Default::default(),
             read_request: None,
             previews_request: None,
+            loupe_stored: None,
             reread: None,
             reread_finished: false,
         };
@@ -340,6 +344,12 @@ impl Library {
     pub(in crate::app) fn export_refusal(&self, id: PhotoId) -> Option<Refusal> {
         let photo = self.photo(id)?;
         develop_refusal(photo, photo.path.is_file())
+    }
+    /// Whether Develop could open photo `id`, by what the Library last found
+    /// online rather than by asking the file system.
+    pub(in crate::app) fn known_developable(&self, id: PhotoId) -> bool {
+        self.photo(id)
+            .is_some_and(|p| develop_refusal(p, self.is_available(&p.path)).is_none())
     }
     pub(crate) fn available_count(&self) -> usize {
         self.availability.count(&self.session.photos)

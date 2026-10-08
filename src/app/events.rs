@@ -122,7 +122,13 @@ impl Editor {
                     }
                 }
                 Event::Header(header) if header.id == self.load.id() => self.header_ready(*header),
+                Event::StandIn(stand_in) => self.stand_in_ready(ctx, *stand_in),
                 Event::Embedded { id, image: im } if id == self.load.id() => {
+                    // The stored preview, which shows the edit, stays until the
+                    // first render.
+                    if self.preview.stand_in.is_some() {
+                        continue;
+                    }
                     // The camera JPEG is uncropped and unedited; when the Library
                     // already has the edited thumbnail, keep showing that until
                     // the first render instead of flashing the original.
@@ -147,6 +153,7 @@ impl Editor {
                         im.as_raw(),
                         Some(navigator),
                     );
+                    self.preview.embedded = true;
                     self.preview.mode = super::state::TextureMode::Whole;
                     // Uncropped, so it is placed by the photo's crop once that is known.
                     self.preview.crop = Some([0., 0., 1., 1.]);
@@ -244,6 +251,8 @@ impl Editor {
                 } if id == self.load.id() => {
                     self.status = error;
                     self.load.finish(id);
+                    // No render is coming to take over from the stored preview.
+                    self.preview.stand_in = None;
                 }
                 Event::Failed {
                     id,
@@ -252,6 +261,7 @@ impl Editor {
                 } if id == self.preview.task.id() => {
                     self.status = error;
                     self.preview.task.finish(id);
+                    self.preview.stand_in = None;
                     // A failed render on the GPU retires Before's textures too: render
                     // Before again, not the edit that failed.
                     let before = &mut self.preview.before;
