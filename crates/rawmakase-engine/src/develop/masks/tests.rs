@@ -560,3 +560,16 @@ fn rendering_a_mask_whose_raster_is_missing_is_an_error_not_an_empty_mask() {
     r.masks[0].components[0].shape = shape;
     assert!(crate::develop::render(&im, &r.checked().unwrap(), 60).is_ok());
 }
+
+#[test]
+fn the_selection_input_keeps_switched_off_spots_off() {
+    use crate::model::panels::{Panel, PanelState};
+    let mut user = Recipe::default();
+    user.panels.set(Panel::SpotRemoval, PanelState::Off);
+    let input = selection_input_recipe(&user);
+    assert_eq!(input.panels.state(Panel::SpotRemoval), PanelState::Off);
+    assert_eq!(
+        input.panels.state(Panel::RedEye),
+        user.panels.state(Panel::RedEye)
+    );
+}

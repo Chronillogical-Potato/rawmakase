@@ -3,7 +3,7 @@
 use super::*;
 use crate::model::masks::{BITMAP_SAMPLING, BitmapMask, MaskComponent, MaskGroup, MaskShape};
 use crate::storage::bitmaps::Bitmap;
-use crate::storage::mask_assets;
+use crate::storage::mask_assets::{self, AssetError};
 use crate::{export_settings::ExportOptions, model::recipe::Recipe};
 use std::path::{Path, PathBuf};
 
@@ -161,5 +161,18 @@ fn a_damaged_row_under_a_new_rasters_id_is_replaced_by_the_good_copy() -> Result
     save(&mut cat, id, &file, &recipe)?;
     let read = cat.bitmap(&raster_id)?.unwrap();
     assert!(read.matches_id(&raster_id));
+    Ok(())
+}
+
+#[test]
+fn a_stored_raster_larger_than_any_raster_is_not_read() -> Result<()> {
+    let (_dir, cat, _file, _id) = catalog()?;
+    let id = format!("sha256:{}", "ee".repeat(32));
+    cat.db_for_tests().execute(
+        "INSERT INTO bitmaps(hash, data) VALUES (?1, zeroblob(?2))",
+        rusqlite::params![id, super::mask_assets::MOST_STORED_BYTES + 1],
+    )?;
+    let error = cat.mask_asset_loader().load(&id).unwrap_err();
+    assert!(matches!(error, AssetError::Corrupt(..)), "{error:?}");
     Ok(())
 }

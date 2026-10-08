@@ -222,6 +222,11 @@ fn content(recipe: &Recipe) -> u64 {
         &recipe.retouch_model,
         &recipe.red_eye,
         recipe.camera_exposure.to_bits(),
+        [
+            crate::model::panels::Panel::SpotRemoval,
+            crate::model::panels::Panel::RedEye,
+        ]
+        .map(|panel| recipe.panels.state(panel) == crate::model::panels::PanelState::On),
     ))
     .unwrap_or_default()
     .hash(&mut h);

@@ -65,6 +65,13 @@ pub fn selection_input_recipe(user: &crate::model::recipe::Recipe) -> crate::mod
         ..Default::default()
     };
     r.profile_tone = true;
+    // A switched-off Spot Removal or Red Eye renders nothing, here as in the edit.
+    for panel in [
+        crate::model::panels::Panel::SpotRemoval,
+        crate::model::panels::Panel::RedEye,
+    ] {
+        r.panels.set(panel, user.panels.state(panel));
+    }
     r
 }
 

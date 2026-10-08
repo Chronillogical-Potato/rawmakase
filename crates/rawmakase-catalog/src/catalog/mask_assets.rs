@@ -13,6 +13,28 @@ use anyhow::{Result, ensure};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// Largest stored (compressed) raster read back: the largest raster compresses to less,
+/// so a bigger row is damaged and is not read into memory.
+pub(super) const MOST_STORED_BYTES: i64 = (mask_assets::MAX_RASTER_BYTES as i64) + (1 << 20);
+
+/// The stored bytes of the raster `id`, unless the row is larger than any raster can be:
+/// `Ok(None)` when there is no row, `Err` when it is too large.
+fn stored(db: &impl Reads, id: &str) -> Result<Option<Vec<u8>>, String> {
+    let length: Option<Option<i64>> = db
+        .read_optional(
+            sql!("SELECT length(data) FROM bitmaps WHERE hash=?"),
+            &[&id],
+        )
+        .map_err(|e| e.to_string())?;
+    match length {
+        None => Ok(None),
+        Some(Some(n)) if n > MOST_STORED_BYTES => Err(format!("its stored copy is {n} bytes")),
+        Some(_) => db
+            .read_optional(sql!("SELECT data FROM bitmaps WHERE hash=?"), &[&id])
+            .map_err(|e| e.to_string()),
+    }
+}
+
 /// The rasters one write refers to: the ones to store, and every one that has to exist
 /// once it commits.
 #[derive(Default)]
@@ -33,9 +55,9 @@ impl Assets {
             // damaged data once the good copy held here is let go. A damaged row is
             // replaced with the good one.
             if inserted == 0 {
-                let stored: Option<Vec<u8>> =
-                    w.read_optional(sql!("SELECT data FROM bitmaps WHERE hash=?"), &[id])?;
-                let intact = stored
+                let intact = stored(w, id)
+                    .ok()
+                    .flatten()
                     .and_then(|bytes| Bitmap::decompress(&bytes).ok())
                     .is_some_and(|b| b.matches_id(id));
                 if !intact {
@@ -129,7 +151,9 @@ struct CatalogAssets {
 impl AssetLoader for CatalogAssets {
     fn source(&self) -> String {
         let CatalogLocation::File(path) = &self.location;
-        path.display().to_string()
+        // Debug keeps every byte of a path that is not UTF-8, so two such catalogs never
+        // share a reader.
+        format!("{path:?}")
     }
     fn load(&self, id: &str) -> Result<Option<Bitmap>, AssetError> {
         let corrupt =
@@ -139,15 +163,14 @@ impl AssetLoader for CatalogAssets {
             *guard = Some(Db::open(&self.location).map_err(|e| corrupt(&e))?);
         }
         let db = guard.as_ref().expect("opened above");
-        let data: Option<Vec<u8>> =
-            match db.read_optional(sql!("SELECT data FROM bitmaps WHERE hash=?"), &[&id]) {
-                Ok(data) => data,
-                Err(error) => {
-                    // A connection that failed is opened again next time.
-                    *guard = None;
-                    return Err(corrupt(&error));
-                }
-            };
+        let data = match stored(db, id) {
+            Ok(data) => data,
+            Err(error) => {
+                // A connection that failed is opened again next time.
+                *guard = None;
+                return Err(corrupt(&error));
+            }
+        };
         data.map(|bytes| Bitmap::decompress(&bytes).map_err(|e| corrupt(&e)))
             .transpose()
     }

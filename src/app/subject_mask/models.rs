@@ -211,7 +211,12 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     // Bytes of files already there count as done.
     let mut finished = 0u64;
     for file in &all_files() {
-        if has(&dir, file) && digest_of(&dir.join(file.name)).as_deref() == Some(file.sha256) {
+        let kept =
+            has(&dir, file) && digest_of(&dir.join(file.name)).as_deref() == Some(file.sha256);
+        if progress.cancel.load(Ordering::Relaxed) {
+            return Err("Cancelled".into());
+        }
+        if kept {
             finished += file.size_bytes;
             progress.done.store(finished, Ordering::Relaxed);
             continue;
@@ -256,6 +261,9 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
         result?;
         finished += file.size_bytes;
         progress.done.store(finished, Ordering::Relaxed);
+    }
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err("Cancelled".into());
     }
     crate::storage::write_atomic(
         &dir.join(RECEIPT),
