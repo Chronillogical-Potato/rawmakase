@@ -35,6 +35,17 @@ use std::{
 /// Preferences > Standard Preview Size: the long edges offered.
 pub(super) const STANDARD_SIZES: [u32; 3] = [1440, 2048, 2560];
 pub(super) const DEFAULT_STANDARD_SIZE: u32 = 2048;
+/// Preferences > Automatically Discard 1:1 Previews: the choices, in days
+/// unused, as Lightroom offers them; `None` is Never.
+pub(super) const DISCARD_CHOICES: [(Option<u32>, &str); 4] = [
+    (Some(1), "After One Day"),
+    (Some(7), "After One Week"),
+    (Some(30), "After 30 Days"),
+    (None, "Never"),
+];
+pub(super) const DEFAULT_DISCARD_DAYS: Option<u32> = Some(30);
+/// The longest side a JPEG can hold.
+const JPEG_LIMIT: u32 = 65_535;
 /// The long edge of the Library thumbnail a build also gives the grid.
 const THUMBNAIL_EDGE: u32 = 640;
 
@@ -120,6 +131,8 @@ fn build_one(
         .sized_fresh(&item.path, &item.identity, item.kind, item.edge)
         .unwrap_or(false)
     {
+        // Asked for again: as good as built now, for the automatic discard.
+        let _ = cache.touch_sized(&item.path, &item.identity, item.kind);
         return Outcome::Fresh;
     }
     let stamp = match Stamp::read(&item.path) {
@@ -135,6 +148,11 @@ fn build_one(
     if cancel.load(Ordering::Relaxed) {
         return Outcome::Cancelled;
     }
+    if image.width().max(image.height()) > JPEG_LIMIT {
+        return Outcome::Failed(format!(
+            "it is larger than a preview can be ({JPEG_LIMIT} pixels a side)"
+        ));
+    }
     if let Err(e) = cache.store_sized(
         &item.path,
         &item.identity,
@@ -145,6 +163,9 @@ fn build_one(
     ) {
         return Outcome::Failed(format!("it could not be kept: {e:#}"));
     }
+    // Recorded again with the row: an automatic discard that ran while this
+    // waited may have forgotten the request.
+    let _ = cache.record_intent(&item.catalog, item.photo, &item.path, item.kind);
     Outcome::Built(item.ticket.map(|_| thumbnail(&image)))
 }
 
@@ -232,10 +253,17 @@ impl Progress {
 enum Op {
     RecordIntent(CatalogLocation, Vec<(PhotoId, PathBuf)>, PreviewKind),
     ForgetIntent(CatalogLocation, Vec<PhotoId>),
-    /// Discard Standard and 1:1 Previews: the rows of these files and the
-    /// requests of these photos, of every kind.
-    Discard(CatalogLocation, Vec<PhotoId>, Vec<PathBuf>),
+    /// Discard Previews: the rows of these files and the requests of these
+    /// photos, of these kinds.
+    Discard(
+        CatalogLocation,
+        Vec<PhotoId>,
+        Vec<PathBuf>,
+        Vec<PreviewKind>,
+    ),
     Clear(PreviewKind),
+    /// Automatically Discard 1:1 Previews: those unused for this long.
+    Expire(PreviewKind, std::time::Duration),
     /// Edits saved: each photo with previews asked for (built, waiting or being
     /// built) is built again, unless its preview is still fresh.
     Refresh(Vec<Item>),
@@ -345,6 +373,28 @@ impl Builder {
         added
     }
 
+    /// Stops the build under way if it is of `kind` (and of one of `photos`,
+    /// when given); the others carry on.
+    fn cancel_running(&self, photos: Option<&[PhotoId]>, kind: PreviewKind) {
+        let mut state = self.shared.state.lock().expect("preview builds");
+        if state.running.is_some_and(|(photo, running)| {
+            running == kind && photos.is_none_or(|p| p.contains(&photo))
+        }) {
+            state.cancel.store(true, Ordering::Relaxed);
+            state.cancel = Arc::default();
+        }
+    }
+
+    /// Queues `expire` in place of any expiry not run yet, which an earlier
+    /// setting asked for; `None` (Never) only removes those.
+    fn replace_expiry(&self, expire: Option<Op>) {
+        let mut state = self.shared.state.lock().expect("preview builds");
+        state.ops.retain(|op| !matches!(op, Op::Expire(..)));
+        state.ops.extend(expire);
+        drop(state);
+        self.shared.wake.notify_one();
+    }
+
     fn maintain(&self, op: Op) {
         self.shared
             .state
@@ -369,17 +419,22 @@ impl Builder {
         state.cancel = Arc::default();
     }
 
-    /// Drops the builds of `photos` that have not started.
-    fn drop_waiting(&self, photos: &[PhotoId]) {
+    /// Drops the builds not started of `photos` (all of them when `None`), of
+    /// `kinds`.
+    fn drop_waiting(&self, photos: Option<&[PhotoId]>, kinds: &[PreviewKind]) {
         let mut state = self.shared.state.lock().expect("preview builds");
         let before = state.waiting.len();
-        state.waiting.retain(|item| !photos.contains(&item.photo));
+        state.waiting.retain(|item| {
+            !(kinds.contains(&item.kind) && photos.is_none_or(|p| p.contains(&item.photo)))
+        });
         let dropped = before - state.waiting.len();
         state.progress.total -= dropped;
         state.generation += 1;
         for op in &mut state.ops {
             if let Op::Refresh(items) = op {
-                items.retain(|item| !photos.contains(&item.photo));
+                items.retain(|item| {
+                    !(kinds.contains(&item.kind) && photos.is_none_or(|p| p.contains(&item.photo)))
+                });
             }
         }
     }
@@ -544,14 +599,12 @@ fn maintain(cache: &mut PreviewCache, op: Op) {
             .iter()
             .try_for_each(|(photo, path)| cache.record_intent(&catalog, *photo, path, kind)),
         Op::ForgetIntent(catalog, photos) => cache.forget_intent(&catalog, &photos, None),
-        Op::Discard(catalog, photos, paths) => {
-            cache.forget_intent(&catalog, &photos, None).and_then(|_| {
-                PreviewKind::ALL
-                    .iter()
-                    .try_for_each(|kind| cache.discard(&paths, *kind))
-            })
-        }
+        Op::Discard(catalog, photos, paths, kinds) => kinds.iter().try_for_each(|kind| {
+            cache.forget_intent(&catalog, &photos, Some(*kind))?;
+            cache.discard(&paths, *kind)
+        }),
         Op::Clear(kind) => cache.clear(kind),
+        Op::Expire(kind, unused) => cache.expire(kind, unused).map(|_| ()),
         Op::Refresh(_) => Ok(()),
     };
 }
@@ -563,16 +616,20 @@ pub(super) struct PreviewBuilds {
     catalog: Option<CatalogLocation>,
     /// Preferences > Standard Preview Size.
     pub(super) standard_size: u32,
+    /// Preferences > Automatically Discard 1:1 Previews, after this many days
+    /// unused; `None` keeps them.
+    pub(super) discard_one_to_one_after: Option<u32>,
     render: Render,
     cache_path: PathBuf,
 }
 
 impl PreviewBuilds {
-    pub(super) fn new(standard_size: u32) -> Self {
+    pub(super) fn new(standard_size: u32, discard_one_to_one_after: Option<u32>) -> Self {
         Self {
             builder: None,
             catalog: None,
             standard_size,
+            discard_one_to_one_after,
             render,
             cache_path: PreviewCache::path(),
         }
@@ -583,7 +640,7 @@ impl PreviewBuilds {
         Self {
             render,
             cache_path,
-            ..Self::new(DEFAULT_STANDARD_SIZE)
+            ..Self::new(DEFAULT_STANDARD_SIZE, DEFAULT_DISCARD_DAYS)
         }
     }
     fn builder(&mut self, ctx: &egui::Context) -> &Builder {
@@ -755,9 +812,13 @@ impl Editor {
             return;
         };
         let catalog = library.session.catalog.location().clone();
-        let Ok((items, _)) = self.build_items(ids, PreviewKind::Standard, Files::Known) else {
-            return;
-        };
+        let mut items = Vec::new();
+        for kind in PreviewKind::ALL {
+            match self.build_items(ids, kind, Files::Known) {
+                Ok((more, _)) => items.extend(more),
+                Err(_) => return,
+            }
+        }
         if !items.is_empty() {
             self.catalog_builder(&catalog).maintain(Op::Refresh(items));
         }
@@ -787,9 +848,9 @@ impl Editor {
         };
     }
 
-    /// Discard Standard and 1:1 Previews: the files' built previews and the
-    /// photos' requests go, and their builds not yet started with them.
-    pub(super) fn discard_previews(&mut self, ids: &[PhotoId]) {
+    /// Discard 1:1 Previews, or Standard and 1:1: the files' built previews of
+    /// `kinds` and the photos' requests go, and their builds not yet started.
+    pub(super) fn discard_previews(&mut self, ids: &[PhotoId], kinds: &[PreviewKind]) {
         let Some(library) = &self.library else {
             return;
         };
@@ -800,10 +861,18 @@ impl Editor {
             .collect();
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
-        builder.drop_waiting(ids);
-        builder.maintain(Op::Discard(catalog, ids.to_vec(), paths));
+        builder.drop_waiting(Some(ids), kinds);
+        for kind in kinds {
+            builder.cancel_running(Some(ids), *kind);
+        }
+        builder.maintain(Op::Discard(catalog, ids.to_vec(), paths, kinds.to_vec()));
+        let which = if kinds == [PreviewKind::OneToOne] {
+            "1:1 previews"
+        } else {
+            "previews"
+        };
         self.status = format!(
-            "Discarded the previews of {}",
+            "Discarded the {which} of {}",
             plural(ids.len(), "photo", "photos")
         );
     }
@@ -817,18 +886,31 @@ impl Editor {
         let catalog = library.session.catalog.location().clone();
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
-        builder.drop_waiting(&[id]);
+        builder.drop_waiting(Some(&[id]), &PreviewKind::ALL);
         builder.maintain(Op::ForgetIntent(catalog, vec![id]));
     }
 
-    /// Preferences' Clear Standard Previews.
+    /// Preferences' Clear Standard Previews and Clear 1:1 Previews; the
+    /// builds of that kind not started go too.
     pub(super) fn clear_previews(&mut self, kind: PreviewKind) {
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
-        if kind == PreviewKind::Standard {
-            builder.cancel();
-        }
+        builder.drop_waiting(None, &[kind]);
+        builder.cancel_running(None, kind);
         builder.maintain(Op::Clear(kind));
+    }
+
+    /// Automatically Discard 1:1 Previews, as Preferences sets it: run when the
+    /// app starts and when the setting changes.
+    pub(super) fn expire_previews(&mut self) {
+        let expire = self.preview_builds.discard_one_to_one_after.map(|days| {
+            Op::Expire(
+                PreviewKind::OneToOne,
+                std::time::Duration::from_secs(u64::from(days) * 86_400),
+            )
+        });
+        let ctx = self.context.clone();
+        self.preview_builds.builder(&ctx).replace_expiry(expire);
     }
 
     /// Takes finished builds, every frame. Another catalog cancels the builds of

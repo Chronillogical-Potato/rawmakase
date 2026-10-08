@@ -436,29 +436,72 @@ impl Editor {
             self.preview_builds.standard_size = size;
             let _ = self.save_session();
         }
-        let mut clear = false;
+        let mut discard = self.preview_builds.discard_one_to_one_after;
+        form_row(ui, "Discard 1:1 Previews", |ui| {
+            let name = |days| {
+                crate::app::preview_build::DISCARD_CHOICES
+                    .iter()
+                    .find(|(d, _)| *d == days)
+                    .map_or("", |(_, name)| name)
+            };
+            egui::ComboBox::from_id_salt("discard-one-to-one")
+                .width(160.)
+                .selected_text(name(discard))
+                .show_ui(ui, |ui| {
+                    for (days, title) in crate::app::preview_build::DISCARD_CHOICES {
+                        ui.selectable_value(&mut discard, days, title);
+                    }
+                });
+        });
+        if discard != self.preview_builds.discard_one_to_one_after {
+            self.preview_builds.discard_one_to_one_after = discard;
+            let _ = self.save_session();
+            self.expire_previews();
+        }
+        let mut clear = None;
         form_row(ui, "", |ui| {
-            clear = ui
+            if ui
                 .add_enabled(
                     preview_kinds.is_some_and(|k| k.standard > 0),
                     egui::Button::new("Clear Standard Previews"),
                 )
-                .clicked();
+                .clicked()
+            {
+                clear = Some(PreviewKind::Standard);
+            }
+            if ui
+                .add_enabled(
+                    preview_kinds.is_some_and(|k| k.one_to_one > 0),
+                    egui::Button::new("Clear 1:1 Previews"),
+                )
+                .clicked()
+            {
+                clear = Some(PreviewKind::OneToOne);
+            }
         });
         form_row(ui, "", |ui| {
             hint(
                 ui,
-                "Build Standard-Sized Previews from a photo's menu. Develop shows them while a photo opens.",
+                "Build previews from a photo's menu. Develop shows Standard previews while a photo opens; 1:1 previews let an offline photo be zoomed to 100% in the Loupe.",
             );
         });
-        if clear {
-            self.clear_previews(PreviewKind::Standard);
-            self.status = "Standard previews cleared".into();
-            self.preferences.usage.preview_kinds =
-                preview_kinds.map(|kinds| crate::catalog::preview_cache::PreviewUsage {
+        if let Some(kind) = clear {
+            self.clear_previews(kind);
+            self.status = match kind {
+                PreviewKind::Standard => "Standard previews cleared",
+                PreviewKind::OneToOne => "1:1 previews cleared",
+            }
+            .into();
+            self.preferences.usage.preview_kinds = preview_kinds.map(|kinds| match kind {
+                PreviewKind::Standard => crate::catalog::preview_cache::PreviewUsage {
                     standard: 0,
                     ..kinds
-                });
+                },
+                PreviewKind::OneToOne => crate::catalog::preview_cache::PreviewUsage {
+                    one_to_one: 0,
+                    ..kinds
+                },
+            });
         }
         gap(ui);
         self.folder_locations_block(ui);

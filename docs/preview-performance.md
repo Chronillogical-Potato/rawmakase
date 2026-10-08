@@ -403,6 +403,25 @@ measurably slow the first live Fit: from the decode cache, 330–343 ms against
 on the A7CR, within the run-to-run spread on this loaded machine. Builds are
 therefore not paused while Develop loads or renders.
 
+## 1:1 previews — 2026-10-08
+
+Issue #213 left open what 1:1 previews should be used for: zooming an offline photo
+to 100% in the Loupe, or standing in at 100% while the full-resolution image or
+region is not ready yet. Measured with `examples/preview_benchmark` on the X100F
+file above (same machine and load), once the full-resolution image is in memory a
+100% region is presented in 24 ms (73 ms with Shadows, Highlights and Clarity), and
+the reduced region shown while a slider moves in 5–55 ms. What a 100% view waits
+for is therefore the full-size image itself: 45–80 ms from the decode cache, or
+0.36 s (X100F) and 1.4 s (A7CR) for a decode, the same wait as the first Fit, which
+the Standard preview already covers. A 1:1 stand-in would save at most that decode,
+only when zooming in within the first second of opening a photo, for tens of
+megabytes per photo; the benchmark's A7CR run stopped at an unrelated Fit-against-
+export check, so its region times are not recorded here.
+
+So 1:1 previews ship for the offline Loupe only, stored as rows of the preview cache
+like Standard previews (one store, one staleness check, one budget, nothing left on
+disk when a row goes), with Lightroom's automatic discard; see [catalogs](catalogs.md).
+
 ## GPU finishing measurements — 2026-09-26
 
 Release build on Apple M1 Pro, private Fujifilm X100F RAW (6032×4032), installed

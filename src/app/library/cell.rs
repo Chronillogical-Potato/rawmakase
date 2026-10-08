@@ -330,8 +330,8 @@ pub(in crate::app) enum PhotoAction {
     ReadMetadata,
     /// Library › Previews: Build Standard-Sized Previews.
     BuildPreviews(crate::catalog::preview_cache::PreviewKind),
-    /// Library › Previews: Discard Standard and 1:1 Previews.
-    DiscardPreviews,
+    /// Library › Previews: Discard 1:1 Previews, or Standard and 1:1.
+    DiscardPreviews(Vec<crate::catalog::preview_cache::PreviewKind>),
     /// Develop's Set as Reference Photo.
     SetReference,
 }
@@ -421,8 +421,17 @@ pub(in crate::app) fn photo_menu(
                 action = Some(PhotoAction::BuildPreviews(PreviewKind::Standard));
                 ui.close();
             }
+            if menu_item(ui, "Build 1:1 Previews", "", true, false) {
+                action = Some(PhotoAction::BuildPreviews(PreviewKind::OneToOne));
+                ui.close();
+            }
+            menu_separator(ui);
+            if menu_item(ui, "Discard 1:1 Previews", "", true, false) {
+                action = Some(PhotoAction::DiscardPreviews(vec![PreviewKind::OneToOne]));
+                ui.close();
+            }
             if menu_item(ui, "Discard Standard and 1:1 Previews", "", true, false) {
-                action = Some(PhotoAction::DiscardPreviews);
+                action = Some(PhotoAction::DiscardPreviews(PreviewKind::ALL.to_vec()));
                 ui.close();
             }
         });

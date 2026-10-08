@@ -388,6 +388,34 @@ impl PreviewCache {
         self.db.execute_batch("PRAGMA incremental_vacuum;")?;
         Ok(())
     }
+    /// Counts a preview as used now, as when it is asked for again.
+    pub fn touch_sized(&self, path: &Path, identity: &str, kind: PreviewKind) -> Result<()> {
+        self.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE source_path=? AND identity=? AND kind=?",
+            params![now(), key(path), identity, kind.code()],
+        )?;
+        Ok(())
+    }
+    /// Lightroom's Automatically Discard 1:1 Previews: drops the previews of
+    /// `kind` not shown or built for `unused`, and the requests for files left
+    /// without one, so an edit does not build them again. Returns how many went.
+    pub fn expire(&mut self, kind: PreviewKind, unused: Duration) -> Result<usize> {
+        let before = now() - unused.as_secs() as i64;
+        let tx = self.db.transaction()?;
+        let gone = tx.execute(
+            "DELETE FROM sized_previews WHERE kind=?1 AND last_used<?2",
+            params![kind.code(), before],
+        )?;
+        tx.execute(
+            "DELETE FROM preview_intent WHERE kind=?1 AND source_path NOT IN (SELECT source_path FROM sized_previews WHERE kind=?1)",
+            [kind.code()],
+        )?;
+        tx.commit()?;
+        if gone > 0 {
+            self.db.execute_batch("PRAGMA incremental_vacuum;")?;
+        }
+        Ok(gone)
+    }
     /// Records that the user asked for `kind` previews of this catalog photo,
     /// so they are rebuilt when its edit changes.
     pub fn record_intent(
@@ -901,6 +929,66 @@ mod tests {
                 .load_sized(&raw, "a", PreviewKind::Standard)?
                 .is_some()
         );
+        Ok(())
+    }
+    #[test]
+    fn unused_previews_of_one_kind_expire() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let (raw, mut cache) = photo(&d)?;
+        let stamp = Stamp::read(&raw)?;
+        let im = image::RgbImage::new(32, 16);
+        cache.store_sized(&raw, "old", PreviewKind::OneToOne, &stamp, 0, &im)?;
+        cache.store_sized(&raw, "new", PreviewKind::OneToOne, &stamp, 0, &im)?;
+        cache.store_sized(&raw, "old", PreviewKind::Standard, &stamp, 2048, &im)?;
+        let long_ago = now() - 40 * 86400;
+        cache.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE identity='old'",
+            [long_ago],
+        )?;
+        let month = Duration::from_secs(30 * 86400);
+        assert_eq!(cache.expire(PreviewKind::OneToOne, month)?, 1);
+        assert!(
+            cache
+                .load_sized(&raw, "old", PreviewKind::OneToOne)?
+                .is_none()
+        );
+        assert!(
+            cache
+                .load_sized(&raw, "new", PreviewKind::OneToOne)?
+                .is_some()
+        );
+        assert!(
+            cache
+                .load_sized(&raw, "old", PreviewKind::Standard)?
+                .is_some()
+        );
+        // The request for a file whose previews of that kind all went goes too.
+        let catalog = CatalogLocation::File(d.path().join("c.rawmakase"));
+        let other = d.path().join("other.ARW");
+        std::fs::write(&other, b"other raw")?;
+        cache.record_intent(&catalog, PhotoId(1), &raw, PreviewKind::OneToOne)?;
+        cache.record_intent(&catalog, PhotoId(2), &other, PreviewKind::OneToOne)?;
+        cache.store_sized(
+            &other,
+            "x",
+            PreviewKind::OneToOne,
+            &Stamp::read(&other)?,
+            0,
+            &im,
+        )?;
+        cache.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE source_path=?",
+            params![long_ago, key(&other)],
+        )?;
+        cache.expire(PreviewKind::OneToOne, month)?;
+        assert!(cache.has_intent(&catalog, PhotoId(1), &raw, PreviewKind::OneToOne)?);
+        assert!(!cache.has_intent(&catalog, PhotoId(2), &other, PreviewKind::OneToOne)?);
+        // Asked for again, a preview starts its time again.
+        cache
+            .db
+            .execute("UPDATE sized_previews SET last_used=?", [long_ago])?;
+        cache.touch_sized(&raw, "new", PreviewKind::OneToOne)?;
+        assert_eq!(cache.expire(PreviewKind::OneToOne, month)?, 0);
         Ok(())
     }
 }

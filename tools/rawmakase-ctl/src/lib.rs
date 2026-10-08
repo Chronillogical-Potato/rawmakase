@@ -90,9 +90,12 @@ enum Command {
     Action { name: String },
     /// Save the current edit and report any failure
     Save,
-    /// Build Standard-Sized Previews of the selected photos in the background;
-    /// reports how many were queued (see state's building_previews)
-    BuildPreviews,
+    /// Build previews of the selected photos in the background; reports how
+    /// many were queued (see state's building_previews)
+    BuildPreviews {
+        #[arg(long, value_enum, default_value_t = PreviewSize::Standard)]
+        kind: PreviewSize,
+    },
     /// Render the captured edit to a new JPEG or TIFF, without overwriting files
     Export {
         path: PathBuf,
@@ -169,6 +172,15 @@ enum Command {
     Develop,
     /// List the Loupedeck's dial and button names
     Controls,
+}
+
+/// Which previews `build-previews` builds.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum PreviewSize {
+    /// Standard-Sized Previews
+    Standard,
+    /// 1:1 Previews
+    OneToOne,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -369,8 +381,11 @@ fn commands(command: &Command) -> Result<Vec<Request>, String> {
         }
         Command::Action { name } => vec![action(name)],
         Command::Save => vec![Request::Save],
-        Command::BuildPreviews => vec![Request::BuildPreviews {
-            kind: Default::default(),
+        Command::BuildPreviews { kind } => vec![Request::BuildPreviews {
+            kind: match kind {
+                PreviewSize::Standard => rawmakase_protocol::request::PreviewKind::Standard,
+                PreviewSize::OneToOne => rawmakase_protocol::request::PreviewKind::OneToOne,
+            },
         }],
         Command::Export { path, max_edge, .. } => vec![Request::Export {
             path: absolute(path)?,
@@ -553,7 +568,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
         | Command::Presets { .. }
         | Command::Preset { .. }
         | Command::Job { .. }
-        | Command::BuildPreviews
+        | Command::BuildPreviews { .. }
         | Command::Export { .. }
         | Command::Preview { .. }
             if !cli.state =>
@@ -621,6 +636,10 @@ mod tests {
             (vec!["rawmakase-ctl", "job", "1"], "job"),
             (vec!["rawmakase-ctl", "presets"], "presets"),
             (vec!["rawmakase-ctl", "build-previews"], "build_previews"),
+            (
+                vec!["rawmakase-ctl", "build-previews", "--kind", "one-to-one"],
+                "build_previews",
+            ),
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
             assert_eq!(requests(&cli.command).unwrap()[0]["cmd"], cmd);

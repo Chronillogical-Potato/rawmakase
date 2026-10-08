@@ -136,6 +136,8 @@ impl Editor {
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
         editor.controls = automation::Hub::start(&cc.egui_ctx);
+        // 1:1 previews left unused past the chosen time go, as in Lightroom.
+        editor.expire_previews();
         editor.updates.launched(launch, &mut editor.status);
         cc.egui_ctx
             .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
@@ -208,6 +210,7 @@ impl Editor {
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
         let standard_preview_size = session.standard_preview_size();
+        let discard_one_to_one_after = session.discard_one_to_one_after();
         let stand_ins = stand_in::StandIns::new(
             tx.clone(),
             ctx.clone(),
@@ -257,7 +260,10 @@ impl Editor {
                 fastframe_text::TextRendering::platform_default(),
             ),
             exports: Default::default(),
-            preview_builds: preview_build::PreviewBuilds::new(standard_preview_size),
+            preview_builds: preview_build::PreviewBuilds::new(
+                standard_preview_size,
+                discard_one_to_one_after,
+            ),
             stand_ins,
             autosave: Default::default(),
             restore: Some(place.clone()),
@@ -333,6 +339,9 @@ impl Editor {
                     crop_guides: self.view.crop_guides.to_session(),
                     raw_defaults: self.raw_defaults.settings().clone(),
                     standard_preview_size: Some(self.preview_builds.standard_size),
+                    one_to_one_discard_days: Some(
+                        self.preview_builds.discard_one_to_one_after.unwrap_or(0),
+                    ),
                 },
             )?;
         }

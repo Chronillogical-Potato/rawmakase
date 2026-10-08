@@ -389,7 +389,7 @@ fn discarding_drops_rows_and_requests_of_every_kind() {
     e.build_previews(&ids, PreviewKind::Standard).unwrap();
     settle(&mut e);
     assert!(fresh(&cache, &e, ids[0]));
-    e.discard_previews(&ids);
+    e.discard_previews(&ids, &PreviewKind::ALL);
     // Upkeep runs on the worker.
     let until = Instant::now() + Duration::from_secs(10);
     while fresh(&cache, &e, ids[0]) {
@@ -554,7 +554,7 @@ fn upkeep_asked_for_before_exit_still_happens() {
     // has got to, the discard comes after the build.
     save_edit(&mut e, ids[0], 1.);
     e.build_previews(&ids, PreviewKind::Standard).unwrap();
-    e.discard_previews(&ids);
+    e.discard_previews(&ids, &PreviewKind::ALL);
     let waited = e.exit_within(Duration::from_secs(3));
     assert_eq!(waited.detached, 0);
     let catalog = e
@@ -712,4 +712,207 @@ fn cancel_drops_refreshes_not_yet_looked_at() {
     settle(&mut e);
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(renders_of(&path_of(&e, b)), 1);
+}
+
+#[test]
+fn one_to_one_previews_build_at_full_size_and_discard_on_their_own() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);
+    let path = path_of(&e, ids[0]);
+    let identity = identity_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    settle(&mut e);
+    let has = |kind| {
+        PreviewCache::open(&cache)
+            .unwrap()
+            .sized_fresh(&path, &identity, kind, 0)
+            .unwrap()
+    };
+    assert!(has(PreviewKind::Standard) && has(PreviewKind::OneToOne));
+    e.discard_previews(&ids, &[PreviewKind::OneToOne]);
+    let until = Instant::now() + Duration::from_secs(10);
+    while has(PreviewKind::OneToOne) {
+        assert!(Instant::now() < until, "never discarded");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(has(PreviewKind::Standard));
+    let catalog = e
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .location()
+        .clone();
+    let cache = PreviewCache::open(&cache).unwrap();
+    assert!(
+        cache
+            .has_intent(&catalog, ids[0], &path, PreviewKind::Standard)
+            .unwrap()
+    );
+    assert!(
+        !cache
+            .has_intent(&catalog, ids[0], &path, PreviewKind::OneToOne)
+            .unwrap()
+    );
+}
+
+#[test]
+fn a_photo_too_large_for_a_jpeg_fails_with_why() {
+    fn panorama(_: &Item, _: &AtomicBool) -> anyhow::Result<image::RgbImage> {
+        Ok(image::RgbImage::new(JPEG_LIMIT + 1, 1))
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pano.ARW");
+    std::fs::write(&path, b"raw").unwrap();
+    let mut cache = PreviewCache::open(&dir.path().join("previews.sqlite3")).unwrap();
+    let item = Item {
+        catalog: CatalogLocation::File(dir.path().join("c.rawmakase")),
+        photo: PhotoId(1),
+        name: "pano.ARW".into(),
+        path,
+        record: EditRecord::default(),
+        defaults: Default::default(),
+        demosaic: Demosaic::default(),
+        identity: "a".into(),
+        kind: PreviewKind::OneToOne,
+        edge: 0,
+        ticket: None,
+    };
+    let outcome = build_one(&item, Some(&mut cache), panorama, &AtomicBool::new(false));
+    assert!(matches!(outcome, Outcome::Failed(why) if why.contains("65535")));
+}
+
+#[test]
+fn a_one_to_one_preview_asked_for_is_built_again_after_an_edit() {
+    let (_dir, mut e, ids, _) = editor(&["one.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    settle(&mut e);
+    save_edit(&mut e, ids[0], 1.);
+    e.refresh_previews(&ids);
+    // The 1:1 preview only: no Standard one was asked for.
+    wait_renders(&path, 2);
+}
+
+#[test]
+fn the_command_builds_one_to_one_previews_too() {
+    use crate::app::commands::{Command, Operation, Outcome as Reply};
+    let (_dir, mut e, ids, _) = editor(&["a.ARW"]);
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let ctx = e.context.clone();
+    let reply = e
+        .execute_command(
+            Command::new(Operation::BuildPreviews(PreviewKind::OneToOne)),
+            &ctx,
+        )
+        .unwrap();
+    assert!(matches!(
+        reply,
+        Reply::Previews {
+            queued: 1,
+            skipped: 0
+        }
+    ));
+    settle(&mut e);
+}
+
+#[test]
+fn a_new_discard_setting_replaces_the_expiry_not_run_yet() {
+    let (_dir, mut e, ids, _) = editor(&["slow-expiry.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    wait_started(&path);
+    let expiries = |e: &Editor| {
+        let state = e
+            .preview_builds
+            .builder
+            .as_ref()
+            .unwrap()
+            .shared
+            .state
+            .lock()
+            .unwrap();
+        state
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::Expire(..)))
+            .count()
+    };
+    e.preview_builds.discard_one_to_one_after = Some(1);
+    e.expire_previews();
+    e.preview_builds.discard_one_to_one_after = Some(30);
+    e.expire_previews();
+    assert_eq!(expiries(&e), 1);
+    e.preview_builds.discard_one_to_one_after = None;
+    e.expire_previews();
+    assert_eq!(expiries(&e), 0);
+    release(&path);
+    settle(&mut e);
+}
+
+#[test]
+fn clearing_a_kind_stops_its_build_under_way() {
+    let (_dir, mut e, ids, cache) = editor(&["slow-clear.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    wait_started(&path);
+    e.clear_previews(PreviewKind::OneToOne);
+    settle(&mut e);
+    let identity = identity_of(&e, ids[0]);
+    assert!(
+        !PreviewCache::open(&cache)
+            .unwrap()
+            .sized_fresh(&path, &identity, PreviewKind::OneToOne, 0)
+            .unwrap()
+    );
+}
+
+#[test]
+fn a_build_keeps_its_request_through_an_expiry_while_it_waited() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);
+    let path = path_of(&e, ids[0]);
+    let catalog = e
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .location()
+        .clone();
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    // As if the setting changed before the build ran: the request is forgotten.
+    e.preview_builds.discard_one_to_one_after = Some(1);
+    e.expire_previews();
+    settle(&mut e);
+    let until = Instant::now() + Duration::from_secs(10);
+    let cache = loop {
+        let cache = PreviewCache::open(&cache).unwrap();
+        if cache
+            .has_intent(&catalog, ids[0], &path, PreviewKind::OneToOne)
+            .unwrap()
+        {
+            break cache;
+        }
+        assert!(Instant::now() < until, "the request was lost");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    drop(cache);
+}
+
+#[test]
+fn discarding_a_photo_stops_its_build_under_way() {
+    let (_dir, mut e, ids, cache) = editor(&["slow-discard.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    wait_started(&path);
+    e.discard_previews(&ids, &[PreviewKind::OneToOne]);
+    settle(&mut e);
+    let identity = identity_of(&e, ids[0]);
+    assert!(
+        !PreviewCache::open(&cache)
+            .unwrap()
+            .sized_fresh(&path, &identity, PreviewKind::OneToOne, 0)
+            .unwrap()
+    );
 }

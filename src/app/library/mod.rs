@@ -56,7 +56,10 @@ pub(crate) enum CopyAction {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PreviewsRequest {
     Build(Vec<PhotoId>, crate::catalog::preview_cache::PreviewKind),
-    Discard(Vec<PhotoId>),
+    Discard(
+        Vec<PhotoId>,
+        Vec<crate::catalog::preview_cache::PreviewKind>,
+    ),
 }
 pub(crate) struct Library {
     /// The open catalog and the photos, folders and collections read from it.
