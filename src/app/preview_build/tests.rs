@@ -899,3 +899,20 @@ fn a_build_keeps_its_request_through_an_expiry_while_it_waited() {
     };
     drop(cache);
 }
+
+#[test]
+fn discarding_a_photo_stops_its_build_under_way() {
+    let (_dir, mut e, ids, cache) = editor(&["slow-discard.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    wait_started(&path);
+    e.discard_previews(&ids, &[PreviewKind::OneToOne]);
+    settle(&mut e);
+    let identity = identity_of(&e, ids[0]);
+    assert!(
+        !PreviewCache::open(&cache)
+            .unwrap()
+            .sized_fresh(&path, &identity, PreviewKind::OneToOne, 0)
+            .unwrap()
+    );
+}

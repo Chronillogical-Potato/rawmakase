@@ -373,10 +373,13 @@ impl Builder {
         added
     }
 
-    /// Stops the build under way if it is of `kind`; the others carry on.
-    fn cancel_running(&self, kind: PreviewKind) {
+    /// Stops the build under way if it is of `kind` (and of one of `photos`,
+    /// when given); the others carry on.
+    fn cancel_running(&self, photos: Option<&[PhotoId]>, kind: PreviewKind) {
         let mut state = self.shared.state.lock().expect("preview builds");
-        if state.running.is_some_and(|(_, running)| running == kind) {
+        if state.running.is_some_and(|(photo, running)| {
+            running == kind && photos.is_none_or(|p| p.contains(&photo))
+        }) {
             state.cancel.store(true, Ordering::Relaxed);
             state.cancel = Arc::default();
         }
@@ -859,6 +862,9 @@ impl Editor {
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
         builder.drop_waiting(Some(ids), kinds);
+        for kind in kinds {
+            builder.cancel_running(Some(ids), *kind);
+        }
         builder.maintain(Op::Discard(catalog, ids.to_vec(), paths, kinds.to_vec()));
         let which = if kinds == [PreviewKind::OneToOne] {
             "1:1 previews"
@@ -890,7 +896,7 @@ impl Editor {
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
         builder.drop_waiting(None, &[kind]);
-        builder.cancel_running(kind);
+        builder.cancel_running(None, kind);
         builder.maintain(Op::Clear(kind));
     }
 
