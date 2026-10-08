@@ -24,21 +24,15 @@ struct Progress {
 }
 
 /// The model on disk and the install in progress, if any.
+#[derive(Default)]
 pub(crate) struct Installer {
-    installed: bool,
+    /// What the folder held when last looked at, and when: the files on disk decide
+    /// whether the models are installed (a copy made, or deleted, by hand counts), not
+    /// a note of what this process did.
+    seen: std::cell::Cell<Option<(std::time::Instant, bool)>>,
     progress: Option<Arc<Progress>>,
     thread: Option<std::thread::JoinHandle<()>>,
     removing: bool,
-}
-impl Default for Installer {
-    fn default() -> Self {
-        Self {
-            installed: is_installed(&model_dir()),
-            progress: None,
-            thread: None,
-            removing: false,
-        }
-    }
 }
 
 /// Where the model is kept: under this computer's own data folder, in a folder named
@@ -70,7 +64,21 @@ pub(super) fn download_megabytes() -> u64 {
 
 impl Installer {
     pub(in crate::app) fn installed(&self) -> bool {
-        self.installed && !self.removing
+        if self.removing {
+            return false;
+        }
+        // Looked at again after a second, so the drawer does not stat on every frame.
+        match self.seen.get() {
+            Some((at, installed)) if at.elapsed() < Duration::from_secs(1) => installed,
+            _ => {
+                let installed = is_installed(&model_dir());
+                self.seen.set(Some((std::time::Instant::now(), installed)));
+                installed
+            }
+        }
+    }
+    fn forget(&self) {
+        self.seen.set(None);
     }
     /// The folder holding the model's files.
     pub(in crate::app) fn path(&self) -> Option<PathBuf> {
@@ -91,12 +99,10 @@ impl Installer {
         }
     }
     /// Called when the install's event arrives.
-    pub(in crate::app) fn finished(&mut self, ok: bool) {
+    pub(in crate::app) fn finished(&mut self, _ok: bool) {
         self.progress = None;
         self.thread = None;
-        if ok {
-            self.installed = is_installed(&model_dir());
-        }
+        self.forget();
     }
     /// Starts fetching the model, or copying `import`; one install at a time.
     pub(in crate::app) fn install(
@@ -105,7 +111,7 @@ impl Installer {
         tx: Sender<Event>,
         ctx: egui::Context,
     ) {
-        if self.busy() || self.installed {
+        if self.busy() || self.installed() {
             return;
         }
         let progress = Arc::new(Progress::default());
@@ -141,7 +147,7 @@ impl Installer {
         tx: Sender<Event>,
         ctx: egui::Context,
     ) {
-        if self.busy() || !self.installed {
+        if self.busy() || !self.installed() {
             return;
         }
         self.removing = true;
@@ -160,11 +166,9 @@ impl Installer {
             ctx.request_repaint();
         });
     }
-    pub(in crate::app) fn removed(&mut self, ok: bool) {
+    pub(in crate::app) fn removed(&mut self, _ok: bool) {
         self.removing = false;
-        if ok {
-            self.installed = false;
-        }
+        self.forget();
     }
 }
 

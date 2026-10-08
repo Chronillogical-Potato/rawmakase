@@ -237,8 +237,15 @@ impl Editor {
                 brush.size = (brush.size * 1.15).min(0.5);
             }
         }
-        if pressed(&[Key::Escape]) && self.selection.prompting.is_some() {
-            self.selection.end_prompting();
+        if pressed(&[Key::Escape]) {
+            // First Escape stops aiming; the next closes Masking.
+            if self.selection.prompting.is_some() {
+                self.selection.end_prompting();
+            } else if self.view.masking.pending.is_some() {
+                self.view.masking.pending = None;
+            } else {
+                self.close_masking();
+            }
             return;
         }
         if pressed(&[Key::O]) && !i.modifiers.shift {
@@ -552,12 +559,34 @@ impl Editor {
                 ui,
                 "Create a mask, or click a pin on the photo to select one. Shift+W closes.",
             );
+            self.masking_done(ui);
             return;
         };
         ui.add_space(4.);
         self.component_settings(ui, m);
         ui.add_space(6.);
         self.adjustment_sliders(ui, m);
+        ui.add_space(6.);
+        self.masking_done(ui);
+    }
+    /// Closes the Masking tool, as Lightroom's Done: the masks and their adjustments stay.
+    fn masking_done(&mut self, ui: &mut egui::Ui) {
+        indented(ui, |ui| {
+            let done = egui::Button::new(egui::RichText::new("Done").strong())
+                .fill(egui::Color32::from_rgb(52, 98, 170));
+            if ui
+                .add(done)
+                .on_hover_text("Close Masking · Shift+W or Escape")
+                .clicked()
+            {
+                self.close_masking();
+            }
+        });
+    }
+    pub(super) fn close_masking(&mut self) {
+        self.selection.end_prompting();
+        self.view.masking.pending = None;
+        self.view.tool = super::state::Tool::None;
     }
     fn create_row(&mut self, ui: &mut egui::Ui) {
         let pending = self.view.masking.pending;

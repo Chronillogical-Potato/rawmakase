@@ -291,6 +291,12 @@ impl Editor {
     /// Starts a selection, or asks what it needs first: the model, an upgraded
     /// catalog.
     pub(super) fn request_selection(&mut self, request: Request) {
+        // The frame that shows what a click did comes after it: ask for one.
+        self.context.request_repaint();
+        // A second click on a tile while its selection runs is not another request.
+        if self.selection.pending.is_some() {
+            return;
+        }
         if let Some(why) = self.selection_unavailable() {
             self.status = why.into();
             return;
@@ -328,6 +334,7 @@ impl Editor {
     /// Aims at a generated component: clicks on the photo add to it and leave things
     /// out of it, each one refining the same mask.
     pub(super) fn begin_refining(&mut self, mask: usize, component: usize) {
+        self.context.request_repaint();
         let Some(MaskShape::Bitmap(b)) = self
             .document
             .edit
@@ -361,6 +368,7 @@ impl Editor {
     /// A click on the photo while aiming: a point on the object (or, with `positive`
     /// false, on something to leave out). Starts or refines the selection.
     pub(super) fn prompt_click(&mut self, at: [f32; 2], positive: bool) {
+        self.context.request_repaint();
         let Some(p) = &mut self.selection.prompting else {
             return;
         };
@@ -440,6 +448,11 @@ impl Editor {
             self.selection.prompt = Some(Prompt::Model(request));
             return;
         };
+        self.context.request_repaint();
+        self.status = match &action {
+            Action::Auto(feature) => format!("Finding the {}…", feature.name().to_lowercase()),
+            Action::Click(_) => "Selecting…".into(),
+        };
         let (generation, cancel) = self.selection.task.start();
         let recipe = self.document.edit.recipe().clone();
         self.selection.pending = Some(Pending {
@@ -461,6 +474,7 @@ impl Editor {
         );
     }
     pub(super) fn cancel_selection(&mut self) {
+        self.context.request_repaint();
         self.selection.cancel();
         self.status = "Selection cancelled".into();
     }
@@ -566,12 +580,14 @@ impl Editor {
     /// Asks the installer to download the model (the prompt's Download) or to import a
     /// file the user chose.
     pub(super) fn install_model(&mut self, import: Option<std::path::PathBuf>) {
+        self.context.request_repaint();
         self.selection
             .models
             .install(import, self.tx.clone(), self.context.clone());
     }
     /// Upgrades the open catalog on a thread of its own, after the edit is saved.
     pub(super) fn upgrade_catalog(&mut self, request: Request) {
+        self.context.request_repaint();
         if self.selection.upgrading.is_some() {
             return;
         }

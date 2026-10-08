@@ -681,3 +681,40 @@ fn refining_aims_at_the_selected_component_only_with_the_models_in_place() {
     );
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
 }
+
+#[test]
+#[ignore = "needs RAWMAKASE_TEST_MODEL (the models' folder) and a HOME of its own: HOME=$(mktemp -d)"]
+fn after_installing_the_models_every_selection_runs_without_asking_again() {
+    let folder = std::path::PathBuf::from(std::env::var("RAWMAKASE_TEST_MODEL").unwrap());
+    let mut f = fixture();
+    let e = &mut f.editor;
+    assert!(!e.selection.models.installed());
+    // Subject asks first; the install it offers finishes; the request goes on by itself.
+    e.request_selection(SUBJECT);
+    assert_eq!(e.selection.prompt, Some(Prompt::Model(SUBJECT)));
+    e.install_model(Some(folder));
+    let result = loop {
+        if let crate::app::worker::Event::ModelInstalled(r) =
+            e.rx.recv_timeout(std::time::Duration::from_secs(120))
+                .unwrap()
+        {
+            break r;
+        }
+    };
+    e.selection.models.finished(result.is_ok());
+    e.model_installed(result);
+    assert!(e.selection.models.installed());
+    assert!(
+        e.selection.running().is_some(),
+        "the request went on: {}",
+        e.status
+    );
+    e.selection.cancel();
+    // Sky then runs at once, asking nothing.
+    e.request_selection(Request {
+        feature: Feature::Sky,
+        target: Target::NewMask,
+    });
+    assert!(e.selection.prompt.is_none(), "asked again");
+    assert!(e.selection.running().is_some());
+}
