@@ -1,21 +1,17 @@
-//! Pure pre- and post-processing: image to model tensor and model matte back to
-//! coverage in the input image's own frame. No runtime and no model needed.
-//!
-//! Resampling is a separable triangle (bilinear) filter whose support widens
-//! when shrinking, so a 1536 px input going into a 1024 px tensor is
-//! area-filtered rather than aliased. All arithmetic is `f32`; the matte is
-//! turned into `u8` only as the very last step.
-
+//! Pure mappings between photos and tensors: the image to the encoder's input, a
+//! prompt to the decoder's, and the decoder's low-resolution mask logits back to
+//! 8-bit coverage in the photo's frame. No runtime is involved, so these are tested
+//! without a model.
 use crate::error::InferenceError;
-use crate::manifest::{Activation, ModelSpec, Resize};
+use crate::manifest::ModelSpec;
 
-/// The longest side of a returned [`Coverage`].
+/// Largest coverage returned, per side.
 pub const MAX_COVERAGE_SIDE: usize = 4096;
-/// The longest side accepted as input. Larger images are the caller's to
-/// downscale first; the cap keeps index arithmetic far from overflow.
+/// Largest input accepted, per side; larger photos are for the caller to downscale
+/// first, and the cap keeps index arithmetic far from overflow.
 pub const MAX_INPUT_SIDE: usize = 16_384;
-/// Tolerance for a "probability" output slightly outside 0..=1 from rounding.
-const PROBABILITY_SLACK: f32 = 1e-3;
+/// Most points in one prompt.
+pub const MAX_POINTS: usize = 32;
 
 /// 8-bit sRGB, interleaved `R G B`, row-major, `data.len() == width * height * 3`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,8 +21,8 @@ pub struct RgbImage {
     pub data: Vec<u8>,
 }
 
-/// 8-bit coverage (0 = background, 255 = subject), row-major, one byte per
-/// pixel, at the aspect ratio of the image it was computed from.
+/// 8-bit coverage (0 = unselected, 255 = selected), row-major, one byte per pixel,
+/// at the aspect ratio of the image it was computed from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Coverage {
     pub width: usize,
@@ -43,82 +39,100 @@ pub struct Rect {
     pub height: usize,
 }
 
-/// Where the image sits inside the model's square input; the inverse mapping
-/// for the output is derived from the same value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Geometry {
-    pub source_width: usize,
-    pub source_height: usize,
-    pub model_size: usize,
-    /// The part of the square that holds image content (all of it when
-    /// stretching).
-    pub content: Rect,
+/// One click: a position as fractions of the photo's width and height, and whether
+/// it marks the object (`true`) or something to leave out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+    pub positive: bool,
 }
 
-impl Geometry {
-    pub fn new(
-        source_width: usize,
-        source_height: usize,
-        spec: &ModelSpec,
-    ) -> Result<Self, InferenceError> {
-        if source_width == 0 || source_height == 0 {
-            return Err(InferenceError::OutputInvalid(
-                "the input image is empty".into(),
-            ));
-        }
-        if source_width > MAX_INPUT_SIDE || source_height > MAX_INPUT_SIDE {
-            return Err(InferenceError::OutputInvalid(format!(
-                "the input image {source_width}x{source_height} exceeds {MAX_INPUT_SIDE} px per side"
-            )));
-        }
-        let size = spec.input_size;
-        let content = match spec.resize {
-            Resize::Stretch => Rect {
-                x: 0,
-                y: 0,
-                width: size,
-                height: size,
-            },
-            Resize::Letterbox { .. } => {
-                let scale = size as f64 / source_width.max(source_height) as f64;
-                let width = ((source_width as f64 * scale).round() as usize).clamp(1, size);
-                let height = ((source_height as f64 * scale).round() as usize).clamp(1, size);
-                Rect {
-                    x: (size - width) / 2,
-                    y: (size - height) / 2,
-                    width,
-                    height,
-                }
-            }
-        };
-        Ok(Self {
-            source_width,
-            source_height,
-            model_size: size,
-            content,
-        })
-    }
+/// What to select: clicks and/or a box (`[left, top, right, bottom]`, fractions).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Prompt {
+    pub points: Vec<Point>,
+    pub bounds: Option<[f32; 4]>,
+}
 
-    /// The size of the coverage returned for this input: the input's own size,
-    /// scaled down to [`MAX_COVERAGE_SIDE`] if larger.
-    pub fn output_size(&self) -> (usize, usize) {
-        let longest = self.source_width.max(self.source_height);
-        if longest <= MAX_COVERAGE_SIDE {
-            return (self.source_width, self.source_height);
+impl Prompt {
+    /// Checks the prompt is something the decoder can use.
+    pub fn validate(&self) -> Result<(), InferenceError> {
+        let unit = |v: f32| v.is_finite() && (0.0..=1.0).contains(&v);
+        let bad = |why: &str| Err(InferenceError::OutputInvalid(why.into()));
+        if self.points.is_empty() && self.bounds.is_none() {
+            return bad("the prompt has no point and no box");
         }
-        let scale = MAX_COVERAGE_SIDE as f64 / longest as f64;
-        let scaled = |v: usize| ((v as f64 * scale).round() as usize).clamp(1, MAX_COVERAGE_SIDE);
-        (scaled(self.source_width), scaled(self.source_height))
+        if self.points.len() > MAX_POINTS {
+            return bad("the prompt has too many points");
+        }
+        if !self.points.iter().all(|p| unit(p.x) && unit(p.y)) {
+            return bad("a prompt point is outside the photo");
+        }
+        if let Some([l, t, r, b]) = self.bounds
+            && !(unit(l) && unit(t) && unit(r) && unit(b) && l < r && t < b)
+        {
+            return bad("the prompt box is empty or outside the photo");
+        }
+        Ok(())
+    }
+    /// The decoder's tensors: points in the encoder's pixel coordinates, their labels
+    /// (1 object, 0 elsewhere) and the box.
+    pub fn tensors(&self, spec: &ModelSpec) -> (Vec<f32>, Vec<i64>, Vec<f32>) {
+        let size = spec.input_size as f32;
+        let points = self
+            .points
+            .iter()
+            .flat_map(|p| [p.x * size, p.y * size])
+            .collect();
+        let labels = self.points.iter().map(|p| i64::from(p.positive)).collect();
+        let bounds = self
+            .bounds
+            .map(|b| b.map(|v| v * size).to_vec())
+            .unwrap_or_default();
+        (points, labels, bounds)
     }
 }
 
-/// Resamples `image` into the model's planar `[1, 3, S, S]` float tensor
-/// (returned flat, channel-major) and returns the geometry to undo it.
-pub fn preprocess(
-    image: &RgbImage,
-    spec: &ModelSpec,
-) -> Result<(Vec<f32>, Geometry), InferenceError> {
-    let geometry = Geometry::new(image.width, image.height, spec)?;
+/// Stretches `image` to the encoder's square input and normalizes it: the planar
+/// `[1, 3, S, S]` float tensor, flat and channel-major.
+pub fn preprocess(image: &RgbImage, spec: &ModelSpec) -> Result<Vec<f32>, InferenceError> {
+    check_image(image)?;
+    let size = spec.input_size;
+    let whole = Rect {
+        x: 0,
+        y: 0,
+        width: image.width,
+        height: image.height,
+    };
+    let mut tensor = Vec::with_capacity(3 * size * size);
+    let mut plane = vec![0.0f32; image.width * image.height];
+    for channel in 0..3 {
+        for (dst, rgb) in plane.iter_mut().zip(image.data.as_chunks::<3>().0) {
+            *dst = f32::from(rgb[channel]) / 255.0;
+        }
+        let resized = resample(&plane, image.width, whole, size, size);
+        tensor.extend(
+            resized
+                .iter()
+                .map(|v| (v - spec.mean[channel]) / spec.std[channel]),
+        );
+    }
+    Ok(tensor)
+}
+
+pub(crate) fn check_image(image: &RgbImage) -> Result<(), InferenceError> {
+    if image.width == 0 || image.height == 0 {
+        return Err(InferenceError::OutputInvalid(
+            "the input image is empty".into(),
+        ));
+    }
+    if image.width > MAX_INPUT_SIDE || image.height > MAX_INPUT_SIDE {
+        return Err(InferenceError::OutputInvalid(format!(
+            "the input image {}x{} exceeds {MAX_INPUT_SIDE} px per side",
+            image.width, image.height
+        )));
+    }
     let expected = image.width * image.height * 3;
     if image.data.len() != expected {
         return Err(InferenceError::OutputInvalid(format!(
@@ -128,93 +142,53 @@ pub fn preprocess(
             image.height
         )));
     }
-    let size = spec.input_size;
-    let plane_len = size * size;
-    let mut tensor = vec![0.0f32; 3 * plane_len];
-    let fill = match spec.resize {
-        Resize::Letterbox { fill } => fill,
-        Resize::Stretch => 0.0,
-    };
-    let pixels = image.width * image.height;
-    let mut plane = vec![0.0f32; pixels];
-    for channel in 0..3 {
-        for (dst, rgb) in plane.iter_mut().zip(image.data.as_chunks::<3>().0) {
-            *dst = f32::from(rgb[channel]) / 255.0;
-        }
-        let out = &mut tensor[channel * plane_len..(channel + 1) * plane_len];
-        let pad = (fill - spec.mean[channel]) / spec.std[channel];
-        out.fill(pad);
-        let resized = resample(
-            &plane,
-            image.width,
-            Rect {
-                x: 0,
-                y: 0,
-                width: image.width,
-                height: image.height,
-            },
-            geometry.content.width,
-            geometry.content.height,
-        );
-        for (row, line) in resized.chunks_exact(geometry.content.width).enumerate() {
-            let start = (geometry.content.y + row) * size + geometry.content.x;
-            for (dst, v) in out[start..start + line.len()].iter_mut().zip(line) {
-                *dst = (v - spec.mean[channel]) / spec.std[channel];
-            }
-        }
-    }
-    Ok((tensor, geometry))
+    Ok(())
 }
 
-/// Validates the model's matte tensor, applies the manifest's activation, undoes
-/// the preprocessing mapping and quantizes to 8 bits.
-///
-/// `shape` is the output tensor's shape as the runtime reports it.
+/// The size of the coverage returned for an image: its own, scaled down to
+/// [`MAX_COVERAGE_SIDE`] if larger.
+pub fn output_size(image: &RgbImage) -> (usize, usize) {
+    let longest = image.width.max(image.height);
+    if longest <= MAX_COVERAGE_SIDE {
+        return (image.width, image.height);
+    }
+    let scale = MAX_COVERAGE_SIDE as f64 / longest as f64;
+    let scaled = |v: usize| ((v as f64 * scale).round() as usize).clamp(1, MAX_COVERAGE_SIDE);
+    (scaled(image.width), scaled(image.height))
+}
+
+/// Turns the decoder's low-resolution mask logits into coverage at `width` x
+/// `height`: the logits are resampled smoothly first and only then squashed, which
+/// keeps the edge where the model put it instead of stepping at the logit grid.
 pub fn postprocess(
-    raw: &[f32],
-    shape: &[i64],
+    logits: &[f32],
     spec: &ModelSpec,
-    geometry: &Geometry,
+    width: usize,
+    height: usize,
 ) -> Result<Coverage, InferenceError> {
-    let size = spec.input_size;
-    let wanted = [1i64, 1, size as i64, size as i64];
-    if shape != wanted {
+    let side = spec.mask_size;
+    if logits.len() != side * side {
         return Err(InferenceError::OutputInvalid(format!(
-            "output shape {shape:?}, expected {wanted:?}"
+            "the mask has {} values, expected {}",
+            logits.len(),
+            side * side
         )));
     }
-    if raw.len() != size * size {
-        return Err(InferenceError::OutputInvalid(format!(
-            "output has {} values, expected {}",
-            raw.len(),
-            size * size
-        )));
+    if logits.iter().any(|v| !v.is_finite()) {
+        return Err(InferenceError::OutputInvalid(
+            "the mask contains NaN or infinity".into(),
+        ));
     }
-    let mut probability = Vec::with_capacity(raw.len());
-    for &v in raw {
-        if !v.is_finite() {
-            return Err(InferenceError::OutputInvalid(
-                "the output contains NaN or infinity".into(),
-            ));
-        }
-        let p = match spec.activation {
-            Activation::Logit => sigmoid(v),
-            Activation::Probability => {
-                if !(-PROBABILITY_SLACK..=1.0 + PROBABILITY_SLACK).contains(&v) {
-                    return Err(InferenceError::OutputInvalid(format!(
-                        "the output value {v} is outside 0..=1 for a probability output"
-                    )));
-                }
-                v.clamp(0.0, 1.0)
-            }
-        };
-        probability.push(p);
-    }
-    let (width, height) = geometry.output_size();
-    let matte = resample(&probability, size, geometry.content, width, height);
-    let data = matte
+    let whole = Rect {
+        x: 0,
+        y: 0,
+        width: side,
+        height: side,
+    };
+    let resized = resample(logits, side, whole, width, height);
+    let data = resized
         .iter()
-        .map(|&p| (p.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .map(|&l| (sigmoid(l) * 255.0).round() as u8)
         .collect();
     Ok(Coverage {
         width,
@@ -313,310 +287,139 @@ mod tests {
     use super::*;
     use crate::manifest::SUBJECT;
 
-    fn letterbox_spec() -> ModelSpec {
-        ModelSpec {
-            input_size: 16,
-            resize: Resize::Letterbox { fill: 0.5 },
-            mean: [0.5; 3],
-            std: [0.5; 3],
-            ..SUBJECT
-        }
-    }
-
-    fn small_stretch_spec() -> ModelSpec {
-        ModelSpec {
-            input_size: 8,
-            ..SUBJECT
-        }
-    }
-
-    fn solid(width: usize, height: usize, rgb: [u8; 3]) -> RgbImage {
+    fn image(width: usize, height: usize) -> RgbImage {
         RgbImage {
             width,
             height,
-            data: rgb
-                .iter()
-                .copied()
-                .cycle()
-                .take(width * height * 3)
-                .collect(),
+            data: (0..width * height * 3).map(|i| (i % 251) as u8).collect(),
         }
     }
 
     #[test]
-    fn stretch_content_is_the_whole_square() {
-        let g = Geometry::new(300, 100, &small_stretch_spec()).unwrap();
-        assert_eq!(
-            g.content,
-            Rect {
-                x: 0,
-                y: 0,
-                width: 8,
-                height: 8
-            }
-        );
-    }
-
-    #[test]
-    fn letterbox_centres_a_wide_image() {
-        let g = Geometry::new(400, 100, &letterbox_spec()).unwrap();
-        assert_eq!(
-            g.content,
-            Rect {
-                x: 0,
-                y: 6,
-                width: 16,
-                height: 4
-            }
-        );
-        let g = Geometry::new(100, 400, &letterbox_spec()).unwrap();
-        assert_eq!(
-            g.content,
-            Rect {
-                x: 6,
-                y: 0,
-                width: 4,
-                height: 16
-            }
-        );
-    }
-
-    #[test]
-    fn letterbox_never_collapses_to_zero() {
-        let g = Geometry::new(1000, 1, &letterbox_spec()).unwrap();
-        assert_eq!(g.content.height, 1);
-        assert_eq!(g.content.width, 16);
-    }
-
-    #[test]
-    fn output_keeps_input_size_up_to_the_cap() {
-        let g = Geometry::new(1536, 1024, &SUBJECT).unwrap();
-        assert_eq!(g.output_size(), (1536, 1024));
-        let g = Geometry::new(8192, 4096, &SUBJECT).unwrap();
-        assert_eq!(g.output_size(), (4096, 2048));
-        let g = Geometry::new(4097, 3, &SUBJECT).unwrap();
-        assert_eq!(g.output_size(), (4096, 3));
-    }
-
-    #[test]
-    fn rejects_empty_oversized_and_malformed_inputs() {
-        let spec = small_stretch_spec();
-        assert!(Geometry::new(0, 5, &spec).is_err());
-        assert!(Geometry::new(MAX_INPUT_SIDE + 1, 5, &spec).is_err());
-        let bad = RgbImage {
-            width: 2,
+    fn the_input_is_stretched_and_normalized_per_channel() {
+        let flat = RgbImage {
+            width: 3,
             height: 2,
-            data: vec![0; 11],
+            data: [255, 0, 51].repeat(6),
         };
-        assert!(matches!(
-            preprocess(&bad, &spec),
-            Err(InferenceError::OutputInvalid(_))
-        ));
-    }
-
-    #[test]
-    fn normalization_follows_mean_and_std() {
-        let spec = ModelSpec {
-            mean: [0.25, 0.5, 0.75],
-            std: [0.5, 0.25, 1.0],
-            ..small_stretch_spec()
-        };
-        let (tensor, _) = preprocess(&solid(5, 3, [255, 0, 255]), &spec).unwrap();
-        let plane = 8 * 8;
+        let tensor = preprocess(&flat, &SUBJECT).unwrap();
+        let plane = SUBJECT.input_size * SUBJECT.input_size;
         assert_eq!(tensor.len(), 3 * plane);
-        assert!(tensor[..plane].iter().all(|&v| (v - 1.5).abs() < 1e-5));
-        assert!(
-            tensor[plane..2 * plane]
-                .iter()
-                .all(|&v| (v + 2.0).abs() < 1e-5)
-        );
-        assert!(tensor[2 * plane..].iter().all(|&v| (v - 0.25).abs() < 1e-5));
-    }
-
-    #[test]
-    fn channels_are_planar_not_interleaved() {
-        let spec = ModelSpec {
-            mean: [0.0; 3],
-            std: [1.0; 3],
-            ..small_stretch_spec()
-        };
-        let (tensor, _) = preprocess(&solid(4, 4, [255, 0, 0]), &spec).unwrap();
-        assert!(tensor[..64].iter().all(|&v| (v - 1.0).abs() < 1e-5));
-        assert!(tensor[64..].iter().all(|&v| v.abs() < 1e-5));
-    }
-
-    #[test]
-    fn letterbox_pads_with_the_normalized_fill() {
-        let spec = letterbox_spec();
-        let (tensor, g) = preprocess(&solid(32, 8, [255, 255, 255]), &spec).unwrap();
-        // White is (1 - 0.5) / 0.5 = 1; the 0.5 fill normalizes to exactly 0.
-        let at = |x: usize, y: usize| tensor[y * 16 + x];
-        assert_eq!(
-            g.content,
-            Rect {
-                x: 0,
-                y: 6,
-                width: 16,
-                height: 4
-            }
-        );
-        assert!(at(0, 0).abs() < 1e-6 && at(15, 15).abs() < 1e-6);
-        assert!((at(8, 7) - 1.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn downscale_averages_instead_of_aliasing() {
-        // Alternating columns of 0 and 255: a point sample would give 0 or 1,
-        // an area filter gives about one half.
-        let mut data = Vec::new();
-        for _y in 0..4 {
-            for x in 0..16 {
-                let v = if x % 2 == 0 { 0 } else { 255 };
-                data.extend_from_slice(&[v, v, v]);
-            }
+        let expect = |c: usize, v: f32| (v - SUBJECT.mean[c]) / SUBJECT.std[c];
+        for (c, v) in [(0, 1.0), (1, 0.0), (2, 0.2)] {
+            assert!((tensor[c * plane + 5000] - expect(c, v)).abs() < 1e-4);
+            assert!((tensor[(c + 1) * plane - 1] - expect(c, v)).abs() < 1e-4);
         }
-        let spec = ModelSpec {
-            mean: [0.0; 3],
-            std: [1.0; 3],
-            ..small_stretch_spec()
+    }
+
+    #[test]
+    fn a_malformed_image_is_refused() {
+        let mut bad = image(4, 4);
+        bad.data.pop();
+        assert!(preprocess(&bad, &SUBJECT).is_err());
+        assert!(preprocess(&image(0, 4), &SUBJECT).is_err());
+    }
+
+    #[test]
+    fn a_prompt_maps_to_encoder_pixels_and_labels() {
+        let prompt = Prompt {
+            points: vec![
+                Point {
+                    x: 0.5,
+                    y: 0.25,
+                    positive: true,
+                },
+                Point {
+                    x: 1.0,
+                    y: 0.0,
+                    positive: false,
+                },
+            ],
+            bounds: Some([0.0, 0.5, 0.5, 1.0]),
         };
-        let (tensor, _) = preprocess(
-            &RgbImage {
-                width: 16,
-                height: 4,
-                data,
+        prompt.validate().unwrap();
+        let (points, labels, bounds) = prompt.tensors(&SUBJECT);
+        assert_eq!(points, [512.0, 256.0, 1024.0, 0.0]);
+        assert_eq!(labels, [1, 0]);
+        assert_eq!(bounds, [0.0, 512.0, 512.0, 1024.0]);
+    }
+
+    #[test]
+    fn prompts_that_the_decoder_cannot_use_are_refused() {
+        let at = |x: f32, y: f32| Point {
+            x,
+            y,
+            positive: true,
+        };
+        assert!(Prompt::default().validate().is_err());
+        for bad in [
+            Prompt {
+                points: vec![at(1.5, 0.5)],
+                bounds: None,
             },
-            &spec,
-        )
-        .unwrap();
-        // Interior columns only: the first and last renormalize at the edge.
-        assert!(
-            tensor[1..7].iter().all(|v| (v - 0.5).abs() < 0.02),
-            "{:?}",
-            &tensor[..8]
-        );
-    }
-
-    fn matte_spec(activation: Activation, resize: Resize) -> ModelSpec {
-        ModelSpec {
-            input_size: 8,
-            activation,
-            resize,
-            ..SUBJECT
+            Prompt {
+                points: vec![at(f32::NAN, 0.5)],
+                bounds: None,
+            },
+            Prompt {
+                points: vec![at(0.5, 0.5); MAX_POINTS + 1],
+                bounds: None,
+            },
+            Prompt {
+                points: vec![],
+                bounds: Some([0.5, 0.5, 0.5, 0.9]),
+            },
+            Prompt {
+                points: vec![],
+                bounds: Some([0.6, 0.1, 0.4, 0.9]),
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
         }
-    }
-
-    fn shape8() -> [i64; 4] {
-        [1, 1, 8, 8]
-    }
-
-    #[test]
-    fn stretch_round_trip_restores_input_aspect() {
-        let spec = matte_spec(Activation::Probability, Resize::Stretch);
-        let g = Geometry::new(24, 6, &spec).unwrap();
-        // Left half foreground in model space.
-        let raw: Vec<f32> = (0..64).map(|i| if i % 8 < 4 { 1.0 } else { 0.0 }).collect();
-        let c = postprocess(&raw, &shape8(), &spec, &g).unwrap();
-        assert_eq!((c.width, c.height), (24, 6));
-        assert_eq!(c.data[0], 255);
-        assert_eq!(c.data[23], 0);
-        assert_eq!(c.data[5 * 24 + 2], 255);
-    }
-
-    #[test]
-    fn letterbox_inverse_crops_the_padding_exactly() {
-        let spec = matte_spec(Activation::Probability, Resize::Letterbox { fill: 0.0 });
-        // 16x4 into 8x8: content is rows 3..5 (2 rows tall), full width.
-        let g = Geometry::new(16, 4, &spec).unwrap();
-        assert_eq!(
-            g.content,
-            Rect {
-                x: 0,
-                y: 3,
-                width: 8,
-                height: 2
+        assert!(
+            Prompt {
+                points: vec![],
+                bounds: Some([0.1, 0.1, 0.9, 0.9])
             }
+            .validate()
+            .is_ok()
         );
-        // Padding says 1 (foreground), content says 0: the output must be all
-        // 0, proving none of the padding leaks into the result.
-        let mut raw = vec![1.0f32; 64];
-        raw[3 * 8..5 * 8].fill(0.0);
-        let c = postprocess(&raw, &shape8(), &spec, &g).unwrap();
-        assert_eq!((c.width, c.height), (16, 4));
-        assert!(c.data.iter().all(|&v| v == 0), "{:?}", c.data);
-        // And the converse: content 1 inside padding 0.
-        let mut raw = vec![0.0f32; 64];
-        raw[3 * 8..5 * 8].fill(1.0);
-        let c = postprocess(&raw, &shape8(), &spec, &g).unwrap();
-        assert!(c.data.iter().all(|&v| v == 255), "{:?}", c.data);
     }
 
     #[test]
-    fn logits_go_through_a_sigmoid() {
-        let spec = matte_spec(Activation::Logit, Resize::Stretch);
-        let g = Geometry::new(8, 8, &spec).unwrap();
-        let mut raw = vec![-20.0f32; 64];
-        raw[0] = 0.0;
-        raw[1] = 20.0;
-        let c = postprocess(&raw, &shape8(), &spec, &g).unwrap();
-        assert_eq!(c.data[0], 128);
-        assert_eq!(c.data[1], 255);
-        assert_eq!(c.data[2], 0);
+    fn logits_become_smooth_coverage_in_the_photos_frame() {
+        let side = SUBJECT.mask_size;
+        // Selected on the left half, unselected on the right.
+        let logits: Vec<f32> = (0..side * side)
+            .map(|i| if i % side < side / 2 { 3.0 } else { -3.0 })
+            .collect();
+        let cov = postprocess(&logits, &SUBJECT, 300, 100).unwrap();
+        assert_eq!((cov.width, cov.height, cov.data.len()), (300, 100, 30000));
+        assert!(cov.data[50 * 300 + 10] > 235 && cov.data[50 * 300 + 290] < 20);
+        // The step is a monotone ramp, never a ringing or a staircase.
+        let row = &cov.data[50 * 300..51 * 300];
+        assert!(row.windows(2).all(|w| w[0] >= w[1]));
     }
 
     #[test]
-    fn output_is_not_min_max_normalized() {
-        let spec = matte_spec(Activation::Probability, Resize::Stretch);
-        let g = Geometry::new(8, 8, &spec).unwrap();
-        let c = postprocess(&[0.2f32; 64], &shape8(), &spec, &g).unwrap();
-        assert!(c.data.iter().all(|&v| v == 51));
+    fn a_damaged_mask_is_an_error() {
+        let side = SUBJECT.mask_size;
+        let mut logits = vec![0.0f32; side * side];
+        assert!(postprocess(&logits[1..], &SUBJECT, 8, 8).is_err());
+        logits[7] = f32::INFINITY;
+        assert!(postprocess(&logits, &SUBJECT, 8, 8).is_err());
     }
 
     #[test]
-    fn rejects_nan_infinity_range_and_shape() {
-        let spec = matte_spec(Activation::Probability, Resize::Stretch);
-        let g = Geometry::new(8, 8, &spec).unwrap();
-        let mut raw = vec![0.5f32; 64];
-        raw[10] = f32::NAN;
-        assert!(postprocess(&raw, &shape8(), &spec, &g).is_err());
-        raw[10] = f32::INFINITY;
-        assert!(postprocess(&raw, &shape8(), &spec, &g).is_err());
-        raw[10] = 1.5;
-        assert!(postprocess(&raw, &shape8(), &spec, &g).is_err());
-        raw[10] = -0.5;
-        assert!(postprocess(&raw, &shape8(), &spec, &g).is_err());
-        let ok = vec![0.5f32; 64];
-        assert!(postprocess(&ok, &[1, 1, 8, 7], &spec, &g).is_err());
-        assert!(postprocess(&ok, &[1, 8, 8], &spec, &g).is_err());
-        assert!(postprocess(&ok[..63], &shape8(), &spec, &g).is_err());
-        let logit = matte_spec(Activation::Logit, Resize::Stretch);
-        let mut raw = vec![0.0f32; 64];
-        raw[0] = f32::NEG_INFINITY;
-        assert!(postprocess(&raw, &shape8(), &logit, &g).is_err());
-    }
-
-    #[test]
-    fn tiny_probability_overshoot_is_clamped() {
-        let spec = matte_spec(Activation::Probability, Resize::Stretch);
-        let g = Geometry::new(8, 8, &spec).unwrap();
-        let c = postprocess(&[1.0005f32; 64], &shape8(), &spec, &g).unwrap();
-        assert!(c.data.iter().all(|&v| v == 255));
-    }
-
-    #[test]
-    fn upscaling_a_matte_is_smooth_and_bounded() {
-        let spec = matte_spec(Activation::Probability, Resize::Stretch);
-        let g = Geometry::new(64, 64, &spec).unwrap();
-        let raw: Vec<f32> = (0..64).map(|i| if i % 8 < 4 { 1.0 } else { 0.0 }).collect();
-        let c = postprocess(&raw, &shape8(), &spec, &g).unwrap();
-        let row = &c.data[..64];
-        assert!(
-            row.windows(2).all(|w| w[0] >= w[1]),
-            "monotone edge: {row:?}"
+    fn large_outputs_are_capped() {
+        assert_eq!(
+            output_size(&RgbImage {
+                width: 8192,
+                height: 4096,
+                data: vec![]
+            }),
+            (4096, 2048)
         );
-        assert!(
-            row[31] > 0 && row[31] < 255 || row[32] > 0 && row[32] < 255,
-            "soft transition"
-        );
+        assert_eq!(output_size(&image(30, 20)), (30, 20));
     }
 }

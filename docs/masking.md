@@ -10,22 +10,29 @@ this computer (below). Sky, Objects, People and Depth masks are not implemented 
 
 ## Select Subject and Select Background
 
-Two actions above the Create row make a mask from the photo's salient foreground
-(Background is the same selection inverted as a component, so adding a brush to it
-still adds coverage). They are also in each mask's Add, Subtract and Intersect menus.
-A result is one named mask and one History step with neutral sliders and its overlay
-shown; **Regenerate** on a selected generated component replaces only its raster.
-Clean up with ordinary Add or Subtract brush components. Subject means the model's
-foreground, possibly several objects, not one person; when it finds nothing the
-drawer says "No subject found" and nothing is added.
+Two actions above the Create row make a mask from an object you point at, with
+Segment Anything 2 running on this computer. They are also in each mask's Add,
+Subtract and Intersect menus. Click an action, then **click the subject on the photo**
+(or drag a box around it). The mask appears at once, with its overlay; click more of
+the subject to add to it, **Alt-click** something to leave it out, drag a new box to
+start from that box, **Start over** to forget the clicks, and **Done** or Escape to
+finish. Each click is a History step ("Select Subject", then "Refine Subject").
+Background is the same selection inverted as a component, so adding a brush to it
+still adds coverage. **Regenerate** on a selected generated component aims again at
+that component only. Clean up with ordinary Add or Subtract brush components.
 
-- **On this computer.** The first use asks to download the model (IS-Net general use,
-  179 MB, checked against a pinned SHA-256) or to import the file yourself; nothing
-  downloads at startup, on opening a catalog or the drawer, or at an update. It runs on
-  the CPU through ONNX Runtime, which ships with the app (beside the executable;
-  source builds put `libonnxruntime` in the data folder's `runtime/` or name it in
-  `RAWMAKASE_ORT_LIB`). No photo leaves the computer. **Remove selection model**
-  deletes it; saved masks keep working without it or the runtime.
+SAM 2 selects one object (or the parts you click) per prompt; it does not pick "the
+subject" by itself. For several people, click each of them.
+
+- **On this computer.** The first use asks to download the model (SAM 2.1 Hiera small,
+  184 MB in four files, each checked against a pinned SHA-256) or to import a folder
+  with the files; nothing downloads at startup, on opening a catalog or the drawer, or
+  at an update. It runs on the CPU through ONNX Runtime, which ships with the app
+  (beside the executable; source builds put `libonnxruntime` in the data folder's
+  `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the computer.
+  **Remove selection model** deletes it; saved masks keep working without it or the
+  runtime. Encoding a photo takes about a second the first time; further clicks on it
+  take a fraction of that.
 - **Catalog only.** The result is a raster stored in the catalog, so it needs a catalog
   photo. A catalog of the first format asks to **Upgrade catalog…**: a backup copy is
   written beside it, then it becomes format version 2, which older releases refuse.
@@ -34,13 +41,15 @@ drawer says "No subject found" and nothing is added.
   rendering (no tone, colour, profile or geometry edits; spots and red eye included),
   about 1280 pixels on the long side. Sliders and crop edits during or after selecting
   do not matter; changing spots or red eye meanwhile discards the result, as does any
-  change to the masks' structure (adding, removing, Undo).
+  change to the masks' structure (adding, removing, Undo). The mask's edge is then
+  moved onto the photo's own edge (a guided filter) so a local adjustment through it
+  leaves no halo.
 - **Not copied:** masks made from a selection belong to their photo. Copy, Paste and
   Sync leave them out (and say so), and presets cannot hold them.
 - **Limits:** one 4096-pixel, 8-bit raster per selection; rasters are never
   garbage-collected, so a catalog only grows with them. Grow/shrink and feather are
-  not implemented. No calibrated "faint result" threshold: only an exactly empty
-  result counts as no subject.
+  not implemented. Fine hair is as sharp as SAM 2's 256-pixel mask and the edge
+  refinement make it, not a matting model's.
 
 ## Using it
 

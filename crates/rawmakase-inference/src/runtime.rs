@@ -15,11 +15,11 @@ use std::time::Duration;
 use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{RunOptions, Session as OrtSession};
-use ort::value::{TensorElementType, TensorRef, ValueType};
+use ort::value::TensorRef;
 
 use crate::error::InferenceError;
 use crate::manifest::{ModelSpec, SUBJECT};
-use crate::process::{self, Coverage, RgbImage};
+use crate::process::{self, Coverage, Prompt, RgbImage};
 
 /// Environment variable naming the ONNX Runtime library file to load.
 pub const RUNTIME_ENV: &str = "RAWMAKASE_ORT_LIB";
@@ -33,7 +33,7 @@ pub const PINNED_RUNTIME_VERSION: &str = "1.23.2";
 /// How often a running inference polls the caller's cancel flag.
 const CANCEL_POLL: Duration = Duration::from_millis(15);
 
-/// Upper bound on the intra-op threads: beyond this the Swin/IS-Net kernels
+/// Upper bound on the intra-op threads: beyond this the encoder kernels
 /// stop scaling and only compete with the UI and render threads.
 const MAX_THREADS: usize = 8;
 
@@ -87,38 +87,62 @@ pub fn default_threads() -> usize {
         .clamp(1, MAX_THREADS)
 }
 
-/// Namespace for loading the automatic subject model.
+/// Namespace for loading the selection model.
 pub struct Subject;
 
 impl Subject {
     /// Opens the runtime (searching [`RUNTIME_ENV`] and the package locations)
-    /// and the model file at `model_path`.
-    pub fn load(model_path: &Path) -> Result<Session, InferenceError> {
-        Self::load_with(model_path, &LoadOptions::default())
+    /// and the model in folder `dir`.
+    pub fn load(dir: &Path) -> Result<Session, InferenceError> {
+        Self::load_with(dir, &LoadOptions::default())
     }
 
-    pub fn load_with(model_path: &Path, options: &LoadOptions) -> Result<Session, InferenceError> {
+    pub fn load_with(dir: &Path, options: &LoadOptions) -> Result<Session, InferenceError> {
         load_runtime(options.runtime_library.as_deref())?;
         let spec = SUBJECT;
-        check_model_file(model_path, &spec)?;
+        check_files(dir, &spec)?;
         let threads = options.threads.unwrap_or_else(default_threads).max(1);
         // The runtime API panics on internal misuse; a panic must never reach
         // the app from a background job.
-        let session = catch_unwind(AssertUnwindSafe(|| {
-            build_session(model_path, &spec, threads)
+        let (encoder, decoder) = catch_unwind(AssertUnwindSafe(|| {
+            Ok::<_, InferenceError>((
+                build_session(&dir.join(spec.encoder_file), threads)?,
+                build_session(&dir.join(spec.decoder_file), threads)?,
+            ))
         }))
         .map_err(|_| {
             InferenceError::Failed("ONNX Runtime panicked while loading the model".into())
         })??;
-        Ok(Session { session, spec })
+        Ok(Session {
+            encoder,
+            decoder,
+            spec,
+        })
     }
 }
 
-/// A loaded model. Not `Sync`: one inference at a time per session, which is
-/// also what ONNX Runtime's `Run` expects here. Dropping it releases the
-/// model's memory.
+/// What the image encoder made of one photo: reused for every click on it. The
+/// photo itself is kept for the edge refinement of each result.
+pub struct Embedding {
+    features: [([usize; 4], Vec<f32>); 3],
+    image: RgbImage,
+}
+impl Embedding {
+    /// Bytes held.
+    pub fn bytes(&self) -> usize {
+        self.features
+            .iter()
+            .map(|(_, v)| v.len() * 4)
+            .sum::<usize>()
+            + self.image.data.len()
+    }
+}
+
+/// A loaded model. Not `Sync`: one run at a time per session, which is also what
+/// ONNX Runtime's `Run` expects here. Dropping it releases the model's memory.
 pub struct Session {
-    session: OrtSession,
+    encoder: OrtSession,
+    decoder: OrtSession,
     spec: ModelSpec,
 }
 
@@ -127,77 +151,185 @@ impl Session {
         &self.spec
     }
 
-    /// Computes the subject coverage of `image`, at the image's own size (capped
-    /// at [`process::MAX_COVERAGE_SIDE`]).
+    /// Runs the image encoder on `image`. This is the expensive step (about a second);
+    /// what it returns serves any number of [`Session::segment`] calls on the photo.
     ///
-    /// `cancel` is checked before preprocessing, polled while the network runs
-    /// (which terminates the run) and checked again before the result is
-    /// returned, so a raised flag never yields a coverage.
-    pub fn select(
+    /// `cancel` is checked before and polled while the network runs (which terminates
+    /// the run), so a raised flag never yields an embedding.
+    pub fn embed(
         &mut self,
         image: &RgbImage,
         cancel: &AtomicBool,
-    ) -> Result<Coverage, InferenceError> {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(InferenceError::Cancelled);
-        }
-        let (tensor, geometry) = process::preprocess(image, &self.spec)?;
-        if cancel.load(Ordering::Relaxed) {
-            return Err(InferenceError::Cancelled);
-        }
+    ) -> Result<Embedding, InferenceError> {
+        cancelled(cancel)?;
+        let tensor = process::preprocess(image, &self.spec)?;
+        cancelled(cancel)?;
         let size = self.spec.input_size;
-        let input =
-            TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..])).map_err(failed)?;
-        let run_options = RunOptions::new().map_err(failed)?;
-        let spec = self.spec;
-        let session = &mut self.session;
-        let done = AtomicBool::new(false);
-        let (coverage, shape, data) = std::thread::scope(|scope| {
-            scope.spawn(|| {
-                while !done.load(Ordering::Acquire) {
-                    if cancel.load(Ordering::Relaxed) {
-                        let _ = run_options.terminate();
-                        return;
-                    }
-                    std::thread::sleep(CANCEL_POLL);
-                }
-            });
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                let outputs = session
-                    .run_with_options(ort::inputs![spec.input_name => input], &run_options)
-                    .map_err(failed)?;
-                let output = outputs.get(spec.output_name).ok_or_else(|| {
-                    InferenceError::ModelInvalid(format!(
-                        "the model has no output `{}`",
-                        spec.output_name
-                    ))
+        let encoder = &mut self.encoder;
+        let features = guarded(cancel, |options| {
+            let input = TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..]))
+                .map_err(failed)?;
+            let outputs = encoder
+                .run_with_options(ort::inputs!["pixel_values" => input], options)
+                .map_err(failed)?;
+            let mut features = Vec::with_capacity(3);
+            for index in 0..3 {
+                let name = format!("image_embeddings.{index}");
+                let output = outputs.get(name.as_str()).ok_or_else(|| {
+                    InferenceError::ModelInvalid(format!("the encoder has no output `{name}`"))
                 })?;
                 let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
-                Ok::<_, InferenceError>((
-                    shape.iter().copied().collect::<Vec<i64>>(),
-                    data.to_vec(),
-                ))
-            }));
-            done.store(true, Ordering::Release);
-            match result {
-                Ok(Ok((shape, data))) => (Ok(()), shape, data),
-                Ok(Err(e)) => (Err(e), Vec::new(), Vec::new()),
-                Err(_) => (
-                    Err(InferenceError::Failed(
-                        "ONNX Runtime panicked during inference".into(),
-                    )),
-                    Vec::new(),
-                    Vec::new(),
-                ),
+                features.push((shape.iter().copied().collect::<Vec<i64>>(), data.to_vec()));
+            }
+            Ok(features)
+        })?;
+        cancelled(cancel)?;
+        let mut checked = Vec::with_capacity(3);
+        for (shape, data) in features {
+            let dims: Option<[usize; 4]> = (shape.len() == 4 && shape[0] == 1)
+                .then(|| {
+                    let mut dims = [0usize; 4];
+                    for (out, d) in dims.iter_mut().zip(&shape) {
+                        *out = usize::try_from(*d).ok()?;
+                    }
+                    Some(dims)
+                })
+                .flatten();
+            let count = dims.and_then(|d| d.iter().try_fold(1usize, |n, d| n.checked_mul(*d)));
+            match dims {
+                Some(dims) if count == Some(data.len()) => checked.push((dims, data)),
+                _ => {
+                    return Err(InferenceError::OutputInvalid(format!(
+                        "an encoder output has shape {shape:?}"
+                    )));
+                }
+            }
+        }
+        let features: [([usize; 4], Vec<f32>); 3] = checked
+            .try_into()
+            .map_err(|_| InferenceError::ModelInvalid("the encoder outputs changed".into()))?;
+        Ok(Embedding {
+            features,
+            image: image.clone(),
+        })
+    }
+
+    /// The mask for `prompt` on an embedded photo, as 8-bit coverage at the photo's
+    /// own size (capped at [`process::MAX_COVERAGE_SIDE`]), its edge moved onto the
+    /// photo's. All zero when the model finds no object at the prompt.
+    pub fn segment(
+        &mut self,
+        embedding: &Embedding,
+        prompt: &Prompt,
+        cancel: &AtomicBool,
+    ) -> Result<Coverage, InferenceError> {
+        cancelled(cancel)?;
+        prompt.validate()?;
+        let (points, labels, bounds) = prompt.tensors(&self.spec);
+        let n = labels.len();
+        let boxes = bounds.len() / 4;
+        let decoder = &mut self.decoder;
+        let (logits, scores, object) = guarded(cancel, |options| {
+            let [f0, f1, f2] = &embedding.features;
+            let outputs = decoder
+                .run_with_options(
+                    ort::inputs![
+                        "input_points" => TensorRef::from_array_view(([1usize, 1, n, 2], &points[..])).map_err(failed)?,
+                        "input_labels" => TensorRef::from_array_view(([1usize, 1, n], &labels[..])).map_err(failed)?,
+                        "input_boxes" => TensorRef::from_array_view(([1usize, boxes, 4], &bounds[..])).map_err(failed)?,
+                        "image_embeddings.0" => view(f0)?,
+                        "image_embeddings.1" => view(f1)?,
+                        "image_embeddings.2" => view(f2)?,
+                    ],
+                    options,
+                )
+                .map_err(failed)?;
+            let get = |name: &str| -> Result<Vec<f32>, InferenceError> {
+                let output = outputs.get(name).ok_or_else(|| {
+                    InferenceError::ModelInvalid(format!("the decoder has no output `{name}`"))
+                })?;
+                let (_, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
+                Ok(data.to_vec())
+            };
+            Ok((
+                get("pred_masks")?,
+                get("iou_scores")?,
+                get("object_score_logits")?,
+            ))
+        })?;
+        cancelled(cancel)?;
+        let side = self.spec.mask_size;
+        if scores.len() != 3 || logits.len() != 3 * side * side || object.len() != 1 {
+            return Err(InferenceError::OutputInvalid(format!(
+                "the decoder returned {} masks of {} values",
+                scores.len(),
+                logits.len()
+            )));
+        }
+        let (width, height) = process::output_size(&embedding.image);
+        if object[0] < 0.0 || scores.iter().any(|s| !s.is_finite()) {
+            return Ok(Coverage {
+                width,
+                height,
+                data: vec![0; width * height],
+            });
+        }
+        let best = (0..3)
+            .max_by(|a, b| scores[*a].total_cmp(&scores[*b]))
+            .unwrap_or(0);
+        let mut coverage = process::postprocess(
+            &logits[best * side * side..(best + 1) * side * side],
+            &self.spec,
+            width,
+            height,
+        )?;
+        crate::refine::refine(&mut coverage, &embedding.image);
+        Ok(coverage)
+    }
+}
+
+fn view(f: &([usize; 4], Vec<f32>)) -> Result<TensorRef<'_, f32>, InferenceError> {
+    TensorRef::from_array_view((f.0, &f.1[..])).map_err(failed)
+}
+
+fn cancelled(cancel: &AtomicBool) -> Result<(), InferenceError> {
+    if cancel.load(Ordering::Relaxed) {
+        Err(InferenceError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+/// Runs `work` with a watcher that terminates the run when `cancel` is raised, and a
+/// panic in the runtime turned into an error.
+fn guarded<T>(
+    cancel: &AtomicBool,
+    work: impl FnOnce(&RunOptions) -> Result<T, InferenceError>,
+) -> Result<T, InferenceError> {
+    let options = RunOptions::new().map_err(failed)?;
+    let done = AtomicBool::new(false);
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(Ordering::Acquire) {
+                if cancel.load(Ordering::Relaxed) {
+                    let _ = options.terminate();
+                    return;
+                }
+                std::thread::sleep(CANCEL_POLL);
             }
         });
-        if cancel.load(Ordering::Relaxed) {
-            return Err(InferenceError::Cancelled);
-        }
-        coverage?;
-        let mut coverage = process::postprocess(&data, &shape, &self.spec, &geometry)?;
-        crate::refine::refine(&mut coverage, image);
-        Ok(coverage)
+        let result = catch_unwind(AssertUnwindSafe(|| work(&options)));
+        done.store(true, Ordering::Release);
+        result
+    });
+    if cancel.load(Ordering::Relaxed) {
+        return Err(InferenceError::Cancelled);
+    }
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(InferenceError::Failed(
+            "ONNX Runtime panicked during inference".into(),
+        )),
     }
 }
 
@@ -205,33 +337,25 @@ fn failed(error: impl std::fmt::Display) -> InferenceError {
     InferenceError::Failed(error.to_string())
 }
 
-fn check_model_file(path: &Path, spec: &ModelSpec) -> Result<(), InferenceError> {
-    let meta = std::fs::metadata(path).map_err(|e| {
-        InferenceError::ModelInvalid(format!("cannot read {}: {e}", path.display()))
-    })?;
-    if !meta.is_file() {
-        return Err(InferenceError::ModelInvalid(format!(
-            "{} is not a file",
-            path.display()
-        )));
-    }
-    if meta.len() != spec.size_bytes {
-        return Err(InferenceError::ModelInvalid(format!(
-            "{} is {} bytes, expected {}",
-            path.display(),
-            meta.len(),
-            spec.size_bytes
-        )));
+fn check_files(dir: &Path, spec: &ModelSpec) -> Result<(), InferenceError> {
+    for file in spec.files {
+        let path = dir.join(file.name);
+        let meta = std::fs::metadata(&path).map_err(|e| {
+            InferenceError::ModelInvalid(format!("cannot read {}: {e}", path.display()))
+        })?;
+        if !meta.is_file() || meta.len() != file.size_bytes {
+            return Err(InferenceError::ModelInvalid(format!(
+                "{} is not the expected {} bytes",
+                path.display(),
+                file.size_bytes
+            )));
+        }
     }
     Ok(())
 }
 
-fn build_session(
-    model_path: &Path,
-    spec: &ModelSpec,
-    threads: usize,
-) -> Result<OrtSession, InferenceError> {
-    let session = OrtSession::builder()
+fn build_session(model_path: &Path, threads: usize) -> Result<OrtSession, InferenceError> {
+    OrtSession::builder()
         .map_err(failed)?
         .with_optimization_level(GraphOptimizationLevel::All)
         .map_err(failed)?
@@ -241,8 +365,6 @@ fn build_session(
         .map_err(failed)?
         .with_intra_op_spinning(false)
         .map_err(failed)?
-        // Fixed-shape model, one run at a time: the memory-pattern planner and
-        // the CPU arena only keep memory around between runs.
         .with_memory_pattern(false)
         .map_err(failed)?
         .with_execution_providers([ep::CPU::default().with_arena_allocator(false).build()])
@@ -250,48 +372,7 @@ fn build_session(
         .commit_from_file(model_path)
         .map_err(|e| {
             InferenceError::ModelInvalid(format!("cannot load {}: {e}", model_path.display()))
-        })?;
-    validate_tensors(&session, spec)?;
-    Ok(session)
-}
-
-fn validate_tensors(session: &OrtSession, spec: &ModelSpec) -> Result<(), InferenceError> {
-    let size = spec.input_size as i64;
-    let expect = |what: &str, ty: &ValueType, channels: i64| -> Result<(), InferenceError> {
-        match ty {
-            ValueType::Tensor {
-                ty: TensorElementType::Float32,
-                shape,
-                ..
-            } if shape.iter().copied().collect::<Vec<_>>() == [1, channels, size, size] => Ok(()),
-            other => Err(InferenceError::ModelInvalid(format!(
-                "{what} is {other:?}, expected float32 [1, {channels}, {size}, {size}]"
-            ))),
-        }
-    };
-    let inputs = session.inputs();
-    let [input] = inputs else {
-        return Err(InferenceError::ModelInvalid(format!(
-            "the model has {} inputs, expected 1",
-            inputs.len()
-        )));
-    };
-    if input.name() != spec.input_name {
-        return Err(InferenceError::ModelInvalid(format!(
-            "input is `{}`, expected `{}`",
-            input.name(),
-            spec.input_name
-        )));
-    }
-    expect("the input", input.dtype(), 3)?;
-    let output = session
-        .outputs()
-        .iter()
-        .find(|o| o.name() == spec.output_name)
-        .ok_or_else(|| {
-            InferenceError::ModelInvalid(format!("the model has no output `{}`", spec.output_name))
-        })?;
-    expect("the matte output", output.dtype(), 1)
+        })
 }
 
 /// Opens the ONNX Runtime library if it is not open yet. The first successful
@@ -387,19 +468,20 @@ mod tests {
     }
 
     #[test]
-    fn a_wrong_sized_model_file_is_invalid_before_the_runtime_is_touched() {
+    fn a_missing_or_wrong_sized_model_file_is_invalid_before_the_runtime_is_touched() {
         let dir =
             std::env::temp_dir().join(format!("rawmakase-inference-size-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let model = dir.join(SUBJECT.file_name);
-        std::fs::write(&model, b"short").unwrap();
-        let err = check_model_file(&model, &SUBJECT).unwrap_err();
-        std::fs::remove_dir_all(&dir).ok();
-        assert!(matches!(err, InferenceError::ModelInvalid(_)));
         assert!(matches!(
-            check_model_file(&dir.join("absent.onnx"), &SUBJECT),
+            check_files(&dir, &SUBJECT),
             Err(InferenceError::ModelInvalid(_))
         ));
+        for file in SUBJECT.files {
+            std::fs::write(dir.join(file.name), b"short").unwrap();
+        }
+        let err = check_files(&dir, &SUBJECT).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(matches!(err, InferenceError::ModelInvalid(_)));
     }
 
     #[test]

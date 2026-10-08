@@ -178,7 +178,10 @@ fn failures_and_cancellation_record_no_edit() {
         e.selection.failure.as_ref().map(|f| &f.1),
         Some(&Failure::NoSubject)
     );
-    assert_eq!(e.status, "No subject found");
+    assert_eq!(
+        e.status,
+        "Nothing selected there; click on the subject itself"
+    );
     assert!(e.selection.running().is_none());
 
     e.selection.failure = None;
@@ -331,7 +334,7 @@ fn regeneration_replaces_only_the_raster() {
     );
     assert_eq!(
         e.document.edit.history().steps().0.last().unwrap().name,
-        "Regenerate Subject"
+        "Refine Subject"
     );
 
     // A failed regeneration leaves the old result in place.
@@ -460,6 +463,18 @@ fn the_drawer_draws_in_every_state_a_selection_can_be_in() {
     e.selection.failure = Some((SUBJECT, Failure::NoSubject));
     draw_masking_panel(e);
     e.selection.failure = None;
+    e.selection.prompting = Some(Prompting {
+        request: SUBJECT,
+        points: vec![Point {
+            x: 0.5,
+            y: 0.5,
+            positive: true,
+        }],
+        bounds: Some([0.1, 0.1, 0.9, 0.9]),
+        applied: None,
+    });
+    draw_masking_panel(e);
+    e.selection.prompting = None;
     e.selection.prompt = Some(Prompt::Model(SUBJECT));
     draw_masking_panel(e);
     e.selection.prompt = Some(Prompt::Upgrade(SUBJECT));
@@ -499,6 +514,14 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
             image: image.clone(),
             recipe: e.document.edit.recipe().clone(),
             model,
+            prompt: rawmakase_inference::Prompt {
+                points: vec![rawmakase_inference::Point {
+                    x: 0.5,
+                    y: 0.62,
+                    positive: true,
+                }],
+                bounds: None,
+            },
         },
         e.tx.clone(),
         e.context.clone(),
@@ -538,4 +561,56 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
     assert!((0.01..0.9).contains(&share), "mask covers {share}");
     // And it survives a save.
     assert!(e.flush());
+}
+
+#[test]
+fn aiming_starts_with_nothing_and_each_click_refines_the_same_mask() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    e.selection.prompting = Some(Prompting {
+        request: SUBJECT,
+        points: Vec::new(),
+        bounds: None,
+        applied: None,
+    });
+    // Outside the photo, and a leave-out click before anything is selected, do nothing.
+    e.prompt_click([1.5, 0.5], true);
+    e.prompt_click([0.5, 0.5], false);
+    assert!(e.selection.running().is_none());
+    assert!(e.selection.prompting.as_ref().unwrap().points.is_empty());
+    // A first result makes the mask and remembers it; later ones replace its raster.
+    let g = begin(e, SUBJECT);
+    finish(e, g, Ok(generated(110)));
+    assert_eq!(
+        e.selection.prompting.as_ref().unwrap().applied,
+        Some((0, 0))
+    );
+    let request = Request {
+        feature: Feature::Subject,
+        target: Target::Regenerate {
+            mask: 0,
+            component: 0,
+        },
+    };
+    let g = begin(e, request);
+    finish(e, g, Ok(generated(111)));
+    assert_eq!(e.document.edit.recipe().masks.len(), 1);
+    assert_eq!(
+        e.document.edit.history().steps().0.last().unwrap().name,
+        "Refine Subject"
+    );
+    // Done ends aiming and leaves the mask; leaving the photo does too.
+    e.selection.end_prompting();
+    assert!(e.selection.prompting.is_none() && e.document.edit.recipe().masks.len() == 1);
+    // Boxes too small to be a drag are ignored.
+    e.selection.prompting = Some(Prompting {
+        request: SUBJECT,
+        points: Vec::new(),
+        bounds: None,
+        applied: None,
+    });
+    e.prompt_box([0.5, 0.5], [0.501, 0.501]);
+    assert!(e.selection.prompting.as_ref().unwrap().bounds.is_none());
+    e.selection.clear_document();
+    assert!(e.selection.prompting.is_none());
 }

@@ -4,7 +4,7 @@
 use super::super::task::Stopping;
 use super::super::worker::Event;
 use eframe::egui;
-use rawmakase_inference::SUBJECT;
+use rawmakase_inference::{ModelFile, SUBJECT};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -32,7 +32,7 @@ pub(crate) struct Installer {
 impl Default for Installer {
     fn default() -> Self {
         Self {
-            installed: is_installed(&model_path()),
+            installed: is_installed(&model_dir()),
             progress: None,
             thread: None,
             removing: false,
@@ -42,33 +42,34 @@ impl Default for Installer {
 
 /// Where the model is kept: under this computer's own data folder, in a folder named
 /// for the model and its contract version, so a replacement model sits beside it.
-fn model_dir() -> PathBuf {
+pub(super) fn model_dir() -> PathBuf {
     crate::storage::local_data_dir()
         .join("models")
         .join(format!("{}-v{}", SUBJECT.id, SUBJECT.version))
 }
-fn model_path() -> PathBuf {
-    model_dir().join(SUBJECT.file_name)
-}
 /// Where the app looks for a runtime library it did not come with.
-pub(in crate::app) fn runtime_dir() -> PathBuf {
+pub(super) fn runtime_dir() -> PathBuf {
     crate::storage::local_data_dir().join("runtime")
 }
-fn is_installed(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == SUBJECT.size_bytes)
+fn is_installed(dir: &Path) -> bool {
+    SUBJECT.files.iter().all(|f| has(dir, f))
+}
+fn has(dir: &Path, file: &ModelFile) -> bool {
+    std::fs::metadata(dir.join(file.name)).is_ok_and(|m| m.is_file() && m.len() == file.size_bytes)
 }
 
 /// The megabytes the drawer quotes.
-pub(in crate::app) fn download_megabytes() -> u64 {
-    SUBJECT.size_bytes.div_ceil(1_000_000)
+pub(super) fn download_megabytes() -> u64 {
+    SUBJECT.total_bytes().div_ceil(1_000_000)
 }
 
 impl Installer {
     pub(in crate::app) fn installed(&self) -> bool {
         self.installed && !self.removing
     }
+    /// The folder holding the model's files.
     pub(in crate::app) fn path(&self) -> Option<PathBuf> {
-        self.installed().then(model_path)
+        self.installed().then(model_dir)
     }
     pub(in crate::app) fn busy(&self) -> bool {
         self.progress.is_some() || self.removing
@@ -77,7 +78,7 @@ impl Installer {
     pub(in crate::app) fn progress(&self) -> Option<(u64, u64)> {
         self.progress
             .as_ref()
-            .map(|p| (p.done.load(Ordering::Relaxed), SUBJECT.size_bytes))
+            .map(|p| (p.done.load(Ordering::Relaxed), SUBJECT.total_bytes()))
     }
     pub(in crate::app) fn cancel(&mut self) {
         if let Some(p) = &self.progress {
@@ -89,7 +90,7 @@ impl Installer {
         self.progress = None;
         self.thread = None;
         if ok {
-            self.installed = is_installed(&model_path());
+            self.installed = is_installed(&model_dir());
         }
     }
     /// Starts fetching the model, or copying `import`; one install at a time.
@@ -162,53 +163,62 @@ impl Installer {
     }
 }
 
-/// Fetches or copies the model into a temporary file beside its final place, checks
-/// it and publishes it by renaming.
+/// Fetches or copies each file of the model into a temporary file beside its final
+/// place, checks it and publishes it by renaming. `import` is a folder holding the
+/// files. A file already in place with the right size was checked when it was
+/// published, so a retry fetches only what is missing.
 fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     let dir = model_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     remove_abandoned(&dir);
-    let part = dir.join(format!(
-        ".{}.part-{}",
-        SUBJECT.file_name,
-        std::process::id()
-    ));
-    let result = (|| {
-        let mut file = std::fs::File::options()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&part)
-            .map_err(|e| format!("could not write {}: {e}", part.display()))?;
-        let digest = match import {
-            Some(path) => {
-                let source = std::fs::File::open(path)
-                    .map_err(|e| format!("could not read {}: {e}", path.display()))?;
-                copy_checked(source, &mut file, progress)?
-            }
-            None => download(&mut file, progress)?,
-        };
-        if digest != SUBJECT.sha256 {
-            return Err(match import {
-                Some(_) => "that file is not the selection model this release uses".to_string(),
-                None => "the download does not match its checksum".to_string(),
-            });
+    // Bytes of files already there count as done.
+    let mut finished = 0u64;
+    for file in SUBJECT.files {
+        if has(&dir, file) {
+            finished += file.size_bytes;
+            progress.done.store(finished, Ordering::Relaxed);
+            continue;
         }
-        file.sync_all().map_err(|e| e.to_string())?;
-        drop(file);
-        let target = model_path();
-        // Windows will not rename over a file; a model that failed its size check
-        // is the only thing that can be there.
-        let _ = std::fs::remove_file(&target);
-        std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
-        let _ = crate::storage::sync_dir(&dir);
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&part);
+        let part = dir.join(format!(".{}.part-{}", file.name, std::process::id()));
+        let result = (|| {
+            let mut out = std::fs::File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&part)
+                .map_err(|e| format!("could not write {}: {e}", part.display()))?;
+            let digest = match import {
+                Some(folder) => {
+                    let path = folder.join(file.name);
+                    let source = std::fs::File::open(&path)
+                        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+                    copy_checked(source, &mut out, progress, file, finished)?
+                }
+                None => download(&mut out, progress, file, finished)?,
+            };
+            if digest != file.sha256 {
+                return Err(match import {
+                    Some(_) => format!("{} is not the file this release uses", file.name),
+                    None => format!("the download of {} does not match its checksum", file.name),
+                });
+            }
+            out.sync_all().map_err(|e| e.to_string())?;
+            drop(out);
+            let target = dir.join(file.name);
+            // Windows will not rename over a file; only a damaged one can be there.
+            let _ = std::fs::remove_file(&target);
+            std::fs::rename(&part, &target).map_err(|e| e.to_string())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&part);
+        }
+        result?;
+        finished += file.size_bytes;
+        progress.done.store(finished, Ordering::Relaxed);
     }
-    result
+    let _ = crate::storage::sync_dir(&dir);
+    Ok(())
 }
 
 /// Removes partial files a crashed install left, never one a running instance owns:
@@ -232,12 +242,15 @@ fn remove_abandoned(dir: &Path) {
     }
 }
 
-/// Copies at most the model's size from `source`, hashing as it goes. Stops at
-/// cancellation, and at one byte too many.
+/// Copies at most `file`'s size from `source`, hashing as it goes. Stops at
+/// cancellation, and at one byte too many. `before` is the bytes of earlier files,
+/// for the shared progress.
 fn copy_checked(
     mut source: impl Read,
     out: &mut impl Write,
     progress: &Progress,
+    file: &ModelFile,
+    before: u64,
 ) -> Result<String, String> {
     let mut sha = Sha256::new();
     let mut buffer = vec![0u8; 256 << 10];
@@ -251,27 +264,32 @@ fn copy_checked(
             break;
         }
         total += n as u64;
-        if total > SUBJECT.size_bytes {
-            return Err("the file is larger than the selection model".into());
+        if total > file.size_bytes {
+            return Err(format!("{} is larger than expected", file.name));
         }
         sha.update(&buffer[..n]);
         out.write_all(&buffer[..n]).map_err(|e| match e.kind() {
             std::io::ErrorKind::StorageFull => "the disk is full".to_string(),
             _ => e.to_string(),
         })?;
-        progress.done.store(total, Ordering::Relaxed);
+        progress.done.store(before + total, Ordering::Relaxed);
     }
-    if total != SUBJECT.size_bytes {
-        return Err("the file is smaller than the selection model".into());
+    if total != file.size_bytes {
+        return Err(format!("{} is smaller than expected", file.name));
     }
     let digest = sha.finalize();
     Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Fetches the model from the host its manifest pins, trying again on network
-/// errors a few times.
-fn download(out: &mut std::fs::File, progress: &Progress) -> Result<String, String> {
-    let url = source_url();
+/// Fetches `file` from the host its manifest pins, trying again on network errors a
+/// few times.
+fn download(
+    out: &mut std::fs::File,
+    progress: &Progress,
+    file: &ModelFile,
+    before: u64,
+) -> Result<String, String> {
+    let url = SUBJECT.url(file);
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(20)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -294,11 +312,11 @@ fn download(out: &mut std::fs::File, progress: &Progress) -> Result<String, Stri
         use std::io::{Seek, SeekFrom};
         out.set_len(0).map_err(|e| e.to_string())?;
         out.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-        progress.done.store(0, Ordering::Relaxed);
+        progress.done.store(before, Ordering::Relaxed);
         match agent.get(&url).call() {
             Ok(mut response) => {
                 let reader = response.body_mut().as_reader();
-                match copy_checked(reader, out, progress) {
+                match copy_checked(reader, out, progress, file, before) {
                     Ok(digest) => return Ok(digest),
                     // A stopped or full disk is final; a dropped connection is not.
                     Err(e) if e == "Cancelled" || e.contains("disk is full") => return Err(e),
@@ -306,7 +324,7 @@ fn download(out: &mut std::fs::File, progress: &Progress) -> Result<String, Stri
                 }
             }
             Err(ureq::Error::StatusCode(code)) if (400..500).contains(&code) && code != 429 => {
-                return Err(format!("the host answered {code}"));
+                return Err(format!("the host answered {code} for {}", file.name));
             }
             Err(e) => last = e.to_string(),
         }
@@ -314,40 +332,54 @@ fn download(out: &mut std::fs::File, progress: &Progress) -> Result<String, Stri
     Err(format!("could not download the model: {last}"))
 }
 
-/// The pinned Hugging Face file once the maintainer has published it; until then
-/// the upstream release the manifest names, which the checksum holds to the same
-/// bytes.
-fn source_url() -> String {
-    if rawmakase_inference::ModelSpec::is_published() {
-        SUBJECT.pinned_url()
-    } else {
-        SUBJECT.upstream_url.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const FILE: ModelFile = ModelFile {
+        name: "x.onnx",
+        size_bytes: 3,
+        sha256: "",
+    };
+
     #[test]
     fn copying_checks_size_and_digest_and_stops_when_asked() {
         let progress = Progress::default();
-        // Too short.
-        let mut sink = Vec::new();
-        assert!(copy_checked(&b"abc"[..], &mut sink, &progress).is_err());
+        // Too short, then too long.
+        assert!(copy_checked(&b"ab"[..], &mut Vec::new(), &progress, &FILE, 0).is_err());
+        assert!(copy_checked(&b"abcd"[..], &mut Vec::new(), &progress, &FILE, 0).is_err());
+        // The right bytes give their SHA-256, and progress counts earlier files too.
+        let digest = copy_checked(&b"abc"[..], &mut Vec::new(), &progress, &FILE, 10).unwrap();
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(progress.done.load(Ordering::Relaxed), 13);
         // Cancelled before the first chunk.
         progress.cancel.store(true, Ordering::Relaxed);
-        let error = copy_checked(&b"abc"[..], &mut Vec::new(), &progress).unwrap_err();
+        let error = copy_checked(&b"abc"[..], &mut Vec::new(), &progress, &FILE, 0).unwrap_err();
         assert_eq!(error, "Cancelled");
     }
 
     #[test]
     fn the_install_location_names_the_model_and_its_version() {
-        let path = model_path();
-        assert!(path.ends_with(format!(
-            "models/{}-v{}/{}",
-            SUBJECT.id, SUBJECT.version, SUBJECT.file_name
-        )));
+        assert!(model_dir().ends_with(format!("models/{}-v{}", SUBJECT.id, SUBJECT.version)));
         assert!(download_megabytes() > 100);
+    }
+
+    #[test]
+    fn a_model_is_installed_only_when_every_file_is_there_with_its_size() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_installed(dir.path()));
+        for file in SUBJECT.files {
+            let f = std::fs::File::create(dir.path().join(file.name)).unwrap();
+            f.set_len(file.size_bytes).unwrap();
+        }
+        assert!(is_installed(dir.path()));
+        std::fs::File::create(dir.path().join(SUBJECT.files[1].name))
+            .unwrap()
+            .set_len(5)
+            .unwrap();
+        assert!(!is_installed(dir.path()));
     }
 }

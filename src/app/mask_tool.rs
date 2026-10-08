@@ -235,6 +235,10 @@ impl Editor {
                 brush.size = (brush.size * 1.15).min(0.5);
             }
         }
+        if pressed(&[Key::Escape]) && self.selection.prompting.is_some() {
+            self.selection.end_prompting();
+            return;
+        }
         if pressed(&[Key::O]) && !i.modifiers.shift {
             t.overlay ^= true;
         }
@@ -275,6 +279,9 @@ impl Editor {
                 (p.y - rect.top()) / rect.height(),
             )
         };
+        if self.selection.prompting.is_some() {
+            return self.prompt_overlay(ui, response, rect, &to_screen, &to_image);
+        }
         let radius_on_screen = |p: [f32; 2], r: f32| {
             let [rx, ry] = map.view_radius(p, r);
             (rx * rect.width()).max(ry * rect.height())

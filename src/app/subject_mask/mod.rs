@@ -15,6 +15,7 @@ use crate::model::masks::{
     MaskComponent, MaskGroup, MaskOp, MaskShape,
 };
 use crate::model::recipe::Recipe;
+use rawmakase_inference::{Point, Prompt as ModelPrompt};
 use std::hash::{Hash, Hasher};
 
 pub(super) use models::Installer;
@@ -72,7 +73,7 @@ impl Failure {
     fn message(&self) -> String {
         match self {
             Self::Cancelled => "Cancelled".into(),
-            Self::NoSubject => "No subject found".into(),
+            Self::NoSubject => "Nothing selected there; click on the subject itself".into(),
             Self::ModelMissing => "The selection model is not installed".into(),
             Self::RuntimeUnavailable(why) => format!("Selection is unavailable here: {why}"),
             Self::Failed(why) => format!("Selection failed: {why}"),
@@ -179,8 +180,22 @@ pub(super) enum Prompt {
     Upgrade(Request),
 }
 
+/// A selection being aimed: the clicks and box so far. The first one makes the mask;
+/// each further one refines that same mask until the user is done.
+pub(super) struct Prompting {
+    pub(super) request: Request,
+    pub(super) points: Vec<Point>,
+    pub(super) bounds: Option<[f32; 4]>,
+    /// The mask and component the first result made (or the one being regenerated).
+    applied: Option<(usize, usize)>,
+}
+
 #[derive(Default)]
 pub(super) struct Selection {
+    /// Waiting for clicks on the photo.
+    pub(super) prompting: Option<Prompting>,
+    /// Where a drag for a box began, in image space.
+    pub(super) drag_from: Option<[f32; 2]>,
     /// The running selection's generation; a newer request or a new photo supersedes.
     task: Task,
     pending: Option<Pending>,
@@ -204,9 +219,15 @@ impl Selection {
         self.task.invalidate();
         self.pending = None;
     }
+    /// Stops aiming (Done, Escape, a new photo).
+    pub(super) fn end_prompting(&mut self) {
+        self.prompting = None;
+        self.drag_from = None;
+    }
     /// The photo changed: nothing asked for the previous one applies.
     pub(super) fn clear_document(&mut self) {
         self.cancel();
+        self.end_prompting();
         self.failure = None;
         self.prompt = None;
     }
@@ -214,6 +235,7 @@ impl Selection {
     /// shared deadline, never joined without one.
     pub(super) fn stop(&mut self) -> Vec<Stopping> {
         self.cancel();
+        self.end_prompting();
         let mut stopping = vec![self.worker.stop()];
         stopping.extend(self.models.stop());
         stopping
@@ -268,13 +290,104 @@ impl Editor {
         }
         self.selection.prompt = None;
         self.selection.failure = None;
-        self.start_selection(request);
+        self.selection.prompting = Some(Prompting {
+            request,
+            points: Vec::new(),
+            bounds: None,
+            applied: match request.target {
+                Target::Regenerate { mask, component } => Some((mask, component)),
+                _ => None,
+            },
+        });
+        self.view.tool = super::state::Tool::Mask;
+        self.status = format!(
+            "Click the {} on the photo, or drag a box around it",
+            if request.feature == Feature::Background {
+                "subject to leave out of the background"
+            } else {
+                "subject"
+            }
+        );
     }
-    fn start_selection(&mut self, request: Request) {
+    /// A click on the photo while aiming: a point on the object (or, with `positive`
+    /// false, on something to leave out). Starts or refines the selection.
+    pub(super) fn prompt_click(&mut self, at: [f32; 2], positive: bool) {
+        let Some(p) = &mut self.selection.prompting else {
+            return;
+        };
+        if self.selection.pending.is_some()
+            || !(0. ..=1.).contains(&at[0])
+            || !(0. ..=1.).contains(&at[1])
+        {
+            return;
+        }
+        // A negative point means nothing without something to be negative about.
+        if !positive && p.points.iter().all(|q| !q.positive) && p.bounds.is_none() {
+            return;
+        }
+        if p.points.len() < rawmakase_inference::process::MAX_POINTS {
+            p.points.push(Point {
+                x: at[0],
+                y: at[1],
+                positive,
+            });
+        }
+        self.run_prompt();
+    }
+    /// A box dragged on the photo while aiming (image space corners).
+    pub(super) fn prompt_box(&mut self, a: [f32; 2], b: [f32; 2]) {
+        let Some(p) = &mut self.selection.prompting else {
+            return;
+        };
+        let clamp = |v: f32| v.clamp(0., 1.);
+        let bounds = [
+            clamp(a[0].min(b[0])),
+            clamp(a[1].min(b[1])),
+            clamp(a[0].max(b[0])),
+            clamp(a[1].max(b[1])),
+        ];
+        if self.selection.pending.is_some()
+            || bounds[2] - bounds[0] < 0.01
+            || bounds[3] - bounds[1] < 0.01
+        {
+            return;
+        }
+        p.bounds = Some(bounds);
+        self.run_prompt();
+    }
+    /// Forgets the clicks and box, so the next click starts the selection over (the
+    /// mask made so far is replaced by it).
+    pub(super) fn clear_prompt(&mut self) {
+        if let Some(p) = &mut self.selection.prompting {
+            p.points.clear();
+            p.bounds = None;
+        }
+    }
+    /// Runs the model on the clicks and box so far.
+    fn run_prompt(&mut self) {
+        let Some(p) = &self.selection.prompting else {
+            return;
+        };
+        let prompt = ModelPrompt {
+            points: p.points.clone(),
+            bounds: p.bounds,
+        };
+        let request = Request {
+            feature: p.request.feature,
+            target: match p.applied {
+                Some((mask, component)) => Target::Regenerate { mask, component },
+                None => p.request.target,
+            },
+        };
+        self.selection.failure = None;
+        self.start_selection(request, prompt);
+    }
+    fn start_selection(&mut self, request: Request, prompt: ModelPrompt) {
         let Some(image) = self.document.full().cloned() else {
             return;
         };
         let Some(model) = self.selection.models.path() else {
+            self.selection.end_prompting();
             self.selection.prompt = Some(Prompt::Model(request));
             return;
         };
@@ -292,6 +405,7 @@ impl Editor {
                 image,
                 recipe,
                 model,
+                prompt,
             },
             self.tx.clone(),
             self.context.clone(),
@@ -347,7 +461,7 @@ impl Editor {
             source: Some(generated.source),
         });
         let name = match request.target {
-            Target::Regenerate { .. } => format!("Regenerate {}", request.feature.name()),
+            Target::Regenerate { .. } => format!("Refine {}", request.feature.name()),
             _ => format!("Select {}", request.feature.name()),
         };
         let selected = self.change_edit(
@@ -380,6 +494,9 @@ impl Editor {
         );
         debug_assert!(masks <= MAX_GROUPS);
         if let Some((mask, component)) = selected {
+            if let Some(p) = &mut self.selection.prompting {
+                p.applied = Some((mask, component));
+            }
             self.view.masking.select_after_selection(mask, component);
             self.status = format!("{} selected", request.feature.name());
         }

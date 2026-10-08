@@ -1,5 +1,6 @@
 //! The thread that runs the selection model. One request at a time, one loaded
-//! session reused between them. Cancelling raises the request's flag, which the
+//! session reused between them, and the image embedding of the photo last asked
+//! about, so a second click on it takes milliseconds instead of a second. Cancelling raises the request's flag, which the
 //! runtime notices within a few milliseconds; quitting hands the thread to the shared
 //! shutdown deadline rather than joining it, and the thread keeps its session until
 //! it ends, so a native call is never left running on unloaded code.
@@ -12,7 +13,9 @@ use crate::model::recipe::Recipe;
 use crate::storage::bitmaps::Bitmap;
 use crate::storage::{FNV_OFFSET, fnv1a, mask_assets};
 use eframe::egui;
-use rawmakase_inference::{InferenceError, LoadOptions, RgbImage, SUBJECT, Session, Subject};
+use rawmakase_inference::{
+    Embedding, InferenceError, LoadOptions, Prompt, RgbImage, SUBJECT, Session, Subject,
+};
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -32,7 +35,9 @@ pub(super) struct Job {
     pub(super) cancel: Arc<AtomicBool>,
     pub(super) image: Arc<CameraImage>,
     pub(super) recipe: Recipe,
+    /// The model's folder.
     pub(super) model: PathBuf,
+    pub(super) prompt: Prompt,
 }
 
 enum Message {
@@ -107,21 +112,21 @@ impl Worker {
 }
 
 fn run(inbox: mpsc::Receiver<Message>) {
-    let mut session: Option<Session> = None;
+    let mut state = State::default();
     for message in inbox {
         match message {
             Message::Unload(ack) => {
-                session = None;
+                state = State::default();
                 let _ = ack.send(());
             }
             Message::Run(job, tx, ctx) => {
                 let (load, generation) = (job.load, job.generation);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    select(&job, &mut session)
+                    select(&job, &mut state)
                 }))
                 .unwrap_or_else(|_| {
                     // The session may be half-built after a panic.
-                    session = None;
+                    state = State::default();
                     Err(Failure::Failed("the selection stopped unexpectedly".into()))
                 });
                 let _ = tx.send(Event::Selection(Box::new(Done {
@@ -135,7 +140,14 @@ fn run(inbox: mpsc::Receiver<Message>) {
     }
 }
 
-fn select(job: &Job, session: &mut Option<Session>) -> Result<Generated, Failure> {
+/// The loaded model and the embedding of the photo last selected on.
+#[derive(Default)]
+struct State {
+    session: Option<Session>,
+    embedding: Option<(String, Embedding)>,
+}
+
+fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
     let cancelled = || job.cancel.load(Ordering::Relaxed);
     if cancelled() {
         return Err(Failure::Cancelled);
@@ -155,19 +167,23 @@ fn select(job: &Job, session: &mut Option<Session>) -> Result<Generated, Failure
         data: input.rgb8(),
     };
     let key = input_key(&rgb);
-    if session.is_none() {
-        *session = Some(load(&job.model)?);
+    if state.session.is_none() {
+        state.session = Some(load(&job.model)?);
     }
+    let session = state.session.as_mut().expect("loaded above");
+    if state.embedding.as_ref().is_none_or(|(k, _)| *k != key) {
+        state.embedding = None;
+        let embedding = session.embed(&rgb, &job.cancel).map_err(failure)?;
+        state.embedding = Some((key.clone(), embedding));
+    }
+    let (_, embedding) = state.embedding.as_ref().expect("embedded above");
     let coverage = session
-        .as_mut()
-        .expect("loaded above")
-        .select(&rgb, &job.cancel)
+        .segment(embedding, &job.prompt, &job.cancel)
         .map_err(failure)?;
     if cancelled() {
         return Err(Failure::Cancelled);
     }
-    // Exactly nothing selected is the only emptiness decided here: a calibrated
-    // threshold for faint results needs the evaluation corpus the plan asks for.
+    // Exactly nothing selected is the only emptiness decided here.
     if coverage.data.iter().all(|v| *v == 0) {
         return Err(Failure::NoSubject);
     }
@@ -186,10 +202,22 @@ fn select(job: &Job, session: &mut Option<Session>) -> Result<Generated, Failure
         height,
         source: BitmapSource {
             feature: FEATURE_SUBJECT.into(),
-            model: format!("{}@{}", SUBJECT.id, &SUBJECT.sha256[..16]),
-            input: key,
+            model: format!("{}@{}", SUBJECT.id, &SUBJECT.files[1].sha256[..16]),
+            input: prompt_key(&key, &job.prompt),
         },
     })
+}
+
+/// What the result was made from: the photo as the model saw it and the prompt.
+fn prompt_key(input: &str, prompt: &Prompt) -> String {
+    let mut text = input.to_string();
+    for p in &prompt.points {
+        text.push_str(&format!("|{:.4},{:.4},{}", p.x, p.y, p.positive));
+    }
+    if let Some(b) = prompt.bounds {
+        text.push_str(&format!("|{b:.4?}"));
+    }
+    format!("{:016x}", fnv1a(FNV_OFFSET, text.as_bytes()))
 }
 
 fn load(model: &std::path::Path) -> Result<Session, Failure> {
@@ -226,7 +254,7 @@ fn input_key(rgb: &RgbImage) -> String {
         rgb.width.to_le_bytes().as_slice(),
         rgb.height.to_le_bytes().as_slice(),
         SUBJECT.id.as_bytes(),
-        SUBJECT.sha256.as_bytes(),
+        SUBJECT.files[1].sha256.as_bytes(),
         &SUBJECT.version.to_le_bytes(),
         &SUBJECT.processing_version.to_le_bytes(),
         &crate::develop::masks::SELECTION_INPUT_VERSION.to_le_bytes(),

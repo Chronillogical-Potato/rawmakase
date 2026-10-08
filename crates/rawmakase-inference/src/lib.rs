@@ -1,4 +1,4 @@
-//! Local ONNX inference for automatic subject selection.
+//! Local ONNX inference for interactive subject selection (Segment Anything 2).
 //!
 //! This crate owns the pinned model contract ([`manifest`]), the pure image
 //! to tensor and matte to coverage mappings ([`process`]) and the lazily loaded
@@ -17,6 +17,6 @@ pub mod refine;
 pub mod runtime;
 
 pub use error::InferenceError;
-pub use manifest::{Activation, ModelSpec, Resize, SUBJECT};
-pub use process::{Coverage, RgbImage};
-pub use runtime::{LoadOptions, RUNTIME_ENV, Session, Subject};
+pub use manifest::{ModelFile, ModelSpec, SOURCE_REPO, SOURCE_REVISION, SUBJECT};
+pub use process::{Coverage, Point, Prompt, RgbImage};
+pub use runtime::{Embedding, LoadOptions, RUNTIME_ENV, Session, Subject};

@@ -18,6 +18,10 @@ impl Editor {
             self.selection_progress(ui, request);
             return;
         }
+        if self.selection.prompting.is_some() {
+            self.prompting_card(ui);
+            return;
+        }
         if self.selection.prompt.is_some() || self.selection.upgrading.is_some() {
             self.setup_card(ui);
             return;
@@ -53,6 +57,162 @@ impl Editor {
             self.selection_failure(ui, request, &failure);
         }
         self.model_footer(ui);
+    }
+    /// While aiming: what to do on the photo, and how to finish.
+    fn prompting_card(&mut self, ui: &mut egui::Ui) {
+        let Some(p) = &self.selection.prompting else {
+            return;
+        };
+        let (feature, points, boxed, applied) = (
+            p.request.feature,
+            p.points.len(),
+            p.bounds.is_some(),
+            p.applied.is_some(),
+        );
+        let accent = egui::Color32::from_rgb(96, 150, 230);
+        let failure = self.selection.failure.as_ref().map(|f| f.1.message());
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(34, 44, 62))
+            .stroke(egui::Stroke::new(1.5, accent))
+            .corner_radius(5.)
+            .inner_margin(egui::Margin::same(9))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Select {}: click it on the photo",
+                        feature.name()
+                    ))
+                    .strong()
+                    .size(12.5),
+                );
+                ui.add_space(3.);
+                let small = |text: &str| {
+                    egui::RichText::new(text)
+                        .size(11.)
+                        .color(egui::Color32::LIGHT_GRAY)
+                };
+                ui.add(
+                    egui::Label::new(small(if applied {
+                        "Click more of the subject to add to it, Alt-click something to leave \
+                         it out, or drag a box to start over from the box."
+                    } else {
+                        "Click the subject, or drag a box around it. Each click can be refined \
+                         with more: click to add, Alt-click to leave out."
+                    }))
+                    .wrap(),
+                );
+                let used = format!(
+                    "{points} point{}{}",
+                    if points == 1 { "" } else { "s" },
+                    if boxed { " and a box" } else { "" }
+                );
+                ui.add(egui::Label::new(small(&used)));
+                if let Some(why) = failure {
+                    ui.colored_label(egui::Color32::from_rgb(230, 170, 90), why);
+                }
+                ui.add_space(4.);
+                ui.horizontal(|ui| {
+                    let done = egui::Button::new(egui::RichText::new("Done").strong())
+                        .fill(egui::Color32::from_rgb(52, 98, 170));
+                    if ui.add(done).on_hover_text("Escape").clicked() {
+                        self.selection.end_prompting();
+                    }
+                    if ui
+                        .button("Start over")
+                        .on_hover_text("Forget the clicks; the next click selects afresh")
+                        .clicked()
+                    {
+                        self.clear_prompt();
+                    }
+                });
+            });
+    }
+    /// Clicks, drags and markers on the photo while aiming. Returns that the tool owns
+    /// the pointer.
+    pub(in crate::app) fn prompt_overlay(
+        &mut self,
+        ui: &mut egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        to_screen: &dyn Fn([f32; 2]) -> egui::Pos2,
+        to_image: &dyn Fn(egui::Pos2) -> [f32; 2],
+    ) -> bool {
+        let busy = self.selection.running().is_some();
+        if !busy {
+            if response.drag_started()
+                && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+            {
+                self.selection.drag_from = Some(to_image(origin));
+            }
+            if response.drag_stopped()
+                && let (Some(from), Some(pos)) = (
+                    self.selection.drag_from.take(),
+                    response.interact_pointer_pos(),
+                )
+            {
+                self.prompt_box(from, to_image(pos));
+            }
+            if response.clicked()
+                && let Some(pos) = response.interact_pointer_pos()
+            {
+                let alt = ui.input(|i| i.modifiers.alt);
+                self.prompt_click(to_image(pos), !alt);
+            }
+        }
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        let Some(p) = &self.selection.prompting else {
+            return true;
+        };
+        if let Some(b) = p.bounds {
+            let r = egui::Rect::from_two_pos(to_screen([b[0], b[1]]), to_screen([b[2], b[3]]));
+            painter.rect_stroke(
+                r,
+                0.,
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(110, 200, 130)),
+                egui::StrokeKind::Middle,
+            );
+        }
+        if let (Some(from), Some(pos)) = (self.selection.drag_from, response.interact_pointer_pos())
+            && response.dragged()
+        {
+            let r = egui::Rect::from_two_pos(to_screen(from), pos);
+            painter.rect_stroke(
+                r,
+                0.,
+                egui::Stroke::new(1.5, egui::Color32::WHITE),
+                egui::StrokeKind::Middle,
+            );
+        }
+        for point in &p.points {
+            let at = to_screen([point.x, point.y]);
+            let color = if point.positive {
+                egui::Color32::from_rgb(110, 200, 130)
+            } else {
+                egui::Color32::from_rgb(230, 90, 80)
+            };
+            painter.circle(at, 6., color, egui::Stroke::new(1.5, egui::Color32::WHITE));
+            if !point.positive {
+                let d = egui::vec2(3., 3.);
+                painter.line_segment(
+                    [at - d, at + d],
+                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+                );
+                let e = egui::vec2(3., -3.);
+                painter.line_segment(
+                    [at - e, at + e],
+                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+                );
+            }
+        }
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(if busy {
+                egui::CursorIcon::Progress
+            } else {
+                egui::CursorIcon::Crosshair
+            });
+        }
+        true
     }
     /// What the first use needs, as a highlighted card in the place the actions were:
     /// the steps with the finished ones ticked, and the button for the next.

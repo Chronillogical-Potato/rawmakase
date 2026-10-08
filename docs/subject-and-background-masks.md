@@ -771,14 +771,18 @@ contract. Broader AI work remains independent of shipping Subject and Background
 
 ## Implementation notes
 
-Built as one change. Phase 0 chose **IS-Net general use** (178,648,008 bytes, SHA-256
-`60920e99…0d964a`): about 1 s per photo on CPU and 1 GB of memory, sensible subject
-choice, softer edges than BiRefNet. BiRefNet tiny has sharper edges but needed 7–10 GB
-and ~25 CPU-seconds per image, so it was not made the default. ONNX Runtime is 1.23.2
-loaded dynamically (`ort` `load-dynamic`) on every platform. Unresolved: the IS-Net
-weights have no published license, so the Hugging Face mirror waits on that; until the
-repository and commit are filled in `rawmakase-inference/src/manifest.rs`, the app
-downloads from the upstream rembg release, verified against the same SHA-256.
+Built as one change. Phase 0 first chose IS-Net general use (automatic, about 1 s,
+1 GB), which grouped people well but had unclear weight licensing and soft edges;
+BiRefNet had better edges but needed 7–10 GB. RapidRAW uses SAM 2 for subjects and
+U²-Net for foreground and sky. The shipped model is therefore **SAM 2.1 Hiera small**
+(Apache-2.0 code and weights; `onnx-community` ONNX export, 184 MB, pinned commit),
+used interactively: click or box on the object, more clicks refine. It selects one
+object per prompt and does not guess which object the "subject" is, so Select Subject
+is an aimed selection rather than one-click; a model that picks the subject by itself
+would be a further, separately licensed model. Edges are refined with a guided filter.
+ONNX Runtime is 1.23.2 loaded dynamically (`ort` `load-dynamic`) on every platform.
+No Hugging Face repository of our own is needed or has been created; nothing has been
+uploaded.
 
 Deliberate differences from the plan above:
 
@@ -791,6 +795,6 @@ Deliberate differences from the plan above:
 - Transfer of raster masks to another photo skips them with a note instead of
   rejecting the whole transfer; presets reject them. No Library-wide `EditSource`
   rework: the global loader serves workers.
-- The model is downloaded in one pass (no resume) with three attempts; no Hugging Face
-  repository exists yet, nothing has been uploaded.
+- The model is downloaded file by file (a finished file is kept on retry, a partial one
+  starts over) with three attempts each.
 - No faint-result threshold, no grow/shrink/feather, no provider acceleration.
