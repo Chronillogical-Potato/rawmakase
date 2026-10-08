@@ -208,3 +208,21 @@ fn a_first_render_of_a_region_takes_over_too() {
     e.set_pixels(&ctx, true, [2, 2], &[0; 12], None);
     assert!(!e.preview.standing_in());
 }
+
+#[test]
+fn a_stored_preview_arriving_after_a_region_render_is_dropped() {
+    let (_dir, mut e, ids, _) = editor(&["a.ARW"]);
+    let load = open(&mut e, ids[0], None);
+    let ctx = e.context.clone();
+    e.set_pixels(&ctx, true, [2, 2], &[0; 12], None);
+    let wanted = e.stand_in_for(ids[0]).unwrap();
+    e.stand_in_ready(
+        &ctx,
+        StandIn {
+            load: Some(load),
+            wanted,
+            image: egui::ColorImage::new([4, 4], vec![egui::Color32::WHITE; 16]),
+        },
+    );
+    assert!(e.preview.stand_in.is_none());
+}

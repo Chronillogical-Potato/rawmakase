@@ -405,7 +405,7 @@ impl PreviewState {
     }
     /// Whether a live render of the photo is shown.
     pub(crate) fn live(&self) -> bool {
-        self.texture.is_some() && !self.embedded
+        self.texture.is_some() && !self.embedded || self.region.is_some()
     }
     /// The stored preview is what shows: there is one, and no live render yet.
     pub(crate) fn standing_in(&self) -> bool {
