@@ -413,3 +413,10 @@ the validation docs.
 When adding or moving a module, update its entry here. Put API contracts in Rust
 doc comments, ownership decisions in the architecture guide, and measured results
 in the validation documents so each has a clear home.
+
+### Camera parity diagnostics
+
+`scripts/cameras/check-calibration.py` audits converter metadata against the camera
+table; `data/camera-calibration-facts.json` holds public-sample and anonymous local numerical evidence.
+`scripts/cameras/parity.py` captures and verifies Camera Raw renders and compares
+frozen references with RAWmakase. See [camera parity](camera-parity.md).

@@ -1,0 +1,3158 @@
+{
+  "about": "CameraCalibration facts from Adobe DNG Converter, not profile content. Public sample hashes and URLs refer to tests/corpus/pixls.json. Non-diagonal, illuminant-dependent and non-identity AnalogBalance cases require separate handling. Local sample entries contain only anonymous hashes and numerical calibration facts. NativeDaylightWB is read from the original Sony RAW, not its converted DNG.",
+  "converter": "18.7 (2743)",
+  "checked": "2026-10-08",
+  "samples": [
+    {
+      "make": "SONY",
+      "model": "DSC-RX100M5A",
+      "measured": [
+        0.9966,
+        1.0,
+        0.9704
+      ],
+      "sha256": "2d0e47c9003590f2d817f9054f3988b32457a93a645156e288127d5c5988f3d5",
+      "url": "https://raw.pixls.us/getfile.php/2816/nice/Sony - DSC-RX100M5A - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX100M5A",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9966 0 0 0 1 0 0 0 0.9704",
+        "CameraCalibration2": "0.9966 0 0 0 1 0 0 0 0.9704",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2324.0,
+          1024.0,
+          1892.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "DSC-RX100M6",
+      "measured": [
+        1.0245,
+        1.0,
+        0.9979
+      ],
+      "sha256": "3015022b00ce219bf2713d9de21608e631566d111c4468402748b794e312d94c",
+      "url": "https://raw.pixls.us/getfile.php/3013/nice/Sony - DSC-RX100M6 - 12bit 12bit compressed (3:2).arw",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX100M6",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0245 0 0 0 1 0 0 0 0.9979",
+        "CameraCalibration2": "1.0245 0 0 0 1 0 0 0 0.9979",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2288.0,
+          1024.0,
+          1920.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "DSC-RX100M7",
+      "measured": [
+        0.9964,
+        1.0,
+        1.0024
+      ],
+      "sha256": "815532f017b94e31990e8111791131647c95f6953aa28c571783c5e17eb36523",
+      "url": "https://raw.pixls.us/getfile.php/3463/nice/Sony - DSC-RX100M7 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX100M7",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9964 0 0 0 1 0 0 0 1.0024",
+        "CameraCalibration2": "0.9964 0 0 0 1 0 0 0 1.0024",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2248.0,
+          1024.0,
+          1688.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "DSC-RX10M4",
+      "measured": [
+        0.9812,
+        1.0,
+        1.0211
+      ],
+      "sha256": "1825b615a472962bbef13a6717e754e2aeb53d353de10d3503767932c420070c",
+      "url": "https://raw.pixls.us/getfile.php/2247/nice/Sony - DSC-RX10M4 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX10M4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9812 0 0 0 1 0 0 0 1.0211",
+        "CameraCalibration2": "0.9812 0 0 0 1 0 0 0 1.0211",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2336.0,
+          1024.0,
+          1896.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "DSC-RX1RM2",
+      "measured": [
+        0.9424,
+        1.0,
+        0.9727
+      ],
+      "sha256": "986419a28c9e1e4f4f8045d7b32aff87bc677f19a6c80ccc844d77a101d154f7",
+      "url": "https://raw.pixls.us/getfile.php/2466/nice/Sony - DSC-RX1RM2 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX1RM2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9424 0 0 0 1 0 0 0 0.9727",
+        "CameraCalibration2": "0.9424 0 0 0 1 0 0 0 0.9727",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2500.0,
+          1024.0,
+          1760.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "DSC-RX1RM3",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "c06c5cf9caeabc225881355520649a0d834644c4d5047c39b9a6f203a409c9d4",
+      "url": "https://raw.pixls.us/getfile.php/8546/nice/Sony - DSC-RX1RM3 - 3:2.ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "DSC-RX1RM3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9785 0 0 0 1 0 0 0 1.0032",
+        "CameraCalibration2": "0.9785 0 0 0 1 0 0 0 1.0032",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "2.389648 1 1.739258"
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCA-99M2",
+      "measured": [
+        1.0097,
+        1.0,
+        0.9595
+      ],
+      "sha256": "be898847ac6da485874d95469bf274df1f8f77f8b8542460464f0f393981b2d2",
+      "url": "https://raw.pixls.us/getfile.php/1535/nice/Sony - ILCA-99M2 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCA-99M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0097 0 0 0 1 0 0 0 0.9595",
+        "CameraCalibration2": "1.0097 0 0 0 1 0 0 0 0.9595",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2476.0,
+          1024.0,
+          1680.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-1",
+      "measured": [
+        0.9894,
+        1.0,
+        0.971
+      ],
+      "sha256": "ddb72880da333b46a4c13286f78473dacc11377ea874bc3656e64e30a8122a88",
+      "url": "https://raw.pixls.us/getfile.php/4465/nice/Sony - ILCE-1 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-1",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9894 0 0 0 1 0 0 0 0.971",
+        "CameraCalibration2": "0.9894 0 0 0 1 0 0 0 0.971",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2455.0,
+          1024.0,
+          1655.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-1M2",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "006b477808b3edaaa41e58ce082653a36e544c4ddc0bfe1bc8a6ef39d93d8369",
+      "url": "https://raw.pixls.us/getfile.php/7834/nice/Sony - ILCE-1M2 - lossless (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-1M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9847 0 0 0 1 0 0 0 0.9408",
+        "CameraCalibration2": "0.9847 0 0 0 1 0 0 0 0.9408",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "2.275391 1 1.575195"
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6000",
+      "measured": [
+        0.9504,
+        1.0,
+        0.9107
+      ],
+      "sha256": "ce8b4957281a817d52a07a691e2468567b6c78223bd0b514ffc1c65b002b8d89",
+      "url": "https://raw.pixls.us/getfile.php/1971/nice/Sony - ILCE-6000 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6000",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9504 0 0 0 1 0 0 0 0.9107",
+        "CameraCalibration2": "0.9504 0 0 0 1 0 0 0 0.9107",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2744.0,
+          1024.0,
+          1792.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6100",
+      "measured": [
+        0.942,
+        1.0,
+        0.9639
+      ],
+      "sha256": "0205f5086cc20a0e4aaf0f5468da26bdf0adba5c0b3a63d2c1930777d90b85fd",
+      "url": "https://raw.pixls.us/getfile.php/3837/nice/Sony - ILCE-6100 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6100",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.942 0 0 0 1 0 0 0 0.9639",
+        "CameraCalibration2": "0.942 0 0 0 1 0 0 0 0.9639",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2760.0,
+          1024.0,
+          1884.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6300",
+      "measured": [
+        1.0729,
+        1.0,
+        0.9589
+      ],
+      "sha256": "cb4d97c2691762545e6c9f7cbe3f7ecd8fffb7cebe9e8a5add5dd58ab2c86f6a",
+      "url": "https://raw.pixls.us/getfile.php/783/nice/Sony - ILCE-6300 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6300",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0729 0 0 0 1 0 0 0 0.9589",
+        "CameraCalibration2": "1.0729 0 0 0 1 0 0 0 0.9589",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2580.0,
+          1024.0,
+          1848.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6400",
+      "measured": [
+        0.9939,
+        1.0,
+        0.9558
+      ],
+      "sha256": "8a37c80fc47c6026efa2e55279220e79460e2f470b1aa48b440f8f2d47873aa6",
+      "url": "https://raw.pixls.us/getfile.php/3406/nice/Sony - ILCE-6400 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6400",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9939 0 0 0 1 0 0 0 0.9558",
+        "CameraCalibration2": "0.9939 0 0 0 1 0 0 0 0.9558",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2616.0,
+          1024.0,
+          1900.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6500",
+      "measured": [
+        1.0328,
+        1.0,
+        0.9888
+      ],
+      "sha256": "d8cbfd1d14f4f4df20046cbed6ebbd92dff583fe0201f16ece21d95153d6b9e7",
+      "url": "https://raw.pixls.us/getfile.php/1989/nice/Sony - ILCE-6500 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6500",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0328 0 0 0 1 0 0 0 0.9888",
+        "CameraCalibration2": "1.0328 0 0 0 1 0 0 0 0.9888",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2680.0,
+          1024.0,
+          1792.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6600",
+      "measured": [
+        0.942,
+        1.0,
+        0.9518
+      ],
+      "sha256": "041d71d70148ca77164f19d061e3582adb34399ea5a4baba32960f2956fb0362",
+      "url": "https://raw.pixls.us/getfile.php/3590/nice/Sony - ILCE-6600 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6600",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.942 0 0 0 1 0 0 0 0.9518",
+        "CameraCalibration2": "0.942 0 0 0 1 0 0 0 0.9518",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2760.0,
+          1024.0,
+          1908.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-6700",
+      "measured": [
+        1.0489,
+        1.0,
+        1.024
+      ],
+      "sha256": "501666fd94cbc28176e9c03a40c1d8121319df6542bfcbef0ffcfebeb04a32bf",
+      "url": "https://raw.pixls.us/getfile.php/6735/nice/Sony - ILCE-6700 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-6700",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0489 0 0 0 1 0 0 0 1.024",
+        "CameraCalibration2": "1.0489 0 0 0 1 0 0 0 1.024",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2579.0,
+          1024.0,
+          1705.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7C",
+      "measured": [
+        1.0476,
+        1.0,
+        0.8829
+      ],
+      "sha256": "6bfac3286f0e931e949b23e1bb236b737bb9e4117b8b42fa09e36f40f0fa8408",
+      "url": "https://raw.pixls.us/getfile.php/4144/nice/Sony - ILCE-7C - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7C",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0476 0 0 0 1 0 0 0 0.8829",
+        "CameraCalibration2": "1.0476 0 0 0 1 0 0 0 0.8829",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2352.0,
+          1024.0,
+          1708.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7CM2",
+      "measured": [
+        1.0092,
+        1.0,
+        0.9727
+      ],
+      "sha256": "002c86d38a16b08a2438780728b4fda8efcc745fa6c26231dad6af67b383b11e",
+      "url": "https://raw.pixls.us/getfile.php/6869/nice/Sony - ILCE-7CM2 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7CM2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0092 0 0 0 1 0 0 0 0.9727",
+        "CameraCalibration2": "1.0092 0 0 0 1 0 0 0 0.9727",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2389.0,
+          1024.0,
+          1684.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M3",
+      "measured": [
+        1.0476,
+        1.0,
+        0.9106
+      ],
+      "sha256": "3ae2ff75cfa7240d0b4458f662afd28665c5fd1e83d230ac73f5ad69d3df8592",
+      "url": "https://raw.pixls.us/getfile.php/2415/nice/Sony - ILCE-7M3 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0476 0 0 0 1 0 0 0 0.9106",
+        "CameraCalibration2": "1.0476 0 0 0 1 0 0 0 0.9106",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2352.0,
+          1024.0,
+          1656.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M4",
+      "measured": [
+        0.9817,
+        1.0,
+        0.9687
+      ],
+      "sha256": "639a6d4db881f1359e3ea7e1137b314e59417d24e6d4d862b7202111a2c823b2",
+      "url": "https://raw.pixls.us/getfile.php/6936/nice/Sony - ILCE-7M4 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9817 0 0 0 1 0 0 0 0.9687",
+        "CameraCalibration2": "0.9817 0 0 0 1 0 0 0 0.9687",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2456.0,
+          1024.0,
+          1691.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M5",
+      "measured": [
+        0.9839,
+        1.0,
+        1.0421
+      ],
+      "sha256": "c16cae99d26a2f8ad183d31a23823310a994aa058d55cfe56e4f82ba56865f57",
+      "url": "https://raw.pixls.us/getfile.php/8849/nice/Sony - ILCE-7M5 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9839 0 0 0 1 0 0 0 1.0421",
+        "CameraCalibration2": "0.9839 0 0 0 1 0 0 0 1.0421",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2362.0,
+          1024.0,
+          1735.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM2",
+      "measured": [
+        0.9949,
+        1.0,
+        1.0288
+      ],
+      "sha256": "a606ebf1dcc6704f03f2966326c60a87dd6bdb3704464b3897c10349a10d3a19",
+      "url": "https://raw.pixls.us/getfile.php/1310/nice/Sony - ILCE-7RM2 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9949 0 0 0 1 0 0 0 1.0288",
+        "CameraCalibration2": "0.9949 0 0 0 1 0 0 0 1.0288",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2368.0,
+          1024.0,
+          1664.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM3",
+      "measured": [
+        1.0336,
+        1.0,
+        1.0173
+      ],
+      "sha256": "a7b0279a11b36055fca1fd598be9f708b2f9d89b0d30178fd81d1d594547fc7a",
+      "url": "https://raw.pixls.us/getfile.php/2045/nice/Sony - ILCE-7RM3 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0336 0 0 0 1 0 0 0 1.0173",
+        "CameraCalibration2": "1.0336 0 0 0 1 0 0 0 1.0173",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2384.0,
+          1024.0,
+          1620.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM4",
+      "measured": [
+        1.0255,
+        1.0,
+        0.9789
+      ],
+      "sha256": "3421b919ee81224d59f78872ee099a021bff0e2a47ae5fbbac385b182ac7241e",
+      "url": "https://raw.pixls.us/getfile.php/3479/nice/Sony - ILCE-7RM4 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0255 0 0 0 1 0 0 0 0.9789",
+        "CameraCalibration2": "1.0255 0 0 0 1 0 0 0 0.9789",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2508.0,
+          1024.0,
+          1704.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM5",
+      "measured": [
+        0.9634,
+        1.0,
+        0.9994
+      ],
+      "sha256": "aacaf9ad3f63c3e3b9fe2d3dd9759894e4f374254b7c1a081c26463936892c14",
+      "url": "https://raw.pixls.us/getfile.php/6239/nice/Sony - ILCE-7RM5 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9634 0 0 0 1 0 0 0 0.9994",
+        "CameraCalibration2": "0.9634 0 0 0 1 0 0 0 0.9994",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2515.0,
+          1024.0,
+          1800.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7SM2",
+      "measured": [
+        0.9889,
+        1.0,
+        1.0438
+      ],
+      "sha256": "46044fb6a9c805f2b4915cd4970316b4d04b0566bcf5287afaad3ef648d7a3db",
+      "url": "https://raw.pixls.us/getfile.php/1080/nice/Sony - ILCE-7SM2 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7SM2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9889 0 0 0 1 0 0 0 1.0438",
+        "CameraCalibration2": "0.9889 0 0 0 1 0 0 0 1.0438",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2528.0,
+          1024.0,
+          1644.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7SM3",
+      "measured": [
+        1.0781,
+        1.0,
+        0.9633
+      ],
+      "sha256": "17e35d98d448b44164ecf414f980e9248b5829233e83a1adbee396b6c1a1a0c6",
+      "url": "https://raw.pixls.us/getfile.php/5418/nice/Sony - ILCE-7SM3 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7SM3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0781 0 0 0 1 0 0 0 0.9633",
+        "CameraCalibration2": "1.0781 0 0 0 1 0 0 0 0.9633",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2382.0,
+          1024.0,
+          1608.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-9",
+      "measured": [
+        0.9872,
+        1.0,
+        0.9901
+      ],
+      "sha256": "598bbc828c279528f504c51a10418521b17a90a25b198368f65e19cfda9e3711",
+      "url": "https://raw.pixls.us/getfile.php/1541/nice/Sony - ILCE-9 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-9",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9872 0 0 0 1 0 0 0 0.9901",
+        "CameraCalibration2": "0.9872 0 0 0 1 0 0 0 0.9901",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2492.0,
+          1024.0,
+          1624.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-9M2",
+      "measured": [
+        0.9968,
+        1.0,
+        1.0496
+      ],
+      "sha256": "a4d81172dad07fb0973f28bb1f5c22a9aae045aea40100aadfad1f56eb8a3903",
+      "url": "https://raw.pixls.us/getfile.php/3990/nice/Sony - ILCE-9M2 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-9M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9968 0 0 0 1 0 0 0 1.0496",
+        "CameraCalibration2": "0.9968 0 0 0 1 0 0 0 1.0496",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2468.0,
+          1024.0,
+          1532.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-9M3",
+      "measured": [
+        0.9788,
+        1.0,
+        0.9914
+      ],
+      "sha256": "87a66c6be1fe91a4a5d1c626167ce58d0ed2953192005a9879f78b9af51fbfd5",
+      "url": "https://raw.pixls.us/getfile.php/7367/nice/Sony - ILCE-9M3 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-9M3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9788 0 0 0 1 0 0 0 0.9914",
+        "CameraCalibration2": "0.9788 0 0 0 1 0 0 0 0.9914",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2174.0,
+          1024.0,
+          1744.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILME-FX2",
+      "measured": [
+        1.147,
+        1.0,
+        0.8708
+      ],
+      "sha256": "7ab90ff048ac383f39ad96be38f730883a80ebbbd0eca4a0f7e0a8c409d8aa70",
+      "url": "https://raw.pixls.us/getfile.php/8808/nice/Sony - ILME-FX2 - 12bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILME-FX2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.147 0 0 0 1 0 0 0 0.8708",
+        "CameraCalibration2": "1.147 0 0 0 1 0 0 0 0.8708",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2102.0,
+          1024.0,
+          1881.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILME-FX3",
+      "measured": [
+        1.0414,
+        1.0,
+        1.0091
+      ],
+      "sha256": "394ceb1a356be8b17f18dc013bfd22895ba6ec7195f578b9be1c2fd0d5ea4773",
+      "url": "https://raw.pixls.us/getfile.php/6874/nice/Sony - ILME-FX3 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILME-FX3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0414 0 0 0 1 0 0 0 1.0091",
+        "CameraCalibration2": "1.0414 0 0 0 1 0 0 0 1.0091",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2466.0,
+          1024.0,
+          1535.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILME-FX30",
+      "measured": [
+        1.0007,
+        1.0,
+        1.043
+      ],
+      "sha256": "87a187dd3f30d6704112bb1d5e8e4ef8ce2f30af3236acdabc85980aa8da3872",
+      "url": "https://raw.pixls.us/getfile.php/6499/nice/Sony - ILME-FX30 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILME-FX30",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0007 0 0 0 1 0 0 0 1.043",
+        "CameraCalibration2": "1.0007 0 0 0 1 0 0 0 1.043",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2703.0,
+          1024.0,
+          1674.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ZV-1",
+      "measured": [
+        1.0017,
+        1.0,
+        0.9762
+      ],
+      "sha256": "14c9d2912584a3ccc5cf10f554fbe495fc960c36758a14d7d858b36ac5ca88e2",
+      "url": "https://raw.pixls.us/getfile.php/4000/nice/Sony - ZV-1 - 12bit 12bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ZV-1",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0017 0 0 0 1 0 0 0 0.9762",
+        "CameraCalibration2": "1.0017 0 0 0 1 0 0 0 0.9762",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2412.0,
+          1024.0,
+          1848.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ZV-1M2",
+      "measured": [
+        1.0185,
+        1.0,
+        0.9555
+      ],
+      "sha256": "2a45845a93ab5e428868366d6575a264818b184541b1c114ab4de980872a7184",
+      "url": "https://raw.pixls.us/getfile.php/8461/nice/Sony - ZV-1M2 - 12bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ZV-1M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0185 0 0 0 1 0 0 0 0.9555",
+        "CameraCalibration2": "1.0185 0 0 0 1 0 0 0 0.9555",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2372.0,
+          1024.0,
+          1888.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ZV-E1",
+      "measured": [
+        1.0529,
+        1.0,
+        0.9767
+      ],
+      "sha256": "d1e37dcdd0a590c62dc1d5c693f0bd202e51929b5a32d6c00b0dd1bc738620b4",
+      "url": "https://raw.pixls.us/getfile.php/6813/nice/Sony - ZV-E1 - 14bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ZV-E1",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0529 0 0 0 1 0 0 0 0.9767",
+        "CameraCalibration2": "1.0529 0 0 0 1 0 0 0 0.9767",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2439.0,
+          1024.0,
+          1586.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ZV-E10",
+      "measured": [
+        1.0486,
+        1.0,
+        0.977
+      ],
+      "sha256": "a8633fae9749ca8d2cf2212bda4c352553c24e7140660c1cd324b982e57ab42e",
+      "url": "https://raw.pixls.us/getfile.php/4855/nice/Sony - ZV-E10 - 14bit 14bit compressed (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ZV-E10",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0486 0 0 0 1 0 0 0 0.977",
+        "CameraCalibration2": "1.0486 0 0 0 1 0 0 0 0.977",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2716.0,
+          1024.0,
+          1912.0
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ZV-E10M2",
+      "measured": [
+        1.1299,
+        1.0,
+        0.9562
+      ],
+      "sha256": "3d61e7f685460e6e77a52355d88bc960d51332f3470468a06c4490a406e6b715",
+      "url": "https://raw.pixls.us/getfile.php/8022/nice/Sony - ZV-E10M2 - 12bit (3:2).ARW",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ZV-E10M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.1299 0 0 0 1 0 0 0 0.9562",
+        "CameraCalibration2": "1.1299 0 0 0 1 0 0 0 0.9562",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2394.0,
+          1024.0,
+          1826.0
+        ]
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX 100",
+      "measured": [
+        1.0307,
+        1.0,
+        0.9676
+      ],
+      "sha256": "0e7dad9819a748bb3d3be26bbf5770d4968e2d80b9cb41d97036bf7c27f7bfe7",
+      "url": "https://raw.pixls.us/getfile.php/3775/nice/Fujifilm - GFX 100 - 14bit 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX 100",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0307 0 0 0 1 0 0 0 0.9676",
+        "CameraCalibration2": "1.0307 0 0 0 1 0 0 0 0.9676",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX 50R",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "35109fc20a849026c43c47674902431ef5a2d54b09b616995263dc75df17912f",
+      "url": "https://raw.pixls.us/getfile.php/2979/nice/Fujifilm - GFX 50R - 14bit 14bit compressed (3:2).raf",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX 50R",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX 50S",
+      "measured": [
+        1.0089,
+        1.0,
+        0.9503
+      ],
+      "sha256": "a7124d13910e0241a6b035154bc1fcdb7be4439371d043b1e1950a0251feb51e",
+      "url": "https://raw.pixls.us/getfile.php/1435/nice/Fujifilm - GFX 50S - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX 50S",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0089 0 0 0 1 0 0 0 0.9503",
+        "CameraCalibration2": "1.0089 0 0 0 1 0 0 0 0.9503",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX100 II",
+      "measured": [
+        1.0099,
+        1.0,
+        1.0147
+      ],
+      "sha256": "03cf2a46b6b6b058547bbbbb46f2cd6fd546a7839f082da614a1e295b36368fa",
+      "url": "https://raw.pixls.us/getfile.php/7176/nice/Fujifilm - GFX100 II - 14bit 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX100 II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0099 0 0 0 1 0 0 0 1.0147",
+        "CameraCalibration2": "1.0099 0 0 0 1 0 0 0 1.0147",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX100RF",
+      "measured": [
+        0.9967,
+        1.0,
+        0.9959
+      ],
+      "sha256": "00eca3fd065af93935a1e6bb94baeb8fecde2372ec3d2aaea4f633112853fa79",
+      "url": "https://raw.pixls.us/getfile.php/8094/nice/Fujifilm - GFX100RF - 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX100RF",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9967 0 0 0 1 0 0 0 0.9959",
+        "CameraCalibration2": "0.9967 0 0 0 1 0 0 0 0.9959",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX100S",
+      "measured": [
+        1.0395,
+        1.0,
+        0.9637
+      ],
+      "sha256": "1be3e443b42a1ed2a5607eb25013bd06bc6da2bb86bac0a1220cbe82338dac50",
+      "url": "https://raw.pixls.us/getfile.php/4497/nice/Fujifilm - GFX100S - 14bit 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX100S",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0395 0 0 0 1 0 0 0 0.9637",
+        "CameraCalibration2": "1.0395 0 0 0 1 0 0 0 0.9637",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX100S II",
+      "measured": [
+        1.0132,
+        1.0,
+        0.9043
+      ],
+      "sha256": "acfbba3f6682d4d7b557dc060fa8e57af9e8260215238cf5b9ec7b7d663fd976",
+      "url": "https://raw.pixls.us/getfile.php/7777/nice/Fujifilm - GFX100S II - 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX100S II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0132 0 0 0 1 0 0 0 0.9043",
+        "CameraCalibration2": "1.0132 0 0 0 1 0 0 0 0.9043",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "GFX50S II",
+      "measured": [
+        0.993,
+        1.0,
+        0.9053
+      ],
+      "sha256": "59699d3063a9900eb5f226da664473c6081ed2cfe4d4529b7cd45afa2f1cac62",
+      "url": "https://raw.pixls.us/getfile.php/5004/nice/Fujifilm - GFX50S II - 14bit 14bit compressed (4:3).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "GFX50S II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.993 0 0 0 1 0 0 0 0.9053",
+        "CameraCalibration2": "0.993 0 0 0 1 0 0 0 0.9053",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-A7",
+      "measured": [
+        1.0148,
+        1.0,
+        0.9318
+      ],
+      "sha256": "97db251dd129663da00d33e8eb4d7932d222f58d99ff7311c09cc277de5b6f18",
+      "url": "https://raw.pixls.us/getfile.php/3879/nice/Fujifilm - X-A7 - 14bit 14bit uncompressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-A7",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0148 0 0 0 1 0 0 0 0.9318",
+        "CameraCalibration2": "1.0148 0 0 0 1 0 0 0 0.9318",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-E3",
+      "measured": [
+        1.0196,
+        1.0,
+        1.0377
+      ],
+      "sha256": "03d6e79ae79107c51d0e1c1c9e488a0ab20268cd9fe43f47d8ea3ea310df35c6",
+      "url": "https://raw.pixls.us/getfile.php/1865/nice/Fujifilm - X-E3 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-E3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0196 0 0 0 1 0 0 0 1.0377",
+        "CameraCalibration2": "1.0196 0 0 0 1 0 0 0 1.0377",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-E4",
+      "measured": [
+        0.9812,
+        1.0,
+        0.9538
+      ],
+      "sha256": "abf49096ad13a2a16a4e11ec25e1455ff800335cb6549215ceac2db8229cb8d7",
+      "url": "https://raw.pixls.us/getfile.php/4448/nice/Fujifilm - X-E4 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-E4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9812 0 0 0 1 0 0 0 0.9538",
+        "CameraCalibration2": "0.9812 0 0 0 1 0 0 0 0.9538",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-E5",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "ff94e2e0d90ba29cacfacceab150a666e329945bd9e281cfced9564d06fc4070",
+      "url": "https://raw.pixls.us/getfile.php/8508/nice/Fujifilm - X-E5 - 14bit lossless compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-E5",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-H1",
+      "measured": [
+        0.9792,
+        1.0,
+        1.043
+      ],
+      "sha256": "5210bf896d2757cecda88bab0a87ef0b534d4b36c31dc08d5db7cd8f5bbf9b4e",
+      "url": "https://raw.pixls.us/getfile.php/2537/nice/Fujifilm - X-H1 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-H1",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9792 0 0 0 1 0 0 0 1.043",
+        "CameraCalibration2": "0.9792 0 0 0 1 0 0 0 1.043",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-H2",
+      "measured": [
+        0.9639,
+        1.0,
+        0.9671
+      ],
+      "sha256": "caeadb2666f6c5d9bbe32fbe692c2079b6a7e028f8514a13173f360656d08507",
+      "url": "https://raw.pixls.us/getfile.php/6001/nice/Fujifilm - X-H2 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-H2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9639 0 0 0 1 0 0 0 0.9671",
+        "CameraCalibration2": "0.9639 0 0 0 1 0 0 0 0.9671",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-H2S",
+      "measured": [
+        0.9685,
+        1.0,
+        1.0142
+      ],
+      "sha256": "15f918a2d36cd77ee6318cd36dffa01ad112f7b17a2f96568322b51ff306c453",
+      "url": "https://raw.pixls.us/getfile.php/6009/nice/Fujifilm - X-H2S - 14bit 14bit compressed (3:2).raf",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-H2S",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9685 0 0 0 1 0 0 0 1.0142",
+        "CameraCalibration2": "0.9685 0 0 0 1 0 0 0 1.0142",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-M5",
+      "measured": [
+        0.9872,
+        1.0,
+        0.9862
+      ],
+      "sha256": "8445f45b1da0342a0ac7ed3e05f99be7a16bc9798d15a67ca4cb3f409e7e94fb",
+      "url": "https://raw.pixls.us/getfile.php/7749/nice/Fujifilm - X-M5 - 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-M5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9872 0 0 0 1 0 0 0 0.9862",
+        "CameraCalibration2": "0.9872 0 0 0 1 0 0 0 0.9862",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-Pro2",
+      "measured": [
+        0.988,
+        1.0,
+        1.0241
+      ],
+      "sha256": "9502fddca2d32341999e52c9aa7f5f47b32a03468b26b8fe54880c72a496cf5a",
+      "url": "https://raw.pixls.us/getfile.php/1681/nice/Fujifilm - X-Pro2 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-Pro2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.988 0 0 0 1 0 0 0 1.0241",
+        "CameraCalibration2": "0.988 0 0 0 1 0 0 0 1.0241",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-Pro3",
+      "measured": [
+        0.9921,
+        1.0,
+        0.9834
+      ],
+      "sha256": "151353de58fa3a1d29e9840e7db6415dff178c2d6faadf362a8130f793507531",
+      "url": "https://raw.pixls.us/getfile.php/3701/nice/Fujifilm - X-Pro3 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-Pro3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9921 0 0 0 1 0 0 0 0.9834",
+        "CameraCalibration2": "0.9921 0 0 0 1 0 0 0 0.9834",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-S10",
+      "measured": [
+        0.9812,
+        1.0,
+        0.9425
+      ],
+      "sha256": "9419d1408ebf850395e5dd563beb96309466546252caf541466034c9cb7e9724",
+      "url": "https://raw.pixls.us/getfile.php/4190/nice/Fujifilm - X-S10 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-S10",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9812 0 0 0 1 0 0 0 0.9425",
+        "CameraCalibration2": "0.9812 0 0 0 1 0 0 0 0.9425",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-S20",
+      "measured": [
+        0.984,
+        1.0,
+        1.0246
+      ],
+      "sha256": "4ee64930d06376b793afac901cd5e808cbc666fed3ecc27fb9ac846c05c1edd6",
+      "url": "https://raw.pixls.us/getfile.php/6668/nice/Fujifilm - X-S20 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-S20",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.984 0 0 0 1 0 0 0 1.0246",
+        "CameraCalibration2": "0.984 0 0 0 1 0 0 0 1.0246",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T2",
+      "measured": [
+        1.0362,
+        1.0,
+        1.043
+      ],
+      "sha256": "f756ad5be551a8b3e1b503a8a6f7e8e637fba519c0b0f8c79dd58e94b0287602",
+      "url": "https://raw.pixls.us/getfile.php/865/nice/Fujifilm - X-T2 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0362 0 0 0 1 0 0 0 1.043",
+        "CameraCalibration2": "1.0362 0 0 0 1 0 0 0 1.043",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T20",
+      "measured": [
+        1.0681,
+        1.0,
+        1.006
+      ],
+      "sha256": "a23045101b2912e64f154100d646c228c0d16585d21e95e0d1a006e537f7784c",
+      "url": "https://raw.pixls.us/getfile.php/1178/nice/Fujifilm - X-T20 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T20",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0681 0 0 0 1 0 0 0 1.006",
+        "CameraCalibration2": "1.0681 0 0 0 1 0 0 0 1.006",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T200",
+      "measured": [
+        0.9338,
+        1.0,
+        0.9695
+      ],
+      "sha256": "8fc8dfa5b4741246287c430010d9699fe6f1e512ac03e14abea72e63cb022051",
+      "url": "https://raw.pixls.us/getfile.php/3899/nice/Fujifilm - X-T200 - 14bit 14bit uncompressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T200",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9338 0 0 0 1 0 0 0 0.9695",
+        "CameraCalibration2": "0.9338 0 0 0 1 0 0 0 0.9695",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T3",
+      "measured": [
+        1.0129,
+        1.0,
+        0.9855
+      ],
+      "sha256": "95b33021160b239ceb1a09d46a1b29cb60cb7dd47581feb126b337c219091754",
+      "url": "https://raw.pixls.us/getfile.php/2783/nice/Fujifilm - X-T3 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0129 0 0 0 1 0 0 0 0.9855",
+        "CameraCalibration2": "1.0129 0 0 0 1 0 0 0 0.9855",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T30",
+      "measured": [
+        1.0032,
+        1.0,
+        0.9814
+      ],
+      "sha256": "929d4ab996145d06787a684154585d00b01c68240e3aead0a3193232259c1849",
+      "url": "https://raw.pixls.us/getfile.php/3069/nice/Fujifilm - X-T30 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T30",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0032 0 0 0 1 0 0 0 0.9814",
+        "CameraCalibration2": "1.0032 0 0 0 1 0 0 0 0.9814",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T30 II",
+      "measured": [
+        0.9905,
+        1.0,
+        0.9635
+      ],
+      "sha256": "5e2678038377cc7f146ceb7693c08535fa1af162cec705d06b0446c3d3017d47",
+      "url": "https://raw.pixls.us/getfile.php/5064/nice/Fujifilm - X-T30 II - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T30 II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9905 0 0 0 1 0 0 0 0.9635",
+        "CameraCalibration2": "0.9905 0 0 0 1 0 0 0 0.9635",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T30 III",
+      "measured": [
+        0.9824,
+        1.0,
+        1.0081
+      ],
+      "sha256": "1910b95422240f97781fa3296d67a56cc8f62de63144ac11cbf4267a11278042",
+      "url": "https://raw.pixls.us/getfile.php/8771/nice/Fujifilm - X-T30 III - 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T30 III",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9824 0 0 0 1 0 0 0 1.0081",
+        "CameraCalibration2": "0.9824 0 0 0 1 0 0 0 1.0081",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T4",
+      "measured": [
+        0.9921,
+        1.0,
+        0.9387
+      ],
+      "sha256": "871836938ffa695f4c41765ddb107c2703ce755f7f3ced7e10f9e04746f1734e",
+      "url": "https://raw.pixls.us/getfile.php/3918/nice/Fujifilm - X-T4 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9921 0 0 0 1 0 0 0 0.9387",
+        "CameraCalibration2": "0.9921 0 0 0 1 0 0 0 0.9387",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T5",
+      "measured": [
+        0.9347,
+        1.0,
+        1.055
+      ],
+      "sha256": "cddd7ae0c43f9280876e5fdcbdf8878718972ebd3d034d8affc8cfc6752d33dc",
+      "url": "https://raw.pixls.us/getfile.php/6123/nice/Fujifilm - X-T5 - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9347 0 0 0 1 0 0 0 1.055",
+        "CameraCalibration2": "0.9347 0 0 0 1 0 0 0 1.055",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X-T50",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "3a8a9ac6d92274969aaa1f55ea669191b98bb8f588d00ec8ec17afd8b3963dea",
+      "url": "https://raw.pixls.us/getfile.php/7807/nice/Fujifilm - X-T50 - 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X-T50",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X100V",
+      "measured": [
+        1.0415,
+        1.0,
+        1.0128
+      ],
+      "sha256": "48f2055ab497c687347eee84103d4f48deb016fff711d2810eaf1317e506f621",
+      "url": "https://raw.pixls.us/getfile.php/3812/nice/Fujifilm - X100V - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X100V",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0415 0 0 0 1 0 0 0 1.0128",
+        "CameraCalibration2": "1.0415 0 0 0 1 0 0 0 1.0128",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "X100VI",
+      "measured": [
+        0.9762,
+        1.0,
+        1.0439
+      ],
+      "sha256": "7f19c7c5914542b91829ac2e41c8d4c10e414b28b0f7a793001e1a979c8c6056",
+      "url": "https://raw.pixls.us/getfile.php/7302/nice/Fujifilm - X100VI - 14bit 14bit compressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "X100VI",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9762 0 0 0 1 0 0 0 1.0439",
+        "CameraCalibration2": "0.9762 0 0 0 1 0 0 0 1.0439",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "FUJIFILM",
+      "model": "XF10",
+      "measured": [
+        1.0282,
+        1.0,
+        0.9697
+      ],
+      "sha256": "0486676fdbbdc7f3f4c63cd45aa76581cbc1316f4c9baef8781bced0fbc137db",
+      "url": "https://raw.pixls.us/getfile.php/3124/nice/Fujifilm - XF10 - 14bit 14bit uncompressed (3:2).RAF",
+      "tags": {
+        "Make": "FUJIFILM",
+        "Model": "XF10",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0282 0 0 0 1 0 0 0 0.9697",
+        "CameraCalibration2": "1.0282 0 0 0 1 0 0 0 0.9697",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 200D",
+      "measured": [
+        1.0247,
+        1.0,
+        1.026
+      ],
+      "sha256": "ffed1191fc4d832f847274a4ec1c5e34e50083a5aeedee3d5dd8a24f707e9ede",
+      "url": "https://raw.pixls.us/getfile.php/2428/nice/Canon - EOS 200D - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 200D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0247 0 0 0 1 0 0 0 1.026",
+        "CameraCalibration2": "1.0247 0 0 0 1 0 0 0 1.026",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 250D",
+      "measured": [
+        0.991,
+        1.0,
+        0.9922
+      ],
+      "sha256": "69bdd267defb3d676f41f62a5e5ea65651669a04191cf4e89740917c59cedbcc",
+      "url": "https://raw.pixls.us/getfile.php/3383/nice/Canon - EOS 250D - C-RAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 250D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.991 0 0 0 1 0 0 0 0.9922",
+        "CameraCalibration2": "0.991 0 0 0 1 0 0 0 0.9922",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 5D Mark IV",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "25d928f9e9a65525ac796bdff13e93b7b36b627568d7a17338e12dc44424078a",
+      "url": "https://raw.pixls.us/getfile.php/981/nice/Canon - EOS 5D Mark IV - sRAW2 (sRAW) (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 5D Mark IV",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0022 0 0 0 1 0 0 0 0.9836",
+        "CameraCalibration2": "1.0022 0 0 0 1 0 0 0 0.9836",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1.989796 1 1.473552"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 5DS R",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "26868d8b944395bf37d1ffc6fe88cc2039e913bba6b7724b5223d128a626b3b3",
+      "url": "https://raw.pixls.us/getfile.php/2976/nice/Canon - EOS 5DS R - sRAW2 (sRAW) (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 5DS R",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9637 0 0 0 1 0 0 0 0.9913",
+        "CameraCalibration2": "0.9637 0 0 0 1 0 0 0 0.9913",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1.578947 1 2.888889"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 6D Mark II",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "a4bf9842c2222b2eeb95ec71065f9d981c9b5be619b96db7f121e395968a119b",
+      "url": "https://raw.pixls.us/getfile.php/1623/nice/Canon - EOS 6D Mark II - sRAW2 (sRAW) (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 6D Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9907 0 0 0 1 0 0 0 1.007",
+        "CameraCalibration2": "0.9907 0 0 0 1 0 0 0 1.007",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1.933884 1 1.881029"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 77D",
+      "measured": [
+        1.0181,
+        1.0,
+        0.9692
+      ],
+      "sha256": "811df582d97918987312fa0fceae3ad19a20532a64ebda9782764ac7e629c265",
+      "url": "https://raw.pixls.us/getfile.php/1332/nice/Canon - EOS 77D - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 77D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0181 0 0 0 1 0 0 0 0.9692",
+        "CameraCalibration2": "1.0181 0 0 0 1 0 0 0 0.9692",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 7D Mark II",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "2d86d7af6168af36ac666e462c0bac325884f88c1cb78eebfd4c9c11dcacc116",
+      "url": "https://raw.pixls.us/getfile.php/1066/nice/Canon - EOS 7D Mark II - sRAW2 (sRAW) (3:2).cr2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 7D Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0307 0 0 0 1 0 0 0 0.9627",
+        "CameraCalibration2": "1.0307 0 0 0 1 0 0 0 0.9627",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "2.111913 1 1.568365"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 800D",
+      "measured": [
+        0.9963,
+        1.0,
+        1.0229
+      ],
+      "sha256": "b87a0d727fa61b7da012e3ea738be6c05a24561656cba9265f5e1e6463f6478e",
+      "url": "https://raw.pixls.us/getfile.php/1599/nice/Canon - EOS 800D - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 800D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9963 0 0 0 1 0 0 0 1.0229",
+        "CameraCalibration2": "0.9963 0 0 0 1 0 0 0 1.0229",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 80D",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "f9c5404b57248c21e9b269721aa0d721c3b1281c94ebdee3c50bf32db42613a8",
+      "url": "https://raw.pixls.us/getfile.php/1296/nice/Canon - EOS 80D - sRAW2 (sRAW) (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 80D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9742 0 0 0 1 0 0 0 0.9804",
+        "CameraCalibration2": "0.9742 0 0 0 1 0 0 0 0.9804",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1.890145 1 1.616022"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 850D",
+      "measured": [
+        0.9984,
+        1.0,
+        0.994
+      ],
+      "sha256": "47f7747b74073515bdbd65015738bc31947504d68255c5377baa21f179df2486",
+      "url": "https://raw.pixls.us/getfile.php/4867/nice/Canon - EOS 850D - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 850D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9984 0 0 0 1 0 0 0 0.994",
+        "CameraCalibration2": "0.9984 0 0 0 1 0 0 0 0.994",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS 90D",
+      "measured": [
+        0.9983,
+        1.0,
+        1.0341
+      ],
+      "sha256": "c8c918b2d1a53e64d7d5009ebac89a920dbba5f766c2f396bb4ec95312b21034",
+      "url": "https://raw.pixls.us/getfile.php/4650/nice/Canon - EOS 90D - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS 90D",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9983 0 0 0 1 0 0 0 1.0341",
+        "CameraCalibration2": "0.9983 0 0 0 1 0 0 0 1.0341",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS M200",
+      "measured": [
+        1.0263,
+        1.0,
+        1.0
+      ],
+      "sha256": "0585a468143c6606936d0ffbff1788c6c02e3610d8ecb50614e21492fbacd052",
+      "url": "https://raw.pixls.us/getfile.php/8470/nice/Canon - EOS M200 - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS M200",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0263 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1.0263 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS M5",
+      "measured": [
+        0.9924,
+        1.0,
+        1.0
+      ],
+      "sha256": "5af02dbad6cd90eeac2b0b1c0be0aeb9a5d2841c6dd984ee415ede9f2566667d",
+      "url": "https://raw.pixls.us/getfile.php/2935/nice/Canon - EOS M5 - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS M5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9924 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "0.9924 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS M50",
+      "measured": [
+        0.9884,
+        1.0,
+        0.9865
+      ],
+      "sha256": "27a88fdae82516ba136e12c2cc9b934f25dbaaac24d64ab4e5517f8524463594",
+      "url": "https://raw.pixls.us/getfile.php/4656/nice/Canon - EOS M50 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS M50",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9884 0 0 0 1 0 0 0 0.9865",
+        "CameraCalibration2": "0.9884 0 0 0 1 0 0 0 0.9865",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS M50 Mark II",
+      "measured": [
+        0.9861,
+        1.0,
+        1.0084
+      ],
+      "sha256": "1a3c11d85f48b8c644664b505f69fbdd75eb51270bb8ab556dbc660f0487e957",
+      "url": "https://raw.pixls.us/getfile.php/4430/nice/Canon - EOS M50 Mark II - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS M50m2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9861 0 0 0 1 0 0 0 1.0084",
+        "CameraCalibration2": "0.9861 0 0 0 1 0 0 0 1.0084",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS M6 Mark II",
+      "measured": [
+        0.9815,
+        1.0,
+        1.048
+      ],
+      "sha256": "94635c6f91e7d743cee6881cc2519992ae9f9031fd86b49e5d0f16edf5961b55",
+      "url": "https://raw.pixls.us/getfile.php/3714/nice/Canon - EOS M6 Mark II - C-RAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS M6 Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9815 0 0 0 1 0 0 0 1.048",
+        "CameraCalibration2": "0.9815 0 0 0 1 0 0 0 1.048",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R",
+      "measured": [
+        0.9807,
+        1.0,
+        1.0274
+      ],
+      "sha256": "90bbf397b592f9ce9799477df4affbdf0025578c07eac26f928696b0d40d5121",
+      "url": "https://raw.pixls.us/getfile.php/4664/nice/Canon - EOS R - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9807 0 0 0 1 0 0 0 1.0274",
+        "CameraCalibration2": "0.9807 0 0 0 1 0 0 0 1.0274",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R10",
+      "measured": [
+        0.9836,
+        1.0,
+        1.0166
+      ],
+      "sha256": "15d017f0770b3da17180077617ffe07b786a1ec2cb36297f81a82a27a54756db",
+      "url": "https://raw.pixls.us/getfile.php/5907/nice/Canon - EOS R10 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R10",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9836 0 0 0 1 0 0 0 1.0166",
+        "CameraCalibration2": "0.9836 0 0 0 1 0 0 0 1.0166",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R100",
+      "measured": [
+        0.9748,
+        1.0,
+        1.0663
+      ],
+      "sha256": "0b66842b2fe00329ebc05fe8ab9357ddbbe1a0a2d2e69a2893102de7fdf5c942",
+      "url": "https://raw.pixls.us/getfile.php/7897/nice/Canon - EOS R100 - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R100",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9748 0 0 0 1 0 0 0 1.0663",
+        "CameraCalibration2": "0.9748 0 0 0 1 0 0 0 1.0663",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R3",
+      "measured": [
+        1.004,
+        1.0,
+        0.9984
+      ],
+      "sha256": "295d46a4d5383895e63126f67000d4352a5bb425ee4d8b16eb6b6c284bdf7994",
+      "url": "https://raw.pixls.us/getfile.php/5051/nice/Canon - EOS R3 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.004 0 0 0 1 0 0 0 0.9984",
+        "CameraCalibration2": "1.004 0 0 0 1 0 0 0 0.9984",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R5",
+      "measured": [
+        0.9905,
+        1.0,
+        1.0197
+      ],
+      "sha256": "a5f4935e0331cc16003c0b1ab6c657272739e82175557aaae576e78a8262511b",
+      "url": "https://raw.pixls.us/getfile.php/4696/nice/Canon - EOS R5 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9905 0 0 0 1 0 0 0 1.0197",
+        "CameraCalibration2": "0.9905 0 0 0 1 0 0 0 1.0197",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R5 Mark II",
+      "measured": [
+        1.0016,
+        1.0,
+        0.9924
+      ],
+      "sha256": "6a597497776a6abbfab8fcf12d0086ac7a3f8afea2879d61accf6bbf48d357d7",
+      "url": "https://raw.pixls.us/getfile.php/7884/nice/Canon - EOS R5 Mark II - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R5m2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0016 0 0 0 1 0 0 0 0.9924",
+        "CameraCalibration2": "1.0016 0 0 0 1 0 0 0 0.9924",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R50",
+      "measured": [
+        0.9836,
+        1.0,
+        1.0219
+      ],
+      "sha256": "b79af9ffa184dd740e8af7a9f451f7150053d7e456b3435ca2e43bbbf5f65026",
+      "url": "https://raw.pixls.us/getfile.php/6646/nice/Canon - EOS R50 - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R50",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9836 0 0 0 1 0 0 0 1.0219",
+        "CameraCalibration2": "0.9836 0 0 0 1 0 0 0 1.0219",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R50 V",
+      "measured": [
+        0.9887,
+        1.0,
+        1.0183
+      ],
+      "sha256": "955ff98710505498ce7f98cbcc5875793ef2d6941b3b5692ed3baf2817ee7c9f",
+      "url": "https://raw.pixls.us/getfile.php/8403/nice/Canon - EOS R50 V - RAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R50 V",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9887 0 0 0 1 0 0 0 1.0183",
+        "CameraCalibration2": "0.9887 0 0 0 1 0 0 0 1.0183",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R6",
+      "measured": [
+        1.0165,
+        1.0,
+        1.0075
+      ],
+      "sha256": "74abb0a113d075ad9887a058082f40dd2a938c4813a08474d82356f11a027778",
+      "url": "https://raw.pixls.us/getfile.php/4659/nice/Canon - EOS R6 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R6",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0165 0 0 0 1 0 0 0 1.0075",
+        "CameraCalibration2": "1.0165 0 0 0 1 0 0 0 1.0075",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R6 Mark II",
+      "measured": [
+        0.9853,
+        1.0,
+        1.0247
+      ],
+      "sha256": "51ae1e673d2801d8a54f33dd8669c43034c506e2d355e75b26c0648e2f14a431",
+      "url": "https://raw.pixls.us/getfile.php/6408/nice/Canon - EOS R6 Mark II - 3:2.cr3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R6m2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9853 0 0 0 1 0 0 0 1.0247",
+        "CameraCalibration2": "0.9853 0 0 0 1 0 0 0 1.0247",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R6 Mark III",
+      "measured": [
+        1.0052,
+        1.0,
+        1.0017
+      ],
+      "sha256": "7e1a5d84297a52853b0bbe5a5c03a5d4f5b93e00b7020271523240f9cabfe50e",
+      "url": "https://raw.pixls.us/getfile.php/8964/nice/Canon - EOS R6 Mark III - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R6 Mark III",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0052 0 0 0 1 0 0 0 1.0017",
+        "CameraCalibration2": "1.0052 0 0 0 1 0 0 0 1.0017",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R7",
+      "measured": [
+        1.0139,
+        1.0,
+        0.9822
+      ],
+      "sha256": "10a18e3f01ca9cd93408496d3853388ef140830548bfeed4237e40f967eb9d5c",
+      "url": "https://raw.pixls.us/getfile.php/5634/nice/Canon - EOS R7 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R7",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0139 0 0 0 1 0 0 0 0.9822",
+        "CameraCalibration2": "1.0139 0 0 0 1 0 0 0 0.9822",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS R8",
+      "measured": [
+        0.9868,
+        1.0,
+        1.0132
+      ],
+      "sha256": "df33cf394573645ce03dea1b2e9f0b5cc2b7734e9e3391ee7114151414cf2812",
+      "url": "https://raw.pixls.us/getfile.php/6587/nice/Canon - EOS R8 - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS R8",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9868 0 0 0 1 0 0 0 1.0132",
+        "CameraCalibration2": "0.9868 0 0 0 1 0 0 0 1.0132",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS RP",
+      "measured": [
+        1.0097,
+        1.0,
+        1.003
+      ],
+      "sha256": "4a859ab137f792aedaf3416b0aad1497ebaab02052a49453902e226699154aa7",
+      "url": "https://raw.pixls.us/getfile.php/4671/nice/Canon - EOS RP - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS RP",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0097 0 0 0 1 0 0 0 1.003",
+        "CameraCalibration2": "1.0097 0 0 0 1 0 0 0 1.003",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS-1D X Mark II",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "35b66b2fc26a015ee622af7269eaf3e694fa6f5b6126ade27d910957d417d81a",
+      "url": "https://raw.pixls.us/getfile.php/1060/nice/Canon - EOS-1D X Mark II - sRAW2 (sRAW) (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS-1D X Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0199 0 0 0 1 0 0 0 0.9969",
+        "CameraCalibration2": "1.0199 0 0 0 1 0 0 0 0.9969",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1.857143 1 1.56"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "EOS-1D X Mark III",
+      "measured": [
+        1.0037,
+        1.0,
+        1.0221
+      ],
+      "sha256": "e5755d1414a2dd51fb0120b272058f00b0199861646070c00304d927eb119560",
+      "url": "https://raw.pixls.us/getfile.php/4654/nice/Canon - EOS-1D X Mark III - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon EOS-1D X Mark III",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0037 0 0 0 1 0 0 0 1.0221",
+        "CameraCalibration2": "1.0037 0 0 0 1 0 0 0 1.0221",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "PowerShot G1 X Mark III",
+      "measured": [
+        1.1024,
+        1.0,
+        0.9529
+      ],
+      "sha256": "ca052ed025432fdacfba7347cb4374fa3b727155912a91c42ed9a275d13bedf5",
+      "url": "https://raw.pixls.us/getfile.php/2695/nice/Canon - PowerShot G1 X Mark III - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon PowerShot G1 X Mark III",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.1024 0 0 0 1 0 0 0 0.9529",
+        "CameraCalibration2": "1.1024 0 0 0 1 0 0 0 0.9529",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "PowerShot G5 X Mark II",
+      "measured": [
+        0.9851,
+        1.0,
+        0.9634
+      ],
+      "sha256": "16d7b944344004c866bf2f84c5673969e76adfe16e5fb4388da48c72bdd58058",
+      "url": "https://raw.pixls.us/getfile.php/3506/nice/Canon - PowerShot G5 X Mark II - C-RAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon PowerShot G5 X Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9851 0 0 0 1 0 0 0 0.9634",
+        "CameraCalibration2": "0.9851 0 0 0 1 0 0 0 0.9634",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "PowerShot G7 X Mark III",
+      "measured": [
+        0.9868,
+        1.0,
+        1.0017
+      ],
+      "sha256": "29fa26718f2791f8dc3a69d8517d0575f8cf165492253671e7b1a5151a512f02",
+      "url": "https://raw.pixls.us/getfile.php/6054/nice/Canon - PowerShot G7 X Mark III - 3:2.CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon PowerShot G7 X Mark III",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9868 0 0 0 1 0 0 0 1.0017",
+        "CameraCalibration2": "0.9868 0 0 0 1 0 0 0 1.0017",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "PowerShot G9 X Mark II",
+      "measured": [
+        0.986,
+        1.0,
+        1.024
+      ],
+      "sha256": "f91f1a3b6fa66b2e15fd26c1bd78e1eb19dfa7e6a3886aff36e7ab96fd1c319c",
+      "url": "https://raw.pixls.us/getfile.php/1575/nice/Canon - PowerShot G9 X Mark II - RAW (3:2).CR2",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon PowerShot G9 X Mark II",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.986 0 0 0 1 0 0 0 1.024",
+        "CameraCalibration2": "0.986 0 0 0 1 0 0 0 1.024",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Canon",
+      "model": "PowerShot V1",
+      "measured": [
+        0.9678,
+        1.0,
+        0.9811
+      ],
+      "sha256": "0a0abfd81b3a34fa513ac8ed24c809275160d65b07e892c2eb4353b77c535a31",
+      "url": "https://raw.pixls.us/getfile.php/8500/nice/Canon - PowerShot V1 - CRAW (3:2).CR3",
+      "tags": {
+        "Make": "Canon",
+        "Model": "Canon PowerShot V1",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9678 0 0 0 1 0 0 0 0.9811",
+        "CameraCalibration2": "0.9678 0 0 0 1 0 0 0 0.9811",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D3400",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "eced190786231f0081261b6c6b425fe23e42a53ade21dec3def5ae8551be71a5",
+      "url": "https://raw.pixls.us/getfile.php/1561/nice/Nikon - D3400 - 12bit 12bit compressed (Lossy (type 2)) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D3400",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D3500",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "b53395f74674588a63f6b667325c5a2b400f26cba72ff402a65ddd02c5f841d5",
+      "url": "https://raw.pixls.us/getfile.php/2902/nice/Nikon - D3500 - 12bit 12bit compressed (Lossy (type 2)) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D3500",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D5",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "13191560a6a9d9ed4156ec5d20863277c9618916aaba934758c5ae2be6654f6a",
+      "url": "https://raw.pixls.us/getfile.php/1636/nice/Nikon - D5 - 14bit 14bit uncompressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D500",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "290ea97c0aa0f490cc1eca0bbfb68048f20219bd921682907d04a8bf8a6bcc70",
+      "url": "https://raw.pixls.us/getfile.php/2518/nice/Nikon - D500 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D500",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D5600",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "82e15f02c4037820e80f14bacfacdc52ea29721b3c70d2cf08b237b50ce8db05",
+      "url": "https://raw.pixls.us/getfile.php/1415/nice/Nikon - D5600 - 12bit 12bit compressed (Lossy (type 2)) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D5600",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D6",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "979a712d59bb768913572db874bd3c605e83c3be23a91b89d7cf88111af951d4",
+      "url": "https://raw.pixls.us/getfile.php/4723/nice/Nikon - D6 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D6",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D610",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "11f0a71bb4141a8ed44c7e1c64f9a12571f5f67a11571f2bde8516aa95a7bea3",
+      "url": "https://raw.pixls.us/getfile.php/888/nice/Nikon - D610 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D610",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D7200",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "9360c9980a20d56a43727493e5d87113b28c3ef205deb5516d5c2508f8aa5db8",
+      "url": "https://raw.pixls.us/getfile.php/836/nice/Nikon - D7200 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D7200",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D750",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "baae8dfc05a81a4a4034831a49ed99d129e797858ad876d31173a46d33b7d3ea",
+      "url": "https://raw.pixls.us/getfile.php/897/nice/Nikon - D750 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D750",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D7500",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "1f4e58a961d3d317fa39a7e1c8948b825651e968c8cd06e49e4239f612faccad",
+      "url": "https://raw.pixls.us/getfile.php/1532/nice/Nikon - D7500 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D7500",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D780",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "3178d0656e3b5fbe90176e38a1cd608d0b69292299445932dddc9a0b2d196b36",
+      "url": "https://raw.pixls.us/getfile.php/3825/nice/Nikon - D780 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D780",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D810",
+      "reason": "non-identity AnalogBalance requires a full matrix implementation",
+      "sha256": "0cb5b8193ddc1de57fcc5f2091d0f7e8476f3b3af4beeb1ccc73d45f1c7a6bed",
+      "url": "https://raw.pixls.us/getfile.php/2036/nice/Nikon - D810 - 12bit 12bit compressed ((8)), small raw (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D810",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "2.160156 1 1.183594"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "D850",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "31b7fe298a5c91694c6ca8b3284a0a016e572a02c3964b502d4732e8e9283da8",
+      "url": "https://raw.pixls.us/getfile.php/1835/nice/Nikon - D850 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON D850",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Df",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "c235099efa19a02f50174dfe473c5d4da1e190d44d9153604486a79cbcf120df",
+      "url": "https://raw.pixls.us/getfile.php/1387/nice/Nikon - Df - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Df",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 30",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "75249c11a3a845367c7a322a1c4e7076f33c785ec2518fc6594c34c185b41161",
+      "url": "https://raw.pixls.us/getfile.php/5812/nice/Nikon - Z 30 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 30",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 5",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "ac11b88c978958222af79946c01071f270e0d660ae8fb5e1f15e4c965a25aa54",
+      "url": "https://raw.pixls.us/getfile.php/4137/nice/Nikon - Z 5 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 5",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 50",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "b25081cf9adcd51fec020b6d227ff094bc0327cbd26d76bad7e1dee3fb4c034a",
+      "url": "https://raw.pixls.us/getfile.php/3648/nice/Nikon - Z 50 - 12bit 12bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 50",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 6",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "f0ab08da469ee205f2bc08efd9005778c64cdcb064893cee03768e32e5da1a36",
+      "url": "https://raw.pixls.us/getfile.php/3587/nice/Nikon - Z 6 - 12bit 12bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 6",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 6_2",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "04ad59c3b97609e72a54ad277ab433444b12392b032207ca7244571f60ab2514",
+      "url": "https://raw.pixls.us/getfile.php/4163/nice/Nikon - Z 6_2 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 6_2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 7",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "85e08750866f339f9e810b9004e542b0a623edf83df911459c7ae0057fe1a1dd",
+      "url": "https://raw.pixls.us/getfile.php/2795/nice/Nikon - Z 7 - 12bit 12bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 7",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 7_2",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "f407fbfee6baef21c843b0ecdbfa30219ef6a031c853d9d0ce07391b2e4bf619",
+      "url": "https://raw.pixls.us/getfile.php/4214/nice/Nikon - Z 7_2 - 12bit 12bit compressed (Lossless) (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 7_2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 8",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "82df041542b8d328738443bb5ff3373b396e406ecc8cbe7dc3b35252790c53e7",
+      "url": "https://raw.pixls.us/getfile.php/6616/nice/Nikon - Z 8 - 8bit 8bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 8",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z 9",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "be91bac25573adf7ec6320a542105d87b4fb9c956d7b620ec90d57ac2ae6c3f0",
+      "url": "https://raw.pixls.us/getfile.php/5148/nice/Nikon - Z 9 - 8bit 8bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z 9",
+        "DNGVersion": "1 7 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z f",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "83c82be0be8865d796096dfbcc8ef2abf5af1bd37db44dfad6715070b0c99d15",
+      "url": "https://raw.pixls.us/getfile.php/6885/nice/Nikon - Z f - 14bit 14bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z f",
+        "DNGVersion": "1 7 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z fc",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "e4cabbeaf818eaa77719158ca2f480fbbf413e694f3714b44f01d588bc7a9863",
+      "url": "https://raw.pixls.us/getfile.php/4813/nice/Nikon - Z fc - 12bit 12bit compressed (Lossless) (3:2).nef",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z fc",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z50_2",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "71c12d398e6f5a01e0e32c2211c40cafdb29e85ba1e17c4f65e7a4e958754c54",
+      "url": "https://raw.pixls.us/getfile.php/7764/nice/Nikon - Z50_2 - 8bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z50_2",
+        "DNGVersion": "1 7 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z5_2",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "196971ea960cfa6f5c0a19cebe515ac118e079c57ceeef850ab3a4995dc7d20f",
+      "url": "https://raw.pixls.us/getfile.php/7737/nice/Nikon - Z5_2 - 8bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z5_2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Nikon",
+      "model": "Z6_3",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "a8fa2cacadcf9dc85475ebcf37fcc32614072bc155e39d01491cb9e293c1343d",
+      "url": "https://raw.pixls.us/getfile.php/7810/nice/Nikon - Z6_3 - 8bit compressed (3:2).NEF",
+      "tags": {
+        "Make": "NIKON CORPORATION",
+        "Model": "NIKON Z6_3",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibration2": "1 0 0 0 1 0 0 0 1",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "645Z",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "7d4e7abd704e0f73452e9fcaaf6728739ac41a12133e0456f492b48edc5c9c2a",
+      "url": "https://raw.pixls.us/getfile.php/2404/nice/Pentax - 645Z - 14bit 14bit compressed (4:3).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX 645Z",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "K-1 Mark II",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "fe2330254c5313d4dde97cbd01e2987f6f1137f1c9c687d30e951f4668979381",
+      "url": "https://raw.pixls.us/getfile.php/7133/nice/Pentax - K-1 Mark II - 14bit (3:2).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX K-1 Mark II",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "K-3 Mark III",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "29714bc4cc754a81d2ab154a4ecf1eb5fa125d3901b10f3bd88d731c674f69c4",
+      "url": "https://raw.pixls.us/getfile.php/5832/nice/Pentax - K-3 Mark III - 14bit (3:2).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX K-3 Mark III",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "K-70",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "1d64c6aa71680642ba8f00b6f6105df3e66a4534e631f422fbf3316273c4408c",
+      "url": "https://raw.pixls.us/getfile.php/1141/nice/Pentax - K-70 - 14bit (3:2).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX K-70",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "KF",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "ddc9cdf399a7210b203dee1765ab9f4165a2e695da59bce6bcabf75b77174a4b",
+      "url": "https://raw.pixls.us/getfile.php/6664/nice/Pentax - KF - 14bit (3:2).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX KF",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "Pentax",
+      "model": "KP",
+      "measured": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "sha256": "19169ca872551dea1bbc6240343fe28e5b731975ccab64b260dd224a8cd3d17a",
+      "url": "https://raw.pixls.us/getfile.php/1825/nice/Pentax - KP - 14bit (3:2).PEF",
+      "tags": {
+        "Make": "RICOH IMAGING COMPANY, LTD.",
+        "Model": "PENTAX KP",
+        "DNGVersion": "1 4 0 0",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1"
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7CR",
+      "measured": [
+        0.9432,
+        1.0,
+        0.9994
+      ],
+      "sha256": "0d8c7c88486d0eb6f7cbe5c3879753c3f6d49db86c95c1e5b6ea3ad2db96bd4e",
+      "source": "local",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7CR",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9432 0 0 0 1 0 0 0 0.9994",
+        "CameraCalibration2": "0.9432 0 0 0 1 0 0 0 0.9994",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2569,
+          1024,
+          1800
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7CR",
+      "measured": [
+        0.9284,
+        1.0,
+        1.0158
+      ],
+      "sha256": "dffeafe6d50c791828d57ee7cd8f159c869904889fbbacb1b7880ba7931c4e76",
+      "source": "local",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7CR",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "0.9284 0 0 0 1 0 0 0 1.0158",
+        "CameraCalibration2": "0.9284 0 0 0 1 0 0 0 1.0158",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2610,
+          1024,
+          1771
+        ]
+      }
+    }
+  ]
+}

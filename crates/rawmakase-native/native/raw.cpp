@@ -33,6 +33,7 @@ struct Metadata {
     float focal_35mm;
     int highlight_tone_priority;
     float fuji_exposure_shift;
+    float sony_daylight_wb[3];
 };
 typedef int (*Cancel)(void*);
 }
@@ -181,6 +182,10 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         m->highlight_tone_priority=d.makernotes.canon.HighlightTonePriority;
         m->fuji_exposure_shift=d.makernotes.fuji.ExpoMidPointShift;
+        if (d.idata.maker_index == LIBRAW_CAMERAMAKER_Sony && !d.idata.dng_version) {
+            for (int c=0; c<3; ++c)
+                m->sony_daylight_wb[c] = d.color.WB_Coeffs[LIBRAW_WBI_Daylight][c];
+        }
         for(int c=0;c<3;++c) {
             m->daylight_wb[c] = d.color.pre_mul[c];
             m->wb[c] = d.color.cam_mul[c] > 0 ? d.color.cam_mul[c] : d.color.pre_mul[c];

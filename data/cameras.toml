@@ -522,6 +522,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.02 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X100F"
 baseline_exposure = 0.15
+neutral_calibration = [0.9883, 1.0, 1.031]
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-09-26"
@@ -1179,6 +1180,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.50 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M5A"
+sony_daylight_reference = [2316, 1024, 1836]
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1187,6 +1189,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M6"
+sony_daylight_reference = [2344, 1024, 1916]
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1195,6 +1198,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M7"
+sony_daylight_reference = [2240, 1024, 1692]
 baseline_exposure = -0.4
 source = "fitted"
 checked = "2026-10-05"
@@ -1203,6 +1207,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX10M4"
+sony_daylight_reference = [2292, 1024, 1936]
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1211,6 +1216,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "DSC-RX1RM2"
+sony_daylight_reference = [2356, 1024, 1712]
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1219,6 +1225,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCA-99M2"
+sony_daylight_reference = [2500, 1024, 1612]
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1227,6 +1234,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-1"
+sony_daylight_reference = [2429, 1024, 1607]
 aliases = ["A1"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1236,6 +1244,7 @@ sample = "raw.pixls.us, 1 photo at ISO 500"
 [[camera]]
 make = "Sony"
 model = "ILCE-6000"
+sony_daylight_reference = [2608, 1024, 1632]
 aliases = ["A6000"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1245,6 +1254,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6100"
+sony_daylight_reference = [2600, 1024, 1816]
 aliases = ["A6100"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1254,6 +1264,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-6300"
+sony_daylight_reference = [2768, 1024, 1772]
 aliases = ["A6300"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1263,6 +1274,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6400"
+sony_daylight_reference = [2600, 1024, 1816]
 aliases = ["A6400"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1272,6 +1284,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250"
 [[camera]]
 make = "Sony"
 model = "ILCE-6500"
+sony_daylight_reference = [2768, 1024, 1772]
 aliases = ["A6500"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1281,6 +1294,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6600"
+sony_daylight_reference = [2600, 1024, 1816]
 aliases = ["A6600"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1290,6 +1304,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-6700"
+sony_daylight_reference = [2705, 1024, 1746]
 aliases = ["A6700"]
 baseline_exposure = 0.1
 source = "adobe-dng"
@@ -1299,6 +1314,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 [[camera]]
 make = "Sony"
 model = "ILCE-7C"
+sony_daylight_reference = [2464, 1024, 1508]
 aliases = ["A7C"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1308,6 +1324,7 @@ sample = "raw.pixls.us, 1 photo at ISO 2000"
 [[camera]]
 make = "Sony"
 model = "ILCE-7CM2"
+sony_daylight_reference = [2411, 1024, 1638]
 aliases = ["A7C II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1317,6 +1334,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7CR"
+sony_daylight_reference = [2423, 1024, 1799]
 aliases = ["A7CR"]
 baseline_exposure = 0.3
 source = "fitted"
@@ -1335,6 +1353,7 @@ sample = "8 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 E
 [[camera]]
 make = "Sony"
 model = "ILCE-7M3"
+sony_daylight_reference = [2464, 1024, 1508]
 aliases = ["A7 III"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1344,6 +1363,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7M4"
+sony_daylight_reference = [2411, 1024, 1638]
 aliases = ["A7 IV"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1353,6 +1373,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 [[camera]]
 make = "Sony"
 model = "ILCE-7M5"
+sony_daylight_reference = [2324, 1024, 1808]
 aliases = ["A7 V"]
 baseline_exposure = 0.5
 source = "fitted"
@@ -1362,6 +1383,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; Adobe's BaselineExposure 0.35 on a 1
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM2"
+sony_daylight_reference = [2356, 1024, 1712]
 aliases = ["A7R II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1371,6 +1393,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM3"
+sony_daylight_reference = [2464, 1024, 1648]
 aliases = ["A7R III"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1380,6 +1403,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM4"
+sony_daylight_reference = [2572, 1024, 1668]
 aliases = ["A7R IV"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1389,6 +1413,7 @@ sample = "raw.pixls.us, 1 photo at ISO 50; Adobe -0.65 at extended ISO 50, which
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM5"
+sony_daylight_reference = [2423, 1024, 1799]
 aliases = ["A7R V"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1398,6 +1423,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7SM2"
+sony_daylight_reference = [2500, 1024, 1716]
 aliases = ["A7S II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1407,6 +1433,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7SM3"
+sony_daylight_reference = [2568, 1024, 1549]
 aliases = ["A7S III"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1416,6 +1443,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80"
 [[camera]]
 make = "Sony"
 model = "ILCE-9"
+sony_daylight_reference = [2460, 1024, 1608]
 aliases = ["A9"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1425,6 +1453,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-9M2"
+sony_daylight_reference = [2460, 1024, 1608]
 aliases = ["A9 II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1434,6 +1463,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 [[camera]]
 make = "Sony"
 model = "ILCE-9M3"
+sony_daylight_reference = [2128, 1024, 1729]
 aliases = ["A9 III"]
 baseline_exposure = 0.25
 source = "adobe-dng"
@@ -1443,6 +1473,7 @@ sample = "raw.pixls.us, 1 photo at ISO 1000"
 [[camera]]
 make = "Sony"
 model = "ILME-FX2"
+sony_daylight_reference = [2411, 1024, 1638]
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1451,6 +1482,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILME-FX3"
+sony_daylight_reference = [2568, 1024, 1549]
 baseline_exposure = 0.15
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1459,6 +1491,7 @@ sample = "raw.pixls.us, 1 photo at ISO 20000"
 [[camera]]
 make = "Sony"
 model = "ILME-FX30"
+sony_daylight_reference = [2705, 1024, 1746]
 baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1467,6 +1500,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 [[camera]]
 make = "Sony"
 model = "ZV-1"
+sony_daylight_reference = [2416, 1024, 1804]
 baseline_exposure = -0.2
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1475,6 +1509,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.20 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ZV-1M2"
+sony_daylight_reference = [2416, 1024, 1804]
 baseline_exposure = -0.2
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1483,6 +1518,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; BaselineExposure -0.20 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ZV-E1"
+sony_daylight_reference = [2568, 1024, 1549]
 baseline_exposure = 0.15
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1491,6 +1527,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 [[camera]]
 make = "Sony"
 model = "ZV-E10"
+sony_daylight_reference = [2848, 1024, 1868]
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1499,6 +1536,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400"
 [[camera]]
 make = "Sony"
 model = "ZV-E10M2"
+sony_daylight_reference = [2705, 1024, 1746]
 baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"

@@ -1,4 +1,113 @@
 use super::*;
+#[test]
+fn matrix_signature_does_not_activate_the_legacy_x100f_profile_correction() {
+    let m = Metadata {
+        baseline_exposure: Some(0.),
+        dng_matrix_profile_signature: Some("com.adobe".into()),
+        dng_neutral_calibration: Some(crate::camera_data::NeutralCalibration {
+            gains: [0.9, 1., 1.1],
+            signature: "com.adobe".into(),
+        }),
+        ..x100f()
+    };
+    let unsigned = CameraProfile::camera_matrix_default(&x100f()).unwrap();
+    let fallback = CameraProfile::camera_matrix_default(&m).unwrap();
+    assert_eq!(
+        fallback.legacy_white_balance(5600., 12., &m),
+        unsigned.white_balance(5600., 12., &x100f())
+    );
+    assert_ne!(
+        fallback.white_balance(5600., 12., &m),
+        fallback.legacy_white_balance(5600., 12., &m)
+    );
+}
+
+#[test]
+fn calibration_upgrade_keeps_old_recipe_white_balance_continuous() {
+    let m = Metadata {
+        make: "Sony".into(),
+        model: "ILCE-7M4".into(),
+        sony_daylight_wb: Some([2456., 1024., 1691.]),
+        ..x100f()
+    };
+    let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+    p.color1 = Some(m.cam_xyz);
+    p.color2 = Some(m.cam_xyz);
+    p.calibration_signature.clear();
+    let before = p.white_balance(5600., 0., &m).unwrap();
+    p.calibration_signature = "com.adobe".into();
+    let mut recipe = crate::model::recipe::Recipe {
+        temperature: 5600.,
+        tint: 0.,
+        wb: before,
+        profile: Some(std::sync::Arc::new(p)),
+        ..Default::default()
+    };
+    recipe.update_wb(&m);
+    assert_eq!(recipe.wb, before);
+}
+#[test]
+fn a7iv_dng_neutral_solves_adobe_as_shot_and_custom_white_balance() {
+    // Public raw.pixls.us A7 IV sample, independently converted with Adobe DNG
+    // Converter. These are metadata measurements, not a fit to rendered pixels.
+    let m = Metadata {
+        make: "Sony".into(),
+        model: "ILCE-7M4".into(),
+        sony_daylight_wb: Some([2456., 1024., 1691.]),
+        wb: [2380. / 1024., 1., 1920. / 1024.],
+        ..x100f()
+    };
+    let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+    p.color1 = Some([
+        [0.8784, -0.4791, 0.1177],
+        [-0.3468, 1.0693, 0.3213],
+        [0.0009, 0.0507, 0.7395],
+    ]);
+    p.color2 = Some([
+        [0.746, -0.2365, -0.0588],
+        [-0.5687, 1.3442, 0.2474],
+        [-0.0624, 0.1156, 0.6584],
+    ]);
+    p.kelvin1 = 2856.;
+    p.kelvin2 = 6504.;
+    p.calibration_signature = "com.adobe".into();
+    let [t, tint] = p.as_shot_white_balance(&m).unwrap();
+    assert!(
+        (t - 4700.).abs() < 50. && (tint - 24.).abs() < 1.,
+        "{t} / {tint}"
+    );
+    let gains = p.white_balance(t, tint, &m).unwrap();
+    assert!(gains.iter().all(|v| (v - 1.).abs() < 0.0005));
+    for t in [3200., 5600., 7500.] {
+        let gains = p.white_balance(t, 0., &m).unwrap();
+        let mut adjusted = m.clone();
+        adjusted.wb = std::array::from_fn(|c| m.wb[c] * gains[c]);
+        let actual = p.as_shot_white_balance(&adjusted).unwrap();
+        assert!((actual[0] / t - 1.).abs() < 0.002 && actual[1].abs() < 0.15);
+    }
+    p.calibration_signature.clear();
+    assert_eq!(p.neutral_calibration(&m), [1.; 3]);
+}
+#[test]
+fn dng_without_calibration_does_not_inherit_a_native_camera_correction() {
+    let mut m = Metadata {
+        make: "Sony".into(),
+        model: "ILCE-7M4".into(),
+        sony_daylight_wb: Some([2456., 1024., 1691.]),
+        baseline_exposure: Some(0.),
+        ..x100f()
+    };
+    let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+    p.calibration_signature = "com.adobe".into();
+    assert_eq!(p.neutral_calibration(&m), [1.; 3]);
+    m.dng_neutral_calibration = Some(crate::camera_data::NeutralCalibration {
+        gains: [0.95, 1., 1.02],
+        signature: "com.adobe".into(),
+    });
+    assert_eq!(p.neutral_calibration(&m), [0.95, 1., 1.02]);
+    p.calibration_signature = "different".into();
+    assert_eq!(p.neutral_calibration(&m), [1.; 3]);
+}
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn x100f() -> Metadata {
     // X100F D65 ColorMatrix, as Adobe writes it into DNGs and LibRaw reports as cam_xyz.
@@ -117,4 +226,31 @@ fn camera_matrix_default_keeps_neutrals_and_uses_dng_tone() {
     assert!(rgb.iter().all(|v| (v - 0.18).abs() < 0.001), "{rgb:?}");
     assert!(p.as_shot_white_balance(&m).is_some());
     assert!(CameraProfile::camera_matrix_default(&Metadata::default()).is_none());
+}
+
+#[test]
+fn a7cr_native_units_use_their_own_daylight_metadata() {
+    for (daylight, expected) in [
+        ([2569., 1024., 1800.], [0.9432, 1., 0.9994]),
+        ([2610., 1024., 1771.], [0.9284, 1., 1.0158]),
+    ] {
+        let mut m = Metadata {
+            make: "Sony".into(),
+            model: "ILCE-7CR".into(),
+            sony_daylight_wb: Some(daylight),
+            ..x100f()
+        };
+        let mut profile = CameraProfile::camera_matrix_default(&m).unwrap();
+        profile.calibration_signature = "com.adobe".into();
+        assert_eq!(profile.neutral_calibration(&m), expected);
+        m.model = "A7CR".into();
+        assert_eq!(profile.neutral_calibration(&m), expected);
+        m.sony_daylight_wb = None;
+        assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
+        m.sony_daylight_wb = Some([0., 1024., 1800.]);
+        assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
+        m.sony_daylight_wb = Some(daylight);
+        profile.calibration_signature.clear();
+        assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
+    }
 }

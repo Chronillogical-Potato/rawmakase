@@ -3,9 +3,6 @@
 //! and DSCF7853 (ISO 200), both DR100. See docs/macos-lightroom-validation.md.
 //! Per-camera baseline exposures live in data/cameras.toml (crate::cameras).
 use crate::camera_data::{HighlightTonePriority, Metadata};
-fn x100f(m: &Metadata) -> bool {
-    m.make.eq_ignore_ascii_case("Fujifilm") && m.model.eq_ignore_ascii_case("X100F")
-}
 /// Camera Raw's default exposure for this photo: a DNG's own BaselineExposure,
 /// otherwise the camera table's value (data/cameras.toml).
 pub fn baseline_exposure(m: &Metadata) -> f32 {
@@ -38,11 +35,7 @@ fn fujifilm_shift(m: &Metadata, row: &crate::cameras::Baseline) -> f32 {
     row.dr100_shift.unwrap_or(usual) - shift
 }
 pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
-    if x100f(m) {
-        [0.9883, 1., 1.031]
-    } else {
-        [1.; 3]
-    }
+    crate::cameras::neutral_calibration(&m.make, &m.model, m.sony_daylight_wb)
 }
 #[cfg(test)]
 mod tests {
@@ -97,7 +90,10 @@ mod tests {
             baseline_exposure(&fujifilm("X100F", true, Some(-1.72))),
             0.15
         );
-        assert_eq!(neutral_calibration(&fujifilm("X100V", true, None)), [1.; 3]);
+        assert_eq!(
+            neutral_calibration(&fujifilm("Unlisted body", true, None)),
+            [1.; 3]
+        );
     }
     #[test]
     fn baseline_covers_measured_cameras() {

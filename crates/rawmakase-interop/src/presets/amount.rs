@@ -394,6 +394,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         black_white_model: _,
         calibration_model: _,
         whites_model: _,
+        white_balance_model: _,
         gamut_model: _,
         temperature,
         tint,
@@ -533,12 +534,14 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         unknown: unknown.clone(),
         ..Recipe::default()
     };
+    r.white_balance_model = b.white_balance_model;
     process_version(&mut r, b);
     // The gains follow the controls, unless they are one side's own.
     if (r.temperature, r.tint) == (b.temperature, b.tint) && r.profile == b.profile {
         r.wb = *wb;
         r.auto_white_balance = *auto_white_balance;
     } else if (r.temperature, r.tint) == (a.temperature, a.tint) && r.profile == a.profile {
+        r.white_balance_model = a.white_balance_model;
         r.wb = a.wb;
         r.auto_white_balance = a.auto_white_balance;
     } else {
