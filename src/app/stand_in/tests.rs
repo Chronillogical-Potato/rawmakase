@@ -197,3 +197,14 @@ fn a_load_that_fails_lets_go_of_the_stored_preview() {
     e.events(&ctx);
     assert!(!e.preview.standing_in());
 }
+
+#[test]
+fn a_first_render_of_a_region_takes_over_too() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);
+    store(&e, &cache, ids[0], 200);
+    open(&mut e, ids[0], None);
+    until(&mut e, |e| e.preview.stand_in.is_some());
+    let ctx = e.context.clone();
+    e.set_pixels(&ctx, true, [2, 2], &[0; 12], None);
+    assert!(!e.preview.standing_in());
+}

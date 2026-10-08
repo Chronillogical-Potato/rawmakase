@@ -429,6 +429,8 @@ impl Editor {
         let image = egui::ColorImage::from_rgb([w as usize, h as usize], data);
         if region {
             Picture::upload(&mut self.preview.region, ctx, "photo region", image);
+            // Zoomed in before the photo was decoded: the region is the live render.
+            self.preview.stand_in = None;
             return;
         }
         // Zoomed in, a whole render still fills a Navigator that has none,
@@ -458,6 +460,7 @@ impl Editor {
         let picture = Some(Picture::presented(id, size));
         if region {
             self.preview.region = picture;
+            self.preview.stand_in = None;
             return;
         }
         if (!self.view.zoom.on || self.preview.navigator.is_none())
