@@ -52,6 +52,12 @@ pub(crate) enum CopyAction {
     /// Asks first, as Lightroom does.
     Remove(PhotoId),
 }
+/// The thumbnail menu's preview commands, for the photos chosen.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum PreviewsRequest {
+    Build(Vec<PhotoId>, crate::catalog::preview_cache::PreviewKind),
+    Discard(Vec<PhotoId>),
+}
 pub(crate) struct Library {
     /// The open catalog and the photos, folders and collections read from it.
     pub session: CatalogSession,
@@ -136,6 +142,8 @@ pub(crate) struct Library {
     message_detail: (String, String),
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<PhotoId>>,
+    /// A thumbnail menu's Build or Discard Previews, for the editor to carry out.
+    previews_request: Option<PreviewsRequest>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -206,6 +214,7 @@ impl Library {
             message: String::new(),
             message_detail: Default::default(),
             read_request: None,
+            previews_request: None,
             reread: None,
             reread_finished: false,
         };
@@ -513,6 +522,23 @@ impl Library {
         self.read_request.take()
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
+    pub(in crate::app) fn take_previews_request(&mut self) -> Option<PreviewsRequest> {
+        self.previews_request.take()
+    }
+    /// The grid's latest request for the photo's edited thumbnail, if any.
+    pub(in crate::app) fn edited_ticket(&self, id: PhotoId) -> Option<u64> {
+        self.cache.edited_ticket(id)
+    }
+    /// A built preview, as the photo's edited thumbnail; the caller has checked
+    /// it is still the photo's latest.
+    pub(in crate::app) fn show_built_preview(
+        &mut self,
+        ctx: &egui::Context,
+        id: PhotoId,
+        image: &image::RgbImage,
+    ) {
+        self.cache.insert_edited(ctx, id, image);
+    }
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }

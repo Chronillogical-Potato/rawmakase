@@ -386,6 +386,15 @@ impl Server {
         self.send(request, Some(p.target)).await
     }
     #[tool(
+        description = "Build Standard-Sized Previews of the selected photos (the Library selection, or in Develop the Filmstrip's) in the background, for Develop to show while each photo opens. Returns how many were queued and skipped (offline or not RAW); queueing is not completion: get_state's building_previews shows progress."
+    )]
+    async fn build_previews(&self) -> CallToolResult {
+        let request = Request::BuildPreviews {
+            kind: Default::default(),
+        };
+        self.send(request, None).await
+    }
+    #[tool(
         description = "Save the current Develop edit to its catalog. Success confirms persistence; protected edits return an error."
     )]
     async fn save_photo(&self, Parameters(p): Parameters<Guarded>) -> CallToolResult {

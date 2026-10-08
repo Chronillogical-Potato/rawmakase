@@ -26,12 +26,19 @@ pub(in crate::app) struct State {
     pub tone_curve: Curves,
     pub selected_mask: Option<usize>,
     pub exporting: bool,
+    /// Previews being built: how many are done of how many queued.
+    pub building_previews: Option<BuildProgress>,
     pub auto_running: bool,
     pub treatment_pending: bool,
     pub save_state: &'static str,
     /// Which of the open module's panels show: `left`, `right` and `filmstrip`,
     /// each `shown` or `hidden`.
     pub panels: crate::app::panels::PanelLayout,
+}
+#[derive(Debug, Serialize)]
+pub(in crate::app) struct BuildProgress {
+    pub done: usize,
+    pub total: usize,
 }
 #[derive(Debug, Serialize)]
 pub(in crate::app) struct MaskState {
@@ -79,6 +86,11 @@ pub(in crate::app) enum Outcome {
         saved: bool,
     },
     Output(OutputState),
+    /// Previews queued by `build_previews`; queueing is not building.
+    Previews {
+        queued: usize,
+        skipped: usize,
+    },
 }
 #[derive(Debug, Serialize)]
 pub(in crate::app) struct PhotoIdentity {

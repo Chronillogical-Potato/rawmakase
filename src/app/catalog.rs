@@ -501,6 +501,7 @@ impl Editor {
             Ok(removed) => {
                 let master = removed.value;
                 self.status = library.message.clone();
+                self.forget_preview_intent(id);
                 self.undo_log.forget_photo(id);
                 // The reference, when it was this copy, goes with it.
                 self.load_reference();

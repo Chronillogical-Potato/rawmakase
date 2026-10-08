@@ -57,6 +57,8 @@ pub(crate) struct Editor {
     stats: stats::UsageStats,
     themes: theme::Themes,
     exports: export::Exports,
+    /// Build Standard-Sized Previews, in the background.
+    preview_builds: preview_build::PreviewBuilds,
     autosave: autosave::Autosave,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<CatalogPlace>,
@@ -203,6 +205,7 @@ impl Editor {
         let loader = worker::Loader::new(tx.clone(), ctx.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
+        let standard_preview_size = session.standard_preview_size();
         let mut app = Self {
             activity: Default::default(),
             load: Default::default(),
@@ -247,6 +250,7 @@ impl Editor {
                 fastframe_text::TextRendering::platform_default(),
             ),
             exports: Default::default(),
+            preview_builds: preview_build::PreviewBuilds::new(standard_preview_size),
             autosave: Default::default(),
             restore: Some(place.clone()),
             saved_place: place,
@@ -320,6 +324,7 @@ impl Editor {
                     copy_groups: Some(self.copy_groups.clone()),
                     crop_guides: self.view.crop_guides.to_session(),
                     raw_defaults: self.raw_defaults.settings().clone(),
+                    standard_preview_size: Some(self.preview_builds.standard_size),
                 },
             )?;
         }
@@ -625,6 +630,7 @@ mod photo_metadata;
 mod point_color_panel;
 mod preferences;
 mod presets;
+mod preview_build;
 mod raw_defaults;
 mod readout;
 mod red_eye_tool;

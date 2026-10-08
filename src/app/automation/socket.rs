@@ -126,6 +126,9 @@ fn command(request: &Value) -> commands::Result<Vec<Msg>> {
             path,
             max_edge: max_edge.unwrap_or(wire::DEFAULT_PREVIEW_EDGE),
         },
+        Request::BuildPreviews { kind } => Operation::BuildPreviews(match kind {
+            wire::PreviewKind::Standard => crate::catalog::preview_cache::PreviewKind::Standard,
+        }),
         Request::Job { job_id } => Operation::Job(job_id),
         // Answered once the photo is loaded or the job finished, or after
         // timeout_ms, within clients' read timeout.

@@ -64,6 +64,18 @@ pub(crate) struct Session {
     /// Preferences > Raw Defaults: what photos without an edit start from.
     #[serde(default, deserialize_with = "crate::raw_defaults::lenient_settings")]
     pub raw_defaults: crate::raw_defaults::RawDefaults,
+    /// Preferences > Standard Preview Size, the long edge in pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard_preview_size: Option<u32>,
+}
+impl Session {
+    /// The Standard Preview Size, or the default when none of the offered
+    /// sizes was saved.
+    pub(crate) fn standard_preview_size(&self) -> u32 {
+        self.standard_preview_size
+            .filter(|size| crate::app::preview_build::STANDARD_SIZES.contains(size))
+            .unwrap_or(crate::app::preview_build::DEFAULT_STANDARD_SIZE)
+    }
 }
 
 /// The Crop tool's guide overlay, which way round it is and when it shows, by stable

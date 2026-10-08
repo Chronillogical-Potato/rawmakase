@@ -8,6 +8,23 @@ pub fn render(im: &CameraImage, r: &ValidRecipe, max_edge: u32) -> Result<Render
     }
     crate::develop::quality::render(im, r, max_edge, None)
 }
+/// [`render`], stopping with an error once `cancel` is set. Recipes of the older
+/// engines render to the end once started.
+pub fn render_cancellable(
+    im: &CameraImage,
+    r: &ValidRecipe,
+    max_edge: u32,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Rendered> {
+    if r.engine < 3 {
+        ensure!(
+            !cancel.load(std::sync::atomic::Ordering::Relaxed),
+            "Cancelled"
+        );
+        return render_legacy(im, r, max_edge);
+    }
+    crate::develop::quality::render_cancellable(im, r, max_edge, None, cancel)
+}
 pub fn render_region(im: &CameraImage, r: &ValidRecipe, region: [u32; 4]) -> Result<Rendered> {
     if r.engine < 3 {
         return render_region_legacy(im, r, region);

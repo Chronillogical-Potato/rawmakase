@@ -121,6 +121,7 @@ there is no separate MCP authentication flow. MCP opens no network listener.
 | `preview_photo` | Returns a rendered JPEG image plus captured revision for visual inspection |
 | `export_photo` | Starts a JPEG/TIFF export to a new absolute output path |
 | `get_job` | Reports export progress, completion or failure |
+| `build_previews` | Queues Standard-Sized Previews of the selected photos; `get_state`'s `building_previews` shows progress |
 
 `set_parameter` uses displayed units: Exposure in EV, Temperature in kelvin,
 Tint in tint units, Straighten in degrees, other basic controls in percent.

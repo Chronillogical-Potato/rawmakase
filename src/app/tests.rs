@@ -2061,7 +2061,7 @@ fn opening_a_file_picks_its_master_after_a_copy_is_promoted() -> anyhow::Result<
     Ok(())
 }
 /// An editor with a catalog of `names`, its Library open.
-fn editor_with_catalog(
+pub(in crate::app) fn editor_with_catalog(
     names: &[&str],
 ) -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>)> {
     let d = tempfile::tempdir()?;

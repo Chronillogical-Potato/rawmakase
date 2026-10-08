@@ -1,5 +1,6 @@
 use super::Editor;
 use super::dialogs::{CatalogDialog, FolderAction};
+use super::library::PreviewsRequest;
 use super::panels::WorkspacePanel;
 use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
@@ -53,6 +54,7 @@ impl Editor {
             library.publish_shown();
             library.poll_previews(&ctx);
         }
+        self.poll_preview_builds();
         // Preferences is modal: keys go to it, not to the photo behind.
         let modal = self.preferences.open
             || self.export_modal()
@@ -106,6 +108,16 @@ impl Editor {
         }
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
             self.virtual_copy(request);
+        }
+        if let Some(request) = self
+            .library
+            .as_mut()
+            .and_then(|l| l.take_previews_request())
+        {
+            match request {
+                PreviewsRequest::Build(ids, kind) => self.build_previews_from_menu(&ids, kind),
+                PreviewsRequest::Discard(ids) => self.discard_previews(&ids),
+            }
         }
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
@@ -373,6 +385,7 @@ impl Editor {
                         ui.spinner();
                     }
                     self.export_progress(ui);
+                    self.preview_build_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
