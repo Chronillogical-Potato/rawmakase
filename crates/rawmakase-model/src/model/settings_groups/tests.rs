@@ -67,6 +67,7 @@ fn everything_changed() -> Recipe {
         black_white_model: crate::model::operators::BlackWhiteModel::Chart,
         calibration_model: crate::model::operators::CalibrationModel::Measured,
         whites_model: crate::model::operators::WhitesModel::Adaptive,
+        white_balance_model: crate::model::operators::WhiteBalanceModel::Calibrated,
         gamut_model: crate::model::operators::GamutModel::Clip,
         temperature: 4000.,
         tint: 12.,

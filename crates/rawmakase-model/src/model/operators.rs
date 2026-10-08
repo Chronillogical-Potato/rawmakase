@@ -423,6 +423,11 @@ mod tests {
             W::Original,
             &[(W::Original, "Original"), (W::Adaptive, "Adaptive")],
         );
+        use WhiteBalanceModel as Wb;
+        stored_as(
+            Wb::Original,
+            &[(Wb::Original, "Original"), (Wb::Calibrated, "Calibrated")],
+        );
         use ContrastModel as Co;
         stored_as(
             Co::Original,
@@ -458,5 +463,20 @@ mod tests {
             ],
             [0.35, 0.8, 0.25, 0.35]
         );
+    }
+}
+
+/// Calibration used when translating Temperature/Tint to camera-neutral gains.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WhiteBalanceModel {
+    /// The pre-calibration conversion, including the original X100F correction.
+    #[default]
+    Original,
+    /// Exact camera or DNG calibration with profile signature matching.
+    Calibrated,
+}
+impl WhiteBalanceModel {
+    pub(crate) fn is_original(&self) -> bool {
+        *self == Self::Original
     }
 }

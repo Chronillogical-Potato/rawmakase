@@ -236,6 +236,7 @@ impl SettingGroup {
         let (f, e) = (&from.effects, &mut to.effects);
         match self {
             WhiteBalance => {
+                to.white_balance_model = from.white_balance_model;
                 to.temperature = from.temperature;
                 to.tint = from.tint;
             }
@@ -632,6 +633,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         black_white_model: _,
         calibration_model: _,
         whites_model: _,
+        white_balance_model: _,
         gamut_model: _,
         temperature: _,
         tint: _,
@@ -740,6 +742,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("black_white_model", Group(ProcessVersion)),
         ("calibration_model", Group(ProcessVersion)),
         ("whites_model", Group(ProcessVersion)),
+        ("white_balance_model", Group(WhiteBalance)),
         ("gamut_model", Group(ProcessVersion)),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),

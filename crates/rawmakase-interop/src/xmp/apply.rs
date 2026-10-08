@@ -476,6 +476,12 @@ impl Preset {
         m: &Metadata,
         image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
+        settings.seen.insert("RAWmakaseWhiteBalanceModel".into());
+        if let Some(value) = settings.values.get("RAWmakaseWhiteBalanceModel") {
+            r.white_balance_model =
+                serde_json::from_value(serde_json::Value::String(value.clone()))
+                    .context("Unsupported RAWmakase white-balance operator")?;
+        }
         let v = settings.values;
         settings.seen.insert("WhiteBalance".into());
         settings.seen.insert("Temperature".into());

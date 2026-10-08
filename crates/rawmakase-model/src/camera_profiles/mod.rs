@@ -41,6 +41,10 @@ pub struct CameraProfile {
     color1: Option<Matrix>,
     #[serde(default)]
     calibration_signature: String,
+    /// A matrix-only DNG fallback's signature. Separate from the original field
+    /// so saved Original white balance retains the old unsigned fallback behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    matrix_calibration_signature: Option<String>,
     #[serde(default)]
     color2: Option<Matrix>,
     forward1: Matrix,
@@ -234,6 +238,11 @@ impl Table {
     }
 }
 impl CameraProfile {
+    /// Whether this profile writes the matrix-only DNG signature field.
+    pub(crate) fn has_matrix_calibration_signature(&self) -> bool {
+        self.matrix_calibration_signature.is_some()
+    }
+
     /// This profile with its look at a Profile Amount (see `Enhanced::at_amount`).
     pub fn at_amount(&self, amount: f32) -> Self {
         Self {
@@ -343,7 +352,18 @@ impl CameraProfile {
         .into())
     }
     fn neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
-        if self.calibration_signature == "com.adobe" {
+        if m.baseline_exposure.is_some() {
+            m.dng_neutral_calibration
+                .as_ref()
+                .filter(|c| {
+                    c.signature
+                        == self
+                            .matrix_calibration_signature
+                            .as_deref()
+                            .unwrap_or(&self.calibration_signature)
+                })
+                .map_or([1.; 3], |c| c.gains)
+        } else if self.calibration_signature == "com.adobe" {
             crate::camera_profiles::reference::neutral_calibration(m)
         } else {
             [1.; 3]
@@ -358,6 +378,33 @@ impl CameraProfile {
         }))
     }
     pub fn white_balance(&self, temperature: f32, tint: f32, m: &Metadata) -> Option<[f32; 3]> {
+        self.white_balance_calibrated(temperature, tint, m, self.neutral_calibration(m))
+    }
+    pub(crate) fn legacy_white_balance(
+        &self,
+        temperature: f32,
+        tint: f32,
+        m: &Metadata,
+    ) -> Option<[f32; 3]> {
+        self.white_balance_calibrated(temperature, tint, m, self.legacy_neutral_calibration(m))
+    }
+    fn legacy_neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
+        if self.calibration_signature == "com.adobe"
+            && m.make.eq_ignore_ascii_case("Fujifilm")
+            && m.model.eq_ignore_ascii_case("X100F")
+        {
+            [0.9883, 1., 1.031]
+        } else {
+            [1.; 3]
+        }
+    }
+    fn white_balance_calibrated(
+        &self,
+        temperature: f32,
+        tint: f32,
+        m: &Metadata,
+        calibration: [f32; 3],
+    ) -> Option<[f32; 3]> {
         let [x, y] = crate::camera_profiles::temperature::xy(temperature, tint);
         let neutral = mul(
             self.color_matrix(temperature)?,
@@ -366,13 +413,17 @@ impl CameraProfile {
         if neutral.iter().any(|v| !v.is_finite() || *v <= 0.) {
             return None;
         }
-        let calibration = self.neutral_calibration(m);
         let gains: [f32; 3] =
             std::array::from_fn(|c| 1. / (calibration[c] * neutral[c] * m.wb[c].max(1e-6)));
         Some(gains.map(|v| (v / gains[1]).clamp(0.01, 100.)))
     }
     pub fn as_shot_white_balance(&self, m: &Metadata) -> Option<[f32; 2]> {
-        let calibration = self.neutral_calibration(m);
+        self.as_shot_calibrated(m, self.neutral_calibration(m))
+    }
+    pub(crate) fn legacy_as_shot_white_balance(&self, m: &Metadata) -> Option<[f32; 2]> {
+        self.as_shot_calibrated(m, self.legacy_neutral_calibration(m))
+    }
+    fn as_shot_calibrated(&self, m: &Metadata, calibration: [f32; 3]) -> Option<[f32; 2]> {
         let neutral = std::array::from_fn(|c| 1. / (m.wb[c].max(1e-6) * calibration[c]));
         let mut xy = [0.3457, 0.3585];
         for pass in 0..30 {
@@ -590,6 +641,7 @@ impl CameraProfile {
             enhanced: None,
             color1: Some(cm),
             calibration_signature: String::new(),
+            matrix_calibration_signature: m.dng_matrix_profile_signature.clone(),
             color2: None,
             forward1: forward,
             forward2: forward,

@@ -184,6 +184,12 @@ pub struct Recipe {
         skip_serializing_if = "crate::model::operators::WhitesModel::is_original"
     )]
     pub whites_model: crate::model::operators::WhitesModel,
+    /// Saved independently of gains so the next control edit uses the same calibration.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::model::operators::WhiteBalanceModel::is_original"
+    )]
+    pub white_balance_model: crate::model::operators::WhiteBalanceModel,
     /// How out-of-gamut colors reach sRGB. Missing means compressed, so recipes saved
     /// before the clipped model look as they did; omitted at that default.
     #[serde(
@@ -335,6 +341,7 @@ impl Default for Recipe {
             black_white_model: Default::default(),
             calibration_model: Default::default(),
             whites_model: Default::default(),
+            white_balance_model: Default::default(),
             gamut_model: Default::default(),
             temperature: 6500.,
             tint: 0.,
@@ -587,6 +594,7 @@ impl Recipe {
         recipe.vibrance_model = crate::model::operators::VibranceModel::Chart;
         recipe.black_white_model = crate::model::operators::BlackWhiteModel::Chart;
         recipe.calibration_model = crate::model::operators::CalibrationModel::Measured;
+        recipe.white_balance_model = crate::model::operators::WhiteBalanceModel::Calibrated;
         recipe.whites_model = crate::model::operators::WhitesModel::Adaptive;
         recipe.gamut_model = crate::model::operators::GamutModel::Clip;
         recipe.set_color_noise_defaults(crate::model::operators::NoiseModel::Measured);
@@ -957,7 +965,13 @@ impl Recipe {
     pub fn reset_white_balance(&mut self, m: &Metadata) {
         let values = self
             .color_profile(m)
-            .and_then(|p| p.as_shot_white_balance(m))
+            .and_then(|p| {
+                if self.white_balance_model.is_original() {
+                    p.legacy_as_shot_white_balance(m)
+                } else {
+                    p.as_shot_white_balance(m)
+                }
+            })
             .unwrap_or([estimate_temperature(m), 0.]);
         self.temperature = values[0].clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
         self.tint = values[1].clamp(-TINT_LIMIT, TINT_LIMIT);
@@ -969,10 +983,13 @@ impl Recipe {
         adjusted.wb = std::array::from_fn(|c| m.wb[c] * self.wb[c]);
         // A profile that cannot map gains back (no ColorMatrix1) is also left to the
         // fallback model, which is what update_wb then uses.
-        let Some([temperature, tint]) = self
-            .color_profile(m)
-            .and_then(|p| p.as_shot_white_balance(&adjusted))
-        else {
+        let Some([temperature, tint]) = self.color_profile(m).and_then(|p| {
+            if self.white_balance_model.is_original() {
+                p.legacy_as_shot_white_balance(&adjusted)
+            } else {
+                p.as_shot_white_balance(&adjusted)
+            }
+        }) else {
             self.sync_fallback_white_balance_controls(m);
             return;
         };
@@ -1025,10 +1042,13 @@ impl Recipe {
         }
     }
     pub fn update_wb(&mut self, m: &Metadata) {
-        if let Some(wb) = self
-            .color_profile(m)
-            .and_then(|p| p.white_balance(self.temperature, self.tint, m))
-        {
+        if let Some(wb) = self.color_profile(m).and_then(|p| {
+            if self.white_balance_model.is_original() {
+                p.legacy_white_balance(self.temperature, self.tint, m)
+            } else {
+                p.white_balance(self.temperature, self.tint, m)
+            }
+        }) {
             self.wb = wb;
             return;
         }
@@ -1184,6 +1204,7 @@ mod tests {
             "black_white_model": "Chart",
             "calibration_model": "Measured",
             "whites_model": "Adaptive",
+            "white_balance_model": "Calibrated",
             "gamut_model": "Clip",
             "noise_model": "Measured",
             "auto_white_balance": [5000.0, 10.0],

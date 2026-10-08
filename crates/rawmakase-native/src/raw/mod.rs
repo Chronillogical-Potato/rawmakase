@@ -74,11 +74,18 @@ impl Raw {
             focal_35mm: m.focal_35mm,
             wb: m.wb,
             daylight_wb: m.daylight_wb,
+            sony_daylight_wb: m
+                .sony_daylight_wb
+                .iter()
+                .all(|v| v.is_finite() && *v > 0.)
+                .then_some(m.sony_daylight_wb),
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: None,
             lens_model: text(&m.lens).trim().to_string(),
             baseline_exposure: None,
+            dng_neutral_calibration: None,
+            dng_matrix_profile_signature: None,
             lens_profiles: Default::default(),
             lateral_ca: Default::default(),
             embedded_dcp: None,
