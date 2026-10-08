@@ -518,6 +518,8 @@ impl Editor {
         if let Some(library) = &mut self.library {
             library.edits_changed(result.synced.iter().map(|e| e.id));
         }
+        let synced: Vec<_> = result.synced.iter().map(|e| e.id).collect();
+        self.refresh_previews(&synced);
         // The reference photo may be among them.
         self.load_reference();
         if done > 0 {

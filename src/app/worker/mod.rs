@@ -135,6 +135,8 @@ pub(crate) enum Event {
         id: u64,
         image: image::RgbImage,
     },
+    /// A stored Standard preview, read for a load or a neighbour.
+    StandIn(Box<crate::app::stand_in::StandIn>),
     Ready {
         id: u64,
         full: Arc<CameraImage>,

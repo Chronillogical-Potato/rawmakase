@@ -246,6 +246,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |
 | [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
+| [stand_in.rs](../src/app/stand_in.rs) | The stored Standard preview Develop shows while a photo opens, read for the photo and its neighbour on a two-lane worker; an offline RAW's for the Loupe. |
 | [preview_build.rs](../src/app/preview_build.rs) | Build Standard-Sized Previews: the selection's previews rendered as export renders them, on a background worker, into the preview cache; their identity, progress, Discard and Clear. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
 | [raw_defaults.rs](../src/app/raw_defaults.rs) | Preferences' Raw Defaults block, and keeping the open unedited photo and the Library's previews in step with the defaults. |

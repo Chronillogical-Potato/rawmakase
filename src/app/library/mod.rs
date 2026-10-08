@@ -144,6 +144,9 @@ pub(crate) struct Library {
     read_request: Option<Vec<PhotoId>>,
     /// A thumbnail menu's Build or Discard Previews, for the editor to carry out.
     previews_request: Option<PreviewsRequest>,
+    /// The offline RAW in the Loupe and its stored preview's identity, as the
+    /// editor works it out.
+    loupe_stored: Option<(PhotoId, String)>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -215,6 +218,7 @@ impl Library {
             message_detail: Default::default(),
             read_request: None,
             previews_request: None,
+            loupe_stored: None,
             reread: None,
             reread_finished: false,
         };

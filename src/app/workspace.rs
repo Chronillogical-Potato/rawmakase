@@ -575,6 +575,7 @@ impl Editor {
         if develops != self.loupe_tried {
             self.loupe_tried = None;
         }
+        self.loupe_stored_preview();
         self.side_edges(ui);
         if self.panel_shown(WorkspacePanel::Left) {
             action = action.then(self.library_left_panel(ui, develops));

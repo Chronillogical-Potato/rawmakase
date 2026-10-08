@@ -59,6 +59,8 @@ pub(crate) struct Editor {
     exports: export::Exports,
     /// Build Standard-Sized Previews, in the background.
     preview_builds: preview_build::PreviewBuilds,
+    /// Stored Standard previews read for the photo opening and its neighbour.
+    stand_ins: stand_in::StandIns,
     autosave: autosave::Autosave,
     /// Library/Develop position to restore once the session's catalog opens.
     restore: Option<CatalogPlace>,
@@ -206,6 +208,11 @@ impl Editor {
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
         let standard_preview_size = session.standard_preview_size();
+        let stand_ins = stand_in::StandIns::new(
+            tx.clone(),
+            ctx.clone(),
+            crate::catalog::preview_cache::PreviewCache::path(),
+        );
         let mut app = Self {
             activity: Default::default(),
             load: Default::default(),
@@ -251,6 +258,7 @@ impl Editor {
             ),
             exports: Default::default(),
             preview_builds: preview_build::PreviewBuilds::new(standard_preview_size),
+            stand_ins,
             autosave: Default::default(),
             restore: Some(place.clone()),
             saved_place: place,
@@ -636,6 +644,7 @@ mod readout;
 mod red_eye_tool;
 mod reference;
 mod retouch_tool;
+mod stand_in;
 #[cfg(feature = "telemetry")]
 mod stats;
 mod stroke_outline;

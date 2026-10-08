@@ -34,6 +34,9 @@ struct Job {
     path: PathBuf,
     /// Longest side, in pixels, of the image wanted.
     edge: u32,
+    /// For an offline RAW: the identity of its stored Standard preview, read
+    /// from the preview cache instead of the file.
+    stored: Option<String>,
     cancel: Arc<AtomicBool>,
 }
 struct Done {
@@ -95,7 +98,11 @@ impl Loupe {
                     ctx.request_repaint();
                 };
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    thumbnails::raster(&job.path).map(|image| Prepared {
+                    let image = match &job.stored {
+                        Some(identity) => stored(&job.path, identity),
+                        None => thumbnails::raster(&job.path),
+                    };
+                    image.map(|image| Prepared {
                         full: image.dimensions(),
                         image: thumbnails::downscale(&image, job.edge),
                     })
@@ -127,8 +134,9 @@ impl Loupe {
             state: State::Loading,
         }
     }
-    /// Asks for `photo` at `edge` pixels, unless that is already on its way.
-    fn request(&mut self, ctx: &egui::Context, photo: &Photo, edge: u32) {
+    /// Asks for `photo` at `edge` pixels, unless that is already on its way;
+    /// from its stored preview with that identity when `stored` says so.
+    fn request(&mut self, ctx: &egui::Context, photo: &Photo, edge: u32, stored: Option<String>) {
         let wanted = key(photo, edge);
         let asked = self.requested.as_ref() == Some(&wanted);
         if asked && self.state == State::Ready {
@@ -164,6 +172,7 @@ impl Loupe {
             ahead: None,
             path: photo.path.clone(),
             edge,
+            stored,
             cancel: self.cancel.clone(),
         });
     }
@@ -183,6 +192,7 @@ impl Loupe {
             ahead: Some(wanted.clone()),
             path: photo.path.clone(),
             edge: wanted.2,
+            stored: None,
             cancel: self.ahead_cancel.clone(),
         });
     }
@@ -261,6 +271,13 @@ impl Loupe {
     }
 }
 
+/// The stored Standard preview of an offline RAW.
+fn stored(path: &std::path::Path, identity: &str) -> anyhow::Result<image::RgbImage> {
+    use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
+    PreviewCache::open(&PreviewCache::path())?
+        .load_sized(path, identity, PreviewKind::Standard)?
+        .ok_or_else(|| anyhow::anyhow!("No stored preview"))
+}
 fn key(photo: &Photo, edge: u32) -> Key {
     (
         photo.id,
@@ -289,6 +306,19 @@ impl Library {
     /// The RAW the Loupe shows through Develop's pipeline: the active photo,
     /// when it is a RAW and online. JPEG, TIFF, PNG and offline photos are
     /// shown by the Loupe's own preview instead.
+    /// The offline RAW the Loupe shows, which a stored preview can stand in for.
+    pub(in crate::app) fn loupe_offline_raw(&self) -> Option<PhotoId> {
+        let photo = self.selection.active.and_then(|id| self.photo(id))?;
+        (self.loupe.open && crate::storage::is_raw(&photo.path) && !self.is_available(&photo.path))
+            .then_some(photo.id)
+    }
+    /// The identity of the stored preview the Loupe shows for an offline RAW.
+    pub(in crate::app) fn set_loupe_stored(&mut self, stored: Option<(PhotoId, String)>) {
+        self.loupe_stored = stored;
+    }
+    pub(in crate::app) fn loupe_stored(&self) -> Option<&(PhotoId, String)> {
+        self.loupe_stored.as_ref()
+    }
     pub(crate) fn loupe_develops(&self) -> Option<PhotoId> {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
         (self.loupe.open && crate::storage::is_raw(&photo.path) && self.is_available(&photo.path))
@@ -390,8 +420,16 @@ impl Library {
         self.loupe.view = rect.shrink(16.).size() * ppp;
         let available = self.is_available(&photo.path);
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
-        if available {
-            self.loupe.request(ui.ctx(), &photo, edge);
+        // An offline RAW with a stored Standard preview shows it.
+        let stored = self
+            .loupe_stored
+            .as_ref()
+            .filter(|(id, _)| !available && *id == photo.id)
+            .map(|(_, identity)| identity.clone());
+        if let Some(identity) = stored.clone() {
+            self.loupe.request(ui.ctx(), &photo, edge, Some(identity));
+        } else if available {
+            self.loupe.request(ui.ctx(), &photo, edge, None);
             // Once this photo is ready, the next one along is prepared.
             if self.loupe.state == State::Ready
                 && let Some(next) = self
@@ -410,11 +448,19 @@ impl Library {
         self.request_previews(&photo, ui.ctx());
         let inset = rect.shrink(16.);
         // Until its own preview is in, the grid's stands in, enlarged.
+        let own = available
+            || stored.is_some()
+                && self.loupe.state == State::Ready
+                && self
+                    .loupe
+                    .requested
+                    .as_ref()
+                    .is_some_and(|r| r.0 == photo.id);
         let texture = self
             .loupe
             .texture
             .clone()
-            .filter(|_| available)
+            .filter(|_| own)
             .or_else(|| self.texture(&photo).cloned());
         let fit = texture.as_ref().map(|t| {
             let size = t.size_vec2();

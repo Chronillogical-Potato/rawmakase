@@ -80,6 +80,7 @@ impl Editor {
             self.reference_loader.stop(),
             task::Stopping::new(self.exports.close()),
             task::Stopping::new(self.preview_builds.close()),
+            self.stand_ins.stop(),
         ]);
         stopping.extend(self.automation.stop_outputs());
         stopping.extend(self.controls.stop());
