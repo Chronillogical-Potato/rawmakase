@@ -370,6 +370,15 @@ impl Builder {
         added
     }
 
+    /// Stops the build under way if it is of `kind`; the others carry on.
+    fn cancel_running(&self, kind: PreviewKind) {
+        let mut state = self.shared.state.lock().expect("preview builds");
+        if state.running.is_some_and(|(_, running)| running == kind) {
+            state.cancel.store(true, Ordering::Relaxed);
+            state.cancel = Arc::default();
+        }
+    }
+
     /// Queues `expire` in place of any expiry not run yet, which an earlier
     /// setting asked for; `None` (Never) only removes those.
     fn replace_expiry(&self, expire: Option<Op>) {
@@ -878,6 +887,7 @@ impl Editor {
         let ctx = self.context.clone();
         let builder = self.preview_builds.builder(&ctx);
         builder.drop_waiting(None, &[kind]);
+        builder.cancel_running(kind);
         builder.maintain(Op::Clear(kind));
     }
 

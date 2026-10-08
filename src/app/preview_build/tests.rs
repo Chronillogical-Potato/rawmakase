@@ -850,3 +850,20 @@ fn a_new_discard_setting_replaces_the_expiry_not_run_yet() {
     release(&path);
     settle(&mut e);
 }
+
+#[test]
+fn clearing_a_kind_stops_its_build_under_way() {
+    let (_dir, mut e, ids, cache) = editor(&["slow-clear.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    wait_started(&path);
+    e.clear_previews(PreviewKind::OneToOne);
+    settle(&mut e);
+    let identity = identity_of(&e, ids[0]);
+    assert!(
+        !PreviewCache::open(&cache)
+            .unwrap()
+            .sized_fresh(&path, &identity, PreviewKind::OneToOne, 0)
+            .unwrap()
+    );
+}
