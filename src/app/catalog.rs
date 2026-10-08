@@ -492,9 +492,6 @@ impl Editor {
         if !self.ready_for_catalog() {
             return;
         }
-        // Before the copy goes, as its previews do: its id may be given to the
-        // next new photo, which must not inherit its requests.
-        self.forget_preview_intent(id);
         let Some(library) = &mut self.library else {
             return;
         };
@@ -504,6 +501,7 @@ impl Editor {
             Ok(removed) => {
                 let master = removed.value;
                 self.status = library.message.clone();
+                self.forget_preview_intent(id);
                 self.undo_log.forget_photo(id);
                 // The reference, when it was this copy, goes with it.
                 self.load_reference();

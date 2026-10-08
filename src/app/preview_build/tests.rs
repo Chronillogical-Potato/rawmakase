@@ -542,3 +542,34 @@ fn quitting_during_a_build_ends_in_time() {
     let waited = e.exit_within(Duration::from_secs(3));
     assert_eq!(waited.detached, 0);
 }
+
+#[test]
+fn upkeep_asked_for_before_exit_still_happens() {
+    let (_dir, mut e, ids, cache) = editor(&["upkeep.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    settle(&mut e);
+    assert!(fresh(&cache, &e, ids[0]));
+    // Rebuilding, then discarding and quitting at once: whatever the worker
+    // has got to, the discard comes after the build.
+    save_edit(&mut e, ids[0], 1.);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    e.discard_previews(&ids);
+    let waited = e.exit_within(Duration::from_secs(3));
+    assert_eq!(waited.detached, 0);
+    let catalog = e
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .location()
+        .clone();
+    let cache = PreviewCache::open(&cache).unwrap();
+    assert!(
+        !cache
+            .has_intent(&catalog, ids[0], &path, PreviewKind::Standard)
+            .unwrap()
+    );
+    assert_eq!(cache.usage().unwrap().standard, 0);
+}

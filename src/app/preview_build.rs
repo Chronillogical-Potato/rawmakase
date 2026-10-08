@@ -425,11 +425,13 @@ impl Shared {
     fn next(&self) -> Option<Next> {
         let mut state = self.state.lock().ok()?;
         loop {
-            if state.closed {
-                return None;
-            }
+            // Upkeep asked for goes through even at exit: a Discard already
+            // reported must not come back on the next launch.
             if let Some(op) = state.ops.pop_front() {
                 return Some(Next::Op(op));
+            }
+            if state.closed {
+                return None;
             }
             if let Some(item) = state.waiting.pop_front() {
                 state.running = Some((item.photo, item.kind));
@@ -559,9 +561,13 @@ impl Editor {
             .document
             .catalog_photo
             .is_some_and(|open| ids.contains(&open))
-        {
             // Unsaved, the build would show the open photo's edit as last saved.
-            self.flush();
+            && !self.flush()
+        {
+            return Err(format!(
+                "the open photo's edit could not be saved: {}",
+                self.status
+            ));
         }
         let library = self.library.as_ref().expect("checked above");
         let catalog = library.session.catalog.location().clone();
@@ -738,9 +744,12 @@ impl Editor {
         let Some(library) = &mut self.library else {
             return;
         };
+        // A relinked folder reloads the Library, whose tickets start again: the
+        // photo must still be the file built.
         if *library.session.catalog.location() != item.catalog
             || item.ticket.is_none()
             || library.edited_ticket(item.photo) != item.ticket
+            || library.photo(item.photo).map(|p| &p.path) != Some(&item.path)
         {
             return;
         }
