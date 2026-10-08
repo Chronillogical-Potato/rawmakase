@@ -163,6 +163,9 @@ fn build_one(
     ) {
         return Outcome::Failed(format!("it could not be kept: {e:#}"));
     }
+    // Recorded again with the row: an automatic discard that ran while this
+    // waited may have forgotten the request.
+    let _ = cache.record_intent(&item.catalog, item.photo, &item.path, item.kind);
     Outcome::Built(item.ticket.map(|_| thumbnail(&image)))
 }
 

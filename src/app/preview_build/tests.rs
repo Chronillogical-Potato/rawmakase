@@ -867,3 +867,35 @@ fn clearing_a_kind_stops_its_build_under_way() {
             .unwrap()
     );
 }
+
+#[test]
+fn a_build_keeps_its_request_through_an_expiry_while_it_waited() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);
+    let path = path_of(&e, ids[0]);
+    let catalog = e
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .catalog
+        .location()
+        .clone();
+    e.build_previews(&ids, PreviewKind::OneToOne).unwrap();
+    // As if the setting changed before the build ran: the request is forgotten.
+    e.preview_builds.discard_one_to_one_after = Some(1);
+    e.expire_previews();
+    settle(&mut e);
+    let until = Instant::now() + Duration::from_secs(10);
+    let cache = loop {
+        let cache = PreviewCache::open(&cache).unwrap();
+        if cache
+            .has_intent(&catalog, ids[0], &path, PreviewKind::OneToOne)
+            .unwrap()
+        {
+            break cache;
+        }
+        assert!(Instant::now() < until, "the request was lost");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    drop(cache);
+}
