@@ -90,6 +90,9 @@ enum Command {
     Action { name: String },
     /// Save the current edit and report any failure
     Save,
+    /// Build Standard-Sized Previews of the selected photos in the background;
+    /// reports how many were queued (see state's building_previews)
+    BuildPreviews,
     /// Render the captured edit to a new JPEG or TIFF, without overwriting files
     Export {
         path: PathBuf,
@@ -366,6 +369,9 @@ fn commands(command: &Command) -> Result<Vec<Request>, String> {
         }
         Command::Action { name } => vec![action(name)],
         Command::Save => vec![Request::Save],
+        Command::BuildPreviews => vec![Request::BuildPreviews {
+            kind: Default::default(),
+        }],
         Command::Export { path, max_edge, .. } => vec![Request::Export {
             path: absolute(path)?,
             max_edge: *max_edge,
@@ -547,6 +553,7 @@ pub fn run(cli: Cli) -> Result<(), String> {
         | Command::Presets { .. }
         | Command::Preset { .. }
         | Command::Job { .. }
+        | Command::BuildPreviews
         | Command::Export { .. }
         | Command::Preview { .. }
             if !cli.state =>
@@ -613,6 +620,7 @@ mod tests {
             (vec!["rawmakase-ctl", "photos", "example"], "photos"),
             (vec!["rawmakase-ctl", "job", "1"], "job"),
             (vec!["rawmakase-ctl", "presets"], "presets"),
+            (vec!["rawmakase-ctl", "build-previews"], "build_previews"),
         ] {
             let cli = Cli::try_parse_from(args).unwrap();
             assert_eq!(requests(&cli.command).unwrap()[0]["cmd"], cmd);

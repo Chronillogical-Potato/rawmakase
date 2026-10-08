@@ -328,6 +328,10 @@ pub(in crate::app) enum PhotoAction {
     Copy(super::CopyAction),
     /// Read Metadata from Files.
     ReadMetadata,
+    /// Library › Previews: Build Standard-Sized Previews.
+    BuildPreviews(crate::catalog::preview_cache::PreviewKind),
+    /// Library › Previews: Discard Standard and 1:1 Previews.
+    DiscardPreviews,
     /// Develop's Set as Reference Photo.
     SetReference,
 }
@@ -407,6 +411,21 @@ pub(in crate::app) fn photo_menu(
             action = Some(PhotoAction::ReadMetadata);
             ui.close();
         }
+        menu_separator(ui);
+        submenu_style(ui);
+        ui.menu_button("Previews", |ui| {
+            ui.set_width(250.);
+            ui.spacing_mut().item_spacing.y = 0.;
+            use crate::catalog::preview_cache::PreviewKind;
+            if menu_item(ui, "Build Standard-Sized Previews", "", true, false) {
+                action = Some(PhotoAction::BuildPreviews(PreviewKind::Standard));
+                ui.close();
+            }
+            if menu_item(ui, "Discard Standard and 1:1 Previews", "", true, false) {
+                action = Some(PhotoAction::DiscardPreviews);
+                ui.close();
+            }
+        });
         menu_separator(ui);
         submenu_style(ui);
         ui.menu_button("Set Flag", |ui| {

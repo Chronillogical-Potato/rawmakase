@@ -176,6 +176,10 @@ impl PreviewTextures {
         self.edited
             .insert(id, texture(ctx, format!("edited-{id}"), im));
     }
+    /// The ticket of the photo's latest edited preview request, if any.
+    pub(super) fn edited_ticket(&self, id: PhotoId) -> Option<u64> {
+        self.edited_requested.get(&id).copied()
+    }
     fn ticket(&mut self) -> u64 {
         self.next_ticket += 1;
         self.next_ticket

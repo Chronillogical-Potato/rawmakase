@@ -180,6 +180,12 @@ pub enum Request {
         )]
         max_edge: Option<u32>,
     },
+    /// Queues previews of the selected photos, built in the background; the
+    /// reply says how many were queued, and `state` how far they have got.
+    BuildPreviews {
+        #[serde(default)]
+        kind: PreviewKind,
+    },
     /// An output job's status.
     Job {
         #[serde(deserialize_with = "job_id")]
@@ -229,6 +235,15 @@ pub enum Until {
         #[serde(deserialize_with = "job_id")]
         job_id: u64,
     },
+}
+
+/// The previews a `build_previews` command builds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewKind {
+    /// Lightroom's Standard-Sized Previews, at the app's Standard Preview Size.
+    #[default]
+    Standard,
 }
 
 /// The module a `module` command switches to.
@@ -615,5 +630,18 @@ mod tests {
             parse(json!({"cmd":"save","verbose":true})).unwrap(),
             Request::Save
         );
+        assert_eq!(
+            parse(json!({"cmd":"build_previews"})).unwrap(),
+            Request::BuildPreviews {
+                kind: PreviewKind::Standard
+            }
+        );
+        assert_eq!(
+            parse(json!({"cmd":"build_previews","kind":"standard"})).unwrap(),
+            Request::BuildPreviews {
+                kind: PreviewKind::Standard
+            }
+        );
+        assert!(parse(json!({"cmd":"build_previews","kind":"huge"})).is_err());
     }
 }

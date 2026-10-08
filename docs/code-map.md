@@ -198,7 +198,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [models.rs](../crates/rawmakase-catalog/src/catalog/models.rs) | Folder, photo, collection and saved-edit records crossing the catalog API. The metadata values they carry are in [metadata.rs](../crates/rawmakase-model/src/metadata.rs). |
 | [schema.postgres.sql](../crates/rawmakase-catalog/src/catalog/schema.postgres.sql) | The same tables in Postgres types, kept in step with `schema.sql` by a test; CI's "Portable catalog SQL" job prepares every portable statement against it. No release opens a Postgres catalog. |
 | [schema.sql](../crates/rawmakase-catalog/src/catalog/schema.sql) | Every catalog table, idempotent: run on creation and on every open, so older catalogs gain tables added since. |
-| [preview_cache.rs](../crates/rawmakase-catalog/src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget. |
+| [preview_cache.rs](../crates/rawmakase-catalog/src/catalog/preview_cache.rs) | Separate, disposable SQLite JPEG cache with identity checks, offline hits and a size budget: Library thumbnails, and Standard and 1:1 previews with the catalog photos they were asked for. |
 | [lightroom/mod.rs](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs) | Read-only Lightroom snapshot import, source preservation, relational transfer and atomic destination publication. |
 | [lr_develop.rs](../crates/rawmakase-interop/src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
 | [lightroom/history.rs](../crates/rawmakase-catalog/src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
@@ -246,6 +246,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |
 | [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
+| [preview_build.rs](../src/app/preview_build.rs) | Build Standard-Sized Previews: the selection's previews rendered as export renders them, on a background worker, into the preview cache; their identity, progress, Discard and Clear. |
 | [preferences.rs](../src/app/preferences.rs) | Preferences window: app, catalog, profile, cache and display settings. |
 | [raw_defaults.rs](../src/app/raw_defaults.rs) | Preferences' Raw Defaults block, and keeping the open unedited photo and the Library's previews in step with the defaults. |
 | [onboarding.rs](../src/app/onboarding.rs) | First-run setup: a catalog, then optional Lightroom profiles and presets. |

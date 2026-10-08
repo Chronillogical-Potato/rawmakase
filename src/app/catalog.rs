@@ -492,6 +492,9 @@ impl Editor {
         if !self.ready_for_catalog() {
             return;
         }
+        // Before the copy goes, as its previews do: its id may be given to the
+        // next new photo, which must not inherit its requests.
+        self.forget_preview_intent(id);
         let Some(library) = &mut self.library else {
             return;
         };

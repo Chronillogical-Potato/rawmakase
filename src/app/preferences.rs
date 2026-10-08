@@ -7,6 +7,7 @@ use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button}
 use crate::app::theme;
 use crate::camera_data::Demosaic;
 use crate::catalog::CatalogLocation;
+use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::path::{Path, PathBuf};
 
@@ -48,7 +49,9 @@ struct Usage {
     camera_profiles: usize,
     lens_profiles: usize,
     decode_cache: (usize, u64),
+    /// The preview cache's file, and what each kind of preview holds of it.
     previews: u64,
+    preview_kinds: Option<crate::catalog::preview_cache::PreviewUsage>,
     catalog: Option<u64>,
     folders: Option<usize>,
 }
@@ -153,8 +156,10 @@ impl Editor {
             camera_profiles: files(&camera_profiles_dir(), &["dcp", "xmp"]).0,
             lens_profiles: files(&lens_profiles_dir(), &["lcp"]).0,
             decode_cache: files(&decode_cache_dir(), &["decoded"]),
-            previews: std::fs::metadata(crate::catalog::preview_cache::PreviewCache::path())
-                .map_or(0, |m| m.len()),
+            previews: std::fs::metadata(PreviewCache::path()).map_or(0, |m| m.len()),
+            preview_kinds: PreviewCache::open(&PreviewCache::path())
+                .and_then(|cache| cache.usage())
+                .ok(),
             catalog: catalog.and_then(|c| {
                 let CatalogLocation::File(path) = c.location();
                 std::fs::metadata(path).ok().map(|m| m.len())
@@ -402,6 +407,59 @@ impl Editor {
         form_row(ui, "Previews", |ui| {
             value(ui, &bytes(usage.previews));
         });
+        let preview_kinds = usage.preview_kinds;
+        if let Some(kinds) = preview_kinds {
+            form_row(ui, "", |ui| {
+                hint(
+                    ui,
+                    &format!(
+                        "Thumbnails {} · Standard {} · 1:1 {}",
+                        bytes(kinds.thumbnails),
+                        bytes(kinds.standard),
+                        bytes(kinds.one_to_one)
+                    ),
+                );
+            });
+        }
+        let mut size = self.preview_builds.standard_size;
+        form_row(ui, "Standard Preview Size", |ui| {
+            egui::ComboBox::from_id_salt("standard-preview-size")
+                .width(120.)
+                .selected_text(format!("{size} pixels"))
+                .show_ui(ui, |ui| {
+                    for choice in crate::app::preview_build::STANDARD_SIZES {
+                        ui.selectable_value(&mut size, choice, format!("{choice} pixels"));
+                    }
+                });
+        });
+        if size != self.preview_builds.standard_size {
+            self.preview_builds.standard_size = size;
+            let _ = self.save_session();
+        }
+        let mut clear = false;
+        form_row(ui, "", |ui| {
+            clear = ui
+                .add_enabled(
+                    preview_kinds.is_some_and(|k| k.standard > 0),
+                    egui::Button::new("Clear Standard Previews"),
+                )
+                .clicked();
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "Build Standard-Sized Previews from a photo's menu. Develop shows them while a photo opens.",
+            );
+        });
+        if clear {
+            self.clear_previews(PreviewKind::Standard);
+            self.status = "Standard previews cleared".into();
+            self.preferences.usage.preview_kinds =
+                preview_kinds.map(|kinds| crate::catalog::preview_cache::PreviewUsage {
+                    standard: 0,
+                    ..kinds
+                });
+        }
         gap(ui);
         self.folder_locations_block(ui);
         group(ui, "Metadata defaults");

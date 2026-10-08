@@ -139,6 +139,8 @@ pub(super) enum Operation {
         max_edge: u32,
     },
     Job(u64),
+    /// Builds previews of the selection, as the thumbnail menu does.
+    BuildPreviews(crate::catalog::preview_cache::PreviewKind),
     /// Answers once `Until` holds, or after the time given, so a client waiting
     /// for a photo or an output is woken rather than polling.
     Wait(Until, std::time::Duration),
@@ -401,6 +403,14 @@ impl Editor {
             },
             selected_mask: self.view.masking.selected,
             exporting: self.exporting(),
+            building_previews: self
+                .preview_builds
+                .progress()
+                .filter(super::preview_build::Progress::running)
+                .map(|p| super::commands::reply::BuildProgress {
+                    done: p.done,
+                    total: p.total,
+                }),
             auto_running: self.document.auto.is_running(),
             treatment_pending: self.document.pending_treatment.is_some(),
             panels: self.panels.of(self.module),
@@ -505,6 +515,7 @@ impl Editor {
                         "preview",
                         "job",
                         "wait",
+                        "build_previews",
                     ],
                     tone_curve: CurveCapabilities {
                         channels: ["rgb", "red", "green", "blue"],
@@ -545,6 +556,29 @@ impl Editor {
                     total: all.len(),
                     offset,
                     photos,
+                });
+            }
+            Operation::BuildPreviews(kind) => {
+                if self.activity.is_busy() || self.command_modal() {
+                    return Err(Error::new(
+                        "busy",
+                        "Close the dialog or wait for the current operation",
+                    ));
+                }
+                let ids = self.preview_command_scope();
+                if ids.is_empty() {
+                    return Err(Error::new(
+                        "no_selection",
+                        "Select photos to build previews of",
+                    ));
+                }
+                let queued = self
+                    .build_previews(&ids, kind)
+                    .map_err(|e| Error::new("not_queued", e))?;
+                self.status = super::preview_build::queued_message(queued);
+                return Ok(Outcome::Previews {
+                    queued: queued.queued,
+                    skipped: queued.skipped,
                 });
             }
             Operation::Presets { group } => {
@@ -758,6 +792,7 @@ impl Editor {
             | Operation::Photos { .. }
             | Operation::Presets { .. }
             | Operation::Job(_)
+            | Operation::BuildPreviews(_)
             | Operation::Wait(..) => unreachable!(),
         }
         Ok(Outcome::Empty)

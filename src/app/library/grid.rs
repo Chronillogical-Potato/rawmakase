@@ -230,6 +230,18 @@ impl Library {
                 }
             }
             PhotoAction::Copy(copy) => self.copy_request = Some(copy),
+            // The selection when the photo is in it, in the grid and the
+            // filmstrip alike, as Export.
+            PhotoAction::BuildPreviews(kind) => {
+                self.previews_request = Some(super::PreviewsRequest::Build(
+                    self.menu_scope(photo.id),
+                    kind,
+                ));
+            }
+            PhotoAction::DiscardPreviews => {
+                self.previews_request =
+                    Some(super::PreviewsRequest::Discard(self.menu_scope(photo.id)));
+            }
             PhotoAction::ReadMetadata => {
                 let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
                     self.selected_ids()
@@ -243,6 +255,14 @@ impl Library {
     }
 }
 impl Library {
+    /// The selection when `id` is part of it, else `id` alone.
+    fn menu_scope(&self, id: PhotoId) -> Vec<PhotoId> {
+        if self.selection.selected.contains(&id) {
+            self.selected_ids()
+        } else {
+            vec![id]
+        }
+    }
     /// Lightroom's Sort: the order from a menu, its direction from the arrow.
     fn sort_menu(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
