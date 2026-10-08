@@ -27,9 +27,12 @@ pub(in crate::catalog) use sql::{Sql, SqliteSql, sql, sqlite_sql};
 
 /// Marks a file as an RAWmakase catalog (`PRAGMA application_id`).
 const APPLICATION_ID: i64 = 0x4f4d4152;
-/// The catalog format version (`PRAGMA user_version`); older releases check
-/// it too.
-const VERSION: i64 = 1;
+/// The catalog format version (`PRAGMA user_version`) new catalogs get; older
+/// releases check it too. Version 2 may hold raster mask data, which a release
+/// that cannot read it must not open and rewrite.
+pub(in crate::catalog) const VERSION: i64 = 2;
+/// The first version, still read and written as it is until a catalog is upgraded.
+pub(in crate::catalog) const FIRST_VERSION: i64 = 1;
 
 /// The catalog's database. Opaque: nothing outside this module sees which
 /// backend it is or its connection.
@@ -64,7 +67,8 @@ impl Db {
             "Not an RAWmakase catalog"
         );
         ensure!(
-            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? == VERSION,
+            (FIRST_VERSION..=VERSION)
+                .contains(&db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?),
             "Unsupported RAWmakase catalog version; file left unchanged"
         );
         db.busy_timeout(Duration::from_secs(5))?;
@@ -72,6 +76,56 @@ impl Db {
         Ok(Self {
             backend: Backend::Sqlite(db),
         })
+    }
+
+    /// The catalog's format version.
+    pub(in crate::catalog) fn version(&self) -> Result<i64> {
+        Ok(self
+            .connection()
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?)
+    }
+
+    /// Upgrades a version 1 catalog to the current version, after writing a
+    /// consistent copy of it to `backup` (a path nothing exists at). The copy is
+    /// SQLite's own (`VACUUM INTO`), not a copy of the live file, and is checked
+    /// before the upgrade commits. A catalog already upgraded is left as it is.
+    pub(in crate::catalog) fn upgrade(&mut self, backup: &Path) -> Result<()> {
+        let Backend::Sqlite(db) = &mut self.backend;
+        if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? >= VERSION {
+            return Ok(());
+        }
+        ensure!(
+            !backup.exists(),
+            "A backup already exists: {}",
+            backup.display()
+        );
+        let published = (|| -> Result<()> {
+            // SQLite takes the name as text; a path that is not valid UTF-8 cannot be
+            // passed to it unchanged, and a changed one would put the copy elsewhere.
+            let name = backup
+                .to_str()
+                .context("The catalog's folder name cannot be used for its backup")?;
+            db.execute("VACUUM INTO ?", [name])?;
+            let copy = Connection::open_with_flags(backup, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            ensure!(
+                copy.query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))? == "ok"
+                    && copy.query_row("PRAGMA application_id", [], |r| r.get::<_, i64>(0))?
+                        == APPLICATION_ID,
+                "The backup could not be verified"
+            );
+            Ok(())
+        })();
+        if let Err(error) = published {
+            let _ = std::fs::remove_file(backup);
+            return Err(error.context("Could not back up the catalog; it was not upgraded"));
+        }
+        // The upgrade is one immediate transaction that rechecks what it read.
+        let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < VERSION {
+            tx.execute_batch(&format!("PRAGMA user_version={VERSION}"))?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Gives a catalog from an earlier release the tables added since. On

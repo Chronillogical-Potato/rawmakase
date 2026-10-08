@@ -10,6 +10,15 @@ pub struct SavedHistory {
     pub steps: Vec<SavedStep>,
     pub applied: usize,
 }
+impl SavedHistory {
+    /// The distinct content IDs of the mask rasters any state of the History refers to.
+    pub fn mask_asset_ids(&self) -> std::collections::BTreeSet<&str> {
+        std::iter::once(&self.origin)
+            .chain(self.steps.iter().map(|s| &s.recipe))
+            .flat_map(Recipe::mask_asset_ids)
+            .collect()
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedStep {
     pub name: String,

@@ -13,7 +13,10 @@ built without LibRaw, the catalog or the GUI; `crates/rawmakase-native` is the o
 crate that compiles and links LibRaw and Little CMS (`raw`, `demosaic`, `photo`,
 and the full-size decode in `decode` and `decode_cache`, which uses the engine's
 highlight recovery); `crates/rawmakase-export` develops and writes exports with
-their watermarks over both. The app crate re-exports these crates' modules at its
+their watermarks over both; `crates/rawmakase-inference` is the one leaf that runs
+the subject selection model through a lazily loaded ONNX Runtime (pixels in,
+coverage out; it knows no other workspace crate, and no value, catalog or
+rendering crate can reach it, so saved masks render without any inference). The app crate re-exports these crates' modules at its
 root (`crate::model`, `crate::xmp`, `crate::catalog`, `crate::develop`…), so paths
 read the same on either side. The desktop app and CLI compose these APIs;
 parsing, persistence and rendering implementations do not import the desktop UI.
@@ -126,6 +129,15 @@ inject a temporary file, without changing the process-wide environment.
   path: sessions, autosave, Sync and folder jobs carry it, and behaviour that
   only makes sense for a file (its size, revealing it, the path `session.json`
   keeps) matches on `CatalogLocation::File`.
+- Raster masks (`MaskShape::Bitmap`) hold only a content ID. The pixels live in
+  `model::storage::mask_assets`, a process-wide store: a generated raster is
+  *unsaved* until a catalog write stores it, saved ones are read back through the
+  loader the app installs from the open catalog (`Catalog::mask_asset_loader`) and
+  can be evicted. Rendering resolves rasters through it and fails, never renders an
+  empty mask, when one cannot be provided. `edit_rows` stores a save's unsaved
+  rasters in the same transaction as the rows naming them and rejects an edit
+  whose references do not exist; rasters are never collected. Catalogs that keep
+  them are format version 2 (see [catalogs](catalogs.md)).
 - A photo's edit (its recipe, export options, identity and edit time, spots
   and masks, and History) is written only by `catalog::edit_rows`: a checked
   save or clear, an exact copy for a virtual copy, and removal with one.

@@ -434,3 +434,142 @@ fn partial_masks_blend_and_amount_scales() {
     assert!((at(&masked, 100) - at(&plain, 100)).abs() < 1e-5);
     let _ = slot::EXPOSURE;
 }
+
+fn register(width: u32, height: u32, data: Vec<u8>) -> (String, MaskShape) {
+    use rawmakase_model::storage::{bitmaps::Bitmap, mask_assets};
+    let id = mask_assets::register(Bitmap {
+        width,
+        height,
+        channels: 1,
+        depth: 1,
+        data,
+    })
+    .unwrap();
+    let shape = MaskShape::Bitmap(crate::model::masks::BitmapMask {
+        id: id.clone(),
+        width,
+        height,
+        sampling: crate::model::masks::BITMAP_SAMPLING,
+        source: None,
+    });
+    (id, shape)
+}
+#[test]
+fn a_bitmap_component_samples_its_raster_over_the_image_frame() {
+    let im = image(200, 100);
+    // Left half unselected, right half selected, a soft step between the centres.
+    let (_, shape) = register(2, 1, vec![0, 255]);
+    let w = weights(&im, group(vec![MaskComponent::new(shape.clone())]), None);
+    let at = |x: usize, y: usize| w[y * 200 + x];
+    assert!(
+        at(10, 50) < 0.01 && at(190, 50) > 0.99,
+        "{} {}",
+        at(10, 50),
+        at(190, 50)
+    );
+    // Pixel centres of the raster sit at a quarter and three quarters of the width.
+    assert!((at(100, 50) - 0.5).abs() < 0.02);
+    assert!((at(50, 20) - 0.).abs() < 0.01 && (at(150, 20) - 1.).abs() < 0.01);
+    // Inverted as a component, it is the complement inside the frame.
+    let mut inverted = MaskComponent::new(shape.clone());
+    inverted.invert = true;
+    let v = weights(&im, group(vec![inverted]), None);
+    for (a, b) in w.iter().zip(&v) {
+        assert!((a + b - 1.).abs() < 0.01, "{a} {b}");
+    }
+    // Opacity and Subtract compose like any component.
+    let mut half = MaskComponent::new(shape.clone());
+    half.opacity = 0.5;
+    let h = weights(&im, group(vec![half]), None);
+    assert!((h[50 * 200 + 190] - 0.5).abs() < 0.01);
+    let mut cut = MaskComponent::new(shape);
+    cut.op = MaskOp::Subtract;
+    let none = weights(
+        &im,
+        group(vec![
+            MaskComponent::new(MaskShape::Radial {
+                center: [0.5, 0.5],
+                radii: [4., 4.],
+                angle: 0.,
+                feather: 0.,
+            }),
+            cut,
+        ]),
+        None,
+    );
+    assert!(none[50 * 200 + 190] < 0.01 && none[50 * 200 + 10] > 0.99);
+}
+#[test]
+fn a_bitmap_contributes_nothing_outside_the_frame_or_without_its_raster() {
+    let (_, shape) = register(2, 2, vec![255; 4]);
+    let mut inverted = MaskComponent::new(shape);
+    inverted.invert = true;
+    // Inverted full coverage is empty everywhere in the frame.
+    let im = image(60, 40);
+    let w = weights(&im, group(vec![inverted]), None);
+    assert!(w.iter().all(|v| *v < 0.01));
+    // A raster nothing can provide contributes zero, even inverted.
+    let missing = MaskShape::Bitmap(crate::model::masks::BitmapMask {
+        id: format!("sha256:{}", "ab".repeat(32)),
+        width: 2,
+        height: 2,
+        sampling: crate::model::masks::BITMAP_SAMPLING,
+        source: None,
+    });
+    let mut c = MaskComponent::new(missing);
+    c.invert = true;
+    let w = weights(&im, group(vec![c]), None);
+    assert!(w.iter().all(|v| *v == 0.));
+}
+#[test]
+fn rendering_a_mask_whose_raster_is_missing_is_an_error_not_an_empty_mask() {
+    let im = image(60, 40);
+    let missing = MaskShape::Bitmap(crate::model::masks::BitmapMask {
+        id: format!("sha256:{}", "ef".repeat(32)),
+        width: 2,
+        height: 2,
+        sampling: crate::model::masks::BITMAP_SAMPLING,
+        source: None,
+    });
+    let mut r = Recipe {
+        masks: vec![group(vec![MaskComponent::new(missing)])],
+        ..Default::default()
+    };
+    let error = crate::develop::render(&im, &r.checked().unwrap(), 60)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("missing"), "{error}");
+    // A stored raster of another size than the mask describes is as bad as a missing one.
+    let (_, other) = register(3, 2, vec![255; 6]);
+    let MaskShape::Bitmap(mut described) = other else {
+        unreachable!()
+    };
+    described.width = 2;
+    described.height = 3;
+    r.masks[0].components[0].shape = MaskShape::Bitmap(described);
+    let error = crate::develop::render(&im, &r.checked().unwrap(), 60)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("damaged"), "{error}");
+    // Hidden, the mask is not rendered and needs nothing.
+    r.masks[0].hidden = true;
+    assert!(crate::develop::render(&im, &r.checked().unwrap(), 60).is_ok());
+    // And its raster, once provided, renders.
+    let (_, shape) = register(2, 2, vec![255; 4]);
+    r.masks[0].hidden = false;
+    r.masks[0].components[0].shape = shape;
+    assert!(crate::develop::render(&im, &r.checked().unwrap(), 60).is_ok());
+}
+
+#[test]
+fn the_selection_input_keeps_switched_off_spots_off() {
+    use crate::model::panels::{Panel, PanelState};
+    let mut user = Recipe::default();
+    user.panels.set(Panel::SpotRemoval, PanelState::Off);
+    let input = selection_input_recipe(&user);
+    assert_eq!(input.panels.state(Panel::SpotRemoval), PanelState::Off);
+    assert_eq!(
+        input.panels.state(Panel::RedEye),
+        user.panels.state(Panel::RedEye)
+    );
+}

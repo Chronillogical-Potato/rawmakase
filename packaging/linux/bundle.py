@@ -2,10 +2,12 @@
 """Stage private imaging libraries without replacing system libraries."""
 import argparse
 import json
+import platform
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 
 def run(*args):
@@ -74,6 +76,11 @@ def main():
             shutil.copy2(copyright_file, licenses / (owner + "-copyright"))
             records.append({"library": name, "package": run("dpkg-query", "-W", "-f=${Package} ${Version}", owner)})
     (licenses / "ubuntu-libraries.json").write_text(json.dumps(records, indent=2) + "\n")
+    # The ONNX Runtime that runs the subject selection model, opened lazily from
+    # beside the executable; the app starts without it.
+    sys.path.insert(0, str(root / "packaging"))
+    import onnxruntime
+    onnxruntime.fetch("linux", platform.machine(), private, licenses)
     for path in private.iterdir():
         subprocess.run(["patchelf", "--set-rpath", "$ORIGIN", str(path)], check=True)
     launcher = stage / "usr/bin/rawmakase"

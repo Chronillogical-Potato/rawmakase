@@ -682,3 +682,57 @@ fn a_lens_profile_the_target_cannot_use_is_reported() {
         out.notes
     );
 }
+
+#[test]
+fn masks_made_from_a_selection_stay_on_their_photo() {
+    use crate::model::masks::{BITMAP_SAMPLING, BitmapMask};
+    let raster = MaskGroup {
+        name: "Subject".into(),
+        components: vec![MaskComponent::new(MaskShape::Bitmap(BitmapMask {
+            id: format!("sha256:{}", "ab".repeat(32)),
+            width: 4,
+            height: 4,
+            sampling: BITMAP_SAMPLING,
+            source: None,
+        }))],
+        ..Default::default()
+    };
+    let gradient = MaskGroup {
+        components: vec![MaskComponent::new(MaskShape::Linear {
+            from: [0.; 2],
+            to: [1.; 2],
+        })],
+        ..Default::default()
+    };
+    let source = Recipe {
+        masks: vec![raster.clone(), gradient.clone()],
+        ..Default::default()
+    };
+    let m = camera("Sony", "ILCE-7M4");
+    let mut selection = GroupSelection::none();
+    selection.set(SettingGroup::Masking, GroupInclusion::Included);
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let out = transfer(from(&source, &m), &Recipe::default(), &selection, target);
+    assert_eq!(out.recipe.masks, vec![gradient.clone()]);
+    assert_eq!(out.notes.len(), 1);
+    // A target that has its own selection keeps it, under the source's other masks.
+    let mut own = raster;
+    own.name = "Own subject".into();
+    let to = Recipe {
+        masks: vec![own.clone()],
+        ..Default::default()
+    };
+    let out = transfer(from(&source, &m), &to, &selection, target);
+    assert_eq!(out.recipe.masks, vec![gradient.clone(), own.clone()]);
+    // Even when the source fills every slot, the target's own selection survives.
+    let full = Recipe {
+        masks: vec![gradient.clone(); crate::model::masks::MAX_GROUPS],
+        ..Default::default()
+    };
+    let out = transfer(from(&full, &m), &to, &selection, target);
+    assert_eq!(out.recipe.masks.len(), crate::model::masks::MAX_GROUPS);
+    assert_eq!(out.recipe.masks.last(), Some(&own));
+}

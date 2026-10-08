@@ -20,6 +20,12 @@ struct Preset {
 }
 pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
     r.validate()?;
+    anyhow::ensure!(
+        !r.masks
+            .iter()
+            .any(crate::model::masks::MaskGroup::has_raster),
+        "A preset cannot hold masks made from a selection; leave Masking out of it"
+    );
     // Spot removal is specific to its photo; Lightroom presets never include it.
     let (mut recipe, local) = r.split_local();
     // Auto white balance was estimated for this photo; applied elsewhere its values are
@@ -46,6 +52,14 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
         red_eye: Default::default(),
         masks: p.masks,
     });
+    // Checked after merging: development builds kept masks inside the recipe itself.
+    anyhow::ensure!(
+        !recipe
+            .masks
+            .iter()
+            .any(crate::model::masks::MaskGroup::has_raster),
+        "This preset refers to a photo's selection mask, which a preset cannot hold"
+    );
     recipe.upright.clear_analysis();
     recipe.validate()?;
     Ok(recipe)
@@ -98,5 +112,57 @@ mod tests {
         assert_eq!(applied.retouch_model, photo.retouch_model);
         assert_eq!(applied.panels.state(Panel::RedEye), PanelState::On);
         assert_eq!(applied.panels.state(Panel::SpotRemoval), PanelState::On);
+    }
+    #[test]
+    fn a_preset_refuses_masks_made_from_a_selection() {
+        use crate::model::masks::{
+            BITMAP_SAMPLING, BitmapMask, MaskComponent, MaskGroup, MaskShape,
+        };
+        let r = Recipe {
+            masks: vec![MaskGroup {
+                components: vec![MaskComponent::new(MaskShape::Bitmap(BitmapMask {
+                    id: format!("sha256:{}", "ab".repeat(32)),
+                    width: 2,
+                    height: 2,
+                    sampling: BITMAP_SAMPLING,
+                    source: None,
+                }))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        assert!(save_preset(&path, &r).is_err());
+        assert!(!path.exists());
+    }
+    #[test]
+    fn a_preset_with_a_selection_mask_inside_its_recipe_is_refused() {
+        use crate::model::masks::{
+            BITMAP_SAMPLING, BitmapMask, MaskComponent, MaskGroup, MaskShape,
+        };
+        let recipe = Recipe {
+            masks: vec![MaskGroup {
+                components: vec![MaskComponent::new(MaskShape::Bitmap(BitmapMask {
+                    id: format!("sha256:{}", "ab".repeat(32)),
+                    width: 2,
+                    height: 2,
+                    sampling: BITMAP_SAMPLING,
+                    source: None,
+                }))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // As a development build wrote it: masks in the recipe, none beside it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let value = serde_json::json!({
+            "schema": saved_version(&recipe),
+            "pipeline": saved_version(&recipe),
+            "recipe": recipe,
+        });
+        std::fs::write(&path, value.to_string()).unwrap();
+        assert!(load_preset(&path).is_err());
     }
 }

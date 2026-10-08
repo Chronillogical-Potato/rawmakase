@@ -11,6 +11,7 @@ hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
 app="$mount/RAWmakase.app"
 test -s "$app/Contents/Resources/Assets.car"
 test -s "$app/Contents/Resources/rawmakase.icns"
+test -s "$app/Contents/Frameworks/libonnxruntime.dylib"
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist")" = RAWmakase
 codesign --verify --strict --deep "$app"
 spctl --assess --type execute --verbose=2 "$app"

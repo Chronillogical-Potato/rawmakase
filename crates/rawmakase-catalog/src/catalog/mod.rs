@@ -30,6 +30,7 @@ pub mod legacy_sidecar;
 pub mod lightroom;
 mod location;
 pub mod locations;
+mod mask_assets;
 mod models;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
@@ -365,6 +366,8 @@ mod descriptive_tests;
 mod edit_rows_tests;
 #[cfg(test)]
 mod locations_tests;
+#[cfg(test)]
+mod mask_assets_tests;
 #[cfg(test)]
 mod open_tests;
 #[cfg(test)]

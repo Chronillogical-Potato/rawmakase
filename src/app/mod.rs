@@ -99,6 +99,9 @@ pub(crate) struct Editor {
     not_editable: Option<(String, String)>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
+    /// Select Subject and Select Background: the running selection, the selection
+    /// model's install and what the drawer asks.
+    selection: subject_mask::Selection,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
     /// Preferences: whether converting to black & white applies the Auto mix to a
@@ -282,6 +285,7 @@ impl Editor {
             modal: None,
             not_editable: None,
             undo_log: Default::default(),
+            selection: Default::default(),
             auto_advance: session.auto_advance,
             first_conversion: if session.no_auto_black_white_mix {
                 treatment::FirstConversion::KeepMix
@@ -657,6 +661,7 @@ mod stand_in;
 #[cfg(feature = "telemetry")]
 mod stats;
 mod stroke_outline;
+mod subject_mask;
 mod targeted_tool;
 #[cfg(test)]
 mod tests;

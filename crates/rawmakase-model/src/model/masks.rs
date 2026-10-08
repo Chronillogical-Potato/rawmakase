@@ -98,9 +98,42 @@ pub enum MaskShape {
         high: f32,
         falloff: [f32; 2],
     },
-    // Later: Bitmap { hash, width, height } for AI and imported raster masks, via the
-    // bitmap store; Depth { low, high, falloff } from a depth map.
+    /// Coverage painted by a model or imported, stored once in the bitmap store and
+    /// named by its content ID (see [`crate::storage::mask_assets`]).
+    Bitmap(BitmapMask),
+    // Later: Depth { low, high, falloff } from a depth map.
 }
+/// The sampling contract of a [`BitmapMask`]: its raster covers exactly the
+/// camera-oriented default-crop image frame, normalised to `[0,1]²` before lens
+/// correction, Transform, crop, straightening and flips; coverage is bilinear at
+/// pixel centres, clamped at the raster's edge and zero outside the frame.
+pub const BITMAP_SAMPLING: u32 = 1;
+/// Raster coverage as a mask component.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BitmapMask {
+    /// Content ID of the 8-bit coverage raster.
+    pub id: String,
+    pub width: u32,
+    pub height: u32,
+    /// [`BITMAP_SAMPLING`] when it was made.
+    pub sampling: u32,
+    /// What made it, when a model did; not needed to render it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<BitmapSource>,
+}
+/// Which feature generated a raster, and from which inputs.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BitmapSource {
+    /// `subject` or `sky`.
+    pub feature: String,
+    /// The model's id and the digest of its file.
+    pub model: String,
+    /// A hash of everything the model was given, for telling whether a regeneration
+    /// would differ.
+    pub input: String,
+}
+pub const FEATURE_SUBJECT: &str = "subject";
+pub const FEATURE_SKY: &str = "sky";
 impl MaskShape {
     pub fn kind(&self) -> &'static str {
         match self {
@@ -109,6 +142,11 @@ impl MaskShape {
             MaskShape::Radial { .. } => "Radial Gradient",
             MaskShape::ColorRange { .. } => "Color Range",
             MaskShape::LuminanceRange { .. } => "Luminance Range",
+            MaskShape::Bitmap(b) => match b.source.as_ref().map(|s| s.feature.as_str()) {
+                Some(FEATURE_SUBJECT) => "Subject",
+                Some(FEATURE_SKY) => "Sky",
+                _ => "Bitmap",
+            },
         }
     }
     /// Whether the weight depends on the developed photo, not only on the position.
@@ -262,6 +300,13 @@ impl MaskShape {
                 unit(*low) && unit(*high) && low <= high && falloff.iter().all(|f| unit(*f)),
                 "Invalid luminance range"
             ),
+            MaskShape::Bitmap(b) => ensure!(
+                crate::storage::bitmaps::Bitmap::is_valid_id(&b.id)
+                    && (1..=crate::storage::mask_assets::MAX_SIDE).contains(&b.width)
+                    && (1..=crate::storage::mask_assets::MAX_SIDE).contains(&b.height)
+                    && b.sampling == BITMAP_SAMPLING,
+                "Invalid bitmap mask"
+            ),
         }
         Ok(())
     }
@@ -287,6 +332,35 @@ impl MaskGroup {
     pub fn is_active(&self) -> bool {
         !self.hidden && !self.components.is_empty() && self.amount > 0. && !self.adjust.is_neutral()
     }
+}
+/// The content IDs of the rasters `groups` refer to, in order, with repeats.
+pub fn bitmap_ids(groups: &[MaskGroup]) -> impl Iterator<Item = &str> {
+    groups
+        .iter()
+        .flat_map(|g| &g.components)
+        .filter_map(|c| match &c.shape {
+            MaskShape::Bitmap(b) => Some(b.id.as_str()),
+            _ => None,
+        })
+}
+impl MaskGroup {
+    /// Whether any component is a raster, which belongs to the photo it was made
+    /// from and cannot travel in a preset or to another photo.
+    pub fn has_raster(&self) -> bool {
+        self.components
+            .iter()
+            .any(|c| matches!(c.shape, MaskShape::Bitmap(_)))
+    }
+}
+/// The rasters `groups` refer to, as they describe them: content ID, width, height.
+pub fn bitmap_refs(groups: &[MaskGroup]) -> impl Iterator<Item = (&str, u32, u32)> {
+    groups
+        .iter()
+        .flat_map(|g| &g.components)
+        .filter_map(|c| match &c.shape {
+            MaskShape::Bitmap(b) => Some((b.id.as_str(), b.width, b.height)),
+            _ => None,
+        })
 }
 pub fn validate(groups: &[MaskGroup]) -> Result<()> {
     ensure!(groups.len() <= MAX_GROUPS, "Too many masks");

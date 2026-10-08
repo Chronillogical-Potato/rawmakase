@@ -1,0 +1,15 @@
+[package]
+name = "rawmakase-inference"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Local ONNX inference for RAWmakase's automatic subject selection: the pinned model contract, pre/post-processing and a lazily loaded ONNX Runtime"
+license = "MIT"
+publish = false
+
+[dependencies]
+# `load-dynamic` links no ONNX Runtime at build time: the library is opened at
+# run time from a path we choose (see `runtime`), so a missing runtime is an
+# error value, not a startup failure. Default features would pull in
+# `download-binaries`-style build scripts; none of them are wanted.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }

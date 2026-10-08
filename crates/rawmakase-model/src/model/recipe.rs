@@ -699,6 +699,10 @@ impl Recipe {
         crate::model::masks::validate(&self.masks)?;
         Ok(())
     }
+    /// The content IDs of the mask rasters this recipe refers to.
+    pub fn mask_asset_ids(&self) -> impl Iterator<Item = &str> {
+        crate::model::masks::bitmap_ids(&self.masks)
+    }
     /// The recipe as saved, without spots and masks, and those apart.
     pub fn split_local(&self) -> (Recipe, LocalEdits) {
         let mut saved = self.clone();

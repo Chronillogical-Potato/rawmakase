@@ -88,6 +88,25 @@ impl Editor {
                 } if id == self.load.id() => {
                     self.auto_straighten_ready(generation, &analysed, result)
                 }
+                Event::Selection(done) => self.selection_done(*done),
+                Event::ModelInstalled(result) => {
+                    self.selection.models.finished(result.is_ok());
+                    if result.as_ref().err().is_some_and(|e| e == "Cancelled") {
+                        self.status = "Model download cancelled".into();
+                    } else {
+                        self.model_installed(result);
+                    }
+                }
+                Event::ModelRemoved(result) => {
+                    self.selection.models.removed(result.is_ok());
+                    self.status = match result {
+                        Ok(()) => "Selection model removed".into(),
+                        Err(e) => format!("Model not removed: {e}"),
+                    };
+                }
+                Event::CatalogUpgraded { generation, result } => {
+                    self.catalog_upgraded(generation, result)
+                }
                 Event::XmpLibrary { scan, library } => self.presets_scanned(scan, library),
                 Event::PresetScanFailed { scan, error } => self.preset_scan_failed(scan, error),
                 Event::Profiles {
@@ -311,6 +330,7 @@ impl Editor {
                 self.preview.clear_document();
                 self.presets.clear_document();
                 self.view.clear_document();
+                self.selection.clear_catalog();
                 self.status = if l.message.is_empty() {
                     "Catalog ready. Offline photos remain in the library; locate their folders to develop them.".into()
                 } else {
@@ -402,6 +422,19 @@ impl Editor {
                     }
                     self.document.edit.save_state_mut().saved();
                     self.document.lightroom_notice.clear();
+                    // Masks made from a selection are read from the catalog now. One
+                    // that cannot be leaves the edit and its History as they are, but
+                    // protected: saving it would lose the mask for good.
+                    let refs: Vec<(String, u32, u32)> =
+                        crate::model::masks::bitmap_refs(&self.document.edit.recipe().masks)
+                            .map(|(id, w, h)| (id.to_owned(), w, h))
+                            .collect();
+                    if let Err(e) = crate::storage::mask_assets::ensure_shaped(
+                        refs.iter().map(|(id, w, h)| (id.as_str(), *w, *h)),
+                    ) {
+                        self.document.edit.save_state_mut().protect(e.to_string());
+                        self.document.lightroom_notice = e.to_string();
+                    }
                 }
                 Ok(None) => {
                     self.document.export = ExportOptions::default();

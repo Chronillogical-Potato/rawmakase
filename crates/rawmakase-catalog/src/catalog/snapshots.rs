@@ -89,8 +89,10 @@ impl Catalog {
     /// Saves `recipe` as a new snapshot of the photo named `name`; returns its id.
     pub fn add_snapshot(&mut self, photo: PhotoId, name: &str, recipe: &Recipe) -> Result<i64> {
         recipe.validate()?;
+        let assets = self.assets_of(recipe.mask_asset_ids())?;
         let (name, recipe) = (snapshot_name(name)?, serde_json::to_string(recipe)?);
-        self.db.write(|w| {
+        let id = self.db.write(|w| {
+            assets.write(w)?;
             w.insert_returning_id(
                 sql!(
                     "INSERT INTO develop_snapshots(photo, name, recipe) VALUES (?, ?, ?)
@@ -98,19 +100,24 @@ impl Catalog {
                 ),
                 &[&photo, &name, &recipe],
             )
-        })
+        })?;
+        assets.saved();
+        Ok(id)
     }
     /// Lightroom's Update with Current Settings: the snapshot now holds `recipe`.
     pub fn update_snapshot(&mut self, id: i64, recipe: &Recipe) -> Result<()> {
         recipe.validate()?;
+        let assets = self.assets_of(recipe.mask_asset_ids())?;
         let recipe = serde_json::to_string(recipe)?;
         let n = self.db.write(|w| {
+            assets.write(w)?;
             w.execute(
                 sql!("UPDATE develop_snapshots SET recipe=?, lightroom=NULL WHERE id=?"),
                 &[&recipe, &id],
             )
         })?;
         ensure!(n == 1, "Unknown snapshot");
+        assets.saved();
         Ok(())
     }
     pub fn rename_snapshot(&mut self, id: i64, name: &str) -> Result<()> {

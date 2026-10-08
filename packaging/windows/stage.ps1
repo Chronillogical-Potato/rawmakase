@@ -21,6 +21,12 @@ $licenses = New-Item -ItemType Directory (Join-Path $Output 'licenses')
 Copy-Item (Join-Path $root 'licenses\*') $licenses
 Copy-Item (Join-Path $Deps 'notices\*') $licenses
 
+# The ONNX Runtime that runs the subject selection model, opened lazily from beside
+# the executable; rawmakase.exe does not import it, so the updater's helper copy
+# still starts alone.
+python (Join-Path $root 'packaging\onnxruntime.py') windows x86_64 $Output $licenses
+if (-not (Test-Path (Join-Path $Output 'onnxruntime.dll'))) { throw 'ONNX Runtime was not staged' }
+
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 if (-not $vs) { throw 'Visual Studio with the C++ tools is not installed' }

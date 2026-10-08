@@ -14,6 +14,14 @@ test -f /usr/share/applications/rawmakase.desktop
 test -f /usr/share/icons/hicolor/scalable/apps/rawmakase.svg
 test -f /usr/share/licenses/rawmakase/LICENSE
 if ldd /usr/lib/rawmakase/rawmakase | grep -q 'not found'; then exit 1; fi
+# The runtime the subject selection model needs is opened lazily, so only loading it
+# shows it works on a clean system. Pull requests install the published 0.1.8
+# package, which predates it; releases from 0.2.2 bundle it.
+installed=$(rawmakase --version | awk '{print $2}')
+if [ "$(printf '%s\n' 0.2.2 "$installed" | sort -V | head -n1)" = 0.2.2 ]; then
+  test -f /usr/lib/rawmakase/libonnxruntime.so
+  python3 -c "import ctypes; ctypes.CDLL('/usr/lib/rawmakase/libonnxruntime.so')"
+fi
 # Winit/wgpu load some libraries at runtime, invisible to ordinary ldd checks.
 python3 - <<'PY'
 import ctypes

@@ -80,7 +80,9 @@ impl Catalog {
                 super::edit_rows::write_edit(w, change, &edited_at)?;
             }
             Ok(())
-        })
+        })?;
+        checked.iter().for_each(|change| change.committed());
+        Ok(())
     }
     /// The photo's spots and masks, saved apart from its recipe.
     fn local_edits(&self, id: PhotoId) -> Result<crate::model::recipe::LocalEdits> {
