@@ -207,16 +207,14 @@ fn an_obsolete_result_is_dropped_and_cannot_finish_a_newer_request() {
     let old = begin(e, SUBJECT);
     let new = begin(e, SUBJECT);
     assert_ne!(old, new);
-    // The first one's success and failure both arrive late; its raster is let go of.
+    // The first one's success and failure both arrive late. Its raster is kept while
+    // the newer selection runs, which could produce the same one.
     let late = generated(40);
     let late_id = late.id.clone();
     finish(e, old, Ok(late));
     finish(e, old, Err(Failure::Failed("late".into())));
     assert!(e.document.edit.recipe().masks.is_empty());
-    assert!(
-        !mask_assets::is_held(&late_id),
-        "a result nobody took stays in memory"
-    );
+    assert!(mask_assets::is_held(&late_id));
     assert!(
         e.selection.running().is_some(),
         "the newer request is still wanted"
@@ -242,10 +240,17 @@ fn an_obsolete_result_is_dropped_and_cannot_finish_a_newer_request() {
         result: Ok(generated(42)),
     });
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
-    // Cancelling stops it being applied even if the worker had finished.
+    // Cancelling stops it being applied even if the worker had finished, and with
+    // nothing running its raster is let go of.
     e.selection.cancel();
-    finish(e, g, Ok(generated(43)));
+    let stray = generated(43);
+    let stray_id = stray.id.clone();
+    finish(e, g, Ok(stray));
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
+    assert!(
+        !mask_assets::is_held(&stray_id),
+        "a result nobody took stays in memory"
+    );
 }
 
 #[test]
@@ -771,4 +776,77 @@ fn when_nothing_is_found_the_user_can_aim_by_hand() {
             Some(Prompt::Model(_) | Prompt::Upgrade(_))
         ));
     }
+}
+
+#[test]
+fn a_different_mask_of_the_same_kind_in_the_same_place_is_not_the_one_asked_for() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let line = |to: f32| MaskGroup {
+        components: vec![MaskComponent::new(MaskShape::Linear {
+            from: [0.; 2],
+            to: [to; 2],
+        })],
+        ..Default::default()
+    };
+    e.change_edit(None, |r| r.masks.push(line(1.)));
+    let request = Request {
+        feature: Feature::Subject,
+        target: Target::Component {
+            mask: 0,
+            op: MaskOp::Add,
+        },
+    };
+    let g = begin(e, request);
+    // Undo, a snapshot: another linear gradient now sits where the first one was.
+    e.change_edit(None, |r| r.masks[0] = line(0.5));
+    finish(e, g, Ok(generated(140)));
+    assert_eq!(e.document.edit.recipe().masks[0].components.len(), 1);
+}
+
+#[test]
+fn a_box_starts_over_without_the_clicks_before_it() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    e.selection.prompting = Some(Prompting {
+        request: SUBJECT,
+        points: vec![Point {
+            x: 0.2,
+            y: 0.2,
+            positive: true,
+        }],
+        bounds: None,
+        applied: None,
+    });
+    e.prompt_box([0.3, 0.3], [0.7, 0.8]);
+    let p = e.selection.prompting.as_ref().unwrap();
+    assert!(p.points.is_empty());
+    assert_eq!(p.bounds, Some([0.3, 0.3, 0.7, 0.8]));
+}
+
+#[test]
+fn an_upgrade_under_way_does_not_select_in_the_next_photo() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let (generation, _) = e.selection.upgrade_task.start();
+    e.selection.upgrading = Some((generation, SUBJECT));
+    e.selection.clear_document();
+    e.catalog_upgraded(generation, Ok(None));
+    assert!(e.selection.running().is_none() && e.selection.prompt.is_none());
+}
+
+#[test]
+fn a_stale_result_does_not_drop_the_raster_a_running_selection_may_share() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let old = begin(e, SUBJECT);
+    let new = begin(e, SUBJECT);
+    // Both produce the same coverage: one ID. The stale one arrives first.
+    finish(e, old, Ok(generated(150)));
+    let same = generated(150);
+    let id = same.id.clone();
+    assert!(mask_assets::is_held(&id));
+    finish(e, new, Ok(same));
+    assert_eq!(e.document.edit.recipe().masks.len(), 1);
+    assert!(mask_assets::resolve(&id).is_ok());
 }

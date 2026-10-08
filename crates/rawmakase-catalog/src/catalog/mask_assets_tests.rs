@@ -148,3 +148,18 @@ fn a_catalog_of_the_first_format_refuses_rasters_until_it_is_upgraded() -> Resul
     );
     Ok(())
 }
+
+#[test]
+fn a_damaged_row_under_a_new_rasters_id_is_replaced_by_the_good_copy() -> Result<()> {
+    let (_dir, mut cat, file, id) = catalog()?;
+    let recipe = masked(16);
+    let raster_id = recipe.mask_asset_ids().next().unwrap().to_string();
+    cat.db_for_tests().execute(
+        "INSERT INTO bitmaps(hash, data) VALUES (?1, ?2)",
+        rusqlite::params![raster_id, b"not a bitmap".to_vec()],
+    )?;
+    save(&mut cat, id, &file, &recipe)?;
+    let read = cat.bitmap(&raster_id)?.unwrap();
+    assert!(read.matches_id(&raster_id));
+    Ok(())
+}

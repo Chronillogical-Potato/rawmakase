@@ -25,10 +25,26 @@ impl Assets {
     /// the transaction of the rows that refer to them.
     pub(super) fn write(&self, w: &mut Write<'_>) -> Result<()> {
         for (id, blob) in &self.unsaved {
-            w.execute(
+            let inserted = w.execute(
                 sql!("INSERT INTO bitmaps(hash, data) VALUES (?, ?) ON CONFLICT DO NOTHING"),
                 &[id, blob.as_ref()],
             )?;
+            // Already there: it must be what its ID names, or the edit would point at
+            // damaged data once the good copy held here is let go. A damaged row is
+            // replaced with the good one.
+            if inserted == 0 {
+                let stored: Option<Vec<u8>> =
+                    w.read_optional(sql!("SELECT data FROM bitmaps WHERE hash=?"), &[id])?;
+                let intact = stored
+                    .and_then(|bytes| Bitmap::decompress(&bytes).ok())
+                    .is_some_and(|b| b.matches_id(id));
+                if !intact {
+                    w.execute(
+                        sql!("UPDATE bitmaps SET data=? WHERE hash=?"),
+                        &[blob.as_ref(), id],
+                    )?;
+                }
+            }
         }
         for id in &self.required {
             let found: Option<i64> =
@@ -111,6 +127,10 @@ struct CatalogAssets {
     db: Mutex<Option<Db>>,
 }
 impl AssetLoader for CatalogAssets {
+    fn source(&self) -> String {
+        let CatalogLocation::File(path) = &self.location;
+        path.display().to_string()
+    }
     fn load(&self, id: &str) -> Result<Option<Bitmap>, AssetError> {
         let corrupt =
             |why: &dyn std::fmt::Display| AssetError::Corrupt(id.to_string(), why.to_string());

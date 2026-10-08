@@ -49,6 +49,9 @@ fn short(id: &str) -> &str {
 pub trait AssetLoader: Send + Sync {
     /// The raster stored under `id`, or `None` when nothing is.
     fn load(&self, id: &str) -> Result<Option<Bitmap>, AssetError>;
+    /// What it reads from (a catalog's location): opening the same catalog again
+    /// replaces its reader rather than adding one.
+    fn source(&self) -> String;
 }
 
 struct Entry {
@@ -62,15 +65,14 @@ struct Entry {
 #[derive(Default)]
 struct Store {
     entries: HashMap<String, Entry>,
-    /// Readers of saved rasters, the catalog opened last first. Earlier catalogs' readers
-    /// stay for a while: an export or preview build started under one keeps resolving
-    /// its rasters after the app has moved on to another, and a content ID names the
-    /// same pixels wherever they are read from.
+    /// Readers of saved rasters, one per catalog opened in this process, the last
+    /// opened first. Earlier catalogs' readers stay: an export or preview build started
+    /// under one keeps resolving its rasters after the app has moved on to another, and
+    /// a content ID names the same pixels wherever they are read from. A reader holds a
+    /// connection only once it has been asked for something.
     loaders: Vec<Arc<dyn AssetLoader>>,
     clock: u64,
 }
-/// Readers kept besides the current catalog's.
-const KEPT_LOADERS: usize = 4;
 fn store() -> &'static Mutex<Store> {
     static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
     STORE.get_or_init(Default::default)
@@ -110,11 +112,17 @@ pub fn register(bitmap: Bitmap) -> Result<String> {
     let used = store.clock;
     let entry = store.entries.entry(id.clone()).or_insert_with(|| Entry {
         raster: Arc::new(bitmap),
-        blob: Some(blob),
+        blob: Some(blob.clone()),
         saved: false,
         used,
     });
     entry.used = used;
+    // Saved before, perhaps in another catalog: whichever catalog this edit is saved
+    // to next must be able to store it, so it is unsaved again until it is.
+    if entry.saved {
+        entry.saved = false;
+        entry.blob = Some(blob);
+    }
     Ok(id)
 }
 
@@ -122,8 +130,9 @@ pub fn register(bitmap: Bitmap) -> Result<String> {
 /// before it are asked after it, for jobs still running under them.
 pub fn add_loader(loader: Arc<dyn AssetLoader>) {
     let mut store = lock();
+    let source = loader.source();
+    store.loaders.retain(|l| l.source() != source);
     store.loaders.insert(0, loader);
-    store.loaders.truncate(KEPT_LOADERS);
 }
 
 /// The raster stored under `id`: from the store, else read through the loader.
@@ -331,6 +340,9 @@ mod tests {
             self.1.fetch_add(1, Ordering::Relaxed);
             Ok(self.0.lock().unwrap().get(id).cloned())
         }
+        fn source(&self) -> String {
+            format!("{:p}", self)
+        }
     }
 
     // One test: the store is shared by the process.
@@ -359,6 +371,7 @@ mod tests {
 
         // A raster that is not held is read, checked against its ID and kept.
         let stored = raster(5, 5, 9);
+        let stored_again = || raster(5, 5, 9);
         let id = stored.content_id();
         let loader = Arc::new(Loader(
             Mutex::new(HashMap::from([
@@ -391,6 +404,12 @@ mod tests {
         reset_cache_only();
         assert!(resolve(&id).is_ok());
         assert_eq!(later.1.load(Ordering::Relaxed), 1);
+        // Generated again (in another catalog, say), a saved raster is unsaved until
+        // that catalog stores it.
+        mark_saved([id.as_str()]);
+        register(stored_again()).unwrap();
+        assert_eq!(unsaved([id.as_str()]).len(), 1);
+        mark_saved([id.as_str()]);
         // An unsaved raster the user did not keep is forgotten; a saved one is kept.
         let unkept = register(raster(2, 2, 77)).unwrap();
         assert!(is_held(&unkept));

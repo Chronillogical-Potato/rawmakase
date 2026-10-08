@@ -178,12 +178,14 @@ fn structure(masks: &[MaskGroup]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     masks.len().hash(&mut h);
     for g in masks {
+        g.invert.hash(&mut h);
         g.components.len().hash(&mut h);
         for c in &g.components {
-            c.shape.kind().hash(&mut h);
-            if let MaskShape::Bitmap(b) = &c.shape {
-                b.id.hash(&mut h);
-            }
+            // Every shape value and how it combines: Undo or a snapshot that puts a
+            // different mask of the same kind at the same place is a different mask.
+            serde_json::to_string(&(&c.shape, c.op, c.invert))
+                .unwrap_or_default()
+                .hash(&mut h);
         }
     }
     h.finish()
@@ -258,19 +260,20 @@ impl Selection {
         self.prompting = None;
         self.drag_from = None;
     }
-    /// The photo changed: nothing asked for the previous one applies.
+    /// The photo changed: nothing asked for the previous one applies, an upgrade under
+    /// way included; it finishes, but does not go on to select in this photo. Its
+    /// thread is still waited for at exit.
     pub(super) fn clear_document(&mut self) {
         self.cancel();
         self.end_prompting();
         self.failure = None;
         self.prompt = None;
-    }
-    /// The catalog changed: an upgrade asked for the previous one must not go on to
-    /// select in this one, whatever its outcome.
-    pub(super) fn clear_catalog(&mut self) {
-        self.clear_document();
         self.upgrading = None;
         self.upgrade_task.invalidate();
+    }
+    /// The catalog changed.
+    pub(super) fn clear_catalog(&mut self) {
+        self.clear_document();
     }
     /// Workers to wait for when quitting: inference is asked to stop and handed to the
     /// shared deadline, never joined without one. An upgrade's backup copy is finished
@@ -443,6 +446,8 @@ impl Editor {
         {
             return;
         }
+        // A box starts over: the clicks so far were about the previous outline.
+        p.points.clear();
         p.bounds = Some(bounds);
         self.run_prompt();
     }
@@ -622,6 +627,10 @@ impl Editor {
     /// Forgets an unsaved raster unless the edit, its History or Before still names it
     /// (the same coverage selected twice has one ID).
     fn discard_raster(&self, id: &str) {
+        // A selection still running may produce the same coverage, and so the same ID.
+        if self.selection.pending.is_some() {
+            return;
+        }
         let edit = &self.document.edit;
         let named = edit.recipe().mask_asset_ids().any(|i| i == id)
             || edit
@@ -669,7 +678,13 @@ impl Editor {
     /// Upgrades the open catalog on a thread of its own, after the edit is saved.
     pub(super) fn upgrade_catalog(&mut self, request: Request) {
         self.context.request_repaint();
-        if self.selection.upgrading.is_some() {
+        let running = self
+            .selection
+            .upgrade_thread
+            .as_ref()
+            .is_some_and(|t| !t.is_finished());
+        if self.selection.upgrading.is_some() || running {
+            self.status = "The catalog is being upgraded".into();
             return;
         }
         if !self.flush() {
