@@ -388,6 +388,14 @@ impl PreviewCache {
         self.db.execute_batch("PRAGMA incremental_vacuum;")?;
         Ok(())
     }
+    /// Counts a preview as used now, as when it is asked for again.
+    pub fn touch_sized(&self, path: &Path, identity: &str, kind: PreviewKind) -> Result<()> {
+        self.db.execute(
+            "UPDATE sized_previews SET last_used=? WHERE source_path=? AND identity=? AND kind=?",
+            params![now(), key(path), identity, kind.code()],
+        )?;
+        Ok(())
+    }
     /// Lightroom's Automatically Discard 1:1 Previews: drops the previews of
     /// `kind` not shown or built for `unused`. Returns how many went.
     pub fn expire(&mut self, kind: PreviewKind, unused: Duration) -> Result<usize> {
@@ -947,6 +955,12 @@ mod tests {
                 .load_sized(&raw, "old", PreviewKind::Standard)?
                 .is_some()
         );
+        // Asked for again, a preview starts its time again.
+        cache
+            .db
+            .execute("UPDATE sized_previews SET last_used=?", [long_ago])?;
+        cache.touch_sized(&raw, "new", PreviewKind::OneToOne)?;
+        assert_eq!(cache.expire(PreviewKind::OneToOne, month)?, 0);
         Ok(())
     }
 }

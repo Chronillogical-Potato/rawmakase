@@ -816,3 +816,37 @@ fn the_command_builds_one_to_one_previews_too() {
     ));
     settle(&mut e);
 }
+
+#[test]
+fn a_new_discard_setting_replaces_the_expiry_not_run_yet() {
+    let (_dir, mut e, ids, _) = editor(&["slow-expiry.ARW"]);
+    let path = path_of(&e, ids[0]);
+    e.build_previews(&ids, PreviewKind::Standard).unwrap();
+    wait_started(&path);
+    let expiries = |e: &Editor| {
+        let state = e
+            .preview_builds
+            .builder
+            .as_ref()
+            .unwrap()
+            .shared
+            .state
+            .lock()
+            .unwrap();
+        state
+            .ops
+            .iter()
+            .filter(|op| matches!(op, Op::Expire(..)))
+            .count()
+    };
+    e.preview_builds.discard_one_to_one_after = Some(1);
+    e.expire_previews();
+    e.preview_builds.discard_one_to_one_after = Some(30);
+    e.expire_previews();
+    assert_eq!(expiries(&e), 1);
+    e.preview_builds.discard_one_to_one_after = None;
+    e.expire_previews();
+    assert_eq!(expiries(&e), 0);
+    release(&path);
+    settle(&mut e);
+}

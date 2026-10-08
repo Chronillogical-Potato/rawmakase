@@ -131,6 +131,8 @@ fn build_one(
         .sized_fresh(&item.path, &item.identity, item.kind, item.edge)
         .unwrap_or(false)
     {
+        // Asked for again: as good as built now, for the automatic discard.
+        let _ = cache.touch_sized(&item.path, &item.identity, item.kind);
         return Outcome::Fresh;
     }
     let stamp = match Stamp::read(&item.path) {
@@ -366,6 +368,16 @@ impl Builder {
             .enqueue(items);
         self.shared.wake.notify_one();
         added
+    }
+
+    /// Queues `expire` in place of any expiry not run yet, which an earlier
+    /// setting asked for; `None` (Never) only removes those.
+    fn replace_expiry(&self, expire: Option<Op>) {
+        let mut state = self.shared.state.lock().expect("preview builds");
+        state.ops.retain(|op| !matches!(op, Op::Expire(..)));
+        state.ops.extend(expire);
+        drop(state);
+        self.shared.wake.notify_one();
     }
 
     fn maintain(&self, op: Op) {
@@ -872,14 +884,14 @@ impl Editor {
     /// Automatically Discard 1:1 Previews, as Preferences sets it: run when the
     /// app starts and when the setting changes.
     pub(super) fn expire_previews(&mut self) {
-        let Some(days) = self.preview_builds.discard_one_to_one_after else {
-            return;
-        };
+        let expire = self.preview_builds.discard_one_to_one_after.map(|days| {
+            Op::Expire(
+                PreviewKind::OneToOne,
+                std::time::Duration::from_secs(u64::from(days) * 86_400),
+            )
+        });
         let ctx = self.context.clone();
-        self.preview_builds.builder(&ctx).maintain(Op::Expire(
-            PreviewKind::OneToOne,
-            std::time::Duration::from_secs(u64::from(days) * 86_400),
-        ));
+        self.preview_builds.builder(&ctx).replace_expiry(expire);
     }
 
     /// Takes finished builds, every frame. Another catalog cancels the builds of
