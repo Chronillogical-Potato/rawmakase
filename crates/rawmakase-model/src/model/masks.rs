@@ -352,6 +352,16 @@ impl MaskGroup {
             .any(|c| matches!(c.shape, MaskShape::Bitmap(_)))
     }
 }
+/// The rasters `groups` refer to, as they describe them: content ID, width, height.
+pub fn bitmap_refs(groups: &[MaskGroup]) -> impl Iterator<Item = (&str, u32, u32)> {
+    groups
+        .iter()
+        .flat_map(|g| &g.components)
+        .filter_map(|c| match &c.shape {
+            MaskShape::Bitmap(b) => Some((b.id.as_str(), b.width, b.height)),
+            _ => None,
+        })
+}
 pub fn validate(groups: &[MaskGroup]) -> Result<()> {
     ensure!(groups.len() <= MAX_GROUPS, "Too many masks");
     groups.iter().try_for_each(MaskGroup::validate)

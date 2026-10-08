@@ -539,6 +539,18 @@ fn rendering_a_mask_whose_raster_is_missing_is_an_error_not_an_empty_mask() {
         .err()
         .unwrap();
     assert!(error.to_string().contains("missing"), "{error}");
+    // A stored raster of another size than the mask describes is as bad as a missing one.
+    let (_, other) = register(3, 2, vec![255; 6]);
+    let MaskShape::Bitmap(mut described) = other else {
+        unreachable!()
+    };
+    described.width = 2;
+    described.height = 3;
+    r.masks[0].components[0].shape = MaskShape::Bitmap(described);
+    let error = crate::develop::render(&im, &r.checked().unwrap(), 60)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("damaged"), "{error}");
     // Hidden, the mask is not rendered and needs nothing.
     r.masks[0].hidden = true;
     assert!(crate::develop::render(&im, &r.checked().unwrap(), 60).is_ok());

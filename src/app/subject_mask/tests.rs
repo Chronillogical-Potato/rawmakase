@@ -207,17 +207,31 @@ fn an_obsolete_result_is_dropped_and_cannot_finish_a_newer_request() {
     let old = begin(e, SUBJECT);
     let new = begin(e, SUBJECT);
     assert_ne!(old, new);
-    // The first one's success and failure both arrive late.
-    finish(e, old, Ok(generated(40)));
+    // The first one's success and failure both arrive late; its raster is let go of.
+    let late = generated(40);
+    let late_id = late.id.clone();
+    finish(e, old, Ok(late));
     finish(e, old, Err(Failure::Failed("late".into())));
     assert!(e.document.edit.recipe().masks.is_empty());
+    assert!(
+        !mask_assets::is_held(&late_id),
+        "a result nobody took stays in memory"
+    );
     assert!(
         e.selection.running().is_some(),
         "the newer request is still wanted"
     );
     assert!(e.selection.failure.is_none());
-    finish(e, new, Ok(generated(41)));
+    let taken = generated(41);
+    let taken_id = taken.id.clone();
+    finish(e, new, Ok(taken));
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
+    assert!(mask_assets::is_held(&taken_id));
+    // Undone, the raster stays: History still names it.
+    assert!(e.document.edit.undo());
+    e.discard_raster(&taken_id);
+    assert!(mask_assets::is_held(&taken_id));
+    assert!(e.document.edit.jump(1));
 
     // A result for another photo is dropped.
     let g = begin(e, SUBJECT);
@@ -249,8 +263,11 @@ fn a_result_is_not_applied_over_masks_that_changed_meanwhile() {
             ..Default::default()
         })
     });
-    finish(e, g, Ok(generated(50)));
+    let rejected = generated(50);
+    let rejected_id = rejected.id.clone();
+    finish(e, g, Ok(rejected));
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
+    assert!(!mask_assets::is_held(&rejected_id));
     assert!(matches!(
         e.document.edit.recipe().masks[0].components[0].shape,
         MaskShape::Linear { .. }

@@ -62,9 +62,15 @@ struct Entry {
 #[derive(Default)]
 struct Store {
     entries: HashMap<String, Entry>,
-    loader: Option<Arc<dyn AssetLoader>>,
+    /// Readers of saved rasters, the catalog opened last first. Earlier catalogs' readers
+    /// stay for a while: an export or preview build started under one keeps resolving
+    /// its rasters after the app has moved on to another, and a content ID names the
+    /// same pixels wherever they are read from.
+    loaders: Vec<Arc<dyn AssetLoader>>,
     clock: u64,
 }
+/// Readers kept besides the current catalog's.
+const KEPT_LOADERS: usize = 4;
 fn store() -> &'static Mutex<Store> {
     static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
     STORE.get_or_init(Default::default)
@@ -112,9 +118,12 @@ pub fn register(bitmap: Bitmap) -> Result<String> {
     Ok(id)
 }
 
-/// Installs the reader for saved rasters, or removes it.
-pub fn set_loader(loader: Option<Arc<dyn AssetLoader>>) {
-    lock().loader = loader;
+/// Installs the reader for the catalog just opened; readers of catalogs opened
+/// before it are asked after it, for jobs still running under them.
+pub fn add_loader(loader: Arc<dyn AssetLoader>) {
+    let mut store = lock();
+    store.loaders.insert(0, loader);
+    store.loaders.truncate(KEPT_LOADERS);
 }
 
 /// The raster stored under `id`: from the store, else read through the loader.
@@ -128,12 +137,28 @@ pub fn resolve(id: &str) -> Result<Arc<Bitmap>, AssetError> {
             entry.used = used;
             return Ok(entry.raster.clone());
         }
-        store.loader.clone()
+        store.loaders.clone()
     };
-    let loader = loader.ok_or_else(|| AssetError::Missing(id.to_string()))?;
-    let bitmap = loader
-        .load(id)?
-        .ok_or_else(|| AssetError::Missing(id.to_string()))?;
+    // The first reader that has it; a reader that fails does not hide one that has it.
+    let mut failure = None;
+    let mut found = None;
+    for loader in &loader {
+        match loader.load(id) {
+            Ok(Some(bitmap)) => {
+                found = Some(bitmap);
+                break;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                failure.get_or_insert(e);
+            }
+        }
+    }
+    let bitmap = match (found, failure) {
+        (Some(bitmap), _) => bitmap,
+        (None, Some(e)) => return Err(e),
+        (None, None) => return Err(AssetError::Missing(id.to_string())),
+    };
     validate_raster(&bitmap).map_err(|e| AssetError::Corrupt(id.to_string(), e.to_string()))?;
     if !bitmap.matches_id(id) {
         return Err(AssetError::Corrupt(
@@ -157,6 +182,36 @@ pub fn resolve(id: &str) -> Result<Arc<Bitmap>, AssetError> {
     let out = entry.raster.clone();
     evict(&mut store);
     Ok(out)
+}
+
+/// Makes sure every raster of `refs` (`(id, width, height)` as a mask describes it)
+/// can be provided and is the size the mask says: a stored raster of another size is
+/// as damaged as a missing one, since the mask would render wrongly placed or empty.
+pub fn ensure_shaped<'a>(
+    refs: impl IntoIterator<Item = (&'a str, u32, u32)>,
+) -> Result<(), AssetError> {
+    for (id, width, height) in refs {
+        let raster = resolve(id)?;
+        if (raster.width, raster.height) != (width, height) {
+            return Err(AssetError::Corrupt(
+                id.to_string(),
+                format!(
+                    "it is {}x{} but the mask describes {width}x{height}",
+                    raster.width, raster.height
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Forgets an unsaved raster nothing refers to any more (a selection the user did
+/// not keep). A saved one stays cached; a raster still referred to must not be passed.
+pub fn discard_unsaved(id: &str) {
+    let mut store = lock();
+    if store.entries.get(id).is_some_and(|e| !e.saved) {
+        store.entries.remove(id);
+    }
 }
 
 /// Whether the raster is in the store without reading anything.
@@ -245,10 +300,15 @@ fn evict(store: &mut Store) {
     }
 }
 
-/// Forgets every raster and the loader (tests only).
+/// Forgets every raster and the readers (tests only).
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset() {
     *lock() = Store::default();
+}
+/// Forgets every raster but keeps the readers (tests only).
+#[cfg(test)]
+fn reset_cache_only() {
+    lock().entries.clear();
 }
 
 #[cfg(test)]
@@ -308,7 +368,7 @@ mod tests {
             AtomicUsize::new(0),
         ));
         assert_eq!(resolve(&id), Err(AssetError::Missing(id.clone())));
-        set_loader(Some(loader.clone()));
+        add_loader(loader.clone());
         assert!(resolve(&id).is_ok() && resolve(&id).is_ok());
         assert_eq!(loader.1.load(Ordering::Relaxed), 1);
         assert_eq!(
@@ -319,6 +379,25 @@ mod tests {
         assert!(matches!(resolve(&wrong), Err(AssetError::Corrupt(..))));
         assert!(ensure_all([id.as_str(), "sha256:ffff"]).is_err());
         assert_eq!(cached_bytes(), 12 + 25);
+        // The size a mask describes must be the raster's.
+        assert!(ensure_shaped([(id.as_str(), 5, 5)]).is_ok());
+        assert!(matches!(
+            ensure_shaped([(id.as_str(), 5, 4)]),
+            Err(AssetError::Corrupt(..))
+        ));
+        // A later catalog's reader comes first; an earlier one still serves its rasters.
+        let later = Arc::new(Loader(Mutex::new(HashMap::new()), AtomicUsize::new(0)));
+        add_loader(later.clone());
+        reset_cache_only();
+        assert!(resolve(&id).is_ok());
+        assert_eq!(later.1.load(Ordering::Relaxed), 1);
+        // An unsaved raster the user did not keep is forgotten; a saved one is kept.
+        let unkept = register(raster(2, 2, 77)).unwrap();
+        assert!(is_held(&unkept));
+        discard_unsaved(&unkept);
+        assert!(!is_held(&unkept));
+        discard_unsaved(&id);
+        assert!(is_held(&id));
         reset();
     }
 }

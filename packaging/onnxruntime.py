@@ -68,14 +68,16 @@ def fetch(platform, arch, output, notices):
     if found != digest:
         raise SystemExit(f"{archive}: SHA-256 is {found}, expected {digest}")
     prefix = archive.rsplit(".", 1)[0]
+    wanted = [f"{prefix}/{member}"] + [f"{prefix}/{notice}" for notice in NOTICES]
     if archive.endswith(".zip"):
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            read = lambda path: zf.read(f"{prefix}/{path}")
+            files = {name: zf.read(name) for name in wanted}
     else:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
             files = {m.name.removeprefix("./"): tf.extractfile(m).read()
-                     for m in tf.getmembers() if m.isfile()}
-        read = lambda path: files[f"{prefix}/{path}"]
+                     for m in tf.getmembers()
+                     if m.isfile() and m.name.removeprefix("./") in wanted}
+    read = lambda path: files[f"{prefix}/{path}"]
     output.mkdir(parents=True, exist_ok=True)
     notices.mkdir(parents=True, exist_ok=True)
     target = output / name

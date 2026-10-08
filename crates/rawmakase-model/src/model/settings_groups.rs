@@ -479,10 +479,23 @@ pub fn transfer(
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
-    // Masks made from a selection are rasters of the photo they were made on.
-    if selection.contains(SettingGroup::Masking) && from.masks.iter().any(MaskGroup::has_raster) {
-        recipe.masks.retain(|g| !g.has_raster());
-        notes.push("Masks made from a selection stay on their photo".into());
+    // Masks made from a selection are rasters of the photo they were made on: the
+    // source's do not come along, and the target keeps its own.
+    if selection.contains(SettingGroup::Masking) {
+        let kept: Vec<MaskGroup> = to
+            .masks
+            .iter()
+            .filter(|g| g.has_raster())
+            .cloned()
+            .collect();
+        if !kept.is_empty() || from.masks.iter().any(MaskGroup::has_raster) {
+            recipe.masks.retain(|g| !g.has_raster());
+            recipe
+                .masks
+                .truncate(crate::model::masks::MAX_GROUPS - kept.len());
+            recipe.masks.extend(kept);
+            notes.push("Masks made from a selection stay on their photo".into());
+        }
     }
     if selection.contains(SettingGroup::TransformAdjustments) {
         // The sliders as shown on the source photo, along the target's displayed axes.

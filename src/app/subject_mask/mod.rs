@@ -192,7 +192,7 @@ fn structure(masks: &[MaskGroup]) -> u64 {
 /// eye, which alter the content to select.
 fn content(recipe: &Recipe) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(&(&recipe.retouch, &recipe.red_eye))
+    serde_json::to_string(&(&recipe.retouch, &recipe.retouch_model, &recipe.red_eye))
         .unwrap_or_default()
         .hash(&mut h);
     h.finish()
@@ -239,6 +239,8 @@ pub(super) struct Selection {
     /// A catalog upgrade under way, and the request it unblocks.
     upgrading: Option<(u64, Request)>,
     upgrade_task: Task,
+    /// Its thread, to wait for when quitting: cut off, it would leave a partial backup.
+    upgrade_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Selection {
@@ -263,12 +265,23 @@ impl Selection {
         self.failure = None;
         self.prompt = None;
     }
+    /// The catalog changed: an upgrade asked for the previous one must not go on to
+    /// select in this one, whatever its outcome.
+    pub(super) fn clear_catalog(&mut self) {
+        self.clear_document();
+        self.upgrading = None;
+        self.upgrade_task.invalidate();
+    }
     /// Workers to wait for when quitting: inference is asked to stop and handed to the
-    /// shared deadline, never joined without one.
+    /// shared deadline, never joined without one. An upgrade's backup copy is finished
+    /// within that deadline too, rather than cut off.
     pub(super) fn stop(&mut self) -> Vec<Stopping> {
         self.cancel();
         self.end_prompting();
-        let mut stopping = vec![self.worker.stop()];
+        let mut stopping = vec![
+            self.worker.stop(),
+            Stopping::new(self.upgrade_thread.take()),
+        ];
         stopping.extend(self.models.stop());
         stopping
     }
@@ -502,15 +515,18 @@ impl Editor {
     /// A selection finished: apply it if it is still the one wanted and the edit it
     /// was made for still stands, else drop it.
     pub(super) fn selection_done(&mut self, done: Done) {
+        let result = done.result;
         if done.load != self.load.id() || done.generation != self.selection.task.id() {
+            self.discard_generated(result.ok());
             return;
         }
         self.selection.task.finish(done.generation);
         let Some(pending) = self.selection.pending.take() else {
+            self.discard_generated(result.ok());
             return;
         };
         let request = pending.request;
-        let generated = match done.result {
+        let generated = match result {
             Ok(generated) => generated,
             Err(Failure::Cancelled) => return,
             Err(failure) => {
@@ -521,6 +537,7 @@ impl Editor {
         };
         if !pending.guard.holds(self.document.edit.recipe(), request) {
             self.status = "The masks changed while selecting; nothing was added".into();
+            self.discard_generated(Some(generated));
             return;
         }
         // The rasters this would add, with every other the edit already refers to.
@@ -534,9 +551,11 @@ impl Editor {
         let bytes = crate::storage::mask_assets::decoded_bytes(ids);
         if bytes > crate::storage::mask_assets::EDIT_BYTES {
             self.status = "This photo's masks use too much memory for another selection".into();
+            self.discard_generated(Some(generated));
             return;
         }
         let masks = self.document.edit.recipe().masks.len();
+        let id = generated.id.clone();
         let shape = MaskShape::Bitmap(BitmapMask {
             id: generated.id,
             width: generated.width,
@@ -577,6 +596,10 @@ impl Editor {
             },
         );
         debug_assert!(masks <= MAX_GROUPS);
+        if selected.is_none() {
+            // The mask it was for is gone: nothing refers to the raster.
+            self.discard_raster(&id);
+        }
         if let Some((mask, component)) = selected {
             if let Some(p) = &mut self.selection.prompting {
                 p.applied = Some((mask, component));
@@ -587,6 +610,32 @@ impl Editor {
             // show the mask until some later change. Render again, now with it.
             self.schedule();
             self.status = format!("{} selected", request.feature.name());
+        }
+    }
+    /// Forgets the raster of a result the edit did not take, so results the user never
+    /// sees (superseded, stale, over budget) do not stay in memory.
+    fn discard_generated(&self, generated: Option<Generated>) {
+        if let Some(generated) = generated {
+            self.discard_raster(&generated.id);
+        }
+    }
+    /// Forgets an unsaved raster unless the edit, its History or Before still names it
+    /// (the same coverage selected twice has one ID).
+    fn discard_raster(&self, id: &str) {
+        let edit = &self.document.edit;
+        let named = edit.recipe().mask_asset_ids().any(|i| i == id)
+            || edit
+                .history()
+                .saved(edit.recipe())
+                .mask_asset_ids()
+                .contains(id)
+            || self
+                .document
+                .before
+                .as_ref()
+                .is_some_and(|r| r.mask_asset_ids().any(|i| i == id));
+        if !named {
+            crate::storage::mask_assets::discard_unsaved(id);
         }
     }
     /// The installer finished or was cancelled; a request waiting for the model goes
@@ -629,16 +678,26 @@ impl Editor {
         let (generation, _) = self.selection.upgrade_task.start();
         self.selection.upgrading = Some((generation, request));
         let (tx, ctx) = (self.tx.clone(), self.context.clone());
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(|| {
-                crate::catalog::Catalog::open(&location)
-                    .and_then(|mut c| c.upgrade_for_raster_masks())
-                    .map_err(|e| format!("{e:#}"))
-            })
-            .unwrap_or_else(|_| Err("the upgrade stopped unexpectedly".into()));
-            let _ = tx.send(super::worker::Event::CatalogUpgraded { generation, result });
-            ctx.request_repaint();
-        });
+        let thread = std::thread::Builder::new()
+            .name("catalog-upgrade".into())
+            .spawn(move || {
+                let result = std::panic::catch_unwind(|| {
+                    crate::catalog::Catalog::open(&location)
+                        .and_then(|mut c| c.upgrade_for_raster_masks())
+                        .map_err(|e| format!("{e:#}"))
+                })
+                .unwrap_or_else(|_| Err("the upgrade stopped unexpectedly".into()));
+                let _ = tx.send(super::worker::Event::CatalogUpgraded { generation, result });
+                ctx.request_repaint();
+            });
+        match thread {
+            Ok(thread) => self.selection.upgrade_thread = Some(thread),
+            Err(e) => {
+                self.selection.upgrading = None;
+                self.selection.upgrade_task.finish(generation);
+                self.status = format!("Catalog not upgraded: {e}");
+            }
+        }
     }
     pub(super) fn catalog_upgraded(
         &mut self,
@@ -653,6 +712,7 @@ impl Editor {
         }
         self.selection.upgrading = None;
         self.selection.upgrade_task.finish(generation);
+        self.selection.upgrade_thread = None;
         match result {
             Ok(backup) => {
                 if let Some(backup) = backup {

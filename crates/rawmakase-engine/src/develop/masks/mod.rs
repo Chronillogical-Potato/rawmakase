@@ -59,6 +59,8 @@ pub fn selection_input_recipe(user: &crate::model::recipe::Recipe) -> crate::mod
         sharpening: 0.,
         camera_exposure: user.camera_exposure,
         retouch: user.retouch.clone(),
+        // With the operator that renders them in the edit, so spot edges match it.
+        retouch_model: user.retouch_model,
         red_eye: user.red_eye.clone(),
         ..Default::default()
     };

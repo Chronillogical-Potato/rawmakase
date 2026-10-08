@@ -199,7 +199,7 @@ pub(crate) fn mask_weights(
     // A mask whose raster cannot be provided is an error, never a mask that selects
     // nothing: the edit would otherwise be shown or exported without it.
     for m in r.masks.iter().filter(|m| m.is_active()) {
-        rawmakase_model::storage::mask_assets::ensure_all(crate::model::masks::bitmap_ids(
+        rawmakase_model::storage::mask_assets::ensure_shaped(crate::model::masks::bitmap_refs(
             std::slice::from_ref(m),
         ))?;
     }

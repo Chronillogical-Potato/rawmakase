@@ -15,8 +15,13 @@ test -f /usr/share/icons/hicolor/scalable/apps/rawmakase.svg
 test -f /usr/share/licenses/rawmakase/LICENSE
 if ldd /usr/lib/rawmakase/rawmakase | grep -q 'not found'; then exit 1; fi
 # The runtime the subject selection model needs is opened lazily, so only loading it
-# shows it works on a clean system.
-test -f /usr/lib/rawmakase/libonnxruntime.so
+# shows it works on a clean system. Pull requests install the published 0.1.8
+# package, which predates it; releases from 0.2.2 bundle it.
+installed=$(rawmakase --version | awk '{print $2}')
+if [ "$(printf '%s\n' 0.2.2 "$installed" | sort -V | head -n1)" = 0.2.2 ]; then
+  test -f /usr/lib/rawmakase/libonnxruntime.so
+  python3 -c "import ctypes; ctypes.CDLL('/usr/lib/rawmakase/libonnxruntime.so')"
+fi
 # Winit/wgpu load some libraries at runtime, invisible to ordinary ldd checks.
 python3 - <<'PY'
 import ctypes
@@ -25,7 +30,6 @@ for library in ['libvulkan.so.1', 'libxkbcommon.so.0', 'libxkbcommon-x11.so.0',
                 'libX11.so.6', 'libX11-xcb.so.1', 'libxcb.so.1', 'libXcursor.so.1',
                 'libXi.so.6', 'libXrandr.so.2', 'libEGL.so.1', 'libGL.so.1']:
     ctypes.CDLL(library)
-ctypes.CDLL('/usr/lib/rawmakase/libonnxruntime.so')
 PY
 mkdir -p /root/.local/share/rawmakase
 echo preserve > /root/.local/share/rawmakase/packaging-test

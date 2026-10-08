@@ -104,7 +104,7 @@ impl Editor {
                         Err(e) => format!("Model not removed: {e}"),
                     };
                 }
-                Event::ModelFile(path) => self.install_model(Some(path)),
+                Event::ModelFolder(folder) => self.install_model(Some(folder)),
                 Event::CatalogUpgraded { generation, result } => {
                     self.catalog_upgraded(generation, result)
                 }
@@ -331,7 +331,7 @@ impl Editor {
                 self.preview.clear_document();
                 self.presets.clear_document();
                 self.view.clear_document();
-                self.selection.clear_document();
+                self.selection.clear_catalog();
                 self.status = if l.message.is_empty() {
                     "Catalog ready. Offline photos remain in the library; locate their folders to develop them.".into()
                 } else {
@@ -426,16 +426,13 @@ impl Editor {
                     // Masks made from a selection are read from the catalog now. One
                     // that cannot be leaves the edit and its History as they are, but
                     // protected: saving it would lose the mask for good.
-                    let ids: Vec<String> = self
-                        .document
-                        .edit
-                        .recipe()
-                        .mask_asset_ids()
-                        .map(str::to_owned)
-                        .collect();
-                    if let Err(e) =
-                        crate::storage::mask_assets::ensure_all(ids.iter().map(String::as_str))
-                    {
+                    let refs: Vec<(String, u32, u32)> =
+                        crate::model::masks::bitmap_refs(&self.document.edit.recipe().masks)
+                            .map(|(id, w, h)| (id.to_owned(), w, h))
+                            .collect();
+                    if let Err(e) = crate::storage::mask_assets::ensure_shaped(
+                        refs.iter().map(|(id, w, h)| (id.as_str(), *w, *h)),
+                    ) {
                         self.document.edit.save_state_mut().protect(e.to_string());
                         self.document.lightroom_notice = e.to_string();
                     }

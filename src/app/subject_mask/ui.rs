@@ -414,7 +414,7 @@ impl Editor {
             }
             if ui
                 .button("Import model…")
-                .on_hover_text("Use the model file from elsewhere (a copy you transferred)")
+                .on_hover_text("Use the models' files from a folder (a copy you transferred)")
                 .clicked()
             {
                 let (tx, ctx) = (self.tx.clone(), self.context.clone());
@@ -422,12 +422,11 @@ impl Editor {
                     tx,
                     ctx,
                     |tx| {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Import the selection model")
-                            .add_filter("ONNX model", &["onnx"])
-                            .pick_file()
+                        if let Some(folder) = rfd::FileDialog::new()
+                            .set_title("Choose the folder holding the selection models' files")
+                            .pick_folder()
                         {
-                            let _ = tx.send(Event::ModelFile(path));
+                            let _ = tx.send(Event::ModelFolder(folder));
                         }
                     },
                     |_, _| {},

@@ -704,21 +704,34 @@ fn masks_made_from_a_selection_stay_on_their_photo() {
         ..Default::default()
     };
     let source = Recipe {
-        masks: vec![raster, gradient.clone()],
+        masks: vec![raster.clone(), gradient.clone()],
         ..Default::default()
     };
     let m = camera("Sony", "ILCE-7M4");
     let mut selection = GroupSelection::none();
     selection.set(SettingGroup::Masking, GroupInclusion::Included);
-    let out = transfer(
-        from(&source, &m),
-        &Recipe::default(),
-        &selection,
-        Target {
-            metadata: &m,
-            profiles: &[],
-        },
-    );
-    assert_eq!(out.recipe.masks, vec![gradient]);
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let out = transfer(from(&source, &m), &Recipe::default(), &selection, target);
+    assert_eq!(out.recipe.masks, vec![gradient.clone()]);
     assert_eq!(out.notes.len(), 1);
+    // A target that has its own selection keeps it, under the source's other masks.
+    let mut own = raster;
+    own.name = "Own subject".into();
+    let to = Recipe {
+        masks: vec![own.clone()],
+        ..Default::default()
+    };
+    let out = transfer(from(&source, &m), &to, &selection, target);
+    assert_eq!(out.recipe.masks, vec![gradient.clone(), own.clone()]);
+    // Even when the source fills every slot, the target's own selection survives.
+    let full = Recipe {
+        masks: vec![gradient.clone(); crate::model::masks::MAX_GROUPS],
+        ..Default::default()
+    };
+    let out = transfer(from(&full, &m), &to, &selection, target);
+    assert_eq!(out.recipe.masks.len(), crate::model::masks::MAX_GROUPS);
+    assert_eq!(out.recipe.masks.last(), Some(&own));
 }
