@@ -801,6 +801,14 @@ Deliberate differences from the plan above:
   rework: the global loader serves workers.
 - The models are downloaded file by file (a finished file is kept on retry, a partial
   one starts over) with three attempts each.
+- Hair and fur edges are SAM 2's 256-pixel mask snapped to the photo by the guided
+  filter. Replacing the edge band with a matting model's alpha (MODNet, BiRefNet-lite
+  and BiRefNet-lite-matting at 512 and 1024 px on a crop of the subject, ViTMatte-S
+  with a trimap) was tried on a group portrait, a man in a cap, a lion's mane and a
+  cat: ViTMatte and BiRefNet-matting at 1024 px kept a few more strands of fur, the
+  rest matched the current result, and none was judged a meaningful difference for
+  100–200 MB more to download and a second more per photo (ViTMatte's weights are
+  also trained on Adobe's restricted Composition-1k). Not added.
 - The subject and sky choice is measured on a handful of photographs, not on the plan's
   evaluation corpus; there is no faint-result threshold, no grow/shrink/feather and no
   provider acceleration.
