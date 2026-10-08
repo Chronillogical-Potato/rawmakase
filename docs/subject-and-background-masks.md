@@ -777,9 +777,10 @@ foreground and sky) draws crisp outlines but does not decide which object matter
 IS-Net picked subjects well but its weights have no license (see dependencies), so it
 was dropped; BiRefNet-lite at 1024 px needs 7 GB, and at 512 px shares IS-Net's
 DIS5K training-data question. The shipped design combines **DETR panoptic** (Apache-2.0
-base weights, COCO) as the picker of people, animals and sky with **SAM 2.1 Hiera small**
-(Apache-2.0, `onnx-community` export at a pinned commit) drawing the outlines, and a
-guided filter moving both onto the photo's edges. Clicks (positive, negative, box) go
+base weights, COCO), which finds each person, animal and the sky, with **SAM 2.1 Hiera
+small** (Apache-2.0, `onnx-community` export at a pinned commit), prompted per instance
+with its box and points to draw the outline (as detector-prompted SAM pipelines do), and
+a guided filter moving the result onto the photo's edges. Clicks (positive, negative, box) go
 through the same SAM 2 decoder, which is how anything DETR does not know is selected.
 Measured on a handful of photographs only: the three people of a group portrait, a man
 in a forest and the sky of overcast, landscape and dusk scenes come out right, a

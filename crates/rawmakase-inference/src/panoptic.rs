@@ -7,12 +7,23 @@ use crate::error::InferenceError;
 use crate::manifest::PanopticSpec;
 use crate::process::{Rect, resample};
 
-/// Where the photo's people and animals are, and where its sky is, on the [`SIDE`] grid,
-/// each 0..=1.
+/// One person or animal the model found: its mask on the [`SIDE`] grid (the pixels
+/// where it won the competition, 0..=1).
+pub struct Instance {
+    pub class: usize,
+    pub score: f32,
+    pub mask: Vec<f32>,
+}
+
+/// What the model found: each person and animal, largest first, and where the sky is
+/// (0..=1 on the [`SIDE`] grid).
 pub struct Labels {
-    pub subject: Vec<f32>,
+    pub instances: Vec<Instance>,
     pub sky: Vec<f32>,
 }
+
+/// Most instances kept: a crowd is not one photo's subject.
+const MOST_INSTANCES: usize = 8;
 
 /// Decodes `logits` (`queries` x `classes`, the last class meaning "nothing") and the
 /// queries' mask logits (`queries` x `height` x `width`).
@@ -56,20 +67,21 @@ pub fn decode(
             sure.push((q, class, confidence));
         }
     }
-    let mut subject = vec![0f32; pixels];
+    let mut maps: Vec<Vec<f32>> = vec![vec![0f32; pixels]; sure.len()];
     let mut sky = vec![0f32; pixels];
     for p in 0..pixels {
         let mut best = (0.0f32, None::<(usize, f32)>);
-        for &(q, class, confidence) in &sure {
+        for (k, &(q, _, confidence)) in sure.iter().enumerate() {
             let prob = 1.0 / (1.0 + (-masks[q * pixels + p]).exp());
             let score = confidence * prob;
             if score > best.0 {
-                best = (score, Some((class, prob)));
+                best = (score, Some((k, prob)));
             }
         }
-        if let Some((class, prob)) = best.1 {
+        if let Some((k, prob)) = best.1 {
+            let class = sure[k].1;
             if spec.is_subject(class) {
-                subject[p] = prob;
+                maps[k][p] = prob;
             } else if class == spec.sky {
                 sky[p] = prob;
             }
@@ -87,8 +99,25 @@ pub fn decode(
             .map(|v| v.clamp(0.0, 1.0))
             .collect()
     };
+    let mut instances: Vec<Instance> = sure
+        .iter()
+        .zip(&maps)
+        .filter(|((_, class, _), _)| spec.is_subject(*class))
+        .map(|(&(_, class, score), map)| Instance {
+            class,
+            score,
+            mask: grid(map),
+        })
+        // A speck is not a subject.
+        .filter(|i| {
+            i.mask.iter().filter(|v| **v > 0.5).count() as f32 > 0.003 * (SIDE * SIDE) as f32
+        })
+        .collect();
+    let area = |i: &Instance| i.mask.iter().filter(|v| **v > 0.5).count();
+    instances.sort_by_key(|i| std::cmp::Reverse(area(i)));
+    instances.truncate(MOST_INSTANCES);
     Ok(Labels {
-        subject: grid(&subject),
+        instances,
         sky: grid(&sky),
     })
 }
@@ -123,17 +152,20 @@ mod tests {
     }
 
     #[test]
-    fn people_and_animals_are_the_subject_and_the_sky_label_is_the_sky() {
+    fn people_and_animals_are_instances_and_the_sky_label_is_the_sky() {
         let (logits, masks) = scene((1, 12.0), (187, 12.0));
         let labels = decode(&PANOPTIC, &logits, &masks, 3, CLASSES, 8, 4).unwrap();
-        assert!(at(&labels.subject, 0.1, 0.5) > 0.95 && at(&labels.subject, 0.9, 0.5) < 0.05);
+        assert_eq!(labels.instances.len(), 1);
+        let person = &labels.instances[0];
+        assert_eq!(person.class, 1);
+        assert!(at(&person.mask, 0.1, 0.5) > 0.95 && at(&person.mask, 0.9, 0.5) < 0.05);
         assert!(at(&labels.sky, 0.9, 0.5) > 0.95 && at(&labels.sky, 0.1, 0.5) < 0.05);
-        // An animal counts as a subject too.
+        // An animal counts as a subject too, and a car is neither.
         let (logits, masks) = scene((18, 12.0), (3, 12.0));
         let labels = decode(&PANOPTIC, &logits, &masks, 3, CLASSES, 8, 4).unwrap();
-        assert!(at(&labels.subject, 0.1, 0.5) > 0.95);
-        // A car is neither.
-        assert!(at(&labels.subject, 0.9, 0.5) < 0.05 && at(&labels.sky, 0.9, 0.5) < 0.05);
+        assert_eq!(labels.instances.len(), 1);
+        assert_eq!(labels.instances[0].class, 18);
+        assert!(labels.sky.iter().all(|v| *v < 0.05));
     }
 
     #[test]
@@ -142,7 +174,7 @@ mod tests {
         let (mut logits, masks) = scene((1, 1.0), (187, 12.0));
         logits[2] = 0.9;
         let labels = decode(&PANOPTIC, &logits, &masks, 3, CLASSES, 8, 4).unwrap();
-        assert!(labels.subject.iter().all(|v| *v < 0.05));
+        assert!(labels.instances.is_empty());
         assert!(at(&labels.sky, 0.9, 0.5) > 0.95);
     }
 

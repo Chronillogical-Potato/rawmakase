@@ -582,6 +582,10 @@ impl Editor {
                 p.applied = Some((mask, component));
             }
             self.view.masking.select_after_selection(mask, component);
+            // The render the edit started was scheduled before the new mask was
+            // selected, so it draws no overlay; with neutral sliders nothing else would
+            // show the mask until some later change. Render again, now with it.
+            self.schedule();
             self.status = format!("{} selected", request.feature.name());
         }
     }

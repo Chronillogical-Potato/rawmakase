@@ -168,17 +168,22 @@ pub struct Session {
 /// are chosen from it without running a model again; clicks need the embedding.
 pub struct Analysis {
     embedding: Embedding,
-    labels: Labels,
-    proposals: Vec<Proposal>,
+    /// What SAM 2 drew for each person and animal DETR found, together (0..=1, on the
+    /// [`SIDE`] grid).
+    subject_mask: Vec<f32>,
+    sky_label: Vec<f32>,
+    /// The outlines SAM 2 drew at points of the sky label.
+    sky_outlines: Vec<Proposal>,
 }
 impl Analysis {
-    /// The photo's subject as coverage in its frame, all zero when nothing stands out.
+    /// The photo's people and animals as coverage in its frame, all zero when there are
+    /// none.
     pub fn subject(&self) -> Result<Coverage, InferenceError> {
-        auto::subject(&self.embedding.image, &self.proposals, &self.labels.subject)
+        auto::subject(&self.embedding.image, &self.subject_mask)
     }
     /// The photo's sky, all zero when there is none.
     pub fn sky(&self) -> Result<Coverage, InferenceError> {
-        auto::sky(&self.embedding.image, &self.proposals, &self.labels.sky)
+        auto::sky(&self.embedding.image, &self.sky_outlines, &self.sky_label)
     }
     /// The embedding, for [`Session::segment`].
     pub fn embedding(&self) -> &Embedding {
@@ -187,8 +192,12 @@ impl Analysis {
     /// Bytes held.
     pub fn bytes(&self) -> usize {
         self.embedding.bytes()
-            + (self.labels.subject.len() + self.labels.sky.len()) * 4
-            + self.proposals.iter().map(|p| p.mask.len()).sum::<usize>()
+            + (self.subject_mask.len() + self.sky_label.len()) * 4
+            + self
+                .sky_outlines
+                .iter()
+                .map(|p| p.mask.len())
+                .sum::<usize>()
     }
 }
 
@@ -215,58 +224,7 @@ impl Session {
         image: &RgbImage,
         cancel: &AtomicBool,
     ) -> Result<Embedding, InferenceError> {
-        cancelled(cancel)?;
-        let tensor =
-            process::preprocess(image, self.spec.input_size, self.spec.mean, self.spec.std)?;
-        cancelled(cancel)?;
-        let size = self.spec.input_size;
-        let encoder = &mut self.encoder;
-        let features = guarded(cancel, |options| {
-            let input = TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..]))
-                .map_err(failed)?;
-            let outputs = encoder
-                .run_with_options(ort::inputs!["pixel_values" => input], options)
-                .map_err(failed)?;
-            let mut features = Vec::with_capacity(3);
-            for index in 0..3 {
-                let name = format!("image_embeddings.{index}");
-                let output = outputs.get(name.as_str()).ok_or_else(|| {
-                    InferenceError::ModelInvalid(format!("the encoder has no output `{name}`"))
-                })?;
-                let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
-                features.push((shape.iter().copied().collect::<Vec<i64>>(), data.to_vec()));
-            }
-            Ok(features)
-        })?;
-        cancelled(cancel)?;
-        let mut checked = Vec::with_capacity(3);
-        for (shape, data) in features {
-            let dims: Option<[usize; 4]> = (shape.len() == 4 && shape[0] == 1)
-                .then(|| {
-                    let mut dims = [0usize; 4];
-                    for (out, d) in dims.iter_mut().zip(&shape) {
-                        *out = usize::try_from(*d).ok()?;
-                    }
-                    Some(dims)
-                })
-                .flatten();
-            let count = dims.and_then(|d| d.iter().try_fold(1usize, |n, d| n.checked_mul(*d)));
-            match dims {
-                Some(dims) if count == Some(data.len()) => checked.push((dims, data)),
-                _ => {
-                    return Err(InferenceError::OutputInvalid(format!(
-                        "an encoder output has shape {shape:?}"
-                    )));
-                }
-            }
-        }
-        let features: [([usize; 4], Vec<f32>); 3] = checked
-            .try_into()
-            .map_err(|_| InferenceError::ModelInvalid("the encoder outputs changed".into()))?;
-        Ok(Embedding {
-            features,
-            image: image.clone(),
-        })
+        embed_with(&mut self.encoder, &self.spec, image, cancel)
     }
 
     /// The mask for `prompt` on an embedded photo, as 8-bit coverage at the photo's
@@ -299,111 +257,101 @@ impl Session {
         Ok(coverage)
     }
 
-    /// Everything automatic selection needs of a photo: the embedding, the people, animals and sky labels and
-    /// the outlines SAM 2 draws from a grid of points. A few seconds; cancellable.
+    /// Everything automatic selection needs of a photo: the embedding, where DETR finds
+    /// its people, animals and sky, and SAM 2's outline of each person and animal and of
+    /// the sky. About two seconds; cancellable.
     pub fn analyze(
         &mut self,
         image: &RgbImage,
         cancel: &AtomicBool,
     ) -> Result<Analysis, InferenceError> {
-        let embedding = self.embed(image, cancel)?;
-        let labels = self.panoptic(image, cancel)?;
+        // The two networks do not depend on each other: run them together.
+        let (embedding, labels) = {
+            let (encoder, panoptic, spec) = (&mut self.encoder, &mut self.panoptic, &self.spec);
+            std::thread::scope(|scope| {
+                let embedding = scope.spawn(move || embed_with(encoder, spec, image, cancel));
+                let labels = panoptic_with(panoptic, image, cancel);
+                let embedding = embedding.join().unwrap_or_else(|_| {
+                    Err(InferenceError::Failed(
+                        "the image encoder stopped unexpectedly".into(),
+                    ))
+                });
+                (embedding, labels)
+            })
+        };
+        let (embedding, labels) = (embedding?, labels?);
         let side = self.spec.mask_size;
-        const GRID: usize = 7;
+        debug_assert_eq!(side, SIDE);
+        let candidates = |decoded: &Decoded| -> Vec<(Vec<bool>, f32)> {
+            (0..3)
+                .map(|k| {
+                    (
+                        decoded.logits[k * side * side..(k + 1) * side * side]
+                            .iter()
+                            .map(|l| *l > 0.0)
+                            .collect(),
+                        decoded.scores[k],
+                    )
+                })
+                .collect()
+        };
+        // Each person and animal: SAM 2 is asked for it with its box and points inside,
+        // and the candidate that agrees best with what DETR found is kept (DETR's own
+        // mask where none does).
+        let mut subject_mask = vec![0f32; SIDE * SIDE];
+        for (k, instance) in labels.instances.iter().enumerate() {
+            let others: Vec<&panoptic::Instance> = labels
+                .instances
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != k)
+                .map(|(_, o)| o)
+                .collect();
+            let decoded = self.decode(&embedding, &auto::aim(instance, &others), cancel)?;
+            let detr: Vec<bool> = instance.mask.iter().map(|v| *v > 0.5).collect();
+            let best = candidates(&decoded)
+                .into_iter()
+                .enumerate()
+                .map(|(c, (mask, _))| (auto::iou(&mask, &detr), c))
+                .max_by(|a, b| a.0.total_cmp(&b.0));
+            let drawn = match best {
+                Some((agreement, c)) if agreement >= 0.5 && decoded.object >= 0.0 => decoded.logits
+                    [c * side * side..(c + 1) * side * side]
+                    .iter()
+                    .map(|l| 1.0 / (1.0 + (-l).exp()))
+                    .collect::<Vec<f32>>(),
+                _ => instance.mask.clone(),
+            };
+            for (m, d) in subject_mask.iter_mut().zip(&drawn) {
+                *m = m.max(*d);
+            }
+        }
+        // The sky: SAM 2's outlines at points of the label.
         let mut found: Vec<Proposal> = Vec::new();
-        for j in 0..GRID {
-            for i in 0..GRID {
-                let prompt = Prompt {
-                    points: vec![crate::process::Point {
-                        x: (i as f32 + 0.5) / GRID as f32,
-                        y: (j as f32 + 0.5) / GRID as f32,
-                        positive: true,
-                    }],
+        for point in auto::sky_points(&labels.sky) {
+            let decoded = self.decode(
+                &embedding,
+                &Prompt {
+                    points: vec![point],
                     bounds: None,
-                };
-                let decoded = self.decode(&embedding, &prompt, cancel)?;
-                if decoded.object < 0.0 {
-                    continue;
-                }
-                for k in 0..3 {
-                    if decoded.scores[k] > 0.6 {
-                        found.push(Proposal {
-                            mask: decoded.logits[k * side * side..(k + 1) * side * side]
-                                .iter()
-                                .map(|l| *l > 0.0)
-                                .collect(),
-                            score: decoded.scores[k],
-                        });
-                    }
+                },
+                cancel,
+            )?;
+            if decoded.object < 0.0 {
+                continue;
+            }
+            for (mask, score) in candidates(&decoded) {
+                if score > 0.6 {
+                    found.push(Proposal { mask, score });
                 }
             }
         }
-        debug_assert_eq!(side, SIDE);
         Ok(Analysis {
             embedding,
-            labels,
-            proposals: distinct(found),
+            subject_mask,
+            sky_label: labels.sky,
+            sky_outlines: distinct(found),
         })
-    }
-
-    /// Where the photo's people, animals and sky are, on the [`SIDE`] grid.
-    fn panoptic(
-        &mut self,
-        image: &RgbImage,
-        cancel: &AtomicBool,
-    ) -> Result<Labels, InferenceError> {
-        cancelled(cancel)?;
-        process::check_image(image)?;
-        let scale = PANOPTIC.long_edge as f64 / image.width.max(image.height) as f64;
-        let width = ((image.width as f64 * scale).round() as usize).max(1);
-        let height = ((image.height as f64 * scale).round() as usize).max(1);
-        let tensor = process::preprocess_sized(image, width, height, PANOPTIC.mean, PANOPTIC.std)?;
-        cancelled(cancel)?;
-        let network = &mut self.panoptic;
-        let (logits, masks, queries, classes, mask_w, mask_h) = guarded(cancel, |options| {
-            let input = TensorRef::from_array_view(([1usize, 3, height, width], &tensor[..]))
-                .map_err(failed)?;
-            // Every pixel is real: the model takes this mask at a fixed size.
-            let valid = vec![1i64; 64 * 64];
-            let mask =
-                TensorRef::from_array_view(([1usize, 64, 64], &valid[..])).map_err(failed)?;
-            let outputs = network
-                .run_with_options(
-                    ort::inputs!["pixel_values" => input, "pixel_mask" => mask],
-                    options,
-                )
-                .map_err(failed)?;
-            let get = |name: &str| -> Result<(Vec<i64>, Vec<f32>), InferenceError> {
-                let output = outputs.get(name).ok_or_else(|| {
-                    InferenceError::ModelInvalid(format!(
-                        "the panoptic model has no output `{name}`"
-                    ))
-                })?;
-                let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
-                Ok((shape.iter().copied().collect(), data.to_vec()))
-            };
-            let (logit_shape, logits) = get("logits")?;
-            let (mask_shape, masks) = get("pred_masks")?;
-            if logit_shape.len() != 3
-                || mask_shape.len() != 4
-                || logit_shape[0] != 1
-                || mask_shape[0] != 1
-            {
-                return Err(InferenceError::OutputInvalid(format!(
-                    "the panoptic output shapes are {logit_shape:?} and {mask_shape:?}"
-                )));
-            }
-            let dim = |v: i64| usize::try_from(v).unwrap_or(0);
-            Ok((
-                logits,
-                masks,
-                dim(logit_shape[1]),
-                dim(logit_shape[2]),
-                dim(mask_shape[3]),
-                dim(mask_shape[2]),
-            ))
-        })?;
-        panoptic::decode(&PANOPTIC, &logits, &masks, queries, classes, mask_w, mask_h)
     }
 
     fn decode(
@@ -501,6 +449,120 @@ fn distinct(mut found: Vec<Proposal>) -> Vec<Proposal> {
         }
     }
     kept
+}
+
+fn embed_with(
+    encoder: &mut OrtSession,
+    spec: &ModelSpec,
+    image: &RgbImage,
+    cancel: &AtomicBool,
+) -> Result<Embedding, InferenceError> {
+    cancelled(cancel)?;
+    let tensor = process::preprocess(image, spec.input_size, spec.mean, spec.std)?;
+    cancelled(cancel)?;
+    let size = spec.input_size;
+    let features = guarded(cancel, |options| {
+        let input =
+            TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..])).map_err(failed)?;
+        let outputs = encoder
+            .run_with_options(ort::inputs!["pixel_values" => input], options)
+            .map_err(failed)?;
+        let mut features = Vec::with_capacity(3);
+        for index in 0..3 {
+            let name = format!("image_embeddings.{index}");
+            let output = outputs.get(name.as_str()).ok_or_else(|| {
+                InferenceError::ModelInvalid(format!("the encoder has no output `{name}`"))
+            })?;
+            let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
+            features.push((shape.iter().copied().collect::<Vec<i64>>(), data.to_vec()));
+        }
+        Ok(features)
+    })?;
+    cancelled(cancel)?;
+    let mut checked = Vec::with_capacity(3);
+    for (shape, data) in features {
+        let dims: Option<[usize; 4]> = (shape.len() == 4 && shape[0] == 1)
+            .then(|| {
+                let mut dims = [0usize; 4];
+                for (out, d) in dims.iter_mut().zip(&shape) {
+                    *out = usize::try_from(*d).ok()?;
+                }
+                Some(dims)
+            })
+            .flatten();
+        let count = dims.and_then(|d| d.iter().try_fold(1usize, |n, d| n.checked_mul(*d)));
+        match dims {
+            Some(dims) if count == Some(data.len()) => checked.push((dims, data)),
+            _ => {
+                return Err(InferenceError::OutputInvalid(format!(
+                    "an encoder output has shape {shape:?}"
+                )));
+            }
+        }
+    }
+    let features: [([usize; 4], Vec<f32>); 3] = checked
+        .try_into()
+        .map_err(|_| InferenceError::ModelInvalid("the encoder outputs changed".into()))?;
+    Ok(Embedding {
+        features,
+        image: image.clone(),
+    })
+}
+
+/// Where the photo's people, animals and sky are, on the [`SIDE`] grid.
+fn panoptic_with(
+    network: &mut OrtSession,
+    image: &RgbImage,
+    cancel: &AtomicBool,
+) -> Result<Labels, InferenceError> {
+    cancelled(cancel)?;
+    process::check_image(image)?;
+    let scale = PANOPTIC.long_edge as f64 / image.width.max(image.height) as f64;
+    let width = ((image.width as f64 * scale).round() as usize).max(1);
+    let height = ((image.height as f64 * scale).round() as usize).max(1);
+    let tensor = process::preprocess_sized(image, width, height, PANOPTIC.mean, PANOPTIC.std)?;
+    cancelled(cancel)?;
+    let (logits, masks, queries, classes, mask_w, mask_h) = guarded(cancel, |options| {
+        let input = TensorRef::from_array_view(([1usize, 3, height, width], &tensor[..]))
+            .map_err(failed)?;
+        // Every pixel is real: the model takes this mask at a fixed size.
+        let valid = vec![1i64; 64 * 64];
+        let mask = TensorRef::from_array_view(([1usize, 64, 64], &valid[..])).map_err(failed)?;
+        let outputs = network
+            .run_with_options(
+                ort::inputs!["pixel_values" => input, "pixel_mask" => mask],
+                options,
+            )
+            .map_err(failed)?;
+        let get = |name: &str| -> Result<(Vec<i64>, Vec<f32>), InferenceError> {
+            let output = outputs.get(name).ok_or_else(|| {
+                InferenceError::ModelInvalid(format!("the panoptic model has no output `{name}`"))
+            })?;
+            let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
+            Ok((shape.iter().copied().collect(), data.to_vec()))
+        };
+        let (logit_shape, logits) = get("logits")?;
+        let (mask_shape, masks) = get("pred_masks")?;
+        if logit_shape.len() != 3
+            || mask_shape.len() != 4
+            || logit_shape[0] != 1
+            || mask_shape[0] != 1
+        {
+            return Err(InferenceError::OutputInvalid(format!(
+                "the panoptic output shapes are {logit_shape:?} and {mask_shape:?}"
+            )));
+        }
+        let dim = |v: i64| usize::try_from(v).unwrap_or(0);
+        Ok((
+            logits,
+            masks,
+            dim(logit_shape[1]),
+            dim(logit_shape[2]),
+            dim(mask_shape[3]),
+            dim(mask_shape[2]),
+        ))
+    })?;
+    panoptic::decode(&PANOPTIC, &logits, &masks, queries, classes, mask_w, mask_h)
 }
 
 fn view(f: &([usize; 4], Vec<f32>)) -> Result<TensorRef<'_, f32>, InferenceError> {

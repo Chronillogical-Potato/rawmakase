@@ -99,8 +99,20 @@ const SUBJECT: Request = Request {
 fn a_selection_becomes_one_named_mask_and_one_history_step() {
     let mut f = fixture();
     let e = &mut f.editor;
+    e.view.tool = crate::app::state::Tool::Mask;
     let g = begin(e, SUBJECT);
+    let renders = e.preview.task.id();
     finish(e, g, Ok(generated(10)));
+    // The mask is selected with its overlay, and the photo rendered again after that so
+    // the overlay is in it (a neutral mask changes no pixel otherwise).
+    assert!(
+        e.preview.task.id() >= renders + 2,
+        "no render after selecting"
+    );
+    assert!(matches!(
+        e.overlay(),
+        crate::app::worker::Overlay::Mask { index: 0, .. }
+    ));
     let masks = &e.document.edit.recipe().masks;
     assert_eq!(masks.len(), 1);
     assert_eq!(masks[0].name, "Subject");

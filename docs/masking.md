@@ -15,10 +15,11 @@ Subtract and Intersect menus) make a mask from the photo with one click, with mo
 running on this computer. The result is one named mask and one History step with
 neutral sliders and its overlay shown.
 
-- **Subject** is the people and animals in the photo (as many as there are). A panoptic
-  model (DETR, trained on COCO) says where they are; Segment Anything 2 draws each one's
-  outline, the outlines inside that area are combined, the label fills what they miss,
-  and both edges are moved onto the photo's own (no halo under a local adjustment). It
+- **Subject** is the people and animals in the photo (as many as there are, up to
+  eight). A panoptic model (DETR, trained on COCO) finds each one; Segment Anything 2 is
+  then asked for each with its box, points inside it and points on the others, the
+  drawing that agrees best with what DETR found is kept, and the edge is moved onto the
+  photo's own (no halo under a local adjustment). It
   knows nothing else: for a sign, a car or a rocket it says "No person or animal found"
   and offers **Click the subject…**.
 - **Sky** is the sky label, drawn with Segment Anything 2's outlines and cut where the sky

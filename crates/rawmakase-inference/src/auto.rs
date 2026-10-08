@@ -8,7 +8,8 @@
 //! Everything here is pure: the proposals and the labels come in, coverage in the photo's
 //! frame goes out.
 use crate::error::InferenceError;
-use crate::process::{Coverage, Rect, RgbImage, output_size, resample};
+use crate::panoptic::Instance;
+use crate::process::{Coverage, Point, Prompt, Rect, RgbImage, output_size, resample};
 use crate::refine::{guided, smooth};
 
 /// Side of the square grid the proposals and the labels live on: the photo
@@ -23,62 +24,173 @@ pub struct Proposal {
     pub score: f32,
 }
 
-/// Subject: the outlines inside the people and animals, with the label filling what they
-/// miss. All zero when there are none.
-pub fn subject(
-    image: &RgbImage,
-    proposals: &[Proposal],
-    saliency: &[f32],
-) -> Result<Coverage, InferenceError> {
-    check(saliency.len())?;
+/// Subject: `mask` (the union of what SAM 2 drew for each person and animal, 0..=1 on
+/// the [`SIDE`] grid) with its edge moved onto the photo's. All zero when it is empty.
+pub fn subject(image: &RgbImage, mask: &[f32]) -> Result<Coverage, InferenceError> {
+    check(mask.len())?;
     let (width, height) = output_size(image);
-    let mass: f32 = saliency.iter().sum();
-    if mass < 0.002 * (SIDE * SIDE) as f32 {
+    if mask.iter().sum::<f32>() < 0.002 * (SIDE * SIDE) as f32 {
         return Ok(empty(width, height));
     }
-    // Where an outline may reach: near the salient area.
-    let near = dilate(&saliency.iter().map(|s| *s > 0.3).collect::<Vec<_>>(), 4);
-    let mut union = vec![0f32; SIDE * SIDE];
-    for p in proposals {
-        let inside: f32 = p
-            .mask
-            .iter()
-            .zip(saliency)
-            .filter(|(m, _)| **m)
-            .map(|(_, s)| *s)
-            .sum();
-        let count = p.mask.iter().filter(|m| **m).count() as f32;
-        if count < 0.003 * (SIDE * SIDE) as f32 || inside / count <= 0.8 {
-            continue;
-        }
-        for (i, m) in p.mask.iter().enumerate() {
-            if *m && near[i] {
-                union[i] = 1.0;
-            }
-        }
-    }
     let guide = luma(image, width, height);
-    let radius = |div: usize| (width.max(height) / div).max(3);
-    let soft = expand(saliency, width, height);
-    let from_saliency = guided(&guide, &soft, width, height, radius(160), 2e-3);
-    let from_outlines = guided(
+    let soft = expand(mask, width, height);
+    let refined = guided(
         &guide,
-        &expand(&union, width, height),
+        &soft,
         width,
         height,
-        radius(200),
+        (width.max(height) / 200).max(3),
         1e-3,
     );
-    let data = from_saliency
-        .iter()
-        .zip(&from_outlines)
-        .map(|(a, b)| (smooth(a.max(*b)) * 255.0 + 0.5) as u8)
-        .collect();
     Ok(Coverage {
         width,
         height,
-        data,
+        data: refined
+            .iter()
+            .map(|v| (smooth(*v) * 255.0 + 0.5) as u8)
+            .collect(),
     })
+}
+
+/// The prompt that makes SAM 2 draw `instance`: its box, a few points well inside it
+/// and a point inside each other instance, which is not part of it.
+pub fn aim(instance: &Instance, others: &[&Instance]) -> Prompt {
+    let inside: Vec<bool> = instance.mask.iter().map(|v| *v > 0.5).collect();
+    let inner = depth(&inside);
+    let cell = |i: usize| ((i % SIDE) as f32 + 0.5) / SIDE as f32;
+    let row = |i: usize| ((i / SIDE) as f32 + 0.5) / SIDE as f32;
+    let deepest = |d: &[f32]| {
+        d.iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .map(|(i, v)| (i, *v))
+    };
+    let mut points = Vec::new();
+    let mut chosen: Vec<usize> = Vec::new();
+    if let Some((first, peak)) = deepest(&inner) {
+        chosen.push(first);
+        // Two more, far from each other, still well inside.
+        let well: Vec<usize> = (0..SIDE * SIDE)
+            .filter(|i| inner[*i] > 0.5 * peak)
+            .collect();
+        for _ in 0..2 {
+            let far = well.iter().copied().max_by_key(|c| {
+                chosen
+                    .iter()
+                    .map(|p| {
+                        let (dx, dy) = (
+                            (c % SIDE) as i64 - (p % SIDE) as i64,
+                            (c / SIDE) as i64 - (p / SIDE) as i64,
+                        );
+                        dx * dx + dy * dy
+                    })
+                    .min()
+                    .unwrap_or(0)
+            });
+            if let Some(far) = far.filter(|f| !chosen.contains(f)) {
+                chosen.push(far);
+            }
+        }
+    }
+    points.extend(chosen.iter().map(|i| Point {
+        x: cell(*i),
+        y: row(*i),
+        positive: true,
+    }));
+    for other in others {
+        let theirs: Vec<bool> = other.mask.iter().map(|v| *v > 0.5).collect();
+        if let Some((i, _)) = deepest(&depth(&theirs)).filter(|(i, _)| !inside[*i]) {
+            points.push(Point {
+                x: cell(i),
+                y: row(i),
+                positive: false,
+            });
+        }
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (SIDE, SIDE, 0, 0);
+    for (i, _) in inside.iter().enumerate().filter(|(_, m)| **m) {
+        x0 = x0.min(i % SIDE);
+        x1 = x1.max(i % SIDE);
+        y0 = y0.min(i / SIDE);
+        y1 = y1.max(i / SIDE);
+    }
+    let unit = |v: usize, up: bool| {
+        let edge = if up { v + 1 } else { v };
+        (edge as f32 / SIDE as f32).clamp(0.0, 1.0)
+    };
+    let bounds = (x1 >= x0 && y1 >= y0).then(|| {
+        [
+            unit(x0, false),
+            unit(y0, false),
+            unit(x1, true),
+            unit(y1, true),
+        ]
+    });
+    Prompt { points, bounds }
+}
+
+/// How far inside `mask` each cell is (city-block distance to the nearest outside cell,
+/// 0 outside), by two sweeps.
+fn depth(mask: &[bool]) -> Vec<f32> {
+    let big = (2 * SIDE) as f32;
+    let mut d: Vec<f32> = mask.iter().map(|m| if *m { big } else { 0.0 }).collect();
+    for y in 0..SIDE {
+        for x in 0..SIDE {
+            let i = y * SIDE + x;
+            if d[i] == 0.0 {
+                continue;
+            }
+            let up = if y > 0 { d[i - SIDE] } else { 0.0 };
+            let left = if x > 0 { d[i - 1] } else { 0.0 };
+            d[i] = d[i].min(up + 1.0).min(left + 1.0);
+        }
+    }
+    for y in (0..SIDE).rev() {
+        for x in (0..SIDE).rev() {
+            let i = y * SIDE + x;
+            if d[i] == 0.0 {
+                continue;
+            }
+            let down = if y + 1 < SIDE { d[i + SIDE] } else { 0.0 };
+            let right = if x + 1 < SIDE { d[i + 1] } else { 0.0 };
+            d[i] = d[i].min(down + 1.0).min(right + 1.0);
+        }
+    }
+    d
+}
+
+/// How much two masks overlap, intersection over union.
+pub fn iou(a: &[bool], b: &[bool]) -> f32 {
+    let both = a.iter().zip(b).filter(|(x, y)| **x && **y).count();
+    let either = a.iter().zip(b).filter(|(x, y)| **x || **y).count();
+    if either == 0 {
+        0.0
+    } else {
+        both as f32 / either as f32
+    }
+}
+
+/// Points spread over the sky label, to ask SAM 2 for the outlines it lies on.
+pub fn sky_points(sky_label: &[f32]) -> Vec<Point> {
+    const SPREAD: usize = 6;
+    let mut points = Vec::new();
+    for j in 0..SPREAD {
+        for i in 0..SPREAD {
+            let (x, y) = (
+                (i as f32 + 0.5) / SPREAD as f32,
+                (j as f32 + 0.5) / SPREAD as f32,
+            );
+            let at = (y * SIDE as f32) as usize * SIDE + (x * SIDE as f32) as usize;
+            if sky_label.get(at).is_some_and(|s| *s > 0.8) {
+                points.push(Point {
+                    x,
+                    y,
+                    positive: true,
+                });
+            }
+        }
+    }
+    points
 }
 
 /// Sky: the outlines the panoptic model's sky label lies on, cut where the sky ends.
@@ -208,29 +320,6 @@ fn expand(grid: &[f32], width: usize, height: usize) -> Vec<f32> {
     resample(grid, SIDE, whole, width, height)
 }
 
-/// `mask` grown by `radius` cells (a square window).
-fn dilate(mask: &[bool], radius: usize) -> Vec<bool> {
-    let pass = |src: &[bool], horizontal: bool| -> Vec<bool> {
-        (0..SIDE * SIDE)
-            .map(|i| {
-                let (x, y) = (i % SIDE, i / SIDE);
-                (0..=2 * radius).any(|d| {
-                    let (xx, yy) = if horizontal {
-                        ((x + d).checked_sub(radius), Some(y))
-                    } else {
-                        (Some(x), (y + d).checked_sub(radius))
-                    };
-                    match (xx, yy) {
-                        (Some(xx), Some(yy)) if xx < SIDE && yy < SIDE => src[yy * SIDE + xx],
-                        _ => false,
-                    }
-                })
-            })
-            .collect()
-    };
-    pass(&pass(mask, true), false)
-}
-
 /// Keeps each column's sky from the top down to where it stops, bridging gaps of a few
 /// cells (a branch, a wire), so water or a window below the horizon is not sky.
 fn to_horizon(mask: &[bool]) -> Vec<bool> {
@@ -281,43 +370,72 @@ mod tests {
     }
 
     #[test]
-    fn the_subject_is_the_outlines_inside_the_saliency_and_not_the_ones_outside() {
-        // A bright block on a dark ground, and a second, equally sharp block that is not salient.
-        let img = photo(256, 256, |x, y| {
-            if (60..120).contains(&x) && (80..200).contains(&y)
-                || (170..230).contains(&x) && (30..90).contains(&y)
-            {
+    fn the_subject_is_the_drawn_mask_with_its_edge_on_the_photos() {
+        // A bright block (pixels 250..470 across); the mask drawn for it, on the coarse
+        // grid, is a cell too wide on every side.
+        let img = photo(1000, 1000, |x, y| {
+            if (250..470).contains(&x) && (300..780).contains(&y) {
                 [220, 200, 60]
             } else {
                 [30, 40, 50]
             }
         });
-        let saliency: Vec<f32> = rect(50, 70, 130, 210)
+        let loose: Vec<f32> = rect(63, 76, 121, 200)
             .iter()
             .map(|m| f32::from(u8::from(*m)))
             .collect();
-        let proposals = vec![
-            Proposal {
-                mask: rect(60, 80, 120, 200),
-                score: 0.9,
-            },
-            Proposal {
-                mask: rect(170, 30, 230, 90),
-                score: 0.9,
-            },
-        ];
-        let cov = subject(&img, &proposals, &saliency).unwrap();
-        assert!(at(&cov, 0.35, 0.55) > 240, "{}", at(&cov, 0.35, 0.55));
-        assert!(at(&cov, 0.78, 0.23) < 10, "{}", at(&cov, 0.78, 0.23));
-        assert!(at(&cov, 0.05, 0.9) < 10);
+        let cov = subject(&img, &loose).unwrap();
+        let px = |x: usize, y: usize| cov.data[y * cov.width + x];
+        assert!(px(350, 500) > 240 && px(800, 200) < 10);
+        // Just outside the block, where the loose mask reached, the edge has moved in.
+        assert!(px(245, 500) < 100, "{}", px(245, 500));
+        assert!(px(475, 500) < 100, "{}", px(475, 500));
+    }
+
+    fn instance(mask: Vec<bool>) -> Instance {
+        Instance {
+            class: 1,
+            score: 0.99,
+            mask: mask.iter().map(|m| f32::from(u8::from(*m))).collect(),
+        }
+    }
+
+    #[test]
+    fn a_person_is_asked_for_with_a_box_points_inside_and_points_on_the_others() {
+        let left = instance(rect(20, 40, 100, 200));
+        let right = instance(rect(110, 40, 200, 200));
+        let prompt = aim(&left, &[&right]);
+        let [l, t, r, b] = prompt.bounds.unwrap();
+        assert!((l - 20. / 256.).abs() < 0.01 && (r - 101. / 256.).abs() < 0.01);
+        assert!((t - 40. / 256.).abs() < 0.01 && (b - 201. / 256.).abs() < 0.01);
+        let (pos, neg): (Vec<&Point>, Vec<&Point>) = prompt.points.iter().partition(|p| p.positive);
+        assert!((1..=3).contains(&pos.len()) && neg.len() == 1);
+        assert!(pos.iter().all(|p| p.x > 20. / 256. && p.x < 100. / 256.));
+        assert!(neg[0].x > 110. / 256.);
+        prompt.validate().unwrap();
+        // Alone, there is nothing to leave out.
+        assert!(aim(&left, &[]).points.iter().all(|p| p.positive));
+    }
+
+    #[test]
+    fn masks_are_compared_by_overlap_and_the_sky_is_sampled_where_it_is() {
+        assert!((iou(&rect(0, 0, 100, 100), &rect(0, 0, 100, 50)) - 0.5).abs() < 1e-6);
+        assert_eq!(iou(&rect(0, 0, 10, 10), &rect(100, 100, 110, 110)), 0.0);
+        let label: Vec<f32> = rect(0, 0, 256, 100)
+            .iter()
+            .map(|m| f32::from(u8::from(*m)))
+            .collect();
+        let points = sky_points(&label);
+        assert!(!points.is_empty() && points.iter().all(|p| p.y < 100. / 256.));
+        assert!(sky_points(&vec![0.0; SIDE * SIDE]).is_empty());
     }
 
     #[test]
     fn without_anything_salient_nothing_is_selected() {
         let img = photo(64, 48, |_, _| [100, 100, 100]);
-        let cov = subject(&img, &[], &vec![0.0; SIDE * SIDE]).unwrap();
+        let cov = subject(&img, &vec![0.0; SIDE * SIDE]).unwrap();
         assert!(cov.data.iter().all(|v| *v == 0));
-        assert!(subject(&img, &[], &[0.0; 3]).is_err());
+        assert!(subject(&img, &[0.0; 3]).is_err());
     }
 
     #[test]
