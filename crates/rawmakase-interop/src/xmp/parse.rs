@@ -218,6 +218,17 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
 /// measured after its release. Presets record no release; theirs is taken as the last
 /// one without the marker.
 fn add_implied_original(settings: &mut BTreeMap<String, String>, creator_tool: Option<&str>) {
+    let rawmakase = settings.contains_key("RAWmakaseMarkers")
+        || settings.contains_key("RAWmakasePreset")
+        || creator_tool.is_some_and(|tool| super::write::rawmakase_version(tool).is_some());
+    if ["WhiteBalance", "Temperature", "Tint"]
+        .iter()
+        .any(|key| settings.contains_key(*key))
+    {
+        settings
+            .entry("RAWmakaseWhiteBalanceModel".into())
+            .or_insert_with(|| if rawmakase { "Original" } else { "Calibrated" }.into());
+    }
     let unnamed = if let Some(markers) = settings.get("RAWmakaseMarkers") {
         // An unreadable format is taken as the current one.
         let markers = markers.trim().parse().unwrap_or(super::write::MARKERS);

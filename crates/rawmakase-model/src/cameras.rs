@@ -41,6 +41,14 @@ pub struct Camera {
     pub aliases: Vec<String>,
     /// Exposure Camera Raw adds to an unedited photo with Adobe Standard, in EV.
     pub baseline_exposure: f32,
+    /// Diagonal CameraCalibration, measured in Adobe DNGs, identical for both
+    /// illuminants. Only meaningful with the Adobe profile calibration signature.
+    #[serde(default)]
+    pub neutral_calibration: Option<[f32; 3]>,
+    /// Sony's model reference daylight preset. Divide by the native RAW's own
+    /// daylight preset to obtain its individual-unit calibration.
+    #[serde(default)]
+    pub sony_daylight_reference: Option<[f32; 3]>,
     /// Fujifilm only: see [`ExposureShift`].
     #[serde(default)]
     pub fujifilm_exposure_shift: ExposureShift,
@@ -116,6 +124,30 @@ pub fn baseline_exposure(make: &str, model: &str) -> Baseline {
     baseline_in(all(), make, model)
 }
 
+/// Exact body calibration only: unlike exposure, this must never use a make median.
+pub fn neutral_calibration(make: &str, model: &str, daylight: Option<[f32; 3]>) -> [f32; 3] {
+    let Some(row) = find_in(all(), make, model) else {
+        return [1.; 3];
+    };
+    if let Some(reference) = row.sony_daylight_reference {
+        let Some(wb) = daylight.filter(|v| v.iter().all(|v| v.is_finite() && *v > 0.)) else {
+            return [1.; 3];
+        };
+        let gains = std::array::from_fn(|c| {
+            let gain = (f64::from(reference[c]) / f64::from(reference[1]))
+                / (f64::from(wb[c]) / f64::from(wb[1]));
+            // DNG Converter records these diagonal coefficients to four decimals.
+            ((gain * 10000.).round() / 10000.) as f32
+        });
+        return if gains.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.) {
+            gains
+        } else {
+            [1.; 3]
+        };
+    }
+    row.neutral_calibration.unwrap_or([1.; 3])
+}
+
 fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
     if let Some(c) = find_in(rows, make, model) {
         return Baseline {
@@ -171,6 +203,22 @@ mod tests {
             let name = format!("{} {}", c.make, c.model);
             assert!(!c.make.is_empty() && !c.model.is_empty(), "{name}");
             assert!(c.baseline_exposure.abs() <= 3., "{name}");
+            if let Some(v) = c.neutral_calibration {
+                assert!(
+                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.),
+                    "{name}"
+                );
+            }
+            if let Some(v) = c.sony_daylight_reference {
+                assert!(
+                    c.make == "Sony" && c.neutral_calibration.is_none(),
+                    "{name}"
+                );
+                assert!(
+                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 65536.),
+                    "{name}"
+                );
+            }
             let d: Vec<&str> = c.checked.split('-').collect();
             assert!(
                 d.len() == 3 && d.iter().all(|p| p.parse::<u32>().is_ok()) && d[0].len() == 4,
@@ -204,6 +252,8 @@ mod tests {
             model: model.into(),
             aliases: vec![],
             baseline_exposure: ev,
+            neutral_calibration: None,
+            sony_daylight_reference: None,
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
             source: Source::Fitted,

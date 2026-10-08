@@ -20,6 +20,7 @@ pub fn open(path: &Path) -> Result<Raw> {
     if let Some(dng) = crate::dng::read(path) {
         // 0 is the DNG default; the camera table is for other raw formats.
         metadata.baseline_exposure = Some(dng.baseline_exposure.unwrap_or(0.));
+        metadata.dng_neutral_calibration = dng.neutral_calibration;
         // A profile needs a forward matrix; one written as colour matrices alone
         // still describes the camera's colour, so keep that when it is all there is.
         let profile = dng

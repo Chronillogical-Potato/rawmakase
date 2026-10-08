@@ -218,6 +218,7 @@ pub(crate) fn group_of_key(key: &str) -> Option<SettingGroup> {
         "Saturation" => Saturation,
         "CameraProfile" | "ConvertToGrayscale" => TreatmentAndProfile,
         "ProcessVersion" => ProcessVersion,
+        "RAWmakaseWhiteBalanceModel" => WhiteBalance,
         "Sharpness" | "EnableDetail" => Sharpening,
         "LuminanceSmoothing" => LuminanceNoiseReduction,
         "ColorNoiseReduction" => ColorNoiseReduction,
@@ -503,6 +504,55 @@ mod tests {
         let mut exposure = GroupSelection::none();
         exposure.set(SettingGroup::Exposure, GroupInclusion::Included);
         assert!(!preset(&r, &info, &exposure).contains("PointColors"));
+        Ok(())
+    }
+
+    #[test]
+    fn white_balance_version_stays_with_its_partial_preset() -> anyhow::Result<()> {
+        use crate::model::operators::WhiteBalanceModel as W;
+        let m = crate::camera_data::Metadata {
+            wb: [2., 1., 1.5],
+            daylight_wb: [2., 1., 1.5],
+            ..Default::default()
+        };
+        for model in [W::Original, W::Calibrated] {
+            let source = Recipe {
+                white_balance_model: model,
+                ..Recipe::with_profiles(&m, &[])
+            };
+            for group in [
+                SettingGroup::WhiteBalance,
+                SettingGroup::ProcessVersion,
+                SettingGroup::Exposure,
+            ] {
+                let mut groups = GroupSelection::none();
+                groups.set(group, GroupInclusion::Included);
+                let text = preset(&source, &PresetInfo::new("WB", "User Presets"), &groups);
+                let parsed = crate::xmp::parse(Path::new("partial.xmp"), &text)?;
+                assert_eq!(crate::presets::user::groups_of(&parsed), groups);
+                assert_eq!(
+                    parsed.settings.contains_key("RAWmakaseWhiteBalanceModel"),
+                    group == SettingGroup::WhiteBalance
+                );
+                let target = Recipe {
+                    white_balance_model: if model == W::Original {
+                        W::Calibrated
+                    } else {
+                        W::Original
+                    },
+                    ..source.clone()
+                };
+                let applied = parsed.apply(&target, &m, &[], None)?;
+                assert_eq!(
+                    applied.white_balance_model,
+                    if group == SettingGroup::WhiteBalance {
+                        model
+                    } else {
+                        target.white_balance_model
+                    }
+                );
+            }
+        }
         Ok(())
     }
 

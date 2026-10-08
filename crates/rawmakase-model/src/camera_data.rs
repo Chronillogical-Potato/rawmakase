@@ -3,6 +3,14 @@
 //! them through LibRaw is [`crate::raw`]'s; nothing here needs native code.
 use serde::{Deserialize, Serialize};
 
+/// A DNG's illuminant-independent diagonal camera calibration. The signature
+/// must match the selected profile before these gains may be used.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NeutralCalibration {
+    pub gains: [f32; 3],
+    pub signature: String,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,
@@ -36,6 +44,10 @@ pub struct Metadata {
     pub focal_35mm: f32,
     pub wb: [f32; 3],
     pub daylight_wb: [f32; 3],
+    /// Sony's per-unit daylight preset, read from the native RAW maker notes.
+    /// Unlike `daylight_wb`, this is not calculated from a color matrix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sony_daylight_wb: Option<[f32; 3]>,
     pub matrix: [[f32; 3]; 3],
     /// LibRaw's XYZ(D65)-to-camera matrix, equivalent to a DNG ColorMatrix. Zero when unknown.
     #[serde(default)]
@@ -49,6 +61,8 @@ pub struct Metadata {
     /// DNG BaselineExposure (0 when the DNG has none); `None` for other formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dng_neutral_calibration: Option<NeutralCalibration>,
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
     /// choices; rebuilt on open.
     #[serde(skip)]

@@ -10,6 +10,7 @@ use std::{collections::BTreeMap, fs::File, path::Path};
 #[derive(Default)]
 pub struct Dng {
     pub baseline_exposure: Option<f32>,
+    pub neutral_calibration: Option<crate::camera_data::NeutralCalibration>,
     /// Left, top, width, height, relative to the active area.
     pub crop: Option<[u32; 4]>,
     /// The profile tags, rewritten as a standalone DCP: the embedded camera
@@ -48,6 +49,7 @@ pub fn read(path: &Path) -> Option<Dng> {
             .and_then(|v| v.first().copied())
             .filter(|v| v.is_finite() && v.abs() <= 5.),
         profile: profile_tags(&mut t, &ifd0),
+        neutral_calibration: neutral_calibration(&mut t, &ifd0),
         ..Default::default()
     };
     // The full-resolution raw image is the SubIFD (or IFD0) with NewSubfileType 0.
@@ -96,6 +98,47 @@ pub fn read(path: &Path) -> Option<Dng> {
     Some(dng)
 }
 
+fn neutral_calibration(
+    t: &mut Tiff,
+    ifd: &BTreeMap<u16, Entry>,
+) -> Option<crate::camera_data::NeutralCalibration> {
+    // Absence means no per-file correction. The DNG discriminator still prevents
+    // falling back to a native camera's calibration.
+    if !ifd.contains_key(&50723) && !ifd.contains_key(&50724) {
+        return None;
+    }
+    let identity = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+    let mut numbers = |tag, default: &[f32]| match ifd.get(&tag) {
+        Some(entry) => t.numbers(entry),
+        None => Some(default.to_vec()),
+    };
+    let a = numbers(50723, &identity)?;
+    let b = numbers(50724, &identity)?;
+    let analog = numbers(50727, &[1.; 3])?;
+    let gains = constant_diagonal(&a, &b, &analog)?;
+    let signature = match ifd.get(&50931) {
+        Some(entry) => String::from_utf8(t.raw(entry)?)
+            .ok()?
+            .trim_end_matches('\0')
+            .to_owned(),
+        None => String::new(),
+    };
+    Some(crate::camera_data::NeutralCalibration { gains, signature })
+}
+
+/// Do not flatten illuminant-dependent or non-diagonal matrices into three gains.
+fn constant_diagonal(a: &[f32], b: &[f32], analog: &[f32]) -> Option<[f32; 3]> {
+    if a.len() != 9 || a != b || analog != [1.; 3] || [1, 2, 3, 5, 6, 7].iter().any(|i| a[*i] != 0.)
+    {
+        return None;
+    }
+    let gains = [a[0], a[4], a[8]];
+    gains
+        .iter()
+        .all(|v| v.is_finite() && *v > 0. && *v < 4.)
+        .then_some(gains)
+}
+
 /// Rewrites the profile tags as a standalone DCP so the regular parser validates them.
 /// Returns the bytes rather than a profile, since the matrix is readable from
 /// them even when the profile itself is not.
@@ -114,7 +157,7 @@ fn profile_tags(t: &mut Tiff, ifd0: &BTreeMap<u16, Entry>) -> Option<Vec<u8>> {
     out.extend(u32b(8));
     out.extend(u16b(entries.len() as u16));
     let mut data_at = 8 + 2 + entries.len() * 12 + 4;
-    let mut data = Vec::new();
+    let mut data: Vec<u8> = Vec::new();
     for (tag, kind, count, bytes) in &entries {
         out.extend(u16b(*tag));
         out.extend(u16b(*kind));
@@ -223,6 +266,58 @@ fn warp(p: &[u8]) -> Option<(Option<Radial>, Option<[Radial; 2]>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reads_per_file_calibration_and_does_not_flatten_complex_matrices() {
+        let matrix: [f32; 9] = [0.9817, 0., 0., 0., 1., 0., 0., 0., 0.9687];
+        let rationals = |v: &[f32]| {
+            v.iter()
+                .flat_map(|v| {
+                    let mut b = ((*v * 10000.).round() as i32).to_le_bytes().to_vec();
+                    b.extend(10000i32.to_le_bytes());
+                    b
+                })
+                .collect::<Vec<_>>()
+        };
+        let entries = [
+            (273u16, 4u16, 1u32, 0u32.to_le_bytes().to_vec()),
+            (50706, 1, 4, vec![1, 4, 0, 0]),
+            (50723, 10, 9, rationals(&matrix)),
+            (50724, 10, 9, rationals(&matrix)),
+            (50727, 10, 3, rationals(&[1.; 3])),
+            (50931, 2, 10, b"com.adobe\0".to_vec()),
+        ];
+        let mut bytes = b"II*\0\x08\0\0\0".to_vec();
+        bytes.extend((entries.len() as u16).to_le_bytes());
+        let mut data: Vec<u8> = Vec::new();
+        for (tag, kind, count, value) in &entries {
+            bytes.extend(tag.to_le_bytes());
+            bytes.extend(kind.to_le_bytes());
+            bytes.extend(count.to_le_bytes());
+            if value.len() <= 4 {
+                bytes.extend(value);
+            } else {
+                bytes.extend(((8 + 2 + entries.len() * 12 + 4 + data.len()) as u32).to_le_bytes());
+                data.extend(value);
+            }
+        }
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(data);
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), bytes).unwrap();
+        let calibration = read(f.path()).unwrap().neutral_calibration.unwrap();
+        assert_eq!(calibration.gains, [0.9817, 1., 0.9687]);
+        assert_eq!(calibration.signature, "com.adobe");
+        let mut other = matrix;
+        other[0] = 0.99;
+        assert!(constant_diagonal(&matrix, &other, &[1.; 3]).is_none());
+        other = matrix;
+        other[1] = 0.1;
+        assert!(constant_diagonal(&other, &other, &[1.; 3]).is_none());
+        assert!(constant_diagonal(&matrix, &matrix, &[1., 2., 1.]).is_none());
+        other = matrix;
+        other[0] = f32::NAN;
+        assert!(constant_diagonal(&other, &other, &[1.; 3]).is_none());
+    }
     fn list(id: u32, params: &[u8]) -> Vec<u8> {
         let mut b = 1u32.to_be_bytes().to_vec();
         for v in [id, 0x0103_0000, 0, params.len() as u32] {

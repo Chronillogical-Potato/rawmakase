@@ -343,7 +343,12 @@ impl CameraProfile {
         .into())
     }
     fn neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
-        if self.calibration_signature == "com.adobe" {
+        if m.baseline_exposure.is_some() {
+            m.dng_neutral_calibration
+                .as_ref()
+                .filter(|c| c.signature == self.calibration_signature)
+                .map_or([1.; 3], |c| c.gains)
+        } else if self.calibration_signature == "com.adobe" {
             crate::camera_profiles::reference::neutral_calibration(m)
         } else {
             [1.; 3]
@@ -358,6 +363,33 @@ impl CameraProfile {
         }))
     }
     pub fn white_balance(&self, temperature: f32, tint: f32, m: &Metadata) -> Option<[f32; 3]> {
+        self.white_balance_calibrated(temperature, tint, m, self.neutral_calibration(m))
+    }
+    pub(crate) fn legacy_white_balance(
+        &self,
+        temperature: f32,
+        tint: f32,
+        m: &Metadata,
+    ) -> Option<[f32; 3]> {
+        self.white_balance_calibrated(temperature, tint, m, self.legacy_neutral_calibration(m))
+    }
+    fn legacy_neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
+        if self.calibration_signature == "com.adobe"
+            && m.make.eq_ignore_ascii_case("Fujifilm")
+            && m.model.eq_ignore_ascii_case("X100F")
+        {
+            [0.9883, 1., 1.031]
+        } else {
+            [1.; 3]
+        }
+    }
+    fn white_balance_calibrated(
+        &self,
+        temperature: f32,
+        tint: f32,
+        m: &Metadata,
+        calibration: [f32; 3],
+    ) -> Option<[f32; 3]> {
         let [x, y] = crate::camera_profiles::temperature::xy(temperature, tint);
         let neutral = mul(
             self.color_matrix(temperature)?,
@@ -366,13 +398,17 @@ impl CameraProfile {
         if neutral.iter().any(|v| !v.is_finite() || *v <= 0.) {
             return None;
         }
-        let calibration = self.neutral_calibration(m);
         let gains: [f32; 3] =
             std::array::from_fn(|c| 1. / (calibration[c] * neutral[c] * m.wb[c].max(1e-6)));
         Some(gains.map(|v| (v / gains[1]).clamp(0.01, 100.)))
     }
     pub fn as_shot_white_balance(&self, m: &Metadata) -> Option<[f32; 2]> {
-        let calibration = self.neutral_calibration(m);
+        self.as_shot_calibrated(m, self.neutral_calibration(m))
+    }
+    pub(crate) fn legacy_as_shot_white_balance(&self, m: &Metadata) -> Option<[f32; 2]> {
+        self.as_shot_calibrated(m, self.legacy_neutral_calibration(m))
+    }
+    fn as_shot_calibrated(&self, m: &Metadata, calibration: [f32; 3]) -> Option<[f32; 2]> {
         let neutral = std::array::from_fn(|c| 1. / (m.wb[c].max(1e-6) * calibration[c]));
         let mut xy = [0.3457, 0.3585];
         for pass in 0..30 {

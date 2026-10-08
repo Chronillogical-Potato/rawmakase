@@ -8,6 +8,86 @@ fn xml(attrs: &str, body: &str) -> String {
         r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><r:RDF xmlns:r="{RDF}"><r:Description xmlns:c="{CRS}" {attrs}>{body}</r:Description></r:RDF></x:xmpmeta>"#
     )
 }
+#[test]
+fn white_balance_versions_roundtrip_and_legacy_imports_stay_legacy() -> Result<()> {
+    use crate::model::operators::WhiteBalanceModel as W;
+    let m = Metadata {
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        ..Default::default()
+    };
+    let fresh = Recipe::with_profiles(&m, &[]);
+    for model in [W::Original, W::Calibrated] {
+        let r = Recipe {
+            white_balance_model: model,
+            ..fresh.clone()
+        };
+        let text = write::packet(
+            &r,
+            &m,
+            &write::Photo {
+                settings: true,
+                ..Default::default()
+            },
+        );
+        let back = parse(Path::new("roundtrip.xmp"), &text)?.apply(&fresh, &m, &[], None)?;
+        assert_eq!(back.white_balance_model, model);
+    }
+    for (attrs, expected) in [
+        (r#"c:Temperature="5000" c:Tint="10""#, W::Calibrated),
+        (
+            r#"c:RAWmakaseMarkers="2" c:Temperature="5000""#,
+            W::Original,
+        ),
+        (
+            r#"c:RAWmakasePreset="1" c:WhiteBalance="As Shot""#,
+            W::Original,
+        ),
+    ] {
+        let back = parse(Path::new("wb.xmp"), &xml(attrs, ""))?.apply(&fresh, &m, &[], None)?;
+        assert_eq!(back.white_balance_model, expected);
+    }
+    let future = parse(
+        Path::new("future.xmp"),
+        &xml(r#"c:RAWmakaseWhiteBalanceModel="Unknown""#, ""),
+    )?;
+    assert!(future.apply(&fresh, &m, &[], None).is_err());
+    Ok(())
+}
+
+#[test]
+fn lenient_white_balance_failure_preserves_its_version_and_basic_edits() -> Result<()> {
+    use crate::model::operators::WhiteBalanceModel as W;
+    let m = Metadata {
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        ..Default::default()
+    };
+    let base = Recipe {
+        white_balance_model: W::Original,
+        temperature: 5100.,
+        tint: 7.,
+        wb: [1.1, 1., 0.9],
+        ..Recipe::default()
+    };
+    for attrs in [
+        r#"c:Temperature="broken" c:Exposure2012="0.7""#,
+        r#"c:WhiteBalance="Unsupported" c:Exposure2012="0.7""#,
+        r#"c:RAWmakaseWhiteBalanceModel="Future" c:Temperature="6000" c:Exposure2012="0.7""#,
+    ] {
+        let preset = parse(Path::new("broken-wb.xmp"), &xml(attrs, ""))?;
+        let (back, warnings) = preset.apply_lenient(&base, &m, &[], None)?;
+        assert!(!warnings.is_empty());
+        assert_eq!(back.white_balance_model, base.white_balance_model);
+        assert_eq!(
+            (back.temperature, back.tint, back.wb),
+            (base.temperature, base.tint, base.wb)
+        );
+        assert_eq!(back.exposure, 0.7);
+    }
+    Ok(())
+}
+
 /// A photo whose Auto results are fixed, recording what applying settings asked.
 struct FakeMeasures {
     image: crate::camera_data::CameraImage,

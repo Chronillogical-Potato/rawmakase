@@ -425,3 +425,38 @@ fn lens_profile_setup_changes_that_render_alike_keep_amount() {
         Some(SettingGroup::LensProfileCorrections)
     );
 }
+
+#[test]
+fn zero_amount_keeps_the_white_balance_version() {
+    let before = Recipe::default();
+    let full = Recipe {
+        white_balance_model: crate::model::operators::WhiteBalanceModel::Calibrated,
+        ..before.clone()
+    };
+    assert_eq!(amount(&before, &full).at(0., &metadata()), before);
+}
+
+#[test]
+fn an_amount_rounded_back_to_before_keeps_its_white_balance_conversion() {
+    use crate::model::operators::WhiteBalanceModel;
+    // 5000 K is exactly 200 mired, avoiding reciprocal round-off in this fixture.
+    let before = Recipe {
+        temperature: 5000.,
+        ..Recipe::default()
+    };
+    let full = Recipe {
+        temperature: 7000.,
+        white_balance_model: WhiteBalanceModel::Calibrated,
+        ..before.clone()
+    };
+    let tiny = amount(&before, &full).at(1e-9, &metadata());
+    assert_eq!(tiny.temperature, before.temperature);
+    assert_eq!(tiny.wb, before.wb);
+    assert_eq!(tiny.white_balance_model, before.white_balance_model);
+    assert_eq!(
+        amount(&before, &full)
+            .at(0.5, &metadata())
+            .white_balance_model,
+        WhiteBalanceModel::Calibrated
+    );
+}
