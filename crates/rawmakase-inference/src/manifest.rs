@@ -103,7 +103,7 @@ pub const SUBJECT: ModelSpec = ModelSpec {
     input_name: "input_image",
     output_name: "output_image",
     activation: Activation::Probability,
-    processing_version: 1,
+    processing_version: 2,
     license: "Code: Apache-2.0 (xuebinqin/DIS). Conversion: rembg release v0.0.0 (MIT). \
               Weights: no separate license is published for isnet-general-use.pth; \
               confirm with the authors before redistribution.",

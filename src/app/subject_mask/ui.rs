@@ -11,10 +11,15 @@ use eframe::egui;
 
 impl Editor {
     /// The Select Subject and Select Background actions, with whatever the running or
-    /// failed selection has to say.
+    /// failed selection has to say. While the first use is being set up, the actions
+    /// give way to a card that says what is needed, in order, and does it.
     pub(in crate::app) fn selection_actions(&mut self, ui: &mut egui::Ui) {
         if let Some(request) = self.selection.running() {
             self.selection_progress(ui, request);
+            return;
+        }
+        if self.selection.prompt.is_some() || self.selection.upgrading.is_some() {
+            self.setup_card(ui);
             return;
         }
         let reason = self.selection_unavailable();
@@ -44,7 +49,184 @@ impl Editor {
         if let Some(why) = reason {
             hint(ui, why);
         }
-        self.selection_prompt(ui);
+        if let Some((request, failure)) = self.selection.failure.clone() {
+            self.selection_failure(ui, request, &failure);
+        }
+        self.model_footer(ui);
+    }
+    /// What the first use needs, as a highlighted card in the place the actions were:
+    /// the steps with the finished ones ticked, and the button for the next.
+    fn setup_card(&mut self, ui: &mut egui::Ui) {
+        let request = match self.selection.prompt {
+            Some(Prompt::Model(r) | Prompt::Upgrade(r)) => Some(r),
+            None => self.selection.upgrading.map(|(_, r)| r),
+        };
+        let Some(request) = request else { return };
+        let upgraded = self
+            .library
+            .as_ref()
+            .and_then(|l| l.session.catalog.supports_raster_masks().ok())
+            .unwrap_or(false);
+        let model = self.selection.models.installed();
+        let upgrading = self.selection.upgrading.is_some();
+        let installing = self.selection.models.busy();
+        let accent = egui::Color32::from_rgb(96, 150, 230);
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(34, 44, 62))
+            .stroke(egui::Stroke::new(1.5, accent))
+            .corner_radius(5.)
+            .inner_margin(egui::Margin::same(9))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Before “Select {}” can run",
+                        request.feature.name()
+                    ))
+                    .strong()
+                    .size(12.5),
+                );
+                ui.add_space(4.);
+                let step = |ui: &mut egui::Ui, done: bool, current: bool, text: &str| {
+                    ui.horizontal(|ui| {
+                        let (mark, color) = if done {
+                            ("✓", egui::Color32::from_rgb(110, 200, 130))
+                        } else if current {
+                            ("▶", accent)
+                        } else {
+                            ("○", egui::Color32::GRAY)
+                        };
+                        ui.label(egui::RichText::new(mark).color(color).strong());
+                        ui.label(egui::RichText::new(text).color(if done {
+                            egui::Color32::GRAY
+                        } else {
+                            egui::Color32::WHITE
+                        }));
+                    });
+                };
+                step(ui, upgraded, !upgraded, "Upgrade this catalog");
+                step(
+                    ui,
+                    model,
+                    upgraded && !model,
+                    &format!("Download the selection model ({} MB)", download_megabytes()),
+                );
+                ui.add_space(6.);
+                if !upgraded {
+                    self.upgrade_step(ui, request, upgrading);
+                } else if !model {
+                    self.model_step(ui, installing);
+                }
+                if !super::worker::runtime_present() {
+                    ui.add_space(4.);
+                    ui.colored_label(
+                        egui::Color32::from_rgb(230, 170, 90),
+                        "This copy of RAWmakase has no ONNX Runtime library, so selecting \
+                         cannot run yet.",
+                    );
+                }
+            });
+    }
+    fn upgrade_step(&mut self, ui: &mut egui::Ui, request: Request, upgrading: bool) {
+        let small = |text: &str| {
+            egui::RichText::new(text)
+                .size(11.)
+                .color(egui::Color32::LIGHT_GRAY)
+        };
+        ui.add(
+            egui::Label::new(small(
+                "Masks made from a selection are stored in the catalog, which needs a newer \
+                 format. RAWmakase first saves a backup copy beside the catalog (as large as \
+                 it), then upgrades it. Older versions of RAWmakase cannot open an upgraded \
+                 catalog, and it must not be open on another computer or in another copy of \
+                 RAWmakase.",
+            ))
+            .wrap(),
+        );
+        ui.add_space(6.);
+        if upgrading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Backing up and upgrading the catalog…");
+            });
+            return;
+        }
+        ui.horizontal(|ui| {
+            let go = egui::Button::new(egui::RichText::new("Upgrade catalog…").strong())
+                .fill(egui::Color32::from_rgb(52, 98, 170));
+            if ui.add(go).clicked() {
+                self.upgrade_catalog(request);
+            }
+            if ui.button("Not now").clicked() {
+                self.selection.prompt = None;
+            }
+        });
+    }
+    fn model_step(&mut self, ui: &mut egui::Ui, installing: bool) {
+        if let Some((done, total)) = self.selection.models.progress() {
+            ui.add(
+                egui::ProgressBar::new(done as f32 / total.max(1) as f32)
+                    .desired_width(ui.available_width())
+                    .text(format!("{} of {} MB", done / 1_000_000, total / 1_000_000)),
+            );
+            if ui.button("Cancel download").clicked() {
+                self.selection.models.cancel();
+            }
+            return;
+        }
+        if installing {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Working…");
+            });
+            return;
+        }
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(
+                    "The model runs on this computer; no photo leaves it. It is a one-time \
+                     download and needs about that much free disk space.",
+                )
+                .size(11.)
+                .color(egui::Color32::LIGHT_GRAY),
+            )
+            .wrap(),
+        );
+        ui.add_space(6.);
+        ui.horizontal(|ui| {
+            let go = egui::Button::new(egui::RichText::new("Download").strong())
+                .fill(egui::Color32::from_rgb(52, 98, 170));
+            if ui.add(go).clicked() {
+                self.install_model(None);
+            }
+            if ui
+                .button("Import model…")
+                .on_hover_text("Use the model file from elsewhere (a copy you transferred)")
+                .clicked()
+            {
+                let (tx, ctx) = (self.tx.clone(), self.context.clone());
+                spawn(
+                    tx,
+                    ctx,
+                    |tx| {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Import the selection model")
+                            .add_filter("ONNX model", &["onnx"])
+                            .pick_file()
+                        {
+                            let _ = tx.send(Event::ModelFile(path));
+                        }
+                    },
+                    |_, _| {},
+                );
+            }
+            if ui.button("Not now").clicked() {
+                self.selection.prompt = None;
+            }
+        });
+    }
+    /// Remove, once the model is installed.
+    fn model_footer(&mut self, ui: &mut egui::Ui) {
         if self.selection.models.installed() && self.selection.running().is_none() {
             indented(ui, |ui| {
                 let remove = ui
@@ -80,19 +262,6 @@ impl Editor {
             }
         });
     }
-    fn selection_prompt(&mut self, ui: &mut egui::Ui) {
-        if let Some((request, failure)) = self.selection.failure.clone() {
-            self.selection_failure(ui, request, &failure);
-        }
-        match self.selection.prompt {
-            Some(Prompt::Model(request)) => self.model_prompt(ui, request),
-            Some(Prompt::Upgrade(request)) => self.upgrade_prompt(ui, request),
-            None => {}
-        }
-        if self.selection.upgrading.is_some() {
-            hint(ui, "Backing up and upgrading the catalog…");
-        }
-    }
     fn selection_failure(&mut self, ui: &mut egui::Ui, request: Request, failure: &Failure) {
         if *failure == Failure::ModelMissing {
             self.selection.failure = None;
@@ -107,87 +276,6 @@ impl Editor {
             }
             if ui.button("Dismiss").clicked() {
                 self.selection.failure = None;
-            }
-        });
-    }
-    fn model_prompt(&mut self, ui: &mut egui::Ui, request: Request) {
-        if let Some((done, total)) = self.selection.models.progress() {
-            indented(ui, |ui| {
-                ui.add(
-                    egui::ProgressBar::new(done as f32 / total.max(1) as f32)
-                        .desired_width(ui.available_width() - 70.)
-                        .text(format!("{} of {} MB", done / 1_000_000, total / 1_000_000)),
-                );
-                if ui.button("Cancel").clicked() {
-                    self.selection.models.cancel();
-                }
-            });
-            return;
-        }
-        let mb = download_megabytes();
-        hint(
-            ui,
-            &format!(
-                "Selecting runs a model on this computer. It is a one-time download of \
-                 {mb} MB and needs about that much free disk space. No photo leaves \
-                 this computer."
-            ),
-        );
-        if !super::worker::runtime_present() {
-            hint(
-                ui,
-                "This copy of RAWmakase does not include the ONNX Runtime library the model \
-                 needs, so selecting will not run yet.",
-            );
-        }
-        indented(ui, |ui| {
-            if ui.button("Download").clicked() {
-                self.install_model(None);
-            }
-            if ui
-                .button("Import model…")
-                .on_hover_text("Use the model file from elsewhere (a copy you transferred)")
-                .clicked()
-            {
-                let (tx, ctx) = (self.tx.clone(), self.context.clone());
-                spawn(
-                    tx,
-                    ctx,
-                    |tx| {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Import the selection model")
-                            .add_filter("ONNX model", &["onnx"])
-                            .pick_file()
-                        {
-                            let _ = tx.send(Event::ModelFile(path));
-                        }
-                    },
-                    |_, _| {},
-                );
-            }
-            if ui.button("Not now").clicked() {
-                self.selection.prompt = None;
-            }
-        });
-        let _ = request;
-    }
-    fn upgrade_prompt(&mut self, ui: &mut egui::Ui, request: Request) {
-        if self.selection.upgrading.is_some() {
-            return;
-        }
-        hint(
-            ui,
-            "Masks made from a selection need an upgraded catalog. RAWmakase first saves a \
-             backup copy of this catalog beside it (as large as the catalog), then upgrades \
-             it. Older versions of RAWmakase cannot open an upgraded catalog, and it must not \
-             be open on another computer or in another copy of RAWmakase.",
-        );
-        indented(ui, |ui| {
-            if ui.button("Upgrade catalog…").clicked() {
-                self.upgrade_catalog(request);
-            }
-            if ui.button("Not now").clicked() {
-                self.selection.prompt = None;
             }
         });
     }
@@ -257,6 +345,11 @@ impl Editor {
         if self.selection.running().is_some() {
             self.selection_progress(ui, self.selection.running().expect("checked"));
         }
-        self.selection_prompt(ui);
+        if let Some((request, failure)) = self.selection.failure.clone() {
+            self.selection_failure(ui, request, &failure);
+        }
+        if self.selection.prompt.is_some() || self.selection.upgrading.is_some() {
+            self.setup_card(ui);
+        }
     }
 }

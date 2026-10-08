@@ -195,7 +195,9 @@ impl Session {
             return Err(InferenceError::Cancelled);
         }
         coverage?;
-        process::postprocess(&data, &shape, &self.spec, &geometry)
+        let mut coverage = process::postprocess(&data, &shape, &self.spec, &geometry)?;
+        crate::refine::refine(&mut coverage, image);
+        Ok(coverage)
     }
 }
 

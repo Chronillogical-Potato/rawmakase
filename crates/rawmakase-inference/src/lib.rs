@@ -13,6 +13,7 @@
 mod error;
 pub mod manifest;
 pub mod process;
+pub mod refine;
 pub mod runtime;
 
 pub use error::InferenceError;
