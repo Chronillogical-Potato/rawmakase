@@ -38,8 +38,7 @@ left, in order, with the finished ones ticked: upgrade the catalog, then downloa
 models.
 
 - **On this computer.** The models are downloaded on request (Segment Anything 2.1 Hiera
-  small, four files, 184 MB; DETR panoptic, 87 MB; each file checked against a pinned SHA-256)
-  or imported from a folder with the files; nothing downloads at startup, on opening a
+  small, four files, 184 MB; DETR panoptic, 87 MB; each file checked against a pinned SHA-256); nothing downloads at startup, on opening a
   catalog or the drawer, or at an update. They run on the CPU through ONNX Runtime, which
   ships with the app (beside the executable; source builds put `libonnxruntime` in the
   data folder's `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the

@@ -206,7 +206,7 @@ struct Pending {
 /// What the drawer asks the user before a selection can run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Prompt {
-    /// The model has to be downloaded or imported.
+    /// The models have to be downloaded.
     Model(Request),
     /// The catalog has to be upgraded to keep the result.
     Upgrade(Request),
@@ -651,13 +651,20 @@ impl Editor {
             Err(why) => self.status = format!("Model not installed: {why}"),
         }
     }
-    /// Asks the installer to download the model (the prompt's Download) or to import a
-    /// file the user chose.
-    pub(super) fn install_model(&mut self, import: Option<std::path::PathBuf>) {
+    /// Asks the installer to download the models (the setup card's Download).
+    pub(super) fn install_model(&mut self) {
         self.context.request_repaint();
         self.selection
             .models
-            .install(import, self.tx.clone(), self.context.clone());
+            .install(None, self.tx.clone(), self.context.clone());
+    }
+    /// Installs the models from a folder holding their files, each checked as a
+    /// download is: for tests, which have no network.
+    #[cfg(test)]
+    pub(super) fn install_model_from(&mut self, folder: std::path::PathBuf) {
+        self.selection
+            .models
+            .install(Some(folder), self.tx.clone(), self.context.clone());
     }
     /// Upgrades the open catalog on a thread of its own, after the edit is saved.
     pub(super) fn upgrade_catalog(&mut self, request: Request) {

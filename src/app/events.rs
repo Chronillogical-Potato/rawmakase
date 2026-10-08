@@ -104,7 +104,6 @@ impl Editor {
                         Err(e) => format!("Model not removed: {e}"),
                     };
                 }
-                Event::ModelFolder(folder) => self.install_model(Some(folder)),
                 Event::CatalogUpgraded { generation, result } => {
                     self.catalog_upgraded(generation, result)
                 }

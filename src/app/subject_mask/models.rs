@@ -1,6 +1,6 @@
-//! Installing the selection model: downloaded from where the release pins it, or
-//! imported from a file the user already has. Nothing starts without the user's
-//! choice, and nothing is published until its size and SHA-256 match the manifest.
+//! Installing the selection models: downloaded from where the release pins them (or,
+//! in tests, copied from a folder). Nothing starts without the user's choice, and
+//! nothing is published until its size and SHA-256 match the manifest.
 use super::super::task::Stopping;
 use super::super::worker::Event;
 use eframe::egui;

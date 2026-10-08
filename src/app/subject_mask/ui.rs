@@ -5,8 +5,6 @@ use super::models::download_megabytes;
 use super::{Failure, Feature, Prompt, Request, Target};
 use crate::app::Editor;
 use crate::app::retouch_tool::{control_label, hint, indented};
-use crate::app::task::spawn;
-use crate::app::worker::Event;
 use eframe::egui;
 
 impl Editor {
@@ -410,27 +408,7 @@ impl Editor {
             let go = egui::Button::new(egui::RichText::new("Download").strong())
                 .fill(egui::Color32::from_rgb(52, 98, 170));
             if ui.add(go).clicked() {
-                self.install_model(None);
-            }
-            if ui
-                .button("Import model…")
-                .on_hover_text("Use the models' files from a folder (a copy you transferred)")
-                .clicked()
-            {
-                let (tx, ctx) = (self.tx.clone(), self.context.clone());
-                spawn(
-                    tx,
-                    ctx,
-                    |tx| {
-                        if let Some(folder) = rfd::FileDialog::new()
-                            .set_title("Choose the folder holding the selection models' files")
-                            .pick_folder()
-                        {
-                            let _ = tx.send(Event::ModelFolder(folder));
-                        }
-                    },
-                    |_, _| {},
-                );
+                self.install_model();
             }
             if ui.button("Not now").clicked() {
                 self.selection.prompt = None;

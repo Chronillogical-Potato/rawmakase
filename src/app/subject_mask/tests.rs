@@ -728,7 +728,7 @@ fn after_installing_the_models_every_selection_runs_without_asking_again() {
     // Subject asks first; the install it offers finishes; the request goes on by itself.
     e.request_selection(SUBJECT);
     assert_eq!(e.selection.prompt, Some(Prompt::Model(SUBJECT)));
-    e.install_model(Some(folder));
+    e.install_model_from(folder);
     let result = loop {
         if let crate::app::worker::Event::ModelInstalled(r) =
             e.rx.recv_timeout(std::time::Duration::from_secs(120))

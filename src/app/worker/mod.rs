@@ -64,8 +64,6 @@ pub(crate) enum Event {
     /// The selection model finished installing, or why not.
     ModelInstalled(Result<(), String>),
     ModelRemoved(Result<(), String>),
-    /// A folder chosen to import the selection models from.
-    ModelFolder(PathBuf),
     /// A catalog upgrade for raster masks finished: the backup it made, or why not.
     CatalogUpgraded {
         generation: u64,
