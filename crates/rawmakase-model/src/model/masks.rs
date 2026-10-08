@@ -124,7 +124,7 @@ pub struct BitmapMask {
 /// Which feature generated a raster, and from which inputs.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct BitmapSource {
-    /// `subject`.
+    /// `subject` or `sky`.
     pub feature: String,
     /// The model's id and the digest of its file.
     pub model: String,
@@ -133,6 +133,7 @@ pub struct BitmapSource {
     pub input: String,
 }
 pub const FEATURE_SUBJECT: &str = "subject";
+pub const FEATURE_SKY: &str = "sky";
 impl MaskShape {
     pub fn kind(&self) -> &'static str {
         match self {
@@ -143,6 +144,7 @@ impl MaskShape {
             MaskShape::LuminanceRange { .. } => "Luminance Range",
             MaskShape::Bitmap(b) => match b.source.as_ref().map(|s| s.feature.as_str()) {
                 Some(FEATURE_SUBJECT) => "Subject",
+                Some(FEATURE_SKY) => "Sky",
                 _ => "Bitmap",
             },
         }

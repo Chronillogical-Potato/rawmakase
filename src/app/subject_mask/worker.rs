@@ -4,17 +4,17 @@
 //! runtime notices within a few milliseconds; quitting hands the thread to the shared
 //! shutdown deadline rather than joining it, and the thread keeps its session until
 //! it ends, so a native call is never left running on unloaded code.
-use super::{Done, Failure, Generated};
+use super::{Action, Done, Failure, Feature, Generated};
 use crate::app::task::Stopping;
 use crate::app::worker::Event;
 use crate::camera_data::CameraImage;
-use crate::model::masks::{BitmapSource, FEATURE_SUBJECT};
+use crate::model::masks::BitmapSource;
 use crate::model::recipe::Recipe;
 use crate::storage::bitmaps::Bitmap;
 use crate::storage::{FNV_OFFSET, fnv1a, mask_assets};
 use eframe::egui;
 use rawmakase_inference::{
-    Embedding, InferenceError, LoadOptions, Prompt, RgbImage, SUBJECT, Session, Subject,
+    Analysis, InferenceError, LoadOptions, Prompt, RgbImage, SUBJECT, Session, Subject,
 };
 use std::path::PathBuf;
 use std::sync::{
@@ -37,7 +37,7 @@ pub(super) struct Job {
     pub(super) recipe: Recipe,
     /// The model's folder.
     pub(super) model: PathBuf,
-    pub(super) prompt: Prompt,
+    pub(super) action: Action,
 }
 
 enum Message {
@@ -144,7 +144,7 @@ fn run(inbox: mpsc::Receiver<Message>) {
 #[derive(Default)]
 struct State {
     session: Option<Session>,
-    embedding: Option<(String, Embedding)>,
+    analysis: Option<(String, Analysis)>,
 }
 
 fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
@@ -171,21 +171,40 @@ fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
         state.session = Some(load(&job.model)?);
     }
     let session = state.session.as_mut().expect("loaded above");
-    if state.embedding.as_ref().is_none_or(|(k, _)| *k != key) {
-        state.embedding = None;
-        let embedding = session.embed(&rgb, &job.cancel).map_err(failure)?;
-        state.embedding = Some((key.clone(), embedding));
+    if state.analysis.as_ref().is_none_or(|(k, _)| *k != key) {
+        state.analysis = None;
+        let analysis = session.analyze(&rgb, &job.cancel).map_err(failure)?;
+        state.analysis = Some((key.clone(), analysis));
     }
-    let (_, embedding) = state.embedding.as_ref().expect("embedded above");
-    let coverage = session
-        .segment(embedding, &job.prompt, &job.cancel)
-        .map_err(failure)?;
+    let (_, analysis) = state.analysis.as_ref().expect("analysed above");
+    let (coverage, feature, nothing, input) = match &job.action {
+        Action::Auto(Feature::Sky) => (
+            analysis.sky().map_err(failure)?,
+            Feature::Sky,
+            Failure::NoSky,
+            prompt_key(&key, "sky", &Prompt::default()),
+        ),
+        Action::Auto(feature) => (
+            analysis.subject().map_err(failure)?,
+            *feature,
+            Failure::NoSubject,
+            prompt_key(&key, "subject", &Prompt::default()),
+        ),
+        Action::Click(prompt) => (
+            session
+                .segment(analysis.embedding(), prompt, &job.cancel)
+                .map_err(failure)?,
+            Feature::Subject,
+            Failure::NothingThere,
+            prompt_key(&key, "click", prompt),
+        ),
+    };
     if cancelled() {
         return Err(Failure::Cancelled);
     }
     // Exactly nothing selected is the only emptiness decided here.
     if coverage.data.iter().all(|v| *v == 0) {
-        return Err(Failure::NoSubject);
+        return Err(nothing);
     }
     let (width, height) = (coverage.width as u32, coverage.height as u32);
     let id = mask_assets::register(Bitmap {
@@ -201,16 +220,16 @@ fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
         width,
         height,
         source: BitmapSource {
-            feature: FEATURE_SUBJECT.into(),
+            feature: feature.provenance().into(),
             model: format!("{}@{}", SUBJECT.id, &SUBJECT.files[1].sha256[..16]),
-            input: prompt_key(&key, &job.prompt),
+            input,
         },
     })
 }
 
 /// What the result was made from: the photo as the model saw it and the prompt.
-fn prompt_key(input: &str, prompt: &Prompt) -> String {
-    let mut text = input.to_string();
+fn prompt_key(input: &str, what: &str, prompt: &Prompt) -> String {
+    let mut text = format!("{input}|{what}");
     for p in &prompt.points {
         text.push_str(&format!("|{:.4},{:.4},{}", p.x, p.y, p.positive));
     }

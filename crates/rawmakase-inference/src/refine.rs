@@ -32,13 +32,13 @@ pub fn refine(coverage: &mut Coverage, image: &RgbImage) {
 }
 
 /// Narrows the soft ramp: below 0.25 is nothing, above 0.75 is everything.
-fn smooth(v: f32) -> f32 {
+pub(crate) fn smooth(v: f32) -> f32 {
     let t = ((v - 0.25) / 0.5).clamp(0., 1.);
     t * t * (3. - 2. * t)
 }
 
 /// Mean over the `(2r+1)²` window around every pixel, clamped at the edges.
-fn mean(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+pub(crate) fn mean(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
     // Horizontal running sums, then vertical.
     let mut tmp = vec![0f32; w * h];
     for y in 0..h {
@@ -66,7 +66,7 @@ fn mean(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
     out
 }
 
-fn guided(i: &[f32], p: &[f32], w: usize, h: usize, r: usize, eps: f32) -> Vec<f32> {
+pub(crate) fn guided(i: &[f32], p: &[f32], w: usize, h: usize, r: usize, eps: f32) -> Vec<f32> {
     let n = w * h;
     let mean_i = mean(i, w, h, r);
     let mean_p = mean(p, w, h, r);

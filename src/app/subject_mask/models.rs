@@ -4,7 +4,8 @@
 use super::super::task::Stopping;
 use super::super::worker::Event;
 use eframe::egui;
-use rawmakase_inference::{ModelFile, SUBJECT};
+use rawmakase_inference::ModelFile;
+use rawmakase_inference::manifest::{all_files, total_bytes};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -45,14 +46,18 @@ impl Default for Installer {
 pub(super) fn model_dir() -> PathBuf {
     crate::storage::local_data_dir()
         .join("models")
-        .join(format!("{}-v{}", SUBJECT.id, SUBJECT.version))
+        .join(format!(
+            "{}-v{}",
+            rawmakase_inference::SUBJECT.id,
+            rawmakase_inference::SUBJECT.version
+        ))
 }
 /// Where the app looks for a runtime library it did not come with.
 pub(super) fn runtime_dir() -> PathBuf {
     crate::storage::local_data_dir().join("runtime")
 }
 fn is_installed(dir: &Path) -> bool {
-    SUBJECT.files.iter().all(|f| has(dir, f))
+    all_files().iter().all(|f| has(dir, f))
 }
 fn has(dir: &Path, file: &ModelFile) -> bool {
     std::fs::metadata(dir.join(file.name)).is_ok_and(|m| m.is_file() && m.len() == file.size_bytes)
@@ -60,7 +65,7 @@ fn has(dir: &Path, file: &ModelFile) -> bool {
 
 /// The megabytes the drawer quotes.
 pub(super) fn download_megabytes() -> u64 {
-    SUBJECT.total_bytes().div_ceil(1_000_000)
+    total_bytes().div_ceil(1_000_000)
 }
 
 impl Installer {
@@ -78,7 +83,7 @@ impl Installer {
     pub(in crate::app) fn progress(&self) -> Option<(u64, u64)> {
         self.progress
             .as_ref()
-            .map(|p| (p.done.load(Ordering::Relaxed), SUBJECT.total_bytes()))
+            .map(|p| (p.done.load(Ordering::Relaxed), total_bytes()))
     }
     pub(in crate::app) fn cancel(&mut self) {
         if let Some(p) = &self.progress {
@@ -174,7 +179,7 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     remove_abandoned(&dir);
     // Bytes of files already there count as done.
     let mut finished = 0u64;
-    for file in SUBJECT.files {
+    for file in &all_files() {
         if has(&dir, file) {
             finished += file.size_bytes;
             progress.done.store(finished, Ordering::Relaxed);
@@ -289,7 +294,7 @@ fn download(
     file: &ModelFile,
     before: u64,
 ) -> Result<String, String> {
-    let url = SUBJECT.url(file);
+    let url = file.url;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(20)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -313,7 +318,7 @@ fn download(
         out.set_len(0).map_err(|e| e.to_string())?;
         out.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
         progress.done.store(before, Ordering::Relaxed);
-        match agent.get(&url).call() {
+        match agent.get(url).call() {
             Ok(mut response) => {
                 let reader = response.body_mut().as_reader();
                 match copy_checked(reader, out, progress, file, before) {
@@ -340,6 +345,7 @@ mod tests {
         name: "x.onnx",
         size_bytes: 3,
         sha256: "",
+        url: "",
     };
 
     #[test]
@@ -363,20 +369,24 @@ mod tests {
 
     #[test]
     fn the_install_location_names_the_model_and_its_version() {
-        assert!(model_dir().ends_with(format!("models/{}-v{}", SUBJECT.id, SUBJECT.version)));
-        assert!(download_megabytes() > 100);
+        assert!(model_dir().ends_with(format!(
+            "models/{}-v{}",
+            rawmakase_inference::SUBJECT.id,
+            rawmakase_inference::SUBJECT.version
+        )));
+        assert!(download_megabytes() > 300);
     }
 
     #[test]
     fn a_model_is_installed_only_when_every_file_is_there_with_its_size() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!is_installed(dir.path()));
-        for file in SUBJECT.files {
+        for file in all_files() {
             let f = std::fs::File::create(dir.path().join(file.name)).unwrap();
             f.set_len(file.size_bytes).unwrap();
         }
         assert!(is_installed(dir.path()));
-        std::fs::File::create(dir.path().join(SUBJECT.files[1].name))
+        std::fs::File::create(dir.path().join(all_files()[1].name))
             .unwrap()
             .set_len(5)
             .unwrap();

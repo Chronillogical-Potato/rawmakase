@@ -96,9 +96,13 @@ impl Prompt {
 
 /// Stretches `image` to the encoder's square input and normalizes it: the planar
 /// `[1, 3, S, S]` float tensor, flat and channel-major.
-pub fn preprocess(image: &RgbImage, spec: &ModelSpec) -> Result<Vec<f32>, InferenceError> {
+pub fn preprocess(
+    image: &RgbImage,
+    size: usize,
+    mean: [f32; 3],
+    std: [f32; 3],
+) -> Result<Vec<f32>, InferenceError> {
     check_image(image)?;
-    let size = spec.input_size;
     let whole = Rect {
         x: 0,
         y: 0,
@@ -112,11 +116,7 @@ pub fn preprocess(image: &RgbImage, spec: &ModelSpec) -> Result<Vec<f32>, Infere
             *dst = f32::from(rgb[channel]) / 255.0;
         }
         let resized = resample(&plane, image.width, whole, size, size);
-        tensor.extend(
-            resized
-                .iter()
-                .map(|v| (v - spec.mean[channel]) / spec.std[channel]),
-        );
+        tensor.extend(resized.iter().map(|v| (v - mean[channel]) / std[channel]));
     }
     Ok(tensor)
 }
@@ -242,7 +242,7 @@ fn taps(src_start: usize, src_len: usize, dst_len: usize) -> Vec<Taps> {
 
 /// Resamples the `window` of a single-channel `src` plane (row stride `stride`)
 /// to `dst_width` x `dst_height`.
-fn resample(
+pub(crate) fn resample(
     src: &[f32],
     stride: usize,
     window: Rect,
@@ -302,7 +302,7 @@ mod tests {
             height: 2,
             data: [255, 0, 51].repeat(6),
         };
-        let tensor = preprocess(&flat, &SUBJECT).unwrap();
+        let tensor = preprocess(&flat, SUBJECT.input_size, SUBJECT.mean, SUBJECT.std).unwrap();
         let plane = SUBJECT.input_size * SUBJECT.input_size;
         assert_eq!(tensor.len(), 3 * plane);
         let expect = |c: usize, v: f32| (v - SUBJECT.mean[c]) / SUBJECT.std[c];
@@ -316,8 +316,9 @@ mod tests {
     fn a_malformed_image_is_refused() {
         let mut bad = image(4, 4);
         bad.data.pop();
-        assert!(preprocess(&bad, &SUBJECT).is_err());
-        assert!(preprocess(&image(0, 4), &SUBJECT).is_err());
+        let pre = |i: &RgbImage| preprocess(i, 1024, SUBJECT.mean, SUBJECT.std);
+        assert!(pre(&bad).is_err());
+        assert!(pre(&image(0, 4)).is_err());
     }
 
     #[test]

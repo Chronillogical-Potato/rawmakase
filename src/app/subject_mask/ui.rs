@@ -28,21 +28,17 @@ impl Editor {
         }
         let reason = self.selection_unavailable();
         control_label(ui, "Select", |ui| {
-            let w = (ui.available_width() - 4.) / 2.;
-            for (feature, label) in [
-                (Feature::Subject, "Select Subject"),
-                (Feature::Background, "Select Background"),
+            let gap = 4.;
+            let w = (ui.available_width() - 2. * gap) / 3.;
+            for (feature, tip) in [
+                (Feature::Subject, "Mask the photo's main subject"),
+                (Feature::Sky, "Mask the sky"),
+                (
+                    Feature::Background,
+                    "Mask everything but the photo's main subject",
+                ),
             ] {
-                let button = egui::Button::new(label).min_size(egui::vec2(w, 24.));
-                let response = ui.add_enabled(reason.is_none(), button);
-                let response = match reason {
-                    Some(why) => response.on_disabled_hover_text(why),
-                    None => response.on_hover_text(match feature {
-                        Feature::Subject => "Mask the photo's main subject",
-                        Feature::Background => "Mask everything but the photo's main subject",
-                    }),
-                };
-                if response.clicked() {
+                if self.feature_tile(ui, feature, w, tip, reason) {
                     self.request_selection(Request {
                         feature,
                         target: Target::NewMask,
@@ -57,6 +53,60 @@ impl Editor {
             self.selection_failure(ui, request, &failure);
         }
         self.model_footer(ui);
+    }
+    /// One of the Select tiles: an icon over its name, as Lightroom's Add New Mask.
+    /// Returns whether it was clicked; when `disabled` says why, it is dimmed and says so
+    /// on hover.
+    fn feature_tile(
+        &self,
+        ui: &mut egui::Ui,
+        feature: Feature,
+        width: f32,
+        tip: &str,
+        disabled: Option<&str>,
+    ) -> bool {
+        let palette = crate::app::theme::palette(ui.ctx());
+        let sense = if disabled.is_some() {
+            egui::Sense::hover()
+        } else {
+            egui::Sense::click()
+        };
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 52.), sense);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                disabled.is_none(),
+                format!("Select {}", feature.name()),
+            )
+        });
+        let hot = response.hovered() && disabled.is_none();
+        ui.painter()
+            .rect_filled(rect, 4., palette.gray(if hot { 54 } else { 38 }));
+        let ink = palette.gray(match (disabled.is_some(), hot) {
+            (true, _) => 95,
+            (false, true) => 245,
+            (false, false) => 200,
+        });
+        paint_feature_icon(
+            ui.painter(),
+            rect.center_top() + egui::vec2(0., 20.),
+            feature,
+            ink,
+        );
+        ui.painter().text(
+            rect.center_bottom() - egui::vec2(0., 9.),
+            egui::Align2::CENTER_CENTER,
+            feature.name(),
+            egui::FontId::proportional(11.),
+            ink,
+        );
+        let response = match disabled {
+            Some(why) => response.on_hover_text(why),
+            None => response
+                .on_hover_text(tip)
+                .on_hover_cursor(egui::CursorIcon::PointingHand),
+        };
+        response.clicked()
     }
     /// While aiming: what to do on the photo, and how to finish.
     fn prompting_card(&mut self, ui: &mut egui::Ui) {
@@ -269,7 +319,10 @@ impl Editor {
                     ui,
                     model,
                     upgraded && !model,
-                    &format!("Download the selection model ({} MB)", download_megabytes()),
+                    &format!(
+                        "Download the selection models ({} MB)",
+                        download_megabytes()
+                    ),
                 );
                 ui.add_space(6.);
                 if !upgraded {
@@ -410,9 +463,12 @@ impl Editor {
             ui.spinner();
             // No percentage: the runtime reports none for a run.
             ui.label(format!(
-                "Selecting {}…",
+                "Finding the {}…",
                 request.feature.name().to_lowercase()
-            ));
+            ))
+            .on_hover_text(
+                "The first selection on a photo takes a few seconds; the next ones are quick",
+            );
             if ui
                 .button("Cancel")
                 .on_hover_text("Stop selecting; the photo is left as it was")
@@ -450,6 +506,7 @@ impl Editor {
         let reason = self.selection_unavailable();
         for (feature, label) in [
             (Feature::Subject, "Subject"),
+            (Feature::Sky, "Sky"),
             (Feature::Background, "Background"),
         ] {
             let response = ui.add_enabled(
@@ -469,47 +526,115 @@ impl Editor {
             }
         }
     }
-    /// The selected generated component's source and Regenerate.
+    /// The selected generated component's source, Regenerate and, for subjects, aiming
+    /// with clicks.
     pub(in crate::app) fn regenerate_ui(
         &mut self,
         ui: &mut egui::Ui,
         mask: usize,
         component: usize,
-        invert: bool,
+        feature: Feature,
         source: &str,
     ) {
         hint(ui, source);
         let reason = self.selection_unavailable();
         let busy = self.selection.running().is_some();
+        let free = reason.is_none() && !busy && self.selection.prompting.is_none();
         indented(ui, |ui| {
-            let response =
-                ui.add_enabled(reason.is_none() && !busy, egui::Button::new("Regenerate"));
-            let response = match reason {
-                Some(why) => response.on_disabled_hover_text(why),
-                None => response.on_hover_text(
-                    "Select again and replace only this part of the mask; its other parts and \
+            let regenerate = ui.add_enabled(free, egui::Button::new("Regenerate"));
+            let regenerate = match reason {
+                Some(why) => regenerate.on_disabled_hover_text(why),
+                None => regenerate.on_hover_text(
+                    "Find it again and replace only this part of the mask; its other parts and \
                      the adjustments stay",
                 ),
             };
-            if response.clicked() {
+            if regenerate.clicked() {
                 self.request_selection(Request {
-                    feature: if invert {
-                        Feature::Background
-                    } else {
-                        Feature::Subject
-                    },
+                    feature,
                     target: Target::Regenerate { mask, component },
                 });
             }
+            if feature != Feature::Sky {
+                let refine = ui
+                    .add_enabled(free, egui::Button::new("Refine with clicks…"))
+                    .on_hover_text(
+                        "Click on the photo to add to this selection, Alt-click to leave \
+                         something out",
+                    );
+                if refine.clicked() {
+                    self.begin_refining(mask, component);
+                }
+            }
         });
-        if self.selection.running().is_some() {
-            self.selection_progress(ui, self.selection.running().expect("checked"));
+        if let Some(request) = self.selection.running() {
+            self.selection_progress(ui, request);
         }
         if let Some((request, failure)) = self.selection.failure.clone() {
             self.selection_failure(ui, request, &failure);
         }
         if self.selection.prompt.is_some() || self.selection.upgrading.is_some() {
             self.setup_card(ui);
+        }
+    }
+}
+
+/// An icon for each selection, in a dashed frame as Lightroom draws them: a head and
+/// shoulders, a sky over a hill, and the frame with the head and shoulders cut out.
+pub(in crate::app) fn paint_feature_icon(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    feature: Feature,
+    ink: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.2, ink);
+    let (w, h) = (11., 9.5);
+    let corners = [
+        c + egui::vec2(-w, -h),
+        c + egui::vec2(w, -h),
+        c + egui::vec2(w, h),
+        c + egui::vec2(-w, h),
+        c + egui::vec2(-w, -h),
+    ];
+    painter.add(egui::Shape::dashed_line(&corners, stroke, 2.2, 1.8));
+    // A head and shoulders, centred a little low.
+    let person = |color: egui::Color32| {
+        painter.circle_filled(c + egui::vec2(0., -2.6), 2.9, color);
+        painter.add(egui::Shape::convex_polygon(
+            (0..=12)
+                .map(|i| {
+                    let t = std::f32::consts::PI * i as f32 / 12.;
+                    c + egui::vec2(-t.cos() * 5.8, 8.4 - t.sin() * 5.4)
+                })
+                .collect(),
+            color,
+            egui::Stroke::NONE,
+        ));
+    };
+    match feature {
+        Feature::Subject => person(ink),
+        Feature::Sky => {
+            painter.circle_filled(c + egui::vec2(5., -3.8), 1.9, ink);
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    c + egui::vec2(-8., 7.),
+                    c + egui::vec2(-3., -1.),
+                    c + egui::vec2(0.5, 3.),
+                    c + egui::vec2(3., 0.),
+                    c + egui::vec2(8., 7.),
+                ],
+                ink,
+                egui::Stroke::NONE,
+            ));
+        }
+        Feature::Background => {
+            painter.rect_filled(
+                egui::Rect::from_center_size(c, egui::vec2(2. * w - 3., 2. * h - 3.)),
+                1.,
+                ink.gamma_multiply(0.55),
+            );
+            // The subject cut out of it: drawn in the tile's own colour.
+            person(egui::Color32::from_gray(38));
         }
     }
 }

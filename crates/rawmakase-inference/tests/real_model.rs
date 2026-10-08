@@ -71,3 +71,42 @@ fn a_click_selects_the_object_under_it_and_a_click_elsewhere_does_not() {
         Some(InferenceError::Cancelled)
     );
 }
+
+#[test]
+#[ignore = "needs the model and an ONNX Runtime"]
+fn the_subject_is_found_without_a_click_and_the_object_in_front_is_not_sky() {
+    let cancel = AtomicBool::new(false);
+    let mut session = Subject::load(&model()).unwrap();
+    let image = scene();
+    let analysis = session.analyze(&image, &cancel).unwrap();
+    let subject = analysis.subject().unwrap();
+    let at = |c: &rawmakase_inference::Coverage, x: usize, y: usize| c.data[y * c.width + x];
+    assert!(at(&subject, 200, 120) > 200, "{}", at(&subject, 200, 120));
+    assert!(at(&subject, 20, 20) < 40, "{}", at(&subject, 20, 20));
+    // The smooth blue backdrop may count as sky; the object in front of it never does.
+    let sky = analysis.sky().unwrap();
+    assert!(at(&sky, 200, 120) < 40, "{}", at(&sky, 200, 120));
+    // Clicks work on the same analysis.
+    let click = Prompt {
+        points: vec![Point {
+            x: 200. / 320.,
+            y: 0.5,
+            positive: true,
+        }],
+        bounds: None,
+    };
+    assert!(
+        at(
+            &session
+                .segment(analysis.embedding(), &click, &cancel)
+                .unwrap(),
+            200,
+            120
+        ) > 200
+    );
+    cancel.store(true, Ordering::Relaxed);
+    assert_eq!(
+        session.analyze(&image, &cancel).err(),
+        Some(InferenceError::Cancelled)
+    );
+}

@@ -8,11 +8,13 @@ mod models;
 mod ui;
 mod worker;
 
+pub(super) use ui::paint_feature_icon;
+
 use super::Editor;
 use super::task::{Stopping, Task};
 use crate::model::masks::{
-    BITMAP_SAMPLING, BitmapMask, BitmapSource, FEATURE_SUBJECT, MAX_COMPONENTS, MAX_GROUPS,
-    MaskComponent, MaskGroup, MaskOp, MaskShape,
+    BITMAP_SAMPLING, BitmapMask, BitmapSource, FEATURE_SKY, FEATURE_SUBJECT, MAX_COMPONENTS,
+    MAX_GROUPS, MaskComponent, MaskGroup, MaskOp, MaskShape,
 };
 use crate::model::recipe::Recipe;
 use rawmakase_inference::{Point, Prompt as ModelPrompt};
@@ -25,18 +27,43 @@ pub(super) use models::Installer;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Feature {
     Subject,
+    Sky,
     Background,
 }
 impl Feature {
     pub(super) fn name(self) -> &'static str {
         match self {
             Self::Subject => "Subject",
+            Self::Sky => "Sky",
             Self::Background => "Background",
         }
     }
     fn invert(self) -> bool {
         self == Self::Background
     }
+    /// What the raster is a selection of, as its provenance says.
+    pub(super) fn provenance(self) -> &'static str {
+        match self {
+            Self::Sky => FEATURE_SKY,
+            Self::Subject | Self::Background => FEATURE_SUBJECT,
+        }
+    }
+}
+/// Which selection a generated component is, from where it came from and whether it
+/// is inverted (Background is an inverted subject).
+pub(super) fn feature_of(b: &BitmapMask, invert: bool) -> Feature {
+    match b.source.as_ref().map(|s| s.feature.as_str()) {
+        Some(FEATURE_SKY) => Feature::Sky,
+        _ if invert => Feature::Background,
+        _ => Feature::Subject,
+    }
+}
+
+/// What a job does: finds the photo's subject or sky by itself, or answers clicks.
+#[derive(Clone, Debug)]
+pub(super) enum Action {
+    Auto(Feature),
+    Click(ModelPrompt),
 }
 
 /// What a finished selection does to the edit.
@@ -63,6 +90,9 @@ pub(crate) enum Failure {
     Cancelled,
     /// The model found nothing; no mask is made.
     NoSubject,
+    NoSky,
+    /// Nothing at the clicked place.
+    NothingThere,
     /// The model file is not installed (or was removed meanwhile).
     ModelMissing,
     /// The inference runtime could not be loaded or has no support here.
@@ -73,7 +103,9 @@ impl Failure {
     fn message(&self) -> String {
         match self {
             Self::Cancelled => "Cancelled".into(),
-            Self::NoSubject => "Nothing selected there; click on the subject itself".into(),
+            Self::NoSubject => "No subject found".into(),
+            Self::NoSky => "No sky found".into(),
+            Self::NothingThere => "Nothing selected there; click on the subject itself".into(),
             Self::ModelMissing => "The selection model is not installed".into(),
             Self::RuntimeUnavailable(why) => format!("Selection is unavailable here: {why}"),
             Self::Failed(why) => format!("Selection failed: {why}"),
@@ -290,24 +322,41 @@ impl Editor {
         }
         self.selection.prompt = None;
         self.selection.failure = None;
+        // The models find the subject and the sky by themselves; clicks only refine.
+        self.start_selection(request, Action::Auto(request.feature));
+    }
+    /// Aims at a generated component: clicks on the photo add to it and leave things
+    /// out of it, each one refining the same mask.
+    pub(super) fn begin_refining(&mut self, mask: usize, component: usize) {
+        let Some(MaskShape::Bitmap(b)) = self
+            .document
+            .edit
+            .recipe()
+            .masks
+            .get(mask)
+            .and_then(|m| m.components.get(component))
+            .map(|c| c.shape.clone())
+        else {
+            return;
+        };
+        let invert = self.document.edit.recipe().masks[mask].components[component].invert;
+        let request = Request {
+            feature: feature_of(&b, invert),
+            target: Target::Regenerate { mask, component },
+        };
+        if self.selection_unavailable().is_some() || !self.selection.models.installed() {
+            self.request_selection(request);
+            return;
+        }
+        self.selection.failure = None;
         self.selection.prompting = Some(Prompting {
             request,
             points: Vec::new(),
             bounds: None,
-            applied: match request.target {
-                Target::Regenerate { mask, component } => Some((mask, component)),
-                _ => None,
-            },
+            applied: Some((mask, component)),
         });
         self.view.tool = super::state::Tool::Mask;
-        self.status = format!(
-            "Click the {} on the photo, or drag a box around it",
-            if request.feature == Feature::Background {
-                "subject to leave out of the background"
-            } else {
-                "subject"
-            }
-        );
+        self.status = "Click the part of the photo to add, Alt-click to leave out".into();
     }
     /// A click on the photo while aiming: a point on the object (or, with `positive`
     /// false, on something to leave out). Starts or refines the selection.
@@ -380,9 +429,9 @@ impl Editor {
             },
         };
         self.selection.failure = None;
-        self.start_selection(request, prompt);
+        self.start_selection(request, Action::Click(prompt));
     }
-    fn start_selection(&mut self, request: Request, prompt: ModelPrompt) {
+    fn start_selection(&mut self, request: Request, action: Action) {
         let Some(image) = self.document.full().cloned() else {
             return;
         };
@@ -405,7 +454,7 @@ impl Editor {
                 image,
                 recipe,
                 model,
-                prompt,
+                action,
             },
             self.tx.clone(),
             self.context.clone(),
@@ -579,7 +628,8 @@ impl Editor {
 /// Where a mask's raster came from, for the component settings.
 pub(super) fn source_text(b: &BitmapMask) -> String {
     match b.source.as_ref().map(|s| s.feature.as_str()) {
-        Some(FEATURE_SUBJECT) => "Selected by the subject model".into(),
+        Some(FEATURE_SUBJECT) => "Found by the subject models".into(),
+        Some(FEATURE_SKY) => "Found by the sky detector".into(),
         _ => "A raster mask".into(),
     }
 }

@@ -17,8 +17,9 @@ use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{RunOptions, Session as OrtSession};
 use ort::value::TensorRef;
 
+use crate::auto::{self, Proposal, SIDE};
 use crate::error::InferenceError;
-use crate::manifest::{ModelSpec, SUBJECT};
+use crate::manifest::{ModelSpec, SALIENCY, SUBJECT, all_files};
 use crate::process::{self, Coverage, Prompt, RgbImage};
 
 /// Environment variable naming the ONNX Runtime library file to load.
@@ -100,14 +101,15 @@ impl Subject {
     pub fn load_with(dir: &Path, options: &LoadOptions) -> Result<Session, InferenceError> {
         load_runtime(options.runtime_library.as_deref())?;
         let spec = SUBJECT;
-        check_files(dir, &spec)?;
+        check_files(dir)?;
         let threads = options.threads.unwrap_or_else(default_threads).max(1);
         // The runtime API panics on internal misuse; a panic must never reach
         // the app from a background job.
-        let (encoder, decoder) = catch_unwind(AssertUnwindSafe(|| {
+        let (encoder, decoder, saliency) = catch_unwind(AssertUnwindSafe(|| {
             Ok::<_, InferenceError>((
                 build_session(&dir.join(spec.encoder_file), threads)?,
                 build_session(&dir.join(spec.decoder_file), threads)?,
+                build_session(&dir.join(SALIENCY.file.name), threads)?,
             ))
         }))
         .map_err(|_| {
@@ -116,6 +118,7 @@ impl Subject {
         Ok(Session {
             encoder,
             decoder,
+            saliency,
             spec,
         })
     }
@@ -143,7 +146,44 @@ impl Embedding {
 pub struct Session {
     encoder: OrtSession,
     decoder: OrtSession,
+    saliency: OrtSession,
     spec: ModelSpec,
+}
+
+/// What the models made of one photo: reused for every selection on it. Subject and Sky
+/// are chosen from it without running a model again; clicks need the embedding.
+pub struct Analysis {
+    embedding: Embedding,
+    saliency: Vec<f32>,
+    proposals: Vec<Proposal>,
+}
+impl Analysis {
+    /// The photo's subject as coverage in its frame, all zero when nothing stands out.
+    pub fn subject(&self) -> Result<Coverage, InferenceError> {
+        auto::subject(&self.embedding.image, &self.proposals, &self.saliency)
+    }
+    /// The photo's sky, all zero when there is none.
+    pub fn sky(&self) -> Result<Coverage, InferenceError> {
+        auto::sky(&self.embedding.image, &self.proposals)
+    }
+    /// The embedding, for [`Session::segment`].
+    pub fn embedding(&self) -> &Embedding {
+        &self.embedding
+    }
+    /// Bytes held.
+    pub fn bytes(&self) -> usize {
+        self.embedding.bytes()
+            + self.saliency.len() * 4
+            + self.proposals.iter().map(|p| p.mask.len()).sum::<usize>()
+    }
+}
+
+/// The decoder's answer to one prompt.
+struct Decoded {
+    /// Three candidate masks' logits, one after the other.
+    logits: Vec<f32>,
+    scores: Vec<f32>,
+    object: f32,
 }
 
 impl Session {
@@ -162,7 +202,8 @@ impl Session {
         cancel: &AtomicBool,
     ) -> Result<Embedding, InferenceError> {
         cancelled(cancel)?;
-        let tensor = process::preprocess(image, &self.spec)?;
+        let tensor =
+            process::preprocess(image, self.spec.input_size, self.spec.mean, self.spec.std)?;
         cancelled(cancel)?;
         let size = self.spec.input_size;
         let encoder = &mut self.encoder;
@@ -223,6 +264,131 @@ impl Session {
         prompt: &Prompt,
         cancel: &AtomicBool,
     ) -> Result<Coverage, InferenceError> {
+        let decoded = self.decode(embedding, prompt, cancel)?;
+        let (width, height) = process::output_size(&embedding.image);
+        if decoded.object < 0.0 {
+            return Ok(Coverage {
+                width,
+                height,
+                data: vec![0; width * height],
+            });
+        }
+        let side = self.spec.mask_size;
+        let best = decoded.best();
+        let mut coverage = process::postprocess(
+            &decoded.logits[best * side * side..(best + 1) * side * side],
+            &self.spec,
+            width,
+            height,
+        )?;
+        crate::refine::refine(&mut coverage, &embedding.image);
+        Ok(coverage)
+    }
+
+    /// Everything automatic selection needs of a photo: the embedding, the saliency and
+    /// the outlines SAM 2 draws from a grid of points. A few seconds; cancellable.
+    pub fn analyze(
+        &mut self,
+        image: &RgbImage,
+        cancel: &AtomicBool,
+    ) -> Result<Analysis, InferenceError> {
+        let embedding = self.embed(image, cancel)?;
+        let saliency = self.saliency(image, cancel)?;
+        let side = self.spec.mask_size;
+        const GRID: usize = 7;
+        let mut found: Vec<Proposal> = Vec::new();
+        for j in 0..GRID {
+            for i in 0..GRID {
+                let prompt = Prompt {
+                    points: vec![crate::process::Point {
+                        x: (i as f32 + 0.5) / GRID as f32,
+                        y: (j as f32 + 0.5) / GRID as f32,
+                        positive: true,
+                    }],
+                    bounds: None,
+                };
+                let decoded = self.decode(&embedding, &prompt, cancel)?;
+                if decoded.object < 0.0 {
+                    continue;
+                }
+                for k in 0..3 {
+                    if decoded.scores[k] > 0.6 {
+                        found.push(Proposal {
+                            mask: decoded.logits[k * side * side..(k + 1) * side * side]
+                                .iter()
+                                .map(|l| *l > 0.0)
+                                .collect(),
+                            score: decoded.scores[k],
+                        });
+                    }
+                }
+            }
+        }
+        debug_assert_eq!(side, SIDE);
+        Ok(Analysis {
+            embedding,
+            saliency,
+            proposals: distinct(found),
+        })
+    }
+
+    /// The saliency matte on the [`SIDE`] grid, 0..=1.
+    fn saliency(
+        &mut self,
+        image: &RgbImage,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<f32>, InferenceError> {
+        cancelled(cancel)?;
+        let size = SALIENCY.input_size;
+        let tensor = process::preprocess(image, size, SALIENCY.mean, SALIENCY.std)?;
+        cancelled(cancel)?;
+        let network = &mut self.saliency;
+        let matte = guarded(cancel, |options| {
+            let input = TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..]))
+                .map_err(failed)?;
+            let outputs = network
+                .run_with_options(ort::inputs![SALIENCY.input_name => input], options)
+                .map_err(failed)?;
+            let output = outputs.get(SALIENCY.output_name).ok_or_else(|| {
+                InferenceError::ModelInvalid(format!(
+                    "the saliency model has no output `{}`",
+                    SALIENCY.output_name
+                ))
+            })?;
+            let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
+            if shape.iter().copied().collect::<Vec<i64>>() != [1, 1, size as i64, size as i64] {
+                return Err(InferenceError::OutputInvalid(format!(
+                    "the saliency matte has shape {shape:?}"
+                )));
+            }
+            Ok(data.to_vec())
+        })?;
+        if matte
+            .iter()
+            .any(|v| !v.is_finite() || !(-0.01..=1.01).contains(v))
+        {
+            return Err(InferenceError::OutputInvalid(
+                "the saliency matte is not a probability".into(),
+            ));
+        }
+        let whole = crate::process::Rect {
+            x: 0,
+            y: 0,
+            width: size,
+            height: size,
+        };
+        Ok(process::resample(&matte, size, whole, SIDE, SIDE)
+            .into_iter()
+            .map(|v| v.clamp(0.0, 1.0))
+            .collect())
+    }
+
+    fn decode(
+        &mut self,
+        embedding: &Embedding,
+        prompt: &Prompt,
+        cancel: &AtomicBool,
+    ) -> Result<Decoded, InferenceError> {
         cancelled(cancel)?;
         prompt.validate()?;
         let (points, labels, bounds) = prompt.tensors(&self.spec);
@@ -257,35 +423,61 @@ impl Session {
                 get("object_score_logits")?,
             ))
         })?;
-        cancelled(cancel)?;
         let side = self.spec.mask_size;
-        if scores.len() != 3 || logits.len() != 3 * side * side || object.len() != 1 {
+        if scores.len() != 3
+            || logits.len() != 3 * side * side
+            || object.len() != 1
+            || scores.iter().any(|s| !s.is_finite())
+            || !object[0].is_finite()
+        {
             return Err(InferenceError::OutputInvalid(format!(
                 "the decoder returned {} masks of {} values",
                 scores.len(),
                 logits.len()
             )));
         }
-        let (width, height) = process::output_size(&embedding.image);
-        if object[0] < 0.0 || scores.iter().any(|s| !s.is_finite()) {
-            return Ok(Coverage {
-                width,
-                height,
-                data: vec![0; width * height],
-            });
-        }
-        let best = (0..3)
-            .max_by(|a, b| scores[*a].total_cmp(&scores[*b]))
-            .unwrap_or(0);
-        let mut coverage = process::postprocess(
-            &logits[best * side * side..(best + 1) * side * side],
-            &self.spec,
-            width,
-            height,
-        )?;
-        crate::refine::refine(&mut coverage, &embedding.image);
-        Ok(coverage)
+        Ok(Decoded {
+            logits,
+            scores,
+            object: object[0],
+        })
     }
+}
+
+impl Decoded {
+    /// The candidate the model rates highest.
+    fn best(&self) -> usize {
+        (0..3)
+            .max_by(|a, b| self.scores[*a].total_cmp(&self.scores[*b]))
+            .unwrap_or(0)
+    }
+}
+
+/// The proposals, best first, without near-duplicates.
+fn distinct(mut found: Vec<Proposal>) -> Vec<Proposal> {
+    found.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let mut kept: Vec<Proposal> = Vec::new();
+    for p in found {
+        let overlaps = |q: &Proposal| {
+            let both = p
+                .mask
+                .iter()
+                .zip(&q.mask)
+                .filter(|(a, b)| **a && **b)
+                .count();
+            let either = p
+                .mask
+                .iter()
+                .zip(&q.mask)
+                .filter(|(a, b)| **a || **b)
+                .count();
+            either > 0 && both as f32 / either as f32 > 0.85
+        };
+        if !kept.iter().any(overlaps) {
+            kept.push(p);
+        }
+    }
+    kept
 }
 
 fn view(f: &([usize; 4], Vec<f32>)) -> Result<TensorRef<'_, f32>, InferenceError> {
@@ -337,8 +529,8 @@ fn failed(error: impl std::fmt::Display) -> InferenceError {
     InferenceError::Failed(error.to_string())
 }
 
-fn check_files(dir: &Path, spec: &ModelSpec) -> Result<(), InferenceError> {
-    for file in spec.files {
+fn check_files(dir: &Path) -> Result<(), InferenceError> {
+    for file in all_files() {
         let path = dir.join(file.name);
         let meta = std::fs::metadata(&path).map_err(|e| {
             InferenceError::ModelInvalid(format!("cannot read {}: {e}", path.display()))
@@ -473,13 +665,13 @@ mod tests {
             std::env::temp_dir().join(format!("rawmakase-inference-size-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(matches!(
-            check_files(&dir, &SUBJECT),
+            check_files(&dir),
             Err(InferenceError::ModelInvalid(_))
         ));
-        for file in SUBJECT.files {
+        for file in all_files() {
             std::fs::write(dir.join(file.name), b"short").unwrap();
         }
-        let err = check_files(&dir, &SUBJECT).unwrap_err();
+        let err = check_files(&dir).unwrap_err();
         std::fs::remove_dir_all(&dir).ok();
         assert!(matches!(err, InferenceError::ModelInvalid(_)));
     }

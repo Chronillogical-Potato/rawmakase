@@ -10,13 +10,15 @@
 //! A missing or unusable ONNX Runtime library is reported as
 //! [`InferenceError::RuntimeUnavailable`]; the library is never linked.
 
+pub mod auto;
 mod error;
 pub mod manifest;
 pub mod process;
 pub mod refine;
 pub mod runtime;
 
+pub use auto::Proposal;
 pub use error::InferenceError;
-pub use manifest::{ModelFile, ModelSpec, SOURCE_REPO, SOURCE_REVISION, SUBJECT};
+pub use manifest::{ModelFile, ModelSpec, SALIENCY, SUBJECT, SaliencySpec};
 pub use process::{Coverage, Point, Prompt, RgbImage};
-pub use runtime::{Embedding, LoadOptions, RUNTIME_ENV, Session, Subject};
+pub use runtime::{Analysis, Embedding, LoadOptions, RUNTIME_ENV, Session, Subject};

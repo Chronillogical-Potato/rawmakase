@@ -771,18 +771,20 @@ contract. Broader AI work remains independent of shipping Subject and Background
 
 ## Implementation notes
 
-Built as one change. Phase 0 first chose IS-Net general use (automatic, about 1 s,
-1 GB), which grouped people well but had unclear weight licensing and soft edges;
-BiRefNet had better edges but needed 7–10 GB. RapidRAW uses SAM 2 for subjects and
-U²-Net for foreground and sky. The shipped model is therefore **SAM 2.1 Hiera small**
-(Apache-2.0 code and weights; `onnx-community` ONNX export, 184 MB, pinned commit),
-used interactively: click or box on the object, more clicks refine. It selects one
-object per prompt and does not guess which object the "subject" is, so Select Subject
-is an aimed selection rather than one-click; a model that picks the subject by itself
-would be a further, separately licensed model. Edges are refined with a guided filter.
-ONNX Runtime is 1.23.2 loaded dynamically (`ort` `load-dynamic`) on every platform.
-No Hugging Face repository of our own is needed or has been created; nothing has been
-uploaded.
+Built as one change, after trying the candidates on real photographs. IS-Net alone
+(automatic, about 1 s) grouped people well but had soft edges and unclear weight
+licensing; BiRefNet had better edges but needed 7–10 GB; SAM 2 alone (what RapidRAW uses
+for subjects, with U²-Net for sky and foreground) draws crisp outlines but does not
+decide which object matters, and several people from one prompt came out poorly. The
+shipped design combines them: **IS-Net says what is salient, SAM 2.1 Hiera small
+(Apache-2.0 code and weights, `onnx-community` export at a pinned commit) draws the
+outlines**, and a guided filter moves both onto the photo's edges. Sky has no model of
+its own: it is chosen from SAM 2's outlines (touching the top, smooth, bright or blue,
+cut at the horizon). Clicks (positive, negative, box) refine through the same SAM 2
+decoder. The saliency weights' license is unresolved (see dependencies); it is a
+separable picker. ONNX Runtime is 1.23.2 loaded dynamically (`ort` `load-dynamic`) on
+every platform. No Hugging Face repository of our own is needed or has been created;
+nothing has been uploaded.
 
 Deliberate differences from the plan above:
 
@@ -795,6 +797,8 @@ Deliberate differences from the plan above:
 - Transfer of raster masks to another photo skips them with a note instead of
   rejecting the whole transfer; presets reject them. No Library-wide `EditSource`
   rework: the global loader serves workers.
-- The model is downloaded file by file (a finished file is kept on retry, a partial one
-  starts over) with three attempts each.
-- No faint-result threshold, no grow/shrink/feather, no provider acceleration.
+- The models are downloaded file by file (a finished file is kept on retry, a partial
+  one starts over) with three attempts each.
+- Sky detection and the subject choice are heuristics measured on a handful of
+  photographs, not on the plan's evaluation corpus; there is no faint-result
+  threshold, no grow/shrink/feather and no provider acceleration.

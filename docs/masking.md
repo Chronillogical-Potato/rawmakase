@@ -8,48 +8,59 @@ masks that need no AI model: Brush, Linear Gradient, Radial Gradient, Color Rang
 Luminance Range, plus **Select Subject** and **Select Background**, which run a model on
 this computer (below). Sky, Objects, People and Depth masks are not implemented yet.
 
-## Select Subject and Select Background
+## Select Subject, Sky and Background
 
-Two actions above the Create row make a mask from an object you point at, with
-Segment Anything 2 running on this computer. They are also in each mask's Add,
-Subtract and Intersect menus. Click an action, then **click the subject on the photo**
-(or drag a box around it). The mask appears at once, with its overlay; click more of
-the subject to add to it, **Alt-click** something to leave it out, drag a new box to
-start from that box, **Start over** to forget the clicks, and **Done** or Escape to
-finish. Each click is a History step ("Select Subject", then "Refine Subject").
-Background is the same selection inverted as a component, so adding a brush to it
-still adds coverage. **Regenerate** on a selected generated component aims again at
-that component only. Clean up with ordinary Add or Subtract brush components.
+Three tiles above the Create row (Subject, Sky, Background; also in each mask's Add,
+Subtract and Intersect menus) make a mask from the photo with one click, with models
+running on this computer. The result is one named mask and one History step with
+neutral sliders and its overlay shown.
 
-SAM 2 selects one object (or the parts you click) per prompt; it does not pick "the
-subject" by itself. For several people, click each of them.
+- **Subject** is the photo's salient foreground, possibly several people or objects.
+  IS-Net decides what is salient; Segment Anything 2 draws each object's outline, and
+  the outlines inside the salient area are combined, with the saliency filling what they
+  miss and both edges moved onto the photo's own (no halo under a local adjustment).
+- **Sky** is the outlines Segment Anything 2 draws that reach the top of the photo and
+  look like sky (smooth, bright or blue), cut where the sky ends so water below the
+  horizon is not included. "No sky found" when there is none.
+- **Background** is the subject inverted as a component, so adding a brush to it still
+  adds coverage.
+- **Regenerate** on a selected generated component finds it again, replacing only that
+  component's raster. **Refine with clicks…** (subject and background) lets you click the
+  photo: a click adds to the selection, **Alt-click** leaves something out, a dragged
+  box starts from that box, **Start over** forgets the clicks, **Done** or Escape
+  finishes. Each click is a History step ("Refine Subject"). Clean up further with
+  ordinary Add or Subtract brush components.
 
-- **On this computer.** The first use asks to download the model (SAM 2.1 Hiera small,
-  184 MB in four files, each checked against a pinned SHA-256) or to import a folder
-  with the files; nothing downloads at startup, on opening a catalog or the drawer, or
-  at an update. It runs on the CPU through ONNX Runtime, which ships with the app
-  (beside the executable; source builds put `libonnxruntime` in the data folder's
-  `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the computer.
-  **Remove selection model** deletes it; saved masks keep working without it or the
-  runtime. Encoding a photo takes about a second the first time; further clicks on it
-  take a fraction of that.
+Setting up: the first use shows a card in place of the tiles with the steps that are
+left, in order, with the finished ones ticked: upgrade the catalog, then download the
+models.
+
+- **On this computer.** The models are downloaded on request (Segment Anything 2.1 Hiera
+  small, four files, 184 MB; IS-Net, 179 MB; each file checked against a pinned SHA-256)
+  or imported from a folder with the files; nothing downloads at startup, on opening a
+  catalog or the drawer, or at an update. They run on the CPU through ONNX Runtime, which
+  ships with the app (beside the executable; source builds put `libonnxruntime` in the
+  data folder's `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the
+  computer. **Remove selection model** deletes them; saved masks keep working without
+  them or the runtime. The first selection on a photo takes a few seconds; Subject, Sky,
+  Background and clicks on the same photo after that are quick.
 - **Catalog only.** The result is a raster stored in the catalog, so it needs a catalog
   photo. A catalog of the first format asks to **Upgrade catalog…**: a backup copy is
   written beside it, then it becomes format version 2, which older releases refuse.
   Close it on other computers first.
-- **What the model sees:** the photo at the camera's default crop with the camera
+- **What the models see:** the photo at the camera's default crop with the camera
   rendering (no tone, colour, profile or geometry edits; spots and red eye included),
   about 1280 pixels on the long side. Sliders and crop edits during or after selecting
   do not matter; changing spots or red eye meanwhile discards the result, as does any
-  change to the masks' structure (adding, removing, Undo). The mask's edge is then
-  moved onto the photo's own edge (a guided filter) so a local adjustment through it
-  leaves no halo.
+  change to the masks' structure (adding, removing, Undo).
 - **Not copied:** masks made from a selection belong to their photo. Copy, Paste and
   Sync leave them out (and say so), and presets cannot hold them.
 - **Limits:** one 4096-pixel, 8-bit raster per selection; rasters are never
   garbage-collected, so a catalog only grows with them. Grow/shrink and feather are
-  not implemented. Fine hair is as sharp as SAM 2's 256-pixel mask and the edge
-  refinement make it, not a matting model's.
+  not implemented. Fine hair is as sharp as the 256-pixel mask and the edge refinement
+  make it, not a matting model's. Which objects are the subject is the saliency model's
+  call; clicks correct it. Sky is a heuristic on top of the outlines: a very dark or
+  unusually coloured sky may be missed, and a bright smooth wall at the top may count.
 
 ## Using it
 

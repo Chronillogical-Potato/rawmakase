@@ -178,10 +178,7 @@ fn failures_and_cancellation_record_no_edit() {
         e.selection.failure.as_ref().map(|f| &f.1),
         Some(&Failure::NoSubject)
     );
-    assert_eq!(
-        e.status,
-        "Nothing selected there; click on the subject itself"
-    );
+    assert_eq!(e.status, "No subject found");
     assert!(e.selection.running().is_none());
 
     e.selection.failure = None;
@@ -514,14 +511,7 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
             image: image.clone(),
             recipe: e.document.edit.recipe().clone(),
             model,
-            prompt: rawmakase_inference::Prompt {
-                points: vec![rawmakase_inference::Point {
-                    x: 0.5,
-                    y: 0.62,
-                    positive: true,
-                }],
-                bounds: None,
-            },
+            action: Action::Auto(Feature::Subject),
         },
         e.tx.clone(),
         e.context.clone(),
@@ -613,4 +603,81 @@ fn aiming_starts_with_nothing_and_each_click_refines_the_same_mask() {
     assert!(e.selection.prompting.as_ref().unwrap().bounds.is_none());
     e.selection.clear_document();
     assert!(e.selection.prompting.is_none());
+}
+
+#[test]
+fn sky_is_a_plain_mask_of_its_own_and_background_is_the_inverted_subject() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let sky = Request {
+        feature: Feature::Sky,
+        target: Target::NewMask,
+    };
+    let g = begin(e, sky);
+    let mut made = generated(120);
+    made.source.feature = FEATURE_SKY.into();
+    finish(e, g, Ok(made));
+    let m = &e.document.edit.recipe().masks[0];
+    assert_eq!(m.name, "Sky");
+    assert!(!m.components[0].invert);
+    assert_eq!(m.components[0].shape.kind(), "Sky");
+    let MaskShape::Bitmap(b) = &m.components[0].shape else {
+        panic!()
+    };
+    assert_eq!(feature_of(b, false), Feature::Sky);
+    assert_eq!(feature_of(b, true), Feature::Sky);
+    assert_eq!(e.document.edit.history().steps().0[0].name, "Select Sky");
+    // A photo without sky says so and adds nothing.
+    let g = begin(e, sky);
+    finish(e, g, Err(Failure::NoSky));
+    assert_eq!(e.status, "No sky found");
+    assert_eq!(e.document.edit.recipe().masks.len(), 1);
+}
+
+#[test]
+fn refining_aims_at_the_selected_component_only_with_the_models_in_place() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let g = begin(e, SUBJECT);
+    finish(e, g, Ok(generated(130)));
+    // Without the models installed, refining asks for them instead of aiming.
+    if !e.selection.models.installed() {
+        e.begin_refining(0, 0);
+        assert!(e.selection.prompting.is_none());
+        assert!(matches!(
+            e.selection.prompt,
+            Some(Prompt::Model(_) | Prompt::Upgrade(_))
+        ));
+    }
+    // Aimed by hand, the first click's result replaces that component's raster.
+    e.selection.prompt = None;
+    e.selection.prompting = Some(Prompting {
+        request: Request {
+            feature: Feature::Subject,
+            target: Target::Regenerate {
+                mask: 0,
+                component: 0,
+            },
+        },
+        points: Vec::new(),
+        bounds: None,
+        applied: Some((0, 0)),
+    });
+    let before = e.document.edit.recipe().masks[0].components[0]
+        .shape
+        .clone();
+    let regenerate = Request {
+        feature: Feature::Subject,
+        target: Target::Regenerate {
+            mask: 0,
+            component: 0,
+        },
+    };
+    let g = begin(e, regenerate);
+    finish(e, g, Ok(generated(131)));
+    assert_ne!(
+        e.document.edit.recipe().masks[0].components[0].shape,
+        before
+    );
+    assert_eq!(e.document.edit.recipe().masks.len(), 1);
 }
