@@ -12,10 +12,18 @@ pub struct ModelFile {
     pub name: &'static str,
     pub size_bytes: u64,
     pub sha256: &'static str,
-    /// Where it is fetched from: pinned to an immutable revision or tag, and checked
-    /// against `sha256` whatever the host sends.
+    /// Where it is fetched from: RAWmakase's own mirror, pinned to an immutable commit,
+    /// and checked against `sha256` whatever the host sends.
     pub url: &'static str,
+    /// The repository the mirror copied it from, pinned the same way: tried when the
+    /// mirror cannot be reached. The same bytes, so the same checksum.
+    pub fallback: &'static str,
 }
+
+/// RAWmakase's mirror of the model files on Hugging Face, and the commit they are
+/// pinned to (see its README and NOTICE for provenance and licence).
+pub const MIRROR: &str =
+    "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac";
 
 /// The interactive model's contract: identity, artifacts, tensors and preprocessing.
 #[derive(Debug, Clone, Copy)]
@@ -75,25 +83,41 @@ pub const SUBJECT: ModelSpec = ModelSpec {
             name: "vision_encoder.onnx",
             size_bytes: 467_440,
             sha256: "aacf1f7137bb6fffcf6bf166abcfabe28f57a76059254f3fb611c4a64a208119",
-            url: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/vision_encoder.onnx",
+            url: concat!(
+                "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac/",
+                "sam2.1-hiera-small/vision_encoder.onnx"
+            ),
+            fallback: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/vision_encoder.onnx",
         },
         ModelFile {
             name: "vision_encoder.onnx_data",
             size_bytes: 162_476_288,
             sha256: "260fd1f0a34e72a3dc79a739e563b4facc0ba75504818b433a1f808e66637456",
-            url: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/vision_encoder.onnx_data",
+            url: concat!(
+                "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac/",
+                "sam2.1-hiera-small/vision_encoder.onnx_data"
+            ),
+            fallback: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/vision_encoder.onnx_data",
         },
         ModelFile {
             name: "prompt_encoder_mask_decoder.onnx",
             size_bytes: 213_114,
             sha256: "079c59b261f723ff5c6a125e69b0170a957b21c58738c28d2b0394ecd0587d7f",
-            url: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/prompt_encoder_mask_decoder.onnx",
+            url: concat!(
+                "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac/",
+                "sam2.1-hiera-small/prompt_encoder_mask_decoder.onnx"
+            ),
+            fallback: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/prompt_encoder_mask_decoder.onnx",
         },
         ModelFile {
             name: "prompt_encoder_mask_decoder.onnx_data",
             size_bytes: 20_958_208,
             sha256: "f9e59a584ab8ced21fa812c211bc01084204db1c9e92a5ef4fb3a49972b4e864",
-            url: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/prompt_encoder_mask_decoder.onnx_data",
+            url: concat!(
+                "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac/",
+                "sam2.1-hiera-small/prompt_encoder_mask_decoder.onnx_data"
+            ),
+            fallback: "https://huggingface.co/onnx-community/sam2.1-hiera-small-ONNX/resolve/a7df49d8de14b9d2e4504d1687b0d568f905fd8d/onnx/prompt_encoder_mask_decoder.onnx_data",
         },
     ],
     encoder_file: "vision_encoder.onnx",
@@ -128,7 +152,11 @@ pub const PANOPTIC: PanopticSpec = PanopticSpec {
         name: "detr-panoptic-fp16.onnx",
         size_bytes: 86_559_030,
         sha256: "afd9f02d864302d690356fd4bfcb2feed2397a1190bf46a7306cb430464d734a",
-        url: "https://huggingface.co/Xenova/detr-resnet-50-panoptic/resolve/ea24b2d4e0bfae31f0a1299ba3fb892a2df064de/onnx/model_fp16.onnx",
+        url: concat!(
+            "https://huggingface.co/pch/rawmakase-models/resolve/5748347a4c11d29b1c747859a4c24883a01215ac/",
+            "detr-resnet-50-panoptic/detr-panoptic-fp16.onnx"
+        ),
+        fallback: "https://huggingface.co/Xenova/detr-resnet-50-panoptic/resolve/ea24b2d4e0bfae31f0a1299ba3fb892a2df064de/onnx/model_fp16.onnx",
     },
     long_edge: 800,
     mean: [0.485, 0.456, 0.406],
@@ -172,7 +200,13 @@ mod tests {
                     .bytes()
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             );
-            assert!(file.url.starts_with("https://") && !file.url.contains("/main/"));
+            for url in [file.url, file.fallback] {
+                assert!(
+                    url.starts_with("https://") && !url.contains("/main/"),
+                    "{url}"
+                );
+            }
+            assert!(file.url.starts_with(MIRROR), "{}", file.url);
         }
         assert!(SUBJECT.files.iter().any(|f| f.name == SUBJECT.encoder_file));
         assert!(SUBJECT.files.iter().any(|f| f.name == SUBJECT.decoder_file));

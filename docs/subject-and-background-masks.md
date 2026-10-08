@@ -785,8 +785,9 @@ through the same SAM 2 decoder, which is how anything DETR does not know is sele
 Measured on a handful of photographs only: the three people of a group portrait, a man
 in a forest and the sky of overcast, landscape and dusk scenes come out right, a
 landscape has no subject, and a dusk street picks up passers-by. ONNX Runtime is 1.23.2
-loaded dynamically (`ort` `load-dynamic`) on every platform. No Hugging Face repository
-of our own is needed or has been created; nothing has been uploaded.
+loaded dynamically (`ort` `load-dynamic`) on every platform. The model files are mirrored,
+unmodified, at [`pch/rawmakase-models`](https://huggingface.co/pch/rawmakase-models)
+(pinned commit; upstream repositories as fallback).
 
 Deliberate differences from the plan above:
 

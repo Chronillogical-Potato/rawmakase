@@ -290,15 +290,15 @@ fn copy_checked(
     Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Fetches `file` from the host its manifest pins, trying again on network errors a
-/// few times.
+/// Fetches `file` from RAWmakase's mirror, else from the repository it was copied
+/// from: each a few times on network errors, and a source whose bytes do not match the
+/// checksum is not used.
 fn download(
     out: &mut std::fs::File,
     progress: &Progress,
     file: &ModelFile,
     before: u64,
 ) -> Result<String, String> {
-    let url = file.url;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(20)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
@@ -306,6 +306,27 @@ fn download(
         .timeout_global(Some(Duration::from_secs(60 * 60)))
         .build()
         .into();
+    let mut last = String::new();
+    for url in [file.url, file.fallback] {
+        match fetch(&agent, url, out, progress, file, before) {
+            Ok(digest) if digest == file.sha256 => return Ok(digest),
+            Ok(_) => last = format!("the download of {} does not match its checksum", file.name),
+            Err(e) if e == "Cancelled" || e.contains("disk is full") => return Err(e),
+            Err(e) => last = e,
+        }
+    }
+    Err(format!("could not download the model: {last}"))
+}
+
+/// One source, tried up to three times; a client error is final for it.
+fn fetch(
+    agent: &ureq::Agent,
+    url: &str,
+    out: &mut std::fs::File,
+    progress: &Progress,
+    file: &ModelFile,
+    before: u64,
+) -> Result<String, String> {
     let mut last = String::new();
     for attempt in 0..3u32 {
         if attempt > 0 {
@@ -338,7 +359,7 @@ fn download(
             Err(e) => last = e.to_string(),
         }
     }
-    Err(format!("could not download the model: {last}"))
+    Err(last)
 }
 
 #[cfg(test)]
@@ -350,6 +371,7 @@ mod tests {
         size_bytes: 3,
         sha256: "",
         url: "",
+        fallback: "",
     };
 
     #[test]
