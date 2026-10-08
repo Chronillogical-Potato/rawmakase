@@ -771,20 +771,21 @@ contract. Broader AI work remains independent of shipping Subject and Background
 
 ## Implementation notes
 
-Built as one change, after trying the candidates on real photographs. IS-Net alone
-(automatic, about 1 s) grouped people well but had soft edges and unclear weight
-licensing; BiRefNet had better edges but needed 7–10 GB; SAM 2 alone (what RapidRAW uses
-for subjects, with U²-Net for sky and foreground) draws crisp outlines but does not
-decide which object matters, and several people from one prompt came out poorly. The
-shipped design combines them: **IS-Net says what is salient, SAM 2.1 Hiera small
-(Apache-2.0 code and weights, `onnx-community` export at a pinned commit) draws the
-outlines**, and a guided filter moves both onto the photo's edges. Sky has no model of
-its own: it is chosen from SAM 2's outlines (touching the top, smooth, bright or blue,
-cut at the horizon). Clicks (positive, negative, box) refine through the same SAM 2
-decoder. The saliency weights' license is unresolved (see dependencies); it is a
-separable picker. ONNX Runtime is 1.23.2 loaded dynamically (`ort` `load-dynamic`) on
-every platform. No Hugging Face repository of our own is needed or has been created;
-nothing has been uploaded.
+Built as one change, after trying candidates on real photographs. SAM 2 alone (what
+RapidRAW uses for subjects; its code in fact downloads SAM 1 ViT-B, with U²-Net for
+foreground and sky) draws crisp outlines but does not decide which object matters.
+IS-Net picked subjects well but its weights have no license (see dependencies), so it
+was dropped; BiRefNet-lite at 1024 px needs 7 GB, and at 512 px shares IS-Net's
+DIS5K training-data question. The shipped design combines **DETR panoptic** (Apache-2.0
+base weights, COCO) as the picker of people, animals and sky with **SAM 2.1 Hiera small**
+(Apache-2.0, `onnx-community` export at a pinned commit) drawing the outlines, and a
+guided filter moving both onto the photo's edges. Clicks (positive, negative, box) go
+through the same SAM 2 decoder, which is how anything DETR does not know is selected.
+Measured on a handful of photographs only: the three people of a group portrait, a man
+in a forest and the sky of overcast, landscape and dusk scenes come out right, a
+landscape has no subject, and a dusk street picks up passers-by. ONNX Runtime is 1.23.2
+loaded dynamically (`ort` `load-dynamic`) on every platform. No Hugging Face repository
+of our own is needed or has been created; nothing has been uploaded.
 
 Deliberate differences from the plan above:
 
@@ -799,6 +800,6 @@ Deliberate differences from the plan above:
   rework: the global loader serves workers.
 - The models are downloaded file by file (a finished file is kept on retry, a partial
   one starts over) with three attempts each.
-- Sky detection and the subject choice are heuristics measured on a handful of
-  photographs, not on the plan's evaluation corpus; there is no faint-result
-  threshold, no grow/shrink/feather and no provider acceleration.
+- The subject and sky choice is measured on a handful of photographs, not on the plan's
+  evaluation corpus; there is no faint-result threshold, no grow/shrink/feather and no
+  provider acceleration.

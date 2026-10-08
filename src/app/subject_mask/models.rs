@@ -378,7 +378,7 @@ mod tests {
             rawmakase_inference::SUBJECT.id,
             rawmakase_inference::SUBJECT.version
         )));
-        assert!(download_megabytes() > 300);
+        assert!(download_megabytes() > 250);
     }
 
     #[test]

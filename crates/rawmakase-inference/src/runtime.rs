@@ -19,7 +19,8 @@ use ort::value::TensorRef;
 
 use crate::auto::{self, Proposal, SIDE};
 use crate::error::InferenceError;
-use crate::manifest::{ModelSpec, SALIENCY, SUBJECT, all_files};
+use crate::manifest::{ModelSpec, PANOPTIC, SUBJECT, all_files};
+use crate::panoptic::{self, Labels};
 use crate::process::{self, Coverage, Prompt, RgbImage};
 
 /// Environment variable naming the ONNX Runtime library file to load.
@@ -105,11 +106,24 @@ impl Subject {
         let threads = options.threads.unwrap_or_else(default_threads).max(1);
         // The runtime API panics on internal misuse; a panic must never reach
         // the app from a background job.
-        let (encoder, decoder, saliency) = catch_unwind(AssertUnwindSafe(|| {
+        let (encoder, decoder, panoptic) = catch_unwind(AssertUnwindSafe(|| {
             Ok::<_, InferenceError>((
-                build_session(&dir.join(spec.encoder_file), threads)?,
-                build_session(&dir.join(spec.decoder_file), threads)?,
-                build_session(&dir.join(SALIENCY.file.name), threads)?,
+                build_session(
+                    &dir.join(spec.encoder_file),
+                    threads,
+                    GraphOptimizationLevel::All,
+                )?,
+                build_session(
+                    &dir.join(spec.decoder_file),
+                    threads,
+                    GraphOptimizationLevel::All,
+                )?,
+                // The half-precision graph breaks the full fusion pass.
+                build_session(
+                    &dir.join(PANOPTIC.file.name),
+                    threads,
+                    GraphOptimizationLevel::Level1,
+                )?,
             ))
         }))
         .map_err(|_| {
@@ -118,7 +132,7 @@ impl Subject {
         Ok(Session {
             encoder,
             decoder,
-            saliency,
+            panoptic,
             spec,
         })
     }
@@ -146,7 +160,7 @@ impl Embedding {
 pub struct Session {
     encoder: OrtSession,
     decoder: OrtSession,
-    saliency: OrtSession,
+    panoptic: OrtSession,
     spec: ModelSpec,
 }
 
@@ -154,17 +168,17 @@ pub struct Session {
 /// are chosen from it without running a model again; clicks need the embedding.
 pub struct Analysis {
     embedding: Embedding,
-    saliency: Vec<f32>,
+    labels: Labels,
     proposals: Vec<Proposal>,
 }
 impl Analysis {
     /// The photo's subject as coverage in its frame, all zero when nothing stands out.
     pub fn subject(&self) -> Result<Coverage, InferenceError> {
-        auto::subject(&self.embedding.image, &self.proposals, &self.saliency)
+        auto::subject(&self.embedding.image, &self.proposals, &self.labels.subject)
     }
     /// The photo's sky, all zero when there is none.
     pub fn sky(&self) -> Result<Coverage, InferenceError> {
-        auto::sky(&self.embedding.image, &self.proposals)
+        auto::sky(&self.embedding.image, &self.proposals, &self.labels.sky)
     }
     /// The embedding, for [`Session::segment`].
     pub fn embedding(&self) -> &Embedding {
@@ -173,7 +187,7 @@ impl Analysis {
     /// Bytes held.
     pub fn bytes(&self) -> usize {
         self.embedding.bytes()
-            + self.saliency.len() * 4
+            + (self.labels.subject.len() + self.labels.sky.len()) * 4
             + self.proposals.iter().map(|p| p.mask.len()).sum::<usize>()
     }
 }
@@ -285,7 +299,7 @@ impl Session {
         Ok(coverage)
     }
 
-    /// Everything automatic selection needs of a photo: the embedding, the saliency and
+    /// Everything automatic selection needs of a photo: the embedding, the people, animals and sky labels and
     /// the outlines SAM 2 draws from a grid of points. A few seconds; cancellable.
     pub fn analyze(
         &mut self,
@@ -293,7 +307,7 @@ impl Session {
         cancel: &AtomicBool,
     ) -> Result<Analysis, InferenceError> {
         let embedding = self.embed(image, cancel)?;
-        let saliency = self.saliency(image, cancel)?;
+        let labels = self.panoptic(image, cancel)?;
         let side = self.spec.mask_size;
         const GRID: usize = 7;
         let mut found: Vec<Proposal> = Vec::new();
@@ -327,60 +341,69 @@ impl Session {
         debug_assert_eq!(side, SIDE);
         Ok(Analysis {
             embedding,
-            saliency,
+            labels,
             proposals: distinct(found),
         })
     }
 
-    /// The saliency matte on the [`SIDE`] grid, 0..=1.
-    fn saliency(
+    /// Where the photo's people, animals and sky are, on the [`SIDE`] grid.
+    fn panoptic(
         &mut self,
         image: &RgbImage,
         cancel: &AtomicBool,
-    ) -> Result<Vec<f32>, InferenceError> {
+    ) -> Result<Labels, InferenceError> {
         cancelled(cancel)?;
-        let size = SALIENCY.input_size;
-        let tensor = process::preprocess(image, size, SALIENCY.mean, SALIENCY.std)?;
+        process::check_image(image)?;
+        let scale = PANOPTIC.long_edge as f64 / image.width.max(image.height) as f64;
+        let width = ((image.width as f64 * scale).round() as usize).max(1);
+        let height = ((image.height as f64 * scale).round() as usize).max(1);
+        let tensor = process::preprocess_sized(image, width, height, PANOPTIC.mean, PANOPTIC.std)?;
         cancelled(cancel)?;
-        let network = &mut self.saliency;
-        let matte = guarded(cancel, |options| {
-            let input = TensorRef::from_array_view(([1usize, 3, size, size], &tensor[..]))
+        let network = &mut self.panoptic;
+        let (logits, masks, queries, classes, mask_w, mask_h) = guarded(cancel, |options| {
+            let input = TensorRef::from_array_view(([1usize, 3, height, width], &tensor[..]))
                 .map_err(failed)?;
+            // Every pixel is real: the model takes this mask at a fixed size.
+            let valid = vec![1i64; 64 * 64];
+            let mask =
+                TensorRef::from_array_view(([1usize, 64, 64], &valid[..])).map_err(failed)?;
             let outputs = network
-                .run_with_options(ort::inputs![SALIENCY.input_name => input], options)
+                .run_with_options(
+                    ort::inputs!["pixel_values" => input, "pixel_mask" => mask],
+                    options,
+                )
                 .map_err(failed)?;
-            let output = outputs.get(SALIENCY.output_name).ok_or_else(|| {
-                InferenceError::ModelInvalid(format!(
-                    "the saliency model has no output `{}`",
-                    SALIENCY.output_name
-                ))
-            })?;
-            let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
-            if shape.iter().copied().collect::<Vec<i64>>() != [1, 1, size as i64, size as i64] {
+            let get = |name: &str| -> Result<(Vec<i64>, Vec<f32>), InferenceError> {
+                let output = outputs.get(name).ok_or_else(|| {
+                    InferenceError::ModelInvalid(format!(
+                        "the panoptic model has no output `{name}`"
+                    ))
+                })?;
+                let (shape, data) = output.try_extract_tensor::<f32>().map_err(failed)?;
+                Ok((shape.iter().copied().collect(), data.to_vec()))
+            };
+            let (logit_shape, logits) = get("logits")?;
+            let (mask_shape, masks) = get("pred_masks")?;
+            if logit_shape.len() != 3
+                || mask_shape.len() != 4
+                || logit_shape[0] != 1
+                || mask_shape[0] != 1
+            {
                 return Err(InferenceError::OutputInvalid(format!(
-                    "the saliency matte has shape {shape:?}"
+                    "the panoptic output shapes are {logit_shape:?} and {mask_shape:?}"
                 )));
             }
-            Ok(data.to_vec())
+            let dim = |v: i64| usize::try_from(v).unwrap_or(0);
+            Ok((
+                logits,
+                masks,
+                dim(logit_shape[1]),
+                dim(logit_shape[2]),
+                dim(mask_shape[3]),
+                dim(mask_shape[2]),
+            ))
         })?;
-        if matte
-            .iter()
-            .any(|v| !v.is_finite() || !(-0.01..=1.01).contains(v))
-        {
-            return Err(InferenceError::OutputInvalid(
-                "the saliency matte is not a probability".into(),
-            ));
-        }
-        let whole = crate::process::Rect {
-            x: 0,
-            y: 0,
-            width: size,
-            height: size,
-        };
-        Ok(process::resample(&matte, size, whole, SIDE, SIDE)
-            .into_iter()
-            .map(|v| v.clamp(0.0, 1.0))
-            .collect())
+        panoptic::decode(&PANOPTIC, &logits, &masks, queries, classes, mask_w, mask_h)
     }
 
     fn decode(
@@ -546,10 +569,14 @@ fn check_files(dir: &Path) -> Result<(), InferenceError> {
     Ok(())
 }
 
-fn build_session(model_path: &Path, threads: usize) -> Result<OrtSession, InferenceError> {
+fn build_session(
+    model_path: &Path,
+    threads: usize,
+    level: GraphOptimizationLevel,
+) -> Result<OrtSession, InferenceError> {
     OrtSession::builder()
         .map_err(failed)?
-        .with_optimization_level(GraphOptimizationLevel::All)
+        .with_optimization_level(level)
         .map_err(failed)?
         .with_intra_threads(threads)
         .map_err(failed)?

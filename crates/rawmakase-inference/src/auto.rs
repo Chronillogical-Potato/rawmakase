@@ -1,17 +1,17 @@
 //! Automatic Subject and Sky selection from what the models proposed.
 //!
 //! Segment Anything 2 answers a prompt with an object's outline but does not know which
-//! object matters; IS-Net knows what is salient but draws a soft matte. Subject therefore
-//! keeps the outlines SAM 2 drew that lie inside the saliency and fills any gap with the
-//! saliency itself, both edges moved onto the photo's. Sky has no model of its own: the
-//! outlines that reach the top of the photo and look like sky (smooth, and bright or
-//! blue) are kept, down to where the sky ends. Everything here is pure: the proposals
-//! and the saliency come in, coverage in the photo's frame goes out.
+//! object matters; the panoptic model knows where the people, animals and sky are but
+//! draws blobs. Subject keeps the outlines SAM 2 drew that lie inside the people and
+//! animals and fills any gap with the label itself; Sky keeps the outlines the sky label
+//! lies on, down to where the sky ends. Both end with their edges moved onto the photo's.
+//! Everything here is pure: the proposals and the labels come in, coverage in the photo's
+//! frame goes out.
 use crate::error::InferenceError;
 use crate::process::{Coverage, Rect, RgbImage, output_size, resample};
-use crate::refine::{guided, mean, smooth};
+use crate::refine::{guided, smooth};
 
-/// Side of the square grid the proposals and the saliency live on: the photo
+/// Side of the square grid the proposals and the labels live on: the photo
 /// stretched to a square, as the models see it.
 pub const SIDE: usize = 256;
 
@@ -23,14 +23,8 @@ pub struct Proposal {
     pub score: f32,
 }
 
-impl Proposal {
-    fn area(&self) -> f32 {
-        self.mask.iter().filter(|m| **m).count() as f32 / (SIDE * SIDE) as f32
-    }
-}
-
-/// Subject: the outlines inside the saliency, with the saliency filling what they miss.
-/// All zero when nothing is salient.
+/// Subject: the outlines inside the people and animals, with the label filling what they
+/// miss. All zero when there are none.
 pub fn subject(
     image: &RgbImage,
     proposals: &[Proposal],
@@ -87,45 +81,52 @@ pub fn subject(
     })
 }
 
-/// Sky: the outlines that reach the top and look like sky, cut where the sky ends.
+/// Sky: the outlines the panoptic model's sky label lies on, cut where the sky ends.
 /// All zero when there is none.
-pub fn sky(image: &RgbImage, proposals: &[Proposal]) -> Result<Coverage, InferenceError> {
+pub fn sky(
+    image: &RgbImage,
+    proposals: &[Proposal],
+    sky_label: &[f32],
+) -> Result<Coverage, InferenceError> {
+    check(sky_label.len())?;
     let (width, height) = output_size(image);
-    let small = grid(image);
-    let lum: Vec<f32> = (0..SIDE * SIDE)
-        .map(|i| (small[0][i] + small[1][i] + small[2][i]) / 3.0)
-        .collect();
-    let blur = mean(&lum, SIDE, SIDE, 2);
-    let texture = gradient(&blur);
+    let labelled: Vec<bool> = sky_label.iter().map(|s| *s > 0.5).collect();
+    let cells = labelled.iter().filter(|l| **l).count();
+    if cells < (0.01 * (SIDE * SIDE) as f32) as usize {
+        return Ok(empty(width, height));
+    }
     let mut union = vec![false; SIDE * SIDE];
     for p in proposals {
-        let area = p.area();
-        if area < 0.02 {
+        let count = p.mask.iter().filter(|m| **m).count() as f32;
+        if count < 0.005 * (SIDE * SIDE) as f32 {
             continue;
         }
-        let top = p.mask[..6 * SIDE].iter().filter(|m| **m).count() as f32 / (6 * SIDE) as f32;
-        if top < 0.5 {
-            continue;
-        }
-        let (mut n, mut cy, mut tex, mut l, mut blue) = (0f32, 0f32, 0f32, 0f32, 0f32);
-        for (i, _) in p.mask.iter().enumerate().filter(|(_, m)| **m) {
-            n += 1.0;
-            cy += (i / SIDE) as f32;
-            tex += texture[i];
-            l += lum[i];
-            blue += small[2][i] - small[0][i];
-        }
-        let (cy, tex, l, blue) = (cy / n / (SIDE - 1) as f32, tex / n, l / n, blue / n);
-        if cy < 0.55 && tex < 0.02 && (l > 0.5 || blue > 0.03) {
+        let sky: f32 = p
+            .mask
+            .iter()
+            .zip(sky_label)
+            .filter(|(m, _)| **m)
+            .map(|(_, s)| *s)
+            .sum();
+        // Mostly sky: a lake that reflects it is not.
+        if sky / count > 0.7 {
             for (u, m) in union.iter_mut().zip(&p.mask) {
                 *u |= *m;
             }
         }
     }
-    let union = to_horizon(&union);
-    if union.iter().filter(|u| **u).count() < (0.01 * (SIDE * SIDE) as f32) as usize {
-        return Ok(empty(width, height));
+    // Where no outline fits, the label itself stands in for it.
+    let covered = union
+        .iter()
+        .zip(&labelled)
+        .filter(|(u, l)| **u && **l)
+        .count();
+    if (covered as f32) < 0.6 * cells as f32 {
+        for (u, l) in union.iter_mut().zip(&labelled) {
+            *u |= *l;
+        }
     }
+    let union = to_horizon(&union);
     let guide = luma(image, width, height);
     let soft = expand(
         &union
@@ -158,7 +159,7 @@ fn check(len: usize) -> Result<(), InferenceError> {
         Ok(())
     } else {
         Err(InferenceError::OutputInvalid(format!(
-            "the saliency has {len} values, expected {}",
+            "a label map has {len} values, expected {}",
             SIDE * SIDE
         )))
     }
@@ -170,27 +171,6 @@ fn empty(width: usize, height: usize) -> Coverage {
         height,
         data: vec![0; width * height],
     }
-}
-
-/// The photo's three colour planes on the [`SIDE`] grid, 0..=1.
-fn grid(image: &RgbImage) -> [Vec<f32>; 3] {
-    let whole = Rect {
-        x: 0,
-        y: 0,
-        width: image.width,
-        height: image.height,
-    };
-    let plane = |c: usize| {
-        let full: Vec<f32> = image
-            .data
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|p| f32::from(p[c]) / 255.0)
-            .collect();
-        resample(&full, image.width, whole, SIDE, SIDE)
-    };
-    [plane(0), plane(1), plane(2)]
 }
 
 /// The photo's luminance at `width` x `height` (the coverage's size, which is the
@@ -226,19 +206,6 @@ fn expand(grid: &[f32], width: usize, height: usize) -> Vec<f32> {
         height: SIDE,
     };
     resample(grid, SIDE, whole, width, height)
-}
-
-/// Gradient magnitude by central differences.
-fn gradient(v: &[f32]) -> Vec<f32> {
-    let at = |x: usize, y: usize| v[y.min(SIDE - 1) * SIDE + x.min(SIDE - 1)];
-    (0..SIDE * SIDE)
-        .map(|i| {
-            let (x, y) = (i % SIDE, i / SIDE);
-            let dx = (at(x + 1, y) - at(x.saturating_sub(1), y)) / 2.0;
-            let dy = (at(x, y + 1) - at(x, y.saturating_sub(1))) / 2.0;
-            dx.hypot(dy)
-        })
-        .collect()
 }
 
 /// `mask` grown by `radius` cells (a square window).
@@ -354,24 +321,36 @@ mod tests {
     }
 
     #[test]
-    fn sky_is_the_smooth_bright_outline_from_the_top_down_to_the_horizon() {
-        // Blue sky over a textured dark ground, with water-like smooth blue below it.
+    fn sky_is_the_outline_the_label_lies_on_from_the_top_down_to_the_horizon() {
+        // Sky over a textured ground, with smooth sky-coloured water below it.
         let img = photo(256, 256, |x, y| match y {
             0..=99 => [120, 160, 230],
             100..=149 => [(x * 7 % 60) as u8, (x * 13 % 70) as u8, 30],
             _ => [110, 150, 220],
         });
+        // The model labels the sky, and also a patch of the water that reflects it.
+        let label: Vec<f32> = (0..SIDE * SIDE)
+            .map(|i| {
+                f32::from(u8::from(
+                    i / SIDE < 100 || (i / SIDE > 200 && i % SIDE < 40),
+                ))
+            })
+            .collect();
         let sky_and_water = Proposal {
             mask: (0..SIDE * SIDE)
                 .map(|i| !(100..150).contains(&(i / SIDE)))
                 .collect(),
             score: 0.95,
         };
+        let sky_only = Proposal {
+            mask: rect(0, 0, 256, 100),
+            score: 0.9,
+        };
         let ground = Proposal {
             mask: rect(0, 100, 256, 150),
             score: 0.9,
         };
-        let cov = sky(&img, &[sky_and_water, ground]).unwrap();
+        let cov = sky(&img, &[sky_and_water, sky_only, ground], &label).unwrap();
         assert!(at(&cov, 0.5, 0.15) > 240);
         assert!(at(&cov, 0.5, 0.45) < 10, "the ground is not sky");
         assert!(
@@ -381,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dark_hill_or_a_photo_without_sky_has_no_sky() {
+    fn without_a_sky_label_there_is_no_sky() {
         let hill = photo(
             256,
             256,
@@ -391,8 +370,30 @@ mod tests {
             mask: rect(0, 0, 256, 128),
             score: 0.9,
         };
-        assert!(sky(&hill, &[top]).unwrap().data.iter().all(|v| *v == 0));
-        assert!(sky(&hill, &[]).unwrap().data.iter().all(|v| *v == 0));
+        assert!(
+            sky(&hill, &[top], &vec![0.0; SIDE * SIDE])
+                .unwrap()
+                .data
+                .iter()
+                .all(|v| *v == 0)
+        );
+        assert!(sky(&hill, &[], &[0.0; 3]).is_err());
+    }
+
+    #[test]
+    fn a_label_stands_in_where_no_outline_fits() {
+        let img = photo(256, 256, |_, y| {
+            if y < 100 {
+                [120, 160, 230]
+            } else {
+                [20, 90, 30]
+            }
+        });
+        let label: Vec<f32> = (0..SIDE * SIDE)
+            .map(|i| f32::from(u8::from(i / SIDE < 100)))
+            .collect();
+        let cov = sky(&img, &[], &label).unwrap();
+        assert!(at(&cov, 0.5, 0.2) > 240 && at(&cov, 0.5, 0.7) < 10);
     }
 
     #[test]

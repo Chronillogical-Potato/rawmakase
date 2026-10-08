@@ -3,8 +3,8 @@
 //! Everything a pre/post-processing step or an installer needs to know about them lives
 //! here; nothing else in the crate hard-codes a size, a tensor name or a normalization
 //! constant. Two models work together: [`SUBJECT`] (Segment Anything 2) draws crisp object
-//! masks and answers clicks, and [`SALIENCY`] (IS-Net) says which objects are the photo's
-//! subject.
+//! masks and answers clicks, and [`PANOPTIC`] (DETR) says where the photo's people,
+//! animals and sky are.
 
 /// One file of the models, as stored under their folder.
 #[derive(Debug, Clone, Copy)]
@@ -43,16 +43,22 @@ pub struct ModelSpec {
     pub attribution: &'static str,
 }
 
-/// The saliency model's contract: one graph, a square input, a probability matte out.
+/// The panoptic model's contract: one graph that labels the photo's people, animals and
+/// sky, at any size.
 #[derive(Debug, Clone, Copy)]
-pub struct SaliencySpec {
+pub struct PanopticSpec {
     pub id: &'static str,
     pub file: ModelFile,
-    pub input_size: usize,
+    /// The photo is scaled to this long edge, keeping its proportions.
+    pub long_edge: usize,
     pub mean: [f32; 3],
     pub std: [f32; 3],
-    pub input_name: &'static str,
-    pub output_name: &'static str,
+    /// Class ids (COCO's) the model labels people and animals with, and its sky.
+    pub people: (usize, usize),
+    pub animals: (usize, usize),
+    pub sky: usize,
+    /// A query counts as an object when the model is at least this sure of its class.
+    pub confidence: f32,
     pub license: &'static str,
     pub attribution: &'static str,
 }
@@ -104,26 +110,38 @@ pub const SUBJECT: ModelSpec = ModelSpec {
                   onnx-community on Hugging Face.",
 };
 
-/// IS-Net "general use" (DIS, Xuebin Qin et al.), the ONNX conversion distributed by the
-/// rembg project. It decides which objects are the subject; SAM 2 draws their outlines.
-pub const SALIENCY: SaliencySpec = SaliencySpec {
-    id: "isnet-general-use",
+impl PanopticSpec {
+    /// Whether `class` is a person or an animal.
+    pub fn is_subject(&self, class: usize) -> bool {
+        [self.people, self.animals]
+            .iter()
+            .any(|(first, last)| (*first..=*last).contains(&class))
+    }
+}
+
+/// DETR ResNet-50 panoptic (Facebook AI Research, trained on COCO), in the ONNX export
+/// of Xenova's Transformers.js conversion (half precision). It says where the people,
+/// animals and sky are; SAM 2 draws their outlines.
+pub const PANOPTIC: PanopticSpec = PanopticSpec {
+    id: "detr-resnet-50-panoptic",
     file: ModelFile {
-        name: "isnet-general-use.onnx",
-        size_bytes: 178_648_008,
-        sha256: "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
-        url: "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+        name: "detr-panoptic-fp16.onnx",
+        size_bytes: 86_559_030,
+        sha256: "afd9f02d864302d690356fd4bfcb2feed2397a1190bf46a7306cb430464d734a",
+        url: "https://huggingface.co/Xenova/detr-resnet-50-panoptic/resolve/ea24b2d4e0bfae31f0a1299ba3fb892a2df064de/onnx/model_fp16.onnx",
     },
-    input_size: 1024,
-    mean: [0.5, 0.5, 0.5],
-    std: [1.0, 1.0, 1.0],
-    input_name: "input_image",
-    output_name: "output_image",
-    license: "Code: Apache-2.0 (xuebinqin/DIS). Conversion: rembg release v0.0.0 (MIT). \
-              No separate license is published for the isnet-general-use weights.",
-    attribution: "IS-Net (DIS: Highly Accurate Dichotomous Image Segmentation, Qin et al., \
-                  ECCV 2022), https://github.com/xuebinqin/DIS, Apache-2.0; ONNX conversion \
-                  from https://github.com/danielgatis/rembg.",
+    long_edge: 800,
+    mean: [0.485, 0.456, 0.406],
+    std: [0.229, 0.224, 0.225],
+    people: (1, 1),
+    animals: (16, 25),
+    sky: 187,
+    confidence: 0.85,
+    license: "Apache-2.0 (facebook/detr-resnet-50-panoptic, trained on COCO). The ONNX export \
+              is Xenova's conversion of those weights; its card declares no license of its own.",
+    attribution: "End-to-End Object Detection with Transformers (DETR), Carion et al., Facebook \
+                  AI Research, 2020, https://github.com/facebookresearch/detr, Apache-2.0; \
+                  ONNX export by Xenova on Hugging Face.",
 };
 
 /// Every file the selection feature needs, in one folder.
@@ -132,7 +150,7 @@ pub fn all_files() -> Vec<ModelFile> {
         .files
         .iter()
         .copied()
-        .chain([SALIENCY.file])
+        .chain([PANOPTIC.file])
         .collect()
 }
 
@@ -155,10 +173,9 @@ mod tests {
                     .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
             );
             assert!(file.url.starts_with("https://") && !file.url.contains("/main/"));
-            assert!(file.url.ends_with(file.name), "{}", file.name);
         }
         assert!(SUBJECT.files.iter().any(|f| f.name == SUBJECT.encoder_file));
         assert!(SUBJECT.files.iter().any(|f| f.name == SUBJECT.decoder_file));
-        assert_eq!(total_bytes(), 184_115_050 + 178_648_008);
+        assert_eq!(total_bytes(), 184_115_050 + 86_559_030);
     }
 }

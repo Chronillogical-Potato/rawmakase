@@ -102,6 +102,17 @@ pub fn preprocess(
     mean: [f32; 3],
     std: [f32; 3],
 ) -> Result<Vec<f32>, InferenceError> {
+    preprocess_sized(image, size, size, mean, std)
+}
+
+/// As [`preprocess`], to a `width` x `height` input that need not be square.
+pub fn preprocess_sized(
+    image: &RgbImage,
+    width: usize,
+    height: usize,
+    mean: [f32; 3],
+    std: [f32; 3],
+) -> Result<Vec<f32>, InferenceError> {
     check_image(image)?;
     let whole = Rect {
         x: 0,
@@ -109,13 +120,13 @@ pub fn preprocess(
         width: image.width,
         height: image.height,
     };
-    let mut tensor = Vec::with_capacity(3 * size * size);
+    let mut tensor = Vec::with_capacity(3 * width * height);
     let mut plane = vec![0.0f32; image.width * image.height];
     for channel in 0..3 {
         for (dst, rgb) in plane.iter_mut().zip(image.data.as_chunks::<3>().0) {
             *dst = f32::from(rgb[channel]) / 255.0;
         }
-        let resized = resample(&plane, image.width, whole, size, size);
+        let resized = resample(&plane, image.width, whole, width, height);
         tensor.extend(resized.iter().map(|v| (v - mean[channel]) / std[channel]));
     }
     Ok(tensor)

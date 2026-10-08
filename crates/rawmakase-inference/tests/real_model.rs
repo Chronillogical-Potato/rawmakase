@@ -74,19 +74,19 @@ fn a_click_selects_the_object_under_it_and_a_click_elsewhere_does_not() {
 
 #[test]
 #[ignore = "needs the model and an ONNX Runtime"]
-fn the_subject_is_found_without_a_click_and_the_object_in_front_is_not_sky() {
+fn automatic_selection_runs_and_a_disc_is_neither_a_person_nor_sky() {
     let cancel = AtomicBool::new(false);
     let mut session = Subject::load(&model()).unwrap();
     let image = scene();
     let analysis = session.analyze(&image, &cancel).unwrap();
+    // The panoptic model knows people, animals and sky: a red disc is none of them.
     let subject = analysis.subject().unwrap();
-    let at = |c: &rawmakase_inference::Coverage, x: usize, y: usize| c.data[y * c.width + x];
-    assert!(at(&subject, 200, 120) > 200, "{}", at(&subject, 200, 120));
-    assert!(at(&subject, 20, 20) < 40, "{}", at(&subject, 20, 20));
-    // The smooth blue backdrop may count as sky; the object in front of it never does.
+    assert_eq!((subject.width, subject.height), (320, 240));
+    assert!(subject.data.iter().all(|v| *v < 40));
     let sky = analysis.sky().unwrap();
-    assert!(at(&sky, 200, 120) < 40, "{}", at(&sky, 200, 120));
+    assert!(sky.data[120 * sky.width + 200] < 40);
     // Clicks work on the same analysis.
+    let at = |c: &rawmakase_inference::Coverage, x: usize, y: usize| c.data[y * c.width + x];
     let click = Prompt {
         points: vec![Point {
             x: 200. / 320.,

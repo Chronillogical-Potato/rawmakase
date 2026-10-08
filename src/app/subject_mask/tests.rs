@@ -178,7 +178,7 @@ fn failures_and_cancellation_record_no_edit() {
         e.selection.failure.as_ref().map(|f| &f.1),
         Some(&Failure::NoSubject)
     );
-    assert_eq!(e.status, "No subject found");
+    assert_eq!(e.status, "No person or animal found");
     assert!(e.selection.running().is_none());
 
     e.selection.failure = None;
@@ -511,7 +511,14 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
             image: image.clone(),
             recipe: e.document.edit.recipe().clone(),
             model,
-            action: Action::Auto(Feature::Subject),
+            action: Action::Click(rawmakase_inference::Prompt {
+                points: vec![rawmakase_inference::Point {
+                    x: 0.5,
+                    y: 0.62,
+                    positive: true,
+                }],
+                bounds: None,
+            }),
         },
         e.tx.clone(),
         e.context.clone(),
@@ -717,4 +724,22 @@ fn after_installing_the_models_every_selection_runs_without_asking_again() {
     });
     assert!(e.selection.prompt.is_none(), "asked again");
     assert!(e.selection.running().is_some());
+}
+
+#[test]
+fn when_nothing_is_found_the_user_can_aim_by_hand() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let g = begin(e, SUBJECT);
+    finish(e, g, Err(Failure::NoSubject));
+    assert!(e.selection.prompting.is_none());
+    // Without the models, aiming asks for them first, as any selection does.
+    if !e.selection.models.installed() {
+        e.begin_aiming(SUBJECT);
+        assert!(e.selection.prompting.is_none());
+        assert!(matches!(
+            e.selection.prompt,
+            Some(Prompt::Model(_) | Prompt::Upgrade(_))
+        ));
+    }
 }

@@ -13,12 +13,13 @@
 pub mod auto;
 mod error;
 pub mod manifest;
+pub mod panoptic;
 pub mod process;
 pub mod refine;
 pub mod runtime;
 
 pub use auto::Proposal;
 pub use error::InferenceError;
-pub use manifest::{ModelFile, ModelSpec, SALIENCY, SUBJECT, SaliencySpec};
+pub use manifest::{ModelFile, ModelSpec, PANOPTIC, PanopticSpec, SUBJECT};
 pub use process::{Coverage, Point, Prompt, RgbImage};
 pub use runtime::{Analysis, Embedding, LoadOptions, RUNTIME_ENV, Session, Subject};

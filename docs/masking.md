@@ -15,13 +15,14 @@ Subtract and Intersect menus) make a mask from the photo with one click, with mo
 running on this computer. The result is one named mask and one History step with
 neutral sliders and its overlay shown.
 
-- **Subject** is the photo's salient foreground, possibly several people or objects.
-  IS-Net decides what is salient; Segment Anything 2 draws each object's outline, and
-  the outlines inside the salient area are combined, with the saliency filling what they
-  miss and both edges moved onto the photo's own (no halo under a local adjustment).
-- **Sky** is the outlines Segment Anything 2 draws that reach the top of the photo and
-  look like sky (smooth, bright or blue), cut where the sky ends so water below the
-  horizon is not included. "No sky found" when there is none.
+- **Subject** is the people and animals in the photo (as many as there are). A panoptic
+  model (DETR, trained on COCO) says where they are; Segment Anything 2 draws each one's
+  outline, the outlines inside that area are combined, the label fills what they miss,
+  and both edges are moved onto the photo's own (no halo under a local adjustment). It
+  knows nothing else: for a sign, a car or a rocket it says "No person or animal found"
+  and offers **Click the subject…**.
+- **Sky** is the sky label, drawn with Segment Anything 2's outlines and cut where the sky
+  ends so a lake reflecting it is not included. "No sky found" when there is none.
 - **Background** is the subject inverted as a component, so adding a brush to it still
   adds coverage.
 - **Regenerate** on a selected generated component finds it again, replacing only that
@@ -36,7 +37,7 @@ left, in order, with the finished ones ticked: upgrade the catalog, then downloa
 models.
 
 - **On this computer.** The models are downloaded on request (Segment Anything 2.1 Hiera
-  small, four files, 184 MB; IS-Net, 179 MB; each file checked against a pinned SHA-256)
+  small, four files, 184 MB; DETR panoptic, 87 MB; each file checked against a pinned SHA-256)
   or imported from a folder with the files; nothing downloads at startup, on opening a
   catalog or the drawer, or at an update. They run on the CPU through ONNX Runtime, which
   ships with the app (beside the executable; source builds put `libonnxruntime` in the
@@ -58,9 +59,8 @@ models.
 - **Limits:** one 4096-pixel, 8-bit raster per selection; rasters are never
   garbage-collected, so a catalog only grows with them. Grow/shrink and feather are
   not implemented. Fine hair is as sharp as the 256-pixel mask and the edge refinement
-  make it, not a matting model's. Which objects are the subject is the saliency model's
-  call; clicks correct it. Sky is a heuristic on top of the outlines: a very dark or
-  unusually coloured sky may be missed, and a bright smooth wall at the top may count.
+  make it, not a matting model's. Subject is limited to what DETR was trained to name (people and animals); clicks
+  cover the rest. Sky follows DETR's sky label, which can miss a very dark sky.
 
 ## Using it
 

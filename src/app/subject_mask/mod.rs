@@ -103,7 +103,7 @@ impl Failure {
     fn message(&self) -> String {
         match self {
             Self::Cancelled => "Cancelled".into(),
-            Self::NoSubject => "No subject found".into(),
+            Self::NoSubject => "No person or animal found".into(),
             Self::NoSky => "No sky found".into(),
             Self::NothingThere => "Nothing selected there; click on the subject itself".into(),
             Self::ModelMissing => "The selection model is not installed".into(),
@@ -330,6 +330,27 @@ impl Editor {
         self.selection.failure = None;
         // The models find the subject and the sky by themselves; clicks only refine.
         self.start_selection(request, Action::Auto(request.feature));
+    }
+    /// Aims at the subject by hand, for what the models do not know (a sign, a car, a
+    /// rocket): the clicks make the mask, a new one or the one `request` names.
+    pub(super) fn begin_aiming(&mut self, request: Request) {
+        self.context.request_repaint();
+        if self.selection_unavailable().is_some() || !self.selection.models.installed() {
+            self.request_selection(request);
+            return;
+        }
+        self.selection.failure = None;
+        self.selection.prompting = Some(Prompting {
+            request,
+            points: Vec::new(),
+            bounds: None,
+            applied: match request.target {
+                Target::Regenerate { mask, component } => Some((mask, component)),
+                _ => None,
+            },
+        });
+        self.view.tool = super::state::Tool::Mask;
+        self.status = "Click the subject on the photo, or drag a box around it".into();
     }
     /// Aims at a generated component: clicks on the photo add to it and leave things
     /// out of it, each one refining the same mask.

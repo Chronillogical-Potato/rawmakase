@@ -485,7 +485,23 @@ impl Editor {
             return;
         }
         hint(ui, &failure.message());
+        if *failure == Failure::NoSubject {
+            hint(
+                ui,
+                "Automatic selection knows people and animals. For anything else, click it yourself.",
+            );
+        }
         indented(ui, |ui| {
+            if *failure == Failure::NoSubject
+                && ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Click the subject…").strong())
+                            .fill(egui::Color32::from_rgb(52, 98, 170)),
+                    )
+                    .clicked()
+            {
+                self.begin_aiming(request);
+            }
             if ui.button("Try again").clicked() {
                 self.selection.failure = None;
                 self.request_selection(request);
