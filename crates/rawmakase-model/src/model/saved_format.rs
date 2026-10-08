@@ -13,9 +13,17 @@ const LOOK_AMOUNT: u32 = 8;
 /// The version written for a recipe whose look has an RGB table (or no HSV table)
 /// or carries develop settings, which releases that read 8 reject.
 const RGB_TABLE: u32 = 9;
+/// Matrix-only DNG signatures add a profile field rejected by older readers.
+const MATRIX_SIGNATURE: u32 = 10;
 
 /// The schema and pipeline version to write `r` with.
 pub fn saved_version(r: &super::recipe::Recipe) -> u32 {
+    if r.profile
+        .as_ref()
+        .is_some_and(|p| p.has_matrix_calibration_signature())
+    {
+        return MATRIX_SIGNATURE;
+    }
     let Some(look) = r.profile.as_ref().and_then(|p| p.enhanced.as_ref()) else {
         return SCHEMA;
     };
@@ -45,6 +53,7 @@ pub fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
                 | (Some(7), Some(7))
                 | (Some(8), Some(8))
                 | (Some(9), Some(9))
+                | (Some(10), Some(10))
         ),
         "Unsupported saved recipe version: preserved without changes"
     );
@@ -113,6 +122,27 @@ mod tests {
         let mut v = serde_json::json!({"schema": 9, "pipeline": 9, "recipe": {}});
         super::migrate_recipe(&mut v).unwrap();
     }
+    #[test]
+    fn matrix_profile_signature_raises_saved_version_and_round_trips() {
+        let m = crate::camera_data::Metadata {
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            dng_matrix_profile_signature: Some("test.profile".into()),
+            ..Default::default()
+        };
+        let r = super::super::recipe::Recipe {
+            profile: crate::camera_profiles::open::color(&m).map(std::sync::Arc::new),
+            ..Default::default()
+        };
+        assert!(r.profile.is_some());
+        let version = super::saved_version(&r);
+        assert_eq!(version, 10);
+        let mut saved = serde_json::json!({"schema": version, "pipeline": version, "recipe": r});
+        super::migrate_recipe(&mut saved).unwrap();
+        let back: super::super::recipe::Recipe =
+            serde_json::from_value(saved["recipe"].clone()).unwrap();
+        assert_eq!(back, r);
+    }
+
     /// The fields a freshly saved recipe writes, as of schema 6. Releases that read
     /// schema 6 keep fields they don't know, so adding a field is safe only when it
     /// is skipped at its default (`skip_serializing_if`) or when every release that

@@ -223,6 +223,7 @@ pub fn from_bytes(b: &[u8]) -> Result<CameraProfile> {
             .then(|| d.matrix(50722))
             .transpose()?,
         calibration_signature: d.text(50932),
+        matrix_calibration_signature: None,
         forward1: f1,
         forward2: f2,
         kelvin1: d.kelvin(50778)?,

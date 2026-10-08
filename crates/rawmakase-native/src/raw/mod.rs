@@ -85,6 +85,7 @@ impl Raw {
             lens_model: text(&m.lens).trim().to_string(),
             baseline_exposure: None,
             dng_neutral_calibration: None,
+            dng_matrix_profile_signature: None,
             lens_profiles: Default::default(),
             lateral_ca: Default::default(),
             embedded_dcp: None,

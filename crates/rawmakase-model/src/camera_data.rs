@@ -63,6 +63,9 @@ pub struct Metadata {
     pub baseline_exposure: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dng_neutral_calibration: Option<NeutralCalibration>,
+    /// Signature of a DNG's matrix-only profile, retained when no forward profile parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dng_matrix_profile_signature: Option<String>,
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
     /// choices; rebuilt on open.
     #[serde(skip)]

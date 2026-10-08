@@ -1,5 +1,28 @@
 use super::*;
 #[test]
+fn matrix_signature_does_not_activate_the_legacy_x100f_profile_correction() {
+    let m = Metadata {
+        baseline_exposure: Some(0.),
+        dng_matrix_profile_signature: Some("com.adobe".into()),
+        dng_neutral_calibration: Some(crate::camera_data::NeutralCalibration {
+            gains: [0.9, 1., 1.1],
+            signature: "com.adobe".into(),
+        }),
+        ..x100f()
+    };
+    let unsigned = CameraProfile::camera_matrix_default(&x100f()).unwrap();
+    let fallback = CameraProfile::camera_matrix_default(&m).unwrap();
+    assert_eq!(
+        fallback.legacy_white_balance(5600., 12., &m),
+        unsigned.white_balance(5600., 12., &x100f())
+    );
+    assert_ne!(
+        fallback.white_balance(5600., 12., &m),
+        fallback.legacy_white_balance(5600., 12., &m)
+    );
+}
+
+#[test]
 fn calibration_upgrade_keeps_old_recipe_white_balance_continuous() {
     let m = Metadata {
         make: "Sony".into(),

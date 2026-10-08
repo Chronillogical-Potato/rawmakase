@@ -11,6 +11,7 @@ use std::{collections::BTreeMap, fs::File, path::Path};
 pub struct Dng {
     pub baseline_exposure: Option<f32>,
     pub neutral_calibration: Option<crate::camera_data::NeutralCalibration>,
+    pub profile_calibration_signature: Option<String>,
     /// Left, top, width, height, relative to the active area.
     pub crop: Option<[u32; 4]>,
     /// The profile tags, rewritten as a standalone DCP: the embedded camera
@@ -50,6 +51,10 @@ pub fn read(path: &Path) -> Option<Dng> {
             .filter(|v| v.is_finite() && v.abs() <= 5.),
         profile: profile_tags(&mut t, &ifd0),
         neutral_calibration: neutral_calibration(&mut t, &ifd0),
+        profile_calibration_signature: ifd0
+            .get(&50932)
+            .and_then(|entry| String::from_utf8(t.raw(entry)?).ok())
+            .map(|value| value.trim_end_matches('\0').to_owned()),
         ..Default::default()
     };
     // The full-resolution raw image is the SubIFD (or IFD0) with NewSubfileType 0.

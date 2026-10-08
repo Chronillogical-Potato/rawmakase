@@ -41,6 +41,10 @@ pub struct CameraProfile {
     color1: Option<Matrix>,
     #[serde(default)]
     calibration_signature: String,
+    /// A matrix-only DNG fallback's signature. Separate from the original field
+    /// so saved Original white balance retains the old unsigned fallback behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    matrix_calibration_signature: Option<String>,
     #[serde(default)]
     color2: Option<Matrix>,
     forward1: Matrix,
@@ -234,6 +238,11 @@ impl Table {
     }
 }
 impl CameraProfile {
+    /// Whether this profile writes the matrix-only DNG signature field.
+    pub(crate) fn has_matrix_calibration_signature(&self) -> bool {
+        self.matrix_calibration_signature.is_some()
+    }
+
     /// This profile with its look at a Profile Amount (see `Enhanced::at_amount`).
     pub fn at_amount(&self, amount: f32) -> Self {
         Self {
@@ -346,7 +355,13 @@ impl CameraProfile {
         if m.baseline_exposure.is_some() {
             m.dng_neutral_calibration
                 .as_ref()
-                .filter(|c| c.signature == self.calibration_signature)
+                .filter(|c| {
+                    c.signature
+                        == self
+                            .matrix_calibration_signature
+                            .as_deref()
+                            .unwrap_or(&self.calibration_signature)
+                })
                 .map_or([1.; 3], |c| c.gains)
         } else if self.calibration_signature == "com.adobe" {
             crate::camera_profiles::reference::neutral_calibration(m)
@@ -626,6 +641,7 @@ impl CameraProfile {
             enhanced: None,
             color1: Some(cm),
             calibration_signature: String::new(),
+            matrix_calibration_signature: m.dng_matrix_profile_signature.clone(),
             color2: None,
             forward1: forward,
             forward2: forward,

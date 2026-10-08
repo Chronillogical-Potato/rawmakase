@@ -117,7 +117,13 @@ python3 -m unittest discover -s scripts/cameras
 
 Camera calibration belongs to the model's camera facts and DNG metadata, and is
 applied by the profile's Temperature/Tint conversion only when signatures match.
-A DNG's own calibration takes precedence over the native-camera table.
+A DNG's own calibration takes precedence over the native-camera table. A
+matrix-only embedded profile retains its signature through the fallback profile;
+matching signatures enable the supported correction, and mismatches keep identity.
+This includes RAWmakase Standard and Color, which use that same camera matrix.
+The fallback signature is stored separately so legacy WB conversion stays unsigned.
+Recipes carrying it save as version 10 so older releases refuse them as newer
+instead of failing on an unknown profile field. Existing recipes keep their version.
 `WhiteBalanceModel` preserves the previous calibration for saved edits and old
 RAWmakase XMP; new edits and Adobe WB imports use `Calibrated`. This keeps old
 gains and the next Temperature/Tint change continuous. The original X100F
