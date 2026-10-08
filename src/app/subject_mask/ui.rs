@@ -481,7 +481,12 @@ impl Editor {
             }
             if ui.button("Try again").clicked() {
                 self.selection.failure = None;
-                self.request_selection(request);
+                // A failed click is retried with its clicks, not as an automatic selection.
+                if self.selection.prompting.is_some() {
+                    self.run_prompt();
+                } else {
+                    self.request_selection(request);
+                }
             }
             if ui.button("Dismiss").clicked() {
                 self.selection.failure = None;

@@ -215,6 +215,7 @@ fn an_obsolete_result_is_dropped_and_cannot_finish_a_newer_request() {
     finish(e, old, Err(Failure::Failed("late".into())));
     assert!(e.document.edit.recipe().masks.is_empty());
     assert!(mask_assets::is_held(&late_id));
+    let held_late = late_id;
     assert!(
         e.selection.running().is_some(),
         "the newer request is still wanted"
@@ -225,6 +226,8 @@ fn an_obsolete_result_is_dropped_and_cannot_finish_a_newer_request() {
     finish(e, new, Ok(taken));
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
     assert!(mask_assets::is_held(&taken_id));
+    // Once the newer one finished with another raster, the late one is let go of.
+    assert!(!mask_assets::is_held(&held_late));
     // Undone, the raster stays: History still names it.
     assert!(e.document.edit.undo());
     e.discard_raster(&taken_id);
@@ -846,4 +849,56 @@ fn a_stale_result_does_not_drop_the_raster_a_running_selection_may_share() {
     finish(e, new, Ok(same));
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
     assert!(mask_assets::resolve(&id).is_ok());
+}
+
+#[test]
+fn a_camera_exposure_change_while_selecting_invalidates_the_result() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let g = begin(e, SUBJECT);
+    e.change_edit(None, |r| r.camera_exposure += 0.5);
+    finish(e, g, Ok(generated(160)));
+    assert!(e.document.edit.recipe().masks.is_empty());
+}
+
+#[test]
+fn refining_a_mask_can_start_by_leaving_something_out() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let g = begin(e, SUBJECT);
+    // A raster selected in its left half.
+    let id = mask_assets::register(Bitmap {
+        width: 4,
+        height: 2,
+        channels: 1,
+        depth: 1,
+        data: vec![255, 255, 0, 0, 255, 255, 0, 0],
+    })
+    .unwrap();
+    assert_eq!(super::raster_extent(&id), Some([0.0, 0.0, 0.5, 1.0]));
+    finish(
+        e,
+        g,
+        Ok(Generated {
+            id,
+            width: 4,
+            height: 2,
+            source: BitmapSource {
+                feature: FEATURE_SUBJECT.into(),
+                model: "test@0".into(),
+                input: "x".into(),
+            },
+        }),
+    );
+    e.selection.prompting = Some(Prompting {
+        request: SUBJECT,
+        points: Vec::new(),
+        bounds: None,
+        applied: Some((0, 0)),
+    });
+    e.prompt_click([0.2, 0.5], false);
+    // Taken: with the models it runs (the click and the mask's extent); without them
+    // aiming ends and asks for the models. Either way it is not ignored.
+    let taken = e.selection.running().is_some() || e.selection.prompt.is_some();
+    assert!(taken, "the first leave-out click was ignored");
 }

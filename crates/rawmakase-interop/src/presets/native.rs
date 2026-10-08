@@ -47,17 +47,19 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     let mut v: serde_json::Value = serde_json::from_reader(File::open(path)?)?;
     migrate_recipe(&mut v)?;
     let p: Preset = serde_json::from_value(v)?;
-    anyhow::ensure!(
-        !p.masks
-            .iter()
-            .any(crate::model::masks::MaskGroup::has_raster),
-        "This preset refers to a photo's selection mask, which a preset cannot hold"
-    );
     let mut recipe = p.recipe.with_local(crate::model::recipe::LocalEdits {
         retouch: Vec::new(),
         red_eye: Default::default(),
         masks: p.masks,
     });
+    // Checked after merging: development builds kept masks inside the recipe itself.
+    anyhow::ensure!(
+        !recipe
+            .masks
+            .iter()
+            .any(crate::model::masks::MaskGroup::has_raster),
+        "This preset refers to a photo's selection mask, which a preset cannot hold"
+    );
     recipe.upright.clear_analysis();
     recipe.validate()?;
     Ok(recipe)
@@ -133,5 +135,34 @@ mod tests {
         let path = dir.path().join("p.json");
         assert!(save_preset(&path, &r).is_err());
         assert!(!path.exists());
+    }
+    #[test]
+    fn a_preset_with_a_selection_mask_inside_its_recipe_is_refused() {
+        use crate::model::masks::{
+            BITMAP_SAMPLING, BitmapMask, MaskComponent, MaskGroup, MaskShape,
+        };
+        let recipe = Recipe {
+            masks: vec![MaskGroup {
+                components: vec![MaskComponent::new(MaskShape::Bitmap(BitmapMask {
+                    id: format!("sha256:{}", "ab".repeat(32)),
+                    width: 2,
+                    height: 2,
+                    sampling: BITMAP_SAMPLING,
+                    source: None,
+                }))],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // As a development build wrote it: masks in the recipe, none beside it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let value = serde_json::json!({
+            "schema": saved_version(&recipe),
+            "pipeline": saved_version(&recipe),
+            "recipe": recipe,
+        });
+        std::fs::write(&path, value.to_string()).unwrap();
+        assert!(load_preset(&path).is_err());
     }
 }

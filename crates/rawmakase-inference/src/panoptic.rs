@@ -22,6 +22,10 @@ pub struct Labels {
     pub sky: Vec<f32>,
 }
 
+/// Fewest grid cells (of [`SIDE`]²) an instance must cover, so a few cells of noise
+/// are not a subject while a distant person (about 6×6 cells) still is.
+const MIN_CELLS: usize = 36;
+
 /// Most instances kept: a crowd is not one photo's subject.
 const MOST_INSTANCES: usize = 8;
 
@@ -108,10 +112,7 @@ pub fn decode(
             score,
             mask: grid(map),
         })
-        // A speck is not a subject.
-        .filter(|i| {
-            i.mask.iter().filter(|v| **v > 0.5).count() as f32 > 0.003 * (SIDE * SIDE) as f32
-        })
+        .filter(|i| i.mask.iter().filter(|v| **v > 0.5).count() >= MIN_CELLS)
         .collect();
     let area = |i: &Instance| i.mask.iter().filter(|v| **v > 0.5).count();
     instances.sort_by_key(|i| std::cmp::Reverse(area(i)));

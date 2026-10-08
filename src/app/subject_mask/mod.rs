@@ -190,13 +190,41 @@ fn structure(masks: &[MaskGroup]) -> u64 {
     }
     h.finish()
 }
+/// The bounding box (fractions of the photo) of a raster's selected pixels.
+fn raster_extent(id: &str) -> Option<[f32; 4]> {
+    let raster = crate::storage::mask_assets::resolve(id).ok()?;
+    let (w, h) = (raster.width as usize, raster.height as usize);
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for (i, v) in raster.data.iter().enumerate() {
+        if *v >= 128 {
+            let (x, y) = (i % w, i / w);
+            x0 = x0.min(x);
+            x1 = x1.max(x + 1);
+            y0 = y0.min(y);
+            y1 = y1.max(y + 1);
+        }
+    }
+    (x1 > x0 && y1 > y0).then(|| {
+        [
+            x0 as f32 / w as f32,
+            y0 as f32 / h as f32,
+            x1 as f32 / w as f32,
+            y1 as f32 / h as f32,
+        ]
+    })
+}
 /// What the model is given besides pixels the settings do not change: spots and red
 /// eye, which alter the content to select.
 fn content(recipe: &Recipe) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(&(&recipe.retouch, &recipe.retouch_model, &recipe.red_eye))
-        .unwrap_or_default()
-        .hash(&mut h);
+    serde_json::to_string(&(
+        &recipe.retouch,
+        &recipe.retouch_model,
+        &recipe.red_eye,
+        recipe.camera_exposure.to_bits(),
+    ))
+    .unwrap_or_default()
+    .hash(&mut h);
     h.finish()
 }
 
@@ -250,6 +278,9 @@ pub(super) struct Selection {
     upgrade_task: Task,
     /// Its thread, to wait for when quitting: cut off, it would leave a partial backup.
     upgrade_thread: Option<std::thread::JoinHandle<()>>,
+    /// Rasters of results not taken while another selection was running, to let go of
+    /// once it has finished unless it took the same one.
+    deferred: Vec<String>,
 }
 
 impl Selection {
@@ -422,10 +453,27 @@ impl Editor {
         {
             return;
         }
-        // A negative point means nothing without something to be negative about.
+        // A negative point means nothing without something to be negative about: when
+        // refining a mask already made, that is the mask's own extent.
         if !positive && p.points.iter().all(|q| !q.positive) && p.bounds.is_none() {
-            return;
+            let shape = p.applied.and_then(|(m, c)| {
+                let masks = &self.document.edit.recipe().masks;
+                Some(masks.get(m)?.components.get(c)?.shape.clone())
+            });
+            let Some(extent) = shape.and_then(|shape| match shape {
+                MaskShape::Bitmap(b) => raster_extent(&b.id),
+                _ => None,
+            }) else {
+                return;
+            };
+            let Some(p) = &mut self.selection.prompting else {
+                return;
+            };
+            p.bounds = Some(extent);
         }
+        let Some(p) = &mut self.selection.prompting else {
+            return;
+        };
         if p.points.len() < rawmakase_inference::process::MAX_POINTS {
             p.points.push(Point {
                 x: at[0],
@@ -465,7 +513,7 @@ impl Editor {
         }
     }
     /// Runs the model on the clicks and box so far.
-    fn run_prompt(&mut self) {
+    pub(super) fn run_prompt(&mut self) {
         let Some(p) = &self.selection.prompting else {
             return;
         };
@@ -525,6 +573,15 @@ impl Editor {
     /// A selection finished: apply it if it is still the one wanted and the edit it
     /// was made for still stands, else drop it.
     pub(super) fn selection_done(&mut self, done: Done) {
+        self.apply_done(done);
+        // Results set aside while this one ran: let go of the ones nothing took.
+        if self.selection.pending.is_none() {
+            for id in std::mem::take(&mut self.selection.deferred) {
+                self.discard_raster(&id);
+            }
+        }
+    }
+    fn apply_done(&mut self, done: Done) {
         let result = done.result;
         if done.load != self.load.id() || done.generation != self.selection.task.id() {
             self.discard_generated(result.ok());
@@ -550,12 +607,14 @@ impl Editor {
             self.discard_generated(Some(generated));
             return;
         }
-        // The rasters this would add, with every other the edit already refers to.
-        let ids: Vec<&str> = self
-            .document
-            .edit
+        // The rasters this would add, with every other the edit and its History refer to.
+        let edit = &self.document.edit;
+        let history = edit.history().saved(edit.recipe());
+        let held = history.mask_asset_ids();
+        let ids: Vec<&str> = edit
             .recipe()
             .mask_asset_ids()
+            .chain(held.iter().copied())
             .chain([generated.id.as_str()])
             .collect();
         let bytes = crate::storage::mask_assets::decoded_bytes(ids);
@@ -624,16 +683,18 @@ impl Editor {
     }
     /// Forgets the raster of a result the edit did not take, so results the user never
     /// sees (superseded, stale, over budget) do not stay in memory.
-    fn discard_generated(&self, generated: Option<Generated>) {
+    fn discard_generated(&mut self, generated: Option<Generated>) {
         if let Some(generated) = generated {
             self.discard_raster(&generated.id);
         }
     }
     /// Forgets an unsaved raster unless the edit, its History or Before still names it
     /// (the same coverage selected twice has one ID).
-    fn discard_raster(&self, id: &str) {
-        // A selection still running may produce the same coverage, and so the same ID.
+    fn discard_raster(&mut self, id: &str) {
+        // A selection still running may produce the same coverage, and so the same ID:
+        // decided once it has finished.
         if self.selection.pending.is_some() {
+            self.selection.deferred.push(id.to_string());
             return;
         }
         let edit = &self.document.edit;
