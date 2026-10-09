@@ -614,227 +614,224 @@ mod tests {
         assert_eq!(error, "Cancelled");
     }
 
-    /// How the test server answers one request: the whole file, cut after `send`
-    /// bytes, or the rest of it from where the request's range starts.
+    /// How the test host answers one request.
     enum Answer {
-        Whole {
-            send: usize,
-        },
-        /// The whole file, stalling after `send` bytes.
-        Stall {
-            send: usize,
-        },
+        /// The whole file, closing after `send` bytes.
+        Whole { send: usize },
+        /// The whole file, sending `send` bytes and then nothing until the client
+        /// hangs up.
+        Stall { send: usize },
+        /// The rest of the file from where the request's range starts.
         Rest,
-    }
-
-    /// An HTTP server for one file answering as told, one connection per request; it
-    /// returns where each request asked to start.
-    fn serve(
-        body: Vec<u8>,
-        answers: Vec<Answer>,
-    ) -> (&'static str, std::thread::JoinHandle<Vec<Option<u64>>>) {
-        use std::io::BufRead;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}/x.onnx", listener.local_addr().unwrap());
-        let thread = std::thread::spawn(move || {
-            let mut asked = Vec::new();
-            for answer in answers {
-                let (stream, _) = listener.accept().unwrap();
-                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-                let mut from = None;
-                loop {
-                    let mut line = String::new();
-                    reader.read_line(&mut line).unwrap();
-                    if line.trim().is_empty() {
-                        break;
-                    }
-                    let line = line.to_ascii_lowercase();
-                    if let Some(range) = line.strip_prefix("range: bytes=") {
-                        from = range.trim().trim_end_matches('-').parse::<u64>().ok();
-                    }
-                }
-                asked.push(from);
-                let mut stream = stream;
-                let len = body.len();
-                let _ = match (answer, from) {
-                    (Answer::Whole { send }, _) => stream
-                        .write_all(
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\
-                                 Connection: close\r\n\r\n"
-                            )
-                            .as_bytes(),
-                        )
-                        .and_then(|_| stream.write_all(&body[..send])),
-                    (Answer::Stall { send }, _) => {
-                        let sent = stream
-                            .write_all(
-                                format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n")
-                                    .as_bytes(),
-                            )
-                            .and_then(|_| stream.write_all(&body[..send]));
-                        std::thread::sleep(Duration::from_secs(2));
-                        sent
-                    }
-                    (Answer::Rest, Some(from)) => {
-                        let from = from as usize;
-                        stream
-                            .write_all(
-                                format!(
-                                    "HTTP/1.1 206 Partial Content\r\n\
-                                     Content-Range: bytes {from}-{}/{len}\r\n\
-                                     Content-Length: {}\r\nConnection: close\r\n\r\n",
-                                    len - 1,
-                                    len - from
-                                )
-                                .as_bytes(),
-                            )
-                            .and_then(|_| stream.write_all(&body[from..]))
-                    }
-                    (Answer::Rest, None) => stream.write_all(
-                        b"HTTP/1.1 500 No range\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    ),
-                };
-            }
-            asked
-        });
-        (Box::leak(url.into_boxed_str()), thread)
-    }
-
-    /// A file of `len` bytes served by `url`, with its digest.
-    fn served(len: usize, url: &'static str) -> (Vec<u8>, ModelFile) {
-        let body: Vec<u8> = (0..len).map(|i| (i * 7 % 251) as u8).collect();
-        let sha: String = Sha256::digest(&body)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        let file = ModelFile {
-            name: "x.onnx",
-            size_bytes: len as u64,
-            sha256: Box::leak(sha.into_boxed_str()),
-            url,
-            fallback: url,
-        };
-        (body, file)
     }
 
     const LEN: usize = 100_000;
 
+    /// The bytes the test host serves.
+    fn body() -> Vec<u8> {
+        (0..LEN).map(|i| (i * 7 % 251) as u8).collect()
+    }
+
+    /// Serves `body()` on a local port, one connection per request, answering each
+    /// as told. Gives the file as the manifest describes it, both sources pointing at
+    /// the host, and where each request asked to start, sent before it is answered so
+    /// it has arrived by the time the client has its answer.
+    ///
+    /// The host is never joined: if the client stops early, its test fails on what
+    /// the host saw instead of waiting in `accept`. Reads time out for the same
+    /// reason, and the thread ends with the test process.
+    fn host(answers: Vec<Answer>) -> (ModelFile, std::sync::mpsc::Receiver<Option<u64>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/x.onnx", listener.local_addr().unwrap());
+        let (asked, requests) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let body = body();
+            for answer in answers {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                if answer_one(stream, &body, answer, &asked).is_err() {
+                    return;
+                }
+            }
+        });
+        let file = ModelFile {
+            name: "x.onnx",
+            size_bytes: LEN as u64,
+            sha256: Box::leak(hex(Sha256::new_with_prefix(body())).into_boxed_str()),
+            url: Box::leak(url.into_boxed_str()),
+            fallback: "",
+        };
+        (
+            ModelFile {
+                fallback: file.url,
+                ..file
+            },
+            requests,
+        )
+    }
+
+    fn answer_one(
+        mut stream: std::net::TcpStream,
+        body: &[u8],
+        answer: Answer,
+        asked: &std::sync::mpsc::Sender<Option<u64>>,
+    ) -> std::io::Result<()> {
+        use std::io::BufRead;
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut from = None;
+        let mut reader = std::io::BufReader::new(stream.try_clone()?);
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(range) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                from = range.trim().trim_end_matches('-').parse::<usize>().ok();
+            }
+        }
+        let _ = asked.send(from.map(|f| f as u64));
+        let len = body.len();
+        match (answer, from) {
+            (Answer::Whole { send }, _) => {
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n")?;
+                stream.write_all(&body[..send])
+            }
+            (Answer::Stall { send }, _) => {
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n")?;
+                stream.write_all(&body[..send])?;
+                // Until the client gives up on the body and closes.
+                std::io::copy(&mut reader, &mut std::io::sink()).map(|_| ())
+            }
+            (Answer::Rest, Some(from)) => {
+                write!(
+                    stream,
+                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{}/{len}\r\n\
+                     Content-Length: {}\r\n\r\n",
+                    len - 1,
+                    len - from
+                )?;
+                stream.write_all(&body[from..])
+            }
+            (Answer::Rest, None) => {
+                stream.write_all(b"HTTP/1.1 500 No range\r\nContent-Length: 0\r\n\r\n")
+            }
+        }
+    }
+
+    /// The partial file's place, holding `held` from an earlier attempt.
+    fn partial(dir: &tempfile::TempDir, held: &[u8]) -> PathBuf {
+        let part = dir.path().join(".x.onnx.part");
+        std::fs::write(&part, held).unwrap();
+        part
+    }
+
     #[test]
     fn a_dropped_download_resumes_where_it_stopped() {
-        let (body, _) = served(LEN, "");
-        let (url, server) = serve(
-            body.clone(),
-            vec![Answer::Whole { send: 40_000 }, Answer::Rest],
-        );
-        let (_, file) = served(LEN, url);
+        let (file, requests) = host(vec![Answer::Whole { send: 40_000 }, Answer::Rest]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
+        let part = partial(&dir, &[]);
         let progress = Progress::default();
         assert_eq!(download(&part, &progress, &file, 0, BODY_BUDGET), Ok(()));
-        assert_eq!(std::fs::read(&part).unwrap(), body);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
         assert_eq!(progress.done.load(Ordering::Relaxed), LEN as u64);
         // The second request asked for the rest only.
-        assert_eq!(server.join().unwrap(), vec![None, Some(40_000)]);
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [None, Some(40_000)]
+        );
     }
 
     /// The 0.2.2 bug: a body longer in coming than its budget started over every
     /// time, so on a slow connection a large file never arrived.
     #[test]
     fn a_download_slower_than_its_budget_keeps_what_arrived() {
-        let (body, _) = served(LEN, "");
-        let (url, server) = serve(
-            body.clone(),
-            vec![Answer::Stall { send: 30_000 }, Answer::Rest],
-        );
-        let (_, file) = served(LEN, url);
+        let (file, requests) = host(vec![Answer::Stall { send: 30_000 }, Answer::Rest]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
-        let budget = Duration::from_millis(300);
+        let part = partial(&dir, &[]);
+        let budget = Duration::from_millis(200);
         assert_eq!(
             download(&part, &Progress::default(), &file, 0, budget),
             Ok(())
         );
-        assert_eq!(std::fs::read(&part).unwrap(), body);
-        assert_eq!(server.join().unwrap(), vec![None, Some(30_000)]);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [None, Some(30_000)]
+        );
     }
 
     #[test]
     fn a_download_left_by_an_earlier_session_is_resumed() {
-        let (body, _) = served(LEN, "");
+        let (file, requests) = host(vec![Answer::Rest]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
-        std::fs::write(&part, &body[..60_000]).unwrap();
-        let (url, server) = serve(body.clone(), vec![Answer::Rest]);
-        let (_, file) = served(LEN, url);
+        let part = partial(&dir, &body()[..60_000]);
         assert_eq!(
             download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
             Ok(())
         );
-        assert_eq!(std::fs::read(&part).unwrap(), body);
-        assert_eq!(server.join().unwrap(), vec![Some(60_000)]);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
     }
 
     #[test]
     fn a_host_ignoring_the_range_is_read_from_the_start() {
-        let (body, _) = served(LEN, "");
+        let (file, requests) = host(vec![Answer::Whole { send: LEN }]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
-        std::fs::write(&part, &body[..60_000]).unwrap();
-        let (url, server) = serve(body.clone(), vec![Answer::Whole { send: LEN }]);
-        let (_, file) = served(LEN, url);
+        let part = partial(&dir, &body()[..60_000]);
         assert_eq!(
             download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
             Ok(())
         );
-        assert_eq!(std::fs::read(&part).unwrap(), body);
-        assert_eq!(server.join().unwrap(), vec![Some(60_000)]);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
     }
 
     #[test]
-    fn a_bad_partial_file_is_not_trusted() {
-        let (body, _) = served(LEN, "");
+    fn wrong_bytes_kept_from_before_are_fetched_again() {
+        // The resumed file fails its checksum, and the other source starts over.
+        let (file, requests) = host(vec![Answer::Rest, Answer::Whole { send: LEN }]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
-        // Wrong bytes resumed: the checksum fails, and the next source starts over.
-        std::fs::write(&part, vec![0u8; 60_000]).unwrap();
-        let (url, server) = serve(
-            body.clone(),
-            vec![Answer::Rest, Answer::Whole { send: LEN }],
-        );
-        let (_, file) = served(LEN, url);
+        let part = partial(&dir, &[0; 60_000]);
         assert_eq!(
             download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
             Ok(())
         );
-        assert_eq!(std::fs::read(&part).unwrap(), body);
-        assert_eq!(server.join().unwrap(), vec![Some(60_000), None]);
-        // Longer than the file: not a beginning of it.
-        std::fs::write(&part, vec![0u8; LEN + 1]).unwrap();
-        let (url, server) = serve(body, vec![Answer::Whole { send: LEN }]);
-        let (_, file) = served(LEN, url);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [Some(60_000), None]
+        );
+    }
+
+    #[test]
+    fn a_partial_file_longer_than_the_file_is_not_resumed() {
+        let (file, requests) = host(vec![Answer::Whole { send: LEN }]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[0; LEN + 1]);
         assert_eq!(
             download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
             Ok(())
         );
-        assert_eq!(server.join().unwrap(), vec![None]);
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [None]);
     }
 
     #[test]
     fn a_cancelled_download_keeps_what_arrived() {
-        let (body, _) = served(LEN, "");
+        let (file, requests) = host(vec![]);
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join(".x.onnx.part");
-        std::fs::write(&part, &body[..60_000]).unwrap();
+        let part = partial(&dir, &body()[..60_000]);
         let progress = Progress::default();
         progress.cancel.store(true, Ordering::Relaxed);
-        // Nothing is asked of the host once cancelled.
-        let (_, file) = served(LEN, "http://127.0.0.1:9/x.onnx");
         assert_eq!(
             download(&part, &progress, &file, 0, BODY_BUDGET),
             Err("Cancelled".into())
         );
-        assert_eq!(std::fs::read(&part).unwrap(), &body[..60_000]);
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..60_000]);
+        // Nothing is asked of the host once cancelled.
+        assert_eq!(requests.try_iter().count(), 0);
     }
 
     #[test]
