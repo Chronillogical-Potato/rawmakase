@@ -70,7 +70,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
 | [crates/rawmakase-model/src/time.rs](../crates/rawmakase-model/src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
-| [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs), [volume.rs](../src/platform/volume.rs), [reveal.rs](../src/platform/reveal.rs), [web.rs](../src/platform/web.rs) | OS integration: Linux GVFS/FUSE path bridge, which drive a path is on, showing a file in the file manager, opening web pages. |
+| [src/platform/mod.rs](../src/platform/mod.rs), [network.rs](../src/platform/network.rs), [volume.rs](../src/platform/volume.rs), [reveal.rs](../src/platform/reveal.rs), [web.rs](../src/platform/web.rs), [text_scale.rs](../src/platform/text_scale.rs) | OS integration: Linux GVFS/FUSE path bridge, which drive a path is on, showing a file in the file manager, opening web pages, following the desktop's text size (GNOME/Omarchy `text-scaling-factor`) as the interface zoom under Wayland. |
 
 ## Development and rendering
 

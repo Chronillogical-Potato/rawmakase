@@ -7,4 +7,5 @@ app -> platform
 app -> stats
 app -> updates
 catalog_session -> platform
+stats -> platform
 stats -> updates

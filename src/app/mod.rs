@@ -131,6 +131,9 @@ impl Editor {
         }
         install_fonts(&cc.egui_ctx, &text);
         icons::install(&cc.egui_ctx);
+        // The desktop's text size (Omarchy's, GNOME's Large Text) zooms the
+        // interface, now and when it changes.
+        crate::platform::text_scale::follow(&cc.egui_ctx);
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,

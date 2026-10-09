@@ -226,10 +226,9 @@ fn distro_from(os_release: &str) -> &'static str {
         .unwrap_or("other")
 }
 
-/// winit uses Wayland whenever the session offers it, by either variable.
+/// The display server winit opens windows through.
 fn display() -> &'static str {
-    let set = |name| std::env::var_os(name).is_some_and(|v| !v.is_empty());
-    if set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET") {
+    if crate::platform::wayland() {
         "wayland"
     } else {
         "x11"
