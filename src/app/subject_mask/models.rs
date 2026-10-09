@@ -510,8 +510,12 @@ fn agent(body: Duration) -> ureq::Agent {
         .into()
 }
 
+/// A tenth of the pause before a source is asked again; short in tests.
+const BACKOFF_TICK: Duration = Duration::from_millis(if cfg!(test) { 1 } else { 100 });
+
 /// Fetches the rest of `file` from one source, one request after another; it gives
-/// up after three in a row bring nothing, and at a client error.
+/// up after three in a row bring it no further than it has been, and at a client error.
+/// Further, not more: a host ignoring ranges starts over each time.
 fn fetch(
     agent: &ureq::Agent,
     url: &str,
@@ -522,29 +526,34 @@ fn fetch(
 ) -> Result<(), String> {
     let mut last = format!("the download of {} stopped", file.name);
     let mut failures = 0u32;
+    let mut furthest = partial.len;
     while partial.len < file.size_bytes {
         if failures == 3 {
             return Err(last);
         }
         if failures > 0 {
-            // Back off, noticing a cancel meanwhile.
+            // Back off, a second more each time, noticing a cancel meanwhile.
             for _ in 0..(10 * failures) {
                 if progress.cancel.load(Ordering::Relaxed) {
                     return Err("Cancelled".into());
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(BACKOFF_TICK);
             }
         }
         if progress.cancel.load(Ordering::Relaxed) {
             return Err("Cancelled".into());
         }
-        let start = partial.len;
         match request(agent, url, partial, progress, file, before) {
             Ok(()) => {}
             Err(Failed::Final(e)) => return Err(e),
             Err(Failed::Retry(e)) => last = e,
         }
-        failures = if partial.len > start { 0 } else { failures + 1 };
+        if partial.len > furthest {
+            furthest = partial.len;
+            failures = 0;
+        } else {
+            failures += 1;
+        }
     }
     Ok(())
 }
@@ -804,6 +813,23 @@ mod tests {
         );
         assert_eq!(std::fs::read(&part).unwrap(), body());
         assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
+    }
+
+    #[test]
+    fn a_host_ignoring_the_range_and_dropping_gets_no_further_and_is_left() {
+        // Each answer starts over, ending at 40 or 60 KB: never past 60 KB, so three
+        // requests after reaching it the source is given up, and so is the fallback.
+        let answers = (0..10).map(|i| Answer::Whole {
+            send: if i % 2 == 0 { 40_000 } else { 60_000 },
+        });
+        let (mut file, requests) = host(answers.collect());
+        file.fallback = host(vec![]).0.url;
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[]);
+        assert!(download(&part, &Progress::default(), &file, 0, BODY_BUDGET).is_err());
+        assert_eq!(requests.try_iter().count(), 5);
+        // What it got is kept for the next try.
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..40_000]);
     }
 
     #[test]
