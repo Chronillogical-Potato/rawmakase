@@ -166,8 +166,10 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
         auto& d = h->raw.imgdata;
-        if (d.idata.colors != 3 || (!d.idata.filters)) {
-            message(err, "Only three-color Bayer and X-Trans RAW files are supported"); return nullptr;
+        // Canon's sRAW and mRAW (and Nikon's sRAW) are stored as YCbCr, not a mosaic;
+        // LibRaw converts them to camera RGB, so they take ora_develop's path.
+        if (d.idata.colors != 3 || (!d.idata.filters && !h->raw.is_sraw())) {
+            message(err, "Only three-color Bayer, X-Trans and small RAW files are supported"); return nullptr;
         }
         *m = {};
         m->width=d.sizes.width; m->height=d.sizes.height;
