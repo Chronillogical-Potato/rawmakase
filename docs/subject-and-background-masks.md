@@ -556,10 +556,12 @@ bounded result receivers; detach if the deadline expires. A blocked worker retai
 its own file handles and never waits for a UI reply. Clear only its owning busy
 state on error, panic or disconnection. Add a separate row to `shutdown.md`.
 
-The installer removes its temporary file on cancellation/failure when possible.
-On a later launch, clean only abandoned installer-owned temporary files after
-checking ownership/active-install locks; never remove published models or another
-instance's active temporary file. No cleanup step starts a download. Model removal
+A downloaded file's temporary file is kept on cancellation/failure and resumed by
+the next install, in the same or a later session, with HTTP range requests; an
+imported file's is removed. One install runs at a time across instances, holding a
+lock file in the model folder. Clean only abandoned installer-owned temporary files
+(those an earlier version named for its process); never remove published models or
+another instance's active temporary file. No cleanup step starts a download. Model removal
 is asynchronous: mark it pending, reject new leases, cancel pending use and wait
 off the UI thread for active leases to finish. A native run that cannot stop may
 leave removal pending until process exit; the UI reports that state without
@@ -800,8 +802,12 @@ Deliberate differences from the plan above:
 - Transfer of raster masks to another photo skips them with a note instead of
   rejecting the whole transfer; presets reject them. No Library-wide `EditSource`
   rework: the global loader serves workers.
-- The models are downloaded file by file (a finished file is kept on retry, a partial
-  one starts over) with three attempts each.
+- The models are downloaded file by file. A finished file is kept on retry, and a
+  partial one is resumed with a range request, after a dropped connection, a request
+  reaching its one-minute body budget, a cancel or a restart of the app; a source
+  gives up after three requests in a row bring nothing. The bytes kept are hashed
+  again when resumed, and a file whose checksum fails is fetched again from the start
+  from the other source.
 - Hair and fur edges are SAM 2's 256-pixel mask snapped to the photo by the guided
   filter. Replacing the edge band with a matting model's alpha (MODNet, BiRefNet-lite
   and BiRefNet-lite-matting at 512 and 1024 px on a crop of the subject, ViTMatte-S

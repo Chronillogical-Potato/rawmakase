@@ -745,7 +745,7 @@ fn after_installing_the_models_every_selection_runs_without_asking_again() {
             break r;
         }
     };
-    e.selection.models.finished(result.is_ok());
+    e.selection.models.finished(&result);
     e.model_installed(result);
     assert!(e.selection.models.installed());
     assert!(
