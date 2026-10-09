@@ -189,6 +189,9 @@ fn opener(
             let t = Instant::now();
             let full_size = FullSize::new(&path, job.demosaic);
             if let Some(image) = full_size.cached(&raw.metadata) {
+                // Closed before the photo is ready: Windows refuses to rename or
+                // replace a file LibRaw still has open.
+                drop(raw);
                 send(
                     &tx,
                     &ctx,

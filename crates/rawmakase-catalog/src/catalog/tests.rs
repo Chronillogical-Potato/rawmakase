@@ -111,6 +111,40 @@ fn lightroom_metadata_preserves_all_labels_flags_and_unrated_photos() -> Result<
     Ok(())
 }
 #[test]
+fn a_catalog_too_large_to_archive_imports_without_its_archive() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.lrcat");
+    fixture(&source)?;
+    let size = std::fs::metadata(&source)?.len();
+    let archived = dir.path().join("Archived.rawmakase");
+    super::lightroom::import_archiving_up_to(&source, &archived, size)?;
+    let archive: Vec<u8> = Catalog::open(&archived)?.db_for_tests().query_row(
+        "SELECT original_catalog FROM sources",
+        [],
+        |r| r.get(0),
+    )?;
+    assert_eq!(archive, std::fs::read(&source)?);
+    // One byte over the limit: imported in full, but with an empty archive.
+    let output = dir.path().join("Photos.rawmakase");
+    super::lightroom::import_archiving_up_to(&source, &output, size - 1)?;
+    let mut cat = Catalog::open(&output)?;
+    let (original_size, archive): (i64, Vec<u8>) = cat.db_for_tests().query_row(
+        "SELECT original_size, original_catalog FROM sources",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    assert_eq!(original_size as u64, size);
+    assert!(archive.is_empty());
+    let photos = cat.photos()?;
+    assert_eq!(photos.len(), 2);
+    assert_eq!(photos[0].rating, 4);
+    assert_eq!(photos[0].keywords, "City");
+    // Opening it has nothing to backfill from.
+    assert_eq!(cat.backfill_lightroom_history()?, 0);
+    assert_eq!(cat.backfill_keyword_export()?, 0);
+    Ok(())
+}
+#[test]
 fn import_is_lossless_atomic_and_virtual_copies_are_independent() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let source = dir.path().join("source.lrcat");

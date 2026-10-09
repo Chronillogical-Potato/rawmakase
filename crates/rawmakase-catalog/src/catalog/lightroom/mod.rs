@@ -89,8 +89,19 @@ pub(super) fn copy_keyword_export(lr: &mut LightroomWrite<'_>) -> Result<usize> 
 }
 
 /// Import a closed/exported Lightroom catalog into a new, atomically published file.
-/// Keep a byte-exact archive inside our catalog, including fields we cannot interpret.
+/// Keep a byte-exact archive inside our catalog, including fields we cannot
+/// interpret, unless the catalog is too large for one SQLite blob.
 pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
+    import_archiving_up_to(source, destination, MAX_ARCHIVED_CATALOG)
+}
+
+/// `import_lightroom`, archiving the source only if it is at most
+/// `max_archived` bytes.
+pub(in crate::catalog) fn import_archiving_up_to(
+    source: &Path,
+    destination: &Path,
+    max_archived: u64,
+) -> Result<PathBuf> {
     ensure!(
         !destination.exists(),
         "Destination exists; choose a new catalog filename"
@@ -108,7 +119,7 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     let mut catalog = Catalog::create(&working)?;
     // A catalog too large for one SQLite blob is imported without the archive,
     // left empty so `backfill_once` has nothing to read.
-    let original = if size <= MAX_ARCHIVED_CATALOG {
+    let original = if size <= max_archived {
         std::fs::read(snapshot.path())?
     } else {
         Vec::new()
