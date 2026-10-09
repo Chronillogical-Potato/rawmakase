@@ -585,11 +585,30 @@ impl winit::application::ApplicationHandler<eframe::UserEvent> for SurfaceGate<'
     }
 }
 /// The UI's wgpu device also renders previews (see `develop::gpu`): prefer the
-/// discrete GPU and ask for the storage limits full-resolution regions need.
+/// discrete GPU (egui's default, unless `WGPU_POWER_PREF` says otherwise) and ask
+/// for the storage limits full-resolution regions need. On Linux the window's GPU
+/// is the one the system lists first; see [`display_adapter`].
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
-        setup.power_preference = wgpu::PowerPreference::HighPerformance;
+        #[cfg(target_os = "linux")]
+        {
+            setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| {
+                let usable: Vec<_> = adapters
+                    .iter()
+                    .filter(|adapter| surface.is_none_or(|s| adapter.is_surface_supported(s)))
+                    .collect();
+                let infos: Vec<_> = usable.iter().map(|adapter| adapter.get_info()).collect();
+                let listed: Vec<_> = infos
+                    .iter()
+                    .map(|info| (info.name.as_str(), info.device_type))
+                    .collect();
+                let name = std::env::var("WGPU_ADAPTER_NAME").ok();
+                display_adapter(&listed, wgpu::PowerPreference::from_env(), name.as_deref())
+                    .map(|i| usable[i].clone())
+                    .ok_or_else(|| "No graphics adapter can draw the window".to_owned())
+            }));
+        }
         let default = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
             let mut descriptor = default(adapter);
@@ -609,6 +628,40 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
         _ => default(status),
     });
     options
+}
+
+/// Which of the adapters able to draw the window, in the system's order, the UI
+/// uses. Ranking a discrete GPU first breaks hybrid laptops whose discrete GPU only
+/// renders for the one driving the display: NVIDIA's driver claims it can present
+/// to the window, then fails to configure the surface (#375). The system's order
+/// already puts the display's GPU first (Mesa's device-select layer), or the
+/// discrete one under `prime-run` or `DRI_PRIME=1`. `preference` and `name` come
+/// from `WGPU_POWER_PREF` and `WGPU_ADAPTER_NAME`; software rendering comes last.
+#[cfg(target_os = "linux")]
+fn display_adapter(
+    adapters: &[(&str, wgpu::DeviceType)],
+    preference: Option<wgpu::PowerPreference>,
+    name: Option<&str>,
+) -> Option<usize> {
+    use wgpu::{DeviceType, PowerPreference};
+    if let Some(name) = name.map(str::to_lowercase) {
+        let named = adapters
+            .iter()
+            .position(|(adapter, _)| adapter.to_lowercase().contains(&name));
+        if named.is_some() {
+            return named;
+        }
+    }
+    let rank = |device_type| match (device_type, preference) {
+        (DeviceType::DiscreteGpu, Some(PowerPreference::LowPower)) => 1,
+        (DeviceType::IntegratedGpu, Some(PowerPreference::HighPerformance)) => 1,
+        (DeviceType::DiscreteGpu | DeviceType::IntegratedGpu, _) => 0,
+        (DeviceType::Other, _) => 2,
+        (DeviceType::VirtualGpu, _) => 3,
+        (DeviceType::Cpu, _) => 4,
+    };
+    // The first of the best-ranked, keeping the system's order.
+    (0..adapters.len()).min_by_key(|&i| rank(adapters[i].1))
 }
 
 /// wgpu panics on uncaptured errors by default. Reconfiguring the window's

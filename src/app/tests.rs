@@ -4545,6 +4545,38 @@ fn only_size_changes_hold_previews_gpu_work() {
     assert!(!reconfigures_surface(&WindowEvent::RedrawRequested));
     assert!(!reconfigures_surface(&WindowEvent::Focused(true)));
 }
+#[cfg(target_os = "linux")]
+#[test]
+fn the_window_draws_on_the_gpu_the_system_lists_first() {
+    use wgpu::{DeviceType::*, PowerPreference};
+    // An Optimus laptop (#375): Mesa's device-select layer lists the Intel GPU,
+    // which drives the display, before the render-offload-only NVIDIA GPU.
+    let optimus = [
+        ("Intel(R) Iris(R) Xe Graphics", IntegratedGpu),
+        ("NVIDIA GeForce MX450", DiscreteGpu),
+        ("llvmpipe (LLVM 20.1.8, 256 bits)", Cpu),
+    ];
+    assert_eq!(display_adapter(&optimus, None, None), Some(0));
+    // prime-run lists the NVIDIA GPU first.
+    let offloaded = [optimus[1], optimus[0], optimus[2]];
+    assert_eq!(display_adapter(&offloaded, None, None), Some(0));
+    // Software rendering only when no GPU can draw the window.
+    assert_eq!(
+        display_adapter(&[optimus[2], optimus[0]], None, None),
+        Some(1)
+    );
+    assert_eq!(display_adapter(&[optimus[2]], None, None), Some(0));
+    assert_eq!(display_adapter(&[], None, None), None);
+    // WGPU_POWER_PREF and WGPU_ADAPTER_NAME still choose.
+    let high = Some(PowerPreference::HighPerformance);
+    assert_eq!(display_adapter(&optimus, high, None), Some(1));
+    let low = Some(PowerPreference::LowPower);
+    assert_eq!(display_adapter(&offloaded, low, None), Some(1));
+    let none = Some(PowerPreference::None);
+    assert_eq!(display_adapter(&offloaded, none, None), Some(0));
+    assert_eq!(display_adapter(&optimus, None, Some("NVIDIA")), Some(1));
+    assert_eq!(display_adapter(&optimus, None, Some("radeon")), Some(0));
+}
 #[test]
 fn eframes_reason_for_giving_up_is_kept() {
     use log::Log;

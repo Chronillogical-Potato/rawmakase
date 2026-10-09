@@ -205,8 +205,11 @@ RAW development and exports use the existing CPU implementation.
 `develop::gpu` uses portable WGSL compute through wgpu: Metal on macOS and Vulkan
 on supported Linux drivers, including NVIDIA and AMD. On the desktop it shares the
 UI's wgpu device (eframe's), which the app creates with the storage limits previews
-need (`gpu::required_limits`) and a high-performance adapter; OpenGL and software
-adapters are not used for compute. Every GPU call runs inside its own validation,
+need (`gpu::required_limits`) and a high-performance adapter. On Linux the window's
+adapter is the first GPU the system lists instead: the display's GPU, or the discrete
+one under `prime-run` or `DRI_PRIME=1`, because a render-offload GPU can claim it
+presents to the window and then fail to configure it. OpenGL and software adapters
+are not used for compute. Every GPU call runs inside its own validation,
 internal and out-of-memory error scopes, so a failure disables the preview GPU
 without reaching the UI. Headless callers (tests, the benchmark) create a device of
 their own. It uses ordinary 32-bit storage buffers, Rgba8Unorm storage textures and
