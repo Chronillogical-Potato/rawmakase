@@ -3153,6 +3153,58 @@
           1771
         ]
       }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM4",
+      "measured": [
+        1.0223,
+        1.0,
+        0.9835
+      ],
+      "sha256": "e8380d44c72f15466d0930f5b77e771e824a57302f8b65c3226fa04be8665ae0",
+      "source": "local",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM4",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0223 0 0 0 1 0 0 0 0.9835",
+        "CameraCalibration2": "1.0223 0 0 0 1 0 0 0 0.9835",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2516,
+          1024,
+          1696
+        ]
+      }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7RM6",
+      "measured": [
+        1.0543,
+        1.0,
+        0.9117
+      ],
+      "sha256": "e954b921f38e7247f76524576dda154c631d82c719e8e6b2c7c27937ecc08f73",
+      "source": "local",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7RM6",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.0543 0 0 0 1 0 0 0 0.9117",
+        "CameraCalibration2": "1.0543 0 0 0 1 0 0 0 0.9117",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "NativeDaylightWB": [
+          2136,
+          1024,
+          2016
+        ]
+      }
     }
   ]
 }
