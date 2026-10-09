@@ -83,6 +83,9 @@ fn develop(
     let recipe = EditSource::recipe(Some(&job.edit), &raw)?;
     let full_size = FullSize::with_cache(&job.path, job.demosaic, cache.clone());
     if let Some(image) = full_size.cached(&raw.metadata) {
+        // Closed before the reference is ready: Windows refuses to rename or
+        // replace a file LibRaw still has open.
+        drop(raw);
         ready(ReferenceImage {
             image: Arc::new(image),
             recipe,
@@ -154,6 +157,40 @@ mod tests {
 
         // The next job with that demosaic opens from the cache.
         assert_eq!(develop_stages(&job(other))?, [Resolution::Full]);
+        Ok(())
+    }
+
+    /// Once the reference is ready its file can be renamed: Windows refuses
+    /// while LibRaw still has it open.
+    #[test]
+    fn the_file_is_closed_when_the_reference_is_ready() -> anyhow::Result<()> {
+        let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/corpus/charts/synthetic-d65.dng");
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("photo.dng");
+        std::fs::copy(chart, &path)?;
+        let cache = DecodeCache::new(dir.path().join("cache"), u64::MAX);
+        let job = ReferenceJob {
+            ticket: 1,
+            path: path.clone(),
+            edit: EditSource::Defaults(Default::default()),
+            cancel: Default::default(),
+            demosaic: Demosaic::default().effective(),
+        };
+        let away = path.with_extension("away");
+        // Developed, then opened from the cache.
+        for _ in 0..2 {
+            let mut renamed = Vec::new();
+            develop(&job, &cache, |image| {
+                if image.resolution == Resolution::Full {
+                    renamed.push(
+                        std::fs::rename(&path, &away).and_then(|()| std::fs::rename(&away, &path)),
+                    );
+                }
+            })?;
+            assert_eq!(renamed.len(), 1);
+            renamed.pop().unwrap()?;
+        }
         Ok(())
     }
 }
