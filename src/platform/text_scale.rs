@@ -7,16 +7,18 @@
 //!
 //! The whole interface zooms rather than only its fonts, so panels sized for
 //! their labels grow with them.
+//!
+//! Only under Wayland: on X11, GNOME's settings daemon already multiplies the
+//! `Xft/DPI` it publishes by this factor, and winit takes its scale from that,
+//! so zooming again would apply the text size twice.
 
-/// The settings namespace holding the text size.
-const NAMESPACE: &str = "org.gnome.desktop.interface";
-/// The text size key in [`NAMESPACE`].
-const KEY: &str = "text-scaling-factor";
 /// The zooms followed; GNOME's own range for the key is 0.5 to 3.
+#[cfg(any(target_os = "linux", test))]
 const RANGE: std::ops::RangeInclusive<f64> = 0.5..=3.0;
 
 /// The interface zoom for a `text-scaling-factor`, or None for a value that is
 /// not a usable size.
+#[cfg(any(target_os = "linux", test))]
 fn zoom(factor: f64) -> Option<f32> {
     RANGE.contains(&factor).then_some(factor as f32)
 }
@@ -27,10 +29,13 @@ fn zoom(factor: f64) -> Option<f32> {
 /// Reading it is one portal call that gives up after about a second. Changes
 /// arrive on a thread that blocks on the portal's signals for the life of the
 /// process; it holds no state to save, so it is never joined and ends with the
-/// process. Without a session bus or portal the interface stays at 1.0.
+/// process. Without a session bus or portal, or on X11, the interface stays at
+/// 1.0.
 pub(crate) fn follow(ctx: &eframe::egui::Context) {
     #[cfg(target_os = "linux")]
-    if let Err(error) = portal::follow(ctx) {
+    if crate::platform::wayland()
+        && let Err(error) = portal::follow(ctx)
+    {
         eprintln!("RAWmakase: not following the desktop's text size: {error}");
     }
     #[cfg(not(target_os = "linux"))]
@@ -39,10 +44,15 @@ pub(crate) fn follow(ctx: &eframe::egui::Context) {
 
 #[cfg(target_os = "linux")]
 mod portal {
-    use super::{KEY, NAMESPACE, zoom};
+    use super::zoom;
     use std::time::Duration;
     use zbus::blocking::{Connection, Proxy, connection};
     use zbus::zvariant::{OwnedValue, Value};
+
+    /// The settings namespace holding the text size.
+    const NAMESPACE: &str = "org.gnome.desktop.interface";
+    /// The text size key in [`NAMESPACE`].
+    const KEY: &str = "text-scaling-factor";
 
     pub(super) fn follow(ctx: &eframe::egui::Context) -> zbus::Result<()> {
         let connection = connection::Builder::session()?
