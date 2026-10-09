@@ -2,6 +2,9 @@
 pkgname=rawmakase-git
 pkgver=0.2.2
 pkgrel=1
+# ONNX Runtime for Subject, Sky and Background selection: the release every other
+# package bundles (packaging/onnxruntime.py), not Arch's onnxruntime-cpu.
+_ortver=1.23.2
 pkgdesc='A fast, non-destructive RAW photo developer (development version)'
 arch=('x86_64' 'aarch64')
 url='https://github.com/pch/rawmakase'
@@ -16,6 +19,11 @@ provides=('rawmakase')
 conflicts=('rawmakase')
 source=('rawmakase::git+https://github.com/pch/rawmakase.git')
 sha256sums=('SKIP')
+_ortbase="https://github.com/microsoft/onnxruntime/releases/download/v$_ortver"
+source_x86_64=("$_ortbase/onnxruntime-linux-x64-$_ortver.tgz")
+source_aarch64=("$_ortbase/onnxruntime-linux-aarch64-$_ortver.tgz")
+sha256sums_x86_64=('1fa4dcaef22f6f7d5cd81b28c2800414350c10116f5fdd46a2160082551c5f9b')
+sha256sums_aarch64=('7c63c73560ed76b1fac6cff8204ffe34fe180e70d6582b5332ec094810241e5c')
 
 pkgver() {
   cd rawmakase
@@ -47,4 +55,10 @@ check() {
 package() {
   cd "rawmakase"
   make install DESTDIR="$pkgdir" PREFIX=/usr PKGNAME="$pkgname"
+  # The app opens the runtime lazily from /usr/lib/rawmakase
+  # (crates/rawmakase-inference/src/runtime.rs); nothing links it.
+  local ort="$srcdir/onnxruntime-linux-${CARCH/x86_64/x64}-$_ortver"
+  install -Dm755 "$ort/lib/libonnxruntime.so.$_ortver" "$pkgdir/usr/lib/rawmakase/libonnxruntime.so"
+  install -Dm644 "$ort/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/onnxruntime-LICENSE"
+  install -Dm644 "$ort/ThirdPartyNotices.txt" "$pkgdir/usr/share/licenses/$pkgname/onnxruntime-ThirdPartyNotices.txt"
 }

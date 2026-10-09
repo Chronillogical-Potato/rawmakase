@@ -274,6 +274,11 @@ jobs:
         run: |
           pacman -U --noconfirm packaging/arch/rawmakase-git/*.pkg.tar.zst
           rawmakase --help
+          # The selection runtime is opened lazily, so only loading it shows it works.
+          # Release rehearsals of tags whose recipe predates the runtime skip it.
+          if grep -q '^_ortver=' packaging/arch/rawmakase-git/PKGBUILD; then
+            python -c "import ctypes; ctypes.CDLL('/usr/lib/rawmakase/libonnxruntime.so')"
+          fi
 
   dependencies:
     name: Module dependencies
