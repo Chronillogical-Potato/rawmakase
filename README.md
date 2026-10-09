@@ -43,6 +43,16 @@ Point your coding agent to [GitHub Releases](https://github.com/pch/rawmakase/re
 Install the latest release of RAWmakase for my operating system from https://github.com/pch/rawmakase/releases. Pick the right package for my OS and CPU architecture, verify it against the release's checksums, install it, and tell me how to launch it.
 ```
 
+### Omarchy
+
+Install `rawmakase-bin` from **Omarchy menu → Install → Package**, or from a terminal:
+
+```sh
+omarchy pkg add rawmakase-bin
+```
+
+It updates with the rest of the system.
+
 ### macOS (15 or newer)
 
 Install with Homebrew:
