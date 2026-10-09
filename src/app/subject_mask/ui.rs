@@ -392,6 +392,20 @@ impl Editor {
             });
             return;
         }
+        if let Some(why) = self.selection.models.failure() {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "The download stopped: {why}. Download again to carry on from \
+                         where it stopped."
+                    ))
+                    .size(11.)
+                    .color(egui::Color32::from_rgb(230, 170, 90)),
+                )
+                .wrap(),
+            );
+            ui.add_space(4.);
+        }
         ui.add(
             egui::Label::new(
                 egui::RichText::new(

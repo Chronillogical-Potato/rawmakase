@@ -33,6 +33,8 @@ pub(crate) struct Installer {
     progress: Option<Arc<Progress>>,
     thread: Option<std::thread::JoinHandle<()>>,
     removing: bool,
+    /// Why the last install failed, until the next one starts.
+    failed: Option<String>,
 }
 
 /// Where the model is kept: under this computer's own data folder, in a folder named
@@ -58,6 +60,8 @@ fn is_installed(dir: &Path) -> bool {
 }
 /// The file recording which files were checked, and against which digests.
 const RECEIPT: &str = "verified.txt";
+/// The file an install holds locked while it runs.
+const LOCK: &str = ".install.lock";
 fn receipt() -> String {
     all_files()
         .iter()
@@ -123,10 +127,15 @@ impl Installer {
             p.cancel.store(true, Ordering::Relaxed);
         }
     }
+    /// Why the last install failed, if it did and was not cancelled.
+    pub(in crate::app) fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
+    }
     /// Called when the install's event arrives.
-    pub(in crate::app) fn finished(&mut self, _ok: bool) {
+    pub(in crate::app) fn finished(&mut self, result: &Result<(), String>) {
         self.progress = None;
         self.thread = None;
+        self.failed = result.clone().err().filter(|e| e != "Cancelled");
         self.forget();
     }
     /// Starts fetching the model, or copying `import`; one install at a time.
@@ -141,6 +150,7 @@ impl Installer {
         }
         let progress = Arc::new(Progress::default());
         self.progress = Some(progress.clone());
+        self.failed = None;
         let spawned = std::thread::Builder::new()
             .name("model-install".into())
             .spawn(move || {
@@ -200,11 +210,14 @@ impl Installer {
 /// Fetches or copies each file of the model into a temporary file beside its final
 /// place, checks it and publishes it by renaming. `import` is a folder holding the
 /// files. A file already in place is kept if its SHA-256 matches, so a retry fetches
-/// only what is missing; the receipt is written once every file has been checked.
+/// only what is missing, and a download that stopped part way is kept to be resumed,
+/// in this session or a later one; the receipt is written once every file has been
+/// checked. One install at a time across running instances: see [`lock`].
 fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     let dir = model_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    let _lock = lock(&dir, progress)?;
     remove_abandoned(&dir);
     // The receipt goes first: until it is written again, nothing counts as installed.
     let _ = std::fs::remove_file(dir.join(RECEIPT));
@@ -221,31 +234,27 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
             progress.done.store(finished, Ordering::Relaxed);
             continue;
         }
-        let part = dir.join(format!(".{}.part-{}", file.name, std::process::id()));
+        let part = dir.join(format!(".{}.part", file.name));
         let result = (|| {
-            let mut out = std::fs::File::options()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&part)
-                .map_err(|e| format!("could not write {}: {e}", part.display()))?;
-            let digest = match import {
+            match import {
                 Some(folder) => {
+                    let mut out = std::fs::File::options()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&part)
+                        .map_err(|e| format!("could not write {}: {e}", part.display()))?;
                     let path = folder.join(file.name);
                     let source = std::fs::File::open(&path)
                         .map_err(|e| format!("could not read {}: {e}", path.display()))?;
-                    copy_checked(source, &mut out, progress, file, finished)?
+                    if copy_checked(source, &mut out, progress, file, finished)? != file.sha256 {
+                        return Err(format!("{} is not the file this release uses", file.name));
+                    }
+                    out.sync_all().map_err(|e| e.to_string())?;
                 }
-                None => download(&mut out, progress, file, finished)?,
-            };
-            if digest != file.sha256 {
-                return Err(match import {
-                    Some(_) => format!("{} is not the file this release uses", file.name),
-                    None => format!("the download of {} does not match its checksum", file.name),
-                });
+                // Checked and synced, or kept to be resumed.
+                None => download(&part, progress, file, finished, BODY_BUDGET)?,
             }
-            out.sync_all().map_err(|e| e.to_string())?;
-            drop(out);
             // Cancelled while the last bytes were written out: not published.
             if progress.cancel.load(Ordering::Relaxed) {
                 return Err("Cancelled".to_string());
@@ -255,7 +264,7 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
             let _ = std::fs::remove_file(&target);
             std::fs::rename(&part, &target).map_err(|e| e.to_string())
         })();
-        if result.is_err() {
+        if result.is_err() && import.is_some() {
             let _ = std::fs::remove_file(&part);
         }
         result?;
@@ -278,8 +287,33 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     Ok(())
 }
 
-/// Removes partial files a crashed install left, never one a running instance owns:
-/// they are named for the process that made them.
+/// Locks the folder's lock file for one install, waiting while another window's
+/// install holds it, noticing a cancel meanwhile. That install's files are then checked
+/// like any others, so this one finishes once they are there. Unlocked when dropped.
+fn lock(dir: &Path, progress: &Progress) -> Result<std::fs::File, String> {
+    let lock = std::fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(LOCK))
+        .map_err(|e| format!("could not write in {}: {e}", dir.display()))?;
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(lock),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if progress.cancel.load(Ordering::Relaxed) {
+                    return Err("Cancelled".into());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.to_string()),
+        }
+    }
+}
+
+/// Removes partial files an earlier version's crashed install left, never one a running
+/// instance owns: they are named for the process that made them. Today's partial
+/// files are kept to be resumed.
 fn remove_abandoned(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -299,19 +333,36 @@ fn remove_abandoned(dir: &Path) {
     }
 }
 
-/// Copies at most `file`'s size from `source`, hashing as it goes. Stops at
-/// cancellation, and at one byte too many. `before` is the bytes of earlier files,
-/// for the shared progress.
+/// Copies `file` from `source` and gives its SHA-256. Stops at cancellation, and at
+/// one byte too many. `before` is the bytes of earlier files, for the shared progress.
 fn copy_checked(
-    mut source: impl Read,
+    source: impl Read,
     out: &mut impl Write,
     progress: &Progress,
     file: &ModelFile,
     before: u64,
 ) -> Result<String, String> {
     let mut sha = Sha256::new();
-    let mut buffer = vec![0u8; 256 << 10];
     let mut total = 0u64;
+    append(source, out, &mut sha, &mut total, progress, file, before)?;
+    if total != file.size_bytes {
+        return Err(format!("{} is smaller than expected", file.name));
+    }
+    Ok(hex(sha))
+}
+
+/// Copies from `source` until it ends, adding what is written to `sha` and `total` as
+/// it goes, so the bytes written before an error count. At most `file`'s size.
+fn append(
+    mut source: impl Read,
+    out: &mut impl Write,
+    sha: &mut Sha256,
+    total: &mut u64,
+    progress: &Progress,
+    file: &ModelFile,
+    before: u64,
+) -> Result<(), String> {
+    let mut buffer = vec![0u8; 256 << 10];
     loop {
         if progress.cancel.load(Ordering::Relaxed) {
             return Err("Cancelled".into());
@@ -320,94 +371,256 @@ fn copy_checked(
         if n == 0 {
             break;
         }
-        total += n as u64;
-        if total > file.size_bytes {
+        if *total + n as u64 > file.size_bytes {
             return Err(format!("{} is larger than expected", file.name));
         }
-        sha.update(&buffer[..n]);
         out.write_all(&buffer[..n]).map_err(|e| match e.kind() {
             std::io::ErrorKind::StorageFull => "the disk is full".to_string(),
             _ => e.to_string(),
         })?;
-        progress.done.store(before + total, Ordering::Relaxed);
+        sha.update(&buffer[..n]);
+        *total += n as u64;
+        progress.done.store(before + *total, Ordering::Relaxed);
     }
-    if total != file.size_bytes {
-        return Err(format!("{} is smaller than expected", file.name));
-    }
-    let digest = sha.finalize();
-    Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(())
 }
 
-/// Fetches `file` from RAWmakase's mirror, else from the repository it was copied
-/// from: each a few times on network errors, and a source whose bytes do not match the
-/// checksum is not used.
+fn hex(sha: Sha256) -> String {
+    sha.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A download in progress: its file, and how many bytes it holds and their SHA-256.
+struct Partial {
+    out: std::fs::File,
+    len: u64,
+    sha: Sha256,
+}
+
+impl Partial {
+    /// Opens the partial file at `path`, keeping the bytes an earlier attempt left in
+    /// it, up to `file`'s size. Reading them back stops at a cancel, keeping them.
+    fn open(
+        path: &Path,
+        file: &ModelFile,
+        progress: &Progress,
+        before: u64,
+    ) -> Result<Self, String> {
+        let mut out = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+        let mut partial = Self {
+            out: out.try_clone().map_err(|e| e.to_string())?,
+            len: 0,
+            sha: Sha256::new(),
+        };
+        // Too long to be a beginning of this file, or unreadable: start over.
+        if out.metadata().is_ok_and(|m| m.len() <= file.size_bytes) {
+            let (sha, len) = (&mut partial.sha, &mut partial.len);
+            match append(
+                &mut out,
+                &mut std::io::sink(),
+                sha,
+                len,
+                progress,
+                file,
+                before,
+            ) {
+                Ok(()) => {}
+                Err(e) if e == "Cancelled" => return Err(e),
+                Err(_) => partial.len = 0,
+            }
+        }
+        partial.rewind()?;
+        Ok(partial)
+    }
+    /// Cuts the file back to the bytes counted, which are the only ones written in
+    /// full, and goes on from there: a write that failed part way may have left more.
+    fn rewind(&mut self) -> Result<(), String> {
+        use std::io::{Seek, SeekFrom};
+        if self.len == 0 {
+            self.sha = Sha256::new();
+        }
+        self.out.set_len(self.len).map_err(|e| e.to_string())?;
+        self.out
+            .seek(SeekFrom::Start(self.len))
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    /// Empties the file to fetch it from the start.
+    fn restart(&mut self) -> Result<(), String> {
+        self.len = 0;
+        self.rewind()
+    }
+}
+
+/// How long one request may spend receiving its body. The budget is for the whole of
+/// it, not each read: it ends a request a minute in, keeping what arrived, so a stalled
+/// connection is noticed and the next request carries on from there.
+const BODY_BUDGET: Duration = Duration::from_secs(60);
+
+/// Fetches `file` into the partial file at `part`, resuming what it already holds,
+/// from RAWmakase's mirror, else from the repository it was copied from; a source
+/// whose bytes do not match the checksum is not used. On success the file is
+/// complete, checked and synced; otherwise it keeps what arrived.
 fn download(
-    out: &mut std::fs::File,
+    part: &Path,
     progress: &Progress,
     file: &ModelFile,
     before: u64,
-) -> Result<String, String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .timeout_recv_body(Some(Duration::from_secs(60)))
-        .timeout_global(Some(Duration::from_secs(60 * 60)))
-        .build()
-        .into();
+    body: Duration,
+) -> Result<(), String> {
+    let agent = agent(body);
+    let mut partial = Partial::open(part, file, progress, before)?;
     let mut last = String::new();
-    for url in [file.url, file.fallback] {
-        match fetch(&agent, url, out, progress, file, before) {
-            Ok(digest) if digest == file.sha256 => return Ok(digest),
-            Ok(_) => last = format!("the download of {} does not match its checksum", file.name),
+    let mut sources = [file.url, file.fallback].into_iter().peekable();
+    while let Some(&url) = sources.peek() {
+        let resumed = partial.len > 0;
+        match fetch(&agent, url, &mut partial, progress, file, before) {
+            Ok(()) if hex(partial.sha.clone()) == file.sha256 => {
+                return partial.out.sync_all().map_err(|e| e.to_string());
+            }
+            Ok(()) => {
+                last = format!("the download of {} does not match its checksum", file.name);
+                partial.restart()?;
+                // The bytes kept from before may be the wrong ones: this source again,
+                // from the start, before the next.
+                if resumed {
+                    continue;
+                }
+            }
             Err(e) if e == "Cancelled" || e.contains("disk is full") => return Err(e),
             Err(e) => last = e,
         }
+        sources.next();
     }
     Err(format!("could not download the model: {last}"))
 }
 
-/// One source, tried up to three times; a client error is final for it.
+fn agent(body: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(20)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_recv_body(Some(body))
+        .timeout_global(Some(body + Duration::from_secs(60)))
+        .build()
+        .into()
+}
+
+/// A tenth of the pause before a source is asked again; short in tests.
+const BACKOFF_TICK: Duration = Duration::from_millis(if cfg!(test) { 1 } else { 100 });
+
+/// Fetches the rest of `file` from one source, one request after another; it gives
+/// up after three in a row bring it no further than it has been, and at a client error.
+/// Further, not more: a host ignoring ranges starts over each time.
 fn fetch(
     agent: &ureq::Agent,
     url: &str,
-    out: &mut std::fs::File,
+    partial: &mut Partial,
     progress: &Progress,
     file: &ModelFile,
     before: u64,
-) -> Result<String, String> {
-    let mut last = String::new();
-    for attempt in 0..3u32 {
-        if attempt > 0 {
-            // Back off, noticing a cancel meanwhile.
-            for _ in 0..(10 * attempt) {
+) -> Result<(), String> {
+    let mut last = format!("the download of {} stopped", file.name);
+    let mut failures = 0u32;
+    let mut furthest = partial.len;
+    while partial.len < file.size_bytes {
+        if failures == 3 {
+            return Err(last);
+        }
+        if failures > 0 {
+            // Back off, a second more each time, noticing a cancel meanwhile.
+            for _ in 0..(10 * failures) {
                 if progress.cancel.load(Ordering::Relaxed) {
                     return Err("Cancelled".into());
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(BACKOFF_TICK);
             }
         }
-        // Start over: the file is rewritten from the top.
-        use std::io::{Seek, SeekFrom};
-        out.set_len(0).map_err(|e| e.to_string())?;
-        out.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-        progress.done.store(before, Ordering::Relaxed);
-        match agent.get(url).call() {
-            Ok(mut response) => {
-                let reader = response.body_mut().as_reader();
-                match copy_checked(reader, out, progress, file, before) {
-                    Ok(digest) => return Ok(digest),
-                    // A stopped or full disk is final; a dropped connection is not.
-                    Err(e) if e == "Cancelled" || e.contains("disk is full") => return Err(e),
-                    Err(e) => last = e,
-                }
-            }
-            Err(ureq::Error::StatusCode(code)) if (400..500).contains(&code) && code != 429 => {
-                return Err(format!("the host answered {code} for {}", file.name));
-            }
-            Err(e) => last = e.to_string(),
+        if progress.cancel.load(Ordering::Relaxed) {
+            return Err("Cancelled".into());
+        }
+        match request(agent, url, partial, progress, file, before) {
+            Ok(()) => {}
+            Err(Failed::Final(e)) => return Err(e),
+            Err(Failed::Retry(e)) => last = e,
+        }
+        if partial.len > furthest {
+            furthest = partial.len;
+            failures = 0;
+        } else {
+            failures += 1;
         }
     }
-    Err(last)
+    Ok(())
+}
+
+/// Why a request failed: worth another, or not (a cancel, a full disk, a client error).
+enum Failed {
+    Retry(String),
+    Final(String),
+}
+
+impl From<String> for Failed {
+    fn from(why: String) -> Self {
+        if why == "Cancelled" || why.contains("disk is full") {
+            Self::Final(why)
+        } else {
+            Self::Retry(why)
+        }
+    }
+}
+
+/// One request, for the bytes after those `partial` holds; a host sending the whole
+/// file instead is read from the start.
+fn request(
+    agent: &ureq::Agent,
+    url: &str,
+    partial: &mut Partial,
+    progress: &Progress,
+    file: &ModelFile,
+    before: u64,
+) -> Result<(), Failed> {
+    partial.rewind()?;
+    let mut get = agent.get(url);
+    if partial.len > 0 {
+        get = get.header("Range", format!("bytes={}-", partial.len));
+    }
+    let mut response = match get.call() {
+        Ok(response) => response,
+        Err(ureq::Error::StatusCode(code)) if (400..500).contains(&code) && code != 429 => {
+            return Err(Failed::Final(format!(
+                "the host answered {code} for {}",
+                file.name
+            )));
+        }
+        Err(e) => return Err(e.to_string().into()),
+    };
+    match response.status().as_u16() {
+        206 => {
+            let rest = response
+                .headers()
+                .get("content-range")
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| {
+                    v.starts_with(&format!("bytes {}-", partial.len))
+                        && v.ends_with(&format!("/{}", file.size_bytes))
+                });
+            if !rest {
+                partial.restart()?;
+                return Err(format!("the host sent the wrong part of {}", file.name).into());
+            }
+        }
+        200 => partial.restart()?,
+        code => return Err(format!("the host answered {code} for {}", file.name).into()),
+    }
+    let reader = response.body_mut().as_reader();
+    let Partial { out, len, sha } = partial;
+    append(reader, out, sha, len, progress, file, before)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -439,6 +652,321 @@ mod tests {
         progress.cancel.store(true, Ordering::Relaxed);
         let error = copy_checked(&b"abc"[..], &mut Vec::new(), &progress, &FILE, 0).unwrap_err();
         assert_eq!(error, "Cancelled");
+    }
+
+    /// How the test host answers one request.
+    enum Answer {
+        /// The whole file, closing after `send` bytes.
+        Whole { send: usize },
+        /// The whole file, sending `send` bytes and then nothing until the client
+        /// hangs up.
+        Stall { send: usize },
+        /// The rest of the file from where the request's range starts.
+        Rest,
+    }
+
+    const LEN: usize = 100_000;
+
+    /// The bytes the test host serves.
+    fn body() -> Vec<u8> {
+        (0..LEN).map(|i| (i * 7 % 251) as u8).collect()
+    }
+
+    /// Serves `body()` on a local port, one connection per request, answering each
+    /// as told. Gives the file as the manifest describes it, both sources pointing at
+    /// the host, and where each request asked to start, sent before it is answered so
+    /// it has arrived by the time the client has its answer.
+    ///
+    /// The host is never joined: if the client stops early, its test fails on what
+    /// the host saw instead of waiting in `accept`. Reads time out for the same
+    /// reason, and the thread ends with the test process.
+    fn host(answers: Vec<Answer>) -> (ModelFile, std::sync::mpsc::Receiver<Option<u64>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/x.onnx", listener.local_addr().unwrap());
+        let (asked, requests) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let body = body();
+            for answer in answers {
+                let Ok((stream, _)) = listener.accept() else {
+                    return;
+                };
+                if answer_one(stream, &body, answer, &asked).is_err() {
+                    return;
+                }
+            }
+        });
+        let file = ModelFile {
+            name: "x.onnx",
+            size_bytes: LEN as u64,
+            sha256: Box::leak(hex(Sha256::new_with_prefix(body())).into_boxed_str()),
+            url: Box::leak(url.into_boxed_str()),
+            fallback: "",
+        };
+        (
+            ModelFile {
+                fallback: file.url,
+                ..file
+            },
+            requests,
+        )
+    }
+
+    fn answer_one(
+        mut stream: std::net::TcpStream,
+        body: &[u8],
+        answer: Answer,
+        asked: &std::sync::mpsc::Sender<Option<u64>>,
+    ) -> std::io::Result<()> {
+        use std::io::BufRead;
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+        let mut from = None;
+        let mut reader = std::io::BufReader::new(stream.try_clone()?);
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line)?;
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(range) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                from = range.trim().trim_end_matches('-').parse::<usize>().ok();
+            }
+        }
+        let _ = asked.send(from.map(|f| f as u64));
+        let len = body.len();
+        match (answer, from) {
+            (Answer::Whole { send }, _) => {
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n")?;
+                stream.write_all(&body[..send])
+            }
+            (Answer::Stall { send }, _) => {
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {len}\r\n\r\n")?;
+                stream.write_all(&body[..send])?;
+                // Until the client gives up on the body and closes.
+                std::io::copy(&mut reader, &mut std::io::sink()).map(|_| ())
+            }
+            (Answer::Rest, Some(from)) => {
+                write!(
+                    stream,
+                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {from}-{}/{len}\r\n\
+                     Content-Length: {}\r\n\r\n",
+                    len - 1,
+                    len - from
+                )?;
+                stream.write_all(&body[from..])
+            }
+            (Answer::Rest, None) => {
+                stream.write_all(b"HTTP/1.1 500 No range\r\nContent-Length: 0\r\n\r\n")
+            }
+        }
+    }
+
+    /// The partial file's place, holding `held` from an earlier attempt.
+    fn partial(dir: &tempfile::TempDir, held: &[u8]) -> PathBuf {
+        let part = dir.path().join(".x.onnx.part");
+        std::fs::write(&part, held).unwrap();
+        part
+    }
+
+    #[test]
+    fn a_dropped_download_resumes_where_it_stopped() {
+        let (file, requests) = host(vec![Answer::Whole { send: 40_000 }, Answer::Rest]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[]);
+        let progress = Progress::default();
+        assert_eq!(download(&part, &progress, &file, 0, BODY_BUDGET), Ok(()));
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(progress.done.load(Ordering::Relaxed), LEN as u64);
+        // The second request asked for the rest only.
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [None, Some(40_000)]
+        );
+    }
+
+    /// The 0.2.2 bug: a body longer in coming than its budget started over every
+    /// time, so on a slow connection a large file never arrived.
+    #[test]
+    fn a_download_slower_than_its_budget_keeps_what_arrived() {
+        let (file, requests) = host(vec![Answer::Stall { send: 30_000 }, Answer::Rest]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[]);
+        let budget = Duration::from_millis(200);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, budget),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [None, Some(30_000)]
+        );
+    }
+
+    #[test]
+    fn a_download_left_by_an_earlier_session_is_resumed() {
+        let (file, requests) = host(vec![Answer::Rest]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
+    }
+
+    #[test]
+    fn a_host_ignoring_the_range_and_dropping_gets_no_further_and_is_left() {
+        // Each answer starts over, ending at 40 or 60 KB: never past 60 KB, so three
+        // requests after reaching it the source is given up, and so is the fallback.
+        let answers = (0..10).map(|i| Answer::Whole {
+            send: if i % 2 == 0 { 40_000 } else { 60_000 },
+        });
+        let (mut file, requests) = host(answers.collect());
+        file.fallback = host(vec![]).0.url;
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[]);
+        assert!(download(&part, &Progress::default(), &file, 0, BODY_BUDGET).is_err());
+        assert_eq!(requests.try_iter().count(), 5);
+        // What it got is kept for the next try.
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..40_000]);
+    }
+
+    #[test]
+    fn a_host_ignoring_the_range_is_read_from_the_start() {
+        let (file, requests) = host(vec![Answer::Whole { send: LEN }]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
+    }
+
+    #[test]
+    fn wrong_bytes_kept_from_before_are_fetched_again() {
+        // The resumed file fails its checksum, and the other source starts over.
+        let (file, requests) = host(vec![Answer::Rest, Answer::Whole { send: LEN }]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[0; 60_000]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [Some(60_000), None]
+        );
+    }
+
+    #[test]
+    fn a_partial_file_longer_than_the_file_is_not_resumed() {
+        let (file, requests) = host(vec![Answer::Whole { send: LEN }]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[0; LEN + 1]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [None]);
+    }
+
+    #[test]
+    fn a_cancelled_download_keeps_what_arrived() {
+        let (file, requests) = host(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        let progress = Progress::default();
+        progress.cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            download(&part, &progress, &file, 0, BODY_BUDGET),
+            Err("Cancelled".into())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..60_000]);
+        // Nothing is asked of the host once cancelled.
+        assert_eq!(requests.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn reading_kept_bytes_back_stops_at_a_cancel_and_keeps_them() {
+        let (file, _) = host(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        let progress = Progress::default();
+        progress.cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            Partial::open(&part, &file, &progress, 0).err().as_deref(),
+            Some("Cancelled")
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..60_000]);
+    }
+
+    #[test]
+    fn bytes_left_by_a_failed_write_are_cut_off_before_the_next_request() {
+        let (file, requests) = host(vec![Answer::Rest]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        let progress = Progress::default();
+        let mut partial = Partial::open(&part, &file, &progress, 0).unwrap();
+        // Written but never counted, as by a write that failed part way.
+        partial.out.write_all(b"stray").unwrap();
+        let agent = agent(BODY_BUDGET);
+        assert_eq!(
+            fetch(&agent, file.url, &mut partial, &progress, &file, 0),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
+    }
+
+    #[test]
+    fn wrong_bytes_kept_from_before_are_fetched_again_from_the_same_source() {
+        // The whole file is there but wrong: no request can show it, so the checksum
+        // does, and the mirror is asked again rather than the fallback, which is down.
+        let (mut file, requests) = host(vec![Answer::Whole { send: LEN }]);
+        file.fallback = host(vec![]).0.url;
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[0; LEN]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [None]);
+    }
+
+    #[test]
+    fn an_install_waits_for_another_windows_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = lock(dir.path(), &Progress::default()).unwrap();
+        // Waiting, not failing: only a cancel ends the wait.
+        let cancelled = Progress::default();
+        cancelled.cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            lock(dir.path(), &cancelled).err().as_deref(),
+            Some("Cancelled")
+        );
+        // And once the other install ends, this one goes on.
+        let path = dir.path().to_owned();
+        let waiting = std::thread::spawn(move || lock(&path, &Progress::default()).is_ok());
+        drop(other);
+        assert!(waiting.join().unwrap());
+    }
+
+    #[test]
+    fn a_failed_install_says_why_until_the_next_one() {
+        let mut installer = Installer::default();
+        installer.finished(&Err("could not download the model: timed out".into()));
+        assert_eq!(
+            installer.failure(),
+            Some("could not download the model: timed out")
+        );
+        installer.finished(&Err("Cancelled".into()));
+        assert_eq!(installer.failure(), None);
     }
 
     #[test]

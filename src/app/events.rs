@@ -90,7 +90,7 @@ impl Editor {
                 }
                 Event::Selection(done) => self.selection_done(*done),
                 Event::ModelInstalled(result) => {
-                    self.selection.models.finished(result.is_ok());
+                    self.selection.models.finished(&result);
                     if result.as_ref().err().is_some_and(|e| e == "Cancelled") {
                         self.status = "Model download cancelled".into();
                     } else {
