@@ -559,7 +559,8 @@ state on error, panic or disconnection. Add a separate row to `shutdown.md`.
 A downloaded file's temporary file is kept on cancellation/failure and resumed by
 the next install, in the same or a later session, with HTTP range requests; an
 imported file's is removed. One install runs at a time across instances, holding a
-lock file in the model folder. Clean only abandoned installer-owned temporary files
+lock file in the model folder; another waits for it, cancellably, then checks the
+files it left. Clean only abandoned installer-owned temporary files
 (those an earlier version named for its process); never remove published models or
 another instance's active temporary file. No cleanup step starts a download. Model removal
 is asynchronous: mark it pending, reject new leases, cancel pending use and wait

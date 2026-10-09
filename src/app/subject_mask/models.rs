@@ -212,24 +212,12 @@ impl Installer {
 /// files. A file already in place is kept if its SHA-256 matches, so a retry fetches
 /// only what is missing, and a download that stopped part way is kept to be resumed,
 /// in this session or a later one; the receipt is written once every file has been
-/// checked. One install at a time across running instances: it holds the folder's
-/// lock file.
+/// checked. One install at a time across running instances: see [`lock`].
 fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     let dir = model_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    let lock = std::fs::File::options()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(dir.join(LOCK))
-        .map_err(|e| format!("could not write in {}: {e}", dir.display()))?;
-    lock.try_lock().map_err(|e| match e {
-        std::fs::TryLockError::WouldBlock => {
-            "another RAWmakase window is installing the model".to_string()
-        }
-        std::fs::TryLockError::Error(e) => e.to_string(),
-    })?;
+    let _lock = lock(&dir, progress)?;
     remove_abandoned(&dir);
     // The receipt goes first: until it is written again, nothing counts as installed.
     let _ = std::fs::remove_file(dir.join(RECEIPT));
@@ -297,6 +285,30 @@ fn install(import: Option<&Path>, progress: &Progress) -> Result<(), String> {
     .map_err(|e| format!("could not record the install: {e}"))?;
     let _ = crate::storage::sync_dir(&dir);
     Ok(())
+}
+
+/// Locks the folder's lock file for one install, waiting while another window's
+/// install holds it, noticing a cancel meanwhile. That install's files are then checked
+/// like any others, so this one finishes once they are there. Unlocked when dropped.
+fn lock(dir: &Path, progress: &Progress) -> Result<std::fs::File, String> {
+    let lock = std::fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(LOCK))
+        .map_err(|e| format!("could not write in {}: {e}", dir.display()))?;
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(lock),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if progress.cancel.load(Ordering::Relaxed) {
+                    return Err("Cancelled".into());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.to_string()),
+        }
+    }
 }
 
 /// Removes partial files an earlier version's crashed install left, never one a running
@@ -386,9 +398,13 @@ struct Partial {
 
 impl Partial {
     /// Opens the partial file at `path`, keeping the bytes an earlier attempt left in
-    /// it, up to `file`'s size.
-    fn open(path: &Path, file: &ModelFile) -> Result<Self, String> {
-        use std::io::{Seek, SeekFrom};
+    /// it, up to `file`'s size. Reading them back stops at a cancel, keeping them.
+    fn open(
+        path: &Path,
+        file: &ModelFile,
+        progress: &Progress,
+        before: u64,
+    ) -> Result<Self, String> {
         let mut out = std::fs::File::options()
             .read(true)
             .write(true)
@@ -402,39 +418,42 @@ impl Partial {
             sha: Sha256::new(),
         };
         // Too long to be a beginning of this file, or unreadable: start over.
-        let mut kept = 0u64;
-        let read = out.metadata().is_ok_and(|m| m.len() <= file.size_bytes)
-            && append(
+        if out.metadata().is_ok_and(|m| m.len() <= file.size_bytes) {
+            let (sha, len) = (&mut partial.sha, &mut partial.len);
+            match append(
                 &mut out,
                 &mut std::io::sink(),
-                &mut partial.sha,
-                &mut kept,
-                &Progress::default(),
+                sha,
+                len,
+                progress,
                 file,
-                0,
-            )
-            .is_ok();
-        if read {
-            partial.len = kept;
-            partial
-                .out
-                .seek(SeekFrom::Start(kept))
-                .map_err(|e| e.to_string())?;
-        } else {
-            partial.restart()?;
+                before,
+            ) {
+                Ok(()) => {}
+                Err(e) if e == "Cancelled" => return Err(e),
+                Err(_) => partial.len = 0,
+            }
         }
+        partial.rewind()?;
         Ok(partial)
+    }
+    /// Cuts the file back to the bytes counted, which are the only ones written in
+    /// full, and goes on from there: a write that failed part way may have left more.
+    fn rewind(&mut self) -> Result<(), String> {
+        use std::io::{Seek, SeekFrom};
+        if self.len == 0 {
+            self.sha = Sha256::new();
+        }
+        self.out.set_len(self.len).map_err(|e| e.to_string())?;
+        self.out
+            .seek(SeekFrom::Start(self.len))
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
     /// Empties the file to fetch it from the start.
     fn restart(&mut self) -> Result<(), String> {
-        use std::io::{Seek, SeekFrom};
-        self.out.set_len(0).map_err(|e| e.to_string())?;
-        self.out
-            .seek(SeekFrom::Start(0))
-            .map_err(|e| e.to_string())?;
         self.len = 0;
-        self.sha = Sha256::new();
-        Ok(())
+        self.rewind()
     }
 }
 
@@ -454,17 +473,12 @@ fn download(
     before: u64,
     body: Duration,
 ) -> Result<(), String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(20)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .timeout_recv_body(Some(body))
-        .timeout_global(Some(body + Duration::from_secs(60)))
-        .build()
-        .into();
-    let mut partial = Partial::open(part, file)?;
-    progress.done.store(before + partial.len, Ordering::Relaxed);
+    let agent = agent(body);
+    let mut partial = Partial::open(part, file, progress, before)?;
     let mut last = String::new();
-    for url in [file.url, file.fallback] {
+    let mut sources = [file.url, file.fallback].into_iter().peekable();
+    while let Some(&url) = sources.peek() {
+        let resumed = partial.len > 0;
         match fetch(&agent, url, &mut partial, progress, file, before) {
             Ok(()) if hex(partial.sha.clone()) == file.sha256 => {
                 return partial.out.sync_all().map_err(|e| e.to_string());
@@ -472,12 +486,28 @@ fn download(
             Ok(()) => {
                 last = format!("the download of {} does not match its checksum", file.name);
                 partial.restart()?;
+                // The bytes kept from before may be the wrong ones: this source again,
+                // from the start, before the next.
+                if resumed {
+                    continue;
+                }
             }
             Err(e) if e == "Cancelled" || e.contains("disk is full") => return Err(e),
             Err(e) => last = e,
         }
+        sources.next();
     }
     Err(format!("could not download the model: {last}"))
+}
+
+fn agent(body: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(20)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_recv_body(Some(body))
+        .timeout_global(Some(body + Duration::from_secs(60)))
+        .build()
+        .into()
 }
 
 /// Fetches the rest of `file` from one source, one request after another; it gives
@@ -545,6 +575,7 @@ fn request(
     file: &ModelFile,
     before: u64,
 ) -> Result<(), Failed> {
+    partial.rewind()?;
     let mut get = agent.get(url);
     if partial.len > 0 {
         get = get.header("Range", format!("bytes={}-", partial.len));
@@ -832,6 +863,72 @@ mod tests {
         assert_eq!(std::fs::read(&part).unwrap(), &body()[..60_000]);
         // Nothing is asked of the host once cancelled.
         assert_eq!(requests.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn reading_kept_bytes_back_stops_at_a_cancel_and_keeps_them() {
+        let (file, _) = host(vec![]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        let progress = Progress::default();
+        progress.cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            Partial::open(&part, &file, &progress, 0).err().as_deref(),
+            Some("Cancelled")
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), &body()[..60_000]);
+    }
+
+    #[test]
+    fn bytes_left_by_a_failed_write_are_cut_off_before_the_next_request() {
+        let (file, requests) = host(vec![Answer::Rest]);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        let progress = Progress::default();
+        let mut partial = Partial::open(&part, &file, &progress, 0).unwrap();
+        // Written but never counted, as by a write that failed part way.
+        partial.out.write_all(b"stray").unwrap();
+        let agent = agent(BODY_BUDGET);
+        assert_eq!(
+            fetch(&agent, file.url, &mut partial, &progress, &file, 0),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [Some(60_000)]);
+    }
+
+    #[test]
+    fn wrong_bytes_kept_from_before_are_fetched_again_from_the_same_source() {
+        // The whole file is there but wrong: no request can show it, so the checksum
+        // does, and the mirror is asked again rather than the fallback, which is down.
+        let (mut file, requests) = host(vec![Answer::Whole { send: LEN }]);
+        file.fallback = host(vec![]).0.url;
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &[0; LEN]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(std::fs::read(&part).unwrap(), body());
+        assert_eq!(requests.try_iter().collect::<Vec<_>>(), [None]);
+    }
+
+    #[test]
+    fn an_install_waits_for_another_windows_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = lock(dir.path(), &Progress::default()).unwrap();
+        // Waiting, not failing: only a cancel ends the wait.
+        let cancelled = Progress::default();
+        cancelled.cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            lock(dir.path(), &cancelled).err().as_deref(),
+            Some("Cancelled")
+        );
+        // And once the other install ends, this one goes on.
+        let path = dir.path().to_owned();
+        let waiting = std::thread::spawn(move || lock(&path, &Progress::default()).is_ok());
+        drop(other);
+        assert!(waiting.join().unwrap());
     }
 
     #[test]
