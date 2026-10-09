@@ -216,11 +216,12 @@ impl Editor {
                     samples,
                     stage,
                     status,
-                } if id == self.preview.task.id() => {
-                    let region = matches!(
-                        self.preview.pending_mode,
-                        super::state::TextureMode::Region(_)
-                    );
+                } => {
+                    let Some(request) = self.preview.request(id) else {
+                        continue;
+                    };
+                    self.preview.showing(id);
+                    let region = matches!(request.mode, super::state::TextureMode::Region(_));
                     // A region's own histogram would describe only what is
                     // visible; the whole photo's follows as `Histogram`.
                     if !region {
@@ -247,10 +248,10 @@ impl Editor {
                     // Pixels asked for by a hover or loupe that has since ended are
                     // not kept.
                     self.preview.keep_samples(region, samples);
-                    self.preview.samples_recipe = self.preview.pending_recipe.clone();
-                    self.preview.mode = self.preview.pending_mode;
+                    self.preview.samples_recipe = request.recipe;
+                    self.preview.mode = request.mode;
                     if !region {
-                        self.preview.crop = Some(self.preview.pending_crop);
+                        self.preview.crop = Some(request.crop);
                     }
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
@@ -260,7 +261,7 @@ impl Editor {
                     }
                     self.preview.status = status;
                 }
-                Event::Histogram { id, histogram } if id == self.preview.task.id() => {
+                Event::Histogram { id, histogram } if self.preview.request(id).is_some() => {
                     self.preview.histogram = *histogram;
                 }
                 Event::Failed {
