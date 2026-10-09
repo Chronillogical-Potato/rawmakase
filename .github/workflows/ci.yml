@@ -177,6 +177,16 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - if: steps.source.outputs.windows == 'true'
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The catalog commits with synchronous=FULL into tempfile directories.
+      # %TEMP% is on C:, the runner's OS disk, where each flush is slow, and
+      # Defender scans every file created there: the catalog and library tests
+      # ran 10 to 20 times slower than on Linux or macOS. RUNNER_TEMP is on D:.
+      - if: steps.source.outputs.windows == 'true'
+        name: Temporary files on D:, outside Defender's scan
+        run: |
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP", "$env:GITHUB_WORKSPACE"
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       - if: steps.source.outputs.windows == 'true'
         run: cargo test --locked --workspace
