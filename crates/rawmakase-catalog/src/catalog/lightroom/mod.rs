@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 /// stored catalog.
 const KEYWORD_EXPORT_BACKFILLED: &str = "lightroom_keyword_export_backfilled";
 
+/// The largest Lightroom catalog kept byte-exact inside ours: SQLite refuses a
+/// blob over SQLITE_MAX_LENGTH, 1,000,000,000 bytes in the bundled build.
+const MAX_ARCHIVED_CATALOG: u64 = 900_000_000;
+
 /// A photo's filename in a Lightroom catalog, from its `AgLibraryFile` row
 /// named `f`: SQL to `concat!` into a statement.
 macro_rules! lightroom_filename {
@@ -40,7 +44,10 @@ impl Catalog {
             return Ok(0);
         }
         let original: Option<Vec<u8>> = self.db.read_optional(
-            sql!("SELECT original_catalog FROM sources WHERE original_catalog IS NOT NULL LIMIT 1"),
+            sql!(
+                "SELECT original_catalog FROM sources
+                 WHERE original_catalog IS NOT NULL AND length(original_catalog) > 0 LIMIT 1"
+            ),
             &[],
         )?;
         let copied = match original {
@@ -99,7 +106,13 @@ pub fn import_lightroom(source: &Path, destination: &Path) -> Result<PathBuf> {
     let tmpdir = tempfile::tempdir_in(parent)?;
     let working = tmpdir.path().join("import.rawmakase");
     let mut catalog = Catalog::create(&working)?;
-    let original = std::fs::read(snapshot.path())?;
+    // A catalog too large for one SQLite blob is imported without the archive,
+    // left empty so `backfill_once` has nothing to read.
+    let original = if size <= MAX_ARCHIVED_CATALOG {
+        std::fs::read(snapshot.path())?
+    } else {
+        Vec::new()
+    };
     catalog.db.with_lightroom(snapshot.path(), |lr| {
         lr.write().execute(
             sql!("INSERT INTO sources(path,original_size,original_catalog) VALUES(?,?,?)"),
@@ -131,10 +144,6 @@ fn ensure_no_live_journal(source: &Path, message: &str) -> Result<()> {
 /// A copy of `source`, refused if it changed while being copied, and its size.
 fn take_snapshot(source: &Path) -> Result<(tempfile::NamedTempFile, u64)> {
     let before = source.metadata()?;
-    ensure!(
-        before.len() < 2_000_000_000,
-        "Catalog is too large for this importer"
-    );
     let snapshot = tempfile::NamedTempFile::new()?;
     std::fs::copy(source, snapshot.path())?;
     let after = source.metadata()?;
