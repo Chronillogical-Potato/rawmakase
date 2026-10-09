@@ -59,7 +59,7 @@ files should preserve.
 | `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), and the background reads that fill in capture times and photo info for photos added from folders. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
-| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager and the browser | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs` |
+| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager, the browser and the desktop's text size | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs`, `text_scale.rs` |
 | `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 

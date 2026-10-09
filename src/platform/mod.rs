@@ -2,5 +2,6 @@
 pub(crate) mod network;
 pub(crate) mod quit;
 pub(crate) mod reveal;
+pub(crate) mod text_scale;
 pub(crate) mod volume;
 pub(crate) mod web;

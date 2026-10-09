@@ -89,6 +89,11 @@ midir = "0.11"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow"] }
 
+# The desktop's text size through the desktop portal (src/platform/text_scale.rs);
+# the same blocking zbus fastframe-text already uses, so no new crates.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", default-features = false, features = ["blocking-api", "async-io"] }
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
