@@ -256,7 +256,7 @@ releases always require signing.
 Release CI installs/removes DEB/RPM packages in clean Ubuntu 24.04, Debian 13,
 Fedora 43 and Fedora 44 containers on both x86_64 and arm64 runners; checks linked and dynamically loaded GUI
 libraries; and verifies removal preserves user data. Arch builds its exact
-tagged source recipe, installs it and runs the CLI. Windows installs the finished
+tagged source recipe, installs it, runs the CLI and loads the bundled ONNX Runtime. Windows installs the finished
 setup program silently, checks the installed app's `--version` and marker, and
 uninstalls it (`packaging/windows/verify.ps1`); pull requests that touch packaging
 run the same build and check and keep the installer as an Actions artifact. Existing CI covers Rust

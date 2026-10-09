@@ -172,7 +172,10 @@ jobs:
           namcap dist/arch/PKGBUILD dist/arch/*.pkg.tar.zst
           pacman -U --noconfirm dist/arch/*.pkg.tar.zst
           rawmakase --version
+          # The selection runtime is opened lazily, so only loading it shows it works.
+          python -c "import ctypes; ctypes.CDLL('/usr/lib/rawmakase/libonnxruntime.so')"
           pacman -R --noconfirm rawmakase
+          test ! -e /usr/lib/rawmakase/libonnxruntime.so
           cp dist/arch/*.pkg.tar.zst dist/upload/
           cp "dist/arch/rawmakase-$VERSION.tar.gz" "dist/upload/rawmakase-$VERSION-source.tar.gz"
           tar -C dist/arch -czf "dist/upload/rawmakase-$VERSION-arch-recipe.tar.gz" PKGBUILD .SRCINFO

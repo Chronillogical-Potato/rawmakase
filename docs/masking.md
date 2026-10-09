@@ -40,8 +40,9 @@ models.
 - **On this computer.** The models are downloaded on request (Segment Anything 2.1 Hiera
   small, four files, 184 MB; DETR panoptic, 87 MB; each file checked against a pinned SHA-256); nothing downloads at startup, on opening a
   catalog or the drawer, or at an update. They run on the CPU through ONNX Runtime, which
-  ships with the app (beside the executable; source builds put `libonnxruntime` in the
-  data folder's `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the
+  ships with every package, Arch included (beside the executable, or in
+  `/usr/lib/rawmakase` on Linux; `make install` from source does not install it, so put
+  `libonnxruntime` in the data folder's `runtime/` or name it in `RAWMAKASE_ORT_LIB`). No photo leaves the
   computer. **Remove selection model** deletes them; saved masks keep working without
   them or the runtime. The first selection on a photo takes a few seconds; Subject, Sky,
   Background and clicks on the same photo after that are quick.
