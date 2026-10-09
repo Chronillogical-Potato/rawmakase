@@ -52,8 +52,8 @@ full matrix implementation and are reported as unsupported. Do not flatten them
 into gains or copy another body's values.
 
 `data/camera-calibration-facts.json` records the converter version, public source
-URLs and SHA-256 hashes, and numerical tags for 142 public samples plus two
-anonymous local A7CR samples. Local entries contain no filenames or paths. CI validates
+URLs and SHA-256 hashes, and numerical tags for 142 public samples plus four
+anonymous local samples (two A7CR, one A7R IV, one A7R VI). Local entries contain no filenames or paths. CI validates
 all measured tags and checks supported Sony/X100F native calibration against the
 camera table without requiring Adobe software. Other native makes with non-identity
 converter calibration remain reported mismatches. RAWs and

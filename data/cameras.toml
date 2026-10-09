@@ -1422,6 +1422,16 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 
 [[camera]]
 make = "Sony"
+model = "ILCE-7RM6"
+sony_daylight_reference = [2252, 1024, 1838]
+aliases = ["A7R VI"]
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-09"
+sample = "1 private photo at ISO 100, Adobe DNG Converter 18.7; LibRaw's white level matches Adobe's"
+
+[[camera]]
+make = "Sony"
 model = "ILCE-7SM2"
 sony_daylight_reference = [2500, 1024, 1716]
 aliases = ["A7S II"]
