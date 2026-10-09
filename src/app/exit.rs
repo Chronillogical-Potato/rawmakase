@@ -13,6 +13,13 @@ pub(super) const DEADLINE: Duration = Duration::from_secs(3);
 /// How long quitting then waits for the temporary files of cut-off exports to be
 /// deleted: they are on the folder an export stalled on, which can stall this too.
 const CLEANUP: Duration = Duration::from_millis(500);
+/// Deletes the temporary files of every export the process is still writing. Tests
+/// run many editors in one process, so their exits leave other tests' exports alone;
+/// `export`'s own tests cover the deletion.
+#[cfg(not(test))]
+const REMOVE_UNFINISHED: fn() = crate::export::remove_unfinished;
+#[cfg(test)]
+const REMOVE_UNFINISHED: fn() = || {};
 
 impl Editor {
     /// Quit on macOS closes the window without a close request, so the close
@@ -53,7 +60,7 @@ impl Editor {
         // temporary files behind.
         let removing = std::thread::Builder::new()
             .name("remove-unfinished".into())
-            .spawn(crate::export::remove_unfinished)
+            .spawn(REMOVE_UNFINISHED)
             .ok();
         task::wait_for(vec![task::Stopping::new(removing)], CLEANUP);
         waited

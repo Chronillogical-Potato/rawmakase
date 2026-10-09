@@ -4744,6 +4744,31 @@ fn editor_with_a_stalled_catalog() -> anyhow::Result<(tempfile::TempDir, Editor)
     Ok((d, e))
 }
 #[test]
+fn an_editor_quitting_leaves_another_tests_export_in_place() -> anyhow::Result<()> {
+    // Tests share one process: an editor's exit sequence deleting every export
+    // still being written failed a parallel test's export (missing file).
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("export.tif");
+    let image = crate::rendered::Rendered {
+        width: 2,
+        height: 2,
+        pixels: vec![[0.5; 3]; 4],
+    };
+    let staged = crate::export::stage(
+        &path,
+        &image,
+        &Default::default(),
+        &Default::default(),
+        &Default::default(),
+    )?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.exit_within(std::time::Duration::from_secs(3));
+    crate::storage::persist(staged.file, &path, crate::export::Replace::NoClobber)?;
+    assert!(path.exists());
+    Ok(())
+}
+#[test]
 fn quitting_gives_up_on_a_save_the_catalog_does_not_answer() -> anyhow::Result<()> {
     let (_d, mut e) = editor_with_a_stalled_catalog()?;
     let started = std::time::Instant::now();
