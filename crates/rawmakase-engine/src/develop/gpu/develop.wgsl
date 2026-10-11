@@ -297,8 +297,8 @@ fn grid_bracket(v: f32, grid: vec3<f32>) -> vec2<f32> {
     let i = min(floor(f), grid.z - 2.0);
     return vec2(i, f - i);
 }
-// GlobalTone::white_at at Whites `whites` (`gpu_curves` layout: the rows, the tail,
-// the toe).
+// GlobalTone::white_at at Whites `whites` (`gpu_curves` layout: the rows, which carry
+// the toe's removal without a black point, then the tail).
 fn white_curve(whites: f32, x_in: f32) -> f32 {
     // Without a black point the curve continues linearly below `linear_below`.
     let linear_below = p(P_SCENE_KEYS + 5u);
@@ -310,7 +310,6 @@ fn white_curve(whites: f32, x_in: f32) -> f32 {
     let r0 = base + i32(b.x) * rows;
     let r1 = r0 + rows;
     let tail = base + i32(SCENE_S.z) * rows;
-    let toe = tail + i32(SCENE_T.z);
     let top = p(P_SCENE_KEYS);
     let top_x = exp2(top);
     var y = 0.0;
@@ -326,9 +325,6 @@ fn white_curve(whites: f32, x_in: f32) -> f32 {
         if rm < 1.0 && at_top < 1.0 {
             y = at_top + (1.0 - at_top) * clamp((r - rm) / (1.0 - rm), 0.0, 1.0);
         }
-    }
-    if p(P_SCENE_KEYS + 2u) == 0.0 && x > 0.0 {
-        y = y * min(x, 1.0) / max(log_curve(toe, SCENE_T, x), 1e-9);
     }
     if below {
         y = y * x_in / linear_below;

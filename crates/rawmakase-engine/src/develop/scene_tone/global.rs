@@ -213,6 +213,15 @@ impl GlobalTone {
         // The default and negative Whites follow the photo's maximum; positive Whites
         // adds the stretch toward `stretch` (twice its 99th percentile on photos), so the
         // rows meet at Whites 0.
+        let one = ((0. - WHITE_FIRST) / WHITE_STEP) as usize;
+        let toe = (!black_point).then(|| Box::new(std::array::from_fn(|k| row(one, k))));
+        let linear_below = toe.as_ref().map_or(0., |toe| {
+            let k = toe
+                .iter()
+                .position(|y| *y >= LINEAR_TOE)
+                .unwrap_or(T_SAMPLES - 1);
+            (T_FIRST + k as f32 * T_STEP).exp2()
+        });
         let zero = SLIDERS / 2;
         let rows: Box<[[f32; U_SAMPLES]; SLIDERS]> = Box::new(std::array::from_fn(|s| {
             let mut row: [f32; U_SAMPLES] = std::array::from_fn(|k| {
@@ -224,22 +233,21 @@ impl GlobalTone {
                     default + curve(stretch, s, log) - curve(stretch, zero, log)
                 }
             });
+            // Without a black point, Camera Raw's toe is divided out of the curve.
+            if let Some(toe) = &toe {
+                for (k, v) in row.iter_mut().enumerate() {
+                    let x = (top + U_FIRST + k as f32 * U_STEP).exp2();
+                    *v *= x.min(1.) / evaluate(&toe[..], T_FIRST, T_STEP, x).max(1e-9);
+                }
+            }
             // The stretch's difference, added to the default curve, can dip where the
-            // stretch level is below the photo's maximum; the curve never decreases.
+            // stretch level is below the photo's maximum, and so can the toe's removal;
+            // the curve never decreases.
             for k in 1..U_SAMPLES {
                 row[k] = row[k].max(row[k - 1]);
             }
             row
         }));
-        let one = ((0. - WHITE_FIRST) / WHITE_STEP) as usize;
-        let toe = (!black_point).then(|| Box::new(std::array::from_fn(|k| row(one, k))));
-        let linear_below = toe.as_ref().map_or(0., |toe| {
-            let k = toe
-                .iter()
-                .position(|y| *y >= LINEAR_TOE)
-                .unwrap_or(T_SAMPLES - 1);
-            (T_FIRST + k as f32 * T_STEP).exp2()
-        });
         let default_black = (black_point && relative_key > NO_DEFAULT_BLACK)
             .then(|| Box::new(std::array::from_fn(|k| default_black(relative_key, k))));
         let blacks_curve = (blacks != 0.).then(|| {
@@ -285,11 +293,12 @@ impl GlobalTone {
                 at_top
             }
         };
+        // The rows carry the toe's removal (`new`); below `linear_below` the curve
+        // without a black point is linear.
         match &self.toe {
             Some(_) if x > 0. && x < self.linear_below => {
                 self.white_at(curve, self.linear_below) * x / self.linear_below
             }
-            Some(toe) if x > 0. => y * x.min(1.) / evaluate(&toe[..], T_FIRST, T_STEP, x).max(1e-9),
             _ => y,
         }
     }
@@ -339,12 +348,11 @@ impl GlobalTone {
             self.linear_below,
         ]
     }
-    /// The curves for the GPU port: the white rows, then the tail and the toe (the tail
-    /// again with a black point, unused).
+    /// The curves for the GPU port: the white rows (which carry the toe's removal
+    /// without a black point), then the tail.
     pub(crate) fn gpu_curves(&self) -> Vec<f32> {
         let mut out: Vec<f32> = self.rows.iter().flatten().copied().collect();
         out.extend(self.tail.iter());
-        out.extend(self.toe.as_deref().unwrap_or(&self.tail).iter());
         out
     }
     /// The default black's samples, for the GPU port.
@@ -606,18 +614,24 @@ mod tests {
             for stretch in [top, top - 1., top - 3.] {
                 for whites in [-1., -0.3, 0., 0.6, 1.] {
                     for blacks in [-1., 0., 0.5, 1.] {
-                        let tone = GlobalTone::new(
-                            [sensor, top, stretch, top + 1.],
-                            whites,
-                            blacks,
-                            -5.,
-                            -5.,
-                            true,
-                        );
-                        monotone(
-                            &tone,
-                            &format!("{sensor} {top} {stretch} {whites} {blacks}"),
-                        );
+                        // With Camera Raw's black point, and without (DefaultBlackRender
+                        // None), where its toe is divided out.
+                        for black_point in [true, false] {
+                            let tone = GlobalTone::new(
+                                [sensor, top, stretch, top + 1.],
+                                whites,
+                                blacks,
+                                -5.,
+                                -5.,
+                                black_point,
+                            );
+                            monotone(
+                                &tone,
+                                &format!(
+                                    "{sensor} {top} {stretch} {whites} {blacks} {black_point}"
+                                ),
+                            );
+                        }
                     }
                 }
             }
@@ -625,6 +639,8 @@ mod tests {
         // Found in review: a brighter input came out darker.
         let tone = GlobalTone::new([2., 2., -1., 2.], 1., 0., -14., -14., true);
         monotone(&tone, "review case");
+        let tone = GlobalTone::new([-1., -2., -5., -1.], 0.75, 0., -14., -14., false);
+        monotone(&tone, "review case without a black point");
     }
 
     #[test]
