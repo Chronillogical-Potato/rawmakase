@@ -506,7 +506,11 @@ fn save_stage(
         Replace::NoClobber
     };
     write_atomic(output, replace, |file| {
-        image.write_to(&mut std::io::BufWriter::new(file), image::ImageFormat::Tiff)?;
+        // Flushed here, so a failed last write fails the tap instead of being lost when
+        // the writer is dropped.
+        let mut writer = std::io::BufWriter::new(file);
+        image.write_to(&mut writer, image::ImageFormat::Tiff)?;
+        std::io::Write::flush(&mut writer)?;
         Ok(())
     })
 }
