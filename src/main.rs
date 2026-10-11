@@ -398,14 +398,7 @@ fn main() -> Result<()> {
                 };
                 let out =
                     develop::quality::render_stage(&im, &edit, stage, &AtomicBool::new(false))?;
-                anyhow::ensure!(overwrite || !output.exists(), "Output already exists");
-                image::Rgb32FImage::from_raw(
-                    out.width,
-                    out.height,
-                    out.pixels.into_iter().flatten().collect(),
-                )
-                .ok_or_else(|| anyhow::anyhow!("Stage image has the wrong size"))?
-                .save_with_format(&output, image::ImageFormat::Tiff)?;
+                save_stage(&output, &input, out, overwrite)?;
                 return Ok(());
             }
             let developed = t.elapsed();
@@ -480,4 +473,79 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Writes a stage tap as a 32-bit float TIFF at `output`, with an export's
+/// protections: never over a RAW file or the `input` it was rendered from, never over
+/// an existing file unless `overwrite`, and encoded beside it before being put in
+/// place, so a failed write leaves the destination as it was.
+fn save_stage(
+    output: &std::path::Path,
+    input: &std::path::Path,
+    out: rawmakase::rendered::Rendered,
+    overwrite: bool,
+) -> Result<()> {
+    use rawmakase::storage::{Replace, is_raw, write_atomic};
+    anyhow::ensure!(!is_raw(output), "A stage tap cannot overwrite a RAW file");
+    if output.exists() {
+        anyhow::ensure!(
+            std::fs::canonicalize(output)? != std::fs::canonicalize(input)?,
+            "Cannot overwrite the source"
+        );
+        anyhow::ensure!(overwrite, "Output already exists");
+    }
+    let image = image::Rgb32FImage::from_raw(
+        out.width,
+        out.height,
+        out.pixels.into_iter().flatten().collect(),
+    )
+    .ok_or_else(|| anyhow::anyhow!("Stage image has the wrong size"))?;
+    let replace = if overwrite {
+        Replace::Overwrite
+    } else {
+        Replace::NoClobber
+    };
+    write_atomic(output, replace, |file| {
+        image.write_to(&mut std::io::BufWriter::new(file), image::ImageFormat::Tiff)?;
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tap() -> rawmakase::rendered::Rendered {
+        rawmakase::rendered::Rendered {
+            width: 2,
+            height: 1,
+            pixels: vec![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+        }
+    }
+
+    #[test]
+    fn stage_taps_never_replace_raws_their_source_or_unasked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("photo.dng");
+        std::fs::write(&raw, b"raw bytes").unwrap();
+        // Over the RAW it was rendered from, with or without --overwrite.
+        for overwrite in [false, true] {
+            assert!(save_stage(&raw, &raw, tap(), overwrite).is_err());
+            assert_eq!(std::fs::read(&raw).unwrap(), b"raw bytes");
+        }
+        // Over the source under a non-RAW name.
+        let source = dir.path().join("source.tif");
+        std::fs::write(&source, b"source").unwrap();
+        assert!(save_stage(&source, &source, tap(), true).is_err());
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+        // An existing file only with --overwrite.
+        let output = dir.path().join("tap.tif");
+        std::fs::write(&output, b"old").unwrap();
+        assert!(save_stage(&output, &raw, tap(), false).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"old");
+        save_stage(&output, &raw, tap(), true).unwrap();
+        let written = image::open(&output).unwrap().to_rgb32f();
+        assert_eq!(written.dimensions(), (2, 1));
+        assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
+    }
 }
