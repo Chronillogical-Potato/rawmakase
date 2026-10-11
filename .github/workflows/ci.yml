@@ -12,6 +12,7 @@ on:
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'
+      - '**.md'
   pull_request:
     paths-ignore:
       - 'website/**'
@@ -22,6 +23,7 @@ on:
       - '.github/triage.yml'
       - '.github/workflows/triage.yml'
       - '.github/workflows/workflow-lint.yml'
+      - '**.md'
   workflow_call:
     inputs:
       source-ref:
