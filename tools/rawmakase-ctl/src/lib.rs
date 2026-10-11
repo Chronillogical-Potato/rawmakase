@@ -96,7 +96,7 @@ enum Command {
         #[arg(long, value_enum, default_value_t = PreviewSize::Standard)]
         kind: PreviewSize,
     },
-    /// Render the captured edit to a new JPEG or TIFF, without overwriting files
+    /// Render the captured edit to a new JPEG, TIFF or PNG, without overwriting files
     Export {
         path: PathBuf,
         #[arg(long)]

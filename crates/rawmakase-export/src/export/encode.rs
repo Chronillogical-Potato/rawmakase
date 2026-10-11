@@ -1,4 +1,5 @@
-//! JPEG and 16-bit TIFF encoding with an ICC profile, EXIF directories and XMP.
+//! JPEG, 16-bit TIFF and 8-bit PNG encoding with an ICC profile, EXIF
+//! directories and XMP.
 use super::Embed;
 use crate::{
     exif::{
@@ -90,6 +91,39 @@ pub(super) fn tiff(
         im.encoder().write_tag(Tag::Unknown(XMP), xmp.as_bytes())?;
     }
     im.write_data(&image.rgb16())?;
+    Ok(())
+}
+
+/// An 8-bit PNG, its EXIF in an eXIf chunk and its XMP in an uncompressed
+/// iTXt chunk, as the XMP specification asks.
+pub(super) fn png(
+    out: &mut impl Write,
+    image: &Rendered,
+    profile: Vec<u8>,
+    directories: CameraExif,
+    embed: &Embed,
+) -> Result<()> {
+    let mut info = png::Info::with_size(image.width, image.height);
+    info.color_type = png::ColorType::Rgb;
+    info.bit_depth = png::BitDepth::Eight;
+    info.icc_profile = Some(profile.into());
+    info.exif_metadata = Some(super::metadata::png_exif(directories).into());
+    // pHYs counts pixels per metre.
+    let ppm = (embed.ppi.clamp(1, 10_000) as f64 / 0.0254).round() as u32;
+    info.pixel_dims = Some(png::PixelDimensions {
+        xppu: ppm,
+        yppu: ppm,
+        unit: png::Unit::Meter,
+    });
+    if let Some(xmp) = &embed.xmp {
+        info.utf8_text
+            .push(png::text_metadata::ITXtChunk::new("XML:com.adobe.xmp", xmp));
+    }
+    let mut e = png::Encoder::with_info(out, info)?;
+    e.set_compression(png::Compression::High);
+    let mut w = e.write_header()?;
+    w.write_image_data(&image.rgb8())?;
+    w.finish()?;
     Ok(())
 }
 

@@ -71,6 +71,7 @@ pub enum Format {
     #[default]
     Jpeg,
     Tiff,
+    Png,
 }
 impl Format {
     /// The extension an export is named with.
@@ -78,16 +79,18 @@ impl Format {
         match self {
             Format::Jpeg => "jpg",
             Format::Tiff => "tif",
+            Format::Png => "png",
         }
     }
     pub fn mime_type(self) -> &'static str {
         match self {
             Format::Jpeg => "image/jpeg",
             Format::Tiff => "image/tiff",
+            Format::Png => "image/png",
         }
     }
-    /// The format `path`'s extension names, in any case: .jpg, .jpeg, .tif
-    /// or .tiff.
+    /// The format `path`'s extension names, in any case: .jpg, .jpeg, .tif,
+    /// .tiff or .png.
     pub fn from_path(path: &Path) -> Option<Format> {
         match path
             .extension()
@@ -98,6 +101,7 @@ impl Format {
         {
             "jpg" | "jpeg" => Some(Format::Jpeg),
             "tif" | "tiff" => Some(Format::Tiff),
+            "png" => Some(Format::Png),
             _ => None,
         }
     }
@@ -536,6 +540,14 @@ mod tests {
         );
         s.destination = Destination::Folder;
         assert_eq!(s.target(source), None);
+    }
+    #[test]
+    fn each_format_is_named_by_the_extension_it_is_read_back_from() {
+        for format in [Format::Jpeg, Format::Tiff, Format::Png] {
+            let path = PathBuf::from(format!("out.{}", format.extension().to_uppercase()));
+            assert_eq!(Format::from_path(&path), Some(format));
+        }
+        assert_eq!(Format::from_path(Path::new("out.webp")), None);
     }
     #[test]
     fn rename_templates_name_each_photo_as_lightrooms_do() {
