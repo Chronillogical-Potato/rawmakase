@@ -215,7 +215,7 @@ impl GlobalTone {
         // rows meet at Whites 0.
         let zero = SLIDERS / 2;
         let rows: Box<[[f32; U_SAMPLES]; SLIDERS]> = Box::new(std::array::from_fn(|s| {
-            std::array::from_fn(|k| {
+            let mut row: [f32; U_SAMPLES] = std::array::from_fn(|k| {
                 let log = top + U_FIRST + k as f32 * U_STEP;
                 let default = curve(top, s.min(zero), log);
                 if s <= zero {
@@ -223,7 +223,13 @@ impl GlobalTone {
                 } else {
                     default + curve(stretch, s, log) - curve(stretch, zero, log)
                 }
-            })
+            });
+            // The stretch's difference, added to the default curve, can dip where the
+            // stretch level is below the photo's maximum; the curve never decreases.
+            for k in 1..U_SAMPLES {
+                row[k] = row[k].max(row[k - 1]);
+            }
+            row
         }));
         let one = ((0. - WHITE_FIRST) / WHITE_STEP) as usize;
         let toe = (!black_point).then(|| Box::new(std::array::from_fn(|k| row(one, k))));
@@ -268,11 +274,12 @@ impl GlobalTone {
         let y = if x <= top {
             evaluate(curve, self.top + U_FIRST, U_STEP, x)
         } else {
-            // Specks brighter than the maximum roll on to white with the default curve.
+            // Specks brighter than the maximum roll on to white with the default curve;
+            // a curve Whites has already stretched past white stays there.
             let at_top = curve[U_SAMPLES - 1];
             let r = evaluate(&self.tail[..], T_FIRST, T_STEP, x);
             let rm = evaluate(&self.tail[..], T_FIRST, T_STEP, top);
-            if rm < 1. {
+            if rm < 1. && at_top < 1. {
                 at_top + (1. - at_top) * ((r - rm) / (1. - rm)).clamp(0., 1.)
             } else {
                 at_top
@@ -584,30 +591,40 @@ mod tests {
 
     #[test]
     fn curves_are_monotone() {
+        let monotone = |tone: &GlobalTone, case: &str| {
+            let mut last = -1f32;
+            for i in 0..400 {
+                let x = 2f32.powf(-14. + i as f32 * 0.05);
+                let y = tone.apply([x; 3])[0];
+                assert!(y >= last - 2e-4, "{case}: {x} -> {y} < {last}");
+                last = y;
+            }
+        };
         for (sensor, top) in [(-1., -1.), (0., -2.), (1.3, 1.3), (2., -1.), (3.7, 1.)] {
-            for whites in [-1., -0.3, 0., 0.6, 1.] {
-                for blacks in [-1., 0., 0.5, 1.] {
-                    let tone = GlobalTone::new(
-                        [sensor, top, top, top + 1.],
-                        whites,
-                        blacks,
-                        -5.,
-                        -5.,
-                        true,
-                    );
-                    let mut last = -1f32;
-                    for i in 0..400 {
-                        let x = 2f32.powf(-14. + i as f32 * 0.05);
-                        let y = tone.apply([x; 3])[0];
-                        assert!(
-                            y >= last - 2e-4,
-                            "{sensor} {top} {whites} {blacks}: {x} -> {y} < {last}"
+            // Whites stretches toward the photo's maximum or, on photos, a level below it
+            // (a dark photo with a small bright highlight).
+            for stretch in [top, top - 1., top - 3.] {
+                for whites in [-1., -0.3, 0., 0.6, 1.] {
+                    for blacks in [-1., 0., 0.5, 1.] {
+                        let tone = GlobalTone::new(
+                            [sensor, top, stretch, top + 1.],
+                            whites,
+                            blacks,
+                            -5.,
+                            -5.,
+                            true,
                         );
-                        last = y;
+                        monotone(
+                            &tone,
+                            &format!("{sensor} {top} {stretch} {whites} {blacks}"),
+                        );
                     }
                 }
             }
         }
+        // Found in review: a brighter input came out darker.
+        let tone = GlobalTone::new([2., 2., -1., 2.], 1., 0., -14., -14., true);
+        monotone(&tone, "review case");
     }
 
     #[test]

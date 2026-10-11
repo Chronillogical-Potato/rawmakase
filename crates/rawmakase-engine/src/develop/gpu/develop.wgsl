@@ -322,7 +322,8 @@ fn white_curve(whites: f32, x_in: f32) -> f32 {
         let r = log_curve(tail, SCENE_T, x);
         let rm = log_curve(tail, SCENE_T, top_x);
         y = at_top;
-        if rm < 1.0 {
+        // A curve Whites has already stretched past white stays there (global.rs).
+        if rm < 1.0 && at_top < 1.0 {
             y = at_top + (1.0 - at_top) * clamp((r - rm) / (1.0 - rm), 0.0, 1.0);
         }
     }
