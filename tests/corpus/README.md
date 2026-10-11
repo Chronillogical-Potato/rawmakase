@@ -94,6 +94,10 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
 
   with `RAWMAKASE_CORPUS` and `RAWMAKASE_PROFILES` set as for the private tier.
 
+## The pixls dataset
+
+A classified copy of the whole raw.pixls.us archive, for choosing test photos by camera, exposure, measured tone and scene, and frozen Camera Raw references for the scene-tone gate, lives in the [rawmakase-dataset](https://github.com/pch/rawmakase-dataset) repository (private for now) with the scripts that build it. Its `manifest --link` puts chosen photos where the photo tests above read them (`$RAWMAKASE_CORPUS/raws/pixls`), and its reference sets are made with this repository's `scripts/corpus/gate.py`.
+
 ## TODO
 
 Known limitations, not yet addressed:
