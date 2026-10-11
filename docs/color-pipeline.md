@@ -14,7 +14,7 @@ The system LibRaw 0.22.2 implementation was inspected against its [versioned sou
 
 Before integer scaling, the shim measures an upper bound across all four camera planes and the proposed scale multipliers. It multiplies all scales by `min(1, 60000 / bound)` before delegating to LibRaw. This retains approximately 0.13 stop below the integer ceiling. The result is converted to camera RGB floats using the inverse common factor and the normalized green WB scale. Values above one are retained. Black subtraction is delegated once; the shim does not repeat it.
 
-The bound intentionally uses values before any residual subtraction, making it conservative for nonnegative black levels. Camera-specific decode artifacts, negative black offsets, unavailable camera matrices, or unsupported sensor layouts still require additional validation. Only three-color Bayer/X-Trans development is accepted, plus Canon and Nikon sRAW/mRAW (YCbCr, which LibRaw converts to camera RGB and develops without demosaicing). Source dimensions are checked before copying the native image into a Rust-owned buffer.
+The bound intentionally uses values before any residual subtraction, making it conservative for nonnegative black levels. Camera-specific decode artifacts, negative black offsets, unavailable camera matrices, or unsupported sensor layouts still require additional validation. Only three-color Bayer/X-Trans development is accepted, plus Canon and Nikon sRAW/mRAW (YCbCr, which LibRaw converts to camera RGB and develops without demosaicing). Nikon's High Efficiency NEFs (JPEG XS, which LibRaw cannot decode) are refused on every body, including those LibRaw would otherwise read as lossless compressed noise; their embedded preview still serves the Library. Source dimensions are checked before copying the native image into a Rust-owned buffer.
 
 Tests feed the actual override synthetic 14-bit ramps at WB ratios 1, 2.5, 8 and 16. No scale-stage pixels reach 65535, and reconstruction error remains below WB / 59000. The two real fixtures also produce zero scale-stage saturation and camera values above one. This proves the integer bridge's tested bounds; it does not prove that clipped sensor information or every demosaicing artifact can be recovered.
 
@@ -56,7 +56,27 @@ Clipping is judged on the rendered encoded-sRGB values (0–1), before any monit
 
 Develop's RGB readout under the histogram (and the White Balance loupe) reads these rendered values, never the screen, and shows them as Lightroom does in Melissa RGB: linear sRGB to ProPhoto primaries (the D65-to-D50 matrix the camera profiles use), then the sRGB tone curve.
 
-Optional monitor ICC conversion maps encoded sRGB bytes to device RGB through Little CMS with relative-colorimetric intent and black-point compensation. Failure falls back to sRGB with a visible error. Automatic monitor-profile discovery and HDR output are outside this release. Calibration/compositor interaction must be verified on the user's chosen monitor; the test suite only proves an sRGB-profile round trip within one byte.
+On macOS, the default display mode explicitly tags the Metal surface as sRGB so
+Core Animation matches it to the current monitor, including wide-gamut displays.
+`app::display` schedules this declaration in the paint callback, after wgpu can
+reconfigure the surface; `platform::display` finds the current Metal layer and
+sets its color space. This works around wgpu-hal 30.0.1 leaving sRGB surfaces
+untagged ([upstream fix](https://github.com/gfx-rs/wgpu/pull/10286)). No additional
+gamma or pixel conversion is applied by this workaround.
+
+Optional monitor ICC conversion maps encoded sRGB bytes to device RGB through
+Little CMS with relative-colorimetric intent and black-point compensation.
+Choosing this manual override on macOS leaves the Metal surface unmanaged to
+avoid applying a second conversion; choosing Use sRGB restores system color
+management. Failure of the manual transform still shows the sRGB bytes with a
+visible error, but on macOS the surface stays unmanaged while a custom profile
+is selected, so that fallback is not matched to the display and can look
+oversaturated on wide-gamut monitors. Automatic monitor-profile discovery for
+manual conversion and HDR output are outside this release. Native tests check
+the actual Metal layer tag, surface reset/replacement and switching manual
+conversion on and off; the Little CMS test proves an sRGB-profile round trip
+within one byte. Visual matching with other applications still requires
+validation on the chosen display.
 
 ## Invalidation and ownership
 
