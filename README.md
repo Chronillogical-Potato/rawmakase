@@ -31,7 +31,7 @@ It is a personal project in active development. It develops photos from almost e
 ## Coming soon
 
 - LUT support
-- AI-powered masks and object removal
+- AI object removal
 - Agentic features: e.g. culling assistance
 
 ## Install
