@@ -51,8 +51,10 @@ pub(super) struct NativeMetadata {
     pub(super) highlight_tone_priority: i32,
     pub(super) fuji_exposure_shift: f32,
     pub(super) sony_daylight_wb: [f32; 3],
+    /// The maker's numeric lens ID (Nikon's `LensIDNumber`); 0 when there is none.
+    pub(super) lens_id: u32,
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 436);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 440);
 
 /// Size of the error buffers `native/raw.cpp`'s `message` writes into.
 const ERR: usize = 512;

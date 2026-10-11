@@ -34,6 +34,9 @@ struct Metadata {
     int highlight_tone_priority;
     float fuji_exposure_shift;
     float sony_daylight_wb[3];
+    // The maker's numeric lens ID, the value the lens profiles' stCamera:LensID
+    // holds too (Nikon's LensIDNumber); 0 when the maker notes have none.
+    unsigned lens_id;
 };
 typedef int (*Cancel)(void*);
 }
@@ -225,6 +228,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         std::snprintf(m->make,64,"%s",d.idata.make);
         std::snprintf(m->model,64,"%s",d.idata.model);
         std::snprintf(m->lens,128,"%s",d.lens.Lens[0] ? d.lens.Lens : d.lens.makernotes.Lens);
+        m->lens_id=d.lens.nikon.LensIDNumber;
         return h.release();
     } catch(const std::exception& e) { message(err,e.what()); return nullptr; }
     catch(...) { message(err,"Native RAW open failed"); return nullptr; }

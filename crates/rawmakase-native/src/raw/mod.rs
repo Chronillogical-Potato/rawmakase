@@ -83,6 +83,7 @@ impl Raw {
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: None,
             lens_model: text(&m.lens).trim().to_string(),
+            lens_id: m.lens_id,
             baseline_exposure: None,
             dng_neutral_calibration: None,
             dng_matrix_profile_signature: None,
