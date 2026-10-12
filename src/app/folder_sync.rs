@@ -654,6 +654,17 @@ impl Editor {
     /// Applying finished: forgets removed photos, moves preview requests
     /// with moved ones, and shows the catalog again, the open photo
     /// following its file.
+    /// Forgets photos a synchronization removed: their previews requested,
+    /// their undo, and the reference if it was one of them.
+    fn forget_removed(&mut self, removed: &[PhotoId]) {
+        for &id in removed {
+            self.forget_preview_intent(id);
+            self.undo_log.forget_photo(id);
+        }
+        if self.reference.photo.is_some_and(|id| removed.contains(&id)) {
+            self.clear_reference();
+        }
+    }
     pub(super) fn folder_synced(&mut self, result: Result<Box<Synced>, String>) {
         let synced = match result {
             Ok(synced) => synced,
@@ -679,10 +690,7 @@ impl Editor {
                 {
                     self.document.relink(path);
                 }
-                for &id in &applied.removed {
-                    self.forget_preview_intent(id);
-                    self.undo_log.forget_photo(id);
-                }
+                self.forget_removed(&applied.removed);
                 // The lists shown must not keep photos removed, whose ids
                 // new photos may have: read again here, or emptied. The
                 // Library stays, so an edit still unsaved saves to it.
@@ -702,10 +710,7 @@ impl Editor {
                 return;
             }
         };
-        for &id in &applied.removed {
-            self.forget_preview_intent(id);
-            self.undo_log.forget_photo(id);
-        }
+        self.forget_removed(&applied.removed);
         // Each moved photo and its copies, at their new file.
         let moved: Vec<(PhotoId, PathBuf)> = library
             .session
@@ -1962,6 +1967,23 @@ mod tests {
         assert!(e.folder_sync.showing);
         // Keys and commands go to the dialog, not the photos behind it.
         assert!(e.command_modal());
+        Ok(())
+    }
+
+    #[test]
+    fn a_reference_photo_removed_is_no_longer_shown() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let b = id(&e, "b.dng");
+        e.reference.photo = Some(b);
+        std::fs::remove_file(trip.join("b.dng"))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        let review = e.folder_sync.review.as_mut().expect("a review");
+        review.removals.iter_mut().for_each(|r| *r = true);
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        assert_eq!(e.reference.photo, None);
         Ok(())
     }
 

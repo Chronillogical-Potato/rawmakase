@@ -293,11 +293,21 @@ impl Library {
             self.screen.forget(*id);
         }
         let reread = self.reload();
-        if reread.is_err() {
-            self.session.photos.clear();
-            self.session.collection_photos.clear();
-            self.session.previous_import.clear();
-            self.reloaded();
+        match &reread {
+            // Moved and added photos are looked for where they are now.
+            Ok(()) => self.check_files(),
+            Err(_) => {
+                // Neither photos nor folders: a folder removed may have
+                // given its id to a new one.
+                self.session.photos.clear();
+                self.session.folders.clear();
+                self.session.roots.clear();
+                self.session.collection_photos.clear();
+                self.session.previous_import.clear();
+                self.filters.folder_scope = None;
+                self.selected_folder.clear();
+                self.reloaded();
+            }
         }
         reread
     }
