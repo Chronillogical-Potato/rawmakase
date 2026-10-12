@@ -22,6 +22,7 @@ import hashlib
 import re
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -395,6 +396,10 @@ def default_parity(args):
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     env, library = render_env(args, out)
+    # Rendered with a copy of the build taken now, so a rebuild meanwhile can't mix engines.
+    pinned = out / 'rawmakase'
+    shutil.copy2(args.rawmakase, pinned)
+    args.rawmakase = pinned
     rows, left_out, crashed = [], 0, []
     for photo in pool['photos']:
         if photo['sha256'] in holdout:
