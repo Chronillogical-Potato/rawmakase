@@ -80,7 +80,8 @@ pub(crate) struct Scanned {
 }
 /// What applying sends back: the catalog opened again, and what changed.
 pub(crate) struct Synced {
-    library: Box<super::library::Library>,
+    /// The catalog opened again, or why it could not be.
+    library: Result<Box<super::library::Library>, String>,
     applied: Applied,
     /// The photo open in Develop, still in the catalog, and its new file
     /// when it was found moved and verified: the open document stays,
@@ -462,6 +463,11 @@ impl Editor {
             self.folder_sync.review = Some(review);
             return;
         }
+        // What the readers bring back could land on photos given removed
+        // photos' ids.
+        if let Some(library) = &mut self.library {
+            library.session.stop_background_reads();
+        }
         let location = review.catalog.clone();
         let plan = review.plan;
         let relink = open.map(|id| (id, open_move));
@@ -480,17 +486,29 @@ impl Editor {
                         &crate::catalog::MetadataDefaults::load(),
                     )?;
                     drop(catalog);
-                    let opened = crate::catalog_session::CatalogSession::open(&location)?;
-                    let mut library = super::library::Library::new(opened, ctx.clone());
-                    synced_message(&mut library, &plan, &applied);
+                    // Applied: what follows must not lose it, nor where the
+                    // open photo's file went.
+                    let opened = crate::catalog_session::CatalogSession::open(&location)
+                        .map(|opened| super::library::Library::new(opened, ctx.clone()));
+                    let library = match opened {
+                        Ok(mut library) => {
+                            synced_message(&mut library, &plan, &applied);
+                            Ok(Box::new(library))
+                        }
+                        Err(e) => Err(format!("{e:#}")),
+                    };
                     // The open photo stays open while it is in the catalog;
                     // it follows only a move that went through.
                     let relink = relink.and_then(|(id, to)| {
-                        let master = library.photo(id)?.master.unwrap_or(id);
-                        Some((id, to.filter(|_| applied.moved.contains(&master))))
+                        let master = match &library {
+                            Ok(l) => l.photo(id)?.master.unwrap_or(id),
+                            Err(_) => id,
+                        };
+                        let moved = applied.moved.contains(&master) || applied.moved.contains(&id);
+                        Some((id, to.filter(|_| moved)))
                     });
                     Ok(Synced {
-                        library: Box::new(library),
+                        library,
                         applied,
                         relink,
                     })
@@ -521,6 +539,26 @@ impl Editor {
             applied,
             relink,
         } = *synced;
+        let library = match library {
+            Ok(library) => library,
+            Err(e) => {
+                // Applied, but not shown again: the open photo still
+                // follows its file, so its edit saves there.
+                self.activity.finish_dialog();
+                if let Some((id, Some(path))) = relink
+                    && self.document.catalog_photo == Some(id)
+                {
+                    self.document.relink(path);
+                }
+                for &id in &applied.removed {
+                    self.undo_log.forget_photo(id);
+                }
+                self.status = format!(
+                    "Synchronized, but the catalog could not be opened again: {e}. Open it again."
+                );
+                return;
+            }
+        };
         for &id in &applied.removed {
             self.forget_preview_intent(id);
             self.undo_log.forget_photo(id);
