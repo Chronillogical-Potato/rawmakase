@@ -14,17 +14,17 @@ impl Editor {
         // The buttons follow the shared log, which also holds Library changes.
         self.sync_undo();
         let (can_undo, can_redo) = (self.undo_log.can_undo(), self.undo_log.can_redo());
-        // On the photo's backdrop, with no rule: the controls sit on the
-        // canvas, whose own margin spaces them from the photo.
-        egui::Panel::top("toolbar")
+        // Under the photo, as the Library's view bar is, on its backdrop with
+        // no rule: the canvas's own margin spaces them from the photo.
+        egui::Panel::bottom("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(palette.photo_backdrop())
                     .inner_margin(egui::Margin {
                         left: 20,
                         right: 20,
-                        top: 10,
-                        bottom: 0,
+                        top: 0,
+                        bottom: 10,
                     }),
             )
             .show_separator_line(false)

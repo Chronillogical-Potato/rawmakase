@@ -199,62 +199,10 @@ impl Editor {
                 .on_hover_text("Output histogram of the whole photo");
         });
     }
-    /// Lightroom's tool strip: Crop, Remove, Red Eye and Masking, with the open tool's
-    /// drawer below it.
-    pub(super) fn tool_strip(&mut self, ui: &mut egui::Ui) {
+    /// The open tool's drawer, in Develop's tab panel: Crop's settings, or
+    /// Remove's, Red Eye's or Masking's. Its tools are on the tab rail.
+    pub(super) fn tool_drawer(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
-        ui.add_space(6.);
-        // Red Eye has no shortcut, as in Lightroom.
-        const TOOLS: [(Tool, &str, &str); 4] = [
-            (Tool::Crop, "Crop", "Crop & Straighten · R"),
-            (Tool::Remove, "Remove", "Spot Removal: Heal and Clone · Q"),
-            (Tool::RedEye, "Red Eye", "Red Eye Correction"),
-            (Tool::Mask, "Masking", "Masking · Shift+W"),
-        ];
-        let (strip, _) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-        let width = (strip.width() - 12.) / 4.;
-        for (k, (tool, label, tip)) in TOOLS.into_iter().enumerate() {
-            let rect = Rect::from_min_size(
-                strip.min + Vec2::new(k as f32 * (width + 4.), 0.),
-                Vec2::new(width, strip.height()),
-            );
-            let response = ui
-                .interact(rect, ui.id().with(("tool", label)), Sense::click())
-                .on_hover_text(tip);
-            let active = self.view.is(tool);
-            ui.painter().rect_filled(
-                rect,
-                3.,
-                palette.gray(if active {
-                    72
-                } else if response.hovered() {
-                    50
-                } else {
-                    38
-                }),
-            );
-            let icon = rect.left_center() + Vec2::new(16., 0.);
-            match tool {
-                Tool::Crop => crop_icon(ui.painter(), icon, active),
-                Tool::Remove => heal_icon(ui.painter(), icon, active),
-                Tool::RedEye => eye_icon(ui.painter(), icon, active),
-                _ => mask_icon(ui.painter(), icon, active),
-            }
-            ui.painter().text(
-                rect.left_center() + Vec2::new(30., 0.),
-                egui::Align2::LEFT_CENTER,
-                label,
-                egui::FontId::proportional(12.),
-                palette.gray(if active { 245 } else { 200 }),
-            );
-            if response
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                self.view.toggle(tool);
-            }
-        }
         let drawer = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             ui.add_space(4.);
             egui::Frame::new()
@@ -449,7 +397,6 @@ impl Editor {
         ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
         ui.spacing_mut().button_padding = Vec2::new(6., 2.);
         ui.spacing_mut().interact_size.y = 20.;
-        self.tool_strip(ui);
         ui.add_space(6.);
         let mut import_profiles = false;
         let mut import_lens = false;
@@ -1804,6 +1751,27 @@ fn experimental(ui: &mut egui::Ui, note: &str) {
         )
         .on_hover_text(note);
     });
+}
+/// The tools whose drawers open in Develop's tab panel, as the rail lists
+/// them, with their tooltips. Red Eye has no shortcut, as in Lightroom.
+pub(super) const DRAWER_TOOLS: [(Tool, &str); 4] = [
+    (Tool::Crop, "Crop & Straighten · R"),
+    (Tool::Remove, "Spot Removal: Heal and Clone · Q"),
+    (Tool::RedEye, "Red Eye Correction"),
+    (Tool::Mask, "Masking · Shift+W"),
+];
+/// Whether `tool` has a drawer in the tab panel.
+pub(super) fn has_drawer(tool: Tool) -> bool {
+    DRAWER_TOOLS.iter().any(|(t, _)| *t == tool)
+}
+/// A drawer tool's icon, centred on `c`, bright while `strong`.
+pub(super) fn paint_tool_icon(painter: &egui::Painter, tool: Tool, c: Pos2, strong: bool) {
+    match tool {
+        Tool::Crop => crop_icon(painter, c, strong),
+        Tool::Remove => heal_icon(painter, c, strong),
+        Tool::RedEye => eye_icon(painter, c, strong),
+        _ => mask_icon(painter, c, strong),
+    }
 }
 /// A circle with an arrow leaving it: the Remove tool.
 fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {

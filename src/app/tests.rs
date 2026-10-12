@@ -3132,7 +3132,7 @@ fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
                 |ui| {
                     ui.set_width(width);
                     let frame = e.begin_edit_frame();
-                    rect = ui.scope(|ui| e.tool_strip(ui)).response.rect;
+                    rect = ui.scope(|ui| e.tool_drawer(ui)).response.rect;
                     e.finish_edit_frame(frame, &ctx);
                 },
             );

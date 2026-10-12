@@ -369,8 +369,12 @@ fn section_header(
         ui.painter().rect_filled(rect, 5., palette.gray(fill));
     }
     ui.painter().text(
-        // Over the rows' text, at their 10 px inset.
-        Pos2::new(rect.left() + 10., rect.center().y),
+        // Over the sidebar rows' text at their 10 px inset; elsewhere at the
+        // contents' 8 px margin.
+        Pos2::new(
+            rect.left() + if sidebar { 10. } else { 8. },
+            rect.center().y,
+        ),
         egui::Align2::LEFT_CENTER,
         title.to_uppercase(),
         egui::FontId::proportional(11.),
@@ -1447,7 +1451,15 @@ fn segment_track(
     let inset = SEGMENT_INSET;
     let radius = control_radius(style.height);
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
-    ui.painter().rect_filled(track, radius, palette.gray(21));
+    // Visible on the dark side panels as on lighter surfaces, so the pill
+    // sits inside a track as wide as the control.
+    ui.painter().rect(
+        track,
+        radius,
+        palette.gray(28),
+        Stroke::new(1., palette.gray(42)),
+        egui::StrokeKind::Inside,
+    );
     let (widths, font) = segment_layout(ui, labels, style, track.width() - 2. * inset);
     let starts: Vec<f32> = widths
         .iter()
