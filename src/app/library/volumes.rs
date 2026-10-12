@@ -104,9 +104,9 @@ pub(super) fn spawn_volume_check(
     });
     true
 }
-/// A Lightroom volume header bar: an LED lit green when the drive is
-/// attached, the drive name, free / total space (or Offline), and a
-/// disclosure arrow that folds its folders away.
+/// A volume's header in the folder tree: a dot lit green when the drive is
+/// attached, its name, its free space (or Offline) and a disclosure chevron
+/// on the right. Clicking it folds its folders away.
 pub(super) fn volume_row(
     ui: &mut egui::Ui,
     volume: &Volume,
@@ -116,73 +116,75 @@ pub(super) fn volume_row(
     open: bool,
 ) -> egui::Response {
     let palette = theme::palette(ui.ctx());
-    ui.add_space(4.);
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), egui::Sense::click());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), egui::Sense::click());
     let painter = ui.painter();
-    painter.rect_filled(
-        rect,
-        3.,
-        palette.gray(if response.hovered() { 64 } else { 56 }),
-    );
-    let y = rect.center().y;
-    let led = egui::Rect::from_center_size(egui::pos2(rect.left() + 14., y), Vec2::new(5., 11.));
-    if attached == Some(true) {
-        painter.rect_filled(led, 1., Color32::from_rgb(110, 200, 90));
-    } else {
-        painter.rect_filled(led, 1., palette.gray(26));
-        painter.rect_stroke(
-            led,
-            1.,
-            egui::Stroke::new(
-                1.,
-                palette.gray(if attached == Some(false) { 150 } else { 90 }),
-            ),
-            egui::StrokeKind::Inside,
-        );
+    let hovered = response.hovered();
+    if hovered {
+        painter.rect_filled(rect, 5., palette.gray(32));
     }
-    painter.text(
-        egui::pos2(rect.left() + 26., y),
-        egui::Align2::LEFT_CENTER,
-        &volume.name,
-        egui::FontId::proportional(12.5),
-        palette.gray(225),
+    let y = rect.center().y;
+    // The dot over the folder tree's chevrons, the name over its folder
+    // icons; the chevron ends where the folders' counts do.
+    let dot = egui::pos2(rect.left() + 13.5, y);
+    if attached == Some(true) {
+        painter.circle_filled(dot, 3.5, Color32::from_rgb(110, 200, 90));
+    } else {
+        let ring = palette.gray(if attached == Some(false) { 150 } else { 90 });
+        painter.circle_stroke(dot, 3., egui::Stroke::new(1., ring));
+    }
+    let chevron = if open {
+        crate::app::icons::Icon::ChevronDown
+    } else {
+        crate::app::icons::Icon::ChevronRight
+    };
+    crate::app::icons::paint_at(
+        painter,
+        chevron,
+        egui::pos2(rect.right() - 15.5, y),
+        11.,
+        palette.gray(if hovered { 200 } else { 110 }),
     );
     let gb = |bytes: u64| bytes as f64 / 1e9;
     let detail = match (attached, space) {
         (Some(false), _) => "Offline".to_string(),
-        (_, Some((free, total))) => format!("{:.0} / {:.0} GB", gb(free), gb(total)),
+        (_, Some((free, _))) => format!("{:.0} GB free", gb(free)),
         _ => String::new(),
     };
-    painter.text(
-        egui::pos2(rect.right() - 26., y),
-        egui::Align2::RIGHT_CENTER,
-        detail,
-        egui::FontId::proportional(11.),
-        palette.gray(160),
-    );
-    let c = egui::pos2(rect.right() - 13., y);
-    let arrow = if open {
-        vec![
-            c + Vec2::new(-4., -2.),
-            c + Vec2::new(4., -2.),
-            c + Vec2::new(0., 3.),
-        ]
+    // The free space turns to the warning colour once the drive is over 90% full.
+    let full = attached != Some(false)
+        && space.is_some_and(|(free, total)| total > 0 && (free as f64) < total as f64 * 0.1);
+    let detail_color = if full {
+        palette.warning()
     } else {
-        vec![
-            c + Vec2::new(3., -4.),
-            c + Vec2::new(3., 4.),
-            c + Vec2::new(-3., 0.),
-        ]
+        palette.gray(125)
     };
-    painter.add(egui::Shape::convex_polygon(
-        arrow,
-        palette.gray(200),
-        egui::Stroke::NONE,
-    ));
+    let detail = painter.layout_no_wrap(detail, egui::FontId::proportional(10.5), detail_color);
+    let detail_left = rect.right() - 27. - detail.size().x;
+    painter.galley(
+        egui::pos2(detail_left, y - detail.size().y / 2.),
+        detail,
+        detail_color,
+    );
+    let name_left = rect.left() + 22.;
+    let name = painter.layout_no_wrap(
+        volume.name.clone(),
+        egui::FontId::proportional(12.5),
+        palette.gray(if hovered { 240 } else { 220 }),
+    );
+    painter
+        .with_clip_rect(rect.with_min_x(name_left).with_max_x(detail_left - 8.))
+        .galley(
+            egui::pos2(name_left, y - name.size().y / 2.),
+            name,
+            palette.gray(220),
+        );
+    let space_text = space
+        .map(|(free, total)| format!(" · {:.0} of {:.0} GB free", gb(free), gb(total)))
+        .unwrap_or_default();
     response.on_hover_text(match (&volume.mount, attached) {
-        (None, _) => format!("Startup disk · {photos} photos"),
+        (None, _) => format!("Startup disk · {photos} photos{space_text}"),
         (Some(mount), Some(false)) => format!("{} is not attached", mount.display()),
-        (Some(mount), _) => format!("{} · {photos} photos", mount.display()),
+        (Some(mount), _) => format!("{} · {photos} photos{space_text}", mount.display()),
     })
 }

@@ -88,6 +88,13 @@ impl Editor {
     /// Lightroom's Navigator: the whole photo with the zoomed area outlined.
     /// Clicking or dragging in it moves the zoomed view there.
     pub(super) fn navigator_ui(&mut self, ui: &mut egui::Ui) {
+        let (photo, shown) = self.navigator_view();
+        if let Some(change) = navigator::navigator(ui, photo, Some(self.view.zoom), shown) {
+            self.navigator_change(change);
+        }
+    }
+    /// What Develop's Navigator shows: the photo, and the part in view.
+    pub(super) fn navigator_view(&self) -> (Option<navigator::Photo>, Option<[f32; 4]>) {
         let shown = self
             .region()
             .zip(self.document.full())
@@ -110,16 +117,19 @@ impl Editor {
                     .thumbnail(self.document.catalog_photo?)?;
                 Some((texture.id(), texture.size_vec2()))
             });
-        match navigator::navigator(ui, photo, Some(self.view.zoom), shown) {
-            Some(navigator::Change::Level(level)) => self.set_zoom(level),
-            Some(navigator::Change::Inspect(at)) => {
+        (photo, shown)
+    }
+    /// A zoom chosen in Develop's Navigator.
+    pub(super) fn navigator_change(&mut self, change: navigator::Change) {
+        match change {
+            navigator::Change::Level(level) => self.set_zoom(level),
+            navigator::Change::Inspect(at) => {
                 self.view.zoom.pan = at;
                 self.view.zoom.on = true;
                 if self.view.is(Tool::Crop) {
                     self.view.tool = Tool::None;
                 }
             }
-            None => {}
         }
     }
     /// Before the first image arrives: the Library preview of the photo being

@@ -306,8 +306,8 @@ impl Editor {
             (WorkspacePanel::Right, false) => (Icon::PanelRightOpen, "the right panel", " · F8"),
             (WorkspacePanel::Filmstrip, true) => (Icon::PanelBottom, "the filmstrip", " · F6"),
             (WorkspacePanel::Filmstrip, false) => (Icon::PanelBottomOpen, "the filmstrip", " · F6"),
-            (WorkspacePanel::Presets, true) => (Icon::ChevronRight, "Presets and History", ""),
-            (WorkspacePanel::Presets, false) => (Icon::ChevronLeft, "Presets and History", ""),
+            (WorkspacePanel::Presets, true) => (Icon::PanelRight, "Presets and History", ""),
+            (WorkspacePanel::Presets, false) => (Icon::PanelRightOpen, "Presets and History", ""),
         };
         let verb = if shown { "Hide" } else { "Show" };
         let palette = super::theme::palette(ui.ctx());

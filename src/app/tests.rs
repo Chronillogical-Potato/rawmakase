@@ -5537,6 +5537,37 @@ fn hiding_the_presets_ends_a_preset_preview() {
     assert!(e.presets.hover.is_none());
 }
 #[test]
+fn a_pinned_panel_is_kept_for_the_next_launch() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("session.json");
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session::default(),
+        Some(session.clone()),
+    );
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    // Nothing is pinned until the user pins it.
+    assert!(!super::widgets::pinned(&ctx, "Navigator"));
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::pinned_sections_id(),
+            std::collections::BTreeSet::from(["Histogram".to_string()]),
+        )
+    });
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    let saved: crate::app::session::Session =
+        serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
+    assert!(saved.pinned.contains("Histogram"));
+    // Read back, it is pinned again.
+    let ctx = egui::Context::default();
+    let _e = Editor::with_context(&ctx, None, saved, None);
+    assert!(super::widgets::pinned(&ctx, "Histogram"));
+}
+#[test]
 fn a_narrow_window_folds_develops_tabs_until_one_is_asked_for() {
     use super::panels::{DevelopTab, WorkspacePanel};
     use super::side_tabs::rail_id;
@@ -5874,14 +5905,18 @@ fn side_panels_stop_where_their_contents_stop() -> anyhow::Result<()> {
         for _ in 0..3 {
             frame(&mut e, vec![egui::Event::PointerMoved(to)]);
         }
-        // Develop's tab panel stops at the adjustments, not the window's edge.
-        let stop = if panel == "presets" {
-            egui::containers::panel::PanelState::load(&ctx, egui::Id::new("adjustments"))
-                .expect("the adjustments")
+        // Develop's tab panel stops at the adjustments, and they at the tab
+        // rail, not the window's edge.
+        let inner = |id: &str| {
+            egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
+                .expect("the panel beside")
                 .outer_rect
                 .left()
-        } else {
-            outward
+        };
+        let stop = match (module, panel) {
+            (Module::Develop, "presets") => inner("adjustments"),
+            (Module::Develop, "adjustments") => inner("develop-rail"),
+            _ => outward,
         };
         let laid_out = (edge(&ctx) - stop).abs();
         assert!(

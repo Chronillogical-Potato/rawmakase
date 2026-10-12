@@ -1,15 +1,16 @@
 //! Develop's tab panel beside the adjustments: Presets, and Snapshots over
-//! History, one at a time. Open, its header switches the tab and folds it;
-//! folded, a slim rail of tab buttons brings it back. A window too narrow for
-//! it and the photo shows it folded until a tab is asked for.
+//! History, one at a time. A slim rail of tab buttons at the window's right
+//! edge switches the tab; the open tab's button folds the panel and any
+//! brings it back. A window too narrow for it and the photo shows it folded
+//! until a tab is asked for.
 use super::Editor;
 use super::icons::{self, Icon};
 use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
 use super::theme;
-use super::widgets::{SectionGroup, SectionSide, segmented};
+use super::widgets::{SectionGroup, SectionSide};
 use eframe::egui::{self, Pos2, Rect, Sense, Vec2};
 
-/// The folded panel's rail.
+/// The rail's width.
 const RAIL_WIDTH: f32 = 36.;
 /// The tab panel's width until the user drags it.
 const PANEL_WIDTH: f32 = 245.;
@@ -21,7 +22,7 @@ const TABS: [(DevelopTab, Icon, &str); 2] = [
     (DevelopTab::History, Icon::History, "History"),
 ];
 
-/// What a click on the panel's header or rail asked for.
+/// What a click on the rail asked for.
 enum TabClick {
     /// Show this tab, opening the panel.
     Open(DevelopTab),
@@ -38,29 +39,29 @@ fn peek_id() -> egui::Id {
 }
 
 impl Editor {
-    /// The tab panel, or its rail while folded. Drawn after the adjustments,
-    /// so it sits between them and the photo. Hidden with the adjustments
-    /// when it is folded too, as Tab does.
-    pub(super) fn develop_side_tabs(&mut self, ui: &mut egui::Ui) {
+    /// The rail, drawn first so it takes the window's right edge, outside
+    /// the adjustments. Hidden with them when the tab panel is folded too, as
+    /// Tab does. Returns whether the tab panel opens, for
+    /// [`Self::develop_tab_panel`] to draw once the adjustments are.
+    pub(super) fn develop_rail_edge(&mut self, ui: &mut egui::Ui) -> bool {
         let ctx = ui.ctx().clone();
         let shown = self.panel_shown(WorkspacePanel::Presets);
-        let width = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("presets"))
-            .map_or(PANEL_WIDTH, |state| state.outer_rect.width());
-        let room = ui.available_width() - width >= PHOTO_MIN;
-        let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));
-        let open = shown && (room || peek);
-        let click = if open {
-            self.tab_panel(ui)
-        } else {
-            // Not drawn, the Presets tab ends a preview it was showing.
-            if self.presets.hover.is_some() {
-                self.end_preset_hover();
-            }
-            if !shown && !self.panel_shown(WorkspacePanel::Right) {
-                return;
-            }
-            self.develop_rail(ui)
+        if !shown && !self.panel_shown(WorkspacePanel::Right) {
+            return false;
+        }
+        let width = |id: &str, default: f32| {
+            egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
+                .map_or(default, |state| state.outer_rect.width())
         };
+        let adjustments = if self.panel_shown(WorkspacePanel::Right) {
+            width("adjustments", 330.)
+        } else {
+            0.
+        };
+        let room = ui.available_width() - RAIL_WIDTH - adjustments - width("presets", PANEL_WIDTH)
+            >= PHOTO_MIN;
+        let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));
+        let click = self.develop_rail(ui, shown && (room || peek));
         match click {
             Some(TabClick::Open(tab)) => {
                 self.set_develop_tab(tab);
@@ -79,24 +80,32 @@ impl Editor {
             }
             None => {}
         }
+        let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));
+        self.panel_shown(WorkspacePanel::Presets) && (room || peek)
     }
-    fn tab_panel(&mut self, ui: &mut egui::Ui) -> Option<TabClick> {
-        let mut click = None;
+    /// The tab panel between the adjustments and the photo, if `open`.
+    pub(super) fn develop_tab_panel(&mut self, ui: &mut egui::Ui, open: bool) {
+        if open {
+            self.tab_panel(ui);
+        } else if self.presets.hover.is_some() {
+            // Not drawn, the Presets tab ends a preview it was showing.
+            self.end_preset_hover();
+        }
+    }
+    fn tab_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("presets")
             .default_size(PANEL_WIDTH)
             .min_size(super::workspace::PRESETS_MIN)
             .max_size(400.)
             .show(ui, |ui| {
                 let _side = SectionSide::enter(ui, SectionGroup::DevelopLeft);
-                click = tab_header(ui, self.panels.develop_tab);
                 match self.panels.develop_tab {
                     DevelopTab::Presets => self.presets_ui(ui),
                     DevelopTab::History => self.history_tab(ui),
                 }
             });
-        click
     }
-    fn develop_rail(&mut self, ui: &mut egui::Ui) -> Option<TabClick> {
+    fn develop_rail(&mut self, ui: &mut egui::Ui, open: bool) -> Option<TabClick> {
         let palette = theme::palette(ui.ctx());
         let mut click = None;
         egui::Panel::right("develop-rail")
@@ -109,17 +118,44 @@ impl Editor {
                 for (k, (tab, icon, name)) in TABS.into_iter().enumerate() {
                     let center = Pos2::new(rail.center().x, rail.top() + 24. + k as f32 * 36.);
                     let rect = Rect::from_center_size(center, Vec2::splat(28.));
+                    let active = open && self.panels.develop_tab == tab;
                     let response = ui
                         .interact(rect, rail_id(tab), Sense::click())
-                        .on_hover_text(format!("Show {name}"))
+                        .on_hover_text(if active {
+                            format!("Hide {name}")
+                        } else {
+                            format!("Show {name}")
+                        })
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if response.hovered() {
-                        ui.painter().rect_filled(rect, 6., palette.gray(44));
+                    if active || response.hovered() {
+                        let fill = palette.gray(if active { 54 } else { 44 });
+                        ui.painter().rect_filled(rect, 6., fill);
                     }
-                    let tint = palette.gray(if response.hovered() { 230 } else { 145 });
+                    // The open tab's marker, on the window's edge.
+                    if active {
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(
+                                Pos2::new(rail.right() - 2., rect.top() + 7.),
+                                Vec2::new(2., rect.height() - 14.),
+                            ),
+                            1.,
+                            palette.accent(),
+                        );
+                    }
+                    let tint = palette.gray(if active {
+                        245
+                    } else if response.hovered() {
+                        230
+                    } else {
+                        145
+                    });
                     icons::paint_at(ui.painter(), icon, center, 16., tint);
                     if response.clicked() {
-                        click = Some(TabClick::Open(tab));
+                        click = Some(if active {
+                            TabClick::Fold
+                        } else {
+                            TabClick::Open(tab)
+                        });
                     }
                 }
             });
@@ -145,35 +181,4 @@ impl Editor {
                 self.history_section(ui);
             });
     }
-}
-
-/// The panel's header: the tabs, and the button that folds it.
-fn tab_header(ui: &mut egui::Ui, open: DevelopTab) -> Option<TabClick> {
-    let palette = theme::palette(ui.ctx());
-    let mut click = None;
-    ui.add_space(6.);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.;
-        let mut tab = open;
-        let w = ui.available_width() - 30.;
-        let labels = TABS.map(|(tab, _, name)| (tab, name));
-        if segmented(ui, &mut tab, &labels, w) {
-            click = Some(TabClick::Open(tab));
-        }
-        let (rect, response) = ui.allocate_exact_size(Vec2::splat(24.), Sense::click());
-        if response.hovered() {
-            ui.painter().rect_filled(rect, 4., palette.gray(50));
-        }
-        let tint = palette.gray(if response.hovered() { 230 } else { 150 });
-        icons::paint_at(ui.painter(), Icon::ChevronRight, rect.center(), 14., tint);
-        if response
-            .on_hover_text("Hide Presets and History")
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            click = Some(TabClick::Fold);
-        }
-    });
-    ui.add_space(2.);
-    click
 }

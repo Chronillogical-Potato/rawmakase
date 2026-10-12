@@ -88,7 +88,11 @@ impl Library {
                     // The startup disk first, then other drives by name.
                     let mut volumes: Vec<_> = volumes.into_iter().collect();
                     volumes.sort_by_key(|(v, _)| (v.mount.is_some(), v.name.to_lowercase()));
-                    for (volume, roots) in volumes {
+                    for (k, (volume, roots)) in volumes.into_iter().enumerate() {
+                        // Room between drives, so each reads as its own group.
+                        if k > 0 {
+                            ui.add_space(10.);
+                        }
                         let state = online
                             .get(volume.mount.as_deref().unwrap_or(std::path::Path::new("/")))
                             .copied();
@@ -176,7 +180,7 @@ impl Library {
                                 .color(palette.gray(120)),
                         );
                     }
-                    ui.add_space(12.);
+                    ui.add_space(16.);
                     if add_row(ui, "Add Folder…")
                         .on_hover_text(
                             "Add a folder of photos to this catalog. Photos stay where they are.",
@@ -358,24 +362,37 @@ impl Library {
         }
     }
 }
-/// A quiet full-width "+ label" row, Lightroom's add action in a panel.
+/// A full-width "+ label" button under a panel's list: outlined, so it reads
+/// as an action rather than another row.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), egui::Sense::click());
     let hovered = response.hovered();
-    if hovered {
-        ui.painter().rect_filled(rect, 3., palette.gray(43));
-    }
-    let color = palette.gray(if hovered { 235 } else { 165 });
-    // Same columns as folder rows: icon at 10 px, text at 29 px.
-    let c = egui::pos2(rect.left() + 16., rect.center().y);
-    crate::app::icons::paint_at(ui.painter(), crate::app::icons::Icon::Add, c, 13., color);
-    ui.painter().text(
-        egui::pos2(rect.left() + 29., rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(12.),
+    ui.painter().rect(
+        rect,
+        6.,
+        palette.gray(if hovered { 40 } else { 28 }),
+        egui::Stroke::new(1., palette.gray(if hovered { 70 } else { 52 })),
+        egui::StrokeKind::Inside,
+    );
+    let color = palette.gray(if hovered { 240 } else { 200 });
+    let text =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), egui::FontId::proportional(12.), color);
+    // The icon and label centred together.
+    let width = 13. + 6. + text.size().x;
+    let left = rect.center().x - width / 2.;
+    crate::app::icons::paint_at(
+        ui.painter(),
+        crate::app::icons::Icon::Add,
+        egui::pos2(left + 6.5, rect.center().y),
+        13.,
+        color,
+    );
+    ui.painter().galley(
+        egui::pos2(left + 19., rect.center().y - text.size().y / 2.),
+        text,
         color,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

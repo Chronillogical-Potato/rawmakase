@@ -8,9 +8,14 @@ use crate::metadata::PhotoInfo;
 use eframe::egui::{self, Vec2};
 
 impl Library {
-    /// Right panel: the selected photo's rating, flag, label and file details.
-    /// The layout is identical with or without a selection, so nothing moves.
-    pub(crate) fn info_panel(&mut self, ui: &mut egui::Ui) -> Action {
+    /// Right panel: the selected photo's rating, flag, label and file details,
+    /// under `top` (the Navigator, while it scrolls with them). The layout is
+    /// identical with or without a selection, so nothing moves.
+    pub(crate) fn info_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        top: impl FnOnce(&mut egui::Ui),
+    ) -> Action {
         let mut action = Action::None;
         ui.spacing_mut().item_spacing.y = 0.;
         let photo = self.selected().and_then(|id| self.photo(id)).cloned();
@@ -19,6 +24,7 @@ impl Library {
             .id_salt("library-info")
             .auto_shrink(false)
             .show(ui, |ui| {
+                top(ui);
                 section(ui, "Quick Develop", false, |ui| {
                     let refusal = photo
                         .as_ref()

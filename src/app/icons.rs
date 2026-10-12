@@ -39,9 +39,10 @@ fastframe_icons::icons! {
         More => lucide "ellipsis",
         ChevronDown => lucide "chevron-down",
         ChevronRight => lucide "chevron-right",
-        ChevronLeft => lucide "chevron-left",
         PanelLeft => lucide "panel-left",
         Eye => lucide "eye",
+        Pin => lucide "pin",
+        PinOff => lucide "pin-off",
         EyeOff => lucide "eye-off",
     }
 }

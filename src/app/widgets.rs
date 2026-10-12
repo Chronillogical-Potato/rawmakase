@@ -89,6 +89,18 @@ pub(super) fn adjustment_section(
 pub(super) fn collapsed_sections_id() -> egui::Id {
     egui::Id::new("rawmakase-collapsed-sections")
 }
+/// Where the set of pinned section titles lives in egui memory; the editor
+/// seeds it from the session and saves it back when it changes.
+pub(super) fn pinned_sections_id() -> egui::Id {
+    egui::Id::new("rawmakase-pinned-sections")
+}
+/// Whether the section `title` is pinned above its side's scrolling panels.
+pub(super) fn pinned(ctx: &egui::Context, title: &str) -> bool {
+    ctx.data(|d| {
+        d.get_temp::<std::collections::BTreeSet<String>>(pinned_sections_id())
+            .is_some_and(|set| set.contains(title))
+    })
+}
 /// Where a control names the edit it just made, for the History panel. The
 /// editor takes it at the end of the frame.
 pub(super) fn history_step_id() -> egui::Id {
@@ -134,6 +146,9 @@ pub(super) enum HeaderButton {
     Reset,
     /// Adds an item, as the Snapshots panel's +.
     Add,
+    /// Pins the panel above the side's scrolling panels, or lets it scroll
+    /// with them; see [`pinned`].
+    Pin,
 }
 /// [`section`] with any header button; returns whether it was clicked.
 pub(super) fn section_with(
@@ -325,52 +340,108 @@ fn section_header(
     let reset = match button {
         HeaderButton::Reset => reset.on_hover_text(format!("Reset {title}")),
         HeaderButton::Add => reset.on_hover_text(format!("New {}", title.trim_end_matches('s'))),
+        HeaderButton::Pin if pinned(ui.ctx(), title) => {
+            reset.on_hover_text(format!("Unpin {title}: it scrolls with the panels"))
+        }
+        HeaderButton::Pin => reset.on_hover_text(format!("Pin {title} at the top")),
         HeaderButton::None => reset,
     };
     let enabled = switch.as_deref().is_none_or(|s| *s == PanelState::On);
-    // A filled header band marks each collapsible panel, as in Lightroom.
-    ui.painter().rect_filled(
-        rect,
-        3.,
-        palette.gray(if toggle.hovered() { 60 } else { 51 }),
-    );
-    ui.painter().rect_stroke(
-        rect,
-        3.,
-        Stroke::new(1., palette.gray(if open { 70 } else { 62 })),
-        egui::StrokeKind::Inside,
-    );
-    let c = Pos2::new(rect.left() + 13., rect.center().y);
-    let triangle = if open {
-        vec![
-            c + Vec2::new(-4., -2.),
-            c + Vec2::new(4., -2.),
-            c + Vec2::new(0., 3.),
-        ]
+    let hovered = toggle.hovered();
+    if group == Some(SectionGroup::LibraryLeft.key()) {
+        // The catalog's sidebar lists its sources under quiet captions, the
+        // chevron on the right while hovered or folded.
+        if hovered {
+            ui.painter().rect_filled(rect, 5., palette.gray(32));
+        }
+        ui.painter().text(
+            // Over the rows' text, at their 10 px inset.
+            Pos2::new(rect.left() + 10., rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            title.to_uppercase(),
+            egui::FontId::proportional(11.),
+            palette.gray(if hovered { 215 } else { 135 }),
+        );
+        if hovered || !open {
+            let chevron = if open {
+                Icon::ChevronDown
+            } else {
+                Icon::ChevronRight
+            };
+            // Ending where the sidebar's counts do.
+            let at = Pos2::new(right - 15.5, rect.center().y);
+            let tint = palette.gray(if hovered { 200 } else { 110 });
+            icons::paint_at(ui.painter(), chevron, at, 12., tint);
+        }
     } else {
-        vec![
-            c + Vec2::new(-2., -4.),
-            c + Vec2::new(3., 0.),
-            c + Vec2::new(-2., 4.),
-        ]
-    };
-    ui.painter().add(egui::Shape::convex_polygon(
-        triangle,
-        palette.gray(if toggle.hovered() { 235 } else { 190 }),
-        Stroke::NONE,
-    ));
-    ui.painter().text(
-        Pos2::new(rect.left() + 26., rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        title,
-        egui::FontId::proportional(13.),
-        palette.gray(match (enabled, toggle.hovered()) {
-            (false, _) => 140,
-            (true, true) => 250,
-            (true, false) => 235,
-        }),
-    );
-    if resettable {
+        // A filled header band marks each collapsible panel, as in Lightroom.
+        ui.painter().rect_filled(
+            rect,
+            3.,
+            palette.gray(if toggle.hovered() { 60 } else { 51 }),
+        );
+        ui.painter().rect_stroke(
+            rect,
+            3.,
+            Stroke::new(1., palette.gray(if open { 70 } else { 62 })),
+            egui::StrokeKind::Inside,
+        );
+        let c = Pos2::new(rect.left() + 13., rect.center().y);
+        let triangle = if open {
+            vec![
+                c + Vec2::new(-4., -2.),
+                c + Vec2::new(4., -2.),
+                c + Vec2::new(0., 3.),
+            ]
+        } else {
+            vec![
+                c + Vec2::new(-2., -4.),
+                c + Vec2::new(3., 0.),
+                c + Vec2::new(-2., 4.),
+            ]
+        };
+        ui.painter().add(egui::Shape::convex_polygon(
+            triangle,
+            palette.gray(if toggle.hovered() { 235 } else { 190 }),
+            Stroke::NONE,
+        ));
+        ui.painter().text(
+            Pos2::new(rect.left() + 26., rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            title,
+            egui::FontId::proportional(13.),
+            palette.gray(match (enabled, toggle.hovered()) {
+                (false, _) => 140,
+                (true, true) => 250,
+                (true, false) => 235,
+            }),
+        );
+    }
+    if button == HeaderButton::Pin {
+        // Lit while pinned; at rest it stays quiet.
+        let on = pinned(ui.ctx(), title);
+        let color = palette.gray(match (reset.hovered(), on) {
+            (true, _) => 240,
+            (false, true) => 200,
+            (false, false) => 105,
+        });
+        let icon = if on && reset.hovered() {
+            Icon::PinOff
+        } else {
+            Icon::Pin
+        };
+        icons::paint_at(ui.painter(), icon, reset_rect.center(), 12., color);
+        if reset.clicked() {
+            ui.ctx().data_mut(|d| {
+                let set = d.get_temp_mut_or_default::<std::collections::BTreeSet<String>>(
+                    pinned_sections_id(),
+                );
+                if !set.remove(title) {
+                    set.insert(title.to_string());
+                }
+            });
+        }
+    } else if resettable {
         let color = palette.gray(if reset.hovered() { 240 } else { 150 });
         let icon = if button == HeaderButton::Add {
             Icon::Add
@@ -420,12 +491,18 @@ fn section_header(
     }
     if open {
         set_edit_context(ui, title);
+        // The catalog's rows span its sidebar, their own inset making the margin.
+        let side = if group == Some(SectionGroup::LibraryLeft.key()) {
+            0
+        } else {
+            8
+        };
         // Scope ids per section so equal slider labels (e.g. two "Amount"s) never clash.
         ui.push_id(title, |ui| {
             egui::Frame::new()
                 .inner_margin(egui::Margin {
-                    left: 8,
-                    right: 8,
+                    left: side,
+                    right: side,
                     top: 8,
                     bottom: 12,
                 })
