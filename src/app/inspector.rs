@@ -449,7 +449,6 @@ impl Editor {
         ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
         ui.spacing_mut().button_padding = Vec2::new(6., 2.);
         ui.spacing_mut().interact_size.y = 20.;
-        self.histogram_ui(ui);
         self.tool_strip(ui);
         ui.add_space(6.);
         let mut import_profiles = false;

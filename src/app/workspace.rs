@@ -1319,9 +1319,14 @@ impl Editor {
                     ui,
                     super::widgets::SectionGroup::DevelopRight,
                 );
+                let enabled = self.document.full().is_some() && !self.view.compare.before_only();
+                // The Histogram stays at the top, as the Navigator does on the
+                // left; the panels below it scroll.
+                super::widgets::section(ui, "Histogram", false, |ui| {
+                    ui.add_enabled_ui(enabled, |ui| self.histogram_ui(ui));
+                });
+                ui.add_space(4.);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let enabled =
-                        self.document.full().is_some() && !self.view.compare.before_only();
                     ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                 });
             });
