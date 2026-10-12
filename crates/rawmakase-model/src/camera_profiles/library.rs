@@ -285,6 +285,23 @@ pub fn adobe_installed(m: &Metadata) -> Vec<std::path::PathBuf> {
         root.join("Adobe Standard")
             .join(format!("{camera} Adobe Standard.dcp")),
     ];
+    // Phones Adobe profiles per camera module (see `CameraProfile::ensure_camera`):
+    // offer every module's, so photos from the phone's other cameras fit too.
+    let module_prefix = format!("{camera} ").to_ascii_lowercase();
+    if let Ok(entries) = std::fs::read_dir(root.join("Adobe Standard")) {
+        paths.extend(entries.flatten().map(|e| e.path()).filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_ascii_lowercase)
+                .and_then(|s| {
+                    let rest = s.strip_prefix(&module_prefix)?;
+                    rest.strip_suffix(" adobe standard")
+                        .or_else(|| rest.strip_suffix(" adobe_standard"))
+                        .map(|module| super::PhoneModule::parse(module).is_some())
+                })
+                .unwrap_or(false)
+        }));
+    }
     if let Ok(entries) = std::fs::read_dir(root.join("Camera").join(&camera)) {
         paths.extend(entries.flatten().map(|e| e.path()));
     }

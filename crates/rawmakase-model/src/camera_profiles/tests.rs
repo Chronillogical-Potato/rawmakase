@@ -254,3 +254,79 @@ fn a7cr_native_units_use_their_own_daylight_metadata() {
         assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
     }
 }
+#[test]
+fn phone_module_profiles_fit_the_module_that_took_the_photo() {
+    // Camera Raw's picks, checked against its CameraProfileDigest for raw.pixls.us DNGs.
+    let fits = |make: &str, model: &str, focal_35mm: f32, lens: &str, camera: &str| {
+        let m = Metadata {
+            make: make.into(),
+            model: model.into(),
+            focal_35mm,
+            lens_model: lens.into(),
+            ..x100f()
+        };
+        let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+        p.camera = camera.into();
+        p.ensure_camera(&m).is_ok()
+    };
+    let pixel = |f, lens, module: &str| {
+        fits(
+            "Google",
+            "Pixel 7 Pro",
+            f,
+            lens,
+            &format!("Google Pixel 7 Pro {module} Camera"),
+        )
+    };
+    assert!(pixel(117., "", "Telephoto"));
+    assert!(!pixel(117., "", "Wide"));
+    assert!(pixel(24., "", "Wide"));
+    assert!(!pixel(24., "", "Front"));
+    assert!(pixel(13., "", "Ultrawide"));
+    assert!(pixel(24., "Pixel 7 Pro front camera 2.7mm f/2.2", "Front"));
+    assert!(!pixel(0., "", "Wide"));
+    // Pixel 4 XL at 43 mm took its Rear Telephoto profile; Pixel 6 Pro its Rear Main.
+    assert!(fits(
+        "Google",
+        "Pixel 4 XL",
+        43.,
+        "",
+        "Google Pixel 4 XL Rear Telephoto Camera"
+    ));
+    assert!(fits(
+        "Google",
+        "Pixel 6 Pro",
+        24.,
+        "",
+        "Google Pixel 6 Pro Rear Main Camera"
+    ));
+    let galaxy = |model: &str, f, camera: &str| fits("samsung", model, f, "", camera);
+    assert!(galaxy(
+        "Galaxy S23 Ultra",
+        230.,
+        "Samsung Galaxy S23 Ultra Rear Super Telephoto Camera"
+    ));
+    assert!(!galaxy(
+        "Galaxy S23 Ultra",
+        230.,
+        "Samsung Galaxy S23 Ultra Rear Telephoto Camera"
+    ));
+    assert!(galaxy(
+        "Galaxy S23 Ultra",
+        69.,
+        "Samsung Galaxy S23 Ultra Rear Telephoto Camera"
+    ));
+    // Another phone whose name extends this one's is not a module.
+    assert!(!galaxy(
+        "Galaxy S23",
+        23.,
+        "Samsung Galaxy S23 Ultra Rear Wide Camera"
+    ));
+    assert!(galaxy(
+        "Galaxy S23",
+        23.,
+        "Samsung Galaxy S23 Rear Wide Camera"
+    ));
+    // Nor is any other suffix.
+    assert!(!fits("Ricoh", "GXR", 28., "", "Ricoh GXR MOUNT A12"));
+}
