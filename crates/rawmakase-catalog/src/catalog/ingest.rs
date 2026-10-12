@@ -1,6 +1,6 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
-use super::db::{Reads, sql};
+use super::db::{Reads, is_storage_error, sql};
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
 use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
@@ -204,15 +204,37 @@ impl Catalog {
                 .collect();
             return Ok(result);
         }
-        let added = self.db.write(|w| {
-            let mut new_root = None;
-            let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
-            let mut added = Vec::new();
+        // Photos already in the catalog are left before their files are read.
+        let files: Vec<(PathBuf, &Place)> = self.db.snapshot(|s| {
+            let mut new = Vec::new();
             for file in files {
                 let Some(place) = file.parent().and_then(|d| places.get(d)) else {
                     continue;
                 };
-                let (root, logical) = match place {
+                if let Place::Folder(root, logical) = place
+                    && known(s, *root, logical, &file)?
+                {
+                    continue;
+                }
+                new.push((file, place));
+            }
+            Ok(new)
+        })?;
+        // Everything each photo brings is read before the transaction, so
+        // that it is written with the photo or not at all.
+        let photos: Vec<NewPhoto> = files
+            .into_iter()
+            .map(|(file, place)| self.read_new_photo(file, place, defaults))
+            .collect();
+        let edited_at = rawmakase_model::time::now_text();
+        let (added, report, edits) = self.db.write(|w| {
+            let mut new_root = None;
+            let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
+            let mut added = 0;
+            let mut report = super::SidecarReport::default();
+            let mut edits = Vec::new();
+            for photo in photos {
+                let (root, logical) = match photo.place {
                     Place::Folder(root, logical) => (*root, logical.clone()),
                     Place::New(logical) => {
                         let root = match new_root {
@@ -225,20 +247,12 @@ impl Catalog {
                         (root, logical.clone())
                     }
                 };
-                let filename = file.file_name().unwrap().to_string_lossy();
-                // A photo is the same one by root, folder and name; its virtual
-                // copies share them and stay as they are.
-                let known: Option<i64> = w.read_optional(
-                    sql!(
-                        "SELECT 1 FROM photos WHERE filename=? AND folder IN
-                         (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
-                          WHERE f.root=? AND p.path=?)"
-                    ),
-                    &[&filename, &root, &logical],
-                )?;
-                if known.is_some() {
+                let file = photo.file;
+                // Added since the files were read.
+                if known(w, root, &logical, &file)? {
                     continue;
                 }
+                let filename = file.file_name().unwrap().to_string_lossy();
                 let key = (root, logical);
                 let fid = match folders.get(&key) {
                     Some(id) => *id,
@@ -286,32 +300,40 @@ impl Catalog {
                     ),
                     &[&fid, &filename, &file.to_string_lossy(), &format],
                 )?;
-                added.push((id, file));
+                added += 1;
+                if let Some(edit) = photo.edit {
+                    // An edit an older release saved that can't be kept stays
+                    // unused on disk.
+                    let written = w.savepoint(|w| {
+                        for (hash, data) in &edit.bitmaps {
+                            super::edits::insert_bitmap(w, hash, data)?;
+                        }
+                        let change = edit.checked.change(id);
+                        super::edit_rows::write_edit(w, &change, &edited_at)?;
+                        Ok(change)
+                    });
+                    edits.extend(refused(written)?.ok());
+                }
+                let mut readable = photo.report.unreadable.is_empty();
+                report.add(photo.report);
+                if let Some(read) = &photo.metadata
+                    && let Err(e) = refused(w.savepoint(|w| {
+                        super::sidecar::apply(w, id, read, super::Merge::FillEmpty)
+                    }))?
+                {
+                    report.unreadable.push((file.clone(), format!("{e:#}")));
+                    readable = false;
+                }
+                // A photo whose metadata couldn't be read may have its own: no
+                // default goes in its place.
+                if readable {
+                    super::defaults::fill(w, id, &photo.defaults)?;
+                }
             }
-            Ok(added)
+            Ok((added, report, edits))
         })?;
-        for (id, file) in &added {
-            if crate::storage::is_raw(file) {
-                // A sidecar that no longer matches its photo stays unused on disk.
-                let _ = self.import_sidecar(*id, file);
-            }
-        }
-        let report = self.import_file_metadata(&added)?;
-        // A photo whose metadata couldn't be read may have its own: no
-        // default goes in its place.
-        let read: Vec<(PhotoId, PathBuf)> = added
-            .iter()
-            .filter(|(_, file)| {
-                let own = super::sidecars(file);
-                !report
-                    .unreadable
-                    .iter()
-                    .any(|(path, _)| path == file || own.contains(path))
-            })
-            .cloned()
-            .collect();
-        self.apply_defaults(&read, defaults)?;
-        result.added = added.len();
+        edits.iter().for_each(|change| change.committed());
+        result.added = added;
         result.report = report;
         Ok(result)
     }
@@ -334,23 +356,87 @@ impl Catalog {
             Ok(())
         })
     }
-    /// Carries the edit a photo got outside any catalog, in its
-    /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
-    fn import_sidecar(&mut self, id: PhotoId, file: &Path) -> Result<()> {
-        let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
-            return Ok(());
-        };
-        for bitmap in bitmaps {
-            self.put_bitmap(&bitmap)?;
-        }
-        self.save_edit(
-            id,
+    /// What a new photo brings from its files: the edit an older release
+    /// saved beside it, its sidecar's and its own XMP metadata, and the
+    /// defaults where neither has a value.
+    fn read_new_photo<'a>(
+        &self,
+        file: PathBuf,
+        place: &'a Place,
+        defaults: &super::MetadataDefaults,
+    ) -> NewPhoto<'a> {
+        let edit = crate::storage::is_raw(&file)
+            .then(|| self.read_legacy_edit(&file))
+            // A sidecar that no longer matches its photo stays unused on disk.
+            .and_then(|edit| edit.ok().flatten());
+        let (metadata, report) = super::sidecar::read_file(&file);
+        let defaults = defaults.for_file(&file, metadata.as_ref());
+        NewPhoto {
             file,
-            &sidecar.recipe,
-            &sidecar.export,
-            super::HistoryUpdate::Keep,
-        )
+            place,
+            edit,
+            metadata,
+            report,
+            defaults,
+        }
     }
+    /// The edit a photo got outside any catalog, in its photo.rawmakase.json
+    /// sidecar, checked for the catalog. The sidecar stays on disk.
+    fn read_legacy_edit(&self, file: &Path) -> Result<Option<LegacyEdit>> {
+        let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
+            return Ok(None);
+        };
+        let bitmaps = bitmaps
+            .iter()
+            .map(|bitmap| Ok((bitmap.hash(), bitmap.compress()?)))
+            .collect::<Result<_>>()?;
+        let checked = self.check_new_edit(file, &sidecar.recipe, &sidecar.export)?;
+        Ok(Some(LegacyEdit { bitmaps, checked }))
+    }
+}
+
+/// Whether the catalog has the photo at `file` in the folder at `logical`
+/// of `root`. A photo is the same one by root, folder and name; its virtual
+/// copies share them and stay as they are.
+fn known(r: &impl Reads, root: RootId, logical: &str, file: &Path) -> Result<bool> {
+    let filename = file.file_name().unwrap_or_default().to_string_lossy();
+    let found: Option<i64> = r.read_optional(
+        sql!(
+            "SELECT 1 FROM photos WHERE filename=? AND folder IN
+             (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
+              WHERE f.root=? AND p.path=?)"
+        ),
+        &[&filename, &root, &logical],
+    )?;
+    Ok(found.is_some())
+}
+
+/// `result`, unless the database failed: what one photo's files hold that
+/// can't be stored leaves the photo without it, but a failing database
+/// keeps nothing.
+fn refused<T>(result: Result<T>) -> Result<Result<T>> {
+    match result {
+        Err(e) if is_storage_error(&e) => Err(e),
+        other => Ok(other),
+    }
+}
+
+/// A photo to add and what its files hold, read before it is written.
+struct NewPhoto<'a> {
+    file: PathBuf,
+    place: &'a Place,
+    edit: Option<LegacyEdit>,
+    metadata: Option<crate::xmp::descriptive::Read>,
+    /// Its sidecars that could not be read, or were ignored.
+    report: super::SidecarReport,
+    defaults: super::defaults::Fill,
+}
+
+/// An edit saved beside a photo by a release before the catalog, with the
+/// bitmaps (hash, compressed) its spots and masks refer to.
+struct LegacyEdit {
+    bitmaps: Vec<(String, Vec<u8>)>,
+    checked: super::edit_rows::CheckedNew,
 }
 
 /// This computer's locations, for matching folders found on disk.

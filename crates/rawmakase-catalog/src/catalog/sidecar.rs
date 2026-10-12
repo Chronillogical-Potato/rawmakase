@@ -20,7 +20,7 @@ pub struct SidecarReport {
     pub ignored: Vec<PathBuf>,
 }
 impl SidecarReport {
-    fn add(&mut self, other: SidecarReport) {
+    pub(super) fn add(&mut self, other: SidecarReport) {
         self.unreadable.extend(other.unreadable);
         self.ignored.extend(other.ignored);
     }
@@ -248,13 +248,19 @@ impl Catalog {
     /// transaction. Virtual copies are never read.
     #[cfg(test)]
     pub fn read_metadata_from_files(&mut self, ids: &[PhotoId]) -> Result<SidecarReport> {
-        let photos: Vec<(PhotoId, PathBuf)> = self
+        let mut report = SidecarReport::default();
+        let reads: Vec<(PhotoId, PathBuf, Read)> = self
             .photos()?
             .into_iter()
             .filter(|p| ids.contains(&p.id) && p.master.is_none())
-            .map(|p| (p.id, p.path))
+            .filter_map(|p| {
+                let (read, found) = read_file(&p.path);
+                report.add(found);
+                read.map(|r| (p.id, p.path, r))
+            })
             .collect();
-        self.read_and_apply(&photos, Merge::Overwrite)
+        report.add(self.apply_file_metadata(&reads, Merge::Overwrite)?);
+        Ok(report)
     }
     /// Writes what was read from files, in one transaction, as `merge`
     /// says. A photo whose values can't be written (an impossible date) is
@@ -274,31 +280,6 @@ impl Catalog {
             }
             Ok(report)
         })
-    }
-    /// Reads the metadata of photos just added from a folder.
-    pub(super) fn import_file_metadata(
-        &mut self,
-        added: &[(PhotoId, PathBuf)],
-    ) -> Result<SidecarReport> {
-        self.read_and_apply(added, Merge::FillEmpty)
-    }
-    /// Reads each photo's files and writes what they have.
-    fn read_and_apply(
-        &mut self,
-        files: &[(PhotoId, PathBuf)],
-        merge: Merge,
-    ) -> Result<SidecarReport> {
-        let mut report = SidecarReport::default();
-        let reads: Vec<(PhotoId, PathBuf, Read)> = files
-            .iter()
-            .filter_map(|(id, path)| {
-                let (read, found) = read_file(path);
-                report.add(found);
-                read.map(|r| (*id, path.clone(), r))
-            })
-            .collect();
-        report.add(self.apply_file_metadata(&reads, merge)?);
-        Ok(report)
     }
 }
 
