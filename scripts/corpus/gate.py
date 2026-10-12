@@ -391,8 +391,11 @@ def default_parity(args):
     references = (args.references or survey.parent.parent).resolve()
     # The pool names its RAWs relative to the dataset folder, references/'s parent.
     root = references.parent
-    holdout = {p['sha256'] for f in references.glob('*/*-holdout/references.json')
-               for p in json.loads(f.read_text())['photos']}
+    held = [p for f in references.glob('*/*-holdout/references.json') for p in json.loads(f.read_text())['photos']]
+    # By file and by scene: other files of a held-out scene (raw.pixls.us keeps a
+    # camera's modes and bit depths side by side) are held out too, as split() does.
+    holdout = {p['sha256'] for p in held}
+    held_scenes = {scene_key(p) for p in held}
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     env, library = render_env(args, out)
@@ -402,7 +405,7 @@ def default_parity(args):
     args.rawmakase = pinned
     rows, left_out, crashed = [], 0, []
     for photo in pool['photos']:
-        if photo['sha256'] in holdout:
+        if photo['sha256'] in holdout or scene_key(photo) in held_scenes:
             left_out += 1
             continue
         key = photo['sha256'][:16]
