@@ -59,6 +59,15 @@ pub struct Choice {
     pub options: Vec<FolderLocation>,
     pub chosen: FolderLocation,
 }
+/// Where the directories of files found on disk go in the catalog.
+#[derive(Default)]
+struct Placed {
+    places: HashMap<PathBuf, Place>,
+    /// Directories not placed: their catalog folder is elsewhere here.
+    conflicts: Vec<Conflict>,
+    /// Directories not placed until one of their options is chosen.
+    ambiguous: Vec<Ambiguity>,
+}
 /// Where a folder on disk goes in the catalog.
 enum Place {
     /// A folder of an existing root, by logical path.
@@ -151,59 +160,59 @@ impl Catalog {
         choices: &[Choice],
     ) -> Result<Added> {
         let folder = folder.canonicalize()?;
-        let mut files = Vec::new();
-        fn walk(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-            for entry in std::fs::read_dir(p)? {
-                let e = entry?;
-                let t = e.file_type()?;
-                if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
-                    continue;
-                }
-                if t.is_dir() {
-                    walk(&e.path(), files)?
-                } else if crate::storage::is_raw(&e.path())
-                    || e.path().extension().is_some_and(|x| {
-                        matches!(
-                            x.to_string_lossy().to_ascii_lowercase().as_str(),
-                            "jpg" | "jpeg" | "png" | "tif" | "tiff"
-                        )
-                    })
-                {
-                    files.push(e.path());
-                }
-            }
-            Ok(())
-        }
-        walk(&folder, &mut files)?;
-        let mut result = Added::default();
-        let mut places = HashMap::new();
-        let mut ambiguous: BTreeMap<Vec<FolderLocation>, Vec<PathBuf>> = BTreeMap::new();
-        {
-            let matcher = Matcher::new(self)?;
-            let directories: BTreeSet<_> = files.iter().filter_map(|f| f.parent()).collect();
-            for directory in directories {
-                match matcher.place(directory, &folder, choices) {
-                    Matched::Place(place) => {
-                        places.insert(directory.to_path_buf(), place);
-                    }
-                    Matched::Conflict(conflict) => result.conflicts.push(conflict),
-                    Matched::Ambiguous(options) => ambiguous
-                        .entry(options)
-                        .or_default()
-                        .push(directory.to_path_buf()),
-                }
-            }
-        }
-        if !ambiguous.is_empty() {
-            result.ambiguous = ambiguous
-                .into_iter()
-                .map(|(options, directories)| Ambiguity {
-                    directories,
-                    options,
-                })
-                .collect();
+        let files = walk(&folder)?;
+        let placed = self.place(&files, &folder, choices)?;
+        let mut result = Added {
+            conflicts: placed.conflicts,
+            ..Default::default()
+        };
+        if !placed.ambiguous.is_empty() {
+            result.ambiguous = placed.ambiguous;
             return Ok(result);
         }
+        (result.added, result.report) = self.insert(&folder, files, &placed.places, defaults)?;
+        Ok(result)
+    }
+    /// Where the directories of `files`, found below the `chosen` folder, go
+    /// in the catalog (see `import_folder`).
+    fn place(&self, files: &[PathBuf], chosen: &Path, choices: &[Choice]) -> Result<Placed> {
+        let mut placed = Placed::default();
+        let mut ambiguous: BTreeMap<Vec<FolderLocation>, Vec<PathBuf>> = BTreeMap::new();
+        let matcher = Matcher::new(self)?;
+        let directories: BTreeSet<_> = files.iter().filter_map(|f| f.parent()).collect();
+        for directory in directories {
+            match matcher.place(directory, chosen, choices) {
+                Matched::Place(place) => {
+                    placed.places.insert(directory.to_path_buf(), place);
+                }
+                Matched::Conflict(conflict) => placed.conflicts.push(conflict),
+                Matched::Ambiguous(options) => ambiguous
+                    .entry(options)
+                    .or_default()
+                    .push(directory.to_path_buf()),
+            }
+        }
+        placed.ambiguous = ambiguous
+            .into_iter()
+            .map(|(options, directories)| Ambiguity {
+                directories,
+                options,
+            })
+            .collect();
+        Ok(placed)
+    }
+    /// Adds the photos of `files` the catalog doesn't have, each with what
+    /// its files hold, in one transaction, their folders where `places` says
+    /// (a new root being the `chosen` folder). Files in a directory `places`
+    /// has no place for are left out. Returns how many were added, and what
+    /// reading their sidecars found.
+    fn insert(
+        &mut self,
+        chosen: &Path,
+        files: Vec<PathBuf>,
+        places: &HashMap<PathBuf, Place>,
+        defaults: &super::MetadataDefaults,
+    ) -> Result<(usize, super::SidecarReport)> {
         // Photos already in the catalog are left before their files are read.
         let files: Vec<(PathBuf, &Place)> = self.db.snapshot(|s| {
             let mut new = Vec::new();
@@ -241,7 +250,7 @@ impl Catalog {
                             Some(root) => root,
                             None => *new_root.insert(w.insert_returning_id(
                                 sql!("INSERT INTO roots(original_path) VALUES(?) RETURNING id"),
-                                &[&folder.to_string_lossy()],
+                                &[&chosen.to_string_lossy()],
                             )?),
                         };
                         (root, logical.clone())
@@ -333,9 +342,7 @@ impl Catalog {
             Ok((added, report, edits))
         })?;
         edits.iter().for_each(|change| change.committed());
-        result.added = added;
-        result.report = report;
-        Ok(result)
+        Ok((added, report))
     }
     /// Records capture times read from the photos' files, in one transaction.
     /// Only empty dates are filled, never one Lightroom or the user set, and a
@@ -393,6 +400,36 @@ impl Catalog {
         let checked = self.check_new_edit(file, &sidecar.recipe, &sidecar.export)?;
         Ok(Some(LegacyEdit { bitmaps, checked }))
     }
+}
+
+/// The photo files below `folder`: RAWs, JPEGs, PNGs and TIFFs, not hidden
+/// and not through a symbolic link.
+fn walk(folder: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    walk_into(folder, &mut files)?;
+    Ok(files)
+}
+fn walk_into(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(p)? {
+        let e = entry?;
+        let t = e.file_type()?;
+        if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
+            continue;
+        }
+        if t.is_dir() {
+            walk_into(&e.path(), files)?
+        } else if crate::storage::is_raw(&e.path())
+            || e.path().extension().is_some_and(|x| {
+                matches!(
+                    x.to_string_lossy().to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "tif" | "tiff"
+                )
+            })
+        {
+            files.push(e.path());
+        }
+    }
+    Ok(())
 }
 
 /// Whether the catalog has the photo at `file` in the folder at `logical`
