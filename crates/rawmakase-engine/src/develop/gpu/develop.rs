@@ -329,20 +329,23 @@ impl Processor {
     ) -> Result<()> {
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let (w, h) = input.size();
-        let n = w as u64 * h as u64;
-        ensure!(n > 0, "Empty develop region");
-        let limits = self.device.limits();
+        ensure!(w as u64 * h as u64 > 0, "Empty develop region");
         ensure!(
-            n * 12 <= limits.max_storage_buffer_binding_size
-                && n * 12 <= limits.max_buffer_size
-                && (params.tables.len() as u64 * 4) <= limits.max_storage_buffer_binding_size,
-            "Region exceeds GPU buffer limits"
-        );
-        ensure!(
-            n * 44 <= 1024 * 1024 * 1024,
-            "Region exceeds GPU memory budget"
+            self.fits_develop(w, h, params),
+            "Region exceeds GPU buffer limits or memory budget"
         );
         Ok(())
+    }
+    /// Whether a `w` × `h` region with `params` is within the device's buffer limits
+    /// and the develop memory budget. A region outside them renders on the CPU; it
+    /// says nothing about the device, which stays in use for the next region.
+    pub(crate) fn fits_develop(&self, w: u32, h: u32, params: &PixelParams) -> bool {
+        let n = w as u64 * h as u64;
+        let limits = self.device.limits();
+        n * 12 <= limits.max_storage_buffer_binding_size
+            && n * 12 <= limits.max_buffer_size
+            && (params.tables.len() as u64 * 4) <= limits.max_storage_buffer_binding_size
+            && n * 44 <= 1024 * 1024 * 1024
     }
     /// Runs `work` inside validation, internal and memory error scopes; a device error
     /// releases the uploaded samples and resident buffers and fails.
