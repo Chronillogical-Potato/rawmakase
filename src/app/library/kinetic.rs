@@ -27,9 +27,11 @@ const ENABLED: bool = !cfg!(target_os = "macos");
 pub(super) struct Kinetic {
     /// The swipe so far: each frame's time and the scrolling in it.
     samples: Vec<(f64, Vec2)>,
-    /// A modifier was held during the swipe, which egui heeds for the whole
-    /// of it: such a swipe zooms or scrolls another way, and does not glide.
-    modified: bool,
+    /// The area saw the swipe start, with no modifier held then or since:
+    /// only such a swipe glides. egui heeds a modifier for the whole of a
+    /// swipe, which then zooms or scrolls another way, and a swipe the
+    /// pointer brought in from elsewhere may have started with one.
+    plain_swipe: bool,
     /// How fast the content glides, in points a second; zero when it does not.
     velocity: Vec2,
     /// When the glide last moved.
@@ -131,11 +133,11 @@ impl Kinetic {
         match phase {
             egui::TouchPhase::Start => {
                 self.samples.clear();
-                self.modified = !plain;
+                self.plain_swipe = plain;
             }
             egui::TouchPhase::Cancel => self.samples.clear(),
-            egui::TouchPhase::Move if self.modified || !plain => {
-                self.modified = true;
+            egui::TouchPhase::Move if !self.plain_swipe || !plain => {
+                self.plain_swipe = false;
                 self.samples.clear();
             }
             egui::TouchPhase::Move => {
@@ -146,7 +148,7 @@ impl Kinetic {
                 }
             }
             egui::TouchPhase::End => {
-                if !std::mem::take(&mut self.modified) {
+                if std::mem::take(&mut self.plain_swipe) {
                     self.velocity = release_velocity(&self.samples, time);
                 }
                 self.moved_at = time;
@@ -342,6 +344,32 @@ mod tests {
         // The next swipe without it glides again.
         swipe(&mut kinetic, 1., 6, -20.);
         assert_ne!(kinetic.velocity, Vec2::ZERO);
+    }
+
+    #[test]
+    fn a_swipe_whose_start_the_area_missed_does_not_glide() {
+        // The pointer came in mid-swipe: the swipe may have started with a
+        // modifier egui still heeds.
+        let mut kinetic = Kinetic::default();
+        let mut t = 0.;
+        for _ in 0..6 {
+            t += FRAME;
+            kinetic.wheel(
+                t,
+                MouseWheelUnit::Point,
+                Vec2::new(0., -20.),
+                TouchPhase::Move,
+                true,
+            );
+        }
+        kinetic.wheel(
+            t + FRAME,
+            MouseWheelUnit::Point,
+            Vec2::ZERO,
+            TouchPhase::End,
+            true,
+        );
+        assert_eq!(kinetic.velocity, Vec2::ZERO);
     }
 
     #[test]
@@ -541,6 +569,30 @@ mod tests {
             area.frame(Vec::new());
             assert_eq!(area.offset, lifted);
         }
+    }
+
+    #[test]
+    fn a_swipe_brought_into_the_area_does_not_glide() {
+        if !ENABLED {
+            return;
+        }
+        let mut area = Area::new();
+        // The swipe starts with Ctrl held while the pointer is elsewhere.
+        area.frame(vec![
+            egui::Event::PointerGone,
+            egui::Event::MouseWheel {
+                unit: MouseWheelUnit::Point,
+                delta: Vec2::ZERO,
+                phase: TouchPhase::Start,
+                modifiers: egui::Modifiers::CTRL,
+            },
+        ]);
+        area.frame(vec![egui::Event::PointerMoved(egui::pos2(100., 100.))]);
+        for _ in 0..6 {
+            area.frame(vec![Area::wheel(TouchPhase::Move, -20.)]);
+        }
+        area.frame(vec![Area::wheel(TouchPhase::End, 0.)]);
+        assert_eq!(area.kinetic.velocity, Vec2::ZERO);
     }
 
     #[test]
