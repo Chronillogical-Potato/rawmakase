@@ -140,6 +140,16 @@ impl Library {
         }
         true
     }
+    /// Lightroom's Cmd+A in Develop's filmstrip: selects every shown photo, so Sync
+    /// reaches them all, keeping the open photo active.
+    pub(crate) fn develop_select_all(&mut self, open: Option<PhotoId>) {
+        self.select_all();
+        if let Some(open) = open {
+            self.selection.selected.insert(open);
+            self.selection.active = Some(open);
+            self.selection.anchor = Some(open);
+        }
+    }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
     /// makes the photo its candidate, and Select activates its side.
