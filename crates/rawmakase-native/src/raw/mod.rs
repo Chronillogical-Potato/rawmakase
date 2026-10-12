@@ -51,9 +51,15 @@ impl Raw {
             let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
             String::from_utf8_lossy(&bytes[..end]).into_owned()
         };
+        let (make, model) = (text(&m.make), text(&m.model));
+        let adobe_names = rawmakase_model::cameras::adobe_names(
+            &make,
+            &model,
+            (&text(&m.normalized_make), &text(&m.normalized_model)),
+        );
         let metadata = Metadata {
-            make: text(&m.make),
-            model: text(&m.model),
+            make,
+            model,
             width: m.width,
             height: m.height,
             raw_width: m.raw_width,
@@ -85,6 +91,7 @@ impl Raw {
             lens: None,
             lens_model: text(&m.lens).trim().to_string(),
             lens_id: m.lens_id,
+            adobe_names,
             baseline_exposure: None,
             dng_neutral_calibration: None,
             dng_matrix_profile_signature: None,

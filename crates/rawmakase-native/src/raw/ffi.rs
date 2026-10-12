@@ -54,8 +54,11 @@ pub(super) struct NativeMetadata {
     pub(super) sony_daylight_wb: [f32; 3],
     /// The maker's numeric lens ID (Nikon's `LensIDNumber`); 0 when there is none.
     pub(super) lens_id: u32,
+    /// LibRaw's canonical name for bodies sold under several names.
+    pub(super) normalized_make: [c_char; 64],
+    pub(super) normalized_model: [c_char; 64],
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 440);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 568);
 /// Mirrors `struct Sensor` in `native/raw.cpp`, as [`NativeMetadata`] does `Metadata`;
 /// `native_sensor_layout_matches` compares the sizes.
 #[repr(C)]

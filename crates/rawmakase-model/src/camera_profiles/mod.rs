@@ -86,6 +86,33 @@ enum PhoneModule {
     Telephoto,
     SuperTelephoto,
 }
+/// Whether a profile made for `camera` (its UniqueCameraModel) fits the photo:
+/// the camera's make and model, the model alone, or one of the names Adobe uses
+/// for it (`Metadata::adobe_names`), compared without case, spaces or underscores
+/// (LibRaw's Nikon "Z 6_2" is Adobe's "Z 6 2"); for a phone, also such a name
+/// followed by the module that took the photo.
+pub(crate) fn camera_fits(camera: &str, m: &Metadata) -> bool {
+    let key = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace() && *c != '_')
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    let names: Vec<String> = [format!("{} {}", m.make, m.model), m.model.clone()]
+        .into_iter()
+        .chain(m.adobe_names.iter().cloned())
+        .map(|n| key(&n))
+        .collect();
+    let camera_lower = camera.to_ascii_lowercase();
+    names.contains(&key(camera))
+        // "<camera> <module>": every split at a space, the module after it.
+        || camera_lower.match_indices(' ').any(|(i, _)| {
+            names.contains(&key(&camera_lower[..i]))
+                && PhoneModule::parse(&camera_lower[i + 1..])
+                    .is_some_and(|module| Some(module) == PhoneModule::of(m))
+        })
+}
+
 impl PhoneModule {
     /// The module a lowercase profile camera-name suffix names, if it names one.
     fn parse(suffix: &str) -> Option<Self> {
@@ -380,23 +407,7 @@ impl CameraProfile {
         Ok(())
     }
     pub fn ensure_camera(&self, m: &Metadata) -> Result<()> {
-        let key = |s: &str| {
-            s.to_ascii_lowercase()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        let profile = key(&self.camera);
-        let cameras = [key(&format!("{} {}", m.make, m.model)), key(&m.model)];
-        if cameras.contains(&profile)
-            || cameras.iter().any(|camera| {
-                profile
-                    .strip_prefix(camera.as_str())
-                    .and_then(|rest| rest.strip_prefix(' '))
-                    .and_then(PhoneModule::parse)
-                    .is_some_and(|module| Some(module) == PhoneModule::of(m))
-            })
-        {
+        if camera_fits(&self.camera, m) {
             return Ok(());
         }
         Err(OtherCamera {
