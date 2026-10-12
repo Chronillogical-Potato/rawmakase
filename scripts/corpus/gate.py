@@ -395,7 +395,7 @@ def default_parity(args):
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     env, library = render_env(args, out)
-    rows, left_out = [], 0
+    rows, left_out, crashed = [], 0, []
     for photo in pool['photos']:
         if photo['sha256'] in holdout:
             left_out += 1
@@ -419,6 +419,11 @@ def default_parity(args):
         result = subprocess.run([str(args.rawmakase), 'render-batch', str(raw), str(listing)],
                                 capture_output=True, text=True, env=env)
         listing.unlink()
+        if result.returncode:
+            # rawmakase itself failed (a crash, the RAW unreadable): not a result.
+            crashed.append(photo['sha256'][:12])
+            rows.append(dict(row, valid=0., error=f'rawmakase failed (exit {result.returncode})'))
+            continue
         if not tif.exists():
             # render-batch prints "<output>: <why>"; keep the why, not the path.
             why = (result.stderr.strip().splitlines() or ['no message'])[-1].split(': ', 1)[-1][:200]
@@ -445,6 +450,10 @@ def default_parity(args):
           f'median ΔE00 {result["median_de00"]}')
     for st, v in summary['stratum'].items():
         print(f'  {st}: {v["n"]} photos, median {v["median"]:.2f}')
+    if crashed:
+        print(f'rawmakase failed on {len(crashed)} photos ({", ".join(crashed)}): the result is incomplete',
+              file=sys.stderr)
+        return 1
 
 
 def render(args):

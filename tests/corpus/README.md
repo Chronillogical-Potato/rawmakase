@@ -146,7 +146,7 @@ lib=<Adobe profile library>     # a folder whose camera-profiles/ holds Adobe St
 run=$RAWMAKASE_DATASET/baselines/gate
 python3 scripts/corpus/dataset-gate.py run --rawmakase target/release/rawmakase --data-dir $lib --out $run/<name>
 python3 scripts/corpus/dataset-gate.py accept --candidate $run/<name> --baseline $run/main-<commit>
-python3 scripts/corpus/dataset-gate.py report $run/<name>
+python3 scripts/corpus/dataset-gate.py report $run/<name>     # --split holdout for holdout
 ```
 
 - **run** renders and scores each set (two at a time) and deletes its renders once scored: the SSD cannot hold them all. Scores, a log per set and `run.json` (the build) stay in the run folder; an interrupted run resumes. The validation split takes about 2½ hours on an M1 Pro.

@@ -178,7 +178,9 @@ def report(args):
     """How far a run is from Camera Raw (median ΔE00 per photo, then medians)."""
     out = args.run.resolve()
     rows = []
-    for f in sorted(out.glob('scores/*/*.json')):
+    # One split: the runs compared side by side must hold the same population.
+    files = sorted(out.glob(f'scores/*/*-{args.split}.json'))
+    for f in files:
         d = json.loads(f.read_text())
         source = f.parent.name.replace('camera-raw-18.7', 'raw.pixls.us').replace('raw.pixls.us-', '')
         rows += [dict(r, source=source, control=f.stem.rsplit('-', 1)[0], split=f.stem.rsplit('-', 1)[1])
@@ -190,7 +192,7 @@ def report(args):
     p90 = lambda v: sorted(v)[int(0.9 * (len(v) - 1))] if v else float('nan')
     kind = lambda r: 'default' if r['name'].endswith('default') else 'edited'
     v = [r['median_de00'] for r in valid]
-    print(f'{len(valid)} of {len(rows)} cases scored; median ΔE00 {med(v):.2f}, 90% within {p90(v):.2f}\n')
+    print(f'{args.split}, {len(files)} sets: {len(valid)} of {len(rows)} cases scored; median ΔE00 {med(v):.2f}, 90% within {p90(v):.2f}\n')
     for key, label in (('control', 'set'), ('stratum', 'stratum'), ('source', 'source')):
         groups = defaultdict(list)
         for r in valid:
@@ -206,7 +208,7 @@ def report(args):
     print('furthest settings:', ', '.join(f'{n} {med(g):.2f}' for n, g in
                                            sorted(worst.items(), key=lambda x: -med(x[1]))[:12]))
     bands = defaultdict(lambda: defaultdict(list))
-    for f in sorted(out.glob('scores/*/*.json')):
+    for f in files:
         d = json.loads(f.read_text())
         for key, b in d.get('bands', {}).items():
             k = 'default' if key.split('|')[0].endswith('default') else 'edited'
@@ -242,6 +244,7 @@ def main():
     s.add_argument('--verbose', action='store_true', help='every set\'s table')
     s = sub.add_parser('report')
     s.add_argument('run', type=Path)
+    s.add_argument('--split', choices=['validation', 'holdout', 'train'], default='validation')
     args = p.parse_args()
     try:
         return {'run': run, 'accept': accept, 'report': report}[args.command](args)
