@@ -2284,3 +2284,63 @@ fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
     assert!(!std::sync::Arc::ptr_eq(&changed, &frame(&mut library)));
     Ok(())
 }
+
+#[test]
+fn the_filmstrip_cells_keep_their_size_when_the_selection_opens_a_photo() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in ["a.RAF", "b.RAF"] {
+        std::fs::write(folder.join(name), b"synthetic raw")?;
+    }
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    // Through an Editor, as the window does, so the strip's header is laid out
+    // at the app's spacing.
+    let _editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    crate::app::icons::install(&ctx);
+    let mut library = Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].clone();
+    let texture = ctx.load_texture(
+        "strip-cell",
+        egui::ColorImage::filled([40, 30], Color32::WHITE),
+        Default::default(),
+    );
+    let texture_id = texture.id();
+    library.cache.thumbs.insert(photo.path, texture);
+    // The size of the photo as the strip below the header paints it.
+    let painted = |library: &mut Library| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900., 400.),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let active = library.selected();
+                library.filmstrip_panel(ui, active, Module::Library);
+            },
+        );
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Mesh(mesh) if mesh.texture_id == texture_id => Some(mesh),
+                _ => None,
+            })
+            .expect("the strip paints the photo")
+            .calc_bounds()
+    };
+    // Nothing open: the header shows no metadata controls, so the cells take
+    // the height they leave. Selecting all opens one, and the controls appear.
+    library.select(None);
+    let none = painted(&mut library);
+    library.select_all();
+    let all = painted(&mut library);
+    assert_eq!(none, all);
+    Ok(())
+}
