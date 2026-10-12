@@ -269,6 +269,10 @@ impl Action {
             "panels:filmstrip",
             Self::Panels(PanelChange::Toggle(WorkspacePanel::Filmstrip)),
         ),
+        (
+            "panels:presets",
+            Self::Panels(PanelChange::Toggle(WorkspacePanel::Presets)),
+        ),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};

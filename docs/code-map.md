@@ -281,8 +281,9 @@ above rather than implementing SQL, file formats or pixel processing.
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
 | [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: Red Eye and Pet Eye, finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size, Darken and the pet eye's catchlight. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
-| [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), kept in the session; a panel being hidden first saves or ends what it was doing. |
+| [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), and Develop's open tab, kept in the session; a panel being hidden first saves or ends what it was doing. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application, the Amount slider and temporary hover previews. |
+| [side_tabs.rs](../src/app/side_tabs.rs) | Develop's Presets and History tab panel beside the adjustments, and the rail that switches and folds it. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
 | [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset, and Update, Rename and Delete for presets made here (`presets/user.rs`, written by `xmp/preset_write.rs`). |

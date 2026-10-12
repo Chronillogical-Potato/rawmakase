@@ -310,6 +310,7 @@ mod tests {
         assert!(e.document.snapshots.list.is_empty());
         // Typing a name and pressing Return in the panel names the new snapshot.
         e.module = Module::Develop;
+        e.set_develop_tab(crate::app::panels::DevelopTab::History);
         e.snapshot_action(SnapshotAction::New);
         let mut frame = |events: Vec<egui::Event>| {
             let mut output = ctx.run_ui(

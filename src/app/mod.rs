@@ -808,6 +808,7 @@ mod readout;
 mod red_eye_tool;
 mod reference;
 mod retouch_tool;
+mod side_tabs;
 mod stand_in;
 #[cfg(feature = "telemetry")]
 mod stats;

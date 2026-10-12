@@ -96,7 +96,8 @@ impl Editor {
             .id_salt("preset-list")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                section(ui, "Presets", false, |ui| {
+                ui.add_space(8.);
+                ui.scope(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::new(4., 4.);
                     ui.horizontal(|ui| {
                         ui.add(
@@ -309,8 +310,6 @@ impl Editor {
                         }
                     }
                 });
-                self.snapshots_section(ui);
-                self.history_section(ui);
             });
         if let Some(dialog) = import {
             self.dialog(dialog, &ui.ctx().clone());
@@ -761,7 +760,7 @@ impl Editor {
     /// Lightroom's History panel: this session's steps, newest first, over
     /// the photo's imported Lightroom steps. Clicking a step of this session
     /// goes back (or forward) to it; later steps stay until the next edit.
-    fn history_section(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn history_section(&mut self, ui: &mut egui::Ui) {
         if self.document.metadata.is_none() {
             return;
         }

@@ -5537,6 +5537,50 @@ fn hiding_the_presets_ends_a_preset_preview() {
     assert!(e.presets.hover.is_none());
 }
 #[test]
+fn a_narrow_window_folds_develops_tabs_until_one_is_asked_for() {
+    use super::panels::{DevelopTab, WorkspacePanel};
+    use super::side_tabs::rail_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    for _ in 0..3 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    // 1200 points leave no room for it beside the sidebar and adjustments:
+    // folded to its rail, the photo keeps its width.
+    assert!(e.panel_shown(WorkspacePanel::Presets));
+    assert!(!drawn(&ctx));
+    assert!(e.view.viewport.x > 400.);
+    let at = ctx
+        .read_response(rail_id(DevelopTab::History))
+        .expect("the rail's History button")
+        .rect
+        .center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    panel_frame(
+        &mut e,
+        vec![egui::Event::PointerMoved(at)],
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, vec![button(true)], FocusedButton::No);
+    panel_frame(&mut e, vec![button(false)], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    // Asked for, it opens on that tab; the layout saved is unchanged.
+    assert_eq!(e.panels.develop_tab, DevelopTab::History);
+    assert!(drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Presets));
+}
+#[test]
 fn the_library_info_panel_stays_while_a_field_in_it_cannot_be_saved() -> anyhow::Result<()> {
     use super::panels::{PanelChange, WorkspacePanel};
     let (_d, mut e, ids) = editor_with_catalog(&["a.ARW"])?;
@@ -5684,16 +5728,22 @@ fn a_side_panels_edge_shows_the_resize_cursor() -> anyhow::Result<()> {
         output.textures_delta.clear();
         output.platform_output.cursor_icon
     };
-    for module in [Module::Library, Module::Develop] {
+    // Develop's tab panel last, with room made for it by hiding the sidebar.
+    for (module, panels) in [
+        (Module::Library, &["library-sidebar", "library-info"][..]),
+        (Module::Develop, &["library-sidebar", "adjustments"][..]),
+        (Module::Develop, &["presets"][..]),
+    ] {
         e.module = module;
+        if panels == ["presets"] {
+            e.change_panels(super::panels::PanelChange::Toggle(
+                super::panels::WorkspacePanel::Left,
+            ));
+        }
         for _ in 0..3 {
             frame(&mut e, vec![]);
         }
-        let panels = match module {
-            Module::Library => ["library-sidebar", "library-info"],
-            Module::Develop => ["presets", "adjustments"],
-        };
-        for panel in panels {
+        for &panel in panels {
             let edge = ctx
                 .read_response(egui::Id::new(panel).with("__resize"))
                 .expect("the panel's edge")
@@ -5793,12 +5843,19 @@ fn side_panels_stop_where_their_contents_stop() -> anyhow::Result<()> {
         modifiers: Default::default(),
     };
     for (module, panel, outward, min) in [
-        (Module::Develop, "presets", 0., PRESETS_MIN),
+        (Module::Develop, "library-sidebar", 0., LIBRARY_SIDEBAR_MIN),
+        (Module::Develop, "presets", 1200., PRESETS_MIN),
         (Module::Develop, "adjustments", 1200., ADJUSTMENTS_MIN),
         (Module::Library, "library-sidebar", 0., LIBRARY_SIDEBAR_MIN),
         (Module::Library, "library-info", 1200., LIBRARY_INFO_MIN),
     ] {
         e.module = module;
+        // The window has room for Develop's tab panel without the sidebar.
+        if panel == "presets" {
+            e.change_panels(super::panels::PanelChange::Toggle(
+                super::panels::WorkspacePanel::Left,
+            ));
+        }
         for _ in 0..3 {
             frame(&mut e, vec![]);
         }
@@ -5817,7 +5874,16 @@ fn side_panels_stop_where_their_contents_stop() -> anyhow::Result<()> {
         for _ in 0..3 {
             frame(&mut e, vec![egui::Event::PointerMoved(to)]);
         }
-        let laid_out = (edge(&ctx) - outward).abs();
+        // Develop's tab panel stops at the adjustments, not the window's edge.
+        let stop = if panel == "presets" {
+            egui::containers::panel::PanelState::load(&ctx, egui::Id::new("adjustments"))
+                .expect("the adjustments")
+                .outer_rect
+                .left()
+        } else {
+            outward
+        };
+        let laid_out = (edge(&ctx) - stop).abs();
         assert!(
             (laid_out - min).abs() <= 1.,
             "{panel}: laid out {laid_out}, painted {min}"

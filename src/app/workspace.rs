@@ -93,17 +93,18 @@ impl Editor {
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
-            // The presets column runs full height; the toolbar sits over
-            // the photo and the adjustments only. Each part may open another
-            // photo; what follows edits that one.
+            // The catalog's sidebar runs the window's height, as in the
+            // Library; the filmstrip and toolbar take the rest of its width.
+            // Each part may open another photo; what follows edits that one.
             self.follow_edit_frame(&mut frame);
+            if self.panel_shown(WorkspacePanel::Left) {
+                let action = self.library_left_panel(ui);
+                self.library_action(action, &ctx);
+                self.follow_edit_frame(&mut frame);
+            }
             if self.panel_shown(WorkspacePanel::Filmstrip) {
                 self.status_bar(ui);
                 self.filmstrip(ui);
-                self.follow_edit_frame(&mut frame);
-            }
-            if self.panel_shown(WorkspacePanel::Left) {
-                self.develop_left_panel(ui);
                 self.follow_edit_frame(&mut frame);
             }
             self.toolbar(ui);
@@ -654,29 +655,30 @@ impl Editor {
                 None => {}
             }
         }
+        let mut action = crate::app::library::Action::None;
+        // The catalog's sidebar runs the window's height, as in Develop.
+        if self.panel_shown(WorkspacePanel::Left) {
+            action = self.library_left_panel(ui);
+        }
         let filmstrip = self.panel_shown(WorkspacePanel::Filmstrip);
         if filmstrip {
             self.library_status_bar(ui);
         }
-        let mut action = crate::app::library::Action::None;
-        // The filmstrip runs the window's width, under both side panels, as
-        // in Develop. Hidden, the views are still brought up to date.
+        // The filmstrip runs under the right panel, as in Develop. Hidden,
+        // the views are still brought up to date.
         if let Some(library) = &mut self.library {
-            action = if filmstrip {
+            action = action.then(if filmstrip {
                 library.library_filmstrip(ui)
             } else {
                 library.prepare(ui.ctx());
                 crate::app::library::Action::None
-            };
+            });
         }
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         if develops != self.loupe_tried {
             self.loupe_tried = None;
         }
         self.loupe_stored_preview();
-        if self.panel_shown(WorkspacePanel::Left) {
-            action = action.then(self.library_left_panel(ui));
-        }
         if self.panel_shown(WorkspacePanel::Right) {
             action = action.then(self.library_right_panel(ui, develops));
         }
@@ -701,23 +703,29 @@ impl Editor {
                 "the view changed what the filmstrip shows",
             );
         }
+        self.library_action(action, &ctx);
+    }
+    /// Does what the Library's grid, filmstrip or sidebar asked, unless a
+    /// file dialog or Sync is running.
+    fn library_action(&mut self, action: crate::app::library::Action, ctx: &egui::Context) {
         if !self.activity.is_busy() {
             match action {
                 crate::app::library::Action::Develop(id) => self.develop_catalog_photo(id),
                 crate::app::library::Action::RelinkRoot(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), ctx)
                 }
                 crate::app::library::Action::RelinkFolder(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), ctx)
                 }
                 crate::app::library::Action::AddFolder => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx)
                 }
                 crate::app::library::Action::None => {}
             }
         }
     }
-    /// The Library's left panel: Export…, folders and collections.
+    /// The catalog's sidebar, on the left in both modules: its folders and
+    /// collections, with the Library's Export… at the foot.
     fn library_left_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
         egui::Panel::left("library-sidebar")
@@ -727,9 +735,9 @@ impl Editor {
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
                 // Lightroom's Export… at the foot of the Library's left panel, for the
-                // photos selected.
+                // photos selected. Develop's toolbar has its own.
                 let mut export = false;
-                if self.library.is_some() {
+                if self.library.is_some() && self.module == Module::Library {
                     egui::Panel::bottom("library-export")
                         .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 8)))
                         .show_separator_line(false)
@@ -1285,23 +1293,11 @@ impl Editor {
         }
     }
 
-    fn develop_left_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("presets")
-            .default_size(245.)
-            .min_size(PRESETS_MIN)
-            .max_size(400.)
-            .show(ui, |ui| {
-                let _side = super::widgets::SectionSide::enter(
-                    ui,
-                    super::widgets::SectionGroup::DevelopLeft,
-                );
-                self.presets_ui(ui);
-            });
-    }
     fn develop_panels(&mut self, ui: &mut egui::Ui) {
         if self.panel_shown(WorkspacePanel::Right) {
             self.develop_right_panel(ui);
         }
+        self.develop_side_tabs(ui);
         let area = egui::CentralPanel::default()
             .show(ui, |ui| self.viewport_ui(ui))
             .response
@@ -1618,7 +1614,8 @@ const FOLDER_CHANGE: &str = "the folder change";
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as
 /// its contents, leaving a strip of the window's black between. The right
-/// panels hold the Navigator, whose zoom levels need 224 points.
+/// panels hold the Navigator, whose zoom levels need 224 points, as do the
+/// catalog's sidebar and Develop's Presets.
 pub(super) const PRESETS_MIN: f32 = 224.;
 pub(super) const ADJUSTMENTS_MIN: f32 = 300.;
 pub(super) const LIBRARY_SIDEBAR_MIN: f32 = 224.;
