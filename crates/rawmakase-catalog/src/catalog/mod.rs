@@ -25,6 +25,7 @@ mod develop_history;
 mod edit_records;
 mod edit_rows;
 mod edits;
+pub mod folder_sync;
 mod info;
 mod ingest;
 pub mod legacy_sidecar;
