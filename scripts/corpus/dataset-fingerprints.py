@@ -247,15 +247,21 @@ def check(args, samples, results, problems):
     return 1 if changes or problems else 0
 
 
+def visible(problems, public):
+    """The problems' texts; with --public, private files' only as a count."""
+    hidden = sum(1 for shown, _ in problems if public and not shown)
+    texts = [text for shown, text in problems if shown or not public]
+    if hidden:
+        texts.append(f'{hidden} problems with files of private sources (not shown)')
+    return texts
+
+
 def report(args, samples, changes, problems, notes):
     """Per file for publishable files; with --public, other sources only as counts."""
     def shown(s):
         return not args.public or committed(s)
 
-    hidden = sum(1 for public, _ in problems if args.public and not public)
-    shown_problems = [text for public, text in problems if public or not args.public]
-    if hidden:
-        shown_problems.append(f'{hidden} problems with files of private sources (not shown)')
+    shown_problems = visible(problems, args.public)
     out = {'files': len(samples), 'notes': notes, 'problems': shown_problems, 'groups': []}
     for note in notes:
         print(f'note: {note}')
@@ -310,7 +316,7 @@ def main():
         results, problems = fingerprint(args.rawmakase, samples, args.jobs)
         if args.command == 'record':
             if problems:
-                raise Setup('Not recording a run with problems:\n  ' + '\n  '.join(t for _, t in problems))
+                raise Setup('Not recording a run with problems:\n  ' + '\n  '.join(visible(problems, args.public)))
             record(args, samples, results)
             return 0
         return check(args, samples, results, problems)
