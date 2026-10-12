@@ -93,10 +93,12 @@ impl Editor {
         }
     }
     fn tab_panel(&mut self, ui: &mut egui::Ui) {
+        let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("presets")
             .default_size(PANEL_WIDTH)
             .min_size(super::workspace::PRESETS_MIN)
             .max_size(400.)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = SectionSide::enter(ui, SectionGroup::DevelopLeft);
                 match self.panels.develop_tab {
@@ -111,7 +113,7 @@ impl Editor {
         egui::Panel::right("develop-rail")
             .resizable(false)
             .exact_size(RAIL_WIDTH)
-            .frame(egui::Frame::new().fill(palette.gray(28)))
+            .frame(egui::Frame::new().fill(palette.gray(22)))
             .show(ui, |ui| {
                 let rail = ui.max_rect();
                 ui.allocate_rect(rail, Sense::hover());

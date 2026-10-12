@@ -158,10 +158,11 @@ impl Palette {
     }
 
     /// Behind the photo and the Navigator: a neutral grey as light as the
-    /// palette's window colour, so photos are judged against grey in any
-    /// theme (Lightroom's own backdrops are greys too).
+    /// palette's panel colour, lighter than the side panels around it, so
+    /// photos are judged against grey in any theme (Lightroom's own
+    /// backdrops are greys too).
     pub(super) fn photo_backdrop(&self) -> Color32 {
-        Color32::from_gray(luma(self.window).round() as u8)
+        Color32::from_gray(luma(self.panel).round() as u8)
     }
 
     /// A selected row in the folder tree and preset list: Lightroom's slate

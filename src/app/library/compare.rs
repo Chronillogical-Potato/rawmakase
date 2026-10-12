@@ -338,17 +338,18 @@ impl Library {
             return Action::None;
         }
         self.sync_compare_selection();
+        // On the photo's backdrop, as the view above it.
         egui::Panel::bottom("library-compare-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(38))
+                    .fill(palette.photo_backdrop())
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
             .show(ui, |ui| self.compare_toolbar(ui));
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
-        ui.painter().rect_filled(area, 0., palette.gray(36));
+        ui.painter().rect_filled(area, 0., palette.photo_backdrop());
         let inner = area.shrink(MARGIN);
         let half = Vec2::new((inner.width() - MARGIN) / 2., inner.height());
         let panes = [

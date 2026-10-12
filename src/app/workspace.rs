@@ -539,10 +539,9 @@ impl Editor {
     /// right. On macOS it is also the title bar, beside the traffic lights.
     fn workspace_bar(&mut self, ui: &mut egui::Ui, sidebar: bool) {
         let palette = theme::palette(ui.ctx());
-        // One rule under the bar: its own, not the panel's separator too.
+        // Its separator, as the side panels' edges are.
         egui::Panel::top("workspace-modes")
             .exact_size(BAR_HEIGHT)
-            .show_separator_line(false)
             .frame(
                 egui::Frame::new()
                     .fill(palette.gray(26))
@@ -623,11 +622,6 @@ impl Editor {
                     });
                 });
             });
-        egui::Panel::top("workspace-modes-rule")
-            .exact_size(1.)
-            .show_separator_line(false)
-            .frame(egui::Frame::new().fill(palette.gray(16)))
-            .show(ui, |_| {});
     }
 
     /// A RAW in the Library's Loupe: loaded as the document, as Develop
@@ -680,9 +674,15 @@ impl Editor {
             self.presets.preview = None;
             self.schedule();
         }
-        let area = ui.available_rect_before_wrap();
+        // On the photo's backdrop with Develop's margin, under the toolbar.
+        let outer = ui.available_rect_before_wrap();
+        ui.painter()
+            .rect_filled(outer, 0., theme::palette(ui.ctx()).photo_backdrop());
+        let area = outer.shrink(PHOTO_MARGIN);
         let before = self.view.zoom.on;
-        self.viewport_ui(ui);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+            self.viewport_ui(ui)
+        });
         let Some(library) = &mut self.library else {
             return;
         };
@@ -910,10 +910,13 @@ impl Editor {
         develops: Option<PhotoId>,
     ) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
+        // Dark as Develop's right panels and the catalog's sidebar.
+        let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("library-info")
             .default_size(270.)
             .min_size(LIBRARY_INFO_MIN)
             .max_size(420.)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(
                     ui,
@@ -1442,7 +1445,7 @@ impl Editor {
             .frame(
                 egui::Frame::new()
                     .fill(backdrop)
-                    .inner_margin(egui::Margin::same(20)),
+                    .inner_margin(egui::Margin::same(PHOTO_MARGIN as i8)),
             )
             .show(ui, |ui| self.viewport_ui(ui))
             .response
@@ -1450,10 +1453,13 @@ impl Editor {
         self.drop_area = Some(area);
     }
     fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
+        // Dark as the catalog's sidebar, around the lighter photo.
+        let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("adjustments")
             .default_size(330.)
             .min_size(ADJUSTMENTS_MIN)
             .max_size(400.)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(
                     ui,
@@ -1767,6 +1773,9 @@ fn menu_separator(ui: &mut egui::Ui) {
     );
     ui.add_space(4.);
 }
+
+/// The photo's backdrop around it in Develop and the Library's views.
+pub(super) const PHOTO_MARGIN: f32 = 20.;
 
 /// What the close guard calls an export or preview a control command started.
 const OUTPUT: &str = "the output the control socket asked for";
