@@ -19,6 +19,9 @@ pub(crate) type Chromatic = (f32, [f32; 3]);
 pub struct Entry {
     pub make: String,
     pub lens: Vec<String>,
+    /// The maker's numeric lens ID (`stCamera:LensID`, which for Nikon is the maker
+    /// note's `LensIDNumber`); `None` when the profile writes none.
+    pub lens_id: Option<u32>,
     /// The lens's display name (`LensPrettyName`, else `ProfileName`).
     pub name: String,
     /// `ProfileName`, the name Lightroom records as `LensProfileName`.
@@ -110,6 +113,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
                 .unwrap_or_default(),
             profile_name: attr(d, "ProfileName").unwrap_or_default(),
             lens,
+            lens_id: attr(d, "LensID").and_then(|v| v.trim().parse().ok()),
             raw: attr(d, "CameraRawProfile").is_some_and(|v| v.eq_ignore_ascii_case("true")),
             prefer_metadata_distortion: attr(d, "PreferMetadataDistort")
                 .is_some_and(|v| v.eq_ignore_ascii_case("true")),
