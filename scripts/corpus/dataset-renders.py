@@ -36,6 +36,8 @@ PUBLIC_LICENSE = 'CC0-1.0'
 # Classifications a change is grouped by: photos view columns, and the CFA.
 DIMENSIONS = ['make', 'cfa', 'key', 'scene', 'light', 'setting', 'contrast', 'skin', 'sky']
 TEST = 'private::photos_match_accepted_renders'
+# The formats the test reads (RAW_EXTENSIONS in tests/color/private.rs).
+READ = {'arw', 'raf', 'nef', 'nrw', 'cr2', 'cr3', 'dng', 'rw2', 'orf', 'ori', 'pef', 'rwl', 'fff', '3fr'}
 
 
 class Setup(Exception):
@@ -49,14 +51,22 @@ def env_path(name, value):
     return Path(value)
 
 
-def run_test(corpus, report, bless, source_edge):
+def run_test(corpus, report, bless, source_edge, public):
     env = {**os.environ, 'RAWMAKASE_CORPUS': str(corpus), 'RAWMAKASE_REPORT': str(report),
            'RAWMAKASE_PHOTO_SOURCE_EDGE': str(source_edge)}
+    # Only --bless records: an exported RAWMAKASE_BLESS would rewrite the baseline.
+    env.pop('RAWMAKASE_BLESS', None)
     if bless:
         env['RAWMAKASE_BLESS'] = bless
+    # The test's own output names photos by path; with --public it goes to a log
+    # beside the corpus, which stays on this machine.
+    log = (corpus / 'last-run.log').open('w') if public else None
     # The test fails on any change; the report says which.
     subprocess.run(['cargo', 'test', '--release', '--locked', '--test', 'color', '--', '--ignored', '--exact',
-                    TEST, '--nocapture'], cwd=ROOT, env=env, stdout=sys.stderr)
+                    TEST, '--nocapture'], cwd=ROOT, env=env, stdout=log or sys.stderr, stderr=log)
+    if log:
+        log.close()
+        print(f'test output: {corpus / "last-run.log"}', file=sys.stderr)
     if not report.is_file():
         raise Setup('The test wrote no report: did it build and find the corpus?')
 
@@ -95,13 +105,35 @@ def failed(o):
     return o['status'] not in ('unchanged', 'blessed', 'kept')
 
 
-def report(photos, unknown, public, out_path):
+def missing(dataset, corpus, photos):
+    """Photos of the corpus's manifest (`dataset.py manifest --out
+    $RAWMAKASE_CORPUS/manifest.json`) in formats the test reads that the run did
+    not see: a link that is missing drops its photo without failing the test."""
+    manifest = corpus / 'manifest.json'
+    if not manifest.is_file():
+        raise Setup(f'No {manifest}: write the selection there with dataset.py manifest --out')
+    db = sqlite3.connect(f'file:{dataset / "dataset.sqlite"}?mode=ro', uri=True)
+    seen = {p['sha256'] for p in photos}
+    out = []
+    for f in json.loads(manifest.read_text())['files']:
+        row = db.execute('SELECT ext, source, license FROM samples WHERE sha256 = ?', (f['sha256'],)).fetchone()
+        if row and (row[0] or '').lower() in READ and f['sha256'] not in seen:
+            out.append(dict(sha256=f['sha256'], source=row[1], license=row[2]))
+    return out
+
+
+def report(photos, unknown, public, out_path, absent=()):
     shown = (lambda p: not public or (p['source'] == 'pixls' and p['license'] == PUBLIC_LICENSE))
     statuses = Counter(p['status'] for p in photos)
     print(f'{len(photos)} dataset photos: ' + ', '.join(f'{n} {s}' for s, n in statuses.most_common()))
     if unknown:
         print(f'{len(unknown)} corpus photos are not in the dataset and were left out')
-    out = {'photos': len(photos), 'statuses': dict(statuses), 'not_in_dataset': len(unknown), 'groups': {},
+    if absent:
+        named = [a['sha256'][:12] for a in absent if not public or (a['source'] == 'pixls' and a['license'] == PUBLIC_LICENSE)]
+        print(f'{len(absent)} photos of the manifest were not run (not linked in the corpus?)'
+              + (': ' + ', '.join(named) if named else ''))
+    out = {'photos': len(photos), 'statuses': dict(statuses), 'not_in_dataset': len(unknown),
+           'not_run': len(absent), 'groups': {},
            'changed': []}
     bad = [p for p in photos if failed(p)]
     for dim in DIMENSIONS:
@@ -133,7 +165,7 @@ def report(photos, unknown, public, out_path):
         out['private_changed'] = hidden
     if out_path:
         out_path.write_text(json.dumps(out, indent=1) + '\n')
-    return 1 if bad or unknown else 0
+    return 1 if bad or unknown or absent else 0
 
 
 def main():
@@ -160,7 +192,7 @@ def main():
         if args.command == 'run':
             report_file = Path(tempfile.mkstemp(suffix='.json')[1])
             report_file.unlink()
-            run_test(corpus, report_file, args.bless, args.source_edge)
+            run_test(corpus, report_file, args.bless, args.source_edge, args.public)
         elif args.file is None:
             raise Setup('report needs the RAWMAKASE_REPORT file')
         else:
@@ -169,7 +201,7 @@ def main():
         if not outcomes:
             raise Setup('The report lists no photos')
         photos, unknown = classify(dataset, corpus, outcomes)
-        return report(photos, unknown, args.public, args.out)
+        return report(photos, unknown, args.public, args.out, missing(dataset, corpus, photos))
     except Setup as e:
         print(f'error: {e}', file=sys.stderr)
         return 2
