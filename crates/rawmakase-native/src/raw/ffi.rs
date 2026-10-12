@@ -404,6 +404,13 @@ pub fn srgb_profile() -> Result<Vec<u8>> {
     // SAFETY: `data` has the `size` bytes the native side was told it may write.
     let written = unsafe { ora_srgb_profile(data.as_mut_ptr(), size) };
     ensure!(written == size, "Cannot serialize sRGB profile");
+    // Little CMS dates the profile as it saves it. A fixed date keeps the
+    // profile, and every export that embeds it, the same whenever it is made.
+    // The profile carries no ID (an MD5 of the header) for this to break.
+    ensure!(data.len() >= 128, "sRGB profile too short");
+    for (at, value) in [2024u16, 1, 1, 0, 0, 0].into_iter().enumerate() {
+        data[24 + 2 * at..26 + 2 * at].copy_from_slice(&value.to_be_bytes());
+    }
     Ok(data)
 }
 /// Converts 8-bit sRGB pixels in place to the monitor profile at `path`.
@@ -436,6 +443,20 @@ mod tests {
         (0..20_000u32)
             .map(|i| level - 6 + (i * 7919 % 13) as u16)
             .collect()
+    }
+    #[test]
+    fn the_srgb_profile_is_the_same_whenever_it_is_made() {
+        // Little CMS dates a profile when saving it: exports would differ
+        // second to second, and a profile compared with a later one too.
+        let profile = super::srgb_profile().unwrap();
+        let date: Vec<u16> = profile[24..36]
+            .chunks(2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+            .collect();
+        assert_eq!(date, [2024, 1, 1, 0, 0, 0]);
+        // No profile ID, which the date would have to be hashed into.
+        assert!(profile[84..100].iter().all(|b| *b == 0));
+        assert_eq!(super::srgb_profile().unwrap(), profile);
     }
     #[test]
     fn black_level_far_below_the_masked_border_is_corrected() {
