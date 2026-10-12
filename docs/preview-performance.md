@@ -157,7 +157,9 @@ and tests), or finished on the device (the desktop).
 The port covers engine 4 with reference curves, color and calibration and a profile
 tone curve, which every new photo uses. Older engines, and color grading with
 Blending or Balance outside the measured tables, render on the CPU, as do machines
-without a usable adapter; a GPU failure disables the GPU for the session. Export
+without a usable adapter; a GPU failure disables the GPU for the session. A region
+beyond the device's buffer limits or the develop memory budget is not a failure: it
+renders on the CPU and the next region uses the GPU again. Export
 always uses the CPU, which remains the reference.
 
 Profile tables are read with explicit trilinear interpolation from a storage buffer
