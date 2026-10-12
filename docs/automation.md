@@ -120,7 +120,7 @@ catalog queries and output-job polling remain available.
 `preview` and `export` capture the decoded photo, recipe and its generation and
 revision before starting a background job. Later UI edits do not change that
 output. Preview defaults to a 1600-pixel long edge; use `--max-edge` to choose a
-size. Export defaults to full size. Both accept JPEG and TIFF paths and use the
+size. Export defaults to full size. Both accept JPEG, TIFF and PNG paths and use the
 existing export pipeline. They never overwrite an existing file or change saved
 Export dialog settings.
 

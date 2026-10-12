@@ -117,7 +117,7 @@ impl Outputs {
         let format = Format::from_path(&path).ok_or_else(|| {
             Error::new(
                 "invalid_path",
-                "Use a .jpg, .jpeg, .tif or .tiff output path",
+                "Use a .jpg, .jpeg, .tif, .tiff or .png output path",
             )
         })?;
         if !path.is_absolute() {
