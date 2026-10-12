@@ -117,7 +117,10 @@ def missing(dataset, corpus, photos):
     out = []
     for f in json.loads(manifest.read_text())['files']:
         row = db.execute('SELECT ext, source, license FROM samples WHERE sha256 = ?', (f['sha256'],)).fetchone()
-        if row and (row[0] or '').lower() in READ and f['sha256'] not in seen:
+        # A hash the database no longer knows is missing too, never skipped.
+        if row is None:
+            out.append(dict(sha256=f['sha256'], source=None, license=None))
+        elif (row[0] or '').lower() in READ and f['sha256'] not in seen:
             out.append(dict(sha256=f['sha256'], source=row[1], license=row[2]))
     return out
 

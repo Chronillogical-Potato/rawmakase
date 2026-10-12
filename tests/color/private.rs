@@ -198,18 +198,36 @@ fn photos_match_accepted_renders() {
             cases,
         })
     };
+    // Accepted renders were named without the RAW's extension, which made
+    // `x.orf` and `x.ori` share one; such a name is still read for a photo no
+    // other photo shares it with.
+    let mut stems = BTreeMap::<PathBuf, usize>::new();
+    for raw in &raws {
+        *stems.entry(raw.with_extension("")).or_default() += 1;
+    }
     // One photo at a time (LibRaw develops with its own threads).
     raws.iter().for_each(|raw| {
         let relative = raw
             .strip_prefix(corpus.join("raws"))
             .unwrap()
             .with_extension("");
+        let named = raw.strip_prefix(corpus.join("raws")).unwrap();
         let path = corpus
             .join("accepted")
+            .join(format!("{}.json", named.display()));
+        let legacy = corpus
+            .join("accepted")
             .join(relative.with_extension("json"));
-        let accepted: Option<Accepted> = std::fs::read(&path)
-            .ok()
-            .map(|b| serde_json::from_slice(&b).expect("accepted renders"));
+        let read = |p: &Path| {
+            std::fs::read(p)
+                .ok()
+                .map(|b| serde_json::from_slice::<Accepted>(&b).expect("accepted renders"))
+        };
+        let accepted = read(&path).or_else(|| {
+            (stems[&raw.with_extension("")] == 1)
+                .then(|| read(&legacy))
+                .flatten()
+        });
         // RAWMAKASE_BLESS=new records only photos that have no accepted render
         // yet, as after adding photos or an interrupted run.
         if accepted.is_some() && std::env::var_os("RAWMAKASE_BLESS").is_some_and(|v| v == "new") {
