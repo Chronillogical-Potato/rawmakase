@@ -150,10 +150,10 @@ python3 scripts/corpus/dataset-gate.py report $run/<name>
 ```
 
 - **run** renders and scores each set (two at a time) and deletes its renders once scored: the SSD cannot hold them all. Scores, a log per set and `run.json` (the build) stay in the run folder; an interrupted run resumes. The validation split takes about 2½ hours on an M1 Pro.
-- **accept** applies `gate.py accept` to every set: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
+- **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
 - **report** says how far a run is from Camera Raw: median ΔE00 by control, stratum and source, the furthest settings, the lightness bias per tone band, and what could not be scored.
 - **Default parity:** `gate.py default-parity --survey $RAWMAKASE_DATASET/references/<family>/survey --rawmakase … --data-dir $lib --out <folder>` scores default renders against the survey's Camera Raw renders, leaving holdout photos out.
-- **Baselines** are runs of `main`, named by its commit (`main-418d0ca7`: validation and holdout); record a new one when `main`'s rendering changes. Judge on validation; score holdout once, at the decision, with `--split holdout` and `accept --exclude $run/holdout-excluded.txt` (holdout photos already looked at).
+- **Baselines** are runs of `main`, named by its commit (`main-418d0ca7`: validation and holdout); record a new one when `main`'s rendering changes. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
 
 ### Testing a rendering-engine change
 
