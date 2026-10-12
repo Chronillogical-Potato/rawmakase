@@ -38,6 +38,21 @@ struct Metadata {
     // holds too (Nikon's LensIDNumber); 0 when the maker notes have none.
     unsigned lens_id;
 };
+// The unpacked sensor data and the levels development reads with it, for decode
+// fingerprints. data and black point into the handle's buffers: data holds
+// height rows of pitch values, of which the visible area starts at left, top;
+// black LibRaw's cblack (4 channels, the pattern's
+// rows and columns, then its values).
+struct Sensor {
+    const unsigned short* data;
+    unsigned width, height, pitch, channels;
+    unsigned left, top, visible_width, visible_height;
+    const unsigned* black;
+    unsigned base_black, black_size;
+    unsigned white, linear_white[4];
+    unsigned pattern_rows, pattern_cols;
+    unsigned char pattern[16*16];
+};
 typedef int (*Cancel)(void*);
 }
 
@@ -304,6 +319,43 @@ void ora_cfa_copy(void* ptr, float* out) {
             dst[c]=std::max(0.f,(float(src[c])-black)/std::max(1.f,white-black));
         }
     }
+}
+unsigned ora_sensor_size() { return sizeof(Sensor); }
+// Unpacks as development does (the black correction included) and describes the
+// sensor data: one channel for a mosaic, three or four for small RAW files.
+// The colour pattern is COLOR's over the visible area for one period of LibRaw's
+// filters: 16 by 2, 16 by 16 for filters 1 (Leaf) and 6 by 6 for X-Trans.
+int ora_sensor(void* ptr, Sensor* s, char* err) {
+    try {
+        auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
+        int rc=handle.unpack(err);
+        if(rc) return rc;
+        auto& d=raw.imgdata;
+        const auto& col=d.rawdata.color;
+        *s = {};
+        s->width=d.sizes.raw_width; s->height=d.sizes.raw_height;
+        if(d.rawdata.raw_image) { s->data=d.rawdata.raw_image; s->channels=1; }
+        else if(d.rawdata.color3_image) { s->data=d.rawdata.color3_image[0]; s->channels=3; }
+        else if(d.rawdata.color4_image) { s->data=d.rawdata.color4_image[0]; s->channels=4; }
+        else { message(err,"No integer sensor data"); return -1; }
+        s->pitch=d.sizes.raw_pitch/2;
+        s->left=d.sizes.left_margin; s->top=d.sizes.top_margin;
+        s->visible_width=d.sizes.width; s->visible_height=d.sizes.height;
+        s->black=col.cblack; s->base_black=col.black;
+        const size_t pattern=size_t(col.cblack[4])*col.cblack[5];
+        s->black_size=unsigned(6+std::min(pattern, size_t(LIBRAW_CBLACK_SIZE-6)));
+        s->white=col.maximum;
+        for(int c=0;c<4;++c) s->linear_white[c]=unsigned(col.linear_max[c]);
+        const unsigned filters=d.idata.filters;
+        if(filters) {
+            s->pattern_rows=filters==9 ? 6 : 16;
+            s->pattern_cols=filters==9 ? 6 : filters==1 ? 16 : 2;
+            for(unsigned r=0;r<s->pattern_rows;++r) for(unsigned c=0;c<s->pattern_cols;++c)
+                s->pattern[r*s->pattern_cols+c]=(unsigned char)raw.COLOR(int(r),int(c));
+        }
+        return 0;
+    } catch(const std::exception& e) { message(err,e.what()); return -1; }
+    catch(...) { message(err,"Native RAW unpack failed"); return -1; }
 }
 void ora_copy(void* ptr, float* out) {
     auto& r=static_cast<Handle*>(ptr)->raw;

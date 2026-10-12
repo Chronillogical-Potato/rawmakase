@@ -11,6 +11,7 @@ use std::{
 };
 mod ffi;
 use crate::camera_data::{CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata};
+pub(crate) use ffi::Sensor;
 pub use ffi::{display_transform, srgb_profile, version};
 /// Runs `work` on a thread of its own at background priority: a lower
 /// scheduling priority, and LibRaw decodes on two OpenMP threads. Every worker
@@ -100,6 +101,10 @@ impl Raw {
     /// The embedded JPEG preview, as stored.
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {
         self.handle.thumbnail()
+    }
+    /// The unpacked sensor data as development reads it, without developing.
+    pub(crate) fn sensor(&self) -> Result<Sensor> {
+        self.handle.sensor()
     }
     pub fn develop(self, decode: Decode, cancel: &AtomicBool) -> Result<CameraImage> {
         match decode {
