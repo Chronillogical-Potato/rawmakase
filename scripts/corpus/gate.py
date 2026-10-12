@@ -22,6 +22,7 @@ import hashlib
 import re
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -361,12 +362,8 @@ def library_digest(folder):
     return h.hexdigest()
 
 
-def render(args):
-    """One `rawmakase render-batch` per photo: it develops the RAW once."""
-    refs = args.refs.resolve()
-    frozen = json.loads((refs / 'references.json').read_text())
-    out = args.out.resolve()
-    out.mkdir(parents=True, exist_ok=True)
+def render_env(args, out):
+    """The environment every gate render runs rawmakase in, and its profile library."""
     # The binary that is hashed is the one that runs, never one found on PATH.
     args.rawmakase = args.rawmakase.resolve(strict=True)
     env = dict(os.environ)
@@ -382,6 +379,98 @@ def render(args):
     (out / 'empty-data-home').mkdir(parents=True, exist_ok=True)
     env['XDG_DATA_HOME'] = str(out / 'empty-data-home')
     env.pop('RAWMAKASE_LIBRAW_DEMOSAIC', None)
+    return env, library
+
+
+def default_parity(args):
+    """Every surveyed photo's default render (Adobe Standard, the settings Camera Raw
+    embedded in its survey render) against Camera Raw's, at the survey's 1024 px.
+    Photos in a holdout set are left out, so this never looks at them."""
+    survey = args.survey.resolve()
+    pool = json.loads((survey / 'pool.json').read_text())
+    references = (args.references or survey.parent.parent).resolve()
+    # The pool names its RAWs relative to the dataset folder, references/'s parent.
+    root = references.parent
+    held = [p for f in references.glob('*/*-holdout/references.json') for p in json.loads(f.read_text())['photos']]
+    # By file and by scene: other files of a held-out scene (raw.pixls.us keeps a
+    # camera's modes and bit depths side by side) are held out too, as split() does.
+    holdout = {p['sha256'] for p in held}
+    held_scenes = {scene_key(p) for p in held}
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    env, library = render_env(args, out)
+    # Rendered with a copy of the build taken now, so a rebuild meanwhile can't mix engines.
+    pinned = out / 'rawmakase'
+    shutil.copy2(args.rawmakase, pinned)
+    args.rawmakase = pinned
+    rows, left_out, crashed = [], 0, []
+    for photo in pool['photos']:
+        if photo['sha256'] in holdout or scene_key(photo) in held_scenes:
+            left_out += 1
+            continue
+        key = photo['sha256'][:16]
+        reference = survey / 'renders' / f'{key}.tif'
+        row = dict(sha256=photo['sha256'], make=photo.get('make'), stratum=photo['stratum'])
+        if not reference.exists():
+            rows.append(dict(row, valid=0., error='no survey render'))
+            continue
+        raw = root / photo['raw']
+        if digest(raw) != photo['sha256']:
+            raise ValueError(f'{photo["raw"]}: changed since the survey')
+        # The settings Camera Raw rendered with, from its TIFF, as `reference` does.
+        sidecar = out / f'{key}.xmp'
+        sidecar.write_bytes(subprocess.check_output(['exiftool', '-b', '-XMP', str(reference)]))
+        tif = out / f'{key}.tif'
+        tif.unlink(missing_ok=True)
+        listing = out / f'{key}.json'
+        listing.write_text(json.dumps([dict(xmp=str(sidecar), output=str(tif), max_edge=1024)]))
+        result = subprocess.run([str(args.rawmakase), 'render-batch', str(raw), str(listing)],
+                                capture_output=True, text=True, env=env)
+        listing.unlink()
+        if result.returncode:
+            # rawmakase itself failed (a crash, the RAW unreadable): not a result.
+            crashed.append(photo['sha256'][:12])
+            rows.append(dict(row, valid=0., error=f'rawmakase failed (exit {result.returncode})'))
+            continue
+        if not tif.exists():
+            # render-batch prints "<output>: <why>"; keep the why, not the path.
+            why = (result.stderr.strip().splitlines() or ['no message'])[-1].split(': ', 1)[-1][:200]
+            rows.append(dict(row, valid=0., error=f'not rendered: {why}'))
+            continue
+        m = photo_metrics(reduce(reference_srgb(reference)), reduce(render_srgb(tif)))
+        m.pop('L_ref', None), m.pop('L_out', None)
+        rows.append(dict(row, **m))
+        tif.unlink()
+    valid = [r for r in rows if r.get('valid', 0) >= 0.5]
+    summary = {}
+    for key in ('stratum', 'make'):
+        groups = {}
+        for r in valid:
+            groups.setdefault(r[key], []).append(r['median_de00'])
+        summary[key] = {k: dict(n=len(v), median=float(np.median(v))) for k, v in sorted(groups.items())}
+    result = dict(schema=1, survey=str(survey), camera_raw=pool.get('camera_raw'), holdout_left_out=left_out,
+                  rendered_by=dict(rawmakase=digest(args.rawmakase), profiles=library_digest(library),
+                                   policy=RENDER_POLICY),
+                  median_de00=float(np.median([r['median_de00'] for r in valid])) if valid else None,
+                  summary=summary, photos=rows)
+    (out / 'default-parity.json').write_text(json.dumps(result, indent=1))
+    print(f'{len(valid)} of {len(rows)} photos scored ({left_out} holdout photos left out); '
+          f'median ΔE00 {result["median_de00"]}')
+    for st, v in summary['stratum'].items():
+        print(f'  {st}: {v["n"]} photos, median {v["median"]:.2f}')
+    if crashed:
+        print(f'rawmakase failed on {len(crashed)} photos ({", ".join(crashed)}): the result is incomplete',
+              file=sys.stderr)
+        return 1
+
+
+def render(args):
+    """One `rawmakase render-batch` per photo: it develops the RAW once."""
+    refs = args.refs.resolve()
+    frozen = json.loads((refs / 'references.json').read_text())
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    env, library = render_env(args, out)
     # Renders, new or kept from an earlier run, must come from the frozen inputs.
     for photo in frozen['photos']:
         if digest(photo['raw']) != photo['sha256']:
@@ -398,6 +487,7 @@ def render(args):
     if (stamp.exists() and json.loads(stamp.read_text()) != made_by) or (kept and not stamp.exists()):
         raise ValueError(f'{out} holds renders of other references or another build: use a new folder')
     stamp.write_text(json.dumps(made_by))
+    failed = []
     for i, photo in enumerate(frozen['photos']):
         done = lambda name: (out / name).exists() or (out / name).with_suffix('.npy').exists()
         jobs = [dict(xmp=str(refs / c['xmp']), output=str(out / Path(c['reference']).name), max_edge=EDGE)
@@ -411,12 +501,21 @@ def render(args):
         listing.unlink()
         if result.returncode or result.stderr.strip():
             print(f'photo {i}: {result.stderr.strip()[:400]}', file=sys.stderr)
+        # render-batch reports a case it can't render and goes on (a result to
+        # score); exiting with an error means the photo could not be developed
+        # at all this time (a crash, the RAW unreadable), which a rerun may not
+        # repeat, so the run is not complete.
+        if result.returncode:
+            failed.append(i)
         # Keep what the metric reads: the render reduced to SCORE_EDGE.
         for job in jobs:
             tif = Path(job['output'])
             if tif.exists():
                 np.save(tif.with_suffix('.npy'), reduce(render_srgb(tif)).astype(np.float32))
                 tif.unlink()
+    if failed:
+        print(f'rawmakase failed on photos {failed}: rerun render', file=sys.stderr)
+        return 1
 
 
 # Scoring and acceptance -----------------------------------------------------------
@@ -467,6 +566,7 @@ def summarise(scores):
             continue
         # By the RAW's hash: photo indices restart in every set.
         s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
+        s.setdefault('clipped', {})[r.get('sha256', r['photo'])] = r['clipping']
         s['clipping'].append(r['clipping'])
     for setting in out.values():
         for s in setting.values():
@@ -582,8 +682,19 @@ def accept(args):
             elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] != b['invalid'] or not cd or not bd
                   or c['photos'].keys() != b['photos'].keys()):
                 # Photos invalid on both sides alike (framed otherwise than
-                # Camera Raw, say) are left out; anything else is no verdict.
+                # Camera Raw, say) are left out; anything else is no verdict on
+                # the setting, but a photo both scored still may not get worse.
                 reasons.append('inconclusive (fewer than 3 photos, photos invalid on one side only or different photos)')
+                limit = COLOR_LIMITS[family] if family else 1.0 if magnitude.get(name, 0) <= 50 else 2.0
+                common = c['photos'].keys() & b['photos'].keys()
+                for p in common:
+                    if c['photos'][p] > b['photos'][p] + limit:
+                        reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {c["photos"][p]:.2f}')
+                if common:
+                    cc = float(np.mean([c['clipped'][p] for p in common]))
+                    bc = float(np.mean([b['clipped'][p] for p in common]))
+                    if cc > bc + 0.005:
+                        reasons.append(f'4: clipping {100 * bc:.2f}% -> {100 * cc:.2f}%')
             else:
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:
@@ -620,6 +731,9 @@ def accept(args):
                   f'{c["score"] if c else float("nan"):6.2f} {dflt:6.2f}  {"PASS" if not reasons else "; ".join(reasons)}')
             if reasons:
                 failed.append((name, st))
+            # For callers that judge many sets (dataset-gate.py): every pair's reasons.
+            if getattr(args, 'results', None) is not None:
+                args.results.append(dict(name=name, stratum=st, reasons=reasons))
     print(f'{len(failed)} failing setting/stratum pairs')
     return int(bool(failed))
 
@@ -659,11 +773,17 @@ def main():
     s.add_argument('--rule', choices=['regression', 'switch'], default='regression',
                    help='regression (default): no setting worse than the baseline; switch: the scene tone '
                         'engine\'s rule, which also requires far-off tone settings to improve (rules 1 and 2)')
+    s = sub.add_parser('default-parity', help='default renders against the survey\'s Camera Raw renders')
+    s.add_argument('--survey', type=Path, required=True, help='a references/<family>/survey folder')
+    s.add_argument('--references', type=Path, help='the references root, for the holdout sets to leave out')
+    s.add_argument('--rawmakase', type=Path, required=True)
+    s.add_argument('--data-dir', type=Path)
+    s.add_argument('--out', type=Path, required=True)
     s = sub.add_parser('color-limits', help='derive COLOR_LIMITS from a baseline')
     s.add_argument('--scores', type=Path, required=True, help='a folder of the baseline\'s score files')
     args = p.parse_args()
     return {'survey': survey, 'split': split, 'reference': reference, 'render': render, 'score': score,
-            'color-limits': color_limits,
+            'color-limits': color_limits, 'default-parity': default_parity,
             'accept': accept}[args.command](args)
 
 

@@ -137,6 +137,37 @@ python3 scripts/corpus/dataset-renders.py run            # on a branch: exits 1 
 
 It renders from the photo reduced to 2,400 pixels (`--source-edge`, 0 for full size): the 48-block comparison sees nothing the reduction loses, and a run of all 1,797 photos takes about 2½ hours on an M1 Pro instead of about 15. Run it before merging rendering-engine changes. The accepted renders stay in `$RAWMAKASE_DATASET/baselines/corpus/accepted/`; re-record them only from `main`, in a change that says why.
 
+### Camera Raw parity
+
+The dataset's frozen Camera Raw 18.7 references (`references/camera-raw-18.7*/<control>-<split>/`, 48 validation and 48 holdout sets over raw.pixls.us, Signature Edits and the owner's photos) are rendered with a build and scored against Camera Raw by `scripts/corpus/gate.py`; `scripts/corpus/dataset-gate.py` does it for every set of a split and judges one run against another:
+
+```
+lib=<Adobe profile library>     # a folder whose camera-profiles/ holds Adobe Standard and the Adobe Raw looks
+run=$RAWMAKASE_DATASET/baselines/gate
+python3 scripts/corpus/dataset-gate.py run --rawmakase target/release/rawmakase --data-dir $lib --out $run/<name>
+python3 scripts/corpus/dataset-gate.py accept --candidate $run/<name> --baseline $run/main-<commit>
+python3 scripts/corpus/dataset-gate.py report $run/<name>     # --split holdout for holdout
+```
+
+- **run** renders and scores each set (two at a time) and deletes its renders once scored: the SSD cannot hold them all. It renders with a copy of the build taken when the run starts (`<run>/rawmakase`), so rebuilding meanwhile changes nothing. Scores, a log per set and `run.json` (the build) stay in the run folder; an interrupted run resumes. The validation split takes about 2½ hours on an M1 Pro.
+- **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
+- **report** says how far a run is from Camera Raw: median ΔE00 by control, stratum and source, the furthest settings, the lightness bias per tone band, and what could not be scored.
+- **Default parity:** `gate.py default-parity --survey $RAWMAKASE_DATASET/references/<family>/survey --rawmakase … --data-dir $lib --out <folder>` scores default renders against the survey's Camera Raw renders, leaving holdout photos out.
+- **Baselines** are runs of `main`, named by its commit (`main-418d0ca7`: validation and holdout); record a new one when `main`'s rendering changes. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
+
+### Testing a rendering-engine change
+
+On the machine with the dataset, from the branch's checkout, built against `packaging/native-deps.sh`'s LibRaw (`cargo build --release`):
+
+| Step | Command | Time | Expect |
+|---|---|---|---|
+| 1. Decoding | `dataset-fingerprints.py check` | 5 min | No difference: an engine change does not change decoding. |
+| 2. Render snapshots | `dataset-renders.py run` | 2½ h | Every photo the change touches moves; read the grouping (make, CFA, key, scene, light) for where. Nothing is accepted here: re-record (`--bless`) on `main` after merging. |
+| 3. Camera Raw parity | `dataset-gate.py run … --out $run/<branch>`, then `accept` against `main`'s baseline, then `report` | 2½ h | The verdict per set, and how far the branch is from Camera Raw next to `main`'s report. |
+| 4. Default parity | `gate.py default-parity` per survey | about 1 h | Default renders against Camera Raw's. |
+
+Steps 2 and 3 compare different things: render snapshots compare a build with RAWmakase's own earlier renders (whether anything moved), Camera Raw parity with Camera Raw (whether it moved closer). Run them one after the other; both use every core.
+
 ## TODO
 
 Known limitations, not yet addressed:
