@@ -1927,6 +1927,69 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
     assert!(e.document.auto.is_running());
 }
 #[test]
+fn select_all_shortcut_selects_the_filmstrip_for_sync() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    let ctx = e.context.clone();
+    // Cmd+A on macOS, Ctrl+A elsewhere.
+    let modifiers = egui::Modifiers::COMMAND;
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::ModifiersChanged(modifiers),
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+    output.textures_delta.clear();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.selected_photos(), ids);
+    assert_eq!(library.selected(), Some(ids[1]));
+    Ok(())
+}
+#[test]
+fn select_none_shortcut_clears_the_filmstrip_selection() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    let ctx = e.context.clone();
+    let press = |e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+        output.textures_delta.clear();
+    };
+    // Cmd+A takes every shown photo, the open one active.
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    press(&mut e, egui::Key::A, egui::Modifiers::COMMAND);
+    assert_eq!(e.library.as_ref().unwrap().selected_photos(), ids);
+    // Cmd+D selects none.
+    press(&mut e, egui::Key::D, egui::Modifiers::COMMAND);
+    let library = e.library.as_ref().unwrap();
+    assert!(library.selected_photos().is_empty());
+    assert_eq!(library.selected(), None);
+    Ok(())
+}
+#[test]
 fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     let ctx = egui::Context::default();
     let mut editor =

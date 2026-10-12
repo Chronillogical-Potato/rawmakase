@@ -327,7 +327,7 @@ impl Editor {
         if pressed(&[Key::H]) && !i.modifiers.shift {
             self.view.retouch.hide_pins ^= true;
         }
-        if pressed(&[Key::A]) && !i.modifiers.shift {
+        if pressed(&[Key::A]) && !i.modifiers.shift && !i.modifiers.command {
             self.view.retouch.visualize ^= true;
         }
     }

@@ -2243,3 +2243,15 @@ fn a_copy_made_while_previous_import_is_shown_is_shown() -> Result<()> {
     assert!(library.shown().contains(&copy));
     Ok(())
 }
+
+#[test]
+fn develop_select_all_takes_every_shown_photo_with_the_open_one_active() -> anyhow::Result<()> {
+    let (_d, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = library.shown();
+    library.select(Some(ids[2]));
+    library.develop_select_all(Some(ids[2]));
+    // Every shown photo is selected, and the open one is still the active photo.
+    assert_eq!(library.selected_photos(), ids);
+    assert_eq!(library.selected(), Some(ids[2]));
+    Ok(())
+}
