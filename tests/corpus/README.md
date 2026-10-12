@@ -60,7 +60,7 @@ RAWMAKASE_CORPUS=… RAWMAKASE_PROFILES=<folder of DCPs> cargo test --release --
 
 - `adobe_profile_parity_does_not_regress`: camera charts with each camera's Adobe Standard DCP against Camera Raw.
 - `photos_camera_raw_parity_does_not_regress`: every photo reference against Camera Raw. `RAWMAKASE_PHOTO_FILTER` selects a subset by path.
-- `photos_match_accepted_renders`: every photo and `photos` case against RAWmakase's last accepted render; files LibRaw can't open are listed as skipped until they have an accepted render.
+- `photos_match_accepted_renders`: every photo and `photos` case against RAWmakase's last accepted render; files LibRaw can't open are listed as skipped until they have an accepted render. `RAWMAKASE_PHOTO_SOURCE_EDGE=<pixels>` renders from the photo reduced to that long edge instead of full size (an accepted render made at another size fails); `RAWMAKASE_REPORT=<file>` writes every photo's outcome as JSON; `RAWMAKASE_BLESS=new` records only photos without an accepted render.
 
 `RAWMAKASE_PROFILES` is read only when set, file by file; DCP file names must contain the camera model (Lightroom's `CameraProfiles` folder works). Adobe profiles and numbers derived from them never go into the repository.
 
@@ -118,6 +118,23 @@ The report lists files that start or stop opening and every changed field, group
 - **Baselines:** the raw.pixls.us CC0 files' are committed in `dataset/pixls-decode.json`; every other file's stay in `$RAWMAKASE_DATASET/baselines/decode/<source>.json` on the dataset's machine. Record a baseline only in a commit that says why it changed, never just to make the check pass.
 - **When:** on every LibRaw update (`packaging/native-deps.sh`), and before releases.
 - **Same build, same machine:** a baseline records the LibRaw version, the commit `native-deps.sh` pins, the platform and the RAWmakase commit, and `check` notes when they differ. LibRaw decodes some formats with floating-point steps, and white balance is computed in floating point, so compare builds linked against `native-deps.sh`'s LibRaw on the platform that recorded the baseline (macOS arm64).
+
+### Render snapshots
+
+`photos_match_accepted_renders` over every photo the dataset measured (`raw_ok AND rawmakase_ok`: 1,818, of which 1,797 in formats the test reads), in a corpus of their own on the dataset's machine, with accepted renders recorded from `main`:
+
+```
+export RAWMAKASE_DATASET=<dataset checkout> RAWMAKASE_CORPUS=$RAWMAKASE_DATASET/baselines/corpus
+(cd $RAWMAKASE_DATASET && python3 -I scripts/dataset.py manifest --where "raw_ok AND rawmakase_ok" \
+    --out $RAWMAKASE_CORPUS/manifest.json --link)
+python3 scripts/corpus/dataset-renders.py run --bless    # on main: record the accepted renders
+python3 scripts/corpus/dataset-renders.py run --bless new   # only photos without one (added, or an interrupted run)
+python3 scripts/corpus/dataset-renders.py run            # on a branch: exits 1 on any change
+```
+
+`scripts/corpus/dataset-renders.py` runs the test with `RAWMAKASE_REPORT` and groups the photos that changed by the dataset's classifications (make, CFA, brightness key, scene, light, setting, contrast, skin, sky), read from `dataset.sqlite` by SHA-256, so a change reads as "X-Trans, low-key scenes" rather than a list of photos. `report <file>` groups an earlier report; `--public` names only raw.pixls.us CC0 photos; `--out` writes the grouped report as JSON.
+
+It renders from the photo reduced to 2,400 pixels (`--source-edge`, 0 for full size): the 48-block comparison sees nothing the reduction loses, and a run of all 1,797 photos takes about 2½ hours on an M1 Pro instead of about 15. Run it before merging rendering-engine changes. The accepted renders stay in `$RAWMAKASE_DATASET/baselines/corpus/accepted/`; re-record them only from `main`, in a change that says why.
 
 ## TODO
 
