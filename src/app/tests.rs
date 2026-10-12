@@ -5863,3 +5863,63 @@ fn a_change_still_waiting_for_the_undo_log_forgets_a_removed_folders_photos() ->
     assert!(!editor.undo_log.can_undo());
     Ok(())
 }
+#[test]
+fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
+    use eframe::App as _;
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    // egui-winit turns Cmd+C and Cmd+V with any other modifier into Copy and
+    // Paste, without the key: what Shift+Cmd+C and Shift+Cmd+V arrive as.
+    let frame = |editor: &mut Editor, event: egui::Event, modifiers: egui::Modifiers| {
+        let mut input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            // Released in the same frame, as a quick shortcut can be. egui-winit
+            // drops only the press: the release comes through.
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                event.clone(),
+                egui::Event::Key {
+                    key: match event {
+                        egui::Event::Copy => egui::Key::C,
+                        _ => egui::Key::V,
+                    },
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers,
+                },
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        };
+        editor.raw_input_hook(&ctx, &mut input);
+        let mut output = ctx.run_ui(input, |ui| editor.draw(ui));
+        output.textures_delta.clear();
+    };
+    let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+    frame(&mut editor, egui::Event::Copy, shift);
+    assert!(
+        matches!(&editor.modal, Some(Modal::CopySettings(dialog))
+            if dialog.purpose == settings_transfer::Transfer::Copy),
+        "Shift+Cmd+C opens Copy Settings"
+    );
+    // The C, with its modifiers gone by the frame's end, is not Crop's.
+    assert!(editor.view.tool == state::Tool::None);
+    editor.close_copy_dialog(settings_transfer::CopyChoice::Confirm);
+    let copied = editor.document.edit.recipe().exposure;
+    editor.document.edit.setup_mut().exposure = copied + 1.5;
+    frame(&mut editor, egui::Event::Paste("text".into()), shift);
+    assert_eq!(
+        editor.document.edit.recipe().exposure,
+        copied,
+        "Shift+Cmd+V pastes"
+    );
+    // Not V: no Black & White, even with nothing copied to paste.
+    editor.clipboard = None;
+    frame(&mut editor, egui::Event::Paste("text".into()), shift);
+    assert!(!editor.document.edit.recipe().effects.monochrome);
+    // Plain Cmd+C stays the clipboard's: no Copy Settings.
+    frame(&mut editor, egui::Event::Copy, egui::Modifiers::COMMAND);
+    assert!(editor.modal.is_none());
+}
