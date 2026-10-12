@@ -19,6 +19,7 @@ Photoshop 2026 (scripts/corpus/camera_raw.py). Never commit photos or renders.
 """
 import argparse
 import hashlib
+import re
 import json
 import os
 import subprocess
@@ -46,6 +47,32 @@ MASK = ('<crs:MaskGroupBasedCorrections><rdf:Seq><rdf:li><rdf:Description crs:Wh
         '<crs:CorrectionMasks><rdf:Seq><rdf:li crs:What="Mask/Gradient" crs:MaskBlendMode="0" '
         'crs:ZeroX="0.5" crs:ZeroY="0.65" crs:FullX="0.5" crs:FullY="0.35"/></rdf:Seq></crs:CorrectionMasks>'
         '</rdf:Description></rdf:li></rdf:Seq></crs:MaskGroupBasedCorrections>')
+# What the mask case's sidecar must hold: the gradient where MASK puts it, applied
+# in full, both local adjustments, and nothing switching it off or inverting it.
+# Camera Raw writes these as attributes or as elements.
+MASK_VALUES = {'What': 'Mask/Gradient', 'CorrectionAmount': 1, 'LocalExposure2012': 0.5,
+               'LocalShadows2012': 0.5, 'ZeroX': 0.5, 'ZeroY': 0.65, 'FullX': 0.5, 'FullY': 0.35}
+MASK_OFF = {'CorrectionActive': ('false', '0'), 'MaskActive': ('false', '0'), 'MaskInverted': ('true', '1')}
+
+
+def crs_values(text, name):
+    """Every value of crs:`name` in an XMP packet, as attribute or element."""
+    return [m.group(1) or m.group(2) for m in
+            re.finditer(rf'crs:{name}="([^"]*)"|<crs:{name}>([^<]*)</crs:{name}>', text)]
+
+
+def has_gate_mask(text):
+    def matches(value, want):
+        try:
+            return abs(float(value) - want) <= 1e-4 if not isinstance(want, str) else value == want
+        except ValueError:
+            return False
+    return (all(any(matches(v, want) for v in crs_values(text, name)) for name, want in MASK_VALUES.items())
+            and not any(v.strip().lower() in off for name, off in MASK_OFF.items() for v in crs_values(text, name)))
+
+
+# How render runs rawmakase (its environment); a change makes earlier renders stale.
+RENDER_POLICY = 2
 PERCENT = {'Contrast2012': 'contrast', 'Highlights2012': 'highlights', 'Shadows2012': 'shadows',
            'Whites2012': 'whites', 'Blacks2012': 'blacks', 'Texture': 'texture', 'Clarity2012': 'clarity',
            'Dehaze': 'dehaze'}
@@ -260,7 +287,14 @@ def camera_profile(profile):
 def reference(args):
     manifest = json.loads(args.manifest.read_text())
     out = args.out.resolve()
+    # Existing renders are reused by photo index, so only for the same photos.
+    photos = [p['sha256'] for p in manifest['photos']]
+    stamp = out / 'photos.json'
+    rendered = (out / 'references').is_dir() and any((out / 'references').iterdir())
+    if (stamp.exists() and json.loads(stamp.read_text()) != photos) or (rendered and not stamp.exists()):
+        raise ValueError(f'{out} holds references of other photos: use a new folder')
     (out / 'references').mkdir(parents=True, exist_ok=True)
+    stamp.write_text(json.dumps(photos))
     chosen = settings()
     if args.settings:
         chosen = {k: v for k, v in chosen.items() if k in args.settings or k == 'default'}
@@ -281,28 +315,50 @@ def reference(args):
     failures = camera_raw.render(jobs, work=out / 'work', chunk=args.chunk)
     for f in failures:
         print('  failed:', f, file=sys.stderr)
+    # A set frozen without some of its cases would never be scored on them.
+    missing = [c['reference'] for c in plan if not (out / c['reference']).exists()]
+    if missing:
+        raise ValueError(f'{len(missing)} references were not rendered, e.g. {missing[0]}: nothing frozen')
     frozen = []
     for c in plan:
         target = out / c['reference']
-        if not target.exists():
-            continue
+        # Always from this TIFF: a sidecar left from an earlier render would vouch for it.
         xmp = target.with_suffix('.xmp')
-        if not xmp.exists():
-            xmp.write_bytes(subprocess.check_output(['exiftool', '-b', '-XMP', str(target)]))
-        s, profile, _, _ = chosen[c['name']]
+        xmp.write_bytes(subprocess.check_output(['exiftool', '-b', '-XMP', str(target)]))
+        s, profile, _, extra = chosen[c['name']]
         base, look = camera_profile(profile)
+        # The mask case's settings are all in its mask, which the tags below don't list.
+        text = xmp.read_text(errors='replace')
+        if extra and not has_gate_mask(text):
+            raise ValueError(f'{target.name}: the sidecar lacks the gate\'s gradient mask')
         tags = json.loads(subprocess.check_output(['exiftool', '-j', '-n', '-XMP-crs:all', str(xmp)]))[0]
         if tags.get('CameraProfile') != base or (look and tags.get('LookName') != profile):
             raise ValueError(f'{target.name}: rendered with {tags.get("CameraProfile")!r} '
                              f'{tags.get("LookName", "")!r}, expected {profile!r}')
-        for k, v in s.items():
-            if abs(float(tags.get(k, 'nan')) - float(v)) > 1e-4:
-                raise ValueError(f'{target.name}: {k} = {tags.get(k)!r}, expected {v}')
+        # Every setting the reference was asked for, the base included: a sidecar
+        # that lacks one, or holds another value, would freeze another render
+        # under this case's name.
+        for k, v in dict(camera_raw.BASE, **s).items():
+            got = tags.get(k)
+            try:
+                same = np.isfinite(float(got)) and abs(float(got) - float(v)) <= 1e-4
+            except (TypeError, ValueError):
+                same = str(got) == str(v)
+            if not same:
+                raise ValueError(f'{target.name}: {k} = {got!r}, expected {v}')
         frozen.append(dict(c, reference_sha256=digest(target), xmp=str(xmp.relative_to(out)), xmp_sha256=digest(xmp)))
     (out / 'references.json').write_text(json.dumps(dict(
         schema=1, camera_raw=camera_raw.version(), set=manifest['set'], photos=manifest['photos'], cases=frozen),
         indent=1))
     print(f'{len(frozen)} references frozen in {out / "references.json"}')
+
+
+def library_digest(folder):
+    """One hash over every file in a profile library: names and contents."""
+    h = hashlib.sha256()
+    for f in sorted(p for p in Path(folder).rglob('*') if p.is_file()):
+        h.update(str(f.relative_to(folder)).encode() + b'\0' + bytes.fromhex(digest(f)))
+    return h.hexdigest()
 
 
 def render(args):
@@ -311,9 +367,37 @@ def render(args):
     frozen = json.loads((refs / 'references.json').read_text())
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    # The binary that is hashed is the one that runs, never one found on PATH.
+    args.rawmakase = args.rawmakase.resolve(strict=True)
     env = dict(os.environ)
     if args.data_dir:
         env['RAWMAKASE_DATA_DIR'] = str(args.data_dir)
+    # The profile library decides which Adobe profile a render uses, so it is
+    # named explicitly and identified by its contents.
+    if not env.get('RAWMAKASE_DATA_DIR'):
+        raise ValueError('Pass --data-dir (or set RAWMAKASE_DATA_DIR): the library with the Adobe profiles')
+    library = Path(env['RAWMAKASE_DATA_DIR']) / 'camera-profiles'
+    # Nothing else decides how a render is made: no profiles or other assets from
+    # the user's data folder ($XDG_DATA_HOME/rawmakase), and the default demosaic.
+    (out / 'empty-data-home').mkdir(parents=True, exist_ok=True)
+    env['XDG_DATA_HOME'] = str(out / 'empty-data-home')
+    env.pop('RAWMAKASE_LIBRAW_DEMOSAIC', None)
+    # Renders, new or kept from an earlier run, must come from the frozen inputs.
+    for photo in frozen['photos']:
+        if digest(photo['raw']) != photo['sha256']:
+            raise ValueError(f'{photo["raw"]}: changed since the references were frozen')
+    for c in frozen['cases']:
+        if digest(refs / c['xmp']) != c['xmp_sha256']:
+            raise ValueError(f'{c["xmp"]}: changed since it was frozen')
+    # Renders already in `out` are kept only for the same references, build and
+    # profile library; anything else needs a folder of its own.
+    made_by = dict(references=digest(refs / 'references.json'), rawmakase=digest(args.rawmakase),
+                   profiles=library_digest(library), policy=RENDER_POLICY)
+    stamp = out / 'rendered-by.json'
+    kept = any(p.suffix in ('.tif', '.npy') for p in out.iterdir())
+    if (stamp.exists() and json.loads(stamp.read_text()) != made_by) or (kept and not stamp.exists()):
+        raise ValueError(f'{out} holds renders of other references or another build: use a new folder')
+    stamp.write_text(json.dumps(made_by))
     for i, photo in enumerate(frozen['photos']):
         done = lambda name: (out / name).exists() or (out / name).with_suffix('.npy').exists()
         jobs = [dict(xmp=str(refs / c['xmp']), output=str(out / Path(c['reference']).name), max_edge=EDGE)
@@ -340,12 +424,19 @@ def render(args):
 def score(args):
     refs = args.refs.resolve()
     frozen = json.loads((refs / 'references.json').read_text())
+    # Renders are matched to cases by file name, so only renders made for these
+    # references are scored.
+    stamp = args.renders / 'rendered-by.json'
+    made_by = json.loads(stamp.read_text()) if stamp.exists() else None
+    if not made_by or made_by.get('references') != digest(refs / 'references.json') \
+            or made_by.get('policy') != RENDER_POLICY:
+        raise ValueError(f'{args.renders} was not rendered for {refs} by `render`')
     rows, pixels = [], {}
     for c in frozen['cases']:
         ref = refs / c['reference']
         out = args.renders / ref.name
         photo = frozen['photos'][c['photo']]
-        row = dict(photo=c['photo'], name=c['name'], stratum=photo['stratum'])
+        row = dict(photo=c['photo'], sha256=photo['sha256'], name=c['name'], stratum=photo['stratum'])
         if digest(ref) != c['reference_sha256']:
             raise ValueError(f'{ref.name}: reference changed since it was frozen')
         reduced = out.with_suffix('.npy')
@@ -359,7 +450,8 @@ def score(args):
             pixels.setdefault((c['name'], photo['stratum']), []).append(L)
         rows.append(dict(row, **m))
     band_rows = {f'{n}|{s}': bands(p) for (n, s), p in pixels.items()}
-    args.out.write_text(json.dumps(dict(schema=1, set=frozen['set'], photos=rows, bands=band_rows), indent=1))
+    args.out.write_text(json.dumps(dict(schema=1, set=frozen['set'], rendered_by=made_by, photos=rows,
+                                        bands=band_rows), indent=1))
     print(f'{len(rows)} scores -> {args.out}')
 
 
@@ -371,7 +463,8 @@ def summarise(scores):
         if r.get('valid', 0) < 0.5:
             s['invalid'] += 1
             continue
-        s['photos'][r['photo']] = r['median_de00']
+        # By the RAW's hash: photo indices restart in every set.
+        s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
         s['clipping'].append(r['clipping'])
     for setting in out.values():
         for s in setting.values():
@@ -385,18 +478,40 @@ def summarise(scores):
 
 def accept(args):
     cand, base = json.loads(args.candidate.read_text()), json.loads(args.baseline.read_text())
+    if cand.get('set') != base.get('set'):
+        print(f'the candidate scores set {cand.get("set")!r}, the baseline {base.get("set")!r}')
+        return 1
+    # Both against the same frozen references and with the same profiles; only the
+    # build may differ.
+    if any((x.get('rendered_by') or {}).get('policy') != RENDER_POLICY for x in (cand, base)):
+        print(f'scores of renders made under another render policy than {RENDER_POLICY}: render and score again')
+        return 1
+    for key in ('references', 'profiles'):
+        if (cand.get('rendered_by') or {}).get(key) != (base.get('rendered_by') or {}).get(key) or \
+                not (cand.get('rendered_by') or {}).get(key):
+            print(f'the candidate and baseline were not rendered with the same {key}')
+            return 1
     C, B = summarise(cand), summarise(base)
     magnitude = {k: v[2] for k, v in settings().items()}
     failed = []
     print(f'{"setting":28s} {"stratum":7s} {"n":>2s} {"e4":>6s} {"new":>6s} {"dflt":>6s}  result')
-    for name in sorted(C, key=lambda n: (n != 'default', n)):
+    # Every setting either side scored: one the candidate lacks fails, as does an
+    # empty candidate.
+    names = sorted(C.keys() | B.keys(), key=lambda n: (n != 'default', n))
+    if not names:
+        print('no scores')
+        return 1
+    for name in names:
         default_name = 'color-default' if name.startswith('color-') else 'default'
         for st, _, _ in STRATA:
-            c, b = C[name].get(st), B.get(name, {}).get(st)
+            c, b = C.get(name, {}).get(st), B.get(name, {}).get(st)
             cd, bd = C.get(default_name, {}).get(st), B.get(default_name, {}).get(st)
             reasons = []
-            if not c or not b or c['n'] < 3 or c['invalid'] or b['n'] < 3:
-                reasons.append('inconclusive (fewer than 3 photos or invalid photos)')
+            if not c or not b:
+                reasons.append('missing from the ' + ('candidate' if not c else 'baseline'))
+            elif (c['n'] < 3 or c['invalid'] or b['n'] < 3 or b['invalid'] or not cd or not bd
+                  or c['photos'].keys() != b['photos'].keys()):
+                reasons.append('inconclusive (fewer than 3 photos, invalid photos or different photos)')
             else:
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:
@@ -408,15 +523,19 @@ def accept(args):
                             reasons.append('1: no material improvement')
                         cb = cand['bands'].get(f'{name}|{st}', {})
                         bb = base['bands'].get(f'{name}|{st}', {})
+                        if not cb or cb.keys() != bb.keys() or not all(np.isfinite(v) for v in cb.values()):
+                            reasons.append('2: band measurements missing')
                         for band, v in cb.items():
                             if abs(v) > 3 and not (band in bb and abs(v) <= 0.5 * abs(bb[band])):
                                 reasons.append(f'2: band {band} ΔL* {v:+.1f}')
-                    limit = 1.0 if magnitude[name] <= 50 else 2.0
-                    for p, v in c['photos'].items():
-                        if p in b['photos'] and v > b['photos'][p] + limit:
-                            reasons.append(f'3: photo {p} {b["photos"][p]:.2f} -> {v:.2f}')
-                    if c['clipping'] > b['clipping'] + 0.005:
-                        reasons.append(f'4: clipping {100 * b["clipping"]:.2f}% -> {100 * c["clipping"]:.2f}%')
+                # One photo much worse, or more clipping, fails every setting,
+                # the defaults too.
+                limit = 1.0 if magnitude[name] <= 50 else 2.0
+                for p, v in c['photos'].items():
+                    if p in b['photos'] and v > b['photos'][p] + limit:
+                        reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {v:.2f}')
+                if c['clipping'] > b['clipping'] + 0.005:
+                    reasons.append(f'4: clipping {100 * b["clipping"]:.2f}% -> {100 * c["clipping"]:.2f}%')
             dflt = cd['score'] if cd else float('nan')
             print(f'{name:28s} {st:7s} {c["n"] if c else 0:2d} {b["score"] if b else float("nan"):6.2f} '
                   f'{c["score"] if c else float("nan"):6.2f} {dflt:6.2f}  {"PASS" if not reasons else "; ".join(reasons)}')
