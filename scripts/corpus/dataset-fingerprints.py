@@ -80,7 +80,8 @@ def load_samples(dataset, manifest):
         wanted = {f['sha256'] for f in json.loads(manifest.read_text())['files']}
         unknown = wanted - samples.keys()
         if unknown:
-            raise Setup(f'{len(unknown)} manifest files are not in the dataset, e.g. {min(unknown)}')
+            # Not named: a hash the dataset does not know may be a private file's.
+            raise Setup(f'{len(unknown)} manifest files are not in the dataset')
         samples = {h: s for h, s in samples.items() if h in wanted}
     missing = []
     for s in samples.values():
@@ -89,8 +90,12 @@ def load_samples(dataset, manifest):
         if s['file'] is None or not s['file'].is_file():
             missing.append(s)
     if missing:
-        raise Setup(f'{len(missing)} files are missing from {dataset}, e.g. '
-                    f'{missing[0]["sha256"]} ({missing[0]["source"]})')
+        # Counted by source; only a publishable file is named.
+        counts = Counter(s['source'] for s in missing)
+        public = [s['sha256'] for s in missing if committed(s)]
+        raise Setup(f'{len(missing)} files are missing from {dataset} (' +
+                    ', '.join(f'{n} {source}' for source, n in sorted(counts.items())) + ')' +
+                    (f', e.g. {public[0]}' if public else ''))
     if not samples:
         raise Setup('No files selected')
     return samples
