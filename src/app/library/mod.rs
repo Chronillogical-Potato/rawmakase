@@ -662,6 +662,7 @@ impl Library {
         }
         self.start_capture_times();
         self.start_photo_info();
+        self.start_checksums();
         Ok(removed)
     }
     /// Removes virtual copy `id`; returns its master, which is selected. An
@@ -727,6 +728,7 @@ impl Library {
         }
         self.poll_capture_times();
         self.poll_photo_info();
+        self.poll_checksums();
         self.poll_reread();
         self.cache.poll(ctx);
         self.screen.poll(ctx);
@@ -891,6 +893,7 @@ mod capture;
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod cell;
+mod checksums;
 mod collections;
 mod compare;
 mod copy_name;

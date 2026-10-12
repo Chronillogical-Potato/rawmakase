@@ -16,6 +16,7 @@ pub struct Catalog {
     computer: locations::Computer,
 }
 
+mod checksums;
 mod copies;
 mod db;
 mod defaults;
@@ -39,6 +40,7 @@ mod value;
 pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 #[doc(hidden)]
+pub use checksums::ReadChecksum;
 pub use db::assert_shape as assert_sql_shape;
 pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
@@ -360,6 +362,8 @@ fn set_meta(w: &mut Write<'_>, key: &str, value: &str) -> Result<()> {
 pub use sidecar::Merge;
 #[cfg(test)]
 mod boundary_tests;
+#[cfg(test)]
+mod checksums_tests;
 #[cfg(test)]
 mod descriptive_tests;
 #[cfg(test)]

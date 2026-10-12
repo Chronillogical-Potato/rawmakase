@@ -52,6 +52,9 @@ pub(crate) struct Session {
     /// white, which is on by default.
     #[serde(default)]
     pub no_auto_black_white_mix: bool,
+    /// Preferences > Catalog: the user paused reading checksums.
+    #[serde(default)]
+    pub pause_checksums: bool,
     /// How the Library showed its photos last time.
     #[serde(default)]
     pub library_layout: LibraryLayout,

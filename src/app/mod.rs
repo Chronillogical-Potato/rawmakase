@@ -113,6 +113,9 @@ pub(crate) struct Editor {
     selection: subject_mask::Selection,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
+    /// Preferences > Catalog: the user paused reading checksums, saved in
+    /// the session.
+    checksums_paused: bool,
     /// Preferences: whether converting to black & white applies the Auto mix to a
     /// mix never set, as Lightroom's preference of that name (on by default).
     first_conversion: treatment::FirstConversion,
@@ -311,6 +314,7 @@ impl Editor {
             undo_log: Default::default(),
             selection: Default::default(),
             auto_advance: session.auto_advance,
+            checksums_paused: session.pause_checksums,
             first_conversion: if session.no_auto_black_white_mix {
                 treatment::FirstConversion::KeepMix
             } else {
@@ -364,6 +368,7 @@ impl Editor {
                     auto_advance: self.auto_advance,
                     no_auto_black_white_mix: self.first_conversion
                         == treatment::FirstConversion::KeepMix,
+                    pause_checksums: self.checksums_paused,
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
                     crop_guides: self.view.crop_guides.to_session(),

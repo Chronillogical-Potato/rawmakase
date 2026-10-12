@@ -1,7 +1,8 @@
 //! What adding a folder leaves out, read from the photos' files in the
 //! background and kept in the catalog: capture times, so the photos sort as
 //! they were taken, and photo info (camera, lens, exposure, size). Photos
-//! imported from Lightroom already have both.
+//! imported from Lightroom already have both. Checksums are read beside them
+//! (see `checksums`).
 use super::CatalogSession;
 use super::background::{Reader, can_read};
 use crate::catalog::PhotoId;
@@ -19,6 +20,7 @@ pub(super) struct Backfill {
     info: Option<Reader<Option<Option<PhotoInfo>>>>,
     /// Photo info was asked for while it was being read.
     info_again: bool,
+    pub(super) checksums: super::checksums::Checksums,
 }
 
 /// What one poll of a backfill saved.
@@ -64,7 +66,11 @@ impl CatalogSession {
     /// photos given the ids of photos removed meanwhile. The next starts read
     /// what is still missing.
     pub(super) fn stop_backfill(&mut self) {
-        self.backfill = Backfill::default();
+        let checksums = std::mem::take(&mut self.backfill.checksums).stopped();
+        self.backfill = Backfill {
+            checksums,
+            ..Backfill::default()
+        };
     }
     /// Lets the next [`Self::start_capture_times`] try every photo again, as
     /// once more photos are online.
