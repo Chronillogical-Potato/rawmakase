@@ -153,8 +153,11 @@ def fingerprint(rawmakase, samples, jobs):
                     line['sha256'] = s['sha256']
                 elif line.get('failed') == 'read' or line.get('sha256') is None:
                     problems.append((committed(s), f'{s["sha256"]}: could not be read ({line.get("error")})'))
+                    line['sha256'] = s['sha256']
                 elif line['sha256'] != s['sha256']:
-                    problems.append((committed(s), f'{s["sha256"]}: the file on disk hashes to {line["sha256"]}'))
+                    # Another file, whose rights are unknown: nothing of it is kept.
+                    problems.append((committed(s), f'{s["sha256"]}: the file on disk is not the dataset\'s file'))
+                    line = {'sha256': s['sha256'], 'failed': 'read', 'error': 'not the dataset\'s file'}
                 results[s['sha256']] = line
             done += len(out)
             print(f'\r{done}/{len(order)} files', end='', file=sys.stderr, flush=True)
