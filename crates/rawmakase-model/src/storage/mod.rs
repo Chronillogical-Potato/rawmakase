@@ -14,6 +14,6 @@ pub use files::{
     asset_dirs, atomic_json, parent_dir, persist, read_json_or_default, stage, sync_dir,
     write_atomic,
 };
-pub use identity::Identity;
 pub use identity::Stamp;
 pub use identity::{FNV_OFFSET, fnv1a};
+pub use identity::{IDENTITY_PREFIX, Identity};

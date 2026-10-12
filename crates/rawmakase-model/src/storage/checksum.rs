@@ -2,7 +2,7 @@
 //! outside RAWmakase: its size, a quick hash of three blocks for finding
 //! candidates cheaply, and the SHA-256 of the whole file, which alone
 //! verifies a match.
-use super::{Identity, Stamp};
+use super::{IDENTITY_PREFIX, Identity, Stamp};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -45,7 +45,7 @@ impl FileChecksum {
     pub fn read_quick(path: &Path, mut pace: impl FnMut(usize) -> bool) -> Result<Outcome<Self>> {
         let identity = Identity::read(path)?;
         let (quick, read) = quick_hash(&mut File::open(path)?, identity.size)?;
-        if !pace(read) {
+        if !pace(read + identity_reads(identity.size)) {
             return Ok(Outcome::Cancelled);
         }
         stable(path, identity, |identity| Self {
@@ -62,7 +62,7 @@ impl FileChecksum {
         let identity = Identity::read(path)?;
         let mut file = File::open(path)?;
         let (quick, read) = quick_hash(&mut file, identity.size)?;
-        if !pace(read) {
+        if !pace(read + identity_reads(identity.size)) {
             return Ok(Outcome::Cancelled);
         }
         file.seek(SeekFrom::Start(0))?;
@@ -107,6 +107,11 @@ fn stable<T>(
         return Ok(Outcome::Changed);
     }
     Ok(Outcome::Done(make(identity)))
+}
+
+/// What reading a file's identity before and after (see [`stable`]) reads.
+fn identity_reads(size: u64) -> usize {
+    2 * IDENTITY_PREFIX.min(size) as usize
 }
 
 /// Fills `buffer` as far as the file goes; less only at its end.
@@ -223,7 +228,8 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(read, 18);
+        // The quick block, and the identity read before and after.
+        assert_eq!(read, 3 * 18);
         let (_dir, large) = file(&vec![0u8; 300_000]);
         let mut read = 0;
         done(
@@ -233,7 +239,7 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(read, 3 * BLOCK as usize);
+        assert_eq!(read, 5 * BLOCK as usize);
     }
 
     #[test]
@@ -256,7 +262,7 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(seen, [3 * BLOCK as usize, CHUNK, CHUNK, 5]);
+        assert_eq!(seen, [5 * BLOCK as usize, CHUNK, CHUNK, 5]);
         let mut chunks = 0;
         let read = FileChecksum::read_full(&path, |_| {
             chunks += 1;
