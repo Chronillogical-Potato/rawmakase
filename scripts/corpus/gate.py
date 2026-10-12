@@ -459,9 +459,11 @@ def summarise(scores):
     """setting -> stratum -> dict(score, mean, photos{i: score}, clipping, n)."""
     out = {}
     for r in scores['photos']:
-        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid=set()))
+        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid={}))
         if r.get('valid', 0) < 0.5:
-            s['invalid'].add(r.get('sha256', r['photo']))
+            # With why: a photo framed otherwise than Camera Raw in both is the
+            # same limitation; one that is no longer rendered is not.
+            s['invalid'][r.get('sha256', r['photo'])] = r.get('error')
             continue
         # By the RAW's hash: photo indices restart in every set.
         s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
@@ -527,9 +529,13 @@ def accept(args):
     # Photos left out of the verdict (holdout photos already looked at): dropped
     # from both sides, and said so.
     skip = excluded(args.exclude)
+    # Band measurements pool the photos' pixels, so they can't drop one: pairs that
+    # lost a photo can't be judged on rule 2.
+    pooled_with_excluded = set()
     if skip:
         for x in (cand, base):
             kept = [r for r in x['photos'] if not str(r.get('sha256', '')).startswith(skip)]
+            pooled_with_excluded |= {(r['name'], r['stratum']) for r in x['photos'] if r not in kept}
             print(f'{len(x["photos"]) - len(kept)} cases of excluded photos left out')
             x['photos'] = kept
     if cand.get('set') != base.get('set'):
@@ -568,9 +574,11 @@ def accept(args):
             reasons = []
             if not c or not b:
                 reasons.append('missing from the ' + ('candidate' if not c else 'baseline'))
-            elif c['invalid'] - b['invalid']:
-                # A photo the baseline scored and the candidate can't: it stopped rendering.
-                reasons.append(f'{len(c["invalid"] - b["invalid"])} photos no longer render or score')
+            elif any(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items()):
+                # A photo the candidate can't score as the baseline could, or for
+                # another reason (no longer rendered, say).
+                n = sum(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items())
+                reasons.append(f'{n} photos no longer render or score as in the baseline')
             elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] != b['invalid'] or not cd or not bd
                   or c['photos'].keys() != b['photos'].keys()):
                 # Photos invalid on both sides alike (framed otherwise than
@@ -590,6 +598,8 @@ def accept(args):
                     if not near:
                         if not (c['score'] <= cd['score'] + 1.0 or c['score'] <= 0.6 * b['score']):
                             reasons.append('1: no material improvement')
+                        if (name, st) in pooled_with_excluded:
+                            reasons.append('inconclusive on rule 2: its bands pool excluded photos')
                         cb = cand['bands'].get(f'{name}|{st}', {})
                         bb = base['bands'].get(f'{name}|{st}', {})
                         if not cb or cb.keys() != bb.keys() or not all(np.isfinite(v) for v in cb.values()):
