@@ -4282,9 +4282,10 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
         })
     };
     draw(&mut state, vec![], 0.);
-    // The switch sits left of the reset button, in the 28-point header 8 points down.
+    // The switch sits left of the reset button, which sits left of the
+    // chevron, in the 28-point header 14 points down.
     let area = area.get();
-    let switch = Pos2::new(area.right() - 28. - 18., area.top() + 8. + 14.);
+    let switch = Pos2::new(area.right() - 26. - 26. - 18., area.top() + 14. + 14.);
     draw(
         &mut state,
         click_at(switch, egui::PointerButton::Primary),

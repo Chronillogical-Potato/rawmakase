@@ -306,17 +306,22 @@ fn section_header(
         d.get_temp::<std::collections::BTreeSet<String>>(collapsed_sections_id())
             .is_some_and(|set| set.contains(key))
     });
-    ui.add_space(8.);
+    let sidebar = group == Some(SectionGroup::LibraryLeft.key());
+    // Space parts the panels; the catalog's sidebar lists sources closer.
+    ui.add_space(if sidebar { 8. } else { 14. });
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    let reset_rect = Rect::from_center_size(
-        Pos2::new(rect.right() - 16., rect.center().y),
-        Vec2::splat(24.),
-    );
-    let right = if resettable {
-        reset_rect.left()
-    } else {
-        rect.right()
-    };
+    // Outside the catalog's sidebar the chevron keeps the header's right end,
+    // its buttons before it.
+    let chevron_rect = (!sidebar).then(|| {
+        Rect::from_center_size(
+            Pos2::new(rect.right() - 14., rect.center().y),
+            Vec2::splat(24.),
+        )
+    });
+    let end = chevron_rect.map_or(rect.right(), |c| c.left());
+    let reset_rect =
+        Rect::from_center_size(Pos2::new(end - 14., rect.center().y), Vec2::splat(24.));
+    let right = if resettable { reset_rect.left() } else { end };
     let switch_rect =
         Rect::from_center_size(Pos2::new(right - 18., rect.center().y), Vec2::new(26., 20.));
     let toggle_right = if switch.is_some() {
@@ -328,6 +333,10 @@ fn section_header(
     let toggle = ui
         .interact(toggle_rect, id.with("toggle"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let chevron = chevron_rect.map(|c| {
+        ui.interact(c, id.with("chevron"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+    });
     let reset = ui.interact(
         reset_rect,
         id.with("reset"),
@@ -347,74 +356,45 @@ fn section_header(
         HeaderButton::None => reset,
     };
     let enabled = switch.as_deref().is_none_or(|s| *s == PanelState::On);
-    let hovered = toggle.hovered();
-    if group == Some(SectionGroup::LibraryLeft.key()) {
-        // The catalog's sidebar lists its sources under quiet captions, the
-        // chevron on the right while hovered or folded.
-        if hovered {
-            ui.painter().rect_filled(rect, 5., palette.gray(32));
-        }
-        ui.painter().text(
-            // Over the rows' text, at their 10 px inset.
-            Pos2::new(rect.left() + 10., rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            title.to_uppercase(),
-            egui::FontId::proportional(11.),
-            palette.gray(if hovered { 215 } else { 135 }),
-        );
-        if hovered || !open {
-            let chevron = if open {
-                Icon::ChevronDown
-            } else {
-                Icon::ChevronRight
-            };
-            // Ending where the sidebar's counts do.
-            let at = Pos2::new(right - 15.5, rect.center().y);
-            let tint = palette.gray(if hovered { 200 } else { 110 });
-            icons::paint_at(ui.painter(), chevron, at, 12., tint);
-        }
-    } else {
-        // A filled header band marks each collapsible panel, as in Lightroom.
-        ui.painter().rect_filled(
-            rect,
-            3.,
-            palette.gray(if toggle.hovered() { 60 } else { 51 }),
-        );
-        ui.painter().rect_stroke(
-            rect,
-            3.,
-            Stroke::new(1., palette.gray(if open { 70 } else { 62 })),
-            egui::StrokeKind::Inside,
-        );
-        let c = Pos2::new(rect.left() + 13., rect.center().y);
-        let triangle = if open {
-            vec![
-                c + Vec2::new(-4., -2.),
-                c + Vec2::new(4., -2.),
-                c + Vec2::new(0., 3.),
-            ]
-        } else {
-            vec![
-                c + Vec2::new(-2., -4.),
-                c + Vec2::new(3., 0.),
-                c + Vec2::new(-2., 4.),
-            ]
+    let hovered = toggle.hovered() || chevron.as_ref().is_some_and(|c| c.hovered());
+    // Every panel's header is a quiet caption with its chevron on the right.
+    // In the catalog's sidebar both show only while hovered (the chevron also
+    // while folded); elsewhere the header is a band with its chevron always.
+    if !sidebar || hovered {
+        let fill = match (sidebar, hovered) {
+            (true, _) => 32,
+            (false, true) => 38,
+            (false, false) => 30,
         };
-        ui.painter().add(egui::Shape::convex_polygon(
-            triangle,
-            palette.gray(if toggle.hovered() { 235 } else { 190 }),
-            Stroke::NONE,
-        ));
-        ui.painter().text(
-            Pos2::new(rect.left() + 26., rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            title,
-            egui::FontId::proportional(13.),
-            palette.gray(match (enabled, toggle.hovered()) {
-                (false, _) => 140,
-                (true, true) => 250,
-                (true, false) => 235,
-            }),
+        ui.painter().rect_filled(rect, 5., palette.gray(fill));
+    }
+    ui.painter().text(
+        // Over the rows' text, at their 10 px inset.
+        Pos2::new(rect.left() + 10., rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title.to_uppercase(),
+        egui::FontId::proportional(11.),
+        palette.gray(match (enabled, hovered) {
+            (false, _) => 95,
+            (true, true) => 215,
+            (true, false) => 145,
+        }),
+    );
+    if !sidebar || hovered || !open {
+        let chevron = if open {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        };
+        // Ending where the sidebar's counts do, or at the header's right end.
+        let x = chevron_rect.map_or(right - 15.5, |c| c.center().x);
+        let tint = palette.gray(if hovered { 200 } else { 110 });
+        icons::paint_at(
+            ui.painter(),
+            chevron,
+            Pos2::new(x, rect.center().y),
+            12.,
+            tint,
         );
     }
     if button == HeaderButton::Pin {
@@ -479,7 +459,9 @@ fn section_header(
             }
         });
     }
-    if toggle.clicked() && !context_clicked(&toggle) {
+    if (toggle.clicked() && !context_clicked(&toggle))
+        || chevron.as_ref().is_some_and(|c| c.clicked())
+    {
         open = !open;
         set_open(ui, key, open);
         if open && let Some(group) = group.filter(|g| solo(ui, g)) {
