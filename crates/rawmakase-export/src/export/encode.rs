@@ -183,7 +183,7 @@ fn write_field<W: Write + Seek, K: TiffKind>(
             .map(|c| c.as_chunks::<4>().0)
     };
     match f.kind {
-        ASCII => dir.write_tag(tag, f.text().unwrap_or_default().as_str())?,
+        ASCII => dir.write_tag(tag, CameraText::new(&f.bytes))?,
         SHORT => dir.write_tag(
             tag,
             halves()
@@ -240,6 +240,28 @@ fn write_field<W: Write + Seek, K: TiffKind>(
         _ => dir.write_tag(tag, f.bytes.as_slice())?,
     }
     Ok(())
+}
+
+/// An ASCII value as the camera wrote it, ending in one NUL. The encoder's own
+/// strings refuse an inner NUL and bytes past ASCII, but EXIF's Copyright holds
+/// two strings separated by NUL (photographer, editor), and cameras and
+/// catalogs write names in UTF-8, which JPEG exports keep too.
+struct CameraText(Vec<u8>);
+impl CameraText {
+    fn new(bytes: &[u8]) -> Self {
+        let end = bytes.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        Self([&bytes[..end], &[0]].concat())
+    }
+}
+impl tiff::encoder::TiffValue for CameraText {
+    const BYTE_LEN: u8 = 1;
+    const FIELD_TYPE: tiff::tags::Type = tiff::tags::Type::ASCII;
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+    fn data(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(&self.0)
+    }
 }
 
 /// The encoder takes rationals only as fixed-size arrays; EXIF uses up to four
