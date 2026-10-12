@@ -10,7 +10,7 @@ use crate::catalog::copies::delete_photo;
 use crate::catalog::db::{Reads, sql};
 use crate::catalog::edit_rows::{Refresh, refresh_identity};
 use crate::catalog::ingest::{Matched, Place, folder_id, known};
-use crate::catalog::locations::{folder_path, logical_location};
+use crate::catalog::locations::folder_path;
 use crate::catalog::{Catalog, FolderId, MetadataDefaults, PhotoId, SidecarReport};
 use crate::storage::Identity;
 use anyhow::{Result, ensure};
@@ -162,6 +162,8 @@ impl Catalog {
             .collect();
         let computer = self.computer.id.clone();
         let (moved, protected, removed, folders_removed, skipped) = self.db.write(|w| {
+            // Where each destination goes, by this transaction's locations.
+            let placing = crate::catalog::ingest::Matcher::read(w, &computer)?;
             let mut moved = Vec::new();
             let mut protected = Vec::new();
             let mut removed = Vec::new();
@@ -178,8 +180,10 @@ impl Catalog {
                     continue;
                 }
                 let (root, logical) = &m.place;
-                let here = logical_location(w, &computer, *root, logical)?;
-                if here.as_deref() != m.to.parent() {
+                let placed = m.to.parent().map(|d| placing.place(d, d, &[]));
+                if !matches!(placed, Some(Matched::Place(Place::Folder(r, ref l)))
+                    if r == *root && l == logical)
+                {
                     skip(&m.to, "its folder was located elsewhere since the scan");
                     continue;
                 }

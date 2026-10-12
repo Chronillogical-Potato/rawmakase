@@ -262,11 +262,43 @@ pub fn scan(
     }
     unknown.sort();
     // Each unknown file matched with the checksums on record.
+    // Present photos without a current checksum are read now, so a copy
+    // of one is known as a copy.
+    let mut checksums = inputs.checksums.clone();
+    let mut by_quick = inputs.by_quick.clone();
+    for (id, state) in &states {
+        if *state != FileState::Present {
+            continue;
+        }
+        let Some(path) = inputs.path_of(*id) else {
+            continue;
+        };
+        let current = checksums.get(id).is_some_and(|c| {
+            crate::storage::Stamp::read(&path).is_ok_and(|now| {
+                now.size == c.identity.size && now.modified_ns == c.identity.modified_ns
+            })
+        });
+        if current {
+            continue;
+        }
+        if cancelled() {
+            bail!("Synchronization stopped");
+        }
+        if let Ok(ChecksumRead::Done(quick)) = FileChecksum::read_quick(&path, |_| !cancelled()) {
+            by_quick
+                .entry((quick.size, quick.quick.clone()))
+                .or_default()
+                .push(*id);
+            checksums.insert(*id, quick);
+        }
+    }
     let mut matcher = Matching {
         inputs,
         online,
         cancel,
         states,
+        checksums,
+        by_quick,
     };
     let mut found: Vec<(PathBuf, (RootId, String), Identity, Found)> = Vec::new();
     for (n, (file, place)) in unknown.into_iter().enumerate() {
@@ -277,11 +309,15 @@ pub fn scan(
         match matcher.find(&file) {
             Ok(Some((identity, what))) => found.push((file, place, identity, what)),
             Ok(None) => {}
+            Err(_) if cancelled() => bail!("Synchronization stopped"),
             Err(e) => plan.not_checked.push(NotChecked {
                 path: file,
                 reason: format!("{e:#}"),
             }),
         }
+    }
+    if cancelled() {
+        bail!("Synchronization stopped");
     }
     // A missing photo two files claim, or a file two photos claim, is the
     // user's to settle.
@@ -428,6 +464,9 @@ struct Matching<'a> {
     online: &'a dyn Fn(&Path) -> bool,
     cancel: &'a AtomicBool,
     states: HashMap<PhotoId, FileState>,
+    /// The checksums on record, with those of present photos read now.
+    checksums: HashMap<PhotoId, FileChecksum>,
+    by_quick: HashMap<(u64, String), Vec<PhotoId>>,
 }
 
 impl Matching<'_> {
@@ -472,7 +511,7 @@ impl Matching<'_> {
         };
         let identity = quick.identity.clone();
         let mut hits: BTreeSet<PhotoId> = BTreeSet::new();
-        if let Some(ids) = self.inputs.by_quick.get(&(quick.size, quick.quick.clone())) {
+        if let Some(ids) = self.by_quick.get(&(quick.size, quick.quick.clone())) {
             hits.extend(ids);
         }
         if let Some(ids) = self
@@ -486,7 +525,8 @@ impl Matching<'_> {
         let mut missing: Vec<(PhotoId, bool)> = Vec::new();
         let mut present: Vec<PhotoId> = Vec::new();
         for id in hits {
-            let stored = self.inputs.checksums.get(&id);
+            let stored = self.checksums.get(&id).cloned();
+            let stored = stored.as_ref();
             // A quick hash on record that differs rules it out.
             if stored.is_some_and(|c| c.size != quick.size || c.quick != quick.quick) {
                 continue;

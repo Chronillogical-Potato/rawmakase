@@ -2,6 +2,7 @@
 //! releases that saved them beside the photo.
 use super::db::{Reads, Write, is_storage_error, sql};
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
+use super::value::row;
 use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -506,6 +507,19 @@ struct Root {
     original_on_disk: String,
     rows_on_disk: Vec<(String, PathBuf)>,
 }
+row! {
+    struct LocationRow {
+        root: RootId,
+        relative: String,
+        path: String,
+    }
+}
+row! {
+    struct RootRow {
+        id: RootId,
+        original: String,
+    }
+}
 /// What a folder found on disk is in the catalog.
 pub(in crate::catalog) enum Matched {
     Place(Place),
@@ -514,13 +528,35 @@ pub(in crate::catalog) enum Matched {
 }
 impl Matcher {
     pub(in crate::catalog) fn new(catalog: &Catalog) -> Result<Self> {
-        let mut rows = catalog.location_rows()?;
+        Self::read(&catalog.db, &catalog.computer.id)
+    }
+    /// The locations of `computer`, read in `db`'s transaction.
+    pub(in crate::catalog) fn read(db: &impl Reads, computer: &str) -> Result<Self> {
+        let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();
+        let located: Vec<(RootId, String, String)> = db
+            .read::<LocationRow>(
+                sql!(
+                    "SELECT root, relative_path, path FROM folder_locations WHERE computer=?
+                     ORDER BY root, relative_path"
+                ),
+                &[&computer],
+            )?
+            .into_iter()
+            .map(|l| (l.root, l.relative, l.path))
+            .collect();
+        for (root, relative, path) in located {
+            rows.entry(root)
+                .or_default()
+                .push((relative, PathBuf::from(path)));
+        }
+        let root_rows: Vec<RootRow> =
+            db.read(sql!("SELECT id, original_path FROM roots ORDER BY id"), &[])?;
         // Paths are compared as the disk has them (no symlinks, no trailing
         // separators); one that isn't there stays as it is.
         let real = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let mut locations = Vec::new();
         let mut roots = HashMap::new();
-        for (root, original, _) in catalog.roots()? {
+        for RootRow { id: root, original } in root_rows {
             let own = rows.remove(&root).unwrap_or_default();
             // Where it was added counts even when it is located elsewhere
             // here: what is left there is then a stale copy, reported by the

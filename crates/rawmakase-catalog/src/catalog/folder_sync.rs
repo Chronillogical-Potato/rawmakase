@@ -185,22 +185,45 @@ impl Catalog {
         }
         // One snapshot: the families' digests are of the very rows the
         // checksums and paths matched come from.
-        let (folders, photos, checksums, digests) = self.db.snapshot(|s| {
+        row! {
+            struct RootRow {
+                id: RootId,
+                original: String,
+                location: Option<String>,
+            }
+        }
+        let (folders, photos, checksums, digests, roots) = self.db.snapshot(|s| {
             let photos: Vec<PhotoRow> = s.read(
                 sql!("SELECT id, folder, filename, identity FROM photos WHERE master_id IS NULL"),
                 &[],
+            )?;
+            let roots: Vec<RootRow> = s.read(
+                sql!(
+                    "SELECT r.id, r.original_path, l.path FROM roots r LEFT JOIN folder_locations l
+                     ON l.root = r.id AND l.relative_path = '' AND l.computer = ?"
+                ),
+                &[&self.computer.id],
             )?;
             Ok((
                 self.locate_folders(s)?,
                 photos,
                 super::checksums::stored(s)?,
                 digest::every_family(s)?,
+                roots,
             ))
         })?;
+        // Where each root is here: its location, else where it was added.
+        let roots: Vec<(RootId, PathBuf)> = roots
+            .into_iter()
+            .map(|r| (r.id, PathBuf::from(r.location.unwrap_or(r.original))))
+            .filter(|(_, path)| !path.as_os_str().is_empty())
+            .collect();
         let walk = match scope {
             SyncScope::All => {
+                // Each root where it is here, and each folder located apart.
                 let mut anchors: Vec<PathBuf> =
                     folders.values().filter_map(|f| f.anchor.clone()).collect();
+                anchors.extend(roots.iter().map(|(_, path)| path.clone()));
                 anchors.sort();
                 anchors.dedup();
                 anchors

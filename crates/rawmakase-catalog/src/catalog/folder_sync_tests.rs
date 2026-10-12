@@ -663,4 +663,49 @@ mod scenarios {
         assert!(!folders.iter().any(|f| f.starts_with("Lisbon")));
         Ok(())
     }
+
+    #[test]
+    fn a_copy_of_a_photo_without_a_checksum_is_still_a_copy() -> Result<()> {
+        let f = fixture()?;
+        let id = f.id("IMG_1001.dng");
+        f.cat
+            .db_for_tests()
+            .execute_batch("DELETE FROM photo_checksums")?;
+        std::fs::copy(
+            f.root.join("Lisbon/IMG_1001.dng"),
+            f.root.join("Lisbon/IMG_1001 copy.dng"),
+        )?;
+        let plan = f.plan(SyncScope::All)?;
+        assert_eq!(plan.additions.len(), 1);
+        assert_eq!(plan.additions[0].copy_of, [id]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_photo_in_a_root_whose_folders_are_all_located_apart_is_found() -> Result<()> {
+        let mut f = fixture()?;
+        for name in ["Lisbon", "Porto"] {
+            let apart = f.root.with_file_name(format!("{name}-apart"));
+            std::fs::rename(f.root.join(name), &apart)?;
+            f.cat.relink_folder(f.folder(name), &apart)?;
+        }
+        std::fs::write(f.root.join("IMG_0001.dng"), bytes(80))?;
+        let plan = f.plan(SyncScope::All)?;
+        assert_eq!(plan.additions.len(), 1);
+        assert_eq!(plan.additions[0].file, f.root.join("IMG_0001.dng"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_scan_stopped_on_its_last_file_gives_no_plan() -> Result<()> {
+        let f = fixture()?;
+        std::fs::write(f.root.join("Lisbon/new.dng"), bytes(81))?;
+        let inputs = f.cat.sync_inputs(SyncScope::All)?;
+        let cancel = AtomicBool::new(false);
+        let stopped = scan(&inputs, &|_| true, &cancel, &|_| {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed)
+        });
+        assert!(stopped.is_err());
+        Ok(())
+    }
 }
