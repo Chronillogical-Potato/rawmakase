@@ -198,12 +198,19 @@ fn photos_match_accepted_renders() {
             cases,
         })
     };
-    // Accepted renders were named without the RAW's extension, which made
-    // `x.orf` and `x.ori` share one; such a name is still read for a photo no
-    // other photo shares it with.
-    let mut stems = BTreeMap::<PathBuf, usize>::new();
+    // Accepted renders used to be named by the RAW's path with its extension
+    // replaced twice (`x.orf` and `x.ori` became `x.json`, as did `x 2.00.rw2`
+    // and `x 2.71.rw2`); such a name is still read for a photo that no other
+    // photo shares it with.
+    let legacy_of = |raw: &Path| {
+        let relative = raw.strip_prefix(corpus.join("raws")).unwrap();
+        corpus
+            .join("accepted")
+            .join(relative.with_extension("").with_extension("json"))
+    };
+    let mut legacy_names = BTreeMap::<PathBuf, usize>::new();
     for raw in &raws {
-        *stems.entry(raw.with_extension("")).or_default() += 1;
+        *legacy_names.entry(legacy_of(raw)).or_default() += 1;
     }
     // One photo at a time (LibRaw develops with its own threads).
     raws.iter().for_each(|raw| {
@@ -215,16 +222,14 @@ fn photos_match_accepted_renders() {
         let path = corpus
             .join("accepted")
             .join(format!("{}.json", named.display()));
-        let legacy = corpus
-            .join("accepted")
-            .join(relative.with_extension("json"));
+        let legacy = legacy_of(raw);
         let read = |p: &Path| {
             std::fs::read(p)
                 .ok()
                 .map(|b| serde_json::from_slice::<Accepted>(&b).expect("accepted renders"))
         };
         let accepted = read(&path).or_else(|| {
-            (stems[&raw.with_extension("")] == 1)
+            (legacy_names[&legacy] == 1)
                 .then(|| read(&legacy))
                 .flatten()
         });
