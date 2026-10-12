@@ -19,9 +19,9 @@ class AppDirTests(unittest.TestCase):
             path = self.payload / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(name)
-        launcher = self.payload / "usr/bin/rawmakase"
-        launcher.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
-        launcher.chmod(0o755)
+        executable = self.payload / "usr/lib/rawmakase/rawmakase"
+        executable.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        executable.chmod(0o755)
         self.destination = self.root / "RAWmakase.AppDir"
 
     def test_launcher_preserves_arguments_from_another_directory(self):
@@ -38,6 +38,8 @@ class AppDirTests(unittest.TestCase):
         appimage.stage_appdir(self.payload, self.destination)
         moved = self.root / "relocated AppDir"
         self.destination.rename(moved)
+        self.assertEqual((moved / "AppRun").read_text(),
+                         (self.payload / "usr/lib/rawmakase/rawmakase").read_text())
         self.assertEqual((moved / "rawmakase.desktop").read_text(),
                          (self.payload / "usr/share/applications/rawmakase.desktop").read_text())
         self.assertEqual((moved / "rawmakase.svg").read_text(),

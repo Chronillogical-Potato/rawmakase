@@ -24,11 +24,6 @@ ASSETS = {
         "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
     ),
 }
-APP_RUN = '''#!/bin/sh
-set -eu
-base=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec "$base/usr/bin/rawmakase" "$@"
-'''
 REQUIRED_FILES = (
     "usr/bin/rawmakase",
     "usr/lib/rawmakase/rawmakase",
@@ -44,14 +39,14 @@ def stage_appdir(payload, destination):
         if not (payload / name).is_file():
             raise FileNotFoundError(f"Missing Linux payload file: {name}")
     shutil.copytree(payload, destination)
+    # The executable finds its private libraries and ONNX Runtime from its
+    # resolved path, so AppRun can link to it without a wrapper script.
     for source, name in (
+        ("usr/lib/rawmakase/rawmakase", "AppRun"),
         ("usr/share/applications/rawmakase.desktop", "rawmakase.desktop"),
         ("usr/share/icons/hicolor/scalable/apps/rawmakase.svg", "rawmakase.svg"),
     ):
         (destination / name).symlink_to(source)
-    launcher = destination / "AppRun"
-    launcher.write_text(APP_RUN)
-    launcher.chmod(0o755)
 
 
 def fetch_asset(url, digest, destination, mode=0o755):
