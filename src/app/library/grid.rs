@@ -100,6 +100,7 @@ impl Library {
             .auto_shrink(false);
         // A re-sort moved the selected photo: scroll by the rows it moved.
         if drawn != self.cell_style {
+            self.grid_kinetic.stop();
             let row = self.grid_offset / drawn.height(width);
             scroll = scroll.vertical_scroll_offset(row * height);
         }
@@ -110,6 +111,7 @@ impl Library {
                 .position(|i| self.session.photos[*i].id == id)
         {
             let rows = (after / columns) as f32 - (before / columns) as f32;
+            self.grid_kinetic.stop();
             scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * height).max(0.));
         }
         egui::Frame::new()
@@ -123,6 +125,7 @@ impl Library {
                             .position(|i| self.session.photos[*i].id == id)
                     })
                 {
+                    self.grid_kinetic.stop();
                     let top = (at / columns) as f32 * height;
                     let view = ui.available_height();
                     if top < self.grid_offset {
@@ -131,6 +134,7 @@ impl Library {
                         scroll = scroll.vertical_scroll_offset(top + height - view);
                     }
                 }
+                let glide = self.grid_kinetic.begin(ui);
                 let output = scroll.show_rows(
                     ui,
                     height,
@@ -185,6 +189,7 @@ impl Library {
                         }
                     },
                 );
+                self.grid_kinetic.end(ui, glide);
                 self.grid_offset = output.state.offset.y;
             });
         ui.spacing_mut().item_spacing = spacing;

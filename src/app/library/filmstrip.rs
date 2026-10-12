@@ -41,6 +41,8 @@ pub(super) struct State {
     /// The selection and `shown_version` the strip was last drawn with, to
     /// notice a view drawn after it changing either.
     drawn: (Selection, u64),
+    /// The strip's glide after a trackpad swipe.
+    kinetic: super::kinetic::Kinetic,
 }
 
 /// Draws the frame again before it is shown, as egui allows once a frame
@@ -241,6 +243,10 @@ impl Library {
         }
         let height = ui.available_height().max(40.);
         let size = Vec2::new(height * 1.25, height);
+        if reveal.is_some() {
+            self.strip.kinetic.stop();
+        }
+        let glide = self.strip.kinetic.begin(ui);
         egui::ScrollArea::horizontal()
             .id_salt(ID)
             .auto_shrink(false)
@@ -281,6 +287,7 @@ impl Library {
                     }
                 }
             });
+        self.strip.kinetic.end(ui, glide);
         Outcome {
             pick: target,
             metadata_changed: changed,

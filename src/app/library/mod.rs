@@ -148,6 +148,8 @@ pub(crate) struct Library {
     keep_in_place: Option<(PhotoId, usize)>,
     /// The grid's scroll offset last frame.
     grid_offset: f32,
+    /// The grid's glide after a trackpad swipe.
+    grid_kinetic: kinetic::Kinetic,
     /// Positions in `visible` the grid drew last frame; all until it is drawn.
     grid_shown: std::ops::Range<usize>,
     /// External volumes attached at the last check, to notice one returning;
@@ -230,6 +232,7 @@ impl Library {
             loupe_info: Default::default(),
             keep_in_place: None,
             grid_offset: 0.,
+            grid_kinetic: Default::default(),
             grid_shown: 0..usize::MAX,
             attached: None,
             message: String::new(),
@@ -903,6 +906,7 @@ mod filter;
 mod filter_bar;
 mod grid;
 mod info;
+mod kinetic;
 mod layout;
 mod loupe;
 mod metadata;
