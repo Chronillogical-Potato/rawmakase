@@ -67,7 +67,8 @@ impl Editor {
             || self.modal.is_some()
             || self.not_editable.is_some()
             || self.view.shortcuts
-            || self.curve_save_open();
+            || self.curve_save_open()
+            || self.folder_sync.is_reviewing();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);

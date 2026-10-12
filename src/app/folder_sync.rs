@@ -29,6 +29,11 @@ impl FolderSync {
     pub(super) fn is_scanning(&self) -> bool {
         self.scan.is_some()
     }
+    /// Whether the review dialog or its confirmation is showing: keys and
+    /// commands go to it, never to the photos behind it.
+    pub(super) fn is_reviewing(&self) -> bool {
+        self.showing || self.review.as_ref().is_some_and(|r| r.confirming)
+    }
 }
 
 /// A scan running on its own thread.
@@ -1145,6 +1150,19 @@ mod tests {
         let losses = review.removal_losses();
         assert_eq!(losses.len(), 1);
         assert!(losses[0].contains("keywords"), "{losses:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_review_is_modal() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        std::fs::remove_file(trip.join("a.dng"))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        e.poll_folder_sync();
+        assert!(e.folder_sync.showing);
+        // Keys and commands go to the dialog, not the photos behind it.
+        assert!(e.command_modal());
         Ok(())
     }
 }
