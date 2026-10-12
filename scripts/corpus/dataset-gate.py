@@ -119,8 +119,17 @@ def run(args):
     if previous and any(previous.get(k) != v for k, v in identity.items()):
         raise Setup(f'{out} holds a run of another build or profile library: use a new --out')
     splits = sorted(set((previous or {}).get('splits', [])) | {args.split})
+    # Rendered with a copy of the build taken now: rebuilding during the hours a
+    # run takes must not change the engine halfway.
+    pinned = out / 'rawmakase'
+    if not pinned.exists():
+        shutil.copy2(args.rawmakase, pinned)
+    if gate.digest(pinned) != identity['rawmakase_sha256']:
+        raise Setup(f'{pinned} is not the build this run was started with: use a new --out')
+    built_from = args.rawmakase
+    args.rawmakase = pinned
     (out / 'run.json').write_text(json.dumps(dict(
-        identity, rawmakase=str(args.rawmakase), commit=built or None, data_dir=str(args.data_dir), splits=splits,
+        identity, rawmakase=str(built_from), commit=built or None, data_dir=str(args.data_dir), splits=splits,
         started=(previous or {}).get('started') or datetime.datetime.now().isoformat(timespec='seconds')),
         indent=1))
     todo = sets(d, args.split)
