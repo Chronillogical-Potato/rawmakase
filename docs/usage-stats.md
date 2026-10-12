@@ -32,7 +32,7 @@ which removes the question, the Preferences row and all reporting.
 | `version` | The RAWmakase version. |
 | `os`, `arch` | macOS, Linux or Windows; x86_64 or aarch64. |
 | `os_release` | The major release: `macos-15`, `windows-11`; just `linux` on Linux. |
-| `channel` | How this copy was installed, as the updater detects it: `macos-dmg`, `windows-installer`, `windows-zip`, `linux-tarball`, or the package manager that owns it (`deb`, `rpm`, `arch-package`, `homebrew`, `flatpak`, `snap`, `nix`, `cargo`). Otherwise `unknown`. |
+| `channel` | How this copy was installed: `linux-appimage` for the AppImage, else as the updater detects it: `macos-dmg`, `windows-installer`, `windows-zip`, `linux-tarball`, or the package manager that owns it (`deb`, `rpm`, `arch-package`, `homebrew`, `flatpak`, `snap`, `nix`, `cargo`). Otherwise `unknown`. |
 | `distro` | On Linux, the distribution family from os-release: arch, debian, ubuntu, fedora, opensuse, nixos or other. `none` elsewhere. |
 | `display` | On Linux, `wayland` or `x11`. `none` elsewhere. |
 | `gpu` | The graphics backend the window uses (`metal`, `vulkan`, `dx12`, `gl`), or `cpu` for a software adapter. |
