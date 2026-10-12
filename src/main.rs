@@ -67,6 +67,13 @@ enum Command {
     Inspect {
         input: PathBuf,
     },
+    /// Render one RAW with several XMP sidecars, developing it once: for comparisons
+    /// with Camera Raw. `jobs` is a JSON list of {"xmp", "output", "max_edge"}; existing
+    /// outputs are skipped.
+    RenderBatch {
+        input: PathBuf,
+        jobs: PathBuf,
+    },
     Thumbnail {
         input: PathBuf,
         output: PathBuf,
@@ -246,6 +253,56 @@ fn main() -> Result<()> {
                 raw::version(),
                 serde_json::to_string_pretty(&r.metadata)?
             );
+        }
+        Some(Command::RenderBatch { input, jobs }) => {
+            #[derive(serde::Deserialize)]
+            struct Job {
+                xmp: PathBuf,
+                output: PathBuf,
+                #[serde(default)]
+                max_edge: u32,
+            }
+            let jobs: Vec<Job> = serde_json::from_str(&std::fs::read_to_string(&jobs)?)?;
+            let photo = rawmakase::photo::open(&input)?;
+            let im = photo.develop(
+                camera_data::Decode::full(Default::default()),
+                &AtomicBool::new(false),
+            )?;
+            let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
+            let base = Recipe::with_profiles(&im.metadata, &profiles);
+            let camera = rawmakase::exif::read(&input);
+            for job in jobs.iter().filter(|j| !j.output.exists()) {
+                let rendered = (|| -> Result<()> {
+                    let preset =
+                        rawmakase::xmp::parse(&job.xmp, &std::fs::read_to_string(&job.xmp)?)?;
+                    let edit = preset.apply(
+                        &base,
+                        &im.metadata,
+                        &profiles,
+                        Some(&rawmakase::develop::Measures(&im)),
+                    )?;
+                    let out = develop::render(&im, &edit.checked()?, job.max_edge)?;
+                    rawmakase::export::export_with(
+                        &job.output,
+                        &input,
+                        &out,
+                        &im.metadata,
+                        &ExportOptions {
+                            max_edge: job.max_edge,
+                            ..Default::default()
+                        },
+                        &rawmakase::export::Embed {
+                            camera: camera.clone(),
+                            ..Default::default()
+                        },
+                        rawmakase::export::Replace::NoClobber,
+                    )?;
+                    Ok(())
+                })();
+                if let Err(e) = rendered {
+                    eprintln!("{}: {e:#}", job.output.display());
+                }
+            }
         }
         Some(Command::Thumbnail { input, output }) => {
             use std::io::Write;
