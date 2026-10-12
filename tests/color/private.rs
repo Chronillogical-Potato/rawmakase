@@ -228,7 +228,10 @@ fn photos_match_accepted_renders() {
                 .ok()
                 .map(|b| serde_json::from_slice::<Accepted>(&b).expect("accepted renders"))
         };
-        let accepted = read(&path).or_else(|| {
+        // A new name can equal another photo's old one (`x.orf.json` for
+        // `x.orf` and `x.orf.2.rw2`): then it is that photo's, not this one's.
+        let shared = legacy_names.contains_key(&path) && path != legacy;
+        let accepted = (!shared).then(|| read(&path)).flatten().or_else(|| {
             (legacy_names[&legacy] == 1)
                 .then(|| read(&legacy))
                 .flatten()
