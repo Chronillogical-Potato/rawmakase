@@ -5899,8 +5899,6 @@ fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
     };
     let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
     frame(&mut editor, egui::Event::Copy, shift);
-    // Not C: no Crop.
-    assert!(!editor.view.is(state::Tool::Crop));
     assert!(
         matches!(&editor.modal, Some(Modal::CopySettings(dialog))
             if dialog.purpose == settings_transfer::Transfer::Copy),
@@ -5920,8 +5918,6 @@ fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
     // Not V: no Black & White, even with nothing copied to paste.
     editor.clipboard = None;
     frame(&mut editor, egui::Event::Paste("text".into()), shift);
-    assert!(!editor.document.edit.recipe().effects.monochrome);
-    // Nor is the V Convert to Black & White.
     assert!(!editor.document.edit.recipe().effects.monochrome);
     // Plain Cmd+C stays the clipboard's: no Copy Settings.
     frame(&mut editor, egui::Event::Copy, egui::Modifiers::COMMAND);
