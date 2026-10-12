@@ -85,8 +85,12 @@ rename these assets.
 
 1. Finish and review the release commit, including the version files and
    `packaging/release-notes/vX.Y.Z.md` (see below).
-2. Push that commit to `main`, then push its matching `vX.Y.Z` tag.
-3. The Release workflow publishes after every required job succeeds.
+2. On the machine with the test dataset, run the decode fingerprints on a release
+   build of that commit (`scripts/corpus/dataset-fingerprints.py check`, see
+   `tests/corpus/README.md`). A file that stops opening or a changed field needs
+   an explanation, or a fix, before the tag.
+3. Push that commit to `main`, then push its matching `vX.Y.Z` tag.
+4. The Release workflow publishes after every required job succeeds.
 
 For a rehearsal without a new publication, manually run **Release**, select
 `main` as the workflow branch, enter an existing stable **tag** (such as
@@ -162,7 +166,9 @@ gh release edit vX.Y.Z --notes-file packaging/release-notes/vX.Y.Z.md
 private prefix. A git archive has no configure script, so the build runs
 `autoreconf` and needs autoconf, automake and libtool; move back to a release
 tarball once LibRaw publishes one with those cameras. Update versions and
-hashes together after testing. Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
+hashes together after testing, including the decode fingerprints over the test
+dataset (`scripts/corpus/dataset-fingerprints.py check`, then `record` with the
+update as the reason, committed with it). Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
 The app's native wrapper retains OpenMP acceleration.
 Release builds define `CMS_NO_REGISTER_KEYWORD` for compatibility between the
 Little CMS headers and the wrapper's C++17 compiler.
