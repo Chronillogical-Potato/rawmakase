@@ -147,7 +147,13 @@ def fingerprint(rawmakase, samples, jobs):
                 problems.append((True, problem))
             for s, line in out:
                 line.pop('path', None)
-                if line.get('sha256') not in (None, s['sha256']):
+                # A file that could not be read says nothing about decoding, and
+                # must not replace a baseline entry.
+                if line.get('failed') == 'crash':
+                    line['sha256'] = s['sha256']
+                elif line.get('failed') == 'read' or line.get('sha256') is None:
+                    problems.append((committed(s), f'{s["sha256"]}: could not be read ({line.get("error")})'))
+                elif line['sha256'] != s['sha256']:
                     problems.append((committed(s), f'{s["sha256"]}: the file on disk hashes to {line["sha256"]}'))
                 results[s['sha256']] = line
             done += len(out)

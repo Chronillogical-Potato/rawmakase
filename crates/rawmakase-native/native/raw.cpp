@@ -324,7 +324,7 @@ unsigned ora_sensor_size() { return sizeof(Sensor); }
 // Unpacks as development does (the black correction included) and describes the
 // sensor data: one channel for a mosaic, three or four for small RAW files.
 // The colour pattern is COLOR's over the visible area for one period of LibRaw's
-// filters: 16 by 2, 16 by 16 for filters 1 (Leaf) and 6 by 6 for X-Trans.
+// filters: 16 by 2, 16 by 16 for filters 1 (Leaf) and Super CCD, 6 by 6 for X-Trans.
 int ora_sensor(void* ptr, Sensor* s, char* err) {
     try {
         auto& handle=*static_cast<Handle*>(ptr); auto& raw=handle.raw;
@@ -359,8 +359,10 @@ int ora_sensor(void* ptr, Sensor* s, char* err) {
         for(int c=0;c<4;++c) s->linear_white[c]=unsigned(col.linear_max[c]);
         const unsigned filters=d.idata.filters;
         if(filters) {
+            // COLOR follows a Super CCD's rotation, which repeats across more columns.
+            const bool wide=filters==1 || internal->internal_output_params.fuji_width;
             s->pattern_rows=filters==9 ? 6 : 16;
-            s->pattern_cols=filters==9 ? 6 : filters==1 ? 16 : 2;
+            s->pattern_cols=filters==9 ? 6 : wide ? 16 : 2;
             for(unsigned r=0;r<s->pattern_rows;++r) for(unsigned c=0;c<s->pattern_cols;++c)
                 s->pattern[r*s->pattern_cols+c]=(unsigned char)raw.COLOR(int(r),int(c));
         }
