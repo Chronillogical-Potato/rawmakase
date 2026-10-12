@@ -10,33 +10,76 @@ use anyhow::Result;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 
-macro_rules! table {
-    ($name:literal) => {
-        (
-            $name,
-            sql!(concat!("SELECT * FROM ", $name, " WHERE photo=?")),
-            sql!(concat!("SELECT photo, * FROM ", $name)),
-        )
-    };
-}
-
 /// Every table holding rows of a photo, with the statements that read one
-/// photo's rows and every row keyed by its photo.
+/// photo's rows and every row keyed by its photo, written out whole so the
+/// portable-SQL check reads them.
 /// `family_tables_cover_the_schema` checks it against `schema.sql`.
 pub(super) const PHOTO_TABLES: [(&str, Sql, Sql); 13] = [
-    table!("photo_keywords"),
-    table!("collection_photos"),
-    table!("lightroom_history"),
-    table!("local_edits"),
-    table!("develop_history"),
-    table!("develop_snapshots"),
-    table!("photo_info"),
-    table!("photo_checksums"),
-    table!("photo_fields"),
-    table!("photo_text"),
-    table!("photo_creators"),
-    table!("photo_capture"),
-    table!("photo_location"),
+    (
+        "photo_keywords",
+        sql!("SELECT * FROM photo_keywords WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_keywords"),
+    ),
+    (
+        "collection_photos",
+        sql!("SELECT * FROM collection_photos WHERE photo=?"),
+        sql!("SELECT photo, * FROM collection_photos"),
+    ),
+    (
+        "lightroom_history",
+        sql!("SELECT * FROM lightroom_history WHERE photo=?"),
+        sql!("SELECT photo, * FROM lightroom_history"),
+    ),
+    (
+        "local_edits",
+        sql!("SELECT * FROM local_edits WHERE photo=?"),
+        sql!("SELECT photo, * FROM local_edits"),
+    ),
+    (
+        "develop_history",
+        sql!("SELECT * FROM develop_history WHERE photo=?"),
+        sql!("SELECT photo, * FROM develop_history"),
+    ),
+    (
+        "develop_snapshots",
+        sql!("SELECT * FROM develop_snapshots WHERE photo=?"),
+        sql!("SELECT photo, * FROM develop_snapshots"),
+    ),
+    (
+        "photo_info",
+        sql!("SELECT * FROM photo_info WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_info"),
+    ),
+    (
+        "photo_checksums",
+        sql!("SELECT * FROM photo_checksums WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_checksums"),
+    ),
+    (
+        "photo_fields",
+        sql!("SELECT * FROM photo_fields WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_fields"),
+    ),
+    (
+        "photo_text",
+        sql!("SELECT * FROM photo_text WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_text"),
+    ),
+    (
+        "photo_creators",
+        sql!("SELECT * FROM photo_creators WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_creators"),
+    ),
+    (
+        "photo_capture",
+        sql!("SELECT * FROM photo_capture WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_capture"),
+    ),
+    (
+        "photo_location",
+        sql!("SELECT * FROM photo_location WHERE photo=?"),
+        sql!("SELECT photo, * FROM photo_location"),
+    ),
 ];
 
 /// SHA-256 of a family's photos and their rows.
