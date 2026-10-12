@@ -117,7 +117,8 @@ def run(rawmakase, files, timeout):
 
 
 def fingerprint(rawmakase, samples, jobs):
-    """Fingerprints by SHA-256, and the run's problems. A batch that fails is
+    """Fingerprints by SHA-256, and the run's problems as (publishable, text).
+    A batch that fails is
     run again file by file: a file that fails alone gets the failure as its
     fingerprint (a crash is a regression too); the batch's failure stays a
     problem of the run even when every file then succeeds."""
@@ -138,11 +139,11 @@ def fingerprint(rawmakase, samples, jobs):
     with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
         for out, problem in pool.map(batch, batches):
             if problem:
-                problems.append(problem)
+                problems.append((True, problem))
             for s, line in out:
                 line.pop('path', None)
                 if line.get('sha256') not in (None, s['sha256']):
-                    problems.append(f'{s["sha256"]}: the file on disk hashes to {line["sha256"]}')
+                    problems.append((committed(s), f'{s["sha256"]}: the file on disk hashes to {line["sha256"]}'))
                 results[s['sha256']] = line
             done += len(out)
             print(f'\r{done}/{len(order)} files', end='', file=sys.stderr, flush=True)
@@ -204,7 +205,12 @@ def compare(old, new):
 
 def check(args, samples, results, problems):
     baselines, notes = {}, []
-    for path in sorted({baseline_path(args.dataset, s) for s in samples.values()}):
+    paths = {baseline_path(args.dataset, s) for s in samples.values()}
+    # With every file selected, every baseline is expected, also one whose
+    # source the dataset no longer has.
+    if not args.manifest:
+        paths |= {COMMITTED, *(args.dataset / 'baselines/decode').glob('*.json')}
+    for path in sorted(paths):
         loaded = read_baseline(path)
         if loaded is None:
             raise Setup(f'No baseline at {path}: record one with `record --reason …`')
@@ -231,7 +237,7 @@ def check(args, samples, results, problems):
     if not args.manifest:
         for path, files in baselines.items():
             for h in files.keys() - samples.keys():
-                problems.append(f'{h} is in {path.name} but not in the dataset')
+                problems.append((path == COMMITTED, f'{h} is in {path.name} but not in the dataset'))
     report(args, samples, changes, problems, notes)
     return 1 if changes or problems else 0
 
@@ -241,10 +247,14 @@ def report(args, samples, changes, problems, notes):
     def shown(s):
         return not args.public or committed(s)
 
-    out = {'files': len(samples), 'notes': notes, 'problems': problems, 'groups': []}
+    hidden = sum(1 for public, _ in problems if args.public and not public)
+    shown_problems = [text for public, text in problems if public or not args.public]
+    if hidden:
+        shown_problems.append(f'{hidden} problems with files of private sources (not shown)')
+    out = {'files': len(samples), 'notes': notes, 'problems': shown_problems, 'groups': []}
     for note in notes:
         print(f'note: {note}')
-    for problem in problems:
+    for problem in shown_problems:
         print(f'problem: {problem}')
     for (make, ext), items in sorted(changes.items()):
         kinds = Counter(kind if kind != 'changed' else f'{detail[0]} changed' for kind, _, detail in items)
@@ -295,7 +305,7 @@ def main():
         results, problems = fingerprint(args.rawmakase, samples, args.jobs)
         if args.command == 'record':
             if problems:
-                raise Setup('Not recording a run with problems:\n  ' + '\n  '.join(problems))
+                raise Setup('Not recording a run with problems:\n  ' + '\n  '.join(t for _, t in problems))
             record(args, samples, results)
             return 0
         return check(args, samples, results, problems)

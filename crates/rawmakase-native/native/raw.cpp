@@ -40,13 +40,13 @@ struct Metadata {
 };
 // The unpacked sensor data and the levels development reads with it, for decode
 // fingerprints. data and black point into the handle's buffers: data holds
-// height rows of pitch values, of which the visible area starts at left, top;
-// black LibRaw's cblack (4 channels, the pattern's
+// height rows of pitch values, of which the area development reads starts at
+// left, top and is area_width by area_height; black LibRaw's cblack (4 channels, the pattern's
 // rows and columns, then its values).
 struct Sensor {
     const unsigned short* data;
     unsigned width, height, pitch, channels;
-    unsigned left, top, visible_width, visible_height;
+    unsigned left, top, area_width, area_height;
     const unsigned* black;
     unsigned base_black, black_size;
     unsigned white, linear_white[4];
@@ -340,7 +340,18 @@ int ora_sensor(void* ptr, Sensor* s, char* err) {
         else { message(err,"No integer sensor data"); return -1; }
         s->pitch=d.sizes.raw_pitch/2;
         s->left=d.sizes.left_margin; s->top=d.sizes.top_margin;
-        s->visible_width=d.sizes.width; s->visible_height=d.sizes.height;
+        // Fujifilm's Super CCD is stored rotated by 45°: development reads
+        // fuji_width columns (twice that in one layout) of the rows between the
+        // top and bottom margins (raw2image). Other sensors, the visible area.
+        auto* internal=raw.get_internal_data_pointer();
+        if(const unsigned fuji=internal->internal_output_params.fuji_width) {
+            const unsigned cols=fuji << (internal->unpacker_data.fuji_layout ? 0 : 1);
+            const unsigned rw=d.sizes.raw_width, rh=d.sizes.raw_height;
+            s->area_width=std::min(cols, rw-std::min(rw, unsigned(d.sizes.left_margin)));
+            s->area_height=rh-std::min(rh, 2u*d.sizes.top_margin);
+        } else {
+            s->area_width=d.sizes.width; s->area_height=d.sizes.height;
+        }
         s->black=col.cblack; s->base_black=col.black;
         const size_t pattern=size_t(col.cblack[4])*col.cblack[5];
         s->black_size=unsigned(6+std::min(pattern, size_t(LIBRAW_CBLACK_SIZE-6)));

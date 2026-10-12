@@ -67,8 +67,8 @@ struct NativeSensor {
     channels: u32,
     left: u32,
     top: u32,
-    visible_width: u32,
-    visible_height: u32,
+    area_width: u32,
+    area_height: u32,
     black: *const u32,
     base_black: u32,
     black_size: u32,
@@ -190,7 +190,8 @@ pub(crate) struct Sensor {
     pub channels: u32,
     /// Where the visible area starts in the raw buffer: left, top.
     pub origin: [u32; 2],
-    /// SHA-256 of the visible area's values, `channels` per pixel, row by row,
+    /// SHA-256 of the values development reads (the visible area; the stored
+    /// rotated area of a Super CCD), `channels` per pixel, row by row,
     /// little-endian. Not the borders: LibRaw leaves rows and columns past some
     /// decoders' data unwritten, so they hold whatever the memory held.
     pub data_sha256: [u8; 32],
@@ -308,41 +309,30 @@ impl Handle {
                 && s.width > 0
                 && s.height > 0
                 && (s.pitch as usize) >= row
-                && s.visible_width > 0
-                && s.visible_height > 0
-                && u64::from(s.left) + u64::from(s.visible_width) <= u64::from(s.width)
-                && u64::from(s.top) + u64::from(s.visible_height) <= u64::from(s.height)
+                && s.area_width > 0
+                && s.area_height > 0
+                && u64::from(s.left) + u64::from(s.area_width) <= u64::from(s.width)
+                && u64::from(s.top) + u64::from(s.area_height) <= u64::from(s.height)
                 && u64::from(s.pitch) * u64::from(s.height) <= 1_000_000_000
                 && s.pattern_rows as usize * s.pattern_cols as usize <= s.pattern.len(),
             "Invalid RAW dimensions"
         );
-        // SAFETY: on success `data` points at the handle's raw buffer of `height`
-        // rows of `pitch` values, and `black` at `black_size` values of its
-        // levels; both stay valid until the handle is used again, which `&self`
+        // SAFETY: on success `black` points at `black_size` values of the
+        // handle's levels, valid until the handle is used again, which `&self`
         // rules out until they are copied below.
-        let (data, black) = unsafe {
-            (
-                std::slice::from_raw_parts(s.data, s.pitch as usize * s.height as usize),
-                std::slice::from_raw_parts(s.black, s.black_size as usize),
-            )
-        };
+        let black = unsafe { std::slice::from_raw_parts(s.black, s.black_size as usize) };
         let mut hash = sha2::Sha256::new();
-        let (left, width) = (
-            s.left as usize * channels,
-            s.visible_width as usize * channels,
-        );
+        let width = s.area_width as usize * channels;
         let mut bytes = Vec::with_capacity(width * 2);
-        for line in data
-            .chunks(s.pitch as usize)
-            .skip(s.top as usize)
-            .take(s.visible_height as usize)
-        {
+        for y in s.top as usize..(s.top + s.area_height) as usize {
+            let start = y * s.pitch as usize + s.left as usize * channels;
+            // SAFETY: `data` points at the handle's raw buffer of `height` rows
+            // of `pitch` values; the area was checked to lie inside it and the
+            // decoder wrote it (only borders may be left unwritten). It stays
+            // valid until the handle is used again, which `&self` rules out.
+            let row = unsafe { std::slice::from_raw_parts(s.data.add(start), width) };
             bytes.clear();
-            bytes.extend(
-                line[left..left + width]
-                    .iter()
-                    .flat_map(|v| v.to_le_bytes()),
-            );
+            bytes.extend(row.iter().flat_map(|v| v.to_le_bytes()));
             hash.update(&bytes);
         }
         let cols = s.pattern_cols as usize;
