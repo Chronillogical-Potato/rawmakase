@@ -347,6 +347,23 @@ mod tests {
         e.document.snapshots.renaming.as_mut().unwrap().name = "Kept".into();
         e.commit_snapshot_rename();
         assert_eq!(e.document.snapshots.list[0].name, "Kept");
+        // So is one being typed when a tool's drawer takes History's place.
+        e.snapshot_action(SnapshotAction::StartRename(e.document.snapshots.list[0].id));
+        e.document.snapshots.renaming.as_mut().unwrap().name = "Before crop".into();
+        e.view.tool = crate::app::state::Tool::Crop;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1400., 900.),
+                )),
+                ..Default::default()
+            },
+            |ui| e.draw(ui),
+        );
+        output.textures_delta.clear();
+        assert!(e.document.snapshots.renaming.is_none());
+        assert_eq!(e.document.snapshots.list[0].name, "Before crop");
         Ok(())
     }
 }

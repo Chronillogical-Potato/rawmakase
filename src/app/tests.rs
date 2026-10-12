@@ -5523,6 +5523,25 @@ fn each_module_keeps_its_own_panels() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn a_tool_opened_over_the_presets_ends_a_preset_preview() {
+    // A preset previewed under the pointer, then R: Crop's drawer takes the
+    // Presets tab's place, and the photo must not keep the preview.
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    e.presets.preview = Some(Recipe {
+        exposure: 1.,
+        ..Default::default()
+    });
+    e.presets.hover = Some((0, std::time::Instant::now()));
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(e.presets.preview.is_none());
+    assert!(e.presets.hover.is_none());
+}
+#[test]
 fn hiding_the_presets_ends_a_preset_preview() {
     use super::panels::PanelChange;
     let ctx = egui::Context::default();

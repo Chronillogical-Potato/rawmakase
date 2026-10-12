@@ -96,11 +96,18 @@ impl Editor {
     }
     /// The tab panel between the adjustments and the photo, if `open`.
     pub(super) fn develop_tab_panel(&mut self, ui: &mut egui::Ui, open: bool) {
+        // A tab not drawn this frame (folded, too narrow, or a tool's drawer
+        // in its place) lets go of what it was doing: Presets ends a preview
+        // it was showing, History saves a snapshot name being typed.
+        let drawn = (open && !has_drawer(self.view.tool)).then_some(self.panels.develop_tab);
+        if drawn != Some(DevelopTab::Presets) && self.presets.hover.is_some() {
+            self.end_preset_hover();
+        }
+        if drawn != Some(DevelopTab::History) {
+            self.commit_snapshot_rename();
+        }
         if open {
             self.tab_panel(ui);
-        } else if self.presets.hover.is_some() {
-            // Not drawn, the Presets tab ends a preview it was showing.
-            self.end_preset_hover();
         }
     }
     fn tab_panel(&mut self, ui: &mut egui::Ui) {
