@@ -9,10 +9,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// A panel the user can hide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WorkspacePanel {
-    /// Develop's Navigator and presets; the Library's Navigator, folders and
-    /// collections.
+    /// Develop's presets; the Library's folders and collections.
     Left,
-    /// Develop's adjustments; the Library's photo info and metadata.
+    /// The Navigator, over Develop's adjustments or the Library's photo info
+    /// and metadata.
     Right,
     /// The filmstrip with the status bar above it.
     Filmstrip,

@@ -1,4 +1,4 @@
-//! The Library's left panel: Navigator, Catalog, Folders and Collections, and
+//! The Library's left panel: Catalog, Folders and Collections, and
 //! the source they choose.
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
@@ -9,8 +9,7 @@ use eframe::egui::{self, Vec2};
 use std::collections::HashSet;
 
 impl Library {
-    /// The left panel's catalog, folders and collections; the editor draws
-    /// the Navigator above them.
+    /// The left panel's catalog, folders and collections.
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) -> Action {
         let palette = theme::palette(ui.ctx());
         let mut action = Action::None;

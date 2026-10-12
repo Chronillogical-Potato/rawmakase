@@ -93,7 +93,7 @@ impl Editor {
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
-            // The Navigator column runs full height; the toolbar sits over
+            // The presets column runs full height; the toolbar sits over
             // the photo and the adjustments only. Each part may open another
             // photo; what follows edits that one.
             self.follow_edit_frame(&mut frame);
@@ -675,10 +675,10 @@ impl Editor {
         }
         self.loupe_stored_preview();
         if self.panel_shown(WorkspacePanel::Left) {
-            action = action.then(self.library_left_panel(ui, develops));
+            action = action.then(self.library_left_panel(ui));
         }
         if self.panel_shown(WorkspacePanel::Right) {
-            action = action.then(self.library_right_panel(ui));
+            action = action.then(self.library_right_panel(ui, develops));
         }
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
@@ -717,13 +717,8 @@ impl Editor {
             }
         }
     }
-    /// The Library's left panel: Export…, the Loupe's Navigator, folders and
-    /// collections.
-    fn library_left_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        develops: Option<PhotoId>,
-    ) -> crate::app::library::Action {
+    /// The Library's left panel: Export…, folders and collections.
+    fn library_left_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
         egui::Panel::left("library-sidebar")
             .default_size(260.)
@@ -756,26 +751,6 @@ impl Editor {
                             });
                         });
                 }
-                // The Navigator controls the zoom: Develop's for a RAW in the
-                // Loupe, the same one for other photos. Outside the Loupe it
-                // shows the selected photo, and a zoom chosen there opens it.
-                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
-                if develops.is_some() {
-                    self.navigator_ui(ui);
-                } else {
-                    let (photo, shown) = match &self.library {
-                        Some(l) if loupe => l
-                            .loupe_navigator()
-                            .map_or((None, None), |(photo, shown)| (Some(photo), shown)),
-                        Some(l) => (l.selected_preview(), None),
-                        None => (None, None),
-                    };
-                    if let Some(change) =
-                        crate::app::navigator::navigator(ui, photo, Some(self.view.zoom), shown)
-                    {
-                        self.library_zoom(change);
-                    }
-                }
                 if export {
                     self.open_export_dialog();
                 }
@@ -804,8 +779,13 @@ impl Editor {
             library.open_loupe();
         }
     }
-    /// The Library's right panel: the active photo's info and metadata.
-    fn library_right_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
+    /// The Library's right panel: the Navigator, which stays at the top, over
+    /// the active photo's info and metadata.
+    fn library_right_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        develops: Option<PhotoId>,
+    ) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
         egui::Panel::right("library-info")
             .default_size(270.)
@@ -816,6 +796,26 @@ impl Editor {
                     ui,
                     super::widgets::SectionGroup::LibraryRight,
                 );
+                // The Navigator controls the zoom: Develop's for a RAW in the
+                // Loupe, the same one for other photos. Outside the Loupe it
+                // shows the selected photo, and a zoom chosen there opens it.
+                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+                if develops.is_some() {
+                    self.navigator_ui(ui);
+                } else {
+                    let (photo, shown) = match &self.library {
+                        Some(l) if loupe => l
+                            .loupe_navigator()
+                            .map_or((None, None), |(photo, shown)| (Some(photo), shown)),
+                        Some(l) => (l.selected_preview(), None),
+                        None => (None, None),
+                    };
+                    if let Some(change) =
+                        crate::app::navigator::navigator(ui, photo, Some(self.view.zoom), shown)
+                    {
+                        self.library_zoom(change);
+                    }
+                }
                 if let Some(library) = &mut self.library {
                     action = action.then(library.info_panel(ui));
                 }
@@ -1295,7 +1295,6 @@ impl Editor {
                     ui,
                     super::widgets::SectionGroup::DevelopLeft,
                 );
-                self.navigator_ui(ui);
                 self.presets_ui(ui);
             });
     }
@@ -1320,8 +1319,9 @@ impl Editor {
                     super::widgets::SectionGroup::DevelopRight,
                 );
                 let enabled = self.document.full().is_some() && !self.view.compare.before_only();
-                // The Histogram stays at the top, as the Navigator does on the
-                // left; the panels below it scroll.
+                // The Navigator and Histogram stay at the top; the panels
+                // below them scroll.
+                self.navigator_ui(ui);
                 super::widgets::section(ui, "Histogram", false, |ui| {
                     ui.add_enabled_ui(enabled, |ui| self.histogram_ui(ui));
                 });
@@ -1617,12 +1617,12 @@ const FOLDER_CHANGE: &str = "the folder change";
 
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as
-/// its contents, leaving a strip of the window's black between. The left
+/// its contents, leaving a strip of the window's black between. The right
 /// panels hold the Navigator, whose zoom levels need 224 points.
 pub(super) const PRESETS_MIN: f32 = 224.;
 pub(super) const ADJUSTMENTS_MIN: f32 = 300.;
 pub(super) const LIBRARY_SIDEBAR_MIN: f32 = 224.;
-pub(super) const LIBRARY_INFO_MIN: f32 = 220.;
+pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
