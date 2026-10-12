@@ -84,11 +84,34 @@ pub fn fingerprint(path: &Path) -> Fingerprint {
         opened: None,
         sensor: None,
     };
+    let before = identity(path);
     if let Err((step, e)) = describe(path, &mut f) {
         f.failed = Some(step);
         f.error = Some(format!("{e:#}"));
     }
+    // The file is read twice (hashed, then decoded): a file replaced in between
+    // would pair one file's hash with another's fingerprint.
+    if before.is_some() && identity(path) != before {
+        f.opened = None;
+        f.sensor = None;
+        f.failed = Some("read");
+        f.error = Some("The file changed while it was read".into());
+    }
     f
+}
+
+/// What tells one file at `path` from another: size, modification time and,
+/// on Unix, device and inode.
+fn identity(path: &Path) -> Option<(u64, std::time::SystemTime, u64, u64)> {
+    let m = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    let (dev, ino) = {
+        use std::os::unix::fs::MetadataExt;
+        (m.dev(), m.ino())
+    };
+    #[cfg(not(unix))]
+    let (dev, ino) = (0, 0);
+    Some((m.len(), m.modified().ok()?, dev, ino))
 }
 
 fn describe(path: &Path, f: &mut Fingerprint) -> Result<(), (&'static str, anyhow::Error)> {
