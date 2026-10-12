@@ -280,6 +280,17 @@ pub fn resolve_in(
     logical: &str,
     windows: bool,
 ) -> Option<PathBuf> {
+    resolve_anchored(original, rows, logical, windows).map(|(_, path)| path)
+}
+/// [`resolve_in`], with the location it resolves below: the most specific
+/// row containing it, else `original`. A folder whose anchor is there while
+/// the folder isn't is missing from it, not offline.
+pub(super) fn resolve_anchored(
+    original: &str,
+    rows: &[(String, PathBuf)],
+    logical: &str,
+    windows: bool,
+) -> Option<(PathBuf, PathBuf)> {
     let parts: Vec<&str> = names(logical).collect();
     if windows
         && parts
@@ -298,14 +309,15 @@ pub fn resolve_in(
             best = Some((row.len(), path));
         }
     }
-    let (skip, mut path) = match best {
+    let (skip, anchor) = match best {
         Some((n, path)) => (n, path.clone()),
         None => (0, PathBuf::from(original)),
     };
+    let mut path = anchor.clone();
     for name in &parts[skip..] {
         path.push(name);
     }
-    Some(path)
+    Some((anchor, path))
 }
 
 /// The folders an older release added since, which have no logical path

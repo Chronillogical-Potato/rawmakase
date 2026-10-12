@@ -1,6 +1,6 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
-use super::db::{Reads, is_storage_error, sql};
+use super::db::{Reads, Write, is_storage_error, sql};
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
 use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
@@ -61,15 +61,16 @@ pub struct Choice {
 }
 /// Where the directories of files found on disk go in the catalog.
 #[derive(Default)]
-struct Placed {
-    places: HashMap<PathBuf, Place>,
+pub(in crate::catalog) struct Placed {
+    pub(in crate::catalog) places: HashMap<PathBuf, Place>,
     /// Directories not placed: their catalog folder is elsewhere here.
-    conflicts: Vec<Conflict>,
+    pub(in crate::catalog) conflicts: Vec<Conflict>,
     /// Directories not placed until one of their options is chosen.
-    ambiguous: Vec<Ambiguity>,
+    pub(in crate::catalog) ambiguous: Vec<Ambiguity>,
 }
 /// Where a folder on disk goes in the catalog.
-enum Place {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::catalog) enum Place {
     /// A folder of an existing root, by logical path.
     Folder(RootId, String),
     /// A folder of the root the added folder becomes, by logical path.
@@ -175,7 +176,12 @@ impl Catalog {
     }
     /// Where the directories of `files`, found below the `chosen` folder, go
     /// in the catalog (see `import_folder`).
-    fn place(&self, files: &[PathBuf], chosen: &Path, choices: &[Choice]) -> Result<Placed> {
+    pub(in crate::catalog) fn place(
+        &self,
+        files: &[PathBuf],
+        chosen: &Path,
+        choices: &[Choice],
+    ) -> Result<Placed> {
         let mut placed = Placed::default();
         let mut ambiguous: BTreeMap<Vec<FolderLocation>, Vec<PathBuf>> = BTreeMap::new();
         let matcher = Matcher::new(self)?;
@@ -206,7 +212,7 @@ impl Catalog {
     /// (a new root being the `chosen` folder). Files in a directory `places`
     /// has no place for are left out. Returns how many were added, and what
     /// reading their sidecars found.
-    fn insert(
+    pub(in crate::catalog) fn insert(
         &mut self,
         chosen: &Path,
         files: Vec<PathBuf>,
@@ -266,33 +272,7 @@ impl Catalog {
                 let fid = match folders.get(&key) {
                     Some(id) => *id,
                     None => {
-                        let (root, logical) = &key;
-                        let existing: Option<FolderId> = w.read_one(
-                            sql!(
-                                "SELECT min(f.id) FROM folders f JOIN folder_paths p ON p.folder=f.id
-                                 WHERE f.root=? AND p.path=?"
-                            ),
-                            &[root, logical],
-                        )?;
-                        let id = match existing {
-                            Some(id) => id,
-                            None => {
-                                // Older releases read the folder in this system's form.
-                                let native: PathBuf = super::locations::names(logical).collect();
-                                let id: FolderId = w.insert_returning_id(
-                                    sql!(
-                                        "INSERT INTO folders(root,relative_path) VALUES(?,?)
-                                         RETURNING id"
-                                    ),
-                                    &[root, &native.to_string_lossy()],
-                                )?;
-                                w.execute(
-                                    sql!("INSERT INTO folder_paths(folder,path) VALUES(?,?)"),
-                                    &[&id, logical],
-                                )?;
-                                id
-                            }
-                        };
+                        let id = folder_id(w, key.0, &key.1)?;
                         folders.insert(key, id);
                         id
                     }
@@ -402,9 +382,39 @@ impl Catalog {
     }
 }
 
+/// The catalog folder at `logical` in `root`, made if there is none, in
+/// `w`'s transaction.
+pub(in crate::catalog) fn folder_id(
+    w: &mut Write<'_>,
+    root: RootId,
+    logical: &str,
+) -> Result<FolderId> {
+    let existing: Option<FolderId> = w.read_one(
+        sql!(
+            "SELECT min(f.id) FROM folders f JOIN folder_paths p ON p.folder=f.id
+             WHERE f.root=? AND p.path=?"
+        ),
+        &[&root, &logical],
+    )?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    // Older releases read the folder in this system's form.
+    let native: PathBuf = super::locations::names(logical).collect();
+    let id: FolderId = w.insert_returning_id(
+        sql!("INSERT INTO folders(root,relative_path) VALUES(?,?) RETURNING id"),
+        &[&root, &native.to_string_lossy()],
+    )?;
+    w.execute(
+        sql!("INSERT INTO folder_paths(folder,path) VALUES(?,?)"),
+        &[&id, &logical],
+    )?;
+    Ok(id)
+}
+
 /// The photo files below `folder`: RAWs, JPEGs, PNGs and TIFFs, not hidden
 /// and not through a symbolic link.
-fn walk(folder: &Path) -> Result<Vec<PathBuf>> {
+pub(in crate::catalog) fn walk(folder: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     walk_into(folder, &mut files)?;
     Ok(files)
@@ -435,7 +445,12 @@ fn walk_into(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 /// Whether the catalog has the photo at `file` in the folder at `logical`
 /// of `root`. A photo is the same one by root, folder and name; its virtual
 /// copies share them and stay as they are.
-fn known(r: &impl Reads, root: RootId, logical: &str, file: &Path) -> Result<bool> {
+pub(in crate::catalog) fn known(
+    r: &impl Reads,
+    root: RootId,
+    logical: &str,
+    file: &Path,
+) -> Result<bool> {
     let filename = file.file_name().unwrap_or_default().to_string_lossy();
     let found: Option<i64> = r.read_optional(
         sql!(
@@ -477,7 +492,7 @@ struct LegacyEdit {
 }
 
 /// This computer's locations, for matching folders found on disk.
-struct Matcher {
+pub(in crate::catalog) struct Matcher {
     /// Every location: where each root was added, its own and every
     /// folder's on this computer; with its path as the disk has it.
     locations: Vec<(FolderLocation, PathBuf)>,
@@ -492,13 +507,13 @@ struct Root {
     rows_on_disk: Vec<(String, PathBuf)>,
 }
 /// What a folder found on disk is in the catalog.
-enum Matched {
+pub(in crate::catalog) enum Matched {
     Place(Place),
     Conflict(Conflict),
     Ambiguous(Vec<FolderLocation>),
 }
 impl Matcher {
-    fn new(catalog: &Catalog) -> Result<Self> {
+    pub(in crate::catalog) fn new(catalog: &Catalog) -> Result<Self> {
         let mut rows = catalog.location_rows()?;
         // Paths are compared as the disk has them (no symlinks, no trailing
         // separators); one that isn't there stays as it is.
@@ -547,7 +562,12 @@ impl Matcher {
         Ok(Self { locations, roots })
     }
     /// Where `directory`, found below the `chosen` folder, goes.
-    fn place(&self, directory: &Path, chosen: &Path, choices: &[Choice]) -> Matched {
+    pub(in crate::catalog) fn place(
+        &self,
+        directory: &Path,
+        chosen: &Path,
+        choices: &[Choice],
+    ) -> Matched {
         // (specificity, location, logical path, whether it resolves back here)
         let mut candidates = Vec::new();
         for (location, on_disk) in &self.locations {

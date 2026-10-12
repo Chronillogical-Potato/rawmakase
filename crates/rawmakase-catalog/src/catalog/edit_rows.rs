@@ -4,10 +4,12 @@
 //! edit live here, and nowhere else writes those rows; a backend that
 //! detected conflicting edits would do it here.
 //!
-//! Three operations: a checked save or clear ([`write_edit`]), of a photo
+//! Five operations: a checked save or clear ([`write_edit`]), of a photo
 //! being added too ([`CheckedNew`]), an opaque copy for virtual copies
-//! ([`copy_edit`]), and removal with a virtual copy ([`delete_edits`]).
-use super::db::{Write, sql};
+//! ([`copy_edit`]), a checked identity refresh for a file found moved
+//! ([`refresh_identity`]), and removal with a virtual copy
+//! ([`delete_edits`]).
+use super::db::{Reads, Write, sql};
 use super::{Catalog, EditChange, HistoryUpdate, PhotoId};
 use crate::storage::Identity;
 use crate::{export_settings::ExportOptions, model::recipe::Recipe};
@@ -217,6 +219,44 @@ pub(super) fn copy_edit(w: &mut Write<'_>, from: PhotoId, to: PhotoId) -> Result
         &[&to, &from],
     )?;
     Ok(())
+}
+
+/// What [`refresh_identity`] did to a photo's edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Refresh {
+    /// The photo has no saved edit.
+    NoEdit,
+    /// Its edit now names the file found.
+    Done,
+    /// Its edit was saved for another version of the file: it stays
+    /// protected, as before the move.
+    Protected,
+}
+
+/// Gives the saved edit of `photo`, whose file was found moved, the identity
+/// of the file found (`now`), only when that edit was saved for exactly the
+/// version `was` names (mtime included) and the file found was verified to
+/// have that version's content. An edit saved for another version stays
+/// bound to it.
+pub(super) fn refresh_identity(
+    w: &mut Write<'_>,
+    photo: PhotoId,
+    was: &Identity,
+    now: &Identity,
+) -> Result<Refresh> {
+    let saved: Option<Option<String>> =
+        w.read_optional(sql!("SELECT identity FROM photos WHERE id=?"), &[&photo])?;
+    let Some(Some(saved)) = saved else {
+        return Ok(Refresh::NoEdit);
+    };
+    if serde_json::from_str::<Identity>(&saved).ok().as_ref() != Some(was) {
+        return Ok(Refresh::Protected);
+    }
+    w.execute(
+        sql!("UPDATE photos SET identity=? WHERE id=?"),
+        &[&serde_json::to_string(now)?, &photo],
+    )?;
+    Ok(Refresh::Done)
 }
 
 /// Removes a photo's spots, masks and History, before the photo itself goes.

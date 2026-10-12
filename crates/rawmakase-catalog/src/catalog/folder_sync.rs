@@ -1,0 +1,438 @@
+//! Synchronize Folder (issue #432): finds photos added, deleted, moved or
+//! renamed outside RAWmakase, and brings the catalog in line while moved
+//! photos keep their rows, and with them their ratings, edits and copies.
+//!
+//! [`Catalog::sync_inputs`] reads what a scan needs in one snapshot;
+//! [`scan`] lists the folders on disk and matches unknown files with the
+//! checksums on record, touching no catalog; [`Catalog::seal_folder_sync`]
+//! records each family's digest for the plan the user reviews; and
+//! [`Catalog::apply_folder_sync`] applies what the user accepted, checking
+//! each action again first. Nothing on disk is ever changed.
+mod apply;
+mod digest;
+mod scan;
+
+use super::db::{Reads, sql};
+use super::ingest::{Conflict, Matcher};
+use super::locations::{logical_from_legacy, resolve_anchored};
+use super::value::row;
+use super::{Catalog, FolderId, PhotoId, RootId};
+use crate::storage::{FileChecksum, Identity};
+use anyhow::Result;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+pub use apply::{Accepted, Applied};
+pub use digest::FamilyDigest;
+pub use scan::scan;
+
+/// What a synchronization covers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SyncScope {
+    /// A catalog folder and every catalog folder below it, wherever each is
+    /// on this computer.
+    Folder(FolderId),
+    /// Every catalog folder.
+    All,
+}
+
+/// Where a catalog folder is on this computer.
+#[derive(Clone, Debug)]
+pub(super) struct Located {
+    pub root: RootId,
+    pub logical: String,
+    /// `None` when it can't be on this computer.
+    pub path: Option<PathBuf>,
+    /// The location it resolves below: its own or an ancestor's, else where
+    /// its root was added.
+    pub anchor: Option<PathBuf>,
+}
+
+/// A master photo as the scan saw it in the catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Master {
+    pub id: PhotoId,
+    pub folder: FolderId,
+    pub filename: String,
+}
+
+/// What a scan works from, read in one snapshot. Its photos and checksums
+/// are the catalog's as they were then; [`Catalog::apply_folder_sync`]
+/// checks each again before acting.
+pub struct SyncInputs {
+    pub(super) scope: Vec<FolderId>,
+    /// Locations walked for new directories besides the scope's folders:
+    /// for every folder, each root's and each folder located apart, as a
+    /// root may have no catalog folder of its own.
+    pub(super) walk: Vec<PathBuf>,
+    /// Every catalog folder, by id.
+    pub(super) folders: HashMap<FolderId, Located>,
+    /// Every master, by id.
+    pub(super) masters: HashMap<PhotoId, Master>,
+    /// The checksums on record, by master.
+    pub(super) checksums: HashMap<PhotoId, FileChecksum>,
+    /// Masters by (size, quick hash).
+    pub(super) by_quick: HashMap<(u64, String), Vec<PhotoId>>,
+    /// Masters without a full checksum but with a saved edit, by the size
+    /// and first bytes their edit was saved for.
+    pub(super) by_edit: HashMap<(u64, String), Vec<PhotoId>>,
+    pub(super) matcher: Matcher,
+}
+
+impl SyncInputs {
+    /// Where master `id`'s file is on this computer.
+    pub(super) fn path_of(&self, id: PhotoId) -> Option<PathBuf> {
+        let master = self.masters.get(&id)?;
+        let folder = self.folders.get(&master.folder)?;
+        Some(folder.path.as_ref()?.join(&master.filename))
+    }
+}
+
+/// How a photo's file was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileState {
+    Present,
+    /// Its directory was listed and lacks it, or its directory is gone from
+    /// a location that was listed and is online.
+    Missing,
+    /// It can't be checked here: its location or volume is offline.
+    Unavailable,
+    /// Listing or reading failed.
+    Error(String),
+}
+
+/// A photo whose file is now elsewhere.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Move {
+    pub photo: PhotoId,
+    pub from: PathBuf,
+    pub to: PathBuf,
+    /// The file found, as read.
+    pub identity: Identity,
+    /// Its full checksum equals the one on record; otherwise only its quick
+    /// hash, or the identity its edit was saved for, matched.
+    pub verified: bool,
+    /// The catalog folder `to` is in, by root and logical path, as placed
+    /// when scanned.
+    pub(super) place: (RootId, String),
+}
+
+/// Files that match more than one photo, or photos matched by more than one
+/// file: the user picks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Choice {
+    /// Each pairing that can be accepted.
+    pub options: Vec<Move>,
+}
+
+/// A file new to the catalog, and where it goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Addition {
+    pub file: PathBuf,
+    /// The photos it is a byte-for-byte copy of, if any.
+    pub copy_of: Vec<PhotoId>,
+}
+
+/// Something the scan could not check, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotChecked {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+/// A photo whose file is missing, with nothing found for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Missing {
+    pub photo: PhotoId,
+    pub path: PathBuf,
+}
+
+/// What a scan found, for the user to review.
+#[derive(Debug, Default)]
+pub struct SyncPlan {
+    /// Photos found moved or renamed: verified first, then probable ones.
+    pub moves: Vec<Move>,
+    pub choices: Vec<Choice>,
+    /// Files new to the catalog, copies of photos in it included.
+    pub additions: Vec<Addition>,
+    pub missing: Vec<Missing>,
+    /// Catalog folders whose directory was observed gone; removed once
+    /// left without photos.
+    pub gone_folders: Vec<FolderId>,
+    pub not_checked: Vec<NotChecked>,
+    /// Directories found whose catalog folder is elsewhere on this computer.
+    pub conflicts: Vec<Conflict>,
+    /// Directories more than one location claims equally.
+    pub ambiguous: Vec<PathBuf>,
+    /// Each master the plan acts on, as it was scanned, and its family's
+    /// digest; set by [`Catalog::seal_folder_sync`].
+    pub(super) scanned: HashMap<PhotoId, (Master, FamilyDigest)>,
+}
+
+impl Catalog {
+    /// What synchronizing `scope` needs, read in one snapshot.
+    pub fn sync_inputs(&self, scope: SyncScope) -> Result<SyncInputs> {
+        row! {
+            struct PhotoRow {
+                id: PhotoId,
+                folder: FolderId,
+                filename: String,
+                identity: Option<String>,
+            }
+        }
+        let (folders, photos) = self.db.snapshot(|s| {
+            let photos: Vec<PhotoRow> = s.read(
+                sql!("SELECT id, folder, filename, identity FROM photos WHERE master_id IS NULL"),
+                &[],
+            )?;
+            Ok((self.locate_folders(s)?, photos))
+        })?;
+        let checksums = self.checksums()?;
+        let walk = match scope {
+            SyncScope::All => {
+                let mut anchors: Vec<PathBuf> =
+                    folders.values().filter_map(|f| f.anchor.clone()).collect();
+                anchors.sort();
+                anchors.dedup();
+                anchors
+            }
+            SyncScope::Folder(_) => Vec::new(),
+        };
+        let scope = match scope {
+            SyncScope::All => folders.keys().copied().collect(),
+            SyncScope::Folder(id) => {
+                let top = folders
+                    .get(&id)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown folder"))?;
+                folders
+                    .iter()
+                    .filter(|(_, f)| f.root == top.root && below(&f.logical, &top.logical))
+                    .map(|(id, _)| *id)
+                    .collect()
+            }
+        };
+        let mut by_quick: HashMap<(u64, String), Vec<PhotoId>> = HashMap::new();
+        for (id, checksum) in &checksums {
+            by_quick
+                .entry((checksum.size, checksum.quick.clone()))
+                .or_default()
+                .push(*id);
+        }
+        let mut by_edit: HashMap<(u64, String), Vec<PhotoId>> = HashMap::new();
+        let mut masters = HashMap::new();
+        for p in photos {
+            let full = checksums.get(&p.id).is_some_and(|c| c.full.is_some());
+            if !full
+                && let Some(identity) = p
+                    .identity
+                    .and_then(|text| serde_json::from_str::<Identity>(&text).ok())
+            {
+                by_edit
+                    .entry((identity.size, identity.prefix_hash))
+                    .or_default()
+                    .push(p.id);
+            }
+            masters.insert(
+                p.id,
+                Master {
+                    id: p.id,
+                    folder: p.folder,
+                    filename: p.filename,
+                },
+            );
+        }
+        Ok(SyncInputs {
+            scope,
+            walk,
+            folders,
+            masters,
+            checksums,
+            by_quick,
+            by_edit,
+            matcher: Matcher::new(self)?,
+        })
+    }
+    /// Every catalog folder and where it is on this computer, read in `db`.
+    pub(super) fn locate_folders(&self, db: &impl Reads) -> Result<HashMap<FolderId, Located>> {
+        row! {
+            struct FolderRow {
+                id: FolderId,
+                root: RootId,
+                original: String,
+                relative: String,
+                logical: Option<String>,
+            }
+        }
+        row! {
+            struct LocationRow {
+                root: RootId,
+                relative: String,
+                path: String,
+            }
+        }
+        let folders: Vec<FolderRow> = db.read(
+            sql!(
+                "SELECT f.id, f.root, r.original_path, f.relative_path, p.path
+                 FROM folders f JOIN roots r ON r.id = f.root
+                 LEFT JOIN folder_paths p ON p.folder = f.id"
+            ),
+            &[],
+        )?;
+        let located: Vec<LocationRow> = db.read(
+            sql!("SELECT root, relative_path, path FROM folder_locations WHERE computer=?"),
+            &[&self.computer.id],
+        )?;
+        let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();
+        for l in located {
+            rows.entry(l.root)
+                .or_default()
+                .push((l.relative, PathBuf::from(l.path)));
+        }
+        Ok(folders
+            .into_iter()
+            .map(|f| {
+                let logical = f
+                    .logical
+                    .unwrap_or_else(|| logical_from_legacy(&f.original, &f.relative));
+                let own = rows.get(&f.root).map_or(&[][..], |r| &r[..]);
+                let (anchor, path) = resolve_anchored(&f.original, own, &logical, cfg!(windows))
+                    .filter(|(_, path)| !path.as_os_str().is_empty())
+                    .unzip();
+                (
+                    f.id,
+                    Located {
+                        root: f.root,
+                        logical,
+                        path,
+                        anchor,
+                    },
+                )
+            })
+            .collect())
+    }
+    /// Records, for the plan the user reviews, each family it acts on as it
+    /// is now. One whose master changed folder, name or master since the
+    /// scan leaves the plan, reported.
+    pub fn seal_folder_sync(&self, inputs: &SyncInputs, plan: &mut SyncPlan) -> Result<()> {
+        let mut acted: Vec<PhotoId> = plan.moves.iter().map(|m| m.photo).collect();
+        acted.extend(
+            plan.choices
+                .iter()
+                .flat_map(|c| c.options.iter().map(|m| m.photo)),
+        );
+        acted.extend(plan.missing.iter().map(|m| m.photo));
+        acted.sort();
+        acted.dedup();
+        let scanned = self.db.snapshot(|s| {
+            let mut scanned = HashMap::new();
+            for id in acted {
+                let Some(master) = inputs.masters.get(&id) else {
+                    continue;
+                };
+                if current_master(s, id)?.as_ref() != Some(master) {
+                    continue;
+                }
+                if let Some(digest) = digest::family(s, id)? {
+                    scanned.insert(id, (master.clone(), digest));
+                }
+            }
+            Ok(scanned)
+        })?;
+        let changed = |id: &PhotoId| !scanned.contains_key(id);
+        let mut gone = Vec::new();
+        plan.moves.retain(|m| {
+            let keep = !changed(&m.photo);
+            if !keep {
+                gone.push(m.from.clone());
+            }
+            keep
+        });
+        for choice in &mut plan.choices {
+            choice.options.retain(|m| !changed(&m.photo));
+        }
+        plan.choices.retain(|c| !c.options.is_empty());
+        plan.missing.retain(|m| {
+            let keep = !changed(&m.photo);
+            if !keep {
+                gone.push(m.path.clone());
+            }
+            keep
+        });
+        plan.not_checked
+            .extend(gone.into_iter().map(|path| NotChecked {
+                path,
+                reason: "changed in the catalog during the scan".into(),
+            }));
+        plan.scanned = scanned;
+        Ok(())
+    }
+}
+
+/// Master `id` as the catalog has it now, if it still is a master.
+pub(super) fn current_master(db: &impl Reads, id: PhotoId) -> Result<Option<Master>> {
+    row! {
+        struct Row {
+            folder: FolderId,
+            filename: String,
+            master: Option<PhotoId>,
+        }
+    }
+    let row: Option<Row> = db.read_optional(
+        sql!("SELECT folder, filename, master_id FROM photos WHERE id=?"),
+        &[&id],
+    )?;
+    Ok(row.filter(|r| r.master.is_none()).map(|r| Master {
+        id,
+        folder: r.folder,
+        filename: r.filename,
+    }))
+}
+
+/// Whether logical path `path` is `top` or below it.
+fn below(path: &str, top: &str) -> bool {
+    top.is_empty()
+        || path == top
+        || path
+            .strip_prefix(top)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// Whether `path`'s file is there, by the evidence rules every photo is
+/// judged by: present when it is a file; missing only when its directory,
+/// or the location it resolves below (`anchor`), was listed and `online`
+/// says that location's volume is there; unavailable when that location
+/// can't be reached; an error otherwise.
+pub(super) fn state_of(
+    path: Option<&Path>,
+    anchor: Option<&Path>,
+    online: &dyn Fn(&Path) -> bool,
+) -> FileState {
+    let (Some(path), Some(anchor)) = (path, anchor) else {
+        return FileState::Unavailable;
+    };
+    match std::fs::symlink_metadata(path) {
+        Ok(m) if m.is_file() || m.file_type().is_symlink() => return FileState::Present,
+        Ok(_) => return FileState::Error(format!("{} is not a file", path.display())),
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            return FileState::Error(format!("{}: {e}", path.display()));
+        }
+        Err(_) => {}
+    }
+    let listed = |dir: &Path| std::fs::read_dir(dir).map(|_| ());
+    let parent = path.parent().unwrap_or(anchor);
+    let evidence = match listed(parent) {
+        Ok(()) => listed(anchor),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && parent != anchor => listed(anchor),
+        Err(e) => Err(e),
+    };
+    match evidence {
+        Ok(()) if online(anchor) => FileState::Missing,
+        Ok(()) => FileState::Unavailable,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileState::Unavailable,
+        Err(e) => FileState::Error(format!("{}: {e}", parent.display())),
+    }
+}
+
+#[cfg(test)]
+#[path = "folder_sync_tests.rs"]
+mod tests;
