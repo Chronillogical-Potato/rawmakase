@@ -197,8 +197,21 @@ pub(super) fn folder_path(
     let Some((root, logical)) = logical_path(db, folder)? else {
         return Ok(None);
     };
-    let original: String =
-        db.read_one(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
+    logical_location(db, computer, root, &logical)
+}
+/// Where logical folder `logical` of `root` is on `computer`, read in
+/// `db`'s transaction, whether or not the catalog has that folder yet.
+pub(super) fn logical_location(
+    db: &impl Reads,
+    computer: &str,
+    root: RootId,
+    logical: &str,
+) -> Result<Option<PathBuf>> {
+    let original: Option<String> =
+        db.read_optional(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
+    let Some(original) = original else {
+        return Ok(None);
+    };
     let rows: Vec<Location> = db.read(
         sql!(
             "SELECT root, relative_path, path FROM folder_locations
@@ -210,7 +223,7 @@ pub(super) fn folder_path(
         .into_iter()
         .map(|l| (l.relative, PathBuf::from(l.path)))
         .collect();
-    Ok(resolve_in(&original, &rows, &logical, cfg!(windows))
+    Ok(resolve_in(&original, &rows, logical, cfg!(windows))
         .filter(|path| !path.as_os_str().is_empty()))
 }
 /// Forgets where folder `folder` is on every computer, as it leaves the

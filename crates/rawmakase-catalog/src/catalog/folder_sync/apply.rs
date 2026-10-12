@@ -10,7 +10,7 @@ use crate::catalog::copies::delete_photo;
 use crate::catalog::db::{Reads, sql};
 use crate::catalog::edit_rows::{Refresh, refresh_identity};
 use crate::catalog::ingest::{Matched, Place, folder_id, known};
-use crate::catalog::locations::folder_path;
+use crate::catalog::locations::{folder_path, logical_location};
 use crate::catalog::{Catalog, FolderId, MetadataDefaults, PhotoId, SidecarReport};
 use crate::storage::Identity;
 use anyhow::{Result, ensure};
@@ -140,14 +140,23 @@ impl Catalog {
                 removals.push((*id, missing.path.clone()));
             }
         }
+        // Still gone, by the same evidence as a missing photo: absent from
+        // a location that lists and is online.
         let gone_folders: Vec<FolderId> = plan
             .gone_folders
             .iter()
             .filter(|id| {
-                folders
-                    .get(id)
-                    .and_then(|f| f.path.as_ref())
-                    .is_some_and(|p| matches!(std::fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+                folders.get(id).is_some_and(|f| {
+                    let absent = f.path.as_ref().is_some_and(|p| {
+                        matches!(std::fs::symlink_metadata(p),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+                    });
+                    let anchor = f.anchor.as_deref();
+                    absent
+                        && anchor.is_some_and(|a| {
+                            Some(a) != f.path.as_deref() && super::list_all(a).is_ok() && online(a)
+                        })
+                })
             })
             .copied()
             .collect();
@@ -169,6 +178,11 @@ impl Catalog {
                     continue;
                 }
                 let (root, logical) = &m.place;
+                let here = logical_location(w, &computer, *root, logical)?;
+                if here.as_deref() != m.to.parent() {
+                    skip(&m.to, "its folder was located elsewhere since the scan");
+                    continue;
+                }
                 if known(w, *root, logical, &m.to)? {
                     skip(&m.to, "a photo of the catalog is there now");
                     continue;
@@ -221,6 +235,11 @@ impl Catalog {
                 }
                 let copies: Vec<PhotoId> =
                     w.read(sql!("SELECT id FROM photos WHERE master_id=?"), &[id])?;
+                // The photo open in Develop, a copy made since included, stays.
+                if open.is_some_and(|open| open == *id || copies.contains(&open)) {
+                    skip(path, "open in Develop");
+                    continue;
+                }
                 for photo in copies.iter().chain([id]) {
                     delete_photo(w, *photo)?;
                     removed.push(*photo);
@@ -240,17 +259,22 @@ impl Catalog {
         applied.folders_removed = folders_removed;
         applied.skipped.extend(skipped);
         // Then the new files, as Add Folder adds them.
-        let offered: HashSet<&PathBuf> = plan.additions.iter().map(|a| &a.file).collect();
-        ensure!(
-            accepted.additions.iter().all(|f| offered.contains(f)),
-            "Not a new file of this synchronization"
-        );
-        let files: Vec<PathBuf> = accepted
+        let offered: HashMap<&PathBuf, &Identity> = plan
             .additions
             .iter()
-            .filter(|f| f.is_file())
-            .cloned()
+            .map(|a| (&a.file, &a.identity))
             .collect();
+        let mut files: Vec<PathBuf> = Vec::new();
+        for file in &accepted.additions {
+            let scanned = offered
+                .get(file)
+                .ok_or_else(|| anyhow::anyhow!("Not a new file of this synchronization"))?;
+            match Identity::read(file) {
+                Ok(now) if now == **scanned => files.push(file.clone()),
+                Ok(_) => skip(&mut applied, file, "changed since the scan"),
+                Err(_) => skip(&mut applied, file, "no longer there"),
+            }
+        }
         if !files.is_empty() {
             match self.add_files(&files, defaults) {
                 Ok((added, report, not_placed)) => {
@@ -264,7 +288,8 @@ impl Catalog {
         Ok(applied)
     }
     /// Adds `files`, whose directories must be in catalog folders, with
-    /// what Add Folder gives each.
+    /// what Add Folder gives each. Returns how many were added, what reading
+    /// their sidecars found, and the directories that could not be placed.
     fn add_files(
         &mut self,
         files: &[PathBuf],

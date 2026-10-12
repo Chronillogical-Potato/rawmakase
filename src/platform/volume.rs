@@ -62,6 +62,30 @@ pub(crate) fn volume_of(path: &Path) -> Volume {
         mount: None,
     })
 }
+/// Whether the volume holding `path` is mounted, for headless commands with
+/// no volume checks of their own. The startup disk always is; another only
+/// when its mount point is a directory on a device of its own, as an empty
+/// directory left where a disk was mounted is not.
+pub fn mounted(path: &Path) -> bool {
+    let Some(mount) = volume_of(path).mount else {
+        return true;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let Ok(m) = std::fs::metadata(&mount) else {
+            return false;
+        };
+        m.is_dir()
+            && mount
+                .parent()
+                .is_some_and(|p| std::fs::metadata(p).is_ok_and(|p| p.dev() != m.dev()))
+    }
+    #[cfg(not(unix))]
+    {
+        mount.is_dir()
+    }
+}
 /// The startup disk's name: on macOS the /Volumes entry that links to "/"
 /// (usually "Macintosh HD").
 fn startup_name() -> String {

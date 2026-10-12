@@ -2,10 +2,9 @@
 //! renamed outside RAWmakase, and brings the catalog in line while moved
 //! photos keep their rows, and with them their ratings, edits and copies.
 //!
-//! [`Catalog::sync_inputs`] reads what a scan needs in one snapshot;
-//! [`scan`] lists the folders on disk and matches unknown files with the
-//! checksums on record, touching no catalog; [`Catalog::seal_folder_sync`]
-//! records each family's digest for the plan the user reviews; and
+//! [`Catalog::sync_inputs`] reads what a scan needs, each family's digest
+//! included, in one snapshot; [`scan`] lists the folders on disk and matches
+//! unknown files with the checksums on record, touching no catalog; and
 //! [`Catalog::apply_folder_sync`] applies what the user accepted, checking
 //! each action again first. Nothing on disk is ever changed.
 mod apply;
@@ -76,6 +75,8 @@ pub struct SyncInputs {
     /// Masters without a full checksum but with a saved edit, by the size
     /// and first bytes their edit was saved for.
     pub(super) by_edit: HashMap<(u64, String), Vec<PhotoId>>,
+    /// Every family's digest, by master.
+    pub(super) digests: HashMap<PhotoId, FamilyDigest>,
     pub(super) matcher: Matcher,
 }
 
@@ -129,6 +130,8 @@ pub struct Choice {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Addition {
     pub file: PathBuf,
+    /// The file as scanned; one changed since is not added.
+    pub identity: Identity,
     /// The photos it is a byte-for-byte copy of, if any.
     pub copy_of: Vec<PhotoId>,
 }
@@ -164,8 +167,8 @@ pub struct SyncPlan {
     pub conflicts: Vec<Conflict>,
     /// Directories more than one location claims equally.
     pub ambiguous: Vec<PathBuf>,
-    /// Each master the plan acts on, as it was scanned, and its family's
-    /// digest; set by [`Catalog::seal_folder_sync`].
+    /// Each master the plan acts on, as the scan's snapshot had it, and its
+    /// family's digest then.
     pub(super) scanned: HashMap<PhotoId, (Master, FamilyDigest)>,
 }
 
@@ -180,14 +183,20 @@ impl Catalog {
                 identity: Option<String>,
             }
         }
-        let (folders, photos) = self.db.snapshot(|s| {
+        // One snapshot: the families' digests are of the very rows the
+        // checksums and paths matched come from.
+        let (folders, photos, checksums, digests) = self.db.snapshot(|s| {
             let photos: Vec<PhotoRow> = s.read(
                 sql!("SELECT id, folder, filename, identity FROM photos WHERE master_id IS NULL"),
                 &[],
             )?;
-            Ok((self.locate_folders(s)?, photos))
+            Ok((
+                self.locate_folders(s)?,
+                photos,
+                super::checksums::stored(s)?,
+                digest::every_family(s)?,
+            ))
         })?;
-        let checksums = self.checksums()?;
         let walk = match scope {
             SyncScope::All => {
                 let mut anchors: Vec<PathBuf> =
@@ -244,6 +253,7 @@ impl Catalog {
         Ok(SyncInputs {
             scope,
             walk,
+            digests,
             folders,
             masters,
             checksums,
@@ -310,62 +320,6 @@ impl Catalog {
             })
             .collect())
     }
-    /// Records, for the plan the user reviews, each family it acts on as it
-    /// is now. One whose master changed folder, name or master since the
-    /// scan leaves the plan, reported.
-    pub fn seal_folder_sync(&self, inputs: &SyncInputs, plan: &mut SyncPlan) -> Result<()> {
-        let mut acted: Vec<PhotoId> = plan.moves.iter().map(|m| m.photo).collect();
-        acted.extend(
-            plan.choices
-                .iter()
-                .flat_map(|c| c.options.iter().map(|m| m.photo)),
-        );
-        acted.extend(plan.missing.iter().map(|m| m.photo));
-        acted.sort();
-        acted.dedup();
-        let scanned = self.db.snapshot(|s| {
-            let mut scanned = HashMap::new();
-            for id in acted {
-                let Some(master) = inputs.masters.get(&id) else {
-                    continue;
-                };
-                if current_master(s, id)?.as_ref() != Some(master) {
-                    continue;
-                }
-                if let Some(digest) = digest::family(s, id)? {
-                    scanned.insert(id, (master.clone(), digest));
-                }
-            }
-            Ok(scanned)
-        })?;
-        let changed = |id: &PhotoId| !scanned.contains_key(id);
-        let mut gone = Vec::new();
-        plan.moves.retain(|m| {
-            let keep = !changed(&m.photo);
-            if !keep {
-                gone.push(m.from.clone());
-            }
-            keep
-        });
-        for choice in &mut plan.choices {
-            choice.options.retain(|m| !changed(&m.photo));
-        }
-        plan.choices.retain(|c| !c.options.is_empty());
-        plan.missing.retain(|m| {
-            let keep = !changed(&m.photo);
-            if !keep {
-                gone.push(m.path.clone());
-            }
-            keep
-        });
-        plan.not_checked
-            .extend(gone.into_iter().map(|path| NotChecked {
-                path,
-                reason: "changed in the catalog during the scan".into(),
-            }));
-        plan.scanned = scanned;
-        Ok(())
-    }
 }
 
 /// Master `id` as the catalog has it now, if it still is a master.
@@ -386,6 +340,29 @@ pub(super) fn current_master(db: &impl Reads, id: PhotoId) -> Result<Option<Mast
         folder: r.folder,
         filename: r.filename,
     }))
+}
+
+/// Lists `directory` to the end, so a listing that fails part way is no
+/// evidence of anything.
+pub(super) fn list_all(directory: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(directory)? {
+        entry?;
+    }
+    Ok(())
+}
+
+/// A file name as a case-insensitive volume compares it: NFC, lower case.
+pub(super) fn folded(name: &std::ffi::OsStr) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.to_string_lossy()
+        .nfc()
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// How many names deep logical path `path` is.
+pub(super) fn depth(path: &str) -> usize {
+    super::locations::names(path).count()
 }
 
 /// Whether logical path `path` is `top` or below it.
@@ -418,7 +395,7 @@ pub(super) fn state_of(
         }
         Err(_) => {}
     }
-    let listed = |dir: &Path| std::fs::read_dir(dir).map(|_| ());
+    let listed = |dir: &Path| list_all(dir);
     let parent = path.parent().unwrap_or(anchor);
     let evidence = match listed(parent) {
         Ok(()) => listed(anchor),

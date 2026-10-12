@@ -1,4 +1,4 @@
-use super::digest::{PHOTO_TABLES, family};
+use super::digest::{PHOTO_TABLES, every_family, family};
 use crate::catalog::Catalog;
 use anyhow::Result;
 
@@ -21,7 +21,7 @@ fn family_tables_cover_the_schema() {
             tables.push(table.clone());
         }
     }
-    let mut listed: Vec<String> = PHOTO_TABLES.iter().map(|(t, _)| t.to_string()).collect();
+    let mut listed: Vec<String> = PHOTO_TABLES.iter().map(|(t, ..)| t.to_string()).collect();
     tables.sort();
     listed.sort();
     assert_eq!(listed, tables);
@@ -55,6 +55,13 @@ fn a_familys_digest_changes_with_any_of_its_rows() -> Result<()> {
     cat.set_copy_name(copy, "Renamed")?;
     assert_ne!(digest(&cat, a), copied);
     assert!(family(&cat.db, crate::catalog::PhotoId(9999))?.is_none());
+    // Read a table at a time, every family's is the same.
+    let every = every_family(&cat.db)?;
+    assert_eq!(every.len(), 2);
+    for id in [a, b] {
+        assert_eq!(every[&id], digest(&cat, id));
+    }
+    assert!(!every.contains_key(&copy));
     Ok(())
 }
 
@@ -150,9 +157,7 @@ mod scenarios {
         }
         fn plan_with(&self, scope: SyncScope, online: &dyn Fn(&Path) -> bool) -> Result<SyncPlan> {
             let inputs = self.cat.sync_inputs(scope)?;
-            let mut plan = scan(&inputs, online, &AtomicBool::new(false), &|_| {})?;
-            self.cat.seal_folder_sync(&inputs, &mut plan)?;
-            Ok(plan)
+            scan(&inputs, online, &AtomicBool::new(false), &|_| {})
         }
         fn apply(&mut self, plan: &SyncPlan, accepted: &Accepted) -> Result<Applied> {
             self.cat
@@ -512,6 +517,150 @@ mod scenarios {
         let added = f.id("IMG_3001.dng");
         let photo = f.cat.photos()?.into_iter().find(|p| p.id == added).unwrap();
         assert_eq!((photo.rating, photo.path), (4, file));
+        Ok(())
+    }
+
+    #[test]
+    fn a_checksum_replaced_after_the_scan_skips_the_move() -> Result<()> {
+        let mut f = fixture()?;
+        let id = f.id("IMG_1001.dng");
+        std::fs::rename(
+            f.root.join("Lisbon/IMG_1001.dng"),
+            f.root.join("Porto/IMG_1001.dng"),
+        )?;
+        let plan = f.plan(SyncScope::All)?;
+        // The row the match was made with is replaced, as a re-created
+        // photo's would be.
+        f.cat.db_for_tests().execute(
+            "UPDATE photo_checksums SET full_hash='other' WHERE photo=?",
+            [id.0],
+        )?;
+        let applied = f.apply(&plan, &plan.default_accepted())?;
+        assert!(applied.moved.is_empty());
+        assert_eq!(f.path_of(id), f.root.join("Lisbon/IMG_1001.dng"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_master_whose_copy_is_open_is_not_removed() -> Result<()> {
+        let mut f = fixture()?;
+        let id = f.id("IMG_1001.dng");
+        let copy = f.cat.create_virtual_copy(id)?;
+        std::fs::remove_file(f.root.join("Lisbon/IMG_1001.dng"))?;
+        let plan = f.plan(SyncScope::All)?;
+        let accepted = Accepted {
+            removals: vec![id],
+            ..Default::default()
+        };
+        let applied = f.cat.apply_folder_sync(
+            &plan,
+            &accepted,
+            &|_| true,
+            Some(copy),
+            &Default::default(),
+        )?;
+        assert!(applied.removed.is_empty());
+        assert!(f.cat.photos()?.iter().any(|p| p.id == copy));
+        Ok(())
+    }
+
+    #[test]
+    fn a_destination_located_elsewhere_after_the_scan_skips_the_move() -> Result<()> {
+        let mut f = fixture()?;
+        let id = f.id("IMG_1001.dng");
+        std::fs::rename(
+            f.root.join("Lisbon/IMG_1001.dng"),
+            f.root.join("Porto/IMG_1001.dng"),
+        )?;
+        let plan = f.plan(SyncScope::All)?;
+        // Porto found elsewhere, holding other files.
+        let elsewhere = f.root.with_file_name("porto-copy");
+        std::fs::create_dir_all(&elsewhere)?;
+        std::fs::write(elsewhere.join("IMG_1001.dng"), bytes(42))?;
+        f.cat.relink_folder(f.folder("Porto"), &elsewhere)?;
+        let applied = f.apply(&plan, &plan.default_accepted())?;
+        assert!(applied.moved.is_empty());
+        assert_eq!(applied.skipped.len(), 1);
+        assert!(f.path_of(id).ends_with("Lisbon/IMG_1001.dng"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_present_photos_old_checksum_makes_no_copy() -> Result<()> {
+        let f = fixture()?;
+        let present = f.root.join("Lisbon/IMG_1001.dng");
+        // A file with what IMG_1001 held, while IMG_1001 now holds other
+        // bytes of the same size.
+        std::fs::copy(&present, f.root.join("Lisbon/old.dng"))?;
+        std::fs::write(&present, bytes(77))?;
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(30);
+        std::fs::File::options()
+            .write(true)
+            .open(&present)?
+            .set_modified(later)?;
+        let plan = f.plan(SyncScope::All)?;
+        assert_eq!(plan.additions.len(), 1);
+        assert!(plan.additions[0].copy_of.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_case_only_rename_on_a_case_insensitive_volume_changes_nothing() -> Result<()> {
+        let f = fixture()?;
+        let from = f.root.join("Lisbon/IMG_1001.dng");
+        if !f.root.join("Lisbon/img_1001.DNG").exists() {
+            // A case-sensitive volume: there it is a rename like any other.
+            return Ok(());
+        }
+        let tmp = f.root.join("Lisbon/tmp.dng");
+        std::fs::rename(&from, &tmp)?;
+        std::fs::rename(&tmp, f.root.join("Lisbon/img_1001.dng"))?;
+        let plan = f.plan(SyncScope::All)?;
+        assert!(plan.moves.is_empty() && plan.choices.is_empty());
+        assert!(plan.additions.is_empty() && plan.missing.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_file_changed_or_gone_after_the_scan_is_not_added() -> Result<()> {
+        let mut f = fixture()?;
+        let (a, b) = (
+            f.root.join("Lisbon/new-a.dng"),
+            f.root.join("Lisbon/new-b.dng"),
+        );
+        std::fs::write(&a, bytes(50))?;
+        std::fs::write(&b, bytes(51))?;
+        let plan = f.plan(SyncScope::All)?;
+        std::fs::write(&a, bytes(52))?;
+        std::fs::remove_file(&b)?;
+        let applied = f.apply(&plan, &plan.default_accepted())?;
+        assert_eq!((applied.added, applied.skipped.len()), (0, 2));
+        Ok(())
+    }
+
+    #[test]
+    fn an_offline_folder_is_reported_not_checked() -> Result<()> {
+        let f = fixture()?;
+        let plan = f.plan_with(SyncScope::All, &|_| false)?;
+        assert!(!plan.not_checked.is_empty());
+        assert!(plan.missing.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn empty_folders_go_deepest_first() -> Result<()> {
+        let mut f = fixture()?;
+        std::fs::create_dir_all(f.root.join("Lisbon/day 2"))?;
+        std::fs::write(f.root.join("Lisbon/day 2/IMG_1101.dng"), bytes(60))?;
+        f.cat.add_folder(&f.root)?;
+        f.checksum_all()?;
+        std::fs::rename(f.root.join("Lisbon"), f.root.join("Lisboa"))?;
+        let plan = f.plan(SyncScope::All)?;
+        assert_eq!(plan.gone_folders.len(), 2);
+        let applied = f.apply(&plan, &plan.default_accepted())?;
+        assert_eq!(applied.folders_removed.len(), 2);
+        let folders: Vec<String> = f.cat.folders()?.into_iter().map(|f| f.relative).collect();
+        assert!(!folders.iter().any(|f| f.starts_with("Lisbon")));
         Ok(())
     }
 }

@@ -116,6 +116,10 @@ pub fn scan(
         .collect();
     // Where each scope photo is.
     let mut states: HashMap<PhotoId, FileState> = HashMap::new();
+    // A photo's file listed under another spelling of its name (a case or
+    // Unicode form a case-insensitive volume equates): by directory and
+    // folded name.
+    let mut aliases: HashSet<(PathBuf, String)> = HashSet::new();
     let in_scope: HashSet<FolderId> = inputs.scope.iter().copied().collect();
     for master in inputs.masters.values() {
         if !in_scope.contains(&master.folder) {
@@ -125,7 +129,18 @@ pub fn scan(
         let state = match folder.path.as_ref().and_then(|p| listings.get(p)) {
             None => FileState::Unavailable,
             Some(Listing::Listed { files, .. }) => {
-                if files.contains(std::ffi::OsStr::new(&master.filename)) {
+                let name = std::ffi::OsStr::new(&master.filename);
+                let path = folder.path.as_ref().map(|p| p.join(name));
+                if files.contains(name) {
+                    FileState::Present
+                } else if path
+                    .as_ref()
+                    .is_some_and(|p| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file()))
+                {
+                    // Not listed by this name, yet there by it: an alias.
+                    if let Some(dir) = &folder.path {
+                        aliases.insert((dir.clone(), super::folded(name)));
+                    }
                     FileState::Present
                 } else if folder.anchor.as_deref().is_some_and(online) {
                     FileState::Missing
@@ -140,6 +155,24 @@ pub fn scan(
             ),
         };
         states.insert(master.id, state);
+    }
+    // Folders in scope that could not be looked at, so none of their
+    // photos is missing.
+    for id in &inputs.scope {
+        let folder = &inputs.folders[id];
+        let (Some(path), Some(anchor)) = (&folder.path, &folder.anchor) else {
+            continue;
+        };
+        let reachable = super::list_all(anchor).is_ok() && online(anchor);
+        let reason = match listings.get(path) {
+            Some(Listing::Absent) if !reachable => "not found; its location is offline",
+            Some(Listing::Listed { .. }) if !online(anchor) => "its volume is offline",
+            _ => continue,
+        };
+        plan.not_checked.push(NotChecked {
+            path: path.clone(),
+            reason: reason.into(),
+        });
     }
     for (path, listing) in &listings {
         if let Listing::Failed(why) = listing {
@@ -170,6 +203,7 @@ pub fn scan(
         unknown.extend(
             files
                 .iter()
+                .filter(|name| !aliases.contains(&(path.clone(), super::folded(name))))
                 .map(|name| path.join(name))
                 .filter(|file| !known.contains(file))
                 .map(|file| (file, places[path].clone())),
@@ -266,9 +300,14 @@ pub fn scan(
         match what {
             Found::New => plan.additions.push(Addition {
                 file,
+                identity,
                 copy_of: Vec::new(),
             }),
-            Found::Copy(of) => plan.additions.push(Addition { file, copy_of: of }),
+            Found::Copy(of) => plan.additions.push(Addition {
+                file,
+                identity,
+                copy_of: of,
+            }),
             Found::Moved(photos) | Found::Contested(photos) => {
                 let moves: Vec<Move> = photos
                     .iter()
@@ -361,7 +400,25 @@ pub fn scan(
         })
         .copied()
         .collect();
-    plan.gone_folders.sort();
+    // Deepest first, so a parent left empty by its child goes too.
+    plan.gone_folders
+        .sort_by_key(|id| std::cmp::Reverse(super::depth(&inputs.folders[id].logical)));
+    // Each family acted on, as the snapshot had it.
+    let acted = plan
+        .moves
+        .iter()
+        .map(|m| m.photo)
+        .chain(
+            plan.choices
+                .iter()
+                .flat_map(|c| c.options.iter().map(|m| m.photo)),
+        )
+        .chain(plan.missing.iter().map(|m| m.photo));
+    for id in acted {
+        if let (Some(master), Some(digest)) = (inputs.masters.get(&id), inputs.digests.get(&id)) {
+            plan.scanned.insert(id, (master.clone(), *digest));
+        }
+    }
     Ok(plan)
 }
 
@@ -449,12 +506,17 @@ impl Matching<'_> {
                     None => missing.push((id, false)),
                 },
                 FileState::Present => {
-                    let theirs = match stored_full {
-                        Some(theirs) => Some(theirs),
-                        None => match self.inputs.path_of(id) {
-                            Some(path) => self.full(&path)?,
-                            None => None,
-                        },
+                    let path = self.inputs.path_of(id);
+                    // Only a checksum of the file as it is now counts.
+                    let current = stored.zip(path.as_deref()).is_some_and(|(c, p)| {
+                        crate::storage::Stamp::read(p).is_ok_and(|now| {
+                            now.size == c.identity.size && now.modified_ns == c.identity.modified_ns
+                        })
+                    });
+                    let theirs = match (stored_full.filter(|_| current), &path) {
+                        (Some(theirs), _) => Some(theirs),
+                        (None, Some(path)) => self.full(path)?,
+                        (None, None) => None,
                     };
                     let ours = match &full {
                         Some(f) => f.clone(),

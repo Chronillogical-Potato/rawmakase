@@ -441,8 +441,8 @@ fn sync_folder(
     };
     let inputs = c.sync_inputs(scope)?;
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let mut plan = scan(&inputs, &|_| true, &cancel, &|_| {})?;
-    c.seal_folder_sync(&inputs, &mut plan)?;
+    let online = |path: &std::path::Path| rawmakase::volume_mounted(path);
+    let plan = scan(&inputs, &online, &cancel, &|_| {})?;
     let shown = |p: &std::path::Path| p.display().to_string();
     for m in &plan.moves {
         let how = if m.verified {
@@ -487,7 +487,7 @@ fn sync_folder(
     let applied = c.apply_folder_sync(
         &plan,
         &plan.default_accepted(),
-        &|_| true,
+        &online,
         None,
         &rawmakase::catalog::MetadataDefaults::load(),
     )?;
