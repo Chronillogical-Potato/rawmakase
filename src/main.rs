@@ -99,6 +99,12 @@ enum Command {
         #[arg(long)]
         auto_wb: bool,
     },
+    /// Print each file's decode fingerprint as a line of JSON: what opening and
+    /// unpacking it yields, for decode regression checks.
+    Fingerprint {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+    },
     Benchmark {
         input: PathBuf,
         #[arg(long, default_value_t = 20)]
@@ -376,6 +382,14 @@ fn main() -> Result<()> {
                 im.scale_factor,
                 im.scale_clipped
             );
+        }
+        Some(Command::Fingerprint { files }) => {
+            // One file at a time: LibRaw opening files side by side can give one
+            // of them different white balance multipliers (issue #420).
+            for path in &files {
+                let line = serde_json::to_string(&rawmakase::fingerprint::fingerprint(path))?;
+                println!("{line}");
+            }
         }
         Some(Command::Benchmark { input, iterations }) => {
             anyhow::ensure!(

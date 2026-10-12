@@ -171,6 +171,7 @@ rawmakase render photo.dng edited.jpg --exposure 0.7 --max-edge 2400
 rawmakase render photo.dng edited.tiff --xmp preset.xmp
 rawmakase render photo.dng edited.jpg --auto
 rawmakase import-catalog Lightroom.lrcat Photos.rawmakase
+rawmakase fingerprint *.NEF        # decode facts per file as JSON lines, for regression checks
 rawmakase help
 ```
 

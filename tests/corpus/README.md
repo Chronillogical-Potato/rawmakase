@@ -14,6 +14,7 @@ Tests that RAWmakase's colors don't change unnoticed, and how far they are from 
 | `camera-raw/*.json` | Camera Raw 18.7 renders of the synthetic charts with their embedded profile (no Adobe files involved). |
 | `camera-raw/baseline.json` | RAWmakase's accepted distance from those renders, per case. |
 | `cameras.json` | LibRaw color matrices of the cameras that get their own chart. |
+| `dataset/pixls-decode.json` | Decode fingerprints of the test dataset's raw.pixls.us CC0 files (see [the pixls dataset](#the-pixls-dataset)). |
 | `pixls.json` | CC0 sample RAWs from raw.pixls.us (URL, SHA-256, size). The files themselves are not committed. |
 
 Patch files hold the mean encoded-sRGB value (16-bit) of each patch, one case per line.
@@ -97,6 +98,26 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
 ## The pixls dataset
 
 A classified copy of the whole raw.pixls.us archive, for choosing test photos by camera, exposure, measured tone and scene, and frozen Camera Raw references for the scene-tone gate, lives in the [rawmakase-dataset](https://github.com/pch/rawmakase-dataset) repository (private for now) with the scripts that build it. Its `manifest --link` puts chosen photos where the photo tests above read them (`$RAWMAKASE_CORPUS/raws/pixls`), and its reference sets are made with this repository's `scripts/corpus/gate.py`.
+
+### Decode fingerprints
+
+`rawmakase fingerprint <files…>` prints one JSON line per file with what opening and unpacking it yields, read as development reads it: the file's SHA-256, the step that failed and its error, or make and model, visible and raw size, the visible area's origin, crop, orientation, as-shot and daylight white balance, camera matrix, black levels per channel and their pattern, white levels, CFA pattern (`g` is LibRaw's second green) and a SHA-256 of the unpacked raw data in the visible area (LibRaw leaves the borders of some files unwritten). Nothing is demosaiced, so the values are LibRaw's and RAWmakase's opening code's alone.
+
+`scripts/corpus/dataset-fingerprints.py` runs it on every file of the dataset (2,944 files, 56 GB: about 4½ minutes from the USB SSD on an M1 Pro) and compares the result with the baselines:
+
+```
+export RAWMAKASE_DATASET=<dataset checkout>
+cargo build --release
+python3 scripts/corpus/dataset-fingerprints.py check                 # every file; exits 1 on any difference
+python3 scripts/corpus/dataset-fingerprints.py check --manifest m.json   # a dataset.py manifest's files
+python3 scripts/corpus/dataset-fingerprints.py record --reason "…"   # write the baselines
+```
+
+The report lists files that start or stop opening and every changed field, grouped by make and format, and fails on files missing from the dataset, files whose bytes changed, files without a baseline and batches that crashed (whose files are then run one by one, so a crash is pinned to its file). `--public` names only raw.pixls.us CC0 files and counts the rest; `--report` writes the report as JSON.
+
+- **Baselines:** the raw.pixls.us CC0 files' are committed in `dataset/pixls-decode.json`; every other file's stay in `$RAWMAKASE_DATASET/baselines/decode/<source>.json` on the dataset's machine. Record a baseline only in a commit that says why it changed, never just to make the check pass.
+- **When:** on every LibRaw update (`packaging/native-deps.sh`), and before releases.
+- **Same build, same machine:** a baseline records the LibRaw version, the commit `native-deps.sh` pins, the platform and the RAWmakase commit, and `check` notes when they differ. LibRaw decodes some formats with floating-point steps, and white balance is computed in floating point, so compare builds linked against `native-deps.sh`'s LibRaw on the platform that recorded the baseline (macOS arm64).
 
 ## TODO
 
