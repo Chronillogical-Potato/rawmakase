@@ -60,6 +60,41 @@ pub struct Choice {
     pub options: Vec<FolderLocation>,
     pub chosen: FolderLocation,
 }
+/// What added a batch of photos.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::catalog) enum ImportKind {
+    Add,
+    Sync,
+}
+impl ImportKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::Sync => "sync",
+        }
+    }
+}
+/// Starts a batch of photos added by `kind`, in `w`'s transaction: Previous
+/// Import from now on.
+pub(in crate::catalog) fn new_batch(w: &mut Write<'_>, kind: ImportKind) -> Result<i64> {
+    w.insert_returning_id(
+        sql!("INSERT INTO import_batches(kind) VALUES(?) RETURNING id"),
+        &[&kind.as_str()],
+    )
+}
+impl Catalog {
+    /// Lightroom's Previous Import: the photos the last Add Photo Folder or
+    /// Synchronize added that are still in the catalog.
+    pub fn previous_import(&self) -> Result<Vec<PhotoId>> {
+        self.db.read(
+            sql!(
+                "SELECT photo FROM photo_imports
+                 WHERE batch = (SELECT max(id) FROM import_batches)"
+            ),
+            &[],
+        )
+    }
+}
 /// Where the directories of files found on disk go in the catalog.
 #[derive(Default)]
 pub(in crate::catalog) struct Placed {
@@ -172,7 +207,8 @@ impl Catalog {
             result.ambiguous = placed.ambiguous;
             return Ok(result);
         }
-        (result.added, result.report) = self.insert(&folder, files, &placed.places, defaults)?;
+        (result.added, result.report) =
+            self.insert(&folder, files, &placed.places, defaults, ImportKind::Add)?;
         Ok(result)
     }
     /// Where the directories of `files`, found below the `chosen` folder, go
@@ -219,6 +255,7 @@ impl Catalog {
         files: Vec<PathBuf>,
         places: &HashMap<PathBuf, Place>,
         defaults: &super::MetadataDefaults,
+        kind: ImportKind,
     ) -> Result<(usize, super::SidecarReport)> {
         // Photos already in the catalog are left before their files are read.
         let files: Vec<(PathBuf, &Place)> = self.db.snapshot(|s| {
@@ -244,6 +281,9 @@ impl Catalog {
             .collect();
         let edited_at = rawmakase_model::time::now_text();
         let (added, report, edits) = self.db.write(|w| {
+            // The newest batch is Previous Import, empty when nothing new
+            // was found.
+            let batch = new_batch(w, kind)?;
             let mut new_root = None;
             let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
             let mut added = 0;
@@ -289,6 +329,10 @@ impl Catalog {
                          RETURNING id"
                     ),
                     &[&fid, &filename, &file.to_string_lossy(), &format],
+                )?;
+                w.execute(
+                    sql!("INSERT INTO photo_imports(photo, batch) VALUES(?, ?)"),
+                    &[&id, &batch],
                 )?;
                 added += 1;
                 if let Some(edit) = photo.edit {

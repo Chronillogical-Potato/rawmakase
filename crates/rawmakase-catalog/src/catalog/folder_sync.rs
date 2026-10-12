@@ -31,6 +31,9 @@ pub enum SyncScope {
     /// A catalog folder and every catalog folder below it, wherever each is
     /// on this computer.
     Folder(FolderId),
+    /// A root folder and every catalog folder in it, as a root may have
+    /// no catalog folder of its own.
+    Root(RootId),
     /// Every catalog folder.
     All,
 }
@@ -219,11 +222,23 @@ impl Catalog {
             .filter(|(_, path)| !path.as_os_str().is_empty())
             .collect();
         let walk = match scope {
-            SyncScope::All => {
+            SyncScope::All | SyncScope::Root(_) => {
+                let in_scope = |root: RootId| match scope {
+                    SyncScope::Root(r) => r == root,
+                    _ => true,
+                };
                 // Each root where it is here, and each folder located apart.
-                let mut anchors: Vec<PathBuf> =
-                    folders.values().filter_map(|f| f.anchor.clone()).collect();
-                anchors.extend(roots.iter().map(|(_, path)| path.clone()));
+                let mut anchors: Vec<PathBuf> = folders
+                    .values()
+                    .filter(|f| in_scope(f.root))
+                    .filter_map(|f| f.anchor.clone())
+                    .collect();
+                anchors.extend(
+                    roots
+                        .iter()
+                        .filter(|(root, _)| in_scope(*root))
+                        .map(|(_, path)| path.clone()),
+                );
                 anchors.sort();
                 anchors.dedup();
                 anchors
@@ -232,6 +247,11 @@ impl Catalog {
         };
         let scope = match scope {
             SyncScope::All => folders.keys().copied().collect(),
+            SyncScope::Root(root) => folders
+                .iter()
+                .filter(|(_, f)| f.root == root)
+                .map(|(id, _)| *id)
+                .collect(),
             SyncScope::Folder(id) => {
                 let top = folders
                     .get(&id)

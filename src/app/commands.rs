@@ -431,6 +431,7 @@ impl Editor {
             || self.view.shortcuts
             || self.onboarding.visible
             || self.curve_save_open()
+            || self.folder_sync.is_reviewing()
     }
     fn check_target(&self, target: &Target) -> Result<()> {
         if target

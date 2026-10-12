@@ -375,6 +375,15 @@ impl PresetBrowser {
 }
 
 impl Document {
+    /// Follows the open photo's file to `path`, where a synchronization
+    /// found it moved and verified, keeping the edit, its History and
+    /// whether it still needs saving; a save that failed on the old path is
+    /// tried again on the new one.
+    pub(super) fn relink(&mut self, path: PathBuf) {
+        self.file = crate::storage::Identity::read(&path).ok();
+        self.path = Some(path);
+        self.edit.save_state_mut().retry_now();
+    }
     pub(crate) fn reset(&mut self, catalog_photo: Option<PhotoId>) {
         *self = Self {
             catalog_photo,
