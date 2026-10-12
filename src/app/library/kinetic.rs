@@ -27,6 +27,9 @@ const ENABLED: bool = !cfg!(target_os = "macos");
 pub(super) struct Kinetic {
     /// The swipe so far: each frame's time and the scrolling in it.
     samples: Vec<(f64, Vec2)>,
+    /// A modifier was held during the swipe, which egui heeds for the whole
+    /// of it: such a swipe zooms or scrolls another way, and does not glide.
+    modified: bool,
     /// How fast the content glides, in points a second; zero when it does not.
     velocity: Vec2,
     /// When the glide last moved.
@@ -56,8 +59,24 @@ impl Kinetic {
             return Step(Vec2::ZERO);
         }
         let delta = ui.input(|i| {
+            // The frame's own events: a shortcut taken before the area is
+            // drawn still stops the glide.
+            let events = &i.raw.events;
+            for event in events {
+                if let egui::Event::MouseWheel {
+                    unit,
+                    delta,
+                    phase,
+                    modifiers,
+                } = event
+                {
+                    self.wheel(i.time, *unit, *delta, *phase, modifiers.is_none());
+                }
+            }
+            // A click or a key in the frame ends the glide and the swipe,
+            // whichever came first.
             if i.pointer.any_down()
-                || i.events.iter().any(|e| {
+                || events.iter().any(|e| {
                     matches!(
                         e,
                         egui::Event::PointerButton { pressed: true, .. }
@@ -66,19 +85,7 @@ impl Kinetic {
                 })
             {
                 self.stop();
-            }
-            for event in &i.events {
-                if let egui::Event::MouseWheel {
-                    unit,
-                    delta,
-                    phase,
-                    modifiers,
-                } = event
-                {
-                    // Zooming and sideways scrolling are left to egui alone.
-                    let plain = !modifiers.command && !modifiers.ctrl && !modifiers.shift;
-                    self.wheel(i.time, *unit, *delta, *phase, plain);
-                }
+                self.samples.clear();
             }
             self.advance(i.time)
         });
@@ -105,8 +112,9 @@ impl Kinetic {
     pub(super) fn stop(&mut self) {
         self.velocity = Vec2::ZERO;
     }
-    /// Takes one wheel event at `time`. Only a `plain` trackpad swipe, in
-    /// points, can start a glide; any scrolling ends the one under way.
+    /// Takes one wheel event at `time`. Only a trackpad swipe, in points,
+    /// with no modifier held (`plain`) can start a glide; any scrolling ends
+    /// the one under way.
     fn wheel(
         &mut self,
         time: f64,
@@ -116,12 +124,20 @@ impl Kinetic {
         plain: bool,
     ) {
         self.stop();
-        if unit != egui::MouseWheelUnit::Point || !plain {
+        if unit != egui::MouseWheelUnit::Point {
             self.samples.clear();
             return;
         }
         match phase {
-            egui::TouchPhase::Start | egui::TouchPhase::Cancel => self.samples.clear(),
+            egui::TouchPhase::Start => {
+                self.samples.clear();
+                self.modified = !plain;
+            }
+            egui::TouchPhase::Cancel => self.samples.clear(),
+            egui::TouchPhase::Move if self.modified || !plain => {
+                self.modified = true;
+                self.samples.clear();
+            }
             egui::TouchPhase::Move => {
                 self.samples.retain(|(at, _)| *at >= time - SAMPLE_WINDOW);
                 match self.samples.last_mut() {
@@ -130,7 +146,9 @@ impl Kinetic {
                 }
             }
             egui::TouchPhase::End => {
-                self.velocity = release_velocity(&self.samples, time);
+                if !std::mem::take(&mut self.modified) {
+                    self.velocity = release_velocity(&self.samples, time);
+                }
                 self.moved_at = time;
                 self.samples.clear();
             }
@@ -182,20 +200,41 @@ mod tests {
 
     const FRAME: f64 = 1. / 60.;
 
-    /// Swipes down in `frames` frames of `step` points each from `start`,
-    /// then lifts the fingers a frame later; returns when they lifted.
-    fn swipe(kinetic: &mut Kinetic, start: f64, frames: usize, step: f32) -> f64 {
-        let wheel = |k: &mut Kinetic, t, phase, d| {
-            k.wheel(t, MouseWheelUnit::Point, Vec2::new(0., d), phase, true);
-        };
-        wheel(kinetic, start, TouchPhase::Start, 0.);
+    /// Starts a swipe down at `start` and moves `frames` frames of `step`
+    /// points each, `plain` or with a modifier held; returns the last move's time.
+    fn swipe_samples(
+        kinetic: &mut Kinetic,
+        start: f64,
+        frames: usize,
+        step: f32,
+        plain: bool,
+    ) -> f64 {
+        kinetic.wheel(
+            start,
+            MouseWheelUnit::Point,
+            Vec2::ZERO,
+            TouchPhase::Start,
+            plain,
+        );
         let mut t = start;
         for _ in 0..frames {
             t += FRAME;
-            wheel(kinetic, t, TouchPhase::Move, step);
+            kinetic.wheel(
+                t,
+                MouseWheelUnit::Point,
+                Vec2::new(0., step),
+                TouchPhase::Move,
+                plain,
+            );
         }
-        t += FRAME;
-        wheel(kinetic, t, TouchPhase::End, 0.);
+        t
+    }
+
+    /// Swipes down in `frames` frames of `step` points each from `start`,
+    /// then lifts the fingers a frame later; returns when they lifted.
+    fn swipe(kinetic: &mut Kinetic, start: f64, frames: usize, step: f32) -> f64 {
+        let t = swipe_samples(kinetic, start, frames, step, true) + FRAME;
+        kinetic.wheel(t, MouseWheelUnit::Point, Vec2::ZERO, TouchPhase::End, true);
         t
     }
 
@@ -236,62 +275,73 @@ mod tests {
 
     #[test]
     fn fingers_resting_before_they_lift_do_not_glide() {
-        let mut kinetic = Kinetic::default();
-        let lifted = swipe(&mut kinetic, 0., 6, -20.);
-        assert_ne!(kinetic.velocity, Vec2::ZERO);
-        let mut kinetic = Kinetic::default();
-        kinetic.wheel(
-            0.,
-            MouseWheelUnit::Point,
-            Vec2::ZERO,
-            TouchPhase::Start,
-            true,
-        );
-        kinetic.wheel(
-            FRAME,
-            MouseWheelUnit::Point,
-            Vec2::new(0., -20.),
-            TouchPhase::Move,
-            true,
-        );
-        kinetic.wheel(
-            lifted + 0.2,
-            MouseWheelUnit::Point,
-            Vec2::ZERO,
-            TouchPhase::End,
-            true,
-        );
-        assert_eq!(kinetic.velocity, Vec2::ZERO);
+        // Lifted `pause` after the last move: within the sampling window
+        // either way, but past the pause only the second time.
+        let lift = |pause: f64| {
+            let mut kinetic = Kinetic::default();
+            let last = swipe_samples(&mut kinetic, 0., 6, -20., true);
+            let end = last + pause;
+            kinetic.wheel(
+                end,
+                MouseWheelUnit::Point,
+                Vec2::ZERO,
+                TouchPhase::End,
+                true,
+            );
+            kinetic.velocity
+        };
+        assert_ne!(lift(0.04), Vec2::ZERO);
+        assert_eq!(lift(0.08), Vec2::ZERO);
     }
 
     #[test]
-    fn zooming_does_not_glide() {
-        let mut kinetic = Kinetic::default();
-        kinetic.wheel(
-            0.,
-            MouseWheelUnit::Point,
-            Vec2::ZERO,
-            TouchPhase::Start,
-            false,
-        );
-        for n in 1..6 {
-            let t = n as f64 * FRAME;
+    fn a_swipe_with_a_modifier_does_not_glide() {
+        for modifiers in [
+            egui::Modifiers::COMMAND,
+            egui::Modifiers::ALT,
+            egui::Modifiers::SHIFT,
+        ] {
+            let mut kinetic = Kinetic::default();
+            let t = swipe_samples(&mut kinetic, 0., 6, -20., modifiers.is_none());
             kinetic.wheel(
-                t,
+                t + FRAME,
+                MouseWheelUnit::Point,
+                Vec2::ZERO,
+                TouchPhase::End,
+                true,
+            );
+            assert_eq!(kinetic.velocity, Vec2::ZERO, "{modifiers:?}");
+        }
+    }
+
+    #[test]
+    fn a_modifier_let_go_of_mid_swipe_still_does_not_glide() {
+        // egui keeps a modifier for the rest of the swipe, so it zoomed or
+        // scrolled sideways throughout.
+        let mut kinetic = Kinetic::default();
+        let t = swipe_samples(&mut kinetic, 0., 2, -20., false);
+        let mut t2 = t;
+        for _ in 0..6 {
+            t2 += FRAME;
+            kinetic.wheel(
+                t2,
                 MouseWheelUnit::Point,
                 Vec2::new(0., -20.),
                 TouchPhase::Move,
-                false,
+                true,
             );
         }
         kinetic.wheel(
-            0.1,
+            t2 + FRAME,
             MouseWheelUnit::Point,
             Vec2::ZERO,
             TouchPhase::End,
-            false,
+            true,
         );
         assert_eq!(kinetic.velocity, Vec2::ZERO);
+        // The next swipe without it glides again.
+        swipe(&mut kinetic, 1., 6, -20.);
+        assert_ne!(kinetic.velocity, Vec2::ZERO);
     }
 
     #[test]
@@ -344,6 +394,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
+                    // A shortcut taken before the area is drawn, as Tab is.
+                    ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
                     let step = kinetic.begin(ui);
                     let output = egui::ScrollArea::vertical().auto_shrink(false).show_rows(
                         ui,
@@ -375,11 +427,25 @@ mod tests {
             }
         }
         fn swipe(&mut self, rows: usize) {
+            self.swipe_lifted_with(rows, vec![Self::wheel(TouchPhase::End, 0.)]);
+        }
+        /// A swipe whose last frame has `lift`: the fingers lifting and
+        /// whatever else came with them.
+        fn swipe_lifted_with(&mut self, rows: usize, lift: Vec<egui::Event>) {
             self.frame_with(vec![Self::wheel(TouchPhase::Start, 0.)], rows);
             for _ in 0..6 {
                 self.frame_with(vec![Self::wheel(TouchPhase::Move, -20.)], rows);
             }
-            self.frame_with(vec![Self::wheel(TouchPhase::End, 0.)], rows);
+            self.frame_with(lift, rows);
+        }
+        fn key(key: egui::Key) -> egui::Event {
+            egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }
         }
     }
 
@@ -444,6 +510,37 @@ mod tests {
         }]);
         area.frame(Vec::new());
         assert_eq!(area.offset, stopped);
+    }
+
+    #[test]
+    fn a_shortcut_taken_before_the_area_stops_the_glide() {
+        if !ENABLED {
+            return;
+        }
+        let mut area = Area::new();
+        area.swipe(100);
+        area.frame(Vec::new());
+        assert_ne!(area.kinetic.velocity, Vec2::ZERO);
+        area.frame(vec![Area::key(egui::Key::Tab)]);
+        let stopped = area.offset;
+        area.frame(Vec::new());
+        assert_eq!(area.offset, stopped);
+    }
+
+    #[test]
+    fn a_key_with_the_fingers_lifting_does_not_glide() {
+        if !ENABLED {
+            return;
+        }
+        let lift = Area::wheel(TouchPhase::End, 0.);
+        let key = Area::key(egui::Key::ArrowDown);
+        for events in [vec![lift.clone(), key.clone()], vec![key, lift]] {
+            let mut area = Area::new();
+            area.swipe_lifted_with(100, events);
+            let lifted = area.offset;
+            area.frame(Vec::new());
+            assert_eq!(area.offset, lifted);
+        }
     }
 
     #[test]
