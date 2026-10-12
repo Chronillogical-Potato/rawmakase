@@ -327,7 +327,13 @@ impl Editor {
         if pressed(&[Key::H]) && !i.modifiers.shift {
             self.view.retouch.hide_pins ^= true;
         }
-        if pressed(&[Key::A]) && !i.modifiers.shift && !i.modifiers.command {
+        // With the modifiers held for the press: a quick Cmd+A, Select All, can
+        // release Cmd within the frame.
+        let a = i.events.iter().any(|event| {
+            matches!(event, egui::Event::Key { key: Key::A, pressed: true, modifiers, .. }
+                if !modifiers.any())
+        });
+        if a {
             self.view.retouch.visualize ^= true;
         }
     }

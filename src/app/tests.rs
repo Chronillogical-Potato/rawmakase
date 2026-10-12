@@ -4151,6 +4151,33 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     assert_eq!(editor.document.edit.history().steps().1, 1);
 }
 #[test]
+fn a_quick_cmd_a_in_remove_does_not_toggle_visualize_spots() {
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    let mut press = |modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+                // Cmd released within the same frame: Select All's press.
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| ui.input(|i| editor.retouch_keys(i)));
+        output.textures_delta.clear();
+        editor.view.retouch.visualize
+    };
+    assert!(!press(egui::Modifiers::COMMAND));
+    assert!(press(egui::Modifiers::NONE));
+}
+#[test]
 fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
     let ctx = egui::Context::default();
     let (mut editor, _) =
