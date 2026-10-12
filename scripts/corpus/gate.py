@@ -470,6 +470,7 @@ def render(args):
     if (stamp.exists() and json.loads(stamp.read_text()) != made_by) or (kept and not stamp.exists()):
         raise ValueError(f'{out} holds renders of other references or another build: use a new folder')
     stamp.write_text(json.dumps(made_by))
+    failed = []
     for i, photo in enumerate(frozen['photos']):
         done = lambda name: (out / name).exists() or (out / name).with_suffix('.npy').exists()
         jobs = [dict(xmp=str(refs / c['xmp']), output=str(out / Path(c['reference']).name), max_edge=EDGE)
@@ -483,12 +484,21 @@ def render(args):
         listing.unlink()
         if result.returncode or result.stderr.strip():
             print(f'photo {i}: {result.stderr.strip()[:400]}', file=sys.stderr)
+        # render-batch reports a case it can't render and goes on (a result to
+        # score); exiting with an error means the photo could not be developed
+        # at all this time (a crash, the RAW unreadable), which a rerun may not
+        # repeat, so the run is not complete.
+        if result.returncode:
+            failed.append(i)
         # Keep what the metric reads: the render reduced to SCORE_EDGE.
         for job in jobs:
             tif = Path(job['output'])
             if tif.exists():
                 np.save(tif.with_suffix('.npy'), reduce(render_srgb(tif)).astype(np.float32))
                 tif.unlink()
+    if failed:
+        print(f'rawmakase failed on photos {failed}: rerun render', file=sys.stderr)
+        return 1
 
 
 # Scoring and acceptance -----------------------------------------------------------
@@ -539,6 +549,7 @@ def summarise(scores):
             continue
         # By the RAW's hash: photo indices restart in every set.
         s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
+        s.setdefault('clipped', {})[r.get('sha256', r['photo'])] = r['clipping']
         s['clipping'].append(r['clipping'])
     for setting in out.values():
         for s in setting.values():
@@ -658,9 +669,15 @@ def accept(args):
                 # the setting, but a photo both scored still may not get worse.
                 reasons.append('inconclusive (fewer than 3 photos, photos invalid on one side only or different photos)')
                 limit = COLOR_LIMITS[family] if family else 1.0 if magnitude.get(name, 0) <= 50 else 2.0
-                for p in c['photos'].keys() & b['photos'].keys():
+                common = c['photos'].keys() & b['photos'].keys()
+                for p in common:
                     if c['photos'][p] > b['photos'][p] + limit:
                         reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {c["photos"][p]:.2f}')
+                if common:
+                    cc = float(np.mean([c['clipped'][p] for p in common]))
+                    bc = float(np.mean([b['clipped'][p] for p in common]))
+                    if cc > bc + 0.005:
+                        reasons.append(f'4: clipping {100 * bc:.2f}% -> {100 * cc:.2f}%')
             else:
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:
