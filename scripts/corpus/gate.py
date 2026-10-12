@@ -459,9 +459,11 @@ def summarise(scores):
     """setting -> stratum -> dict(score, mean, photos{i: score}, clipping, n)."""
     out = {}
     for r in scores['photos']:
-        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid=0))
+        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid={}))
         if r.get('valid', 0) < 0.5:
-            s['invalid'] += 1
+            # With why: a photo framed otherwise than Camera Raw in both is the
+            # same limitation; one that is no longer rendered is not.
+            s['invalid'][r.get('sha256', r['photo'])] = r.get('error')
             continue
         # By the RAW's hash: photo indices restart in every set.
         s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
@@ -476,8 +478,66 @@ def summarise(scores):
     return out
 
 
+# The acceptance rules. Every setting: no photo more than a limit worse than the
+# baseline (rule 3) and no more clipping (rule 4); defaults: the median no more
+# than 0.1 ΔE00 worse (rule 5). Other settings, by --rule: `regression` (the
+# default, for any change) holds their median to the same 0.1; `switch` (the
+# scene tone engine's switch, docs/scene-tone-stage.md) asks tone settings far
+# from the default render to improve materially (rule 1) without a band more
+# than 3 L* off (rule 2). Colour families always take the regression rule, with
+# per-photo limits of their own: half the 90th percentile of the family's
+# per-photo ΔE00 in `main`'s baseline, between 1.0 and 2.0 (the tone limits).
+# The colour families' limits: half the 90th percentile of the
+# family's per-photo ΔE00 in `main`'s baseline, between 1.0 and 2.0 (the tone
+# rule's range). Derived with `color-limits` from main 418d0ca7's validation
+# scores (Camera Raw 18.7, all three sources); frozen, change only with a reason.
+COLOR_LIMITS = {'color-wb': 1.9, 'color-vibrance': 2.0, 'color-mixer-skin': 1.4, 'color-mixer-sky': 2.0,
+                'color-mixer-foliage': 2.0, 'color-grading': 1.7}
+
+
+def color_family(set_name):
+    """The colour family a set belongs to (`color-wb-validation` -> `color-wb`), or None."""
+    family = (set_name or '').rsplit('-', 1)[0]
+    return family if family in COLOR_LIMITS else None
+
+
+def color_limits(args):
+    """Derive COLOR_LIMITS from a baseline's score files."""
+    per = {}
+    for f in sorted(Path(args.scores).rglob('*.json')):
+        d = json.loads(f.read_text())
+        family = (d.get('set') or '').rsplit('-', 1)[0]
+        if family.startswith('color-') and family != 'color-default':
+            per.setdefault(family, []).extend(r['median_de00'] for r in d['photos']
+                                              if r.get('valid', 0) >= 0.5 and not r['name'].endswith('default'))
+    for family, v in sorted(per.items()):
+        p90 = float(np.percentile(v, 90))
+        print(f"'{family}': {min(2.0, max(1.0, round(0.5 * p90, 1)))},  # n {len(v)}, median {np.median(v):.2f}, "
+              f"p90 {p90:.2f}")
+
+
+def excluded(path):
+    """SHA-256 hashes (or prefixes), one per line, `#` comments allowed."""
+    if not path:
+        return ()
+    return tuple(line.split('#')[0].strip() for line in Path(path).read_text().splitlines()
+                 if line.split('#')[0].strip())
+
+
 def accept(args):
     cand, base = json.loads(args.candidate.read_text()), json.loads(args.baseline.read_text())
+    # Photos left out of the verdict (holdout photos already looked at): dropped
+    # from both sides, and said so.
+    skip = excluded(args.exclude)
+    # Band measurements pool the photos' pixels, so they can't drop one: pairs that
+    # lost a photo can't be judged on rule 2.
+    pooled_with_excluded = set()
+    if skip:
+        for x in (cand, base):
+            kept = [r for r in x['photos'] if not str(r.get('sha256', '')).startswith(skip)]
+            pooled_with_excluded |= {(r['name'], r['stratum']) for r in x['photos'] if r not in kept}
+            print(f'{len(x["photos"]) - len(kept)} cases of excluded photos left out')
+            x['photos'] = kept
     if cand.get('set') != base.get('set'):
         print(f'the candidate scores set {cand.get("set")!r}, the baseline {base.get("set")!r}')
         return 1
@@ -493,6 +553,7 @@ def accept(args):
             return 1
     C, B = summarise(cand), summarise(base)
     magnitude = {k: v[2] for k, v in settings().items()}
+    family = color_family(cand.get('set'))
     failed = []
     print(f'{"setting":28s} {"stratum":7s} {"n":>2s} {"e4":>6s} {"new":>6s} {"dflt":>6s}  result')
     # Every setting either side scored: one the candidate lacks fails, as does an
@@ -505,22 +566,40 @@ def accept(args):
         default_name = 'color-default' if name.startswith('color-') else 'default'
         for st, _, _ in STRATA:
             c, b = C.get(name, {}).get(st), B.get(name, {}).get(st)
+            # `score` writes a row for every frozen case, so a stratum neither
+            # file has is one the references have no photo in.
+            if not c and not b:
+                continue
             cd, bd = C.get(default_name, {}).get(st), B.get(default_name, {}).get(st)
             reasons = []
             if not c or not b:
                 reasons.append('missing from the ' + ('candidate' if not c else 'baseline'))
-            elif (c['n'] < 3 or c['invalid'] or b['n'] < 3 or b['invalid'] or not cd or not bd
+            elif any(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items()):
+                # A photo the candidate can't score as the baseline could, or for
+                # another reason (no longer rendered, say).
+                n = sum(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items())
+                reasons.append(f'{n} photos no longer render or score as in the baseline')
+            elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] != b['invalid'] or not cd or not bd
                   or c['photos'].keys() != b['photos'].keys()):
-                reasons.append('inconclusive (fewer than 3 photos, invalid photos or different photos)')
+                # Photos invalid on both sides alike (framed otherwise than
+                # Camera Raw, say) are left out; anything else is no verdict.
+                reasons.append('inconclusive (fewer than 3 photos, photos invalid on one side only or different photos)')
             else:
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:
                         reasons.append('5: default worse than engine 4 + 0.1')
+                elif family or args.rule == 'regression':
+                    if c['score'] > b['score'] + 0.1:
+                        reasons.append('R: median worse than the baseline + 0.1')
+                elif name not in magnitude:
+                    reasons.append('unknown setting: no acceptance rule')
                 else:
                     near = b['score'] <= bd['score'] + 0.5
                     if not near:
                         if not (c['score'] <= cd['score'] + 1.0 or c['score'] <= 0.6 * b['score']):
                             reasons.append('1: no material improvement')
+                        if (name, st) in pooled_with_excluded:
+                            reasons.append('inconclusive on rule 2: its bands pool excluded photos')
                         cb = cand['bands'].get(f'{name}|{st}', {})
                         bb = base['bands'].get(f'{name}|{st}', {})
                         if not cb or cb.keys() != bb.keys() or not all(np.isfinite(v) for v in cb.values()):
@@ -530,7 +609,7 @@ def accept(args):
                                 reasons.append(f'2: band {band} ΔL* {v:+.1f}')
                 # One photo much worse, or more clipping, fails every setting,
                 # the defaults too.
-                limit = 1.0 if magnitude[name] <= 50 else 2.0
+                limit = COLOR_LIMITS[family] if family else 1.0 if magnitude.get(name, 0) <= 50 else 2.0
                 for p, v in c['photos'].items():
                     if p in b['photos'] and v > b['photos'][p] + limit:
                         reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {v:.2f}')
@@ -576,8 +655,15 @@ def main():
     s = sub.add_parser('accept')
     s.add_argument('--candidate', type=Path, required=True)
     s.add_argument('--baseline', type=Path, required=True)
+    s.add_argument('--exclude', type=Path, help='photos to leave out: SHA-256 hashes or prefixes, one per line')
+    s.add_argument('--rule', choices=['regression', 'switch'], default='regression',
+                   help='regression (default): no setting worse than the baseline; switch: the scene tone '
+                        'engine\'s rule, which also requires far-off tone settings to improve (rules 1 and 2)')
+    s = sub.add_parser('color-limits', help='derive COLOR_LIMITS from a baseline')
+    s.add_argument('--scores', type=Path, required=True, help='a folder of the baseline\'s score files')
     args = p.parse_args()
     return {'survey': survey, 'split': split, 'reference': reference, 'render': render, 'score': score,
+            'color-limits': color_limits,
             'accept': accept}[args.command](args)
 
 
