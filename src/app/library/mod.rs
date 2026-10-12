@@ -281,9 +281,28 @@ impl Library {
         self.screen.retry_failed();
         self.filter();
     }
-    /// Reads the catalog again, as after a change made through another
-    /// connection, so no row it no longer has can be acted on.
-    pub(in crate::app) fn reload(&mut self) -> Result<()> {
+    /// After a change made through another connection that could not be
+    /// shown by opening the catalog again: forgets the previews of the
+    /// photos `removed` (new photos may have their ids) and reads the
+    /// catalog again. If that fails too, no photo is shown, so none can be
+    /// changed under an id that now names another; the catalog stays open,
+    /// for an edit still to be saved.
+    pub(in crate::app) fn reread_after(&mut self, removed: &[PhotoId]) -> Result<()> {
+        for id in removed {
+            self.cache.forget(*id);
+            self.screen.forget(*id);
+        }
+        let reread = self.reload();
+        if reread.is_err() {
+            self.session.photos.clear();
+            self.session.collection_photos.clear();
+            self.session.previous_import.clear();
+            self.reloaded();
+        }
+        reread
+    }
+    /// Reads the catalog again into the lists shown.
+    fn reload(&mut self) -> Result<()> {
         self.session.reload()?;
         self.reloaded();
         Ok(())

@@ -684,10 +684,13 @@ impl Editor {
                     self.undo_log.forget_photo(id);
                 }
                 // The lists shown must not keep photos removed, whose ids
-                // new photos may have: read again here, or shown no more.
-                let reread = self.library.as_mut().map(|l| l.reload());
+                // new photos may have: read again here, or emptied. The
+                // Library stays, so an edit still unsaved saves to it.
+                let reread = self
+                    .library
+                    .as_mut()
+                    .map(|l| l.reread_after(&applied.removed));
                 if let Some(Err(again)) = reread {
-                    self.library = None;
                     self.status = format!(
                         "Synchronized, but the catalog could not be read again: {again:#}. Open it again."
                     );
