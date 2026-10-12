@@ -223,6 +223,12 @@ impl Db {
     }
 }
 
+/// Whether `error` came from the database itself, as a full disk or a lost
+/// connection does, rather than from a value refused before it was written.
+pub(in crate::catalog) fn is_storage_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|e| e.is::<rusqlite::Error>())
+}
+
 /// Direct access to the stored state, for tests that set it up or break it.
 #[cfg(any(test, feature = "test-support"))]
 impl super::Catalog {

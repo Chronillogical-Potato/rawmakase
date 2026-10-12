@@ -365,6 +365,8 @@ mod descriptive_tests;
 #[cfg(test)]
 mod edit_rows_tests;
 #[cfg(test)]
+mod ingest_tests;
+#[cfg(test)]
 mod locations_tests;
 #[cfg(test)]
 mod mask_assets_tests;
