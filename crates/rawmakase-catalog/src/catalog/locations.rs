@@ -186,6 +186,33 @@ fn logical_path(db: &impl Reads, folder: FolderId) -> Result<Option<(RootId, Str
         )
     }))
 }
+/// Where folder `folder` is on `computer`, as [`Catalog::folders`] places
+/// it, read in `db`'s transaction: `None` when it isn't in the catalog or
+/// can't be there.
+pub(super) fn folder_path(
+    db: &impl Reads,
+    computer: &str,
+    folder: FolderId,
+) -> Result<Option<PathBuf>> {
+    let Some((root, logical)) = logical_path(db, folder)? else {
+        return Ok(None);
+    };
+    let original: String =
+        db.read_one(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
+    let rows: Vec<Location> = db.read(
+        sql!(
+            "SELECT root, relative_path, path FROM folder_locations
+             WHERE computer=? AND root=? ORDER BY relative_path"
+        ),
+        &[&computer, &root],
+    )?;
+    let rows: Vec<(String, PathBuf)> = rows
+        .into_iter()
+        .map(|l| (l.relative, PathBuf::from(l.path)))
+        .collect();
+    Ok(resolve_in(&original, &rows, &logical, cfg!(windows))
+        .filter(|path| !path.as_os_str().is_empty()))
+}
 /// Forgets where folder `folder` is on every computer, as it leaves the
 /// catalog: a location left behind would refuse the folder added again as
 /// being elsewhere. A root's own location goes with the root.

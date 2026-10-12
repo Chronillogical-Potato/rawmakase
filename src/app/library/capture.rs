@@ -17,6 +17,7 @@ impl Library {
         self.session.retry_capture_times();
         self.start_capture_times();
         self.start_photo_info();
+        self.start_checksums();
     }
     /// Says once, after the catalog opens, how many folders with photos have
     /// none of them on this computer, unless something else is being said.

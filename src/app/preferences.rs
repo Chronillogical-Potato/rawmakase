@@ -382,6 +382,7 @@ impl Editor {
     fn catalog_page(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let usage = &self.preferences.usage;
+        let (mut paused, mut pause_changed) = (self.checksums_paused, false);
         if let Some(library) = &self.library {
             let location = library.session.catalog.location().clone();
             group(ui, "Current catalog");
@@ -398,11 +399,30 @@ impl Editor {
             form_row(ui, "Catalog size", |ui| {
                 value(ui, &usage.catalog.map_or("–".into(), bytes));
             });
+            let (read, masters) = library.session.checksum_count();
+            form_row(ui, "Checksums", |ui| {
+                value(ui, &format!("{read} of {masters} photos"));
+            });
+            form_row(ui, "", |ui| {
+                pause_changed = ui
+                    .checkbox(&mut paused, "Pause reading checksums")
+                    .changed();
+            });
+            form_row(ui, "", |ui| {
+                hint(
+                    ui,
+                    "Read in the background, to find photos moved or renamed outside RAWmakase.",
+                );
+            });
         } else {
             group(ui, "Current catalog");
             form_row(ui, "", |ui| {
                 value(ui, "No catalog is open.");
             });
+        }
+        if pause_changed {
+            self.checksums_paused = paused;
+            let _ = self.save_session();
         }
         form_row(ui, "Previews", |ui| {
             value(ui, &bytes(usage.previews));

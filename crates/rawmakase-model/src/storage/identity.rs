@@ -31,6 +31,9 @@ impl Stamp {
     }
 }
 
+/// How many of a file's first bytes its [`Identity`] hashes.
+pub const IDENTITY_PREFIX: u64 = 65536;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Identity {
     pub size: u64,
@@ -41,7 +44,9 @@ impl Identity {
     pub fn read(path: &Path) -> Result<Self> {
         let Stamp { size, modified_ns } = Stamp::read(path)?;
         let mut bytes = Vec::new();
-        File::open(path)?.take(65536).read_to_end(&mut bytes)?;
+        File::open(path)?
+            .take(IDENTITY_PREFIX)
+            .read_to_end(&mut bytes)?;
         let hash = fnv1a(FNV_OFFSET, &bytes);
         Ok(Self {
             size,
