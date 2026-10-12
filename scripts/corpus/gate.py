@@ -361,12 +361,8 @@ def library_digest(folder):
     return h.hexdigest()
 
 
-def render(args):
-    """One `rawmakase render-batch` per photo: it develops the RAW once."""
-    refs = args.refs.resolve()
-    frozen = json.loads((refs / 'references.json').read_text())
-    out = args.out.resolve()
-    out.mkdir(parents=True, exist_ok=True)
+def render_env(args, out):
+    """The environment every gate render runs rawmakase in, and its profile library."""
     # The binary that is hashed is the one that runs, never one found on PATH.
     args.rawmakase = args.rawmakase.resolve(strict=True)
     env = dict(os.environ)
@@ -382,6 +378,79 @@ def render(args):
     (out / 'empty-data-home').mkdir(parents=True, exist_ok=True)
     env['XDG_DATA_HOME'] = str(out / 'empty-data-home')
     env.pop('RAWMAKASE_LIBRAW_DEMOSAIC', None)
+    return env, library
+
+
+def default_parity(args):
+    """Every surveyed photo's default render (Adobe Standard, the settings Camera Raw
+    embedded in its survey render) against Camera Raw's, at the survey's 1024 px.
+    Photos in a holdout set are left out, so this never looks at them."""
+    survey = args.survey.resolve()
+    pool = json.loads((survey / 'pool.json').read_text())
+    references = (args.references or survey.parent.parent).resolve()
+    holdout = {p['sha256'] for f in references.glob('*/*-holdout/references.json')
+               for p in json.loads(f.read_text())['photos']}
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    env, library = render_env(args, out)
+    rows, left_out = [], 0
+    for photo in pool['photos']:
+        if photo['sha256'] in holdout:
+            left_out += 1
+            continue
+        key = photo['sha256'][:16]
+        reference = survey / 'renders' / f'{key}.tif'
+        row = dict(sha256=photo['sha256'], make=photo.get('make'), stratum=photo['stratum'])
+        if not reference.exists():
+            rows.append(dict(row, valid=0., error='no survey render'))
+            continue
+        if digest(photo['raw']) != photo['sha256']:
+            raise ValueError(f'{photo["raw"]}: changed since the survey')
+        # The settings Camera Raw rendered with, from its TIFF, as `reference` does.
+        sidecar = out / f'{key}.xmp'
+        sidecar.write_bytes(subprocess.check_output(['exiftool', '-b', '-XMP', str(reference)]))
+        tif = out / f'{key}.tif'
+        tif.unlink(missing_ok=True)
+        listing = out / f'{key}.json'
+        listing.write_text(json.dumps([dict(xmp=str(sidecar), output=str(tif), max_edge=1024)]))
+        result = subprocess.run([str(args.rawmakase), 'render-batch', photo['raw'], str(listing)],
+                                capture_output=True, text=True, env=env)
+        listing.unlink()
+        if not tif.exists():
+            # render-batch prints "<output>: <why>"; keep the why, not the path.
+            why = (result.stderr.strip().splitlines() or ['no message'])[-1].split(': ', 1)[-1][:200]
+            rows.append(dict(row, valid=0., error=f'not rendered: {why}'))
+            continue
+        m = photo_metrics(reduce(reference_srgb(reference)), reduce(render_srgb(tif)))
+        m.pop('L_ref', None), m.pop('L_out', None)
+        rows.append(dict(row, **m))
+        tif.unlink()
+    valid = [r for r in rows if r.get('valid', 0) >= 0.5]
+    summary = {}
+    for key in ('stratum', 'make'):
+        groups = {}
+        for r in valid:
+            groups.setdefault(r[key], []).append(r['median_de00'])
+        summary[key] = {k: dict(n=len(v), median=float(np.median(v))) for k, v in sorted(groups.items())}
+    result = dict(schema=1, survey=str(survey), camera_raw=pool.get('camera_raw'), holdout_left_out=left_out,
+                  rendered_by=dict(rawmakase=digest(args.rawmakase), profiles=library_digest(library),
+                                   policy=RENDER_POLICY),
+                  median_de00=float(np.median([r['median_de00'] for r in valid])) if valid else None,
+                  summary=summary, photos=rows)
+    (out / 'default-parity.json').write_text(json.dumps(result, indent=1))
+    print(f'{len(valid)} of {len(rows)} photos scored ({left_out} holdout photos left out); '
+          f'median ΔE00 {result["median_de00"]}')
+    for st, v in summary['stratum'].items():
+        print(f'  {st}: {v["n"]} photos, median {v["median"]:.2f}')
+
+
+def render(args):
+    """One `rawmakase render-batch` per photo: it develops the RAW once."""
+    refs = args.refs.resolve()
+    frozen = json.loads((refs / 'references.json').read_text())
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    env, library = render_env(args, out)
     # Renders, new or kept from an earlier run, must come from the frozen inputs.
     for photo in frozen['photos']:
         if digest(photo['raw']) != photo['sha256']:
@@ -659,11 +728,17 @@ def main():
     s.add_argument('--rule', choices=['regression', 'switch'], default='regression',
                    help='regression (default): no setting worse than the baseline; switch: the scene tone '
                         'engine\'s rule, which also requires far-off tone settings to improve (rules 1 and 2)')
+    s = sub.add_parser('default-parity', help='default renders against the survey\'s Camera Raw renders')
+    s.add_argument('--survey', type=Path, required=True, help='a references/<family>/survey folder')
+    s.add_argument('--references', type=Path, help='the references root, for the holdout sets to leave out')
+    s.add_argument('--rawmakase', type=Path, required=True)
+    s.add_argument('--data-dir', type=Path)
+    s.add_argument('--out', type=Path, required=True)
     s = sub.add_parser('color-limits', help='derive COLOR_LIMITS from a baseline')
     s.add_argument('--scores', type=Path, required=True, help='a folder of the baseline\'s score files')
     args = p.parse_args()
     return {'survey': survey, 'split': split, 'reference': reference, 'render': render, 'score': score,
-            'color-limits': color_limits,
+            'color-limits': color_limits, 'default-parity': default_parity,
             'accept': accept}[args.command](args)
 
 
