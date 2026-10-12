@@ -813,6 +813,8 @@ mod subject_mask;
 mod targeted_tool;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ui_snapshot;
 mod undo;
 mod upright;
 mod viewport;

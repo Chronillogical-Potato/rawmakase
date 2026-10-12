@@ -281,10 +281,9 @@ impl Library {
         self.screen.retry_failed();
         self.filter();
     }
-    /// Reads the catalog again without checking which files are online, for
-    /// tests.
-    #[cfg(test)]
-    fn reload(&mut self) -> Result<()> {
+    /// Reads the catalog again, as after a change made through another
+    /// connection, so no row it no longer has can be acted on.
+    pub(in crate::app) fn reload(&mut self) -> Result<()> {
         self.session.reload()?;
         self.reloaded();
         Ok(())
