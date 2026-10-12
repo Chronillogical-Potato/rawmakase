@@ -21,6 +21,7 @@ fn read(photo: &Photo) -> Result<ReadChecksum> {
         photo: photo.id,
         folder: photo.folder,
         filename: photo.filename.clone(),
+        path: photo.path.clone(),
         checksum,
     })
 }
@@ -91,5 +92,22 @@ fn a_checksum_of_another_version_is_read_again() -> Result<()> {
         .execute_batch("UPDATE photo_checksums SET version = version + 1")?;
     assert!(cat.checksums()?.is_empty());
     assert_eq!(cat.checksum_count()?, (0, 2));
+    Ok(())
+}
+
+#[test]
+fn a_checksum_read_before_its_folder_was_located_elsewhere_is_dropped() -> Result<()> {
+    let (dir, mut cat, photos) = catalog()?;
+    let a = read(&photos[0])?;
+    // The folder found elsewhere, as Find Missing Folder does while the
+    // read is under way.
+    let moved = dir.path().join("moved");
+    std::fs::rename(dir.path().join("photos"), &moved)?;
+    let root = cat.roots()?[0].0;
+    cat.relink_root(root, &moved)?;
+    assert!(cat.save_checksums(std::slice::from_ref(&a))?.is_empty());
+    // Read again where it is now, it is kept.
+    let a = read(&cat.photos()?.into_iter().find(|p| p.id == a.photo).unwrap())?;
+    assert_eq!(cat.save_checksums(std::slice::from_ref(&a))?, [a.photo]);
     Ok(())
 }

@@ -7,6 +7,7 @@ use super::{Catalog, FolderId, PhotoId};
 use crate::storage::{CHECKSUM_VERSION, FileChecksum};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// A checksum read from the file of a photo, as it was when the read began.
 #[derive(Clone, Debug)]
@@ -14,6 +15,8 @@ pub struct ReadChecksum {
     pub photo: PhotoId,
     pub folder: FolderId,
     pub filename: String,
+    /// The file it was read from.
+    pub path: PathBuf,
     pub checksum: FileChecksum,
 }
 
@@ -72,13 +75,19 @@ impl Catalog {
         Ok((count.full as usize, count.masters as usize))
     }
     /// Records checksums read from files, in one transaction. Each is kept
-    /// only while its photo is still a master in the folder and under the
-    /// name it was read from; one replaced, moved, renamed or made a copy
-    /// meanwhile is dropped. Returns the photos whose checksums were saved.
+    /// only while its photo is still a master in the folder, under the name
+    /// and at the path it was read from; one replaced, moved, renamed, made
+    /// a copy or located elsewhere meanwhile is dropped. Returns the photos
+    /// whose checksums were saved.
     pub fn save_checksums(&mut self, read: &[ReadChecksum]) -> Result<Vec<PhotoId>> {
+        let computer = self.computer.id.clone();
         self.db.write(|w| {
             let mut saved = Vec::new();
             for r in read {
+                let here = super::locations::folder_path(w, &computer, r.folder)?;
+                if here.map(|folder| folder.join(&r.filename)).as_ref() != Some(&r.path) {
+                    continue;
+                }
                 let identity = serde_json::to_string(&r.checksum.identity)?;
                 let size = i64::try_from(r.checksum.size)?;
                 let written = w.execute(

@@ -40,10 +40,14 @@ pub enum Outcome<T> {
 }
 
 impl FileChecksum {
-    /// The size and quick hash of `path`, without its full hash.
-    pub fn read_quick(path: &Path) -> Result<Outcome<Self>> {
+    /// The size and quick hash of `path`, without its full hash. `pace` is
+    /// given the bytes read, as [`Self::read_full`]'s is.
+    pub fn read_quick(path: &Path, mut pace: impl FnMut(usize) -> bool) -> Result<Outcome<Self>> {
         let identity = Identity::read(path)?;
-        let quick = quick_hash(&mut File::open(path)?, identity.size)?;
+        let (quick, read) = quick_hash(&mut File::open(path)?, identity.size)?;
+        if !pace(read) {
+            return Ok(Outcome::Cancelled);
+        }
         stable(path, identity, |identity| Self {
             size: identity.size,
             quick,
@@ -57,7 +61,10 @@ impl FileChecksum {
     pub fn read_full(path: &Path, mut pace: impl FnMut(usize) -> bool) -> Result<Outcome<Self>> {
         let identity = Identity::read(path)?;
         let mut file = File::open(path)?;
-        let quick = quick_hash(&mut file, identity.size)?;
+        let (quick, read) = quick_hash(&mut file, identity.size)?;
+        if !pace(read) {
+            return Ok(Outcome::Cancelled);
+        }
         file.seek(SeekFrom::Start(0))?;
         let mut sha = Sha256::new();
         let mut buffer = vec![0; CHUNK];
@@ -117,13 +124,16 @@ fn read_chunk(file: &mut File, buffer: &mut [u8]) -> Result<usize> {
 }
 
 /// SHA-256 of the size and of the blocks at the start, middle and end of a
-/// file of `size` bytes; they overlap in a file smaller than three blocks.
-fn quick_hash(file: &mut File, size: u64) -> Result<String> {
+/// file of `size` bytes, and the bytes read. They overlap in a file smaller
+/// than three blocks; one no larger than a block is its only block.
+fn quick_hash(file: &mut File, size: u64) -> Result<(String, usize)> {
     let mut sha = Sha256::new();
     sha.update(size.to_le_bytes());
     let block = BLOCK.min(size);
     let mut buffer = vec![0; block as usize];
-    for start in [0, size / 2 - (size / 2).min(block / 2), size - block] {
+    let mut starts = vec![0, size / 2 - (size / 2).min(block / 2), size - block];
+    starts.dedup();
+    for &start in &starts {
         file.seek(SeekFrom::Start(start))?;
         anyhow::ensure!(
             read_chunk(file, &mut buffer)? == buffer.len(),
@@ -131,7 +141,7 @@ fn quick_hash(file: &mut File, size: u64) -> Result<String> {
         );
         sha.update(&buffer);
     }
-    Ok(hex(&sha.finalize()))
+    Ok((hex(&sha.finalize()), buffer.len() * starts.len()))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -165,7 +175,7 @@ mod tests {
             Some(hex(&Sha256::digest(&bytes)).as_str())
         );
         assert_eq!(full.size, bytes.len() as u64);
-        let quick = done(FileChecksum::read_quick(&path).unwrap());
+        let quick = done(FileChecksum::read_quick(&path, |_| true).unwrap());
         assert_eq!((&quick.quick, quick.full), (&full.quick, None));
         assert!(full.is_current(&Identity::read(&path).unwrap()));
     }
@@ -183,6 +193,47 @@ mod tests {
         );
         assert_eq!(a.quick, b.quick);
         assert_ne!(a.full, b.full);
+    }
+
+    #[test]
+    fn quick_hashes_match_reference_values() {
+        // Worked out apart from this code (Python's hashlib): SHA-256 of the
+        // size as 8 bytes little-endian, then the blocks.
+        let (_dir, small) = file(b"tiny synthetic raw");
+        assert_eq!(
+            done(FileChecksum::read_quick(&small, |_| true).unwrap()).quick,
+            "9beee9b9ee4616893c8914866ad8fff1fcce147ef391f86deec352f36bab2deb"
+        );
+        let bytes: Vec<u8> = (0..300_000).map(|i| (i * 31 % 251) as u8).collect();
+        let (_dir, large) = file(&bytes);
+        assert_eq!(
+            done(FileChecksum::read_quick(&large, |_| true).unwrap()).quick,
+            "ff49b88ab02bd87d11a736b5d2c6b4869523ac70622fe32caeeaa833c77b5031"
+        );
+    }
+
+    #[test]
+    fn the_quick_hash_reports_what_it_read() {
+        let (_dir, small) = file(b"tiny synthetic raw");
+        let mut read = 0;
+        done(
+            FileChecksum::read_quick(&small, |n| {
+                read += n;
+                true
+            })
+            .unwrap(),
+        );
+        assert_eq!(read, 18);
+        let (_dir, large) = file(&vec![0u8; 300_000]);
+        let mut read = 0;
+        done(
+            FileChecksum::read_quick(&large, |n| {
+                read += n;
+                true
+            })
+            .unwrap(),
+        );
+        assert_eq!(read, 3 * BLOCK as usize);
     }
 
     #[test]
@@ -205,7 +256,7 @@ mod tests {
             })
             .unwrap(),
         );
-        assert_eq!(seen, [CHUNK, CHUNK, 5]);
+        assert_eq!(seen, [3 * BLOCK as usize, CHUNK, CHUNK, 5]);
         let mut chunks = 0;
         let read = FileChecksum::read_full(&path, |_| {
             chunks += 1;
@@ -213,13 +264,21 @@ mod tests {
         })
         .unwrap();
         assert_eq!((read, chunks), (Outcome::Cancelled, 1));
+        assert!(matches!(
+            FileChecksum::read_quick(&path, |_| false).unwrap(),
+            Outcome::Cancelled
+        ));
     }
 
     #[test]
     fn a_file_changed_during_the_read_gives_nothing() {
         let (_dir, path) = file(&vec![1u8; 2 * CHUNK]);
+        let mut first = true;
         let read = FileChecksum::read_full(&path, |_| {
-            // Same size, other content and time.
+            // After the quick hash: same size, other content and time.
+            if std::mem::take(&mut first) {
+                return true;
+            }
             std::fs::write(&path, vec![2u8; 2 * CHUNK]).unwrap();
             let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
             File::options()

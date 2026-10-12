@@ -18,11 +18,17 @@ use std::time::{Duration, Instant};
 pub(crate) const RATE: u64 = 64_000_000;
 /// How often a paused reader looks again.
 const PAUSED_POLL: Duration = Duration::from_millis(100);
+/// How far reading can fall behind [`RATE`], as while a file is opened or
+/// its metadata read, and catch up at full speed afterwards.
+const MAX_CREDIT: Duration = Duration::from_secs(1);
 
 /// The reader under way and what it was started for.
 #[derive(Default)]
 pub(super) struct Checksums {
     reader: Option<Reader>,
+    /// Starting was asked for while a reader was under way: start again
+    /// once it is done, for photos that came online meanwhile.
+    again: bool,
     /// Reading waits while this is set: by the user, or for heavier work.
     paused: bool,
     /// Masters with a full checksum, and masters, in the catalog.
@@ -33,6 +39,7 @@ impl Checksums {
     pub(super) fn stopped(self) -> Self {
         Self {
             reader: None,
+            again: false,
             ..self
         }
     }
@@ -69,6 +76,7 @@ impl CatalogSession {
     /// says are online, unless a reader is under way.
     pub(crate) fn start_checksums(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.checksums.reader.is_some() {
+            self.backfill.checksums.again = true;
             return;
         }
         let Ok(mut stored) = self.catalog.checksums() else {
@@ -140,6 +148,7 @@ impl CatalogSession {
         };
         if done {
             self.backfill.checksums.reader = None;
+            out.start_again = std::mem::take(&mut self.backfill.checksums.again);
         }
         if !read.is_empty() {
             match self.catalog.save_checksums(&read) {
@@ -173,17 +182,21 @@ fn current(stored: &FileChecksum, path: &Path) -> bool {
 fn read(mut wanted: Vec<Wanted>, control: &Control, tx: &Sender<ReadChecksum>, wake: &Wake) {
     let mut pace = Pace::new(control);
     // A checksum read from the file as it is stays.
-    wanted.retain_mut(|w| {
+    for w in &mut wanted {
+        if !pace.go_on(0) {
+            return;
+        }
         if w.stored.as_ref().is_some_and(|s| !current(s, &w.path)) {
             w.stored = None;
         }
-        w.stored.as_ref().is_none_or(|s| s.full.is_none())
-    });
+    }
+    wanted.retain(|w| w.stored.as_ref().is_none_or(|s| s.full.is_none()));
     let send = |w: &Wanted, checksum: FileChecksum| {
         let read = ReadChecksum {
             photo: w.photo,
             folder: w.folder,
             filename: w.filename.clone(),
+            path: w.path.clone(),
             checksum,
         };
         let sent = tx.send(read).is_ok();
@@ -194,11 +207,15 @@ fn read(mut wanted: Vec<Wanted>, control: &Control, tx: &Sender<ReadChecksum>, w
         if !pace.go_on(0) {
             return;
         }
-        if let Ok(ChecksumRead::Done(quick)) = FileChecksum::read_quick(&w.path) {
-            if !send(w, quick.clone()) {
-                return;
+        match FileChecksum::read_quick(&w.path, |n| pace.go_on(n)) {
+            Ok(ChecksumRead::Done(quick)) => {
+                if !send(w, quick.clone()) {
+                    return;
+                }
+                w.stored = Some(quick);
             }
-            w.stored = Some(quick);
+            Ok(ChecksumRead::Cancelled) => return,
+            Ok(ChecksumRead::Changed) | Err(_) => {}
         }
     }
     for w in wanted.iter().filter(|w| w.stored.is_some()) {
@@ -237,8 +254,13 @@ impl<'a> Pace<'a> {
     fn go_on(&mut self, bytes: usize) -> bool {
         self.bytes += bytes as u64;
         let due = Duration::from_secs_f64(self.bytes as f64 / RATE as f64);
-        if let Some(wait) = due.checked_sub(self.since.elapsed()) {
+        let elapsed = self.since.elapsed();
+        if let Some(wait) = due.checked_sub(elapsed) {
             std::thread::sleep(wait);
+        } else if elapsed > due + MAX_CREDIT {
+            // Time spent not reading is no licence to read faster later.
+            self.since = Instant::now();
+            self.bytes = 0;
         }
         if self.control.paused.load(Ordering::Relaxed) {
             while self.control.paused.load(Ordering::Relaxed) {
@@ -319,6 +341,26 @@ mod tests {
     }
 
     #[test]
+    fn a_start_asked_for_while_reading_starts_again_once_done() -> Result<()> {
+        let (_dir, mut session) = session()?;
+        session.start_checksums(|path| path.ends_with("b.dng"));
+        // a.dng came online meanwhile.
+        session.start_checksums(|_| true);
+        let started = Instant::now();
+        let mut again = false;
+        while session.reading_checksums() {
+            assert!(started.elapsed() < Duration::from_secs(10));
+            again |= session.poll_checksums().start_again;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(again);
+        session.start_checksums(|_| true);
+        read_all(&mut session);
+        assert_eq!(session.checksum_count(), (2, 2));
+        Ok(())
+    }
+
+    #[test]
     fn offline_photos_are_left_for_later() -> Result<()> {
         let (_dir, mut session) = session()?;
         session.start_checksums(|path| path.ends_with("b.dng"));
@@ -370,6 +412,12 @@ mod tests {
             paused: AtomicBool::new(false),
         };
         let mut pace = Pace::new(&control);
+        let started = Instant::now();
+        assert!(pace.go_on((RATE / 10) as usize));
+        assert!(started.elapsed() >= Duration::from_millis(95));
+        // Idle time beyond a second is not banked.
+        pace.since -= Duration::from_secs(10);
+        pace.go_on(0);
         let started = Instant::now();
         assert!(pace.go_on((RATE / 10) as usize));
         assert!(started.elapsed() >= Duration::from_millis(95));
