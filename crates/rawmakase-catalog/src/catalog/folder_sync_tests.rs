@@ -726,17 +726,28 @@ mod scenarios {
         let plan = f.plan(SyncScope::All)?;
         f.apply(&plan, &plan.default_accepted())?;
         assert_eq!(f.cat.previous_import()?.len(), 1);
+        f.checksum_all()?;
         std::fs::rename(
             f.root.join("Porto/IMG_2003.dng"),
             f.root.join("Porto/renamed.dng"),
         )?;
-        f.checksum_all()?;
         let plan = f.plan(SyncScope::All)?;
+        assert_eq!(plan.moves.len(), 1);
         let accepted = Accepted {
             moves: plan.moves.iter().map(|m| (m.photo, m.to.clone())).collect(),
             ..Default::default()
         };
         f.apply(&plan, &accepted)?;
+        assert!(f.cat.previous_import()?.is_empty());
+        // And one whose new files all changed before it applied.
+        std::fs::write(f.root.join("Porto/IMG_2004.dng"), bytes(72))?;
+        let plan = f.plan(SyncScope::All)?;
+        f.apply(&plan, &plan.default_accepted())?;
+        assert_eq!(f.cat.previous_import()?.len(), 1);
+        std::fs::write(f.root.join("Porto/IMG_2005.dng"), bytes(73))?;
+        let plan = f.plan(SyncScope::All)?;
+        std::fs::remove_file(f.root.join("Porto/IMG_2005.dng"))?;
+        f.apply(&plan, &plan.default_accepted())?;
         assert!(f.cat.previous_import()?.is_empty());
         Ok(())
     }

@@ -160,6 +160,23 @@ impl Catalog {
             })
             .copied()
             .collect();
+        // The new files as scanned, rechecked before anything is written.
+        let offered: HashMap<&PathBuf, &Identity> = plan
+            .additions
+            .iter()
+            .map(|a| (&a.file, &a.identity))
+            .collect();
+        let mut files: Vec<PathBuf> = Vec::new();
+        for file in &accepted.additions {
+            let scanned = offered
+                .get(file)
+                .ok_or_else(|| anyhow::anyhow!("Not a new file of this synchronization"))?;
+            match Identity::read(file) {
+                Ok(now) if now == **scanned => files.push(file.clone()),
+                Ok(_) => skip(&mut applied, file, "changed since the scan"),
+                Err(_) => skip(&mut applied, file, "no longer there"),
+            }
+        }
         let computer = self.computer.id.clone();
         let (moved, protected, removed, folders_removed, skipped) = self.db.write(|w| {
             // Where each destination goes, by this transaction's locations.
@@ -250,7 +267,7 @@ impl Catalog {
                 }
             }
             // A synchronization adding nothing leaves Previous Import empty.
-            if accepted.additions.is_empty() {
+            if files.is_empty() {
                 crate::catalog::ingest::new_batch(w, crate::catalog::ingest::ImportKind::Sync)?;
             }
             let mut folders_removed = Vec::new();
@@ -267,22 +284,6 @@ impl Catalog {
         applied.folders_removed = folders_removed;
         applied.skipped.extend(skipped);
         // Then the new files, as Add Folder adds them.
-        let offered: HashMap<&PathBuf, &Identity> = plan
-            .additions
-            .iter()
-            .map(|a| (&a.file, &a.identity))
-            .collect();
-        let mut files: Vec<PathBuf> = Vec::new();
-        for file in &accepted.additions {
-            let scanned = offered
-                .get(file)
-                .ok_or_else(|| anyhow::anyhow!("Not a new file of this synchronization"))?;
-            match Identity::read(file) {
-                Ok(now) if now == **scanned => files.push(file.clone()),
-                Ok(_) => skip(&mut applied, file, "changed since the scan"),
-                Err(_) => skip(&mut applied, file, "no longer there"),
-            }
-        }
         if !files.is_empty() {
             match self.add_files(&files, defaults) {
                 Ok((added, report, not_placed)) => {
