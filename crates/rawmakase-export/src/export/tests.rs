@@ -312,6 +312,45 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     Ok(())
 }
 #[test]
+fn tiff_keeps_camera_text_that_is_not_plain_ascii() -> Result<()> {
+    // Fujifilm writes Copyright in EXIF's two-part form (photographer, NUL,
+    // editor), here padded with spaces; artists' names are often UTF-8.
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.RAF");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 8,
+        height: 4,
+        pixels: vec![[0.5; 3]; 32],
+    };
+    let embed = Embed {
+        camera: Some(crate::exif::CameraExif {
+            main: vec![
+                crate::exif::Field::ascii(0x8298, "Ann Photographer \0 Bob Editor   "),
+                crate::exif::Field::ascii(0x013b, "José Ñuñez"),
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let tif = dir.path().join("out.tif");
+    export_with(
+        &tif,
+        &source,
+        &image,
+        &Metadata::default(),
+        &ExportOptions::default(),
+        &embed,
+        Replace::NoClobber,
+    )?;
+    let bytes = fs::read(&tif)?;
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(has(b"Ann Photographer \0 Bob Editor   \0"));
+    assert!(has("José Ñuñez\0".as_bytes()));
+    assert!(image::open(&tif).is_ok());
+    Ok(())
+}
+#[test]
 fn png_carries_icc_camera_exif_xmp_and_resolution() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let source = dir.path().join("source.ARW");
