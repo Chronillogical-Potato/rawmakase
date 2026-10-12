@@ -108,12 +108,26 @@ pub(crate) fn camera_fits(camera: &str, m: &Metadata) -> bool {
         // "<camera> <module>": every split at a space, the module after it.
         || camera_lower.match_indices(' ').any(|(i, _)| {
             names.contains(&key(&camera_lower[..i]))
-                && PhoneModule::parse(&camera_lower[i + 1..])
+                && PhoneModule::named(&camera_lower[..i], &camera_lower[i + 1..])
                     .is_some_and(|module| Some(module) == PhoneModule::of(m))
         })
 }
 
 impl PhoneModule {
+    /// The module a lowercase profile camera-name suffix names on the phone the
+    /// rest of the name (`camera`) names: Huawei calls its main module "Rear Main"
+    /// and its ultrawide "Rear Wide", where Google's "Wide" is the main module.
+    fn named(camera: &str, suffix: &str) -> Option<Self> {
+        match Self::parse(suffix)? {
+            Self::Wide
+                if camera.starts_with("huawei")
+                    && suffix.trim_start_matches("rear ") == "wide camera" =>
+            {
+                Some(Self::Ultrawide)
+            }
+            module => Some(module),
+        }
+    }
     /// The module a lowercase profile camera-name suffix names, if it names one.
     fn parse(suffix: &str) -> Option<Self> {
         let role = suffix.strip_suffix(" camera")?;

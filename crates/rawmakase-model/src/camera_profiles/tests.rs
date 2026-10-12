@@ -442,4 +442,15 @@ fn profiles_fit_under_the_names_adobe_uses() {
         125.,
         "HUAWEI P30 Pro Rear Main Camera"
     ));
+    // Huawei's "Rear Wide" is its ultrawide module; Google's "Wide" is the main one.
+    let huawei = |focal, camera| fits("Huawei", "VOG-L29", ("Huawei", "VOG-L29"), focal, camera);
+    assert!(!huawei(27., "HUAWEI P30 Pro Rear Wide Camera"));
+    assert!(huawei(16., "HUAWEI P30 Pro Rear Wide Camera"));
+    assert!(fits(
+        "Google",
+        "Pixel 7 Pro",
+        ("Google", "Pixel 7 Pro"),
+        24.,
+        "Google Pixel 7 Pro Wide Camera"
+    ));
 }
