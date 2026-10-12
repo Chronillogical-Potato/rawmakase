@@ -906,21 +906,23 @@ impl Editor {
                     };
                     self.set_compare(self.view.compare.toggled(view));
                 }
-                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::C) {
-                    copy = true;
-                }
-                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::V) {
-                    paste = true;
-                }
+                // With the modifiers held for the key, which a quick shortcut can
+                // release in the same frame.
+                let shift_command = |want: egui::Key| {
+                    i.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key, pressed: true, modifiers, .. }
+                            if *key == want && modifiers.command && modifiers.shift)
+                    })
+                };
+                copy = shift_command(egui::Key::C);
+                paste = shift_command(egui::Key::V);
                 // Lightroom's Paste Settings from Previous. Option changes the typed
                 // letter on macOS, so match the physical key too.
-                let v = i.events.iter().any(|event| {
-                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
-                        if *key == egui::Key::V || *physical_key == Some(egui::Key::V))
+                previous = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers }
+                        if (*key == egui::Key::V || *physical_key == Some(egui::Key::V))
+                            && modifiers.command && modifiers.alt && !modifiers.shift)
                 });
-                if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
-                    previous = true;
-                }
                 // Lightroom's Match Total Exposures; Option changes the typed letter
                 // on macOS, so match the physical key too.
                 let m = i.events.iter().any(|event| {
@@ -968,11 +970,12 @@ impl Editor {
                     reset = true;
                 }
                 // Lightroom's Convert to Black & White.
-                // Once per press: holding V does not flip it back and forth.
-                treatment = !i.modifiers.any()
-                    && i.events.iter().any(|event| {
-                        matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, .. })
-                    });
+                // Once per press: holding V does not flip it back and forth. With the
+                // key's own modifiers: Shift+Cmd+V released in the same frame pastes.
+                treatment = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, modifiers, .. }
+                        if !modifiers.any())
+                });
                 // Lightroom's Auto Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
                     auto = true;
@@ -1002,11 +1005,13 @@ impl Editor {
                 {
                     self.redo();
                 }
-                // Shift+R is Reference View, below.
-                if (i.key_pressed(egui::Key::C)
-                    || i.key_pressed(egui::Key::R) && !i.modifiers.shift)
-                    && !i.modifiers.command
-                {
+                // Shift+R is Reference View, below. C with its own modifiers, as
+                // Shift+Cmd+C released in the same frame copies.
+                let c = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::C, pressed: true, modifiers, .. }
+                        if !modifiers.command)
+                });
+                if c || i.key_pressed(egui::Key::R) && !i.modifiers.shift && !i.modifiers.command {
                     self.view.toggle(Tool::Crop);
                 }
                 if i.key_pressed(egui::Key::R)
@@ -1400,6 +1405,40 @@ impl Editor {
 /// What dropping files onto the window does, shown while they are dragged
 /// over it: the main `area` becomes the drop zone, drawn over whatever it
 /// showed; the side panels stay as they are.
+/// egui-winit reads Cmd+C and Cmd+V with any other modifier as the clipboard's
+/// Copy and Paste and drops the key, so Shift+Cmd+C (Copy Settings),
+/// Shift+Cmd+V (Paste Settings) and Option+Cmd+V (Paste from Previous) never
+/// reach the shortcuts. Their keys go back in after the clipboard events, which
+/// text fields still take. A Paste with an empty clipboard is not sent at all.
+pub(super) fn clipboard_shortcut_keys(ctx: &egui::Context, input: &mut egui::RawInput) {
+    let mut modifiers = ctx.input(|i| i.modifiers);
+    let mut events = Vec::with_capacity(input.events.len());
+    for event in input.events.drain(..) {
+        let key = match &event {
+            egui::Event::ModifiersChanged(changed) => {
+                modifiers = *changed;
+                None
+            }
+            egui::Event::Copy => Some(egui::Key::C),
+            egui::Event::Paste(_) => Some(egui::Key::V),
+            _ => None,
+        };
+        events.push(event);
+        if let Some(key) = key
+            && modifiers.command
+            && (modifiers.shift || modifiers.alt)
+        {
+            events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            });
+        }
+    }
+    input.events = events;
+}
 fn drop_overlay(ctx: &egui::Context, area: egui::Rect, catalog: Option<&str>) {
     let palette = theme::palette(ctx);
     let painter = ctx
