@@ -1567,7 +1567,6 @@ fn segment_track(
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ButtonKind {
     Primary,
-    Secondary,
 }
 /// A toolbar button sized to its content: an optional icon and the label
 /// centred together, with the segmented controls' height and rounding.
@@ -1607,17 +1606,6 @@ pub(super) fn action_button(
             },
             Color32::TRANSPARENT,
             palette.on_accent(),
-        ),
-        (ButtonKind::Secondary, true) => (
-            palette.gray(if pressed {
-                36
-            } else if hovered {
-                50
-            } else {
-                42
-            }),
-            palette.gray(60),
-            palette.gray(225),
         ),
     };
     ui.painter().rect(

@@ -539,8 +539,10 @@ impl Editor {
     /// right. On macOS it is also the title bar, beside the traffic lights.
     fn workspace_bar(&mut self, ui: &mut egui::Ui, sidebar: bool) {
         let palette = theme::palette(ui.ctx());
+        // One rule under the bar: its own, not the panel's separator too.
         egui::Panel::top("workspace-modes")
             .exact_size(BAR_HEIGHT)
+            .show_separator_line(false)
             .frame(
                 egui::Frame::new()
                     .fill(palette.gray(26))
@@ -623,6 +625,7 @@ impl Editor {
             });
         egui::Panel::top("workspace-modes-rule")
             .exact_size(1.)
+            .show_separator_line(false)
             .frame(egui::Frame::new().fill(palette.gray(16)))
             .show(ui, |_| {});
     }
@@ -1432,7 +1435,15 @@ impl Editor {
         self.develop_tab_panel(ui, tabs);
     }
     fn develop_photo(&mut self, ui: &mut egui::Ui) {
+        // The photo's backdrop reaches the panels around it, leaving the
+        // photo a margin of its own colour.
+        let backdrop = theme::palette(ui.ctx()).photo_backdrop();
         let area = egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(backdrop)
+                    .inner_margin(egui::Margin::same(20)),
+            )
             .show(ui, |ui| self.viewport_ui(ui))
             .response
             .rect;

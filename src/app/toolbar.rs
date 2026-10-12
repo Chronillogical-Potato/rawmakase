@@ -2,9 +2,7 @@ use super::Editor;
 use super::before_after::{Compare, Transfer};
 use super::dialogs::FileDialog;
 use super::icons::Icon;
-use super::widgets::{
-    ButtonKind, action_button, menu_item, menu_separator, toolbar_action, toolbar_divider,
-};
+use super::widgets::{menu_item, menu_separator, toolbar_action, toolbar_divider};
 use crate::app::theme;
 use crate::model::recipe::Recipe;
 use eframe::egui::{self, Stroke, Vec2};
@@ -16,12 +14,20 @@ impl Editor {
         // The buttons follow the shared log, which also holds Library changes.
         self.sync_undo();
         let (can_undo, can_redo) = (self.undo_log.can_undo(), self.undo_log.can_redo());
+        // On the photo's backdrop, with no rule: the controls sit on the
+        // canvas, whose own margin spaces them from the photo.
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(29))
-                    .inner_margin(egui::Margin::symmetric(14, 10)),
+                    .fill(palette.photo_backdrop())
+                    .inner_margin(egui::Margin {
+                        left: 20,
+                        right: 20,
+                        top: 10,
+                        bottom: 0,
+                    }),
             )
+            .show_separator_line(false)
             .show(ui, |ui| {
                 ui.spacing_mut().button_padding = Vec2::new(12., 8.);
                 ui.spacing_mut().interact_size.y = 32.;
@@ -63,25 +69,8 @@ impl Editor {
                         self.view.clipping.toggle_both();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if action_button(
-                            ui,
-                            "Export",
-                            Some(Icon::Export),
-                            ButtonKind::Primary,
-                            self.document.full().is_some(),
-                        )
-                        .on_hover_text(if cfg!(target_os = "macos") {
-                            "Export… · ⇧⌘E"
-                        } else {
-                            "Export… · Ctrl+Shift+E"
-                        })
-                        .clicked()
-                        {
-                            self.open_export_dialog();
-                        }
-                        ui.add_space(8.);
-                        let settings =
-                            action_button(ui, "Settings", None, ButtonKind::Secondary, true);
+                        // The photo's menu: its settings, presets and export.
+                        let settings = photo_menu_button(ui);
                         egui::Popup::menu(&settings).show(|ui| {
                             ui.set_width(270.);
                             ui.spacing_mut().item_spacing.y = 0.;
@@ -208,7 +197,8 @@ impl Editor {
                             }
                         });
                         if self.load.is_running() || self.preview.task.is_running() {
-                            ui.spinner();
+                            ui.add_space(10.);
+                            thin_spinner(ui);
                         }
                     });
                 });
@@ -311,4 +301,54 @@ impl Editor {
         }
         self.document.edit.replace(defaults.recipe);
     }
+}
+
+/// The toolbar's Photo button, a toolbar button like the rest with a chevron
+/// for its menu.
+fn photo_menu_button(ui: &mut egui::Ui) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let response = toolbar_action(ui, "", 82., false, true, 0)
+        .on_hover_text("Copy, paste and sync settings, presets and export");
+    let color = palette.gray(if response.hovered() { 235 } else { 175 });
+    let rect = response.rect;
+    ui.painter().text(
+        rect.left_center() + Vec2::new(14., 0.),
+        egui::Align2::LEFT_CENTER,
+        "Photo",
+        egui::FontId::proportional(12.),
+        color,
+    );
+    super::icons::paint_at(
+        ui.painter(),
+        Icon::ChevronDown,
+        rect.right_center() - Vec2::new(16., 0.),
+        11.,
+        color,
+    );
+    response
+}
+
+/// A small spinner with a hairline stroke: egui's draws 3 points thick at any
+/// size, heavy beside the toolbar's text.
+fn thin_spinner(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.), egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.ctx().request_repaint();
+    let radius = rect.width() / 2. - 1.;
+    let time = ui.input(|i| i.time);
+    // egui's sweep: a turn a second, the arc growing and shrinking.
+    let start = time * std::f64::consts::TAU;
+    let end = start + 240f64.to_radians() * time.sin();
+    let points: Vec<egui::Pos2> = (0..=24)
+        .map(|k| {
+            let angle = start + (end - start) * k as f64 / 24.;
+            let (sin, cos) = angle.sin_cos();
+            rect.center() + radius * Vec2::new(cos as f32, sin as f32)
+        })
+        .collect();
+    let color = theme::palette(ui.ctx()).gray(175);
+    ui.painter()
+        .add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }
