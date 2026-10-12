@@ -23,38 +23,7 @@ pub struct ReadChecksum {
 impl Catalog {
     /// The checksums on record, by master, of the current version.
     pub fn checksums(&self) -> Result<HashMap<PhotoId, FileChecksum>> {
-        row! {
-            struct Stored {
-                photo: PhotoId,
-                size: i64,
-                quick: String,
-                full: Option<String>,
-                identity: String,
-            }
-        }
-        let rows: Vec<Stored> = self.db.read(
-            sql!(
-                "SELECT c.photo, c.size, c.quick_hash, c.full_hash, c.identity
-                 FROM photo_checksums c JOIN photos p ON p.id = c.photo
-                 WHERE p.master_id IS NULL AND c.version = ?"
-            ),
-            &[&CHECKSUM_VERSION],
-        )?;
-        Ok(rows
-            .into_iter()
-            // One this release can't read is read again.
-            .filter_map(|r| {
-                Some((
-                    r.photo,
-                    FileChecksum {
-                        size: u64::try_from(r.size).ok()?,
-                        quick: r.quick,
-                        full: r.full,
-                        identity: serde_json::from_str(&r.identity).ok()?,
-                    },
-                ))
-            })
-            .collect())
+        stored(&self.db)
     }
     /// How many masters have a full checksum on record, of how many.
     pub fn checksum_count(&self) -> Result<(usize, usize)> {
@@ -118,4 +87,40 @@ impl Catalog {
             Ok(saved)
         })
     }
+}
+
+/// The checksums on record, by master, of the current version, read in `db`.
+pub(super) fn stored(db: &impl Reads) -> Result<HashMap<PhotoId, FileChecksum>> {
+    row! {
+        struct Stored {
+            photo: PhotoId,
+            size: i64,
+            quick: String,
+            full: Option<String>,
+            identity: String,
+        }
+    }
+    let rows: Vec<Stored> = db.read(
+        sql!(
+            "SELECT c.photo, c.size, c.quick_hash, c.full_hash, c.identity
+             FROM photo_checksums c JOIN photos p ON p.id = c.photo
+             WHERE p.master_id IS NULL AND c.version = ?"
+        ),
+        &[&CHECKSUM_VERSION],
+    )?;
+    Ok(rows
+        .into_iter()
+        // One this release can't read is read again.
+        .filter_map(|r| {
+            Some((
+                r.photo,
+                FileChecksum {
+                    size: u64::try_from(r.size).ok()?,
+                    quick: r.quick,
+                    full: r.full,
+                    identity: serde_json::from_str(&r.identity).ok()?,
+                },
+            ))
+        })
+        .collect())
 }

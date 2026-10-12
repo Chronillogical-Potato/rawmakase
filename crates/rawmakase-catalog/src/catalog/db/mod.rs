@@ -446,6 +446,10 @@ pub(in crate::catalog) struct Row<'a> {
 }
 
 impl Row<'_> {
+    /// How many columns the row has.
+    pub(in crate::catalog) fn len(&self) -> usize {
+        self.row.as_ref().column_count()
+    }
     /// Column `index`, read as `T`.
     pub(in crate::catalog) fn get<T: FromValue>(&self, index: usize) -> Result<T> {
         let value = match self.row.get_ref(index)? {

@@ -45,6 +45,16 @@ enum Command {
         root: i64,
         folder: PathBuf,
     },
+    /// Find photos added, deleted, moved or renamed outside RAWmakase in a
+    /// catalog folder (by its path on this computer), or in every folder.
+    /// Prints what Synchronize Folder would do; --apply does it, accepting
+    /// what the review ticks by default. Nothing on disk is changed.
+    SyncFolder {
+        catalog: PathBuf,
+        folder: Option<PathBuf>,
+        #[arg(long)]
+        apply: bool,
+    },
     Compare {
         input: PathBuf,
         reference: PathBuf,
@@ -202,6 +212,11 @@ fn main() -> Result<()> {
             println!("Root folder relinked");
         }
 
+        Some(Command::SyncFolder {
+            catalog,
+            folder,
+            apply,
+        }) => sync_folder(&catalog, folder.as_deref(), apply)?,
         Some(Command::Compare {
             input,
             reference,
@@ -411,6 +426,96 @@ fn main() -> Result<()> {
             }
             run?;
         }
+    }
+    Ok(())
+}
+
+/// `rawmakase sync-folder`: scans, prints the plan, and applies it with
+/// `apply`.
+fn sync_folder(
+    catalog: &std::path::Path,
+    folder: Option<&std::path::Path>,
+    apply: bool,
+) -> Result<()> {
+    use rawmakase::catalog::folder_sync::{SyncScope, scan};
+    let mut c = rawmakase::catalog::Catalog::open(catalog)?;
+    let scope = match folder {
+        None => SyncScope::All,
+        Some(path) => {
+            let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            let found = c
+                .folders()?
+                .into_iter()
+                .find(|f| f.path == path)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("{} is not a catalog folder here", path.display())
+                })?;
+            SyncScope::Folder(found.id)
+        }
+    };
+    let inputs = c.sync_inputs(scope)?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let online = |path: &std::path::Path| rawmakase::volume_mounted(path);
+    let plan = scan(&inputs, &online, &cancel, &|_| {})?;
+    let shown = |p: &std::path::Path| p.display().to_string();
+    for m in &plan.moves {
+        let how = if m.verified {
+            "moved"
+        } else {
+            "probably moved"
+        };
+        println!("{how}: {} → {}", shown(&m.from), shown(&m.to));
+    }
+    for choice in &plan.choices {
+        println!("needs a choice:");
+        for m in &choice.options {
+            println!("  {} → {}", shown(&m.from), shown(&m.to));
+        }
+    }
+    for a in &plan.additions {
+        if a.copy_of.is_empty() {
+            println!("new: {}", shown(&a.file));
+        } else {
+            println!("copy of a photo in the catalog: {}", shown(&a.file));
+        }
+    }
+    for m in &plan.missing {
+        println!("missing: {}", shown(&m.path));
+    }
+    for n in &plan.not_checked {
+        println!("not checked: {} ({})", shown(&n.path), n.reason);
+    }
+    for c in &plan.conflicts {
+        println!("not added: {}", c.message());
+    }
+    for d in &plan.ambiguous {
+        println!(
+            "not added, more than one catalog folder could be it: {}",
+            shown(d)
+        );
+    }
+    if !apply {
+        println!("Dry run: nothing changed. Run again with --apply to apply.");
+        return Ok(());
+    }
+    let applied = c.apply_folder_sync(
+        &plan,
+        &plan.default_accepted(),
+        &online,
+        None,
+        &rawmakase::catalog::MetadataDefaults::load(),
+    )?;
+    for s in &applied.skipped {
+        println!("skipped: {} ({})", shown(&s.path), s.reason);
+    }
+    println!(
+        "Synchronized · {} updated · {} added · {} still missing",
+        applied.moved.len(),
+        applied.added,
+        plan.missing.len()
+    );
+    if let Some(e) = applied.add_error {
+        anyhow::bail!("Adding the new files failed: {e:#}");
     }
     Ok(())
 }
