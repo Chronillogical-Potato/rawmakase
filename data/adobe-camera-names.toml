@@ -1,0 +1,31 @@
+# Names Adobe's camera profiles (DCP UniqueCameraModel) use for cameras that LibRaw
+# names otherwise, where neither LibRaw's canonical name (normalized_model, which
+# already maps regional twins such as the Panasonic DC-G95 to the DC-G99) nor
+# comparing names without spaces and underscores (Nikon "Z 6_2" and "Z 6 2") finds
+# them. Read by rawmakase-model's cameras::adobe_names. See docs/cameras.md.
+#
+# Each name is the camera name inside the Adobe Standard profile Camera Raw 18.7
+# installs. The Samsung entry was also checked against Camera Raw's render of a
+# raw.pixls.us photo (ΔE00 0.5 at the default settings); see #448.
+
+[[make]]
+libraw = "OM Digital"
+adobe = "OM Digital Solutions"
+
+[[camera]]
+make = "Olympus"
+model = "E-M10MarkIIIS"
+adobe = "Olympus E-M10 Mark III"
+why = "the Mark III S is a Mark III with other menus; Adobe profiles it as one"
+
+[[camera]]
+make = "Samsung"
+model = "SM-G965F"
+adobe = "Samsung Galaxy S9+"
+why = "Samsung's model code for the Galaxy S9+"
+
+[[camera]]
+make = "Huawei"
+model = "VOG-L29"
+adobe = "HUAWEI P30 Pro"
+why = "Huawei's model code for the P30 Pro; Adobe profiles each camera module"

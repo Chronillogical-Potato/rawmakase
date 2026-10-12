@@ -128,7 +128,9 @@ impl Dcp {
             23 => 5003.,
             20 => 5503.,
             22 => 7504.,
-            1 | 9 => 5500.,
+            // Daylight, flash (as the DNG SDK takes it; Phase One's profiles
+            // use it) and fine weather.
+            1 | 4 | 9 => 5500.,
             24 => 3200.,
             _ => anyhow::bail!("Unsupported calibration illuminant {v}"),
         })
@@ -263,4 +265,37 @@ pub fn d65_color_matrix(b: &[u8]) -> Result<Option<Matrix>> {
     Ok(Some(std::array::from_fn(|i| {
         std::array::from_fn(|j| a[i][j] * (1. - w) + b[i][j] * w)
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    /// A DCP holding ColorMatrix1 (identity) and CalibrationIlluminant1.
+    fn dcp(illuminant: u16) -> Vec<u8> {
+        let mut b = b"IIRC".to_vec();
+        b.extend(8u32.to_le_bytes());
+        let data = 8 + 2 + 2 * 12 + 4;
+        b.extend(2u16.to_le_bytes());
+        for (tag, kind, count, value) in [
+            (50721u16, 10u16, 9u32, data as u32),
+            (50778, 3, 1, u32::from(illuminant)),
+        ] {
+            b.extend(tag.to_le_bytes());
+            b.extend(kind.to_le_bytes());
+            b.extend(count.to_le_bytes());
+            b.extend(value.to_le_bytes());
+        }
+        b.extend(0u32.to_le_bytes());
+        for i in 0..9 {
+            b.extend((if i % 4 == 0 { 1i32 } else { 0 }).to_le_bytes());
+            b.extend(1i32.to_le_bytes());
+        }
+        b
+    }
+    #[test]
+    fn flash_calibration_reads_as_daylight() {
+        // Phase One IQ250's Adobe Standard is calibrated under flash.
+        assert!(super::d65_color_matrix(&dcp(4)).unwrap().is_some());
+        assert!(super::d65_color_matrix(&dcp(21)).unwrap().is_some());
+        assert!(super::d65_color_matrix(&dcp(255)).is_err());
+    }
 }

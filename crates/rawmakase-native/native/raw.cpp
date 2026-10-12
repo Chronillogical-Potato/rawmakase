@@ -37,6 +37,9 @@ struct Metadata {
     // The maker's numeric lens ID, the value the lens profiles' stCamera:LensID
     // holds too (Nikon's LensIDNumber); 0 when the maker notes have none.
     unsigned lens_id;
+    // LibRaw's canonical name for bodies sold under several names (the Panasonic
+    // DC-G95 is the DC-G99), which is often the one Adobe's profiles use.
+    char normalized_make[64], normalized_model[64];
 };
 // The unpacked sensor data and the levels development reads with it, for decode
 // fingerprints. data and black point into the handle's buffers: data holds
@@ -244,6 +247,8 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         std::snprintf(m->model,64,"%s",d.idata.model);
         std::snprintf(m->lens,128,"%s",d.lens.Lens[0] ? d.lens.Lens : d.lens.makernotes.Lens);
         m->lens_id=d.lens.nikon.LensIDNumber;
+        std::snprintf(m->normalized_make,64,"%s",d.idata.normalized_make);
+        std::snprintf(m->normalized_model,64,"%s",d.idata.normalized_model);
         return h.release();
     } catch(const std::exception& e) { message(err,e.what()); return nullptr; }
     catch(...) { message(err,"Native RAW open failed"); return nullptr; }

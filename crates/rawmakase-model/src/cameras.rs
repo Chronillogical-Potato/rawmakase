@@ -81,6 +81,84 @@ struct Table {
 
 const TABLE: &str = include_str!("../../../data/cameras.toml");
 
+/// `data/adobe-camera-names.toml`: names Adobe's camera profiles use for cameras
+/// LibRaw names otherwise, beyond what LibRaw's canonical names cover.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdobeNames {
+    make: Vec<MakeName>,
+    camera: Vec<CameraName>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MakeName {
+    libraw: String,
+    adobe: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CameraName {
+    make: String,
+    model: String,
+    adobe: String,
+    #[allow(dead_code)]
+    why: String,
+}
+
+const ADOBE_NAMES: &str = include_str!("../../../data/adobe-camera-names.toml");
+
+fn adobe_table() -> &'static AdobeNames {
+    static NAMES: OnceLock<AdobeNames> = OnceLock::new();
+    // A unit test parses the table, so a malformed row cannot ship.
+    NAMES.get_or_init(|| toml::from_str(ADOBE_NAMES).expect("data/adobe-camera-names.toml"))
+}
+
+/// Names, as "Make Model", that Adobe's camera profiles may use for a camera LibRaw
+/// reports as `make` `model`, other than that one: LibRaw's canonical name for a
+/// body sold under several names (`normalized`), the same with Adobe's spelling of
+/// the make, the table's names, and older Google phones' "Model-Google-google".
+pub fn adobe_names<'a>(
+    make: &'a str,
+    model: &'a str,
+    normalized: (&'a str, &'a str),
+) -> Vec<String> {
+    let table = adobe_table();
+    // LibRaw leaves its canonical names empty for makers it doesn't know.
+    let pick = |n: &'a str, own: &'a str| if n.trim().is_empty() { own } else { n };
+    let normalized = (pick(normalized.0, make), pick(normalized.1, model));
+    let mut names = vec![format!("{} {}", normalized.0, normalized.1)];
+    for m in table
+        .make
+        .iter()
+        .filter(|m| m.libraw.eq_ignore_ascii_case(make))
+    {
+        names.push(format!("{} {model}", m.adobe));
+        names.push(format!("{} {}", m.adobe, normalized.1));
+    }
+    names.extend(
+        table
+            .camera
+            .iter()
+            .filter(|c| c.make.eq_ignore_ascii_case(make) && c.model.eq_ignore_ascii_case(model))
+            .map(|c| c.adobe.clone()),
+    );
+    if make.eq_ignore_ascii_case("Google") {
+        names.push(format!("{model}-Google-google"));
+    }
+    let own = format!("{make} {model}");
+    let mut out: Vec<String> = Vec::new();
+    for n in names {
+        let n = n.trim().to_string();
+        if !n.is_empty()
+            && !n.eq_ignore_ascii_case(&own)
+            && !out.iter().any(|o| o.eq_ignore_ascii_case(&n))
+        {
+            out.push(n);
+        }
+    }
+    out
+}
+
 fn parse(text: &str) -> Result<Vec<Camera>, toml::de::Error> {
     toml::from_str::<Table>(text).map(|t| t.camera)
 }
@@ -194,6 +272,39 @@ fn median(values: impl Iterator<Item = f32>) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn adobe_names_table_parses_and_names_cameras_otherwise() {
+        let table = adobe_table();
+        assert!(!table.make.is_empty() && !table.camera.is_empty());
+        for c in &table.camera {
+            assert!(
+                !c.why.is_empty()
+                    && !c
+                        .adobe
+                        .eq_ignore_ascii_case(&format!("{} {}", c.make, c.model))
+            );
+        }
+        // LibRaw's canonical name, the make Adobe spells otherwise, the table.
+        assert_eq!(
+            adobe_names("Panasonic", "DC-G95", ("Panasonic", "DC-G99")),
+            ["Panasonic DC-G99"]
+        );
+        assert_eq!(
+            adobe_names("OM Digital", "OM-1", ("OM Digital", "OM-1")),
+            ["OM Digital Solutions OM-1"]
+        );
+        assert_eq!(
+            adobe_names("Samsung", "SM-G965F", ("Samsung", "SM-G965F")),
+            ["Samsung Galaxy S9+"]
+        );
+        assert_eq!(
+            adobe_names("Google", "Pixel 2 XL", ("Google", "Pixel 2 XL")),
+            ["Pixel 2 XL-Google-google"]
+        );
+        // Nothing for a camera Adobe names as LibRaw does, or one LibRaw doesn't know.
+        assert!(adobe_names("RAWmakase", "Synthetic Chart", ("", "")).is_empty());
+        assert!(adobe_names("Sony", "ILCE-7M4", ("Sony", "ILCE-7M4")).is_empty());
+    }
     #[test]
     fn every_row_parses_and_is_complete() {
         let rows = parse(TABLE).unwrap();

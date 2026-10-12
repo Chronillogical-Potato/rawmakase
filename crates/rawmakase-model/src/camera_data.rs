@@ -63,6 +63,11 @@ pub struct Metadata {
     /// none. Cameras that write no lens model leave the ID as the only lens identity.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub lens_id: u32,
+    /// Other names, as "Make Model", that Adobe's camera profiles may use for this
+    /// camera: LibRaw's canonical name for a body sold under several names, and
+    /// `crate::cameras::adobe_names`' table. See `CameraProfile::ensure_camera`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adobe_names: Vec<String>,
     /// DNG BaselineExposure (0 when the DNG has none); `None` for other formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
