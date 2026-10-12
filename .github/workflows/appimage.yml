@@ -1,0 +1,68 @@
+name: AppImage checks
+
+on:
+  push:
+    paths:
+      - 'packaging/linux/appimage.py'
+      - 'packaging/test_appimage.py'
+      - '.github/workflows/appimage.yml'
+      - '.github/workflows/release.yml'
+  pull_request:
+    paths:
+      - 'packaging/linux/appimage.py'
+      - 'packaging/test_appimage.py'
+      - '.github/workflows/appimage.yml'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appimage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package and launch (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            checksum: 54b97a3de900277d728c3fef01182dad7b64c396da5e208a3c15c6efedc805a6
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            checksum: 9636a73cda592edce2e261e99e5deea5229df0196984d69631ba3e4498bf41d3
+    env:
+      VERSION: '0.2.4'
+      ARCH: ${{ matrix.arch }}
+      CHECKSUM: ${{ matrix.checksum }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: AppDir and download verification tests
+        run: python3 -m unittest discover -s packaging -p 'test_appimage.py'
+      # Exercise the packaging code with a real payload, without recompiling the
+      # app or invoking the signed macOS/Windows release jobs on a fork.
+      - name: Fetch the pinned Linux payload
+        run: |
+          archive="rawmakase-$VERSION-$ARCH-linux.tar.gz"
+          curl --fail --location --retry 3 "https://github.com/pch/rawmakase/releases/download/v$VERSION/$archive" --output "$RUNNER_TEMP/$archive"
+          echo "$CHECKSUM  $RUNNER_TEMP/$archive" | sha256sum --check
+          mkdir -p dist/linux-root
+          tar -xzf "$RUNNER_TEMP/$archive" -C dist/linux-root
+      - name: Package and verify AppImage without FUSE
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y desktop-file-utils libvulkan1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libwayland-cursor0 libwayland-egl1 libx11-6 libx11-xcb1 libxcb1 libxcursor1 libxi6 libxrandr2 libegl1 libgl1
+          python3 packaging/linux/appimage.py dist/linux-root "dist/upload/rawmakase-$VERSION-$ARCH.AppImage" "$ARCH" "$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: appimage-${{ matrix.arch }}
+          path: dist/upload/*.AppImage
+          if-no-files-found: error
