@@ -253,6 +253,8 @@ impl Progress {
 enum Op {
     RecordIntent(CatalogLocation, Vec<(PhotoId, PathBuf)>, PreviewKind),
     ForgetIntent(CatalogLocation, Vec<PhotoId>),
+    /// Photos whose file was found moved, with its new path.
+    MoveIntent(CatalogLocation, Vec<(PhotoId, PathBuf)>),
     /// Discard Previews: the rows of these files and the requests of these
     /// photos, of these kinds.
     Discard(
@@ -599,6 +601,9 @@ fn maintain(cache: &mut PreviewCache, op: Op) {
             .iter()
             .try_for_each(|(photo, path)| cache.record_intent(&catalog, *photo, path, kind)),
         Op::ForgetIntent(catalog, photos) => cache.forget_intent(&catalog, &photos, None),
+        Op::MoveIntent(catalog, photos) => photos
+            .iter()
+            .try_for_each(|(photo, path)| cache.move_intent(&catalog, *photo, path)),
         Op::Discard(catalog, photos, paths, kinds) => kinds.iter().try_for_each(|kind| {
             cache.forget_intent(&catalog, &photos, Some(*kind))?;
             cache.discard(&paths, *kind)
@@ -879,6 +884,25 @@ impl Editor {
 
     /// A photo leaving the catalog takes its requests along, so a later photo
     /// given its id starts without any.
+    /// Photos whose file was found moved: their queued builds of the old
+    /// file are dropped, and their requests follow the file.
+    pub(super) fn move_preview_intents(
+        &mut self,
+        catalog: &CatalogLocation,
+        moved: &[(PhotoId, PathBuf)],
+    ) {
+        if moved.is_empty() {
+            return;
+        }
+        let ids: Vec<PhotoId> = moved.iter().map(|(id, _)| *id).collect();
+        let ctx = self.context.clone();
+        let builder = self.preview_builds.builder(&ctx);
+        builder.drop_waiting(Some(&ids), &PreviewKind::ALL);
+        for kind in PreviewKind::ALL {
+            builder.cancel_running(Some(&ids), kind);
+        }
+        builder.maintain(Op::MoveIntent(catalog.clone(), moved.to_vec()));
+    }
     pub(super) fn forget_preview_intent(&mut self, id: PhotoId) {
         let Some(library) = &self.library else {
             return;

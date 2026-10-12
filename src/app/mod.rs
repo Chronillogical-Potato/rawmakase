@@ -113,6 +113,12 @@ pub(crate) struct Editor {
     selection: subject_mask::Selection,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
+    /// Synchronize Folder: the scan under way or the plan waiting for review.
+    folder_sync: folder_sync::FolderSync,
+    /// The photo open in Develop and its file's new path, after a
+    /// synchronization found it moved: the next catalog reload keeps the
+    /// document, following it (see `catalog_ready`).
+    relink_open: Option<(crate::catalog::PhotoId, PathBuf)>,
     /// Preferences > Catalog: the user paused reading checksums, saved in
     /// the session.
     checksums_paused: bool,
@@ -314,6 +320,8 @@ impl Editor {
             undo_log: Default::default(),
             selection: Default::default(),
             auto_advance: session.auto_advance,
+            folder_sync: Default::default(),
+            relink_open: None,
             checksums_paused: session.pause_checksums,
             first_conversion: if session.no_auto_black_white_mix {
                 treatment::FirstConversion::KeepMix
@@ -777,6 +785,7 @@ mod dialogs;
 mod display;
 mod export;
 pub(crate) mod folder_locations;
+mod folder_sync;
 mod guided_tool;
 mod inspector;
 pub(crate) mod library;

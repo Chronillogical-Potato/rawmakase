@@ -708,4 +708,19 @@ mod scenarios {
         assert!(stopped.is_err());
         Ok(())
     }
+
+    #[test]
+    fn previous_import_is_the_last_add_or_synchronize() -> Result<()> {
+        let mut f = fixture()?;
+        assert_eq!(f.cat.previous_import()?.len(), 3);
+        let file = f.root.join("Porto/IMG_2002.dng");
+        std::fs::write(&file, bytes(70))?;
+        let plan = f.plan(SyncScope::Root(f.cat.roots()?[0].0))?;
+        f.apply(&plan, &plan.default_accepted())?;
+        assert_eq!(f.cat.previous_import()?, [f.id("IMG_2002.dng")]);
+        // Adding the folder again adds nothing: Previous Import is empty.
+        f.cat.add_folder(&f.root)?;
+        assert!(f.cat.previous_import()?.is_empty());
+        Ok(())
+    }
 }

@@ -118,6 +118,11 @@ pub(crate) struct Library {
     /// A folder chosen in the Folders panel to be removed, for the editor
     /// to confirm.
     removal_request: Option<FolderRemoval>,
+    /// Synchronize Folder chosen in the Folders panel, for the editor.
+    sync_request: Option<(crate::catalog::folder_sync::SyncScope, String)>,
+    /// After a synchronization added photos, the status bar offers to show
+    /// them.
+    pub(in crate::app) offer_previous_import: bool,
     copy_names: copy_name::CopyNames,
     /// Title, caption and the other descriptive fields being shown or typed.
     fields: metadata_fields::Fields,
@@ -214,6 +219,8 @@ impl Library {
             ctx,
             copy_request: None,
             removal_request: None,
+            sync_request: None,
+            offer_previous_import: false,
             copy_names: Default::default(),
             fields: Default::default(),
             done: Vec::new(),
@@ -287,6 +294,9 @@ impl Library {
         self.cell_info.clear();
         self.sort_keys = None;
         self.shown_version += 1;
+        if self.filters.previous_import {
+            self.filters.members = self.session.previous_import.clone();
+        }
         if let Some(id) = self.filters.collection {
             if self.session.collections.iter().any(|c| c.id == id) {
                 self.filters.members = self
@@ -574,6 +584,44 @@ impl Library {
     }
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
+    }
+    pub(in crate::app) fn take_sync_request(
+        &mut self,
+    ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
+        self.sync_request.take()
+    }
+    /// What Synchronize Folder covers for the folder selected in the
+    /// Folders panel, and its name; none for All Photographs or a collection.
+    pub(in crate::app) fn selected_sync_scope(
+        &self,
+    ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
+        use crate::catalog::folder_sync::SyncScope;
+        let rest = self.selected_folder.strip_prefix("root:")?;
+        let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
+        let root = root.parse::<i64>().ok().map(RootId)?;
+        if relative.is_empty() {
+            let name = self
+                .session
+                .roots
+                .iter()
+                .find(|(id, ..)| *id == root)
+                .map(|(_, original, _)| {
+                    std::path::Path::new(original)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .unwrap_or_default();
+            return Some((SyncScope::Root(root), name));
+        }
+        let folder = self
+            .session
+            .folders
+            .iter()
+            .find(|f| f.root == root && f.relative.trim_end_matches('/') == relative)?;
+        let name = relative.rsplit('/').next().unwrap_or(relative).to_string();
+        Some((SyncScope::Folder(folder.id), name))
     }
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()

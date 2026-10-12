@@ -242,6 +242,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [treatment.rs](../src/app/treatment.rs) | The Basic panel's Treatment (and V), the B&W panel's Auto and the "Apply auto mix when first converting" preference, each change one History step. |
 | [auto.rs](../src/app/auto.rs) | Runs Auto (the Basic panel's Auto button, the WB menu, Ctrl/Cmd+Shift+U) off the UI thread and applies the estimate as one History step. |
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs (including the default one in the data folder), Lightroom import, folder addition, relinking and applying imported edits. |
+| [folder_sync.rs](../src/app/folder_sync.rs) | Synchronize Folder in the app: the scan on its own thread (top bar progress and stop), the review dialog, applying as a folder change, and the open photo following a verified move of its file. |
 | [folder_locations.rs](../src/app/folder_locations.rs) | Preferences › Catalog › Folder locations, and the questions changing a root or adding a folder can raise. |
 | [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported. |
 | [upright.rs](../src/app/upright.rs) | Runs the Transform panel's Upright analysis off the UI thread. |

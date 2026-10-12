@@ -145,6 +145,7 @@ pub(super) fn delete_photo(w: &mut Write<'_>, id: PhotoId) -> Result<()> {
         sql!("DELETE FROM collection_photos WHERE photo=?"),
         sql!("DELETE FROM photo_info WHERE photo=?"),
         sql!("DELETE FROM photo_checksums WHERE photo=?"),
+        sql!("DELETE FROM photo_imports WHERE photo=?"),
     ]
     .into_iter()
     .chain(super::descriptive::DELETE_ROWS)

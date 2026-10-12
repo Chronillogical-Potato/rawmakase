@@ -89,6 +89,8 @@ pub(super) struct Filters {
     /// Cmd+L: whether the bar's settings apply.
     pub enabled: bool,
     pub only_missing: bool,
+    /// Previous Import: only the photos the last import added, in `members`.
+    pub previous_import: bool,
     pub sort: super::sort::Sort,
     pub reverse: bool,
 }
@@ -106,6 +108,7 @@ impl Default for Filters {
             kind: Kind::default(),
             enabled: true,
             only_missing: false,
+            previous_import: false,
             sort: Default::default(),
             reverse: false,
         }
@@ -128,7 +131,8 @@ impl Filters {
                 self.folder_scope
                     .as_ref()
                     .is_none_or(|ids| ids.contains(&p.folder))
-                    && (self.collection.is_none() || self.members.contains(&p.id))
+                    && ((self.collection.is_none() && !self.previous_import)
+                        || self.members.contains(&p.id))
                     && (!self.only_missing || !available(&p.path))
                     && (!self.enabled || self.bar_shows(p, &query))
             })

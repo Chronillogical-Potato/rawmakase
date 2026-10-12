@@ -464,6 +464,20 @@ impl PreviewCache {
     /// Forgets the requests for these catalog photos: of `kind`, or of every
     /// kind when the photos left the catalog, so a later photo that reuses an
     /// id starts without any.
+    /// Points `photo`'s requests at its file's new path, after the file was
+    /// found moved, so its previews are built from there.
+    pub fn move_intent(
+        &mut self,
+        catalog: &CatalogLocation,
+        photo: PhotoId,
+        path: &Path,
+    ) -> Result<()> {
+        self.db.execute(
+            "UPDATE preview_intent SET source_path=? WHERE catalog=? AND photo_id=?",
+            params![key(path), catalog_key(catalog), photo.0],
+        )?;
+        Ok(())
+    }
     pub fn forget_intent(
         &mut self,
         catalog: &CatalogLocation,

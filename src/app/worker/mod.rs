@@ -72,6 +72,10 @@ pub(crate) enum Event {
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
+    /// A Synchronize Folder scan finished, or failed.
+    FolderSyncScanned(Box<crate::app::folder_sync::Scanned>),
+    /// Applying a synchronization finished: the catalog opened again.
+    FolderSyncApplied(Result<Box<crate::app::folder_sync::Synced>, String>),
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     Monitor(PathBuf),

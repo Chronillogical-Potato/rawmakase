@@ -123,6 +123,10 @@ impl Editor {
                 PreviewsRequest::Discard(ids, kinds) => self.discard_previews(&ids, &kinds),
             }
         }
+        if let Some((scope, name)) = self.library.as_mut().and_then(|l| l.take_sync_request()) {
+            self.start_folder_sync(scope, name);
+        }
+        self.poll_folder_sync();
         if let Some(removal) = self.library.as_mut().and_then(|l| l.take_removal_request()) {
             self.modal = Some(super::Modal::RemoveFolder(removal));
         }
@@ -138,6 +142,7 @@ impl Editor {
         }
         self.remove_copy_window(&ctx);
         self.remove_folder_window(&ctx);
+        self.folder_sync_window(&ctx);
         self.read_metadata_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
@@ -347,6 +352,37 @@ impl Editor {
             self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx);
             ui.close();
         }
+        let selected = self.library.as_ref().and_then(|l| l.selected_sync_scope());
+        let scanning = self.folder_sync.is_scanning();
+        if menu_row(
+            ui,
+            Icon::Folder,
+            "Synchronize Folder…",
+            selected.is_some() && !scanning,
+        )
+        .on_hover_text(
+            "Find photos added, deleted, moved or renamed outside RAWmakase in the selected folder",
+        )
+        .clicked()
+            && let Some((scope, name)) = selected
+        {
+            self.start_folder_sync(scope, name);
+            ui.close();
+        }
+        if menu_row(
+            ui,
+            Icon::Folder,
+            "Synchronize All Folders…",
+            location.is_some() && !scanning,
+        )
+        .clicked()
+        {
+            self.start_folder_sync(
+                crate::catalog::folder_sync::SyncScope::All,
+                "All Folders".into(),
+            );
+            ui.close();
+        }
         menu_separator(ui);
         if menu_row(ui, Icon::Folder, "Open Catalog…", true).clicked() {
             self.catalog_dialog(CatalogDialog::Open, ctx);
@@ -441,6 +477,7 @@ impl Editor {
                     }
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
+                    self.folder_sync_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
@@ -797,6 +834,12 @@ impl Editor {
                         .filter(|l| !l.message.is_empty())
                         .map_or(self.status.as_str(), |l| l.message.as_str());
                     status_text(ui, shown, self.message_detail(shown), None);
+                    if let Some(library) = &mut self.library
+                        && library.offer_previous_import
+                        && ui.small_button("Show").clicked()
+                    {
+                        library.show_previous_import();
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = ui

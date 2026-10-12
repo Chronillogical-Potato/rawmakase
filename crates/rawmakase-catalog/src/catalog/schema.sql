@@ -149,6 +149,18 @@ CREATE TABLE IF NOT EXISTS photo_checksums (
 );
 CREATE INDEX IF NOT EXISTS photo_checksums_quick ON photo_checksums(size, quick_hash);
 
+-- Which Add Photo Folder or Synchronize added each photo; Previous Import is
+-- the newest batch.
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    kind TEXT NOT NULL            -- 'add' or 'sync'
+);
+CREATE TABLE IF NOT EXISTS photo_imports (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    batch INTEGER NOT NULL REFERENCES import_batches(id)
+);
+
 -- Facts about the catalog itself, by name.
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
