@@ -77,9 +77,10 @@ pub(crate) struct Scanned {
 pub(crate) struct Synced {
     library: Box<super::library::Library>,
     applied: Applied,
-    /// The photo open in Develop and its new file, when its file was found
-    /// moved and verified: the open document follows it.
-    relink: Option<(PhotoId, PathBuf)>,
+    /// The photo open in Develop, still in the catalog, and its new file
+    /// when it was found moved and verified: the open document stays,
+    /// following it.
+    relink: Option<(PhotoId, Option<PathBuf>)>,
 }
 
 impl Editor {
@@ -272,11 +273,9 @@ impl Editor {
                     .iter()
                     .filter(|p| p.master == Some(id))
                     .count();
-                let rating = session
-                    .photos
-                    .iter()
-                    .find(|p| p.id == id)
-                    .map_or(0, |p| p.rating);
+                let photo = session.photos.iter().find(|p| p.id == id);
+                let rating = photo.map_or(0, |p| p.rating);
+                let keywords = photo.is_some_and(|p| !p.keywords.is_empty());
                 let collections = session
                     .collection_photos
                     .values()
@@ -288,6 +287,9 @@ impl Editor {
                 }
                 if edited.contains_key(&id) {
                     parts.push("edited".into());
+                }
+                if keywords {
+                    parts.push("keywords".into());
                 }
                 if collections > 0 {
                     parts.push(format!("in {collections} collections"));
@@ -441,7 +443,13 @@ impl Editor {
             self.folder_sync.review = Some(review);
             return;
         }
-        if !self.flush() && open_move.is_none() {
+        // Edits made in the Library are saved first, whatever happens.
+        if !self.commit_library_drafts() {
+            self.folder_sync.review = Some(review);
+            return;
+        }
+        let file_gone = self.document.path.as_ref().is_some_and(|p| !p.exists());
+        if !self.flush() && !(file_gone && open_move.is_some()) {
             self.folder_sync.review = Some(review);
             return;
         }
@@ -451,7 +459,7 @@ impl Editor {
         }
         let location = review.catalog.clone();
         let plan = review.plan;
-        let relink = open.zip(open_move);
+        let relink = open.map(|id| (id, open_move));
         let ctx = ctx.clone();
         super::task::spawn(
             self.tx.clone(),
@@ -470,10 +478,11 @@ impl Editor {
                     let opened = crate::catalog_session::CatalogSession::open(&location)?;
                     let mut library = super::library::Library::new(opened, ctx.clone());
                     synced_message(&mut library, &plan, &applied);
-                    // The open photo follows only a move that went through.
-                    let relink = relink.filter(|(id, _)| {
-                        let master = library.photo(*id).map(|p| p.master.unwrap_or(*id));
-                        master.is_some_and(|m| applied.moved.contains(&m))
+                    // The open photo stays open while it is in the catalog;
+                    // it follows only a move that went through.
+                    let relink = relink.and_then(|(id, to)| {
+                        let master = library.photo(id)?.master.unwrap_or(id);
+                        Some((id, to.filter(|_| applied.moved.contains(&master))))
                     });
                     Ok(Synced {
                         library: Box::new(library),
@@ -1084,6 +1093,58 @@ mod tests {
             .load_edit(a, &trip.join("moved.dng"))?
             .expect("saved");
         assert_eq!(saved.recipe.exposure, 0.8);
+        Ok(())
+    }
+
+    #[test]
+    fn the_open_photo_whose_move_is_skipped_stays_open_with_its_edit() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        e.module = Module::Develop;
+        e.document.catalog_photo = Some(a);
+        e.document.path = Some(trip.join("a.dng"));
+        e.document.edit.change(None, |r| r.exposure = 0.6);
+        std::fs::rename(trip.join("a.dng"), trip.join("moved.dng"))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        // The file found changes before applying: its move is skipped.
+        let later = std::time::SystemTime::now() + Duration::from_secs(30);
+        std::fs::File::options()
+            .write(true)
+            .open(trip.join("moved.dng"))?
+            .set_modified(later)?;
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        assert_eq!(e.document.catalog_photo, Some(a));
+        assert_eq!(
+            e.document.path.as_deref(),
+            Some(trip.join("a.dng").as_path())
+        );
+        assert_eq!(e.document.edit.recipe().exposure, 0.6);
+        assert!(e.document.edit.save_state().needs_save());
+        assert!(e.module == Module::Develop);
+        Ok(())
+    }
+
+    #[test]
+    fn removing_a_photo_with_keywords_asks_first() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        let library = e.library.as_mut().unwrap();
+        library
+            .session
+            .catalog
+            .add_keywords(&[a], &[vec!["Trip".into()]])?;
+        library.session.reload()?;
+        std::fs::remove_file(trip.join("a.dng"))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        let review = e.folder_sync.review.as_mut().expect("a review");
+        review.removals.iter_mut().for_each(|r| *r = true);
+        let losses = review.removal_losses();
+        assert_eq!(losses.len(), 1);
+        assert!(losses[0].contains("keywords"), "{losses:?}");
         Ok(())
     }
 }

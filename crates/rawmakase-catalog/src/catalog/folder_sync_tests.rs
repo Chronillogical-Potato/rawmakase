@@ -721,6 +721,23 @@ mod scenarios {
         // Adding the folder again adds nothing: Previous Import is empty.
         f.cat.add_folder(&f.root)?;
         assert!(f.cat.previous_import()?.is_empty());
+        // So does a synchronization that only relinks.
+        std::fs::write(f.root.join("Porto/IMG_2003.dng"), bytes(71))?;
+        let plan = f.plan(SyncScope::All)?;
+        f.apply(&plan, &plan.default_accepted())?;
+        assert_eq!(f.cat.previous_import()?.len(), 1);
+        std::fs::rename(
+            f.root.join("Porto/IMG_2003.dng"),
+            f.root.join("Porto/renamed.dng"),
+        )?;
+        f.checksum_all()?;
+        let plan = f.plan(SyncScope::All)?;
+        let accepted = Accepted {
+            moves: plan.moves.iter().map(|m| (m.photo, m.to.clone())).collect(),
+            ..Default::default()
+        };
+        f.apply(&plan, &accepted)?;
+        assert!(f.cat.previous_import()?.is_empty());
         Ok(())
     }
 }

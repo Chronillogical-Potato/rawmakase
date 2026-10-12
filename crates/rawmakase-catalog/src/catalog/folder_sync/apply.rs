@@ -249,6 +249,10 @@ impl Catalog {
                     removed.push(*photo);
                 }
             }
+            // A synchronization adding nothing leaves Previous Import empty.
+            if accepted.additions.is_empty() {
+                crate::catalog::ingest::new_batch(w, crate::catalog::ingest::ImportKind::Sync)?;
+            }
             let mut folders_removed = Vec::new();
             for id in &gone_folders {
                 if remove_if_empty(w, *id)? {

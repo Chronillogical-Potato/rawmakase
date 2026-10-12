@@ -314,8 +314,8 @@ impl Editor {
             }
         }
     }
-    /// Whether the catalog `l`, opened again after a synchronization that
-    /// found the open photo's file moved, still has that photo there.
+    /// Whether the catalog `l`, opened again after a synchronization, still
+    /// has the photo open in Develop: where its file was found moved, there.
     fn keeps_open_photo(&self, l: &super::library::Library) -> bool {
         let Some((id, path)) = &self.relink_open else {
             return false;
@@ -325,7 +325,8 @@ impl Editor {
                 .library
                 .as_ref()
                 .is_some_and(|old| old.session.catalog.location() == l.session.catalog.location())
-            && l.photo(*id).is_some_and(|p| &p.path == path)
+            && l.photo(*id)
+                .is_some_and(|p| path.as_ref().is_none_or(|path| &p.path == path))
     }
     pub(super) fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
@@ -334,10 +335,13 @@ impl Editor {
         self.preferences.locations = None;
         match result {
             Ok(mut l) if self.keeps_open_photo(&l) => {
-                // A synchronization found the open photo's file moved: the
-                // document follows it, with its edit, History and pending save.
+                // After a synchronization the open photo stays open, its
+                // edit, History and pending save kept; where its file was
+                // found moved, the document follows it.
                 let (_, path) = self.relink_open.take().expect("kept");
-                self.document.relink(path);
+                if let Some(path) = path {
+                    self.document.relink(path);
+                }
                 self.onboarding.catalog_error = None;
                 if !l.message.is_empty() {
                     self.status = l.message.clone();

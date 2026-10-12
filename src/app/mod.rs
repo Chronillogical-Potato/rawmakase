@@ -115,10 +115,11 @@ pub(crate) struct Editor {
     auto_advance: bool,
     /// Synchronize Folder: the scan under way or the plan waiting for review.
     folder_sync: folder_sync::FolderSync,
-    /// The photo open in Develop and its file's new path, after a
-    /// synchronization found it moved: the next catalog reload keeps the
-    /// document, following it (see `catalog_ready`).
-    relink_open: Option<(crate::catalog::PhotoId, PathBuf)>,
+    /// The photo open in Develop when a synchronization was applied, and its
+    /// file's new path if it was found moved: the reload that follows keeps
+    /// the document, unsaved edit included, following the file (see
+    /// `catalog_ready`).
+    relink_open: Option<(crate::catalog::PhotoId, Option<PathBuf>)>,
     /// Preferences > Catalog: the user paused reading checksums, saved in
     /// the session.
     checksums_paused: bool,

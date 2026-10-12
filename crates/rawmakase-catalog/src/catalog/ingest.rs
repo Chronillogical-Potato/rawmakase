@@ -74,6 +74,14 @@ impl ImportKind {
         }
     }
 }
+/// Starts a batch of photos added by `kind`, in `w`'s transaction: Previous
+/// Import from now on.
+pub(in crate::catalog) fn new_batch(w: &mut Write<'_>, kind: ImportKind) -> Result<i64> {
+    w.insert_returning_id(
+        sql!("INSERT INTO import_batches(kind) VALUES(?) RETURNING id"),
+        &[&kind.as_str()],
+    )
+}
 impl Catalog {
     /// Lightroom's Previous Import: the photos the last Add Photo Folder or
     /// Synchronize added that are still in the catalog.
@@ -275,10 +283,7 @@ impl Catalog {
         let (added, report, edits) = self.db.write(|w| {
             // The newest batch is Previous Import, empty when nothing new
             // was found.
-            let batch: i64 = w.insert_returning_id(
-                sql!("INSERT INTO import_batches(kind) VALUES(?) RETURNING id"),
-                &[&kind.as_str()],
-            )?;
+            let batch = new_batch(w, kind)?;
             let mut new_root = None;
             let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
             let mut added = 0;
