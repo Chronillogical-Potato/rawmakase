@@ -388,6 +388,8 @@ def default_parity(args):
     survey = args.survey.resolve()
     pool = json.loads((survey / 'pool.json').read_text())
     references = (args.references or survey.parent.parent).resolve()
+    # The pool names its RAWs relative to the dataset folder, references/'s parent.
+    root = references.parent
     holdout = {p['sha256'] for f in references.glob('*/*-holdout/references.json')
                for p in json.loads(f.read_text())['photos']}
     out = args.out.resolve()
@@ -404,7 +406,8 @@ def default_parity(args):
         if not reference.exists():
             rows.append(dict(row, valid=0., error='no survey render'))
             continue
-        if digest(photo['raw']) != photo['sha256']:
+        raw = root / photo['raw']
+        if digest(raw) != photo['sha256']:
             raise ValueError(f'{photo["raw"]}: changed since the survey')
         # The settings Camera Raw rendered with, from its TIFF, as `reference` does.
         sidecar = out / f'{key}.xmp'
@@ -413,7 +416,7 @@ def default_parity(args):
         tif.unlink(missing_ok=True)
         listing = out / f'{key}.json'
         listing.write_text(json.dumps([dict(xmp=str(sidecar), output=str(tif), max_edge=1024)]))
-        result = subprocess.run([str(args.rawmakase), 'render-batch', photo['raw'], str(listing)],
+        result = subprocess.run([str(args.rawmakase), 'render-batch', str(raw), str(listing)],
                                 capture_output=True, text=True, env=env)
         listing.unlink()
         if not tif.exists():
@@ -689,6 +692,9 @@ def accept(args):
                   f'{c["score"] if c else float("nan"):6.2f} {dflt:6.2f}  {"PASS" if not reasons else "; ".join(reasons)}')
             if reasons:
                 failed.append((name, st))
+            # For callers that judge many sets (dataset-gate.py): every pair's reasons.
+            if getattr(args, 'results', None) is not None:
+                args.results.append(dict(name=name, stratum=st, reasons=reasons))
     print(f'{len(failed)} failing setting/stratum pairs')
     return int(bool(failed))
 

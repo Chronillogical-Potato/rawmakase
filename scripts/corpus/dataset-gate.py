@@ -71,6 +71,13 @@ def run_set(args, d, refs, out):
     family, name = refs.parent.name, refs.name
     score = out / 'scores' / family / f'{name}.json'
     if score.exists():
+        # Kept from an interrupted run only when this build made it, for these
+        # references, with this profile library.
+        made_by = json.loads(score.read_text()).get('rendered_by') or {}
+        expected = dict(references=gate.digest(refs / 'references.json'), rawmakase=gate.digest(args.rawmakase),
+                        profiles=args.profiles, policy=gate.RENDER_POLICY)
+        if any(made_by.get(k) != v for k, v in expected.items()):
+            return f'{family}/{name} (scored by another build, library or references: use a new --out)', False, 0
         return f'{family}/{name}', True, 0
     renders = out / 'renders' / family / name
     logs = out / 'logs' / family
@@ -79,8 +86,13 @@ def run_set(args, d, refs, out):
     start = datetime.datetime.now()
     py = sys.executable
     with (logs / f'{name}.render.log').open('w') as log:
-        subprocess.run([py, str(HERE / 'gate.py'), 'render', '--refs', str(refs), '--rawmakase', str(args.rawmakase),
-                        '--data-dir', str(args.data_dir), '--out', str(renders)], stdout=log, stderr=log, cwd=d)
+        rendered = subprocess.run([py, str(HERE / 'gate.py'), 'render', '--refs', str(refs), '--rawmakase',
+                                   str(args.rawmakase), '--data-dir', str(args.data_dir), '--out', str(renders)],
+                                  stdout=log, stderr=log, cwd=d).returncode == 0
+    # A render gate.py refused (another build's renders in the folder, inputs that
+    # changed) is never scored; its folder stays for a look.
+    if not rendered:
+        return f'{family}/{name} (render failed)', False, (datetime.datetime.now() - start).seconds
     with (logs / f'{name}.score.log').open('w') as log:
         ok = subprocess.run([py, str(HERE / 'gate.py'), 'score', '--refs', str(refs), '--renders', str(renders),
                              '--out', str(score)], stdout=log, stderr=log, cwd=d).returncode == 0
@@ -96,11 +108,18 @@ def run(args):
         raise Setup('Pass --data-dir: the library with the Adobe profiles (see tests/corpus/README.md)')
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    args.profiles = gate.library_digest(Path(args.data_dir) / 'camera-profiles')
     built = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=args.rawmakase.parent, capture_output=True,
                            text=True).stdout.strip()
+    identity = dict(rawmakase_sha256=gate.digest(args.rawmakase), profiles=args.profiles)
+    # One run folder is one build with one profile library; a split may be added.
+    previous = json.loads((out / 'run.json').read_text()) if (out / 'run.json').exists() else None
+    if previous and any(previous.get(k) != v for k, v in identity.items()):
+        raise Setup(f'{out} holds a run of another build or profile library: use a new --out')
+    splits = sorted(set((previous or {}).get('splits', [])) | {args.split})
     (out / 'run.json').write_text(json.dumps(dict(
-        rawmakase=str(args.rawmakase), rawmakase_sha256=gate.digest(args.rawmakase), commit=built or None,
-        data_dir=str(args.data_dir), split=args.split, started=datetime.datetime.now().isoformat(timespec='seconds')),
+        identity, rawmakase=str(args.rawmakase), commit=built or None, data_dir=str(args.data_dir), splits=splits,
+        started=(previous or {}).get('started') or datetime.datetime.now().isoformat(timespec='seconds')),
         indent=1))
     todo = sets(d, args.split)
     failed = []
@@ -116,38 +135,38 @@ def run(args):
 
 
 def accept(args):
+    """Every set of the split, which both runs must have scored."""
+    d = dataset(args)
     baseline, candidate = args.baseline.resolve(), args.candidate.resolve()
-    files = sorted((baseline / 'scores').glob('*/*.json'))
-    if not files:
-        raise Setup(f'No scores in {baseline / "scores"}')
-    verdicts, failing = Counter(), []
-    for b in files:
-        c = candidate / 'scores' / b.parent.name / b.name
-        name = f'{b.parent.name}/{b.stem}'
-        if not c.exists():
-            verdicts['missing'] += 1
-            failing.append((name, 'no candidate scores'))
+    expected = [f'{r.parent.name}/{r.name}' for r in sets(d, args.split)]
+    counts, failing = Counter(), []
+    for name in expected:
+        b, c = baseline / 'scores' / f'{name}.json', candidate / 'scores' / f'{name}.json'
+        if not b.exists() or not c.exists():
+            counts['missing'] += 1
+            failing.append((name, 'not scored by the ' + ('baseline' if not b.exists() else 'candidate')))
             continue
-        text = io.StringIO()
+        results, text = [], io.StringIO()
         with contextlib.redirect_stdout(text):
             status = gate.accept(types.SimpleNamespace(candidate=c, baseline=b, exclude=args.exclude,
-                                                       rule=args.rule))
-        lines = text.getvalue().splitlines()
-        pairs = [line for line in lines if ' low ' in line or ' mid ' in line or ' high ' in line]
-        failed = [line for line in pairs if not line.rstrip().endswith('PASS') and 'inconclusive' not in line]
-        verdicts['pairs'] += len(pairs)
-        verdicts['pass'] += sum(line.rstrip().endswith('PASS') for line in pairs)
-        verdicts['inconclusive'] += sum('inconclusive' in line for line in pairs)
-        verdicts['fail'] += len(failed)
-        if status and not failed and not any('inconclusive' in line for line in pairs):
-            failing.append((name, lines[-1] if lines else 'refused'))
-        for line in failed:
-            failing.append((name, ' '.join(line.split())))
+                                                       rule=args.rule, results=results))
         if args.verbose:
-            print(f'== {name}\n' + '\n'.join(lines))
-    print(f'{len(files)} sets, {verdicts["pairs"]} setting × stratum pairs: {verdicts["pass"]} pass, '
-          f'{verdicts["fail"]} fail, {verdicts["inconclusive"]} inconclusive (fewer than three photos)'
-          + (f', {verdicts["missing"]} sets without candidate scores' if verdicts['missing'] else ''))
+            print(f'== {name}\n{text.getvalue()}')
+        if status and not results:
+            # Refused before judging (other references, profiles or policy).
+            failing.append((name, text.getvalue().strip().splitlines()[-1]))
+            continue
+        for r in results:
+            # A pair fails on any reason but an inconclusive one; one that is both
+            # inconclusive on a rule and failing another still fails.
+            hard = [why for why in r['reasons'] if not why.startswith('inconclusive')]
+            counts['pairs'] += 1
+            counts['fail' if hard else 'inconclusive' if r['reasons'] else 'pass'] += 1
+            if hard:
+                failing.append((name, f'{r["name"]} {r["stratum"]}: ' + '; '.join(hard)))
+    print(f'{args.split}: {len(expected)} sets, {counts["pairs"]} setting × stratum pairs: {counts["pass"]} pass, '
+          f'{counts["fail"]} fail, {counts["inconclusive"]} inconclusive (fewer than three photos)'
+          + (f'; {counts["missing"]} sets not scored by both runs' if counts['missing'] else ''))
     for name, why in failing:
         print(f'  {name}: {why}')
     return 1 if failing else 0
@@ -215,6 +234,7 @@ def main():
     s = sub.add_parser('accept')
     s.add_argument('--candidate', type=Path, required=True, help='a run folder')
     s.add_argument('--baseline', type=Path, required=True, help='a run folder')
+    s.add_argument('--split', choices=['validation', 'holdout', 'train'], default='validation')
     s.add_argument('--rule', choices=['regression', 'switch'], default='regression')
     s.add_argument('--exclude', type=Path, help='photos to leave out (gate.py accept --exclude)')
     s.add_argument('--verbose', action='store_true', help='every set\'s table')
