@@ -4,16 +4,19 @@
 //! edit live here, and nowhere else writes those rows; a backend that
 //! detected conflicting edits would do it here.
 //!
-//! Three operations: a checked save or clear ([`write_edit`]), an opaque
-//! copy for virtual copies ([`copy_edit`]), and removal with a virtual copy
-//! ([`delete_edits`]).
+//! Three operations: a checked save or clear ([`write_edit`]), of a photo
+//! being added too ([`CheckedNew`]), an opaque copy for virtual copies
+//! ([`copy_edit`]), and removal with a virtual copy ([`delete_edits`]).
 use super::db::{Write, sql};
 use super::{Catalog, EditChange, HistoryUpdate, PhotoId};
 use crate::storage::Identity;
+use crate::{export_settings::ExportOptions, model::recipe::Recipe};
 use anyhow::{Result, ensure};
+use std::path::Path;
 
 /// A change to one photo's edit, checked and ready to write. Only
-/// [`Catalog::check_edit`] makes one, so nothing unchecked is written.
+/// [`Catalog::check_edit`] and [`CheckedNew`] make one, so nothing
+/// unchecked is written.
 pub(super) struct CheckedChange<'a> {
     id: PhotoId,
     save: Option<Checked<'a>>,
@@ -39,6 +42,19 @@ struct Checked<'a> {
     assets: super::mask_assets::Assets,
 }
 
+/// The edit of a photo that the same transaction adds, checked as a save is,
+/// with no saved edit to replace. Only [`Catalog::check_new_edit`] makes one.
+pub(super) struct CheckedNew(Checked<'static>);
+impl CheckedNew {
+    /// The change that writes it for photo `id`, once the photo is inserted.
+    pub(super) fn change(self, id: PhotoId) -> CheckedChange<'static> {
+        CheckedChange {
+            id,
+            save: Some(self.0),
+        }
+    }
+}
+
 impl Catalog {
     /// Checks `change` before it is written: the recipe and export options
     /// are valid, the photo's file can be identified, and the edit it
@@ -53,29 +69,55 @@ impl Catalog {
             }
             EditChange::Save(e) => e,
         };
-        e.recipe.validate()?;
-        e.export.validate()?;
-        let identity = Identity::read(e.path)?;
+        let save = self.checked(e.path, e.recipe, e.export, e.history)?;
         // Refuse replacing an edit after the underlying source changed.
         let _ = self.load_edit(e.id, e.path)?;
-        let (saved, local) = e.recipe.split_local();
-        let history_ids = match e.history {
+        Ok(CheckedChange {
+            id: e.id,
+            save: Some(save),
+        })
+    }
+    /// Checks the edit of a photo not yet in the catalog, as `check_edit`
+    /// checks a save.
+    pub(super) fn check_new_edit(
+        &self,
+        path: &Path,
+        recipe: &Recipe,
+        export: &ExportOptions,
+    ) -> Result<CheckedNew> {
+        Ok(CheckedNew(self.checked(
+            path,
+            recipe,
+            export,
+            HistoryUpdate::Keep,
+        )?))
+    }
+    /// A valid edit for `path`, as its rows store it.
+    fn checked<'a>(
+        &self,
+        path: &Path,
+        recipe: &Recipe,
+        export: &ExportOptions,
+        history: HistoryUpdate<'a>,
+    ) -> Result<Checked<'a>> {
+        recipe.validate()?;
+        export.validate()?;
+        let identity = Identity::read(path)?;
+        let (saved, local) = recipe.split_local();
+        let history_ids = match history {
             HistoryUpdate::Replace(h) => h.mask_asset_ids(),
             HistoryUpdate::Keep => Default::default(),
         };
-        let assets = self.assets_of(e.recipe.mask_asset_ids().chain(history_ids))?;
-        Ok(CheckedChange {
-            id: e.id,
-            save: Some(Checked {
-                recipe: serde_json::to_string(&saved)?,
-                export: serde_json::to_string(e.export)?,
-                identity: serde_json::to_string(&identity)?,
-                local: (!local.is_empty())
-                    .then(|| serde_json::to_string(&local))
-                    .transpose()?,
-                history: e.history,
-                assets,
-            }),
+        let assets = self.assets_of(recipe.mask_asset_ids().chain(history_ids))?;
+        Ok(Checked {
+            recipe: serde_json::to_string(&saved)?,
+            export: serde_json::to_string(export)?,
+            identity: serde_json::to_string(&identity)?,
+            local: (!local.is_empty())
+                .then(|| serde_json::to_string(&local))
+                .transpose()?,
+            history,
+            assets,
         })
     }
 }

@@ -76,6 +76,52 @@ impl std::fmt::Display for OtherCamera {
 }
 impl std::error::Error for OtherCamera {}
 
+/// One camera of a phone that Adobe profiles per module, named after the phone,
+/// e.g. `Google Pixel 7 Pro Telephoto Camera` or `Samsung Galaxy S23 Rear Wide Camera`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PhoneModule {
+    Front,
+    Ultrawide,
+    Wide,
+    Telephoto,
+    SuperTelephoto,
+}
+impl PhoneModule {
+    /// The module a lowercase profile camera-name suffix names, if it names one.
+    fn parse(suffix: &str) -> Option<Self> {
+        let role = suffix.strip_suffix(" camera")?;
+        let role = role.strip_prefix("rear ").unwrap_or(role);
+        Some(match role {
+            "front" => Self::Front,
+            "ultrawide" => Self::Ultrawide,
+            "wide" | "main" => Self::Wide,
+            "telephoto" => Self::Telephoto,
+            "super telephoto" => Self::SuperTelephoto,
+            _ => return None,
+        })
+    }
+    /// The module that took the photo. Phone DNGs don't name it, so as Camera
+    /// Raw does (checked against its profile digests for raw.pixls.us Pixel 4 XL,
+    /// 4a, 6 Pro, 7 Pro and 8 Pro DNGs) go by the 35 mm equivalent focal length.
+    /// The front camera only when the lens model says so. Unknown without a
+    /// focal length; from 150 mm only a super telephoto module fits, so a phone
+    /// without one has no profile there rather than a guessed one.
+    fn of(m: &Metadata) -> Option<Self> {
+        let lens = m.lens_model.to_ascii_lowercase();
+        if lens.contains("front") {
+            return Some(Self::Front);
+        }
+        let f = m.focal_35mm;
+        Some(match f {
+            f if !f.is_finite() || f <= 0. => return None,
+            f if f < 20. => Self::Ultrawide,
+            f if f < 35. => Self::Wide,
+            f if f < 150. => Self::Telephoto,
+            _ => Self::SuperTelephoto,
+        })
+    }
+}
+
 /// An imported look whose base camera profile was not imported with it.
 #[derive(Debug)]
 pub struct MissingBase {
@@ -340,8 +386,16 @@ impl CameraProfile {
                 .collect::<Vec<_>>()
                 .join(" ")
         };
-        if key(&self.camera) == key(&format!("{} {}", m.make, m.model))
-            || key(&self.camera) == key(&m.model)
+        let profile = key(&self.camera);
+        let cameras = [key(&format!("{} {}", m.make, m.model)), key(&m.model)];
+        if cameras.contains(&profile)
+            || cameras.iter().any(|camera| {
+                profile
+                    .strip_prefix(camera.as_str())
+                    .and_then(|rest| rest.strip_prefix(' '))
+                    .and_then(PhoneModule::parse)
+                    .is_some_and(|module| Some(module) == PhoneModule::of(m))
+            })
         {
             return Ok(());
         }

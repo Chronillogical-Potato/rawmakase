@@ -1,6 +1,6 @@
 //! Adding a folder of photos to the catalog, with the edits they got from
 //! releases that saved them beside the photo.
-use super::db::{Reads, sql};
+use super::db::{Reads, is_storage_error, sql};
 use super::locations::{FolderLocation, join, logical_from_os, resolve_in};
 use super::{Catalog, FolderId, PhotoId, RootId};
 use anyhow::{Result, ensure};
@@ -58,6 +58,15 @@ pub struct Ambiguity {
 pub struct Choice {
     pub options: Vec<FolderLocation>,
     pub chosen: FolderLocation,
+}
+/// Where the directories of files found on disk go in the catalog.
+#[derive(Default)]
+struct Placed {
+    places: HashMap<PathBuf, Place>,
+    /// Directories not placed: their catalog folder is elsewhere here.
+    conflicts: Vec<Conflict>,
+    /// Directories not placed until one of their options is chosen.
+    ambiguous: Vec<Ambiguity>,
 }
 /// Where a folder on disk goes in the catalog.
 enum Place {
@@ -151,94 +160,108 @@ impl Catalog {
         choices: &[Choice],
     ) -> Result<Added> {
         let folder = folder.canonicalize()?;
-        let mut files = Vec::new();
-        fn walk(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-            for entry in std::fs::read_dir(p)? {
-                let e = entry?;
-                let t = e.file_type()?;
-                if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
-                    continue;
-                }
-                if t.is_dir() {
-                    walk(&e.path(), files)?
-                } else if crate::storage::is_raw(&e.path())
-                    || e.path().extension().is_some_and(|x| {
-                        matches!(
-                            x.to_string_lossy().to_ascii_lowercase().as_str(),
-                            "jpg" | "jpeg" | "png" | "tif" | "tiff"
-                        )
-                    })
-                {
-                    files.push(e.path());
-                }
-            }
-            Ok(())
-        }
-        walk(&folder, &mut files)?;
-        let mut result = Added::default();
-        let mut places = HashMap::new();
-        let mut ambiguous: BTreeMap<Vec<FolderLocation>, Vec<PathBuf>> = BTreeMap::new();
-        {
-            let matcher = Matcher::new(self)?;
-            let directories: BTreeSet<_> = files.iter().filter_map(|f| f.parent()).collect();
-            for directory in directories {
-                match matcher.place(directory, &folder, choices) {
-                    Matched::Place(place) => {
-                        places.insert(directory.to_path_buf(), place);
-                    }
-                    Matched::Conflict(conflict) => result.conflicts.push(conflict),
-                    Matched::Ambiguous(options) => ambiguous
-                        .entry(options)
-                        .or_default()
-                        .push(directory.to_path_buf()),
-                }
-            }
-        }
-        if !ambiguous.is_empty() {
-            result.ambiguous = ambiguous
-                .into_iter()
-                .map(|(options, directories)| Ambiguity {
-                    directories,
-                    options,
-                })
-                .collect();
+        let files = walk(&folder)?;
+        let placed = self.place(&files, &folder, choices)?;
+        let mut result = Added {
+            conflicts: placed.conflicts,
+            ..Default::default()
+        };
+        if !placed.ambiguous.is_empty() {
+            result.ambiguous = placed.ambiguous;
             return Ok(result);
         }
-        let added = self.db.write(|w| {
-            let mut new_root = None;
-            let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
-            let mut added = Vec::new();
+        (result.added, result.report) = self.insert(&folder, files, &placed.places, defaults)?;
+        Ok(result)
+    }
+    /// Where the directories of `files`, found below the `chosen` folder, go
+    /// in the catalog (see `import_folder`).
+    fn place(&self, files: &[PathBuf], chosen: &Path, choices: &[Choice]) -> Result<Placed> {
+        let mut placed = Placed::default();
+        let mut ambiguous: BTreeMap<Vec<FolderLocation>, Vec<PathBuf>> = BTreeMap::new();
+        let matcher = Matcher::new(self)?;
+        let directories: BTreeSet<_> = files.iter().filter_map(|f| f.parent()).collect();
+        for directory in directories {
+            match matcher.place(directory, chosen, choices) {
+                Matched::Place(place) => {
+                    placed.places.insert(directory.to_path_buf(), place);
+                }
+                Matched::Conflict(conflict) => placed.conflicts.push(conflict),
+                Matched::Ambiguous(options) => ambiguous
+                    .entry(options)
+                    .or_default()
+                    .push(directory.to_path_buf()),
+            }
+        }
+        placed.ambiguous = ambiguous
+            .into_iter()
+            .map(|(options, directories)| Ambiguity {
+                directories,
+                options,
+            })
+            .collect();
+        Ok(placed)
+    }
+    /// Adds the photos of `files` the catalog doesn't have, each with what
+    /// its files hold, in one transaction, their folders where `places` says
+    /// (a new root being the `chosen` folder). Files in a directory `places`
+    /// has no place for are left out. Returns how many were added, and what
+    /// reading their sidecars found.
+    fn insert(
+        &mut self,
+        chosen: &Path,
+        files: Vec<PathBuf>,
+        places: &HashMap<PathBuf, Place>,
+        defaults: &super::MetadataDefaults,
+    ) -> Result<(usize, super::SidecarReport)> {
+        // Photos already in the catalog are left before their files are read.
+        let files: Vec<(PathBuf, &Place)> = self.db.snapshot(|s| {
+            let mut new = Vec::new();
             for file in files {
                 let Some(place) = file.parent().and_then(|d| places.get(d)) else {
                     continue;
                 };
-                let (root, logical) = match place {
+                if let Place::Folder(root, logical) = place
+                    && known(s, *root, logical, &file)?
+                {
+                    continue;
+                }
+                new.push((file, place));
+            }
+            Ok(new)
+        })?;
+        // Everything each photo brings is read before the transaction, so
+        // that it is written with the photo or not at all.
+        let photos: Vec<NewPhoto> = files
+            .into_iter()
+            .map(|(file, place)| self.read_new_photo(file, place, defaults))
+            .collect();
+        let edited_at = rawmakase_model::time::now_text();
+        let (added, report, edits) = self.db.write(|w| {
+            let mut new_root = None;
+            let mut folders: HashMap<(RootId, String), FolderId> = HashMap::new();
+            let mut added = 0;
+            let mut report = super::SidecarReport::default();
+            let mut edits = Vec::new();
+            for photo in photos {
+                let (root, logical) = match photo.place {
                     Place::Folder(root, logical) => (*root, logical.clone()),
                     Place::New(logical) => {
                         let root = match new_root {
                             Some(root) => root,
                             None => *new_root.insert(w.insert_returning_id(
                                 sql!("INSERT INTO roots(original_path) VALUES(?) RETURNING id"),
-                                &[&folder.to_string_lossy()],
+                                &[&chosen.to_string_lossy()],
                             )?),
                         };
                         (root, logical.clone())
                     }
                 };
-                let filename = file.file_name().unwrap().to_string_lossy();
-                // A photo is the same one by root, folder and name; its virtual
-                // copies share them and stay as they are.
-                let known: Option<i64> = w.read_optional(
-                    sql!(
-                        "SELECT 1 FROM photos WHERE filename=? AND folder IN
-                         (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
-                          WHERE f.root=? AND p.path=?)"
-                    ),
-                    &[&filename, &root, &logical],
-                )?;
-                if known.is_some() {
+                let file = photo.file;
+                // Added since the files were read.
+                if known(w, root, &logical, &file)? {
                     continue;
                 }
+                let filename = file.file_name().unwrap().to_string_lossy();
                 let key = (root, logical);
                 let fid = match folders.get(&key) {
                     Some(id) => *id,
@@ -286,34 +309,40 @@ impl Catalog {
                     ),
                     &[&fid, &filename, &file.to_string_lossy(), &format],
                 )?;
-                added.push((id, file));
+                added += 1;
+                if let Some(edit) = photo.edit {
+                    // An edit an older release saved that can't be kept stays
+                    // unused on disk.
+                    let written = w.savepoint(|w| {
+                        for (hash, data) in &edit.bitmaps {
+                            super::edits::insert_bitmap(w, hash, data)?;
+                        }
+                        let change = edit.checked.change(id);
+                        super::edit_rows::write_edit(w, &change, &edited_at)?;
+                        Ok(change)
+                    });
+                    edits.extend(refused(written)?.ok());
+                }
+                let mut readable = photo.report.unreadable.is_empty();
+                report.add(photo.report);
+                if let Some(read) = &photo.metadata
+                    && let Err(e) = refused(w.savepoint(|w| {
+                        super::sidecar::apply(w, id, read, super::Merge::FillEmpty)
+                    }))?
+                {
+                    report.unreadable.push((file.clone(), format!("{e:#}")));
+                    readable = false;
+                }
+                // A photo whose metadata couldn't be read may have its own: no
+                // default goes in its place.
+                if readable {
+                    super::defaults::fill(w, id, &photo.defaults)?;
+                }
             }
-            Ok(added)
+            Ok((added, report, edits))
         })?;
-        for (id, file) in &added {
-            if crate::storage::is_raw(file) {
-                // A sidecar that no longer matches its photo stays unused on disk.
-                let _ = self.import_sidecar(*id, file);
-            }
-        }
-        let report = self.import_file_metadata(&added)?;
-        // A photo whose metadata couldn't be read may have its own: no
-        // default goes in its place.
-        let read: Vec<(PhotoId, PathBuf)> = added
-            .iter()
-            .filter(|(_, file)| {
-                let own = super::sidecars(file);
-                !report
-                    .unreadable
-                    .iter()
-                    .any(|(path, _)| path == file || own.contains(path))
-            })
-            .cloned()
-            .collect();
-        self.apply_defaults(&read, defaults)?;
-        result.added = added.len();
-        result.report = report;
-        Ok(result)
+        edits.iter().for_each(|change| change.committed());
+        Ok((added, report))
     }
     /// Records capture times read from the photos' files, in one transaction.
     /// Only empty dates are filled, never one Lightroom or the user set, and a
@@ -334,23 +363,117 @@ impl Catalog {
             Ok(())
         })
     }
-    /// Carries the edit a photo got outside any catalog, in its
-    /// photo.rawmakase.json sidecar, into the catalog. The sidecar stays on disk.
-    fn import_sidecar(&mut self, id: PhotoId, file: &Path) -> Result<()> {
-        let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
-            return Ok(());
-        };
-        for bitmap in bitmaps {
-            self.put_bitmap(&bitmap)?;
-        }
-        self.save_edit(
-            id,
+    /// What a new photo brings from its files: the edit an older release
+    /// saved beside it, its sidecar's and its own XMP metadata, and the
+    /// defaults where neither has a value.
+    fn read_new_photo<'a>(
+        &self,
+        file: PathBuf,
+        place: &'a Place,
+        defaults: &super::MetadataDefaults,
+    ) -> NewPhoto<'a> {
+        let edit = crate::storage::is_raw(&file)
+            .then(|| self.read_legacy_edit(&file))
+            // A sidecar that no longer matches its photo stays unused on disk.
+            .and_then(|edit| edit.ok().flatten());
+        let (metadata, report) = super::sidecar::read_file(&file);
+        let defaults = defaults.for_file(&file, metadata.as_ref());
+        NewPhoto {
             file,
-            &sidecar.recipe,
-            &sidecar.export,
-            super::HistoryUpdate::Keep,
-        )
+            place,
+            edit,
+            metadata,
+            report,
+            defaults,
+        }
     }
+    /// The edit a photo got outside any catalog, in its photo.rawmakase.json
+    /// sidecar, checked for the catalog. The sidecar stays on disk.
+    fn read_legacy_edit(&self, file: &Path) -> Result<Option<LegacyEdit>> {
+        let Some((sidecar, bitmaps)) = super::legacy_sidecar::import(file)? else {
+            return Ok(None);
+        };
+        let bitmaps = bitmaps
+            .iter()
+            .map(|bitmap| Ok((bitmap.hash(), bitmap.compress()?)))
+            .collect::<Result<_>>()?;
+        let checked = self.check_new_edit(file, &sidecar.recipe, &sidecar.export)?;
+        Ok(Some(LegacyEdit { bitmaps, checked }))
+    }
+}
+
+/// The photo files below `folder`: RAWs, JPEGs, PNGs and TIFFs, not hidden
+/// and not through a symbolic link.
+fn walk(folder: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    walk_into(folder, &mut files)?;
+    Ok(files)
+}
+fn walk_into(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(p)? {
+        let e = entry?;
+        let t = e.file_type()?;
+        if t.is_symlink() || crate::storage::is_hidden(&e.path()) {
+            continue;
+        }
+        if t.is_dir() {
+            walk_into(&e.path(), files)?
+        } else if crate::storage::is_raw(&e.path())
+            || e.path().extension().is_some_and(|x| {
+                matches!(
+                    x.to_string_lossy().to_ascii_lowercase().as_str(),
+                    "jpg" | "jpeg" | "png" | "tif" | "tiff"
+                )
+            })
+        {
+            files.push(e.path());
+        }
+    }
+    Ok(())
+}
+
+/// Whether the catalog has the photo at `file` in the folder at `logical`
+/// of `root`. A photo is the same one by root, folder and name; its virtual
+/// copies share them and stay as they are.
+fn known(r: &impl Reads, root: RootId, logical: &str, file: &Path) -> Result<bool> {
+    let filename = file.file_name().unwrap_or_default().to_string_lossy();
+    let found: Option<i64> = r.read_optional(
+        sql!(
+            "SELECT 1 FROM photos WHERE filename=? AND folder IN
+             (SELECT f.id FROM folders f JOIN folder_paths p ON p.folder=f.id
+              WHERE f.root=? AND p.path=?)"
+        ),
+        &[&filename, &root, &logical],
+    )?;
+    Ok(found.is_some())
+}
+
+/// `result`, unless the database failed: what one photo's files hold that
+/// can't be stored leaves the photo without it, but a failing database
+/// keeps nothing.
+fn refused<T>(result: Result<T>) -> Result<Result<T>> {
+    match result {
+        Err(e) if is_storage_error(&e) => Err(e),
+        other => Ok(other),
+    }
+}
+
+/// A photo to add and what its files hold, read before it is written.
+struct NewPhoto<'a> {
+    file: PathBuf,
+    place: &'a Place,
+    edit: Option<LegacyEdit>,
+    metadata: Option<crate::xmp::descriptive::Read>,
+    /// Its sidecars that could not be read, or were ignored.
+    report: super::SidecarReport,
+    defaults: super::defaults::Fill,
+}
+
+/// An edit saved beside a photo by a release before the catalog, with the
+/// bitmaps (hash, compressed) its spots and masks refer to.
+struct LegacyEdit {
+    bitmaps: Vec<(String, Vec<u8>)>,
+    checked: super::edit_rows::CheckedNew,
 }
 
 /// This computer's locations, for matching folders found on disk.

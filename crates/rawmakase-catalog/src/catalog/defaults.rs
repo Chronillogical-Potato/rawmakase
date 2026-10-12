@@ -1,12 +1,13 @@
 //! Default Creator and Copyright from Preferences, written for photos added
 //! from folders where neither the file nor its sidecar has one: below an
 //! edit or an imported value, above the file's EXIF, and never at export.
-use super::{Catalog, PhotoId};
+use super::PhotoId;
+use super::db::Write;
 use crate::metadata::{LangAlt, Value};
+use crate::xmp::descriptive::Read;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -29,47 +30,51 @@ impl MetadataDefaults {
     }
 }
 
-impl Catalog {
-    /// Writes `defaults` for the photos given, where a photo has no value of
-    /// its own and its file's EXIF none either. One transaction.
-    pub(super) fn apply_defaults(
-        &mut self,
-        added: &[(PhotoId, PathBuf)],
-        defaults: &MetadataDefaults,
-    ) -> Result<()> {
-        if defaults.is_empty() {
-            return Ok(());
+impl MetadataDefaults {
+    /// What of these defaults a photo added from `file` gets: each one the
+    /// metadata read from its files (`read`) and its EXIF both lack.
+    pub(super) fn for_file(&self, file: &Path, read: Option<&Read>) -> Fill {
+        let (creator, copyright) = (self.creator.trim(), self.copyright.trim());
+        let creator = !creator.is_empty() && read.is_none_or(|r| r.creator.is_none());
+        let copyright = !copyright.is_empty() && read.is_none_or(|r| r.copyright.is_none());
+        if !creator && !copyright {
+            return Fill::default();
         }
-        let has = |exif: &Option<crate::exif::CameraExif>, tag| {
+        // Read once for both.
+        let exif = crate::exif::read(file);
+        let has = |tag| {
             exif.as_ref()
                 .and_then(|e| e.get(tag).and_then(crate::exif::Field::text))
                 .is_some_and(|t| !t.is_empty())
         };
-        let (creator, copyright) = (defaults.creator.trim(), defaults.copyright.trim());
-        let ids: Vec<PhotoId> = added.iter().map(|(id, _)| *id).collect();
-        let paths: HashMap<PhotoId, &PathBuf> =
-            added.iter().map(|(id, path)| (*id, path)).collect();
-        self.update_descriptive_where(&ids, |id, d| {
-            if (creator.is_empty() || d.creator.is_some())
-                && (copyright.is_empty() || d.copyright.is_some())
-            {
-                return false;
-            }
-            // Read once for both.
-            let exif = crate::exif::read(paths[&id]);
-            let mut changed = false;
-            if !creator.is_empty() && d.creator.is_none() && !has(&exif, crate::exif::tag::ARTIST) {
-                d.creator = Some(Value::Set(vec![creator.to_string()]));
-                changed = true;
-            }
-            if !copyright.is_empty()
-                && d.copyright.is_none()
-                && !has(&exif, crate::exif::tag::COPYRIGHT)
-            {
-                d.copyright = Some(Value::Set(LangAlt::new(copyright)));
-                changed = true;
-            }
-            changed
-        })
+        Fill {
+            creator: (creator && !has(crate::exif::tag::ARTIST))
+                .then(|| Value::Set(vec![self.creator.trim().to_string()])),
+            copyright: (copyright && !has(crate::exif::tag::COPYRIGHT))
+                .then(|| Value::Set(LangAlt::new(self.copyright.trim()))),
+        }
     }
+}
+
+/// The defaults one added photo gets, worked out before it is written.
+#[derive(Debug, Default)]
+pub(super) struct Fill {
+    creator: Option<Value<Vec<String>>>,
+    copyright: Option<Value<LangAlt>>,
+}
+
+/// Writes `fill` for photo `id`, in `w`'s transaction, where it has no
+/// value of its own.
+pub(super) fn fill(w: &mut Write<'_>, id: PhotoId, fill: &Fill) -> Result<()> {
+    if fill.creator.is_none() && fill.copyright.is_none() {
+        return Ok(());
+    }
+    let mut d = super::descriptive::read(w, id)?;
+    if d.creator.is_none() {
+        d.creator.clone_from(&fill.creator);
+    }
+    if d.copyright.is_none() {
+        d.copyright.clone_from(&fill.copyright);
+    }
+    super::descriptive::write(w, id, &d)
 }

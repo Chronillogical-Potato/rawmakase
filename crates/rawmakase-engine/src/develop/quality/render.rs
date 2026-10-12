@@ -189,6 +189,14 @@ fn render_resident(
         None => [0; 4],
     };
     let backend = &mut *stages.backend;
+    // A region too large for the device renders on the CPU, without turning the GPU off.
+    if !backend
+        .gpu
+        .as_ref()
+        .is_some_and(|gpu| gpu.fits_develop(w, h, &params))
+    {
+        return Ok(None);
+    }
     let Some(samples) = backend.run_resident(cancel, |gpu| {
         gpu.scoped(|gpu| {
             gpu.sample(
