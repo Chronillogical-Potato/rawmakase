@@ -703,6 +703,10 @@ impl Editor {
                         "Synchronized, but the catalog could not be read again: {again:#}. Open it again."
                     );
                 } else {
+                    let library = self.library.as_ref().expect("read again");
+                    let moved = moved_files(&library.session.photos, &applied);
+                    let catalog = library.session.catalog.location().clone();
+                    self.move_preview_intents(&catalog, &moved);
                     self.status = format!(
                         "Synchronized, but the catalog could not be opened again: {e}. It was read again."
                     );
@@ -711,23 +715,26 @@ impl Editor {
             }
         };
         self.forget_removed(&applied.removed);
-        // Each moved photo and its copies, at their new file.
-        let moved: Vec<(PhotoId, PathBuf)> = library
-            .session
-            .photos
-            .iter()
-            .filter(|p| applied.moved.contains(&p.master.unwrap_or(p.id)))
-            .map(|p| (p.id, p.path.clone()))
-            .collect();
+        let moved = moved_files(&library.session.photos, &applied);
         self.move_preview_intents(library.session.catalog.location(), &moved);
         self.relink_open = relink;
         self.catalog_ready(Ok(library));
     }
 }
 
+/// Each moved photo and its copies, at their new file.
+fn moved_files(photos: &[crate::catalog::Photo], applied: &Applied) -> Vec<(PhotoId, PathBuf)> {
+    photos
+        .iter()
+        .filter(|p| applied.moved.contains(&p.master.unwrap_or(p.id)))
+        .map(|p| (p.id, p.path.clone()))
+        .collect()
+}
+
 /// Whether `plan` offers nothing to do.
 fn nothing_to_do(plan: &SyncPlan) -> bool {
-    plan.moves.is_empty()
+    plan.gone_folders.is_empty()
+        && plan.moves.is_empty()
         && plan.choices.is_empty()
         && plan.additions.is_empty()
         && plan.missing.is_empty()
@@ -907,15 +914,24 @@ impl Review {
                 "need a choice",
             ));
         }
+        if !p.gone_folders.is_empty() {
+            parts.push(super::widgets::plural(
+                p.gone_folders.len(),
+                "folder gone",
+                "folders gone",
+            ));
+        }
         if parts.is_empty() {
             "Nothing to change".into()
         } else {
             parts.join(" \u{b7} ")
         }
     }
-    /// Whether nothing at all is ticked or picked.
+    /// Whether nothing at all is ticked or picked, nor any folder left
+    /// empty to remove.
     fn accepted_nothing(&self) -> bool {
-        !self.moves.iter().any(|m| *m)
+        self.plan.gone_folders.is_empty()
+            && !self.moves.iter().any(|m| *m)
             && !self.additions.iter().any(|a| *a)
             && !self.removals.iter().any(|r| *r)
             && self.picks.iter().all(Option::is_none)
@@ -1105,6 +1121,23 @@ impl Review {
                     }
                 });
             }
+        }
+        if !self.plan.gone_folders.is_empty() {
+            let n = self.plan.gone_folders.len();
+            ui.add_space(2.);
+            ui.horizontal(|ui| {
+                ui.add_space(4.);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "\u{24d8}  {} no longer on disk {} removed from the catalog once {} no photos.",
+                        super::widgets::plural(n, "folder", "folders"),
+                        if n == 1 { "is" } else { "are" },
+                        if n == 1 { "it holds" } else { "they hold" }
+                    ))
+                    .size(12.)
+                    .color(palette.gray(140)),
+                );
+            });
         }
         let not_checked =
             self.plan.not_checked.len() + self.plan.conflicts.len() + self.plan.ambiguous.len();
@@ -1984,6 +2017,42 @@ mod tests {
         e.apply_folder_sync(&ctx);
         applied(&mut e);
         assert_eq!(e.reference.photo, None);
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_folder_gone_from_disk_is_offered_and_removed() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        // A folder whose one photo moved away, then the folder itself.
+        std::fs::create_dir_all(trip.join("day 2"))?;
+        std::fs::write(trip.join("day 2/c.dng"), bytes(5))?;
+        e.library
+            .as_mut()
+            .unwrap()
+            .session
+            .catalog
+            .add_folder(&trip)?;
+        e.library.as_mut().unwrap().session.reload()?;
+        let c = id(&e, "c.dng");
+        e.library
+            .as_mut()
+            .unwrap()
+            .session
+            .catalog
+            .db_for_tests()
+            .execute("DELETE FROM photos WHERE id=?", [c.0])?;
+        e.library.as_mut().unwrap().session.reload()?;
+        std::fs::remove_dir_all(trip.join("day 2"))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        let review = e.folder_sync.review.as_ref().expect("offered, not in sync");
+        assert_eq!(review.plan.gone_folders.len(), 1);
+        assert!(!review.accepted_nothing());
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        let folders = &e.library.as_ref().unwrap().session.folders;
+        assert!(!folders.iter().any(|f| f.relative == "day 2"));
         Ok(())
     }
 
