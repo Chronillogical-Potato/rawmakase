@@ -127,6 +127,16 @@ CREATE TABLE IF NOT EXISTS photo_info (
     height BIGINT
 );
 
+CREATE TABLE IF NOT EXISTS photo_checksums (
+    photo BIGINT PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    size BIGINT NOT NULL,
+    quick_hash TEXT NOT NULL,
+    full_hash TEXT,
+    identity TEXT NOT NULL,
+    version BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS photo_checksums_quick ON photo_checksums(size, quick_hash);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

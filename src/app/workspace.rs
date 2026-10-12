@@ -50,7 +50,13 @@ impl Editor {
         self.events(&ctx);
         self.poll_updates(&ctx);
         self.themes.poll(&ctx);
+        // Checksums are read only while nothing heavier reads files.
+        let busy = self.checksums_paused
+            || self.exporting()
+            || self.load.is_running()
+            || self.preview_builds.progress().is_some_and(|p| p.running());
         if let Some(library) = &mut self.library {
+            library.session.pause_checksums(busy);
             library.publish_shown();
             library.poll_previews(&ctx);
         }

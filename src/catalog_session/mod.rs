@@ -2,6 +2,7 @@
 //! shows it: opening needs no UI, and reading it again keeps the lists in step.
 mod backfill;
 pub(crate) mod background;
+mod checksums;
 mod descriptive;
 
 use crate::catalog::{
@@ -25,7 +26,14 @@ pub(crate) struct CatalogSession {
     pub roots: Vec<(RootId, String, Option<String>)>,
     backfill: backfill::Backfill,
     wake: Wake,
+    /// Changes whenever photos may have changed place, name or master (see
+    /// [`Self::reload`]), so a background result read before is dropped.
+    generation: u64,
 }
+
+/// The last structural generation given out, by any session: unique across
+/// catalogs, and across one catalog opened again.
+static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// A catalog just opened, with what opening it could not finish.
 pub(crate) struct Opened {
@@ -60,6 +68,7 @@ impl CatalogSession {
             roots: Vec::new(),
             backfill: Default::default(),
             wake: std::sync::Arc::new(|| {}),
+            generation: 0,
         };
         session.reload()?;
         Ok(Opened {
@@ -173,6 +182,10 @@ impl CatalogSession {
         self.collections = collections;
         self.collection_photos = collection_photos;
         self.roots = roots;
+        // Read again after a change that may move, rename, promote or
+        // remove photos: what was read before no longer applies.
+        self.generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        self.count_checksums();
         Ok(())
     }
 }
