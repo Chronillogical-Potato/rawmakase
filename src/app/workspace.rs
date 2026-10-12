@@ -113,9 +113,13 @@ impl Editor {
                 self.filmstrip(ui);
                 self.follow_edit_frame(&mut frame);
             }
+            // The panels on the right run up to the bar; the toolbar sits
+            // over the photo alone.
+            self.develop_side_panels(ui);
+            self.follow_edit_frame(&mut frame);
             self.toolbar(ui);
             self.follow_edit_frame(&mut frame);
-            self.develop_panels(ui);
+            self.develop_photo(ui);
             self.finish_edit_frame(frame, &ctx);
         }
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
@@ -1418,7 +1422,7 @@ impl Editor {
         }
     }
 
-    fn develop_panels(&mut self, ui: &mut egui::Ui) {
+    fn develop_side_panels(&mut self, ui: &mut egui::Ui) {
         // From the window's right edge: the tab rail, the adjustments, then
         // Presets or History beside the photo.
         let tabs = self.develop_rail_edge(ui);
@@ -1426,6 +1430,8 @@ impl Editor {
             self.develop_right_panel(ui);
         }
         self.develop_tab_panel(ui, tabs);
+    }
+    fn develop_photo(&mut self, ui: &mut egui::Ui) {
         let area = egui::CentralPanel::default()
             .show(ui, |ui| self.viewport_ui(ui))
             .response
