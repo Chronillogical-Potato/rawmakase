@@ -290,6 +290,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [library/copy_name.rs](../src/app/library/copy_name.rs) | The Copy Name field: the name being typed, saved on commit and kept across selection changes and failed saves. |
 | [library/tree.rs](../src/app/library/tree.rs) | Folder/collection hierarchy, rows and tree actions. |
 | [library/cell.rs](../src/app/library/cell.rs) | Individual photo grid cells. |
+| [library/kinetic.rs](../src/app/library/kinetic.rs) | Kinetic scrolling for the grid and the filmstrip: a trackpad swipe keeps gliding after the fingers lift (where the platform does not glide itself), fed to the scroll area as wheel input. |
 | [library/thumbnails.rs](../src/app/library/thumbnails.rs) | Batched file availability and bounded thumbnail work using the RAW API and preview cache. |
 | [library/previews.rs](../src/app/library/previews.rs) | The two preview workers (embedded thumbnails, and each photo's edited preview) with their disk cache and progress. |
 
