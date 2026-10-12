@@ -654,8 +654,13 @@ def accept(args):
             elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] != b['invalid'] or not cd or not bd
                   or c['photos'].keys() != b['photos'].keys()):
                 # Photos invalid on both sides alike (framed otherwise than
-                # Camera Raw, say) are left out; anything else is no verdict.
+                # Camera Raw, say) are left out; anything else is no verdict on
+                # the setting, but a photo both scored still may not get worse.
                 reasons.append('inconclusive (fewer than 3 photos, photos invalid on one side only or different photos)')
+                limit = COLOR_LIMITS[family] if family else 1.0 if magnitude.get(name, 0) <= 50 else 2.0
+                for p in c['photos'].keys() & b['photos'].keys():
+                    if c['photos'][p] > b['photos'][p] + limit:
+                        reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {c["photos"][p]:.2f}')
             else:
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:

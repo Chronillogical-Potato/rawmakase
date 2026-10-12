@@ -104,8 +104,10 @@ def run_set(args, d, refs, out):
 def run(args):
     d = dataset(args)
     args.rawmakase = args.rawmakase.resolve(strict=True)
-    if not args.data_dir:
-        raise Setup('Pass --data-dir: the library with the Adobe profiles (see tests/corpus/README.md)')
+    if not args.data_dir or not (args.data_dir / 'camera-profiles').is_dir():
+        raise Setup('Pass --data-dir: a profile library with camera-profiles/ (see tests/corpus/README.md)')
+    # gate.py runs from the dataset folder: a relative path would name another one.
+    args.data_dir = args.data_dir.resolve()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     args.profiles = gate.library_digest(Path(args.data_dir) / 'camera-profiles')
