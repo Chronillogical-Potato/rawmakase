@@ -2230,3 +2230,16 @@ fn develop_filmstrip_cmd_and_shift_select_while_the_open_photo_stays_active() ->
     assert_eq!(library.selected_photos(), ids[1..]);
     Ok(())
 }
+
+#[test]
+fn a_copy_made_while_previous_import_is_shown_is_shown() -> Result<()> {
+    let (_d, mut e, ids) = crate::app::tests::editor_with_catalog(&["a.RAF", "b.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    // Adding the folder was the last import.
+    library.show_previous_import();
+    assert_eq!(library.shown().len(), 2);
+    let copy = library.create_virtual_copy(ids[0])?.value;
+    assert_eq!(library.selected(), Some(copy));
+    assert!(library.shown().contains(&copy));
+    Ok(())
+}

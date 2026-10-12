@@ -751,6 +751,7 @@ impl Library {
         {
             if !self.filters.members.contains(&id) {
                 self.filters.collection = None;
+                self.filters.previous_import = false;
             }
             // Filters turned off with Cmd+L hide nothing, and are kept.
             if self.filters.enabled {
@@ -766,6 +767,7 @@ impl Library {
         {
             self.filters.folder_scope = None;
             self.filters.collection = None;
+            self.filters.previous_import = false;
             self.filters.only_missing = false;
             self.selected_folder.clear();
             self.filter();
