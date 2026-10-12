@@ -3415,6 +3415,7 @@ dependencies = [
  "bytemuck",
  "cc",
  "image",
+ "moxcms",
  "pkg-config",
  "rawmakase-engine",
  "rawmakase-model",

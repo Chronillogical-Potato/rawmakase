@@ -216,7 +216,7 @@ fn region(
                         anyhow::anyhow!("no 1:1 preview; build one while the photo is online")
                     })?
             }
-            None => super::thumbnails::raster(&job.path)?,
+            None => crate::raster::decode(&job.path)?,
         };
         *held = Some(Held {
             path: job.path.clone(),
