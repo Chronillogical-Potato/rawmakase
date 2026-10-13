@@ -189,7 +189,7 @@ impl Editor {
             .rect_filled(badge, 15., Color32::from_black_alpha(170));
         let spinner =
             Rect::from_center_size(badge.left_center() + Vec2::new(20., 0.), Vec2::splat(14.));
-        ui.put(spinner, egui::Spinner::new().size(14.));
+        super::widgets::paint_spinner(ui, spinner, None);
         ui.painter().text(
             badge.left_center() + Vec2::new(36., 0.),
             egui::Align2::LEFT_CENTER,

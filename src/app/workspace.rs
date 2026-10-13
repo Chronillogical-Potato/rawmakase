@@ -570,7 +570,7 @@ impl Editor {
                         ui.add_space(8.);
                     }
                     if self.activity.is_busy() {
-                        ui.spinner();
+                        super::widgets::spinner(ui, 14.);
                     }
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
@@ -972,7 +972,7 @@ impl Editor {
             .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 if let Some(work) = &self.catalog_work {
-                    ui.add(egui::Spinner::new().size(11.));
+                    super::widgets::spinner(ui, 11.);
                     ui.small(work);
                 } else {
                     let shown = self

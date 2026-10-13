@@ -198,7 +198,7 @@ impl Editor {
                         });
                         if self.load.is_running() || self.preview.task.is_running() {
                             ui.add_space(10.);
-                            thin_spinner(ui);
+                            super::widgets::spinner(ui, 14.);
                         }
                     });
                 });
@@ -326,29 +326,4 @@ fn photo_menu_button(ui: &mut egui::Ui) -> egui::Response {
         color,
     );
     response
-}
-
-/// A small spinner with a hairline stroke: egui's draws 3 points thick at any
-/// size, heavy beside the toolbar's text.
-fn thin_spinner(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(14.), egui::Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    ui.ctx().request_repaint();
-    let radius = rect.width() / 2. - 1.;
-    let time = ui.input(|i| i.time);
-    // egui's sweep: a turn a second, the arc growing and shrinking.
-    let start = time * std::f64::consts::TAU;
-    let end = start + 240f64.to_radians() * time.sin();
-    let points: Vec<egui::Pos2> = (0..=24)
-        .map(|k| {
-            let angle = start + (end - start) * k as f64 / 24.;
-            let (sin, cos) = angle.sin_cos();
-            rect.center() + radius * Vec2::new(cos as f32, sin as f32)
-        })
-        .collect();
-    let color = theme::palette(ui.ctx()).gray(175);
-    ui.painter()
-        .add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }

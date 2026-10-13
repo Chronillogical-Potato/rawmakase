@@ -328,7 +328,7 @@ impl Editor {
         }
         if self.reference.loading() {
             let at = Rect::from_center_size(pane.clip.center(), Vec2::splat(18.));
-            egui::Spinner::new().size(18.).paint_at(ui, at);
+            super::widgets::paint_spinner(ui, at, None);
         }
     }
     /// Clicks, drags and drops on the Reference side: a click zooms the reference

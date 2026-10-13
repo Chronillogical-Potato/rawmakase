@@ -1157,6 +1157,12 @@ pub(super) fn slider_styled(
                 let spacing = ui.spacing_mut();
                 spacing.interact_size.x = SLIDER_VALUE_WIDTH;
                 spacing.button_padding.x = 4.;
+                // Set into the dark panels; a disabled field fades further.
+                let widgets = &mut ui.visuals_mut().widgets;
+                for (state, fill) in [(&mut widgets.inactive, 32), (&mut widgets.hovered, 42)] {
+                    state.bg_fill = palette.gray(fill);
+                    state.weak_bg_fill = palette.gray(fill);
+                }
                 ui.place(
                     value_rect,
                     // An imported value beyond the range shows as it is, rather
@@ -2160,4 +2166,34 @@ mod segment_tests {
         let drawn = drawn.expect("drawn");
         assert!(drawn <= place + 0.5, "{drawn} wide in {place}");
     }
+}
+
+/// A spinner `size` points across with a hairline stroke: egui's draws three
+/// points thick at any size, heavy beside the interface's text.
+pub(super) fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    paint_spinner(ui, rect, None);
+    response
+}
+/// [`spinner`] painted into `rect`, in `color` or the interface's grey.
+pub(super) fn paint_spinner(ui: &egui::Ui, rect: Rect, color: Option<Color32>) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.ctx().request_repaint();
+    let radius = rect.width().min(rect.height()) / 2. - 1.;
+    let time = ui.input(|i| i.time);
+    // egui's sweep: a turn a second, the arc growing and shrinking.
+    let start = time * std::f64::consts::TAU;
+    let end = start + 240f64.to_radians() * time.sin();
+    let points: Vec<Pos2> = (0..=24)
+        .map(|k| {
+            let angle = start + (end - start) * k as f64 / 24.;
+            let (sin, cos) = angle.sin_cos();
+            rect.center() + radius * Vec2::new(cos as f32, sin as f32)
+        })
+        .collect();
+    let color = color.unwrap_or_else(|| theme::palette(ui.ctx()).gray(175));
+    ui.painter()
+        .add(egui::Shape::line(points, Stroke::new(1.5, color)));
 }
