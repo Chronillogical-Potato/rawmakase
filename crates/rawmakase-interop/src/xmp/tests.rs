@@ -1478,3 +1478,114 @@ fn adobe_standard_resolves_to_the_phone_module_that_took_the_photo() -> Result<(
     assert!(format!("{e:#}").contains("Missing camera profile ‘Adobe Standard’"));
     Ok(())
 }
+
+fn rendered() -> Metadata {
+    Metadata {
+        source: crate::camera_data::Source::Rendered,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn xmp_reads_and_writes_relative_white_balance_for_a_jpeg() -> Result<()> {
+    let m = rendered();
+    let profiles = crate::camera_profiles::installed(&m).0;
+    let attrs = r#"c:IncrementalTemperature="+25" c:IncrementalTint="-10" c:WhiteBalance="Custom" c:CameraProfile="Embedded""#;
+    let sidecar = parse(Path::new("photo.xmp"), &xml(attrs, ""))?;
+    let r = sidecar.apply(&Recipe::for_rendered(&m), &m, &profiles, None)?;
+    assert_eq!((r.incremental_temperature, r.incremental_tint), (25., -10.));
+    assert_eq!(r.wb, crate::model::white_balance::relative_gains(25., -10.));
+    assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
+    let text = write::packet(
+        &r,
+        &m,
+        &write::Photo {
+            settings: true,
+            ..Default::default()
+        },
+    );
+    for attr in [
+        r#"crs:IncrementalTemperature="+25""#,
+        r#"crs:IncrementalTint="-10""#,
+        r#"crs:WhiteBalance="Custom""#,
+        r#"crs:CameraProfile="Embedded""#,
+    ] {
+        assert!(text.contains(attr), "{attr} in {text}");
+    }
+    assert!(!text.contains("crs:Temperature="), "{text}");
+    assert!(!text.contains("crs:Tint="), "{text}");
+    // As shot is written as Lightroom writes it.
+    let text = write::packet(
+        &Recipe::for_rendered(&m),
+        &m,
+        &write::Photo {
+            settings: true,
+            ..Default::default()
+        },
+    );
+    assert!(text.contains(r#"crs:WhiteBalance="As Shot""#), "{text}");
+    assert!(text.contains(r#"crs:IncrementalTemperature="0""#), "{text}");
+    Ok(())
+}
+
+#[test]
+fn a_raw_xmp_with_relative_white_balance_is_still_refused() -> Result<()> {
+    let m = Metadata::default();
+    let preset = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:IncrementalTemperature="+25" c:Exposure2012="0.5""#, ""),
+    )?;
+    let error = preset.apply(&Recipe::default(), &m, &[], None).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("Active IncrementalTemperature"),
+        "{error:#}"
+    );
+    // Lenient application keeps the RAW's white balance and the rest of the edit.
+    let (r, warnings) = preset.apply_lenient(&Recipe::default(), &m, &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(
+        (r.incremental_temperature, r.wb),
+        (0., Recipe::default().wb)
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("IncrementalTemperature")),
+        "{warnings:?}"
+    );
+    // At 0, as Lightroom may write it, it is accepted.
+    let zero = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:IncrementalTemperature="0" c:IncrementalTint="0""#, ""),
+    )?;
+    zero.apply(&Recipe::default(), &m, &[], None)?;
+    Ok(())
+}
+
+#[test]
+fn kelvin_white_balance_is_ignored_on_a_rendered_photo() -> Result<()> {
+    let m = rendered();
+    let mut base = Recipe::for_rendered(&m);
+    base.incremental_temperature = 12.;
+    base.update_wb(&m);
+    let preset = parse(
+        Path::new("Warm.xmp"),
+        &xml(
+            r#"c:WhiteBalance="Custom" c:Temperature="5000" c:Tint="10" c:Exposure2012="0.5""#,
+            "",
+        ),
+    )?;
+    let r = preset.apply(&base, &m, &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(
+        (r.temperature, r.tint, r.incremental_temperature, r.wb),
+        (base.temperature, base.tint, 12., base.wb)
+    );
+    let (r, warnings) = preset.apply_lenient(&base, &m, &[], None)?;
+    assert_eq!((r.exposure, r.wb), (0.5, base.wb));
+    assert_eq!(
+        warnings,
+        vec!["Temperature in Kelvin applies to RAW files only".to_string()]
+    );
+    Ok(())
+}

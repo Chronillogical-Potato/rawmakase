@@ -122,7 +122,7 @@ impl Preset {
         self.apply_panels(&mut settings, &mut recipe)?;
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
-        self.validate_remaining(&mut settings)?;
+        self.validate_remaining(&mut settings, m)?;
         self.keep_upright_fitting(base, &mut recipe);
         recipe.preset_name = self.name.clone();
         recipe.preset_settings = self.settings.clone();
@@ -141,9 +141,10 @@ impl Preset {
         image: Option<&dyn PhotoMeasures>,
     ) -> Result<(Recipe, Vec<String>)> {
         if let Ok(recipe) = self.apply(base, m, profiles, image) {
-            return Ok((recipe, Vec::new()));
+            return Ok((recipe, self.ignored_white_balance(m).into_iter().collect()));
         }
         let mut warnings = self.blockers.clone();
+        warnings.extend(self.ignored_white_balance(m));
         let mut settings = Settings {
             values: &self.settings,
             seen: METADATA.iter().map(|key| key.to_string()).collect(),
@@ -194,7 +195,7 @@ impl Preset {
             self.apply_panels(&mut settings.borrow_mut(), r)
         });
         stage(&mut recipe, &|_| {
-            self.validate_remaining(&mut settings.borrow_mut())
+            self.validate_remaining(&mut settings.borrow_mut(), m)
         });
         // Spots and masks that convert apply; the rest are reported.
         let skipped = self.apply_local(&mut recipe, m);
@@ -410,6 +411,9 @@ impl Preset {
         settings.seen.insert("WhiteBalance".into());
         settings.seen.insert("Temperature".into());
         settings.seen.insert("Tint".into());
+        if m.is_rendered() {
+            return self.apply_relative_white_balance(settings, r, m, image);
+        }
         match v.get("WhiteBalance").map(String::as_str) {
             Some("As Shot") => {
                 r.reset_white_balance(m);
@@ -467,6 +471,64 @@ impl Preset {
             Some(other) => anyhow::bail!("Unsupported white balance mode: {other}"),
         }
         Ok(())
+    }
+
+    /// A rendered file's white balance, as Lightroom keeps it: relative Temp and Tint
+    /// (`IncrementalTemperature`, `IncrementalTint`). Kelvin values and the named
+    /// modes are for RAW files and are ignored (see `ignored_white_balance`).
+    fn apply_relative_white_balance(
+        &self,
+        settings: &mut Settings<'_>,
+        r: &mut Recipe,
+        m: &Metadata,
+        image: Option<&dyn PhotoMeasures>,
+    ) -> Result<()> {
+        let v = settings.values;
+        let keys = ["IncrementalTemperature", "IncrementalTint"];
+        settings.seen.extend(keys.map(String::from));
+        let given = keys.iter().any(|key| v.contains_key(*key));
+        match v.get("WhiteBalance").map(String::as_str) {
+            Some("As Shot") => r.reset_white_balance(m),
+            // Photo settings carry the values Auto resolved to; a preset names the
+            // mode alone and gets the WB menu's Auto.
+            Some("Auto") if !(self.photo_settings && given) => {
+                if let Some(photo) = image {
+                    *r = photo.auto_white_balance(r)?;
+                }
+                return Ok(());
+            }
+            Some("Auto" | "Custom") | None => {}
+            Some(name)
+                if crate::model::white_balance::NamedWhiteBalance::from_name(name).is_some() => {}
+            Some(other) => anyhow::bail!("Unsupported white balance mode: {other}"),
+        }
+        settings.assign(
+            "IncrementalTemperature",
+            &mut r.incremental_temperature,
+            1.,
+            -100.,
+            100.,
+        )?;
+        settings.assign("IncrementalTint", &mut r.incremental_tint, 1., -100., 100.)?;
+        if given {
+            r.update_wb(m);
+            r.auto_white_balance = None;
+        }
+        Ok(())
+    }
+
+    /// The note for white balance these settings carry that photo `m` ignores:
+    /// Kelvin Temperature and Tint, and the named modes they stand for, apply to RAW
+    /// files only, as in Lightroom.
+    pub(crate) fn ignored_white_balance(&self, m: &Metadata) -> Option<String> {
+        let v = &self.settings;
+        let kelvin = v.contains_key("Temperature")
+            || v.contains_key("Tint")
+            || v.get("WhiteBalance").is_some_and(|name| {
+                crate::model::white_balance::NamedWhiteBalance::from_name(name).is_some()
+            });
+        (m.is_rendered() && kelvin)
+            .then(|| "Temperature in Kelvin applies to RAW files only".to_string())
     }
 
     fn apply_color_mixer(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
@@ -1064,7 +1126,7 @@ impl Preset {
         }
         edits.skipped
     }
-    fn validate_remaining(&self, settings: &mut Settings<'_>) -> Result<()> {
+    fn validate_remaining(&self, settings: &mut Settings<'_>, m: &Metadata) -> Result<()> {
         let v = settings.values;
         // No-op geometry/default flags are safe; active unsupported operations are explicit blockers.
         for (key, default) in [
@@ -1075,6 +1137,10 @@ impl Preset {
             ("Glow", "0"),
             ("ReshapeAmount", "0"),
         ] {
+            // A rendered file's relative white balance is applied with white balance.
+            if m.is_rendered() && key.starts_with("Incremental") {
+                continue;
+            }
             settings.seen.insert(key.into());
             if let Some(value) = v.get(key) {
                 ensure!(

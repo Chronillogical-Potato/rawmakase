@@ -183,7 +183,9 @@ pub(crate) fn group_of_key(key: &str) -> Option<SettingGroup> {
     use SettingGroup::*;
     let starts = |prefix: &str| key.starts_with(prefix);
     Some(match key {
-        "WhiteBalance" | "Temperature" | "Tint" => WhiteBalance,
+        "WhiteBalance" | "Temperature" | "Tint" | "IncrementalTemperature" | "IncrementalTint" => {
+            WhiteBalance
+        }
         "Exposure2012" => Exposure,
         "Contrast2012" => Contrast,
         "Highlights2012" => Highlights,
@@ -317,6 +319,35 @@ mod tests {
         )?;
         assert_eq!(back.profile.as_ref().unwrap().name, "Test Creative");
         assert_eq!(back.profile_amount, 0.35);
+        Ok(())
+    }
+    #[test]
+    fn a_rendered_photos_white_balance_preset_carries_relative_temp_and_tint() -> anyhow::Result<()>
+    {
+        let m = crate::camera_data::Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let mut r = Recipe::for_rendered(&m);
+        r.incremental_temperature = 20.;
+        r.incremental_tint = -5.;
+        r.update_wb(&m);
+        let mut white_balance = GroupSelection::none();
+        white_balance.set(SettingGroup::WhiteBalance, GroupInclusion::Included);
+        let text = preset(&r, &PresetInfo::new("Warm", "User Presets"), &white_balance);
+        assert!(
+            text.contains(r#"crs:IncrementalTemperature="+20""#),
+            "{text}"
+        );
+        assert!(text.contains(r#"crs:IncrementalTint="-5""#), "{text}");
+        assert!(!text.contains("crs:Temperature="), "{text}");
+        let back = crate::xmp::parse(Path::new("Warm.xmp"), &text)?.apply(
+            &Recipe::for_rendered(&m),
+            &m,
+            &[],
+            None,
+        )?;
+        assert_eq!((back.incremental_temperature, back.wb), (20., r.wb));
         Ok(())
     }
     /// A preset offers Lightroom's Amount only when every setting it holds scales.
