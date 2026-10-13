@@ -371,9 +371,10 @@ fn default_black(base: i32, y: f32) -> f32 {
     }
     return log_curve(base, SCENE_Y, y);
 }
-// GlobalTone::curves: the white curve at `whites` (RGBTone), then the default black and,
-// with `blacks`, Blacks per channel.
-fn scene_curves(q: vec3<f32>, whites: f32, blacks: bool) -> vec3<f32> {
+// GlobalTone::apply: the white curve (RGBTone), then the default black and Blacks per
+// channel.
+fn scene_global(q: vec3<f32>) -> vec3<f32> {
+    let whites = p(P_SCENE_KEYS + 3u);
     let lo = min(min(q.x, q.y), q.z);
     let hi = max(max(q.x, q.y), q.z);
     let ya = white_curve(whites, lo);
@@ -386,33 +387,9 @@ fn scene_curves(q: vec3<f32>, whites: f32, blacks: bool) -> vec3<f32> {
     if black >= 0 {
         out = vec3(default_black(black, out.x), default_black(black, out.y), default_black(black, out.z));
     }
-    let curve = offset(P_SCENE_BLACKS);
-    if blacks && curve >= 0 {
-        out = vec3(log_curve(curve, SCENE_Y, out.x), log_curve(curve, SCENE_Y, out.y), log_curve(curve, SCENE_Y, out.z));
-    }
-    return out;
-}
-// GlobalTone::apply: the curves at the recipe's Whites and Blacks; for a rendered file
-// (relative mode) each channel scaled by them relative to the curves at 0, exactly
-// unchanged at 0.
-fn scene_global(q: vec3<f32>) -> vec3<f32> {
-    let whites = p(P_SCENE_KEYS + 3u);
-    if p(P_SCENE_RELATIVE) == 0.0 {
-        return scene_curves(q, whites, true);
-    }
-    if whites == 0.0 && p(P_SCENE_KEYS + 4u) == 0.0 {
-        return q;
-    }
-    let curved = scene_curves(q, whites, true);
-    let unchanged = scene_curves(q, 0.0, false);
-    var out = q;
-    for (var c = 0u; c < 3u; c++) {
-        if unchanged[c] > 1e-9 {
-            out[c] = q[c] * (curved[c] / unchanged[c]);
-        } else {
-            // Where the reference curve is at black, the difference.
-            out[c] = q[c] + curved[c] - unchanged[c];
-        }
+    let blacks = offset(P_SCENE_BLACKS);
+    if blacks >= 0 {
+        out = vec3(log_curve(blacks, SCENE_Y, out.x), log_curve(blacks, SCENE_Y, out.y), log_curve(blacks, SCENE_Y, out.z));
     }
     return out;
 }

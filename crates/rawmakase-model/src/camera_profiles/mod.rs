@@ -652,8 +652,9 @@ const D65: [f32; 3] = [0.95047, 1., 1.08883];
 /// Lightroom's profile for rendered files.
 pub const EMBEDDED: &str = "Embedded";
 impl CameraProfile {
-    /// Lightroom's "Embedded" profile for rendered files: their pixels, already
-    /// linear ProPhoto, pass through unchanged (no matrix, tables or tone curve).
+    /// Lightroom's "Embedded" profile for rendered files: it renders a rendered file's
+    /// pseudo-scene (`develop::rendered`) with Camera Raw's default tone curve; its
+    /// colour is linear ProPhoto as it is (no matrix or tables).
     pub fn embedded(m: &Metadata) -> Self {
         // camera RGB is linear ProPhoto D50, so XYZ_TO_PRO · forward = identity.
         let forward = crate::color::inverse(XYZ_TO_PRO);
@@ -673,7 +674,7 @@ impl CameraProfile {
             hue1: None,
             hue2: None,
             look: None,
-            tone: vec![[0., 0.], [1., 1.]],
+            tone: default_tone(),
             exposure: 0.,
             black_render: BlackRender::None,
         }

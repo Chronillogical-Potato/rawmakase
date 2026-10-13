@@ -19,7 +19,8 @@ const VERSION: i64 = 1;
 const GENERATION: i64 = 3;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
-const RASTER_GENERATION: i64 = 4;
+// 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
+const RASTER_GENERATION: i64 = 5;
 const LIMIT: i64 = 512 * 1024 * 1024;
 // 2: the one engine, as `GENERATION` 3.
 const SIZED_GENERATION: i64 = 2;

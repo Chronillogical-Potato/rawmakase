@@ -283,10 +283,14 @@ pub(super) fn photo_measures(
         &lut,
         None,
     ));
+    // A rendered file's white curve is Camera Raw's default rendering at keys 0, which
+    // its pseudo-scene was made with (`develop::rendered`), whatever the scene measures:
+    // so the file renders back as it is at default settings.
+    let rendered = metadata.is_rendered();
     crate::develop::scene_tone::PhotoMeasures {
-        sensor_white: white.max(1e-6).log2(),
+        sensor_white: if rendered { 0. } else { white.max(1e-6).log2() },
         // Highlights rebuilt above the sensor's clip do not raise it.
-        max: max.min(white).log2(),
+        max: if rendered { 0. } else { max.min(white).log2() },
         min: min.max(2f32.powi(-20)).log2(),
         dark: dark.max(2f32.powi(-20)).log2(),
         p99: crate::develop::local_tone::level(p99),

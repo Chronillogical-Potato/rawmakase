@@ -31,12 +31,14 @@ impl Opened {
 }
 
 /// Opens `path` as a RAW (LibRaw) when its extension is a RAW's, otherwise as a
-/// JPEG, PNG or TIFF.
+/// JPEG, PNG or TIFF. A rendered file opens as the scene its default rendering is of
+/// (`develop::rendered`), which Develop renders as a raw scene.
 pub fn open_source(path: &Path, cancel: &AtomicBool) -> Result<Opened> {
     if rawmakase_model::storage::is_raw(path) {
         open(path).map(Opened::Raw)
     } else {
-        raster::open(path, cancel).map(Opened::Rendered)
+        raster::open(path, cancel)
+            .map(|image| Opened::Rendered(rawmakase_engine::develop::rendered::to_scene(image)))
     }
 }
 
@@ -273,12 +275,21 @@ mod tests {
     fn open_source_opens_a_png_as_rendered() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("photo.png");
-        image::RgbImage::from_pixel(2, 2, image::Rgb([10, 20, 30]))
+        // A mid-grey.
+        image::RgbImage::from_pixel(2, 2, image::Rgb([118, 118, 118]))
             .save(&path)
             .unwrap();
         let cancel = std::sync::atomic::AtomicBool::new(false);
+        let raw_pixel = crate::raster::open(&path, &cancel).unwrap().pixels[0];
         match super::open_source(&path, &cancel).unwrap() {
-            super::Opened::Rendered(image) => assert!(image.metadata.is_rendered()),
+            super::Opened::Rendered(image) => {
+                assert!(image.metadata.is_rendered());
+                // The pixels are the pseudo-scene of the file's linear values.
+                assert_eq!(
+                    image.pixels[0],
+                    rawmakase_engine::develop::rendered::scene_from_rendered(raw_pixel)
+                );
+            }
             super::Opened::Raw(_) => panic!("a PNG must open as rendered"),
         }
     }

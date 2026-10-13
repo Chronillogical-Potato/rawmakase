@@ -409,7 +409,7 @@ fn profiles_fit_under_the_names_adobe_uses() {
 }
 
 #[test]
-fn the_embedded_profile_passes_linear_prophoto_through() {
+fn the_embedded_profile_renders_with_camera_raws_default_tone_curve() {
     use crate::camera_data::Source;
     for m in [
         Metadata {
@@ -432,17 +432,18 @@ fn the_embedded_profile_passes_linear_prophoto_through() {
             [0.9, 0.2, 0.05],
             [1.0, 1.0, 1.0],
         ] {
-            // camera_color then finish, as pixel.rs runs S1 and S4.
+            // camera_color, as pixel.rs runs S1: the colour is linear ProPhoto as it is.
             let rgb = p.camera_color(v, p.camera_matrix(6500.), 6500.);
             let pro = mul(RGB_TO_PRO, rgb);
             for c in 0..3 {
                 assert!((pro[c] - v[c]).abs() < 1e-5, "{v:?} -> {pro:?}");
             }
-            let out = p.finish(pro);
-            let want = mul(PRO_TO_RGB, v);
-            for c in 0..3 {
-                assert!((out[c] - want[c]).abs() < 1e-5, "{v:?} -> {out:?}");
-            }
+        }
+        // finish converts to the working RGB, which leaves greys grey.
+        let out = mul(RGB_TO_PRO, p.finish([0.5; 3]));
+        let want = crate::camera_profiles::default_tone_at(0.5);
+        for c in 0..3 {
+            assert!((out[c] - want).abs() < 1e-5, "{out:?} vs {want}");
         }
     }
 }

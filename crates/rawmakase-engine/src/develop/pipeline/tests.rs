@@ -33,8 +33,8 @@ fn fixture() -> CameraImage {
         scale_clipped: 0,
     }
 }
-/// A rendered file of one row of 8-bit sRGB pixels, decoded as the rendered decoder
-/// does: to linear ProPhoto RGB.
+/// A rendered file of one row of 8-bit sRGB pixels as `photo::open_source` gives it:
+/// the pseudo-scene of these sRGB pixels, decoded to linear ProPhoto RGB.
 pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
     use rawmakase_model::camera_data::Source;
     use rawmakase_model::camera_profiles::RGB_TO_PRO;
@@ -47,7 +47,7 @@ pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
         }
     };
     let width = srgb.len() as u32;
-    CameraImage {
+    crate::develop::rendered::to_scene(CameraImage {
         recovered: Default::default(),
         width,
         height: 1,
@@ -66,7 +66,7 @@ pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
         fast: false,
         scale_factor: 1.,
         scale_clipped: 0,
-    }
+    })
 }
 /// An untouched edit of a rendered file reproduces it (on the CPU): deep shadows, mid
 /// tones, saturated colours and near-white, where highlight recovery and the scene
@@ -95,12 +95,153 @@ fn a_rendered_file_at_its_defaults_renders_as_it_is() -> anyhow::Result<()> {
     assert!(off.is_empty(), "{off:?}");
     Ok(())
 }
-/// At a rendered file's defaults the scene tone stage leaves every pixel as it is, not
-/// just within 8-bit rounding: Camera Raw's toe and white curves are relative to the
-/// file's own rendering, so a 16-bit export reproduces it too.
+/// A grey ramp, every 8-bit sRGB level, as a rendered file.
+fn grey_ramp() -> CameraImage {
+    let srgb: Vec<[u8; 3]> = (0..=255u8).map(|v| [v; 3]).collect();
+    rendered_fixture(&srgb)
+}
+fn rendered_levels(im: &CameraImage, r: &Recipe) -> anyhow::Result<Vec<[u8; 3]>> {
+    let out = crate::develop::render(im, &r.checked()?, 0)?;
+    Ok(out.rgb8().chunks(3).map(|p| [p[0], p[1], p[2]]).collect())
+}
+fn near(got: [u8; 3], want: [u8; 3], tolerance: i16) -> bool {
+    (0..3).all(|c| (got[c] as i16 - want[c] as i16).abs() <= tolerance)
+}
+
+/// Lightroom Classic 15.6 (Camera Raw 18.7) renders of a grey JPEG chart: Exposure
+/// brightens and darkens through the default rendering, so mid-tones move more than a
+/// linear gain and white stays white at −1 EV.
 #[test]
-fn the_scene_tone_stage_passes_a_rendered_file_through() -> anyhow::Result<()> {
-    use crate::develop::quality::{Stage, render_stage};
+fn exposure_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (exposure, levels) in [
+        (
+            1.,
+            [
+                (48u8, 79u8),
+                (96, 146),
+                (128, 181),
+                (192, 229),
+                (240, 251),
+                (255, 255),
+            ],
+        ),
+        (
+            -1.,
+            [
+                (48, 27),
+                (96, 60),
+                (128, 83),
+                (192, 141),
+                (240, 213),
+                (255, 255),
+            ],
+        ),
+    ] {
+        let r = Recipe {
+            exposure,
+            ..Recipe::for_rendered(&im.metadata)
+        };
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, [want; 3], 2),
+                "Exposure {exposure}: {input} -> {got:?}, Lightroom {want}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lightroom's renders of the same chart at Temp +25, +50 and Tint +25.
+#[test]
+fn white_balance_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (temperature, tint, levels) in [
+        (
+            25.,
+            0.,
+            [
+                (48u8, [70u8, 61, 45]),
+                (96, [132, 117, 92]),
+                (128, [170, 152, 124]),
+            ],
+        ),
+        (
+            50.,
+            0.,
+            [
+                (48, [91, 73, 42]),
+                (96, [165, 136, 87]),
+                (128, [202, 170, 120]),
+            ],
+        ),
+        (
+            0.,
+            25.,
+            [
+                (48, [52, 47, 54]),
+                (96, [102, 95, 106]),
+                (128, [136, 127, 140]),
+            ],
+        ),
+    ] {
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, want, 3),
+                "Temp {temperature} Tint {tint}: {input} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whites and Blacks act on the pseudo-scene as on a raw scene: Whites +50 lifts the
+/// upper tones more than the mid-tones and keeps white white; Blacks −50 darkens shadows.
+#[test]
+fn whites_and_blacks_move_a_rendered_file() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    let base = Recipe::for_rendered(&im.metadata);
+    let whites = rendered_levels(
+        &im,
+        &Recipe {
+            whites: 0.5,
+            ..base.clone()
+        },
+    )?;
+    assert!(
+        whites[192][1] as i16 - 192 > whites[96][1] as i16 - 96,
+        "{:?} {:?}",
+        whites[96],
+        whites[192]
+    );
+    assert_eq!(whites[255], [255; 3]);
+    let blacks = rendered_levels(
+        &im,
+        &Recipe {
+            blacks: -0.5,
+            ..base
+        },
+    )?;
+    assert!(
+        blacks[32][1] < 32 && blacks[255] == [255; 3],
+        "{:?} {:?}",
+        blacks[32],
+        blacks[255]
+    );
+    Ok(())
+}
+/// At a rendered file's defaults the render is the file, finer than 8-bit rounding, so
+/// a 16-bit export reproduces it too.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is_in_16_bits() -> anyhow::Result<()> {
     let mut srgb: Vec<[u8; 3]> = [0u8, 1, 4, 8, 16, 32, 64, 118, 200, 250, 255]
         .iter()
         .map(|&v| [v; 3])
@@ -108,34 +249,20 @@ fn the_scene_tone_stage_passes_a_rendered_file_through() -> anyhow::Result<()> {
     srgb.extend([[200, 30, 40], [20, 160, 60], [30, 60, 220], [255, 250, 240]]);
     let im = rendered_fixture(&srgb);
     let r = Recipe::for_rendered(&im.metadata);
-    let cancel = std::sync::atomic::AtomicBool::new(false);
-    let input = render_stage(&im, &r, Stage::SceneInput, &cancel)?;
-    let output = render_stage(&im, &r, Stage::SceneOutput, &cancel)?;
-    for (i, o) in input.pixels.iter().zip(&output.pixels) {
-        assert_eq!(i, o);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    for (got, want) in out.pixels.iter().zip(&srgb) {
+        // Saturated colours get a wider tolerance than greys: the f32 rounding of the
+        // round trip (about 1e-7 relative in ProPhoto, not the inverse table's error) is
+        // amplified by the ProPhoto to sRGB conversion, whose large opposing
+        // coefficients and sRGB's steep slope at dark channels turn it into up to ~3
+        // 16-bit levels. Greys pass through that conversion unamplified.
+        let grey = want[0] == want[1] && want[1] == want[2];
+        let tolerance = if grey { 2. } else { 4. } / 65535.;
+        for c in 0..3 {
+            let want = want[c] as f32 / 255.;
+            assert!((got[c] - want).abs() < tolerance, "{got:?} vs {want}");
+        }
     }
-    Ok(())
-}
-/// Whites and Blacks (−1 to 1) still move a rendered file: Whites +50 lifts the light
-/// patches, Blacks −50 darkens the dark ones.
-#[test]
-fn whites_and_blacks_still_move_a_rendered_file() -> anyhow::Result<()> {
-    let srgb: Vec<[u8; 3]> = [10u8, 40, 118, 200, 240].iter().map(|&v| [v; 3]).collect();
-    let im = rendered_fixture(&srgb);
-    let base = Recipe::for_rendered(&im.metadata);
-    let render = |r: &Recipe| -> anyhow::Result<Vec<u8>> {
-        Ok(crate::develop::render(&im, &r.checked()?, 0)?.rgb8())
-    };
-    let whites = render(&Recipe {
-        whites: 0.5,
-        ..base.clone()
-    })?;
-    let blacks = render(&Recipe {
-        blacks: -0.5,
-        ..base
-    })?;
-    assert!(whites[4 * 3] > 240 && whites[3 * 3] >= 200, "{whites:?}");
-    assert!(blacks[0] < 10 && blacks[3] <= 40, "{blacks:?}");
     Ok(())
 }
 /// Settings earlier releases saved to choose a rendering engine and its operators are
