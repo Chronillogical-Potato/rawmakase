@@ -97,17 +97,21 @@ scene 1.0 at 1.0, where Camera Raw renders 0.69.
 
 ### Rendered files
 
-A JPEG, PNG or TIFF is decoded to linear ProPhoto and already carries its rendering,
-so an untouched edit (the Embedded profile) must reproduce it within one 8-bit level.
-S0 does not recover highlights: its near-white colours are the rendering, not clipped
-channels. S3 runs in relative mode (`GlobalTone::relative`): each channel is scaled by
-the global curves at the recipe's Whites and Blacks over the same curves at 0,
-`p · C(p; Whites, Blacks) / C(p; 0, 0)`, with W* = 1, no black point and the photo's
-measured keys. At Whites and Blacks 0 the stage is exactly the identity, and the
-sliders keep their shapes. The GPU port does the same when `SCENE_RELATIVE` is 1
-(`scene_global` in `develop.wgsl`), evaluating both sets of curves from the same
-uploaded rows; S0's skip needs nothing on the GPU, which samples the recovered
-image the CPU prepares.
+A JPEG, PNG or TIFF is treated as Lightroom treats it: as Camera Raw's default rendering
+of a scene. `develop::rendered` inverts that rendering — the white curve at keys 0 (sensor
+white, maximum, Whites level and white point all 1; no black point) followed by the ACR3
+default tone curve, both DNG RGBTone — once, when `photo::open_source` opens the file. The
+resulting pseudo-scene renders through the raw path with the Embedded profile, whose tone
+curve is ACR3. `photo_measures` pins a rendered file's sensor white and maximum to 1, so at
+default settings the render is the file (±1/255; finer in 16 bits). S0 runs as for any
+scene.
+
+Measured against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts and 32
+photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 on greys;
+Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance:
+`model::white_balance::rendered_gains`. Known gaps: Highlights/Shadows on very dark or
+bright files, Saturation, Vibrance, Clarity, Dehaze, strong cooling, and fully saturated
+colours at large Exposure.
 
 ### Whites and Blacks
 

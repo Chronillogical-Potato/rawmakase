@@ -106,7 +106,9 @@ impl NamedWhiteBalance {
 /// the ProPhoto gains that reproduce Lightroom Classic 15.6 (Camera Raw 18.7) renders
 /// of synthetic JPEG charts (`scripts/corpus/rendered-white-balance.py`). Past +50
 /// Lightroom keeps warming beyond the Planckian locus, which the drift carries; the
-/// cool side's drift fitted to noise (±1.5) and is 0.
+/// cool side's drift fitted to noise (±1.5) and is 0. Temp −100 with Tint of +25 or
+/// more, and strong cooling with magenta (Temp −50, Tint +50, say), are outside what
+/// was measured; the soft floor in `prophoto_white` keeps them finite.
 const RENDERED_TEMPERATURE: [[f32; 3]; 27] = [
     [-100., 359.5, 0.],
     [-90., 304.5, 0.],
