@@ -21,12 +21,15 @@ pub fn change_setting<T>(
 }
 
 /// Brings the recipe in line after setting `id` changed from `previous`:
-/// a new Temp or Tint recomputes the white balance multipliers for `photo`, which
+/// a new Temp or Tint (relative ones for rendered files too) recomputes the white balance multipliers for `photo`, which
 /// then no longer come from Auto.
 pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Option<&Metadata>) {
     let current = *id.value_mut(r);
     match id {
-        ParameterId::Temperature | ParameterId::Tint => {
+        ParameterId::Temperature
+        | ParameterId::Tint
+        | ParameterId::IncrementalTemperature
+        | ParameterId::IncrementalTint => {
             if current != previous
                 && let Some(m) = photo
             {
@@ -89,5 +92,21 @@ mod tests {
             r.auto_white_balance.is_some(),
             "no photo, nothing to recompute"
         );
+    }
+
+    #[test]
+    fn a_rendered_photos_relative_white_balance_edit_recomputes_the_gains() {
+        use crate::camera_data::Source;
+        let m = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        let mut r = Recipe::for_rendered(&m);
+        r.auto_white_balance = Some([5000., 0.]);
+        change_setting(&mut r, ParameterId::IncrementalTemperature, Some(&m), |r| {
+            r.incremental_temperature = 30.
+        });
+        assert_ne!(r.wb, [1.; 3]);
+        assert_eq!(r.auto_white_balance, None);
     }
 }
