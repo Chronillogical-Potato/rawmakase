@@ -5,8 +5,8 @@
 //! The interface was drawn in greys, so a palette is applied through them:
 //! [`Palette::gray`] maps a level of the default palette onto the one
 //! applied to the egui context ([`palette`]), between the palette's own
-//! colours. The photo's backdrop is a neutral grey in every theme, as light
-//! as the palette, so colours are judged against grey.
+//! colours. The photo's backdrop is the palette's panel colour, so it
+//! follows the theme like the rest of the window.
 use eframe::egui::{self, Color32, Stroke};
 use std::collections::BTreeSet;
 
@@ -157,12 +157,11 @@ impl Palette {
         map(self, level)
     }
 
-    /// Behind the photo and the Navigator: a neutral grey as light as the
-    /// palette's panel colour, lighter than the side panels around it, so
-    /// photos are judged against grey in any theme (Lightroom's own
-    /// backdrops are greys too).
+    /// Behind the photo and the Navigator: the palette's panel colour,
+    /// lighter than the side panels around it (Lightroom's grey in the
+    /// default palette).
     pub(super) fn photo_backdrop(&self) -> Color32 {
-        Color32::from_gray(luma(self.panel).round() as u8)
+        self.panel
     }
 
     /// A selected row in the folder tree and preset list: Lightroom's slate
