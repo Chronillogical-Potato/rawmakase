@@ -879,16 +879,7 @@ impl Editor {
             Next => return self.command_navigate(1),
             Previous => return self.command_navigate(-1),
             Panels(change) => {
-                // Develop's tab panel opens and folds as its rail does, in a
-                // narrow window too.
-                let tabs = change == PanelChange::Toggle(WorkspacePanel::Presets)
-                    && self.module == Module::Develop;
-                let changed = if tabs {
-                    self.toggle_develop_tabs()
-                } else {
-                    self.change_panels(change)
-                };
-                if !changed {
+                if !self.request_panels(change) {
                     return Err(Error::new("save_failed", self.status.clone()));
                 }
             }

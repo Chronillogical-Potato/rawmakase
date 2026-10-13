@@ -5613,6 +5613,33 @@ fn each_module_keeps_its_own_panels() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn shift_f8_folds_develops_tab_panel_alone() {
+    use super::panels::WorkspacePanel;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    // 1200 points leave it folded by itself; Shift+F8 opens it, as its rail does.
+    assert!(!drawn(&ctx));
+    let shift_f8 = || key_down(egui::Key::F8, egui::Modifiers::SHIFT);
+    panel_frame(&mut e, shift_f8(), FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(drawn(&ctx));
+    // F8's plain pattern did not take it: the adjustments stay.
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    panel_frame(&mut e, shift_f8(), FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+}
+#[test]
 fn hiding_develops_right_panel_takes_its_tab_panel_and_rail() {
     use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
     use super::side_tabs::rail_id;

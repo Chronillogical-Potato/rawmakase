@@ -33,7 +33,7 @@ impl WorkspacePanel {
 /// How a request changes a module's panels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PanelChange {
-    /// One panel (F7, F8, F6, its bar button, or Develop's tab rail).
+    /// One panel (F7, F8, F6, Shift+F8, its bar button, or Develop's tab rail).
     Toggle(WorkspacePanel),
     /// Both side panels (Tab).
     Sides,
@@ -245,6 +245,18 @@ impl Editor {
         self.save_panels();
         true
     }
+    /// A panel change asked for by a key, a command or a device: as
+    /// [`Self::change_panels`], except that Develop's tab panel opens and
+    /// folds as its rail does, in a narrow window too. Returns whether the
+    /// panels changed.
+    pub(super) fn request_panels(&mut self, change: PanelChange) -> bool {
+        if change == PanelChange::Toggle(WorkspacePanel::Presets) && self.module == Module::Develop
+        {
+            self.toggle_develop_tabs()
+        } else {
+            self.change_panels(change)
+        }
+    }
     /// Switches Develop's tab panel to `tab`. The tab left first lets go of
     /// what it was doing, as hiding the panel does.
     pub(super) fn set_develop_tab(&mut self, tab: DevelopTab) {
@@ -263,7 +275,7 @@ impl Editor {
             self.status = format!("Panel layout not saved: {e:#}");
         }
     }
-    /// Tab, Shift+Tab and F6–F8, unless a field or control has the keyboard
+    /// Tab, Shift+Tab, F6–F8 and Shift+F8 (Develop's tab panel), unless a field or control has the keyboard
     /// focus (Tab then moves it on) or a menu is open. Run before any panel is
     /// drawn, so the Tab taken here does not also focus the first slider.
     pub(super) fn panel_keys(&mut self, ctx: &egui::Context) {
@@ -276,6 +288,9 @@ impl Editor {
                 Some(PanelChange::All)
             } else if i.consume_key(Modifiers::NONE, Key::Tab) {
                 Some(PanelChange::Sides)
+            } else if i.consume_key(Modifiers::SHIFT, Key::F8) {
+                // Before F8, whose plain pattern also matches with Shift held.
+                Some(PanelChange::Toggle(WorkspacePanel::Presets))
             } else if i.consume_key(Modifiers::NONE, Key::F7) {
                 Some(PanelChange::Toggle(WorkspacePanel::Left))
             } else if i.consume_key(Modifiers::NONE, Key::F8) {
@@ -288,7 +303,7 @@ impl Editor {
         });
         if let Some(change) = change {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
-            self.change_panels(change);
+            self.request_panels(change);
         }
     }
 }
