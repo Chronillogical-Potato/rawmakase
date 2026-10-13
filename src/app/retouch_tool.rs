@@ -555,7 +555,9 @@ fn draw_shape(
 /// A row with a right-aligned label in the sliders' label column.
 pub(super) fn control_label(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(79., 22.), egui::Sense::hover());
+        // To the label column, less the gap the row puts after it.
+        let width = super::widgets::label_column(ui) - ui.spacing().item_spacing.x;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 22.), egui::Sense::hover());
         ui.painter().text(
             rect.right_center(),
             egui::Align2::RIGHT_CENTER,
@@ -569,7 +571,7 @@ pub(super) fn control_label(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mu
 /// A row starting where slider rails start.
 pub(super) fn indented(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
-        ui.add_space(83.);
+        ui.add_space(super::widgets::label_column(ui));
         add(ui);
     });
 }

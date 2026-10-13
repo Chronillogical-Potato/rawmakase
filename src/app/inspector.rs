@@ -5,8 +5,9 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, adjustment_section, name_history_step, parametric_curve_ui, segmented,
-    setting_slider, slider, slider_with, switched_section, tone_curve_ui, toolbar_action,
+    SliderEvent, adjustment_section, label_column, name_history_step, parametric_curve_ui,
+    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
+    toolbar_action,
 };
 use super::worker::AutoKind;
 use super::{Editor, bulk_import::ImportKind};
@@ -342,7 +343,7 @@ impl Editor {
                     );
             });
             ui.horizontal(|ui| {
-                ui.add_space(83.);
+                ui.add_space(label_column(ui));
                 ui.label(
                     egui::RichText::new("Drag the frame on the photo; changes apply live.")
                         .size(10.)
@@ -350,7 +351,7 @@ impl Editor {
                 );
             });
             ui.horizontal(|ui| {
-                ui.add_space(83.);
+                ui.add_space(label_column(ui));
                 let w = (ui.available_width() - 4.) / 2.;
                 if ui
                     .add_sized([w, 22.], egui::Button::new("Reset"))
@@ -557,14 +558,14 @@ impl Editor {
             .on_disabled_hover_text("This profile has no Amount");
             if !profile_errors.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.add_space(88.);
+                    ui.add_space(label_column(ui) + 5.);
                     ui.small(format!("{} profiles unavailable", profile_errors.len()))
                         .on_hover_text(profile_errors.join("\n"));
                 });
                 // On a line of its own, so it never widens the panel.
                 if !adobe.is_empty() {
                     ui.horizontal(|ui| {
-                        ui.add_space(88.);
+                        ui.add_space(label_column(ui) + 5.);
                         if ui.small_button("Import Adobe base profile").clicked() {
                             import_adobe = true;
                         }
@@ -605,7 +606,10 @@ impl Editor {
                 // The selector sits at the row's far left, so the menu lines up
                 // with Profile's.
                 let rect = Rect::from_center_size(
-                    Pos2::new(ui.max_rect().left() - 88. + 13., ui.max_rect().center().y),
+                    Pos2::new(
+                        ui.max_rect().left() - label_column(ui) - 5. + 13.,
+                        ui.max_rect().center().y,
+                    ),
                     Vec2::new(26., 20.),
                 );
                 let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
@@ -1640,7 +1644,7 @@ fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
     ui.add_space(8.);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.), Sense::hover());
     ui.painter().text(
-        rect.left_center() + Vec2::new(88., 0.),
+        rect.left_center() + Vec2::new(label_column(ui) + 5., 0.),
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(11.),
@@ -1649,19 +1653,20 @@ fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
     rect
 }
 /// A labelled control row on the slider grid: caption right-aligned in the
-/// 83 px label column, controls from the rail start (88 px) to the right edge,
+/// label column, controls from the rail start (5 pt past it) to the right edge,
 /// and the same height as a slider row. Text too long for the row, such as a lens
 /// or profile name, is cut short: wider rows push the panel past the window.
 fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let column = label_column(ui);
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::hover());
     ui.painter().text(
-        Pos2::new(row.left() + 78., row.center().y),
+        Pos2::new(row.left() + column - 5., row.center().y),
         egui::Align2::RIGHT_CENTER,
         label,
         egui::FontId::proportional(11.),
         theme::palette(ui.ctx()).gray(190),
     );
-    let rect = Rect::from_min_max(Pos2::new(row.left() + 88., row.top()), row.max);
+    let rect = Rect::from_min_max(Pos2::new(row.left() + column + 5., row.top()), row.max);
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -1742,7 +1747,7 @@ const RED_EYE_NOTE: &str = "Fitted to Camera Raw on synthetic eyes. Corrections 
      from the rest of the edit, so older RAWmakase releases open the photo without them.";
 fn experimental(ui: &mut egui::Ui, note: &str) {
     ui.horizontal(|ui| {
-        ui.add_space(83.);
+        ui.add_space(label_column(ui));
         ui.label(
             egui::RichText::new("Experimental · early version")
                 .size(10.)
@@ -1848,7 +1853,7 @@ fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
 /// A small note aligned with the slider rails.
 fn hint_row(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
-        ui.add_space(88.);
+        ui.add_space(label_column(ui) + 5.);
         ui.label(
             egui::RichText::new(text)
                 .size(11.)

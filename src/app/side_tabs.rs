@@ -17,6 +17,9 @@ use eframe::egui::{self, Pos2, Rect, Sense, Vec2};
 const RAIL_WIDTH: f32 = 36.;
 /// The tab panel's width until the user drags it.
 const PANEL_WIDTH: f32 = 245.;
+/// The slider grid's label column in the tool drawers, wide enough for
+/// their longest captions ("Orientation", "Range High").
+const DRAWER_LABEL_COLUMN: f32 = 68.;
 /// The photo's narrowest width before the tab panel folds by itself.
 const PHOTO_MIN: f32 = 400.;
 /// The tabs, top to bottom on the rail, with their icons and names.
@@ -160,6 +163,8 @@ impl Editor {
             .show(ui, |ui| {
                 let _side = SectionSide::enter(ui, SectionGroup::DevelopLeft);
                 if has_drawer(self.view.tool) {
+                    // The drawers' labels are short: their controls take the room.
+                    let _labels = super::widgets::LabelColumn::enter(ui, DRAWER_LABEL_COLUMN);
                     let enabled =
                         self.document.full().is_some() && !self.view.compare.before_only();
                     egui::ScrollArea::vertical()

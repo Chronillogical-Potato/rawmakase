@@ -1106,7 +1106,10 @@ pub(super) fn slider_styled(
     let before = *value;
     ui.push_id(label, |ui| {
         let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
-        let label_rect = Rect::from_min_max(row.min, Pos2::new(row.left() + 83., row.bottom()));
+        let label_rect = Rect::from_min_max(
+            row.min,
+            Pos2::new(row.left() + label_column(ui), row.bottom()),
+        );
         let label_response = ui.interact(label_rect, ui.id().with("label"), Sense::click());
         ui.painter().text(
             label_rect.right_center() - Vec2::new(5., 0.),
@@ -2192,4 +2195,45 @@ pub(super) fn paint_spinner(ui: &egui::Ui, rect: Rect, color: Option<Color32>) {
     let color = color.unwrap_or_else(|| theme::palette(ui.ctx()).gray(175));
     ui.painter()
         .add(egui::Shape::line(points, Stroke::new(1.5, color)));
+}
+
+/// The slider grid's label column: captions end 5 pt short of it, slider
+/// rails and controls start 5 pt past it.
+const LABEL_COLUMN: f32 = 83.;
+fn label_column_id() -> egui::Id {
+    egui::Id::new("rawmakase-label-column")
+}
+/// The label column's width where `ui` draws: [`LABEL_COLUMN`], or a
+/// narrower one a [`LabelColumn`] set.
+pub(super) fn label_column(ui: &egui::Ui) -> f32 {
+    ui.ctx()
+        .data(|d| d.get_temp::<f32>(label_column_id()))
+        .unwrap_or(LABEL_COLUMN)
+}
+/// While alive, the slider grid's label column is `width` wide: Develop's
+/// tool drawers, whose labels are short, give the controls the room.
+pub(super) struct LabelColumn {
+    ctx: egui::Context,
+    before: Option<f32>,
+}
+impl LabelColumn {
+    pub(super) fn enter(ui: &egui::Ui, width: f32) -> Self {
+        let ctx = ui.ctx().clone();
+        let before = ctx.data_mut(|d| {
+            let before = d.get_temp::<f32>(label_column_id());
+            d.insert_temp(label_column_id(), width);
+            before
+        });
+        Self { ctx, before }
+    }
+}
+impl Drop for LabelColumn {
+    fn drop(&mut self) {
+        self.ctx.data_mut(|d| match self.before {
+            Some(width) => {
+                d.insert_temp(label_column_id(), width);
+            }
+            None => d.remove::<f32>(label_column_id()),
+        });
+    }
 }
