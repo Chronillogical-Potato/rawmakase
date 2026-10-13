@@ -15,6 +15,9 @@ pub(crate) const HEIGHT: f32 = 128.;
 /// The id of the strip's panel; its scroll area is salted the same way.
 /// Every view draws the one panel, so the strip keeps its scroll position.
 pub(super) const ID: &str = "filmstrip";
+/// The height of the header's rating, flag and label controls
+/// (`photo_metadata::controls`), which its captions centre on.
+const CONTROLS_HEIGHT: f32 = 22.;
 
 /// The module the strip is shown in. Both mark the whole selection; the Library lets
 /// the view shown take a click, and Develop marks the photo it has open as active.
@@ -188,14 +191,10 @@ impl Library {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 3))
             .show(ui, |ui| {
-                // As tall as the controls on the right were last frame, so the
-                // captions placed before them centre on the same line.
-                let height_id = ui.id().with("header-height");
-                let height = ui
-                    .data(|d| d.get_temp::<f32>(height_id))
-                    .unwrap_or(ui.spacing().interact_size.y);
-                let row = ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width(), height),
+                // As tall as the rating and label controls on the right, so
+                // the captions placed before them centre on the same line.
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), CONTROLS_HEIGHT),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.label(
@@ -239,11 +238,6 @@ impl Library {
                         }
                     },
                 );
-                let taken = row.response.rect.height();
-                if (taken - height).abs() > 0.5 {
-                    ui.data_mut(|d| d.insert_temp(height_id, taken));
-                    ui.ctx().request_repaint();
-                }
             });
         // Scroll only to bring a newly shown photo into view, or one a sort
         // or filter moved: a photo already visible, e.g. one just clicked,
