@@ -956,7 +956,7 @@ impl Editor {
     fn library_status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("library-status")
             .exact_size(STATUS_HEIGHT)
-            .frame(status_frame(ui))
+            .frame(status_frame(ui, 8))
             .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 if let Some(work) = &self.catalog_work {
@@ -1362,7 +1362,7 @@ impl Editor {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("status")
             .exact_size(STATUS_HEIGHT)
-            .frame(status_frame(ui))
+            .frame(status_frame(ui, PHOTO_MARGIN as i8))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     let display = if self.view.monitor.is_some() {
@@ -1813,9 +1813,10 @@ pub(super) const PHOTO_MARGIN: f32 = 20.;
 /// The status line's height, its text centred in it.
 const STATUS_HEIGHT: f32 = 26.;
 /// The status line's frame: the panels' fill, inset at the sides only, so its
-/// text sits midway between the filmstrip and the window's edge.
-fn status_frame(ui: &egui::Ui) -> egui::Frame {
-    egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 0))
+/// text sits midway between the filmstrip and the window's edge; `side` is
+/// the inset, Develop's the photo area's margin.
+fn status_frame(ui: &egui::Ui, side: i8) -> egui::Frame {
+    egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(side, 0))
 }
 
 /// What the close guard calls an export or preview a control command started.
