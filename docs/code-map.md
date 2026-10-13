@@ -64,7 +64,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [crates/rawmakase-model/src/color/mod.rs](../crates/rawmakase-model/src/color/mod.rs) | Shared matrix and sRGB transfer primitives. |
 | [src/comparison.rs](../src/comparison.rs) | Reference-image comparisons and reproducible resolved-recipe output using the normal development APIs. |
 | [crates/rawmakase-native/src/demosaic.rs](../crates/rawmakase-native/src/demosaic.rs) | RAWmakase's own demosaicing of the unpacked sensor data (Bayer and X-Trans); LibRaw's is the fallback. See [demosaicing](demosaic.md). |
-| [crates/rawmakase-model/src/cameras.rs](../crates/rawmakase-model/src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback. See [camera table](cameras.md). |
+| [crates/rawmakase-model/src/cameras.rs](../crates/rawmakase-model/src/cameras.rs) | The camera table, [data/cameras.toml](../data/cameras.toml): per-model baseline exposure, with the same-make fallback, and the names Adobe's profiles use for cameras LibRaw names otherwise ([data/adobe-camera-names.toml](../data/adobe-camera-names.toml)). See [camera table](cameras.md). |
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop and opcode lens corrections. |
 | [crates/rawmakase-model/src/tiff.rs](../crates/rawmakase-model/src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
 | [crates/rawmakase-interop/src/jpeg.rs](../crates/rawmakase-interop/src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |

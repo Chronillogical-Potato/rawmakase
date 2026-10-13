@@ -103,6 +103,30 @@ DNGs or Adobe profiles.
   corpus photos against RAWmakase's default renders. Rerun the check after changing
   rows; the second pass lands within ±0.05 EV.
 
+## Adobe's names for a camera
+
+An imported Adobe profile (a DCP) names the camera it was made for, and RAWmakase
+uses it only for photos from that camera (`CameraProfile::ensure_camera`). Adobe
+and LibRaw name many cameras differently, so a profile fits when its camera is
+any of:
+
+- the make and model LibRaw reports, or the model alone;
+- LibRaw's canonical name for a body sold under several names (`normalized_model`):
+  the Panasonic DC-G95 is Adobe's DC-G99, the DC-TZ91 its DC-ZS70;
+- the names in [data/adobe-camera-names.toml](../data/adobe-camera-names.toml):
+  makes Adobe spells otherwise (OM Digital Solutions) and phones Adobe names by
+  their marketing name (Samsung SM-G965F is the Galaxy S9+), each with a `why`;
+- for Google phones, Adobe's older `Model-Google-google`.
+
+Names are compared without case, spaces or underscores (LibRaw's Nikon "Z 6_2" is
+Adobe's "Z 6 2"). A phone profile named for a camera module (Rear Main, Telephoto…)
+fits the module the photo's 35 mm focal length points to. The one-click import
+offers Adobe's profiles under the same rule. `rawmakase inspect` lists a photo's
+`adobe_names`.
+
+Add a table entry only when neither LibRaw's canonical name nor the comparison
+finds the profile, and check it against a Camera Raw render of the camera.
+
 ## Sources of the current rows
 
 Most rows (`adobe-dng`) come from Adobe DNG Converter 18.x: it converted a copy of one

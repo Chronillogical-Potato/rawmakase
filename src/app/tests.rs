@@ -1927,6 +1927,69 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
     assert!(e.document.auto.is_running());
 }
 #[test]
+fn select_all_shortcut_selects_the_filmstrip_for_sync() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    let ctx = e.context.clone();
+    // Cmd+A on macOS, Ctrl+A elsewhere.
+    let modifiers = egui::Modifiers::COMMAND;
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::ModifiersChanged(modifiers),
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+    output.textures_delta.clear();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.selected_photos(), ids);
+    assert_eq!(library.selected(), Some(ids[1]));
+    Ok(())
+}
+#[test]
+fn select_none_shortcut_clears_the_filmstrip_selection() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    let ctx = e.context.clone();
+    let press = |e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+        output.textures_delta.clear();
+    };
+    // Cmd+A takes every shown photo, the open one active.
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    press(&mut e, egui::Key::A, egui::Modifiers::COMMAND);
+    assert_eq!(e.library.as_ref().unwrap().selected_photos(), ids);
+    // Cmd+D selects none.
+    press(&mut e, egui::Key::D, egui::Modifiers::COMMAND);
+    let library = e.library.as_ref().unwrap();
+    assert!(library.selected_photos().is_empty());
+    assert_eq!(library.selected(), None);
+    Ok(())
+}
+#[test]
 fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     let ctx = egui::Context::default();
     let mut editor =
@@ -4086,6 +4149,33 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     editor.finish_edit_frame(edit, &ctx);
     assert!(!editor.document.edit.history().in_gesture());
     assert_eq!(editor.document.edit.history().steps().1, 1);
+}
+#[test]
+fn a_quick_cmd_a_in_remove_does_not_toggle_visualize_spots() {
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    let mut press = |modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+                // Cmd released within the same frame: Select All's press.
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| ui.input(|i| editor.retouch_keys(i)));
+        output.textures_delta.clear();
+        editor.view.retouch.visualize
+    };
+    assert!(!press(egui::Modifiers::COMMAND));
+    assert!(press(egui::Modifiers::NONE));
 }
 #[test]
 fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {

@@ -1046,17 +1046,21 @@ impl Editor {
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
-            let (mut copy, mut paste, mut reset) = (false, false, false);
-            let mut previous = false;
+            let (copy, paste, previous, treatment);
+            let mut reset = false;
             let mut sync = false;
             let mut match_exposures = false;
             let mut new_preset = false;
             let mut auto = false;
-            let mut treatment = false;
+            let mut select_all = false;
+            let mut select_none = false;
             let mut export = None;
             let mut transfer = None;
             let mut targeted = None;
-            ctx.input(|i| {
+            {
+                // A copy: `ctx.input` holds the context's lock, and a shortcut that
+                // opens a photo uploads a texture, which waits for it forever.
+                let i = &ctx.input(|i| i.clone());
                 // Lightroom's Copy After's Settings to Before (←), Copy Before's to
                 // After (→) and Swap (↑), with Cmd+Option+Shift.
                 let m = i.modifiers;
@@ -1177,6 +1181,23 @@ impl Editor {
                 if e && i.modifiers.command && i.modifiers.shift {
                     export = Some(i.modifiers.alt);
                 }
+                // Lightroom's Select All, as in the Library grid: every photo in
+                // the filmstrip joins the selection so Sync reaches them all. Read
+                // from the event, whose modifiers are those held for the press,
+                // not the frame's, which a quick Cmd+A can outrun.
+                if i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::A, pressed: true, modifiers, .. }
+                        if modifiers.command)
+                }) {
+                    select_all = true;
+                }
+                // Lightroom's Select None, as in the Library grid.
+                if i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::D, pressed: true, modifiers, .. }
+                        if modifiers.command)
+                }) {
+                    select_none = true;
+                }
                 // Cmd+Z / Cmd+Shift+Z on macOS, Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y elsewhere.
                 if i.modifiers.command && i.key_pressed(egui::Key::Z) {
                     if i.modifiers.shift {
@@ -1223,7 +1244,10 @@ impl Editor {
                     self.view.clipping.toggle_both();
                 }
                 if i.key_pressed(egui::Key::Backslash) {
-                    let view = self.view.compare.toggled(super::before_after::Compare::BeforeOnly);
+                    let view = self
+                        .view
+                        .compare
+                        .toggled(super::before_after::Compare::BeforeOnly);
                     self.set_compare(view);
                 }
                 if i.key_pressed(egui::Key::Enter)
@@ -1267,7 +1291,11 @@ impl Editor {
                     let kind = if i.key_pressed(egui::Key::K) && !i.modifiers.shift {
                         Some(Kind::Brush)
                     } else if i.key_pressed(egui::Key::M) {
-                        Some(if i.modifiers.shift { Kind::Radial } else { Kind::Linear })
+                        Some(if i.modifiers.shift {
+                            Kind::Radial
+                        } else {
+                            Kind::Linear
+                        })
                     } else if i.key_pressed(egui::Key::J) && i.modifiers.shift {
                         Some(Kind::Color)
                     } else {
@@ -1277,7 +1305,18 @@ impl Editor {
                         self.create_mask(kind, None);
                     }
                 }
-            });
+            }
+            // Select All takes the filmstrip's shown photos, so a following Sync
+            // reaches them all; the open photo stays active.
+            if select_all {
+                let open = self.document.catalog_photo;
+                if let Some(library) = &mut self.library {
+                    library.develop_select_all(open);
+                }
+            }
+            if select_none && let Some(library) = &mut self.library {
+                library.select(None);
+            }
             // As in Lightroom, Shift+Cmd+C opens Copy Settings. Not while a folder is
             // being picked: the folder question that follows would replace it.
             if copy && !self.activity.is_busy() {

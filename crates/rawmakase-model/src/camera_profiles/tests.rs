@@ -330,3 +330,127 @@ fn phone_module_profiles_fit_the_module_that_took_the_photo() {
     // Nor is any other suffix.
     assert!(!fits("Ricoh", "GXR", 28., "", "Ricoh GXR MOUNT A12"));
 }
+
+#[test]
+fn profiles_fit_under_the_names_adobe_uses() {
+    let fits =
+        |make: &str, model: &str, normalized: (&str, &str), focal_35mm: f32, camera: &str| {
+            let m = Metadata {
+                make: make.into(),
+                model: model.into(),
+                adobe_names: crate::cameras::adobe_names(make, model, normalized),
+                focal_35mm,
+                ..x100f()
+            };
+            let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+            p.camera = camera.into();
+            p.ensure_camera(&m).is_ok()
+        };
+    // Spaces and underscores.
+    assert!(fits(
+        "Nikon",
+        "Z 6_2",
+        ("Nikon", "Z 6_2"),
+        0.,
+        "Nikon Z 6 2"
+    ));
+    assert!(fits(
+        "Nikon",
+        "Z50_2",
+        ("Nikon", "Z50_2"),
+        0.,
+        "Nikon Z 50 2"
+    ));
+    assert!(fits(
+        "Fujifilm",
+        "GFX100RF",
+        ("Fujifilm", "GFX100RF"),
+        0.,
+        "Fujifilm GFX 100RF"
+    ));
+    assert!(!fits("Nikon", "Z 6_2", ("Nikon", "Z 6_2"), 0., "Nikon Z 6"));
+    // LibRaw's canonical name for a regional twin.
+    assert!(fits(
+        "Panasonic",
+        "DC-G95",
+        ("Panasonic", "DC-G99"),
+        0.,
+        "Panasonic DC-G99"
+    ));
+    assert!(fits(
+        "Panasonic",
+        "DC-GX880",
+        ("Panasonic", "DC-GF10"),
+        0.,
+        "Panasonic DC-GF10"
+    ));
+    assert!(!fits(
+        "Panasonic",
+        "DC-G95",
+        ("Panasonic", "DC-G95"),
+        0.,
+        "Panasonic DC-G99"
+    ));
+    // The make Adobe spells otherwise, and the table.
+    assert!(fits(
+        "OM Digital",
+        "OM-5",
+        ("OM Digital", "OM-5"),
+        0.,
+        "OM Digital Solutions OM-5"
+    ));
+    assert!(fits(
+        "Olympus",
+        "E-M10MarkIIIS",
+        ("Olympus", "E-M10MarkIIIS"),
+        0.,
+        "Olympus E-M10 Mark III"
+    ));
+    assert!(fits(
+        "Samsung",
+        "SM-G965F",
+        ("Samsung", "SM-G965F"),
+        0.,
+        "Samsung Galaxy S9+"
+    ));
+    assert!(!fits(
+        "Samsung",
+        "SM-G965F",
+        ("Samsung", "SM-G965F"),
+        0.,
+        "Samsung Galaxy S9"
+    ));
+    // Older Google phones, and a phone's module under its Adobe name.
+    assert!(fits(
+        "Google",
+        "Pixel 2 XL",
+        ("Google", "Pixel 2 XL"),
+        0.,
+        "Pixel 2 XL-Google-google"
+    ));
+    assert!(fits(
+        "Huawei",
+        "VOG-L29",
+        ("Huawei", "VOG-L29"),
+        27.,
+        "HUAWEI P30 Pro Rear Main Camera"
+    ));
+    assert!(!fits(
+        "Huawei",
+        "VOG-L29",
+        ("Huawei", "VOG-L29"),
+        125.,
+        "HUAWEI P30 Pro Rear Main Camera"
+    ));
+    // Huawei's "Rear Wide" is its ultrawide module; Google's "Wide" is the main one.
+    let huawei = |focal, camera| fits("Huawei", "VOG-L29", ("Huawei", "VOG-L29"), focal, camera);
+    assert!(!huawei(27., "HUAWEI P30 Pro Rear Wide Camera"));
+    assert!(huawei(16., "HUAWEI P30 Pro Rear Wide Camera"));
+    assert!(fits(
+        "Google",
+        "Pixel 7 Pro",
+        ("Google", "Pixel 7 Pro"),
+        24.,
+        "Google Pixel 7 Pro Wide Camera"
+    ));
+}

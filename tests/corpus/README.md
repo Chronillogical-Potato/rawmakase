@@ -76,7 +76,7 @@ All run from the repository root with a Python that has numpy (`/opt/homebrew/bi
 - `scripts/corpus/whites-curve.py`: renders Whites on `synthetic-d65` at 13 exposures, prints the adaptive Whites tables for `basic_tone_data.rs`, and with the private photo references fits the offset between photos and the chart.
 - `scripts/corpus/parametric-curve.py`: renders the parametric curve's fitting cases (about 380 region and split settings) on `synthetic-d65` and fits `crates/rawmakase-engine/src/develop/parametric.bin` from them. The renders' patch means stay outside the repository.
 - `scripts/corpus/pixls.py`: `manifest` (rebuild `pixls.json`), `download` (checks hashes and the budget), `cameras` (rebuild `cameras.json` from the corpus RAWs).
-- `scripts/corpus/gate.py`: photo gates against frozen Camera Raw references (issue #420's level 3, the scene tone stage's gates): `survey`, `split` and `reference` make and freeze the references through Photoshop (`camera_raw.py`); `render` develops each photo once with every case's sidecar through `rawmakase render-batch <raw> <jobs.json>` (`--data-dir` for a library with Adobe Standard); `score` measures median ΔE00, ΔL* per brightness band and clipping; `accept` applies the acceptance rule to a candidate's scores against a baseline's (tone settings only). Photos, references and renders stay outside the repository.
+- `scripts/corpus/gate.py`: photo gates against frozen Camera Raw references (issue #420's level 3, the scene tone stage's gates): `survey`, `split` and `reference` make and freeze the references through Photoshop (`camera_raw.py`); `render` develops each photo once with every case's sidecar through `rawmakase render-batch <raw> <jobs.json>` (`--data-dir` for a library with Adobe Standard); `score` measures median ΔE00, ΔL* per brightness band and clipping; `accept` applies the acceptance rules to a candidate's scores against a baseline's: by default (`--rule regression`) no setting's median more than 0.1 ΔE00 worse per brightness stratum, no photo worse by more than a limit (tone 1.0 or 2.0; colour families their own, derived from `main`'s baseline with `color-limits`), no more clipping, and no photo that stops rendering; `--rule switch` is the scene tone engine's rule, which also asks far-off tone settings to improve; `--exclude <file>` leaves listed photos (SHA-256 prefixes) out of the verdict. Photos, references and renders stay outside the repository.
 - `scripts/corpus/migrate-references.py`: reduce existing reference TIFFs (sweeps, Lightroom exports) to block files.
 - `scripts/corpus/parity-report.py`: groups the Camera Raw comparison by Develop control (mean and p95 ΔE00, distance above the default render, worst cases and patches) into `report.json` and a self-contained `report.html`; `--previous` marks changes against an earlier report. It reads RAWmakase's patch values from the parity test:
 
@@ -136,6 +136,37 @@ python3 scripts/corpus/dataset-renders.py run            # on a branch: exits 1 
 `scripts/corpus/dataset-renders.py` runs the test with `RAWMAKASE_REPORT` and groups the photos that changed by the dataset's classifications (make, CFA, brightness key, scene, light, setting, contrast, skin, sky), read from `dataset.sqlite` by SHA-256, so a change reads as "X-Trans, low-key scenes" rather than a list of photos. `report <file>` groups an earlier report; `--public` names only raw.pixls.us CC0 photos; `--out` writes the grouped report as JSON.
 
 It renders from the photo reduced to 2,400 pixels (`--source-edge`, 0 for full size): the 48-block comparison sees nothing the reduction loses, and a run of all 1,797 photos takes about 2½ hours on an M1 Pro instead of about 15. Run it before merging rendering-engine changes. The accepted renders stay in `$RAWMAKASE_DATASET/baselines/corpus/accepted/`; re-record them only from `main`, in a change that says why.
+
+### Camera Raw parity
+
+The dataset's frozen Camera Raw 18.7 references (`references/camera-raw-18.7*/<control>-<split>/`, 48 validation and 48 holdout sets over raw.pixls.us, Signature Edits and the owner's photos) are rendered with a build and scored against Camera Raw by `scripts/corpus/gate.py`; `scripts/corpus/dataset-gate.py` does it for every set of a split and judges one run against another:
+
+```
+lib=<Adobe profile library>     # a folder whose camera-profiles/ holds Adobe Standard and the Adobe Raw looks
+run=$RAWMAKASE_DATASET/baselines/gate
+python3 scripts/corpus/dataset-gate.py run --rawmakase target/release/rawmakase --data-dir $lib --out $run/<name>
+python3 scripts/corpus/dataset-gate.py accept --candidate $run/<name> --baseline $run/main-<commit>
+python3 scripts/corpus/dataset-gate.py report $run/<name>     # --split holdout for holdout
+```
+
+- **run** renders and scores each set (two at a time) and deletes its renders once scored: the SSD cannot hold them all. It renders with a copy of the build taken when the run starts (`<run>/rawmakase`), so rebuilding meanwhile changes nothing. Scores, a log per set and `run.json` (the build) stay in the run folder; an interrupted run resumes. The validation split takes about 2½ hours on an M1 Pro.
+- **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
+- **report** says how far a run is from Camera Raw: median ΔE00 by control, stratum and source, the furthest settings, the lightness bias per tone band, and what could not be scored.
+- **Default parity:** `gate.py default-parity --survey $RAWMAKASE_DATASET/references/<family>/survey --rawmakase … --data-dir $lib --out <folder>` scores default renders against the survey's Camera Raw renders, leaving holdout photos out.
+- **Baselines** are runs of `main`, named by its commit (`main-418d0ca7`: validation and holdout); record a new one when `main`'s rendering changes. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
+
+### Testing a rendering-engine change
+
+On the machine with the dataset, from the branch's checkout, built against `packaging/native-deps.sh`'s LibRaw (`cargo build --release`):
+
+| Step | Command | Time | Expect |
+|---|---|---|---|
+| 1. Decoding | `dataset-fingerprints.py check` | 5 min | No difference: an engine change does not change decoding. |
+| 2. Render snapshots | `dataset-renders.py run` | 2½ h | Every photo the change touches moves; read the grouping (make, CFA, key, scene, light) for where. Nothing is accepted here: re-record (`--bless`) on `main` after merging. |
+| 3. Camera Raw parity | `dataset-gate.py run … --out $run/<branch>`, then `accept` against `main`'s baseline, then `report` | 2½ h | The verdict per set, and how far the branch is from Camera Raw next to `main`'s report. |
+| 4. Default parity | `gate.py default-parity` per survey | about 1 h | Default renders against Camera Raw's. |
+
+Steps 2 and 3 compare different things: render snapshots compare a build with RAWmakase's own earlier renders (whether anything moved), Camera Raw parity with Camera Raw (whether it moved closer). Run them one after the other; both use every core.
 
 ## TODO
 
