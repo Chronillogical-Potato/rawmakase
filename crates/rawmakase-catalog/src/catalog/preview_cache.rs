@@ -608,11 +608,17 @@ mod tests {
         for path in [&raw, &jpeg] {
             cache.store(path, &Stamp::read(path)?, &im)?;
         }
-        // Rows as a build that ignored a JPEG's ICC profile left them.
-        cache.db.execute("UPDATE previews SET generation=2", [])?;
+        // A JPEG's row as a build that ignored its ICC profile left it.
+        cache.db.execute(
+            "UPDATE previews SET generation=2 WHERE source_path=?1",
+            [jpeg.to_string_lossy()],
+        )?;
         assert!(cache.load(&jpeg)?.is_none());
-        // A RAW's embedded thumbnail did not change, so it is kept.
+        // A RAW's current row is kept.
         assert!(cache.load(&raw)?.is_some());
+        // A RAW's row from before the one engine is made again.
+        cache.db.execute("UPDATE previews SET generation=2", [])?;
+        assert!(cache.load(&raw)?.is_none());
         cache.store(&jpeg, &Stamp::read(&jpeg)?, &im)?;
         assert!(cache.load(&jpeg)?.is_some());
         Ok(())
