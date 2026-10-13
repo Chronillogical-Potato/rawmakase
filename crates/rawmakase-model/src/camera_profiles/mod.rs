@@ -531,18 +531,7 @@ impl CameraProfile {
         if let Some(look) = &self.enhanced {
             p = look.apply_table(p);
         }
-        let evaluate = |v: f32| {
-            let x = v.clamp(0., 1.);
-            let i = self
-                .tone
-                .partition_point(|p| p[0] <= x)
-                .saturating_sub(1)
-                .min(self.tone.len() - 2);
-            let a = self.tone[i];
-            let b = self.tone[i + 1];
-            let t = ((x - a[0]) / (b[0] - a[0])).clamp(0., 1.);
-            a[1] * (1. - t) + b[1] * t
-        };
+        let evaluate = |v: f32| evaluate_tone(&self.tone, v);
         // Map the darkest and brightest channels; preserve the middle channel's
         // relative position. This preserves hue without flattening saturation.
         p = p.map(|v| v.clamp(0., 1.));
@@ -728,11 +717,7 @@ impl CameraProfile {
             hue1: None,
             hue2: None,
             look: None,
-            tone: dng_tone::DEFAULT_TONE
-                .iter()
-                .enumerate()
-                .map(|(i, y)| [i as f32 / 1024., *y])
-                .collect(),
+            tone: default_tone(),
             exposure: 0.,
             black_render: BlackRender::Auto,
         };
@@ -740,6 +725,34 @@ impl CameraProfile {
         Some(p)
     }
 }
+/// A profile tone curve's `points` at `x` (clamped to 0…1), linearly between points.
+fn evaluate_tone(points: &[[f32; 2]], x: f32) -> f32 {
+    let x = x.clamp(0., 1.);
+    let i = points
+        .partition_point(|p| p[0] <= x)
+        .saturating_sub(1)
+        .min(points.len() - 2);
+    let a = points[i];
+    let b = points[i + 1];
+    let t = ((x - a[0]) / (b[0] - a[0])).clamp(0., 1.);
+    a[1] * (1. - t) + b[1] * t
+}
+
+/// The DNG SDK's default tone curve (ACR3) as profile tone points.
+pub fn default_tone() -> Vec<[f32; 2]> {
+    dng_tone::DEFAULT_TONE
+        .iter()
+        .enumerate()
+        .map(|(i, y)| [i as f32 / 1024., *y])
+        .collect()
+}
+
+/// [`default_tone`] at `x`, as [`CameraProfile::finish`] evaluates a tone curve.
+pub fn default_tone_at(x: f32) -> f32 {
+    static POINTS: std::sync::OnceLock<Vec<[f32; 2]>> = std::sync::OnceLock::new();
+    evaluate_tone(POINTS.get_or_init(default_tone), x)
+}
+
 fn matmul(a: Matrix, b: Matrix) -> Matrix {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
