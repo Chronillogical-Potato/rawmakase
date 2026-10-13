@@ -415,11 +415,16 @@ fn contrast_pivot(
             tone_stage(*p, &default, &lut, matrix, pos, None).map(|v| srgb_encode(v.clamp(0., 1.)))
         })
         .collect();
-    crate::develop::basic_tone::photo_pivot(&crate::develop::basic_tone::blocks(
+    let pivot = crate::develop::basic_tone::photo_pivot(&crate::develop::basic_tone::blocks(
         &encoded,
         small.width as usize,
         small.height as usize,
-    ))
+    ));
+    if small.metadata.is_rendered() {
+        crate::develop::basic_tone::rendered_pivot(pivot)
+    } else {
+        pivot
+    }
 }
 pub(super) fn apply_reference_curves(
     rgb: [f32; 3],
