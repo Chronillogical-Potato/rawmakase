@@ -50,7 +50,9 @@ output's white or below 2^-10 are left out of the fits.
 - Dehaze (training photos): each channel's gain as a function of its log2 level minus
   L's 99th percentile, over [-12, 1].
   Each is a 48-bin piecewise-linear table per slider position, fitted by least squares
-  with a second-difference smoothness penalty.
+  with a second-difference smoothness penalty. Generated families apply
+  Family::monotone at compile time: input + gain must not decrease, including
+  poorly sampled tails, and CPU, masks and GPU all read those corrected values.
 - Clarity (synthetic scenes): the gain as a sum over four bilateral blurs of L (0.004,
   0.015, 0.05 and 0.15 of the long edge, range sigma 2 stops) of the detail L - blur
   times weights that are piecewise linear in B minus the Shadows key (a quarter of L's
@@ -522,7 +524,7 @@ def family(const, tables, values, lo, hi):
         rows.append('        [\n            ' + ',\n            '.join(lines) + ',\n        ],')
     vs = ', '.join(f'{v:g}' if v != int(v) else f'{v:.0f}.' for v in values)
     return (f'pub(super) const {const}: Family = Family {{\n    values: [{vs}],\n    lo: {lo:.1f},\n'
-            f'    hi: {hi:.1f},\n    tables: [\n' + '\n'.join(rows) + '\n    ],\n};\n')
+            f'    hi: {hi:.1f},\n    tables: [\n' + '\n'.join(rows) + '\n    ],\n}.monotone();\n')
 
 
 LOCAL_HEADER = '''//! Camera Raw 18.7's Shadows, Highlights and Dehaze on scene values (process version

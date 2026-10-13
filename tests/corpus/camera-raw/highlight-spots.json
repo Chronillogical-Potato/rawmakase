@@ -1,0 +1,70 @@
+{
+  "camera_raw": "18.7 (2743)",
+  "process_version": "15.4",
+  "generator": "scripts/corpus/highlight-probes.py",
+  "cases": [
+    {
+      "background_ev": -5,
+      "highlights": 0,
+      "centre": 1.0,
+      "rim": 1.0,
+      "ratio": 1.0
+    },
+    {
+      "background_ev": -5,
+      "highlights": -50,
+      "centre": 0.3526138116554729,
+      "rim": 0.37890700995358984,
+      "ratio": 1.0745665581693298
+    },
+    {
+      "background_ev": -5,
+      "highlights": -100,
+      "centre": 0.12188749708831317,
+      "rim": 0.14122134446921955,
+      "ratio": 1.1586204314860786
+    },
+    {
+      "background_ev": -7,
+      "highlights": 0,
+      "centre": 1.0,
+      "rim": 1.0,
+      "ratio": 1.0
+    },
+    {
+      "background_ev": -7,
+      "highlights": -50,
+      "centre": 0.1634626236170957,
+      "rim": 0.1830414491097976,
+      "ratio": 1.1197755490488424
+    },
+    {
+      "background_ev": -7,
+      "highlights": -100,
+      "centre": 0.023184225159076942,
+      "rim": 0.03010541241176504,
+      "ratio": 1.2985300222543068
+    },
+    {
+      "background_ev": -9,
+      "highlights": 0,
+      "centre": 1.0,
+      "rim": 1.0,
+      "ratio": 1.0
+    },
+    {
+      "background_ev": -9,
+      "highlights": -50,
+      "centre": 0.08658127146896803,
+      "rim": 0.09915759531645636,
+      "ratio": 1.1452545525621654
+    },
+    {
+      "background_ev": -9,
+      "highlights": -100,
+      "centre": 0.00596117413659846,
+      "rim": 0.008270136659666291,
+      "ratio": 1.3873335135258038
+    }
+  ]
+}

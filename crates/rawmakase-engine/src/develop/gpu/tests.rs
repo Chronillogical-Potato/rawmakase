@@ -3,6 +3,123 @@ use crate::develop::masks::local::LocalDeltas;
 
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn gpu_measured_tails_match_cpu_globally_and_in_masks() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::{
+            masks::MaskWeights,
+            pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+        },
+        model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape},
+    };
+    use std::sync::Arc;
+    let metadata = Metadata {
+        width: 240,
+        height: 240,
+        wb: [1.; 3],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: 240,
+        height: 240,
+        pixels: (0..240 * 240)
+            .map(|i| {
+                let radius = ((i % 240) as f32 - 120.).hypot((i / 240) as f32 - 120.);
+                [(-7. + 7. * ((45. - radius) / 25.).clamp(0., 1.)).exp2(); 3]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let samples = Arc::new(Samples {
+        width: 240,
+        height: 240,
+        pixels: image.pixels.clone(),
+        positions: (0..240 * 240)
+            .map(|i| [(i % 240) as f32, (i / 240) as f32])
+            .collect(),
+    });
+    let base = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let source = Source::new(&image);
+    for adjust in [
+        LocalAdjust {
+            highlights: -1.,
+            ..Default::default()
+        },
+        LocalAdjust {
+            highlights: -0.75,
+            ..Default::default()
+        },
+        LocalAdjust {
+            highlights: -0.5,
+            ..Default::default()
+        },
+        LocalAdjust {
+            shadows: -1.,
+            ..Default::default()
+        },
+        LocalAdjust {
+            shadows: 1.,
+            ..Default::default()
+        },
+        LocalAdjust {
+            dehaze: -1.,
+            ..Default::default()
+        },
+    ] {
+        for masked in [false, true] {
+            let mut recipe = base.clone();
+            let weights = masked.then(|| MaskWeights {
+                deltas: vec![adjust.delta(1.)],
+                data: Arc::new(vec![255; image.pixels.len()]),
+            });
+            if masked {
+                recipe.masks = vec![MaskGroup {
+                    adjust,
+                    components: vec![MaskComponent::new(MaskShape::Linear {
+                        from: [0.5, -2.],
+                        to: [0.5, -1.],
+                    })],
+                    ..Default::default()
+                }];
+            } else {
+                recipe.highlights = adjust.highlights;
+                recipe.shadows = adjust.shadows;
+                recipe.effects.dehaze = adjust.dehaze;
+            }
+            let mut params = pixel_params(source, &recipe).expect("supported recipe");
+            if let Some(weights) = &weights {
+                assert!(params.set_masks(source, &recipe, Some(weights)));
+            }
+            let expected = develop_samples(source, &recipe, &samples, &cancel, weights.as_ref())?;
+            let actual = gpu.develop(&samples, &params, &cancel)?;
+            let max = actual
+                .pixels
+                .iter()
+                .flatten()
+                .zip(expected.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f32::max);
+            assert!(max < 1e-4, "masked {masked}, {adjust:?}: max {max}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn gpu_matches_cpu_finishing_and_reuses_buffers() -> Result<()> {
     let mut gpu = Processor::new()?;
     eprintln!("GPU: {}", gpu.name());

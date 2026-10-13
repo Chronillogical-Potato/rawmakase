@@ -32,6 +32,25 @@ Calibration renders neutral-preserving primary Hue/Saturation matrices plus an a
 
 The primary sliders render Camera Raw 18.7's measured changes (in `calibration.rs`), replacing the original coefficients, measured on X100F/Adobe Standard. Camera Raw rendered a dense synthetic chart (1,728 colors and a gray ramp) with each primary's Hue and Saturation at −100, −50, +50 and +100. For each position, the six numbers of a neutral-preserving matrix at RAWmakase's calibration step were fitted by rendering the same chart through RAWmakase's own pipeline (Gauss–Newton on CIELAB differences), and positions in between are interpolated. Camera Raw leaves grays alone under every calibration slider, as the matrices do. On the fitting chart the 24 renders went from mean ΔE00 1.0–3.4 to 0.66–0.80, against 0.80 for the default render there; on the corpus chart the `calibration-*` cases went from 1.11–2.02 to 0.62–0.68 (default 0.66), and calibration combined with the color mixer from 1.55 to 0.66. Several sliders add their changes, which was checked only on that pair. Shadow Tint keeps its earlier fit (0.71 and 0.91 on the chart). The chart is one synthetic camera with its embedded profile; other cameras and profiles are not measured.
 
+## Partially clipped highlights
+
+Highlight recovery runs once on the full decoded camera image, before the scene
+tone controls, and feeds Fit, regions and export. The existing 7×7 neighbourhood
+uses unclipped neighbours' channel ratios. A wider partially clipped area used to
+fall back to neutral even when a channel still held useful information, producing
+hard grey patches when Highlights darkened it.
+
+When that local search finds nothing, a lazily built map (at most 512 pixels on
+the long edge) supplies a colour reference from the same connected bright area.
+Only smooth, unclipped samples contribute; dark gaps separate areas so an unrelated
+bright object cannot provide the reference. The surviving channels stay unchanged;
+only clipped channels are estimated, with the existing blend near saturation.
+Fully clipped pixels and areas without a usable reference keep the neutral fallback.
+This infers missing colour, not missing detail, and is not Adobe's recovery algorithm.
+Cancellation discards the map and recovered image together. Tests cover a wide
+partially clipped area, dark gaps, untouched surviving channels, fully clipped
+fallback and cancellation.
+
 ## Camera profiles
 
 DCP ColorMatrix1/2 now support DNG temperature/tint and camera-neutral inversion. Camera calibration is signature-matched; missing color matrices fall back to the original WB approximation. Profile matrices, signatures and rendering parameters are embedded in saved recipes.
