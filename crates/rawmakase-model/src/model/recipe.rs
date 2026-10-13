@@ -52,6 +52,9 @@ pub struct Recipe {
     pub effects: crate::model::effects::Effects,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
+    /// A saved Embedded profile loads with today's tone curve (`CameraProfile::loaded`),
+    /// wherever a recipe is read: sessions, the catalog, History, presets and sidecars.
+    #[serde(deserialize_with = "loaded_profile")]
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
     /// Lightroom's Profile Amount (`crs:Look` `Amount`, 0–2, 1 = 100%): the strength of
     /// a look that supports it. Other profiles render at 100% whatever it is. Omitted
@@ -805,6 +808,14 @@ impl Recipe {
 fn is_zero(v: &f32) -> bool {
     *v == 0.
 }
+/// [`Recipe::profile`] as a saved edit stores it, with a stored Embedded profile given
+/// today's tone curve.
+fn loaded_profile<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>, D::Error> {
+    let profile = Option::<crate::camera_profiles::CameraProfile>::deserialize(deserializer)?;
+    Ok(profile.map(|p| std::sync::Arc::new(p.loaded())))
+}
 fn is_one(v: &f32) -> bool {
     *v == 1.
 }
@@ -835,6 +846,57 @@ fn one() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A recipe as JSON whose profile is the Embedded one, edited by `change`.
+    fn saved_embedded(change: impl FnOnce(&mut serde_json::Value)) -> String {
+        let m = Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let r = Recipe {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(&m),
+            )),
+            ..Recipe::default()
+        };
+        let mut v = serde_json::to_value(&r).unwrap();
+        v["profile"]["tone"] = serde_json::json!([[0., 0.], [1., 1.]]);
+        change(&mut v["profile"]);
+        v.to_string()
+    }
+    fn tone_of(json: &str) -> serde_json::Value {
+        let r: Recipe = serde_json::from_str(json).unwrap();
+        serde_json::to_value(r).unwrap()["profile"]["tone"].clone()
+    }
+
+    /// A rendered photo's edit saved while the Embedded profile had no tone curve
+    /// loads with Camera Raw's default tone curve, wherever the edit is read from:
+    /// the Embedded profile's curve comes from the code, not from storage.
+    #[test]
+    fn a_saved_embedded_profile_loads_with_todays_tone_curve() {
+        assert_eq!(
+            tone_of(&saved_embedded(|_| {})),
+            serde_json::to_value(crate::camera_profiles::default_tone()).unwrap()
+        );
+    }
+
+    /// Only the Embedded profile itself: one named so with a colour matrix or a look
+    /// table, or any other profile, keeps the tone curve it was saved with.
+    #[test]
+    fn other_profiles_keep_their_saved_tone_curve() {
+        let identity = serde_json::json!([[0., 0.], [1., 1.]]);
+        let with_color = saved_embedded(|p| {
+            p["color1"] = serde_json::json!([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+        });
+        assert_eq!(tone_of(&with_color), identity);
+        let with_look = saved_embedded(|p| {
+            p["look"] =
+                serde_json::json!({"dims": [1, 1, 1], "data": [[0., 0., 0.]], "srgb": false})
+        });
+        assert_eq!(tone_of(&with_look), identity);
+        let other = saved_embedded(|p| p["name"] = "Adobe Standard".into());
+        assert_eq!(tone_of(&other), identity);
+    }
 
     /// The names a new recipe is saved with; renaming one would lose that setting
     /// from every saved edit. Settings at their defaults beyond these are left out.

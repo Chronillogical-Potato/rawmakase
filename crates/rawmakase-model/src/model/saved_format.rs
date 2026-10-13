@@ -112,48 +112,11 @@ pub fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
         recipe.entry("sharpening").or_insert(0.into());
     }
     drop_obsolete_settings(recipe);
-    // The Embedded profile's tone curve comes from the code: a rendered photo's recipe
-    // saved with an earlier curve renders with today's (the profile is a definition,
-    // not a measurement the photo carries).
-    if let Some(profile) = recipe
-        .get_mut("profile")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        let embedded = profile.get("name").and_then(serde_json::Value::as_str)
-            == Some(crate::camera_profiles::EMBEDDED)
-            && profile.get("color1").is_none_or(serde_json::Value::is_null)
-            && profile.get("look").is_none_or(serde_json::Value::is_null);
-        if embedded {
-            profile.insert(
-                "tone".into(),
-                serde_json::to_value(crate::camera_profiles::default_tone())?,
-            );
-        }
-    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    /// A rendered photo's recipe saved while the Embedded profile had no tone curve
-    /// opens with Camera Raw's default tone curve: the profile's curve comes from the
-    /// code, not from storage.
-    #[test]
-    fn a_saved_embedded_profile_gets_todays_tone_curve() {
-        let m = crate::camera_data::Metadata {
-            source: crate::camera_data::Source::Rendered,
-            ..Default::default()
-        };
-        let mut profile =
-            serde_json::to_value(crate::camera_profiles::CameraProfile::embedded(&m)).unwrap();
-        profile["tone"] = serde_json::json!([[0., 0.], [1., 1.]]);
-        let mut v = serde_json::json!({"schema": super::SCHEMA, "pipeline": super::SCHEMA, "recipe": {"profile": profile}});
-        super::migrate_recipe(&mut v).unwrap();
-        assert_eq!(
-            v["recipe"]["profile"]["tone"],
-            serde_json::to_value(crate::camera_profiles::default_tone()).unwrap()
-        );
-    }
     /// Every version this build reads migrates; recipes keep the settings they
     /// were saved with and render with the one engine.
     #[test]

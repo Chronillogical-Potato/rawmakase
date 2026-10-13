@@ -682,6 +682,15 @@ impl CameraProfile {
     pub fn is_embedded(&self) -> bool {
         self.name == EMBEDDED && self.color1.is_none() && self.look.is_none()
     }
+    /// The profile as loaded from a saved edit: the Embedded profile takes Camera
+    /// Raw's default tone curve, whatever curve it was saved with (the profile is a
+    /// definition, not something the photo carries). Any other profile is unchanged.
+    pub(crate) fn loaded(mut self) -> Self {
+        if self.is_embedded() {
+            self.tone = default_tone();
+        }
+        self
+    }
     /// The DNG rendering of a file that carries only a ColorMatrix: LibRaw's XYZ-to-camera
     /// matrix, no hue/look tables, and the published ACR 3 default tone curve. This is the
     /// neutral starting point when the user has imported no camera profile.
