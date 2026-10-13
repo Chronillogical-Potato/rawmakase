@@ -115,33 +115,39 @@ scene 1.0 at 1.0, where Camera Raw renders 0.69.
   when it lies above a fixed black point (about 0.016 scene); even a 4-pixel dark spot
   counts, so the minimum is measured at higher resolution than the maximum. Positive
   Blacks does not depend on it. Negative Blacks works on each channel.
-- **The default black** adapts to the photo's darkest level relative to the sensor's
-  white: the 0.1th percentile of the measurement copy's luminance less the sensor's
-  white (log2, both at the render's Exposure, so Exposure does not move it: letting
-  Exposure move the darkest level against the sensor's white at Exposure 0 does worse
-  on Camera Raw's references, the exposure ramp at +1 0.0013 → 0.0027 mean error and
-  the chart's Exposure +1, +2 and +3 0.32, 0.31, 0.20 → 0.35, 0.36, 0.26 ΔE00, with
-  −2 unchanged at 0.0045). It is
-  measured on the photo before red eye corrections and spot removal, so a local
-  repair does not move the whole photo's black, and a few dark pixels do not move
-  the percentile; on the probes the darkest patch covers far more than 0.1% of the
-  pixels, so it is the darkest patch. (Blacks keeps the minimum.) The black ramps
-  (darkest patch 2^-8 … 2^-2 at a sensor white of 4, so −10 … −4 relative to it)
-  show a default black that depends on the level; the white curves, measured on
-  white ramps whose darkest patch is 2^-14 of their white, carry almost none.
-  `default_black.bin` maps the white ramp's default output to the black ramp's at the
-  same scene value, per key; with a profile's default black (DefaultBlackRender
-  Auto) it applies to each channel after the white curve and before Blacks. Between
-  keys it is interpolated linearly, above −4 the last key holds, and below −10 it
-  fades linearly to none at −11.5 and below. The anchor is set by the synthetic
-  chart: it sits at −11.6 and Camera Raw renders it with no extra black (the white
-  ramps, at −14, stay without one too). Below a key's darkest patch the curve keeps
-  the ratio of its first sample. On the training photos' deep shadows against Camera
-  Raw's renders with a linear profile, the ratio of RAWmakase's level to Camera Raw's
-  in the bands 2^-9, 2^-8, 2^-7 and 2^-6 was 1.77, 1.44, 1.24 and 1.13 without it and
-  is 1.18, 1.06, 1.01 and 1.02 with it (fading to none at −14 instead: 1.17, 1.04,
-  1.00 and 1.01; with the minimum in place of the percentile: 1.20, 1.09, 1.03 and
-  1.03).
+- **The default black** follows the photo's dark scene level, including camera
+  baseline exposure and the user's Exposure. Its key is the 0.1th percentile of
+  the measurement copy's luminance, measured before local tone adjustments, red-eye
+  correction and spot removal. A local repair therefore does not move the whole
+  photo's black. Blacks retains its separate minimum-based key.
+
+  Camera Raw 18.7 neutral ramps with the same scene values and different camera
+  baselines produce the same dark outputs; raising Exposure moves the response.
+  The earlier model subtracted sensor white from the key and used incomplete
+  ramps measured at one baseline. Extending each row from its first nonzero
+  sample also produced different low-end slopes for rows whose measured portions
+  were actually the same curve.
+
+  `default_black.bin` now contains paired DefaultBlackRender None → Auto transfers
+  at absolute dark keys −14 to −7, every half stop. Above −7 the response is held
+  at the measured saturated response. Samples are monotone; below a ramp's first
+  measured input the generator continues its ratio, rather than storing missing
+  samples as zero. These remain unmeasured tails, especially relevant to negative
+  local adjustments that push pixels below the original scene minimum.
+
+  The white tables already contain the black response of their calibration ramp,
+  whose darkest patch is 14 stops below its maximum. The engine composes the
+  inverse of that response with the photo's response before uploading the shared
+  CPU/GPU correction table. Matching calibration and scene keys gives the identity;
+  it does not apply black rendering twice. DefaultBlackRender None retains its
+  separate white-curve path.
+
+  Regenerate this family independently with `scene-tone-tables.py
+  render-default-black DIR` and `scene-tone-tables.py default-black-table DIR`.
+  The regression suite compares complete scene-stage renders across camera
+  baselines and Exposure, and checks that correction curves preserve brightness
+  order and the calibration identity. This corrects black rendering; it does not
+  establish parity for the separate spatial Shadows operator.
 
 ### Local operators
 
@@ -418,3 +424,17 @@ once; if it fails and its errors are inspected, it becomes validation data and a
 fresh holdout is frozen before further fitting. Adaptive statistics are identified
 with controlled synthetic probes before fitting; no offsets are fitted to photos.
 Engine 4's photo results are frozen first, as the comparison baseline.
+
+### Default-black calibration validation
+
+The paired black-response calibration corrects the baseline-exposure dependence
+and is checked against fixed Camera Raw ramp outputs. Updating the engine
+snapshots records this intentional rendering change; the Camera Raw reference
+pixels remain unchanged. In scene 3, final-output mean absolute errors improve
+for Contrast +50 (0.0074 → 0.0038), Dehaze +40 (0.0118 → 0.0090) and
+Dehaze −40 (0.0107 → 0.0064). Their adjustment-relative errors increase from
+0.064 to 0.074, 0.223 to 0.264 and 0.069 to 0.092 EV respectively because
+the default rendering also changes. These are accepted calibration tradeoffs,
+not evidence of complete Camera Raw parity. Shadows +100 on this scene changes
+slightly in the other direction (output error 0.0023 → 0.0026). The weak
+Shadows response in scenes with scattered bright gaps remains a separate issue.

@@ -26,6 +26,51 @@ const DARK: f64 = 1. / 4096.;
 /// Scene blocks Camera Raw renders brighter than this may be clipped.
 const BRIGHT: f64 = 0.9;
 
+#[test]
+fn default_black_follows_scene_darkness_across_camera_baselines() {
+    let values: Vec<f64> = (-8..=0).map(|e| 2_f64.powi(e)).collect();
+    let (width, height) = (576_u32, 64_u32);
+    let scene: Vec<[f64; 3]> = (0..width * height)
+        .map(|i| [values[((i % width) / 64) as usize]; 3])
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    let mut errors = Vec::new();
+    // Camera Raw 18.7 (2743), PV 15.4, linear profile, Auto black. Changing
+    // camera baseline exposure while keeping scene values fixed leaves these
+    // dark patch outputs unchanged. User Exposure +1 moves the black response.
+    for (baseline, exposure, expected) in [
+        (0., 0, [0.00101035, 0.00471585, 0.012339, 0.027770]),
+        (2., 0, [0.001025, 0.004731, 0.012355, 0.027785]),
+        (2., 1, [0.002837, 0.010701, 0.026418, 0.057868]),
+    ] {
+        let path = dir.path().join(format!("black-{baseline}-{exposure}.dng"));
+        std::fs::write(&path, dng::write_probe(width, height, &scene, baseline)).unwrap();
+        let im = develop(&path);
+        let profiles = embedded_profiles(&im);
+        let case = ProbeCase {
+            probe: String::new(),
+            settings: BTreeMap::from([("Exposure2012".into(), exposure.to_string())]),
+            mask: BTreeMap::new(),
+            camera_raw: Vec::new(),
+        };
+        let out = scene_output(&im, &profiles, &xmp(&case));
+        for (patch, reference) in expected.into_iter().enumerate() {
+            let pixel = out.pixels[32 * width as usize + patch * 64 + 32];
+            let got = pixel
+                .iter()
+                .zip(Y)
+                .map(|(v, w)| f64::from(*v) * w)
+                .sum::<f64>();
+            if !got.is_finite() || (got - reference).abs() > 0.0004 {
+                errors.push(format!(
+                    "BE {baseline}, E {exposure}, patch {patch}: {got}, ACR {reference}"
+                ));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
 #[derive(Deserialize)]
 struct References {
     probes: BTreeMap<String, Probe>,
