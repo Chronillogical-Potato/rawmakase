@@ -2255,3 +2255,32 @@ fn develop_select_all_takes_every_shown_photo_with_the_open_one_active() -> anyh
     assert_eq!(library.selected(), Some(ids[2]));
     Ok(())
 }
+
+#[test]
+fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
+    // The sidebar draws in Develop too, every frame while a slider moves: its
+    // folder and collection trees are not rebuilt from the lists each time.
+    let (_dir, mut library) = library_of(&["a.RAF", "b.RAF"])?;
+    let ctx = library.ctx.clone();
+    let frame = |library: &mut Library| {
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            egui::Panel::left("sidebar").show(ui, |ui| library.sidebar(ui));
+        });
+        output.textures_delta.clear();
+        library.sidebar_trees.clone().expect("the sidebar's trees")
+    };
+    let first = frame(&mut library);
+    assert!(std::sync::Arc::ptr_eq(&first, &frame(&mut library)));
+    // A photo added to a collection, which reads no lists again, shows.
+    let quick = library.session.ensure_quick_collection()?;
+    let built = frame(&mut library);
+    assert!(!std::sync::Arc::ptr_eq(&first, &built));
+    let id = library.session.photos[0].id;
+    library.session.change_collection(quick, &[id], &[])?;
+    let changed = frame(&mut library);
+    assert!(!std::sync::Arc::ptr_eq(&built, &changed));
+    // So does a read of the lists, whatever it changed.
+    library.session.reload()?;
+    assert!(!std::sync::Arc::ptr_eq(&changed, &frame(&mut library)));
+    Ok(())
+}
