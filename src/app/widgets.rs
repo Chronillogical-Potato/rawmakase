@@ -363,8 +363,8 @@ fn section_header(
     if !sidebar || hovered {
         let fill = match (sidebar, hovered) {
             (true, _) => 32,
-            (false, true) => 38,
-            (false, false) => 30,
+            (false, true) => 44,
+            (false, false) => 38,
         };
         ui.painter().rect_filled(rect, 5., palette.gray(fill));
     }
@@ -378,11 +378,7 @@ fn section_header(
         egui::Align2::LEFT_CENTER,
         title.to_uppercase(),
         egui::FontId::proportional(11.),
-        palette.gray(match (enabled, hovered) {
-            (false, _) => 95,
-            (true, true) => 225,
-            (true, false) => 180,
-        }),
+        palette.gray(if enabled { 225 } else { 95 }),
     );
     if !sidebar || hovered || !open {
         let chevron = if open {
