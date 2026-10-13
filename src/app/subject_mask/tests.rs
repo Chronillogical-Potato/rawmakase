@@ -49,6 +49,10 @@ fn fixture() -> Fixture {
         scale_factor: 1.,
         scale_clipped: 0,
     }));
+    // The tests say what the configuration file says, so a developer's own
+    // `remote-inference.json` cannot bend them. Tests that exercise the remote
+    // mode call `with_remote` afterwards.
+    editor.selection.remote.force(None);
     Fixture {
         _dir: dir,
         editor,
@@ -485,6 +489,186 @@ fn draw_masking_panel(e: &mut Editor) {
     e.finish_edit_frame(frame, &ctx);
 }
 
+/// The tests say what the configuration file says, so a developer's own
+/// `remote-inference.json` cannot bend them.
+fn without_remote(e: &mut Editor) {
+    e.selection.remote.force(None);
+}
+fn with_remote(e: &mut Editor, endpoint: &str) {
+    e.selection.remote.force(Some(endpoint));
+}
+
+#[test]
+fn with_a_remote_worker_the_models_do_not_have_to_be_here() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    without_remote(e);
+    if !e.selection.models.installed() {
+        e.request_selection(SUBJECT);
+        assert_eq!(e.selection.prompt, Some(Prompt::Model(SUBJECT)));
+        e.selection.prompt = None;
+    }
+    // The same request, with a worker configured, starts selecting.
+    with_remote(e, "127.0.0.1:1");
+    e.request_selection(SUBJECT);
+    assert!(e.selection.prompt.is_none(), "{:?}", e.selection.prompt);
+    assert!(e.selection.running().is_some());
+    e.selection.clear_document();
+    // And the drawer draws in the remote states without asking for a download.
+    e.selection.prompt = Some(Prompt::Model(SUBJECT));
+    draw_masking_panel(e);
+    e.selection.prompt = None;
+    draw_masking_panel(e);
+}
+
+/// Waits for the selection the worker is running, whatever it turns out to be.
+fn next_selection(e: &Editor) -> Box<Done> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        match e.rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(crate::app::worker::Event::Selection(done)) => return done,
+            _ => assert!(std::time::Instant::now() < deadline, "no selection result"),
+        }
+    }
+}
+
+/// A fake selection worker on a loopback port: what the app is told when the
+/// worker answers, fails, forgets or goes away.
+struct Remote {
+    _holder: std::thread::JoinHandle<()>,
+    endpoint: String,
+}
+impl Remote {
+    fn starting(subject: [u8; 12], sky: u8) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = listener.local_addr().unwrap().to_string();
+        let holder = std::thread::spawn(move || {
+            use rawmakase_remote::server::{Engine, EngineError, Outcome, Server};
+            struct Fake {
+                subject: rawmakase_inference::Coverage,
+                sky: rawmakase_inference::Coverage,
+            }
+            impl Engine for Fake {
+                fn analyze(
+                    &mut self,
+                    _photo: &rawmakase_inference::RgbImage,
+                    _cancel: &std::sync::atomic::AtomicBool,
+                ) -> Result<Outcome, EngineError> {
+                    Ok(Outcome {
+                        key: "k".into(),
+                        subject: self.subject.clone(),
+                        sky: self.sky.clone(),
+                    })
+                }
+                fn segment(
+                    &mut self,
+                    key: &str,
+                    _prompt: &rawmakase_inference::Prompt,
+                    _cancel: &std::sync::atomic::AtomicBool,
+                ) -> Result<rawmakase_inference::Coverage, EngineError> {
+                    if key == "k" {
+                        Ok(self.subject.clone())
+                    } else {
+                        Err(EngineError::UnknownKey)
+                    }
+                }
+                fn describe(&self) -> rawmakase_remote::server::Info {
+                    rawmakase_remote::server::Info {
+                        model: "fake@0".into(),
+                        panoptic: "fake".into(),
+                        provider: "CPU".into(),
+                    }
+                }
+            }
+            let engine = Fake {
+                subject: rawmakase_inference::Coverage {
+                    width: 4,
+                    height: 3,
+                    data: subject.to_vec(),
+                },
+                sky: rawmakase_inference::Coverage {
+                    width: 4,
+                    height: 3,
+                    data: vec![sky; 12],
+                },
+            };
+            Arc::new(Server::new(engine)).serve(listener);
+        });
+        Self {
+            _holder: holder,
+            endpoint,
+        }
+    }
+}
+
+#[test]
+fn a_selection_runs_through_the_remote_worker_into_one_mask() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let remote = Remote::starting([10; 12], 20);
+    with_remote(e, &remote.endpoint);
+    e.request_selection(SUBJECT);
+    let done = next_selection(e);
+    assert!(done.result.is_ok(), "{:?}", done.result);
+    e.selection_done(*done);
+    assert_eq!(e.document.edit.recipe().masks.len(), 1, "{}", e.status);
+    // The remote coverage is the mask's raster, saved like any other.
+    let MaskShape::Bitmap(b) = &e.document.edit.recipe().masks[0].components[0].shape else {
+        panic!("a selection made a bitmap mask");
+    };
+    let id = b.id.clone();
+    assert_eq!(
+        crate::storage::mask_assets::resolve(&id).unwrap().data,
+        vec![10; 12]
+    );
+    // A sky selection on the same photo comes from the same analysis.
+    e.request_selection(Request {
+        feature: Feature::Sky,
+        target: Target::Component {
+            mask: 0,
+            op: crate::model::masks::MaskOp::Add,
+        },
+    });
+    let done = next_selection(e);
+    assert!(done.result.is_ok(), "{:?}", done.result);
+    e.selection_done(*done);
+    assert_eq!(e.document.edit.recipe().masks[0].components.len(), 2);
+}
+
+#[test]
+fn a_remote_worker_that_is_gone_or_slow_fails_like_a_missing_runtime() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    // Nothing listens here.
+    with_remote(e, "127.0.0.1:1");
+    e.request_selection(SUBJECT);
+    let done = next_selection(e);
+    e.selection_done(*done);
+    let (_, failure) = e.selection.failure.clone().unwrap();
+    assert!(
+        matches!(failure, Failure::RuntimeUnavailable(_)),
+        "{failure:?}"
+    );
+    assert_eq!(e.document.edit.recipe().masks.len(), 0);
+}
+
+#[test]
+fn a_cancelled_or_superseded_remote_answer_applies_nothing() {
+    let mut f = fixture();
+    let e = &mut f.editor;
+    let remote = Remote::starting([10; 12], 20);
+    with_remote(e, &remote.endpoint);
+    e.request_selection(SUBJECT);
+    e.cancel_selection();
+    // The worker's answer, late by one click, is dropped as stale like a local
+    // one: nothing is applied, nothing is kept, the drawer moves on.
+    let done = next_selection(e);
+    e.selection_done(*done);
+    assert_eq!(e.document.edit.recipe().masks.len(), 0);
+    assert!(e.selection.pending.is_none());
+    assert_eq!(e.status, "Selection cancelled");
+}
+
 #[test]
 fn the_drawer_draws_in_every_state_a_selection_can_be_in() {
     let mut f = fixture();
@@ -518,7 +702,8 @@ fn the_drawer_draws_in_every_state_a_selection_can_be_in() {
 }
 
 #[test]
-#[ignore = "needs RAWMAKASE_TEST_MODEL, RAWMAKASE_ORT_LIB and RAWMAKASE_TEST_RAW"]
+#[ignore = "needs RAWMAKASE_TEST_MODEL, RAWMAKASE_ORT_LIB and RAWMAKASE_TEST_RAW; with \
+            RAWMAKASE_REMOTE_ENDPOINT the same selection runs through the remote worker"]
 fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
     let model = std::path::PathBuf::from(std::env::var("RAWMAKASE_TEST_MODEL").unwrap());
     let raw = std::path::PathBuf::from(std::env::var("RAWMAKASE_TEST_RAW").unwrap());
@@ -547,7 +732,17 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
             cancel,
             image: image.clone(),
             recipe: e.document.edit.recipe().clone(),
-            model,
+            // With RAWMAKASE_REMOTE_ENDPOINT set, the same request runs
+            // through the remote worker instead of the local session: the
+            // proof that a selection asked over the wire lands as a mask.
+            endpoint: std::env::var("RAWMAKASE_REMOTE_ENDPOINT")
+                .ok()
+                .filter(|endpoint| !endpoint.is_empty()),
+            model: std::env::var("RAWMAKASE_REMOTE_ENDPOINT")
+                .ok()
+                .filter(|endpoint| !endpoint.is_empty())
+                .is_none()
+                .then_some(model),
             action: Action::Click(rawmakase_inference::Prompt {
                 points: vec![rawmakase_inference::Point {
                     x: 0.5,

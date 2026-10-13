@@ -3282,6 +3282,7 @@ dependencies = [
  "rawmakase-model",
  "rawmakase-native",
  "rawmakase-protocol",
+ "rawmakase-remote",
  "rayon",
  "rfd",
  "rmcp",
@@ -3433,6 +3434,17 @@ dependencies = [
 name = "rawmakase-protocol"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rawmakase-remote"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "image",
+ "rawmakase-inference",
  "serde",
  "serde_json",
 ]

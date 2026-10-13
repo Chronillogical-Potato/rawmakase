@@ -14,8 +14,9 @@ use crate::storage::bitmaps::Bitmap;
 use crate::storage::{FNV_OFFSET, fnv1a, mask_assets};
 use eframe::egui;
 use rawmakase_inference::{
-    Analysis, InferenceError, LoadOptions, Prompt, RgbImage, SUBJECT, Session, Subject,
+    Analysis, Coverage, InferenceError, LoadOptions, Prompt, RgbImage, SUBJECT, Session, Subject,
 };
+use rawmakase_remote::{ClientError, RemoteAnalysis, RemoteSession};
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -35,8 +36,10 @@ pub(super) struct Job {
     pub(super) cancel: Arc<AtomicBool>,
     pub(super) image: Arc<CameraImage>,
     pub(super) recipe: Recipe,
-    /// The model's folder.
-    pub(super) model: PathBuf,
+    /// The model's folder, when the selection runs on this computer.
+    pub(super) model: Option<PathBuf>,
+    /// The remote worker to ask instead, when one is configured.
+    pub(super) endpoint: Option<String>,
     pub(super) action: Action,
 }
 
@@ -140,11 +143,14 @@ fn run(inbox: mpsc::Receiver<Message>) {
     }
 }
 
-/// The loaded model and the embedding of the photo last selected on.
+/// The loaded model and the embedding of the photo last selected on. Over the
+/// remote endpoint, the worker's answer for the photo last asked about, so its
+/// clicks are answered from what it kept.
 #[derive(Default)]
 struct State {
     session: Option<Session>,
     analysis: Option<(String, Analysis)>,
+    remote_analysis: Option<(String, RemoteAnalysis)>,
 }
 
 fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
@@ -167,37 +173,9 @@ fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
         data: input.rgb8(),
     };
     let key = input_key(&rgb);
-    if state.session.is_none() {
-        state.session = Some(load(&job.model)?);
-    }
-    let session = state.session.as_mut().expect("loaded above");
-    if state.analysis.as_ref().is_none_or(|(k, _)| *k != key) {
-        state.analysis = None;
-        let analysis = session.analyze(&rgb, &job.cancel).map_err(failure)?;
-        state.analysis = Some((key.clone(), analysis));
-    }
-    let (_, analysis) = state.analysis.as_ref().expect("analysed above");
-    let (coverage, feature, nothing, input) = match &job.action {
-        Action::Auto(Feature::Sky) => (
-            analysis.sky().map_err(failure)?,
-            Feature::Sky,
-            Failure::NoSky,
-            prompt_key(&key, "sky", &Prompt::default()),
-        ),
-        Action::Auto(feature) => (
-            analysis.subject().map_err(failure)?,
-            *feature,
-            Failure::NoSubject,
-            prompt_key(&key, "subject", &Prompt::default()),
-        ),
-        Action::Click(prompt) => (
-            session
-                .segment(analysis.embedding(), prompt, &job.cancel)
-                .map_err(failure)?,
-            Feature::Subject,
-            Failure::NothingThere,
-            prompt_key(&key, "click", prompt),
-        ),
+    let (coverage, feature, nothing, input) = match &job.endpoint {
+        Some(endpoint) => select_remotely(endpoint, &rgb, &key, job, state)?,
+        None => select_locally(&rgb, &key, job, state)?,
     };
     if cancelled() {
         return Err(Failure::Cancelled);
@@ -227,6 +205,132 @@ fn select(job: &Job, state: &mut State) -> Result<Generated, Failure> {
     })
 }
 
+/// What the local models make of the photo, and the prompt on it.
+fn select_locally(
+    rgb: &RgbImage,
+    key: &str,
+    job: &Job,
+    state: &mut State,
+) -> Result<(Coverage, Feature, Failure, String), Failure> {
+    let Some(model) = &job.model else {
+        return Err(Failure::ModelMissing);
+    };
+    if state.session.is_none() {
+        state.session = Some(load(model)?);
+    }
+    let session = state.session.as_mut().expect("loaded above");
+    if state.analysis.as_ref().is_none_or(|(k, _)| *k != key) {
+        state.analysis = None;
+        let analysis = session.analyze(rgb, &job.cancel).map_err(failure)?;
+        state.analysis = Some((key.to_string(), analysis));
+    }
+    let (_, analysis) = state.analysis.as_ref().expect("analysed above");
+    Ok(match &job.action {
+        Action::Auto(Feature::Sky) => (
+            analysis.sky().map_err(failure)?,
+            Feature::Sky,
+            Failure::NoSky,
+            prompt_key(key, "sky", &Prompt::default()),
+        ),
+        Action::Auto(feature) => (
+            analysis.subject().map_err(failure)?,
+            *feature,
+            Failure::NoSubject,
+            prompt_key(key, "subject", &Prompt::default()),
+        ),
+        Action::Click(prompt) => (
+            session
+                .segment(analysis.embedding(), prompt, &job.cancel)
+                .map_err(failure)?,
+            Feature::Subject,
+            Failure::NothingThere,
+            prompt_key(key, "click", prompt),
+        ),
+    })
+}
+
+/// What the remote worker makes of the photo. The analysis it sent for this
+/// photo is kept, so its clicks are answered without asking it to look again;
+/// when it has forgotten the photo, it is asked once more.
+fn select_remotely(
+    endpoint: &str,
+    rgb: &RgbImage,
+    key: &str,
+    job: &Job,
+    state: &mut State,
+) -> Result<(Coverage, Feature, Failure, String), Failure> {
+    let session = RemoteSession::new(endpoint);
+    // The worker keeps the photo's analysis under its own name; the one it
+    // sent last is kept here, keyed the same way as a local one would be.
+    let analysed = |state: &mut State| {
+        if state
+            .remote_analysis
+            .as_ref()
+            .is_none_or(|(k, _)| *k != key)
+        {
+            state.remote_analysis = None;
+            let analysis = session.analyze(rgb, &job.cancel).map_err(remote_failure)?;
+            state.remote_analysis = Some((key.to_string(), analysis));
+        }
+        Ok(state
+            .remote_analysis
+            .as_ref()
+            .map(|(_, a)| a.clone())
+            .expect("analysed above"))
+    };
+    match &job.action {
+        Action::Auto(Feature::Sky) => {
+            let analysis = analysed(state)?;
+            Ok((
+                analysis.sky,
+                Feature::Sky,
+                Failure::NoSky,
+                prompt_key(key, "sky", &Prompt::default()),
+            ))
+        }
+        Action::Auto(_) => {
+            let analysis = analysed(state)?;
+            Ok((
+                analysis.subject,
+                Feature::Subject,
+                Failure::NoSubject,
+                prompt_key(key, "subject", &Prompt::default()),
+            ))
+        }
+        Action::Click(prompt) => {
+            let analysis = analysed(state)?;
+            let coverage = match session.segment(&analysis, prompt, &job.cancel) {
+                Ok(coverage) => coverage,
+                Err(ClientError::Expired) => {
+                    // The worker keeps only the last photos: ask once more.
+                    state.remote_analysis = None;
+                    let analysis = analysed(state)?;
+                    session
+                        .segment(&analysis, prompt, &job.cancel)
+                        .map_err(remote_failure)?
+                }
+                Err(e) => return Err(remote_failure(e)),
+            };
+            Ok((
+                coverage,
+                Feature::Subject,
+                Failure::NothingThere,
+                prompt_key(key, "click", prompt),
+            ))
+        }
+    }
+}
+
+/// What a remote answer means to the drawer.
+fn remote_failure(error: ClientError) -> Failure {
+    match error {
+        ClientError::Cancelled => Failure::Cancelled,
+        ClientError::Unavailable(why) => Failure::RuntimeUnavailable(why),
+        ClientError::Expired => Failure::Failed("the remote worker forgot this photo".into()),
+        ClientError::Failed(why) => Failure::Failed(format!("the remote worker: {why}")),
+    }
+}
+
 /// What the result was made from: the photo as the model saw it and the prompt.
 fn prompt_key(input: &str, what: &str, prompt: &Prompt) -> String {
     let mut text = format!("{input}|{what}");
@@ -250,6 +354,9 @@ fn load(model: &std::path::Path) -> Result<Session, Failure> {
         &LoadOptions {
             runtime_library,
             threads: None,
+            // Selections made on this computer run on its CPU, as before; the
+            // accelerators are the remote worker's concern.
+            provider: None,
         },
     )
     .map_err(failure)
@@ -291,4 +398,67 @@ pub(super) fn runtime_present() -> bool {
     dirs.iter()
         .any(|dir| names.iter().any(|name| dir.join(name).is_file()))
         || std::env::var_os(rawmakase_inference::RUNTIME_ENV).is_some_and(|v| !v.is_empty())
+}
+
+/// Where selections run, when the user has said they run elsewhere: the
+/// endpoint of a `rawmakase-remote-worker`, from `remote-inference.json` in
+/// this computer's data folder. Absent — the usual case — means the models run
+/// here, as always. See docs/remote-inference.md.
+///
+/// ```json
+/// { "endpoint": "127.0.0.1:8765" }
+/// ```
+#[derive(Default)]
+pub(in crate::app) struct RemoteConfig {
+    /// What the file said, and when: read again at most once a second, so the
+    /// drawer notices an edit without stat on every frame. Tests set this
+    /// directly.
+    seen: std::cell::Cell<Option<(std::time::Instant, Option<String>)>>,
+}
+
+impl RemoteConfig {
+    /// The endpoint to send selections to, if there is one.
+    pub(super) fn endpoint(&self) -> Option<String> {
+        match self.seen.take() {
+            Some((at, endpoint)) if at.elapsed() < Duration::from_secs(1) => {
+                self.seen.set(Some((at, endpoint.clone())));
+                endpoint
+            }
+            _ => {
+                let endpoint = read_endpoint();
+                self.seen
+                    .set(Some((std::time::Instant::now(), endpoint.clone())));
+                endpoint
+            }
+        }
+    }
+    /// Pretends the file said this, for the tests; the next real read wins.
+    #[cfg(test)]
+    pub(super) fn force(&self, endpoint: Option<&str>) {
+        self.seen.set(Some((
+            std::time::Instant::now(),
+            endpoint.map(str::to_string),
+        )));
+    }
+}
+
+/// The endpoint from the configuration file, when it is a usable one.
+/// `RAWMAKASE_REMOTE_ENDPOINT` says the same thing for one launch, without
+/// touching the file.
+fn read_endpoint() -> Option<String> {
+    if let Some(endpoint) = std::env::var_os("RAWMAKASE_REMOTE_ENDPOINT")
+        .map(|v| v.to_string_lossy().trim().to_string())
+        .filter(|text| !text.is_empty())
+    {
+        return Some(endpoint);
+    }
+    let path = crate::storage::local_data_dir().join("remote-inference.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("endpoint")?
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty() && !text.chars().any(char::is_whitespace))
+        .map(str::to_string)
 }

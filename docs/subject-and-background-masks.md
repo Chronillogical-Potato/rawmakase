@@ -818,5 +818,8 @@ Deliberate differences from the plan above:
   100–200 MB more to download and a second more per photo (ViTMatte's weights are
   also trained on Adobe's restricted Composition-1k). Not added.
 - The subject and sky choice is measured on a handful of photographs, not on the plan's
-  evaluation corpus; there is no faint-result threshold, no grow/shrink/feather and no
-  provider acceleration.
+  evaluation corpus; there is no faint-result threshold and no grow/shrink/feather.
+  Selections run on the CPU by default; the plan's acceleration option arrived as the
+  optional [remote worker](remote-inference.md), which may register CUDA or CoreML
+  where the runtime truly supports them, and selection over it is excluded from the
+  numbers above.

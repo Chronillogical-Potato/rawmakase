@@ -1,0 +1,26 @@
+[package]
+name = "rawmakase-remote"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+description = "Optional remote inference for RAWmakase's selection models: a small TCP worker that runs them where the GPU is, and the client the app talks to"
+license = "MIT"
+publish = false
+
+[dependencies]
+rawmakase-inference = { path = "../rawmakase-inference", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pixels and coverage ride inside the JSON frames as base64.
+base64 = "0.23"
+
+[dev-dependencies]
+# The real-photo test decodes an sRGB JPEG the caller names; the app itself
+# never decodes through this crate.
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+# Nothing beyond the above: the tests run the real server and client against a
+# fake engine on a loopback port.
+
+[[bin]]
+name = "rawmakase-remote-worker"
+path = "src/bin/worker.rs"
