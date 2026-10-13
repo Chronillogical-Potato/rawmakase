@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod ffi;
-use crate::camera_data::{CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata};
+use crate::camera_data::{CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata, Source};
 pub(crate) use ffi::Sensor;
 pub use ffi::{display_transform, srgb_profile, version};
 /// Runs `work` on a thread of its own at background priority: a lower
@@ -100,6 +100,7 @@ impl Raw {
             baseline_exposure: None,
             dng_neutral_calibration: None,
             dng_matrix_profile_signature: None,
+            source: Source::Raw,
             lens_profiles: Default::default(),
             lateral_ca: Default::default(),
             embedded_dcp: None,

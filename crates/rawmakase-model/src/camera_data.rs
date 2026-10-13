@@ -11,6 +11,21 @@ pub struct NeutralCalibration {
     pub signature: String,
 }
 
+/// What kind of file a photo's pixels come from: a camera RAW (LibRaw), or a
+/// rendered JPEG, PNG or TIFF decoded through its colour profile.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Source {
+    #[default]
+    Raw,
+    Rendered,
+}
+
+impl Source {
+    pub fn is_raw(&self) -> bool {
+        *self == Source::Raw
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,
@@ -83,6 +98,10 @@ pub struct Metadata {
     /// Signature of a DNG's matrix-only profile, retained when no forward profile parses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dng_matrix_profile_signature: Option<String>,
+    /// Raw unless the photo is a JPEG, PNG or TIFF. Raw is not written, so RAW
+    /// metadata keeps its saved form; metadata from earlier releases reads as Raw.
+    #[serde(default, skip_serializing_if = "Source::is_raw")]
+    pub source: Source,
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
     /// choices; rebuilt on open.
     #[serde(skip)]
@@ -97,6 +116,10 @@ pub struct Metadata {
     pub embedded_dcp: Option<std::sync::Arc<[u8]>>,
 }
 impl Metadata {
+    pub fn is_rendered(&self) -> bool {
+        self.source == Source::Rendered
+    }
+
     /// Adobe's default crop (DNG DefaultCrop, or the RAF header's crop, which is
     /// 2 px larger per side than LibRaw's), as `[left, top, width, height]`;
     /// ignored unless it fits the image.
@@ -210,4 +233,24 @@ pub struct CameraImage {
     pub fast: bool,
     pub scale_factor: f32,
     pub scale_clipped: u32,
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn metadata_saved_before_sources_reads_as_raw() {
+        // A Metadata serialised by an earlier release has no `source`.
+        let mut v = serde_json::to_value(Metadata::default()).unwrap();
+        v.as_object_mut().unwrap().remove("source");
+        let m: Metadata = serde_json::from_value(v).unwrap();
+        assert_eq!(m.source, Source::Raw);
+        assert!(!m.is_rendered());
+        let r = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        let back: Metadata = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+        assert!(back.is_rendered());
+    }
 }
