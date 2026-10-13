@@ -407,3 +407,42 @@ fn profiles_fit_under_the_names_adobe_uses() {
         "Google Pixel 7 Pro Wide Camera"
     ));
 }
+
+#[test]
+fn the_embedded_profile_passes_linear_prophoto_through() {
+    use crate::camera_data::Source;
+    for m in [
+        Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        },
+        Metadata {
+            source: Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        },
+    ] {
+        let p = CameraProfile::embedded(&m);
+        assert!(p.is_embedded());
+        assert!(p.ensure_camera(&m).is_ok());
+        for v in [
+            [0.0, 0.0, 0.0],
+            [0.18, 0.18, 0.18],
+            [0.9, 0.2, 0.05],
+            [1.0, 1.0, 1.0],
+        ] {
+            // camera_color then finish, as pixel.rs runs S1 and S4.
+            let rgb = p.camera_color(v, p.camera_matrix(6500.), 6500.);
+            let pro = mul(RGB_TO_PRO, rgb);
+            for c in 0..3 {
+                assert!((pro[c] - v[c]).abs() < 1e-5, "{v:?} -> {pro:?}");
+            }
+            let out = p.finish(pro);
+            let want = mul(PRO_TO_RGB, v);
+            for c in 0..3 {
+                assert!((out[c] - want[c]).abs() < 1e-5, "{v:?} -> {out:?}");
+            }
+        }
+    }
+}

@@ -660,7 +660,38 @@ const D65_TO_D50: Matrix = [
     [-0.0092345, 0.0150436, 0.7521316],
 ];
 const D65: [f32; 3] = [0.95047, 1., 1.08883];
+/// Lightroom's profile for rendered files.
+pub const EMBEDDED: &str = "Embedded";
 impl CameraProfile {
+    /// Lightroom's "Embedded" profile for rendered files: their pixels, already
+    /// linear ProPhoto, pass through unchanged (no matrix, tables or tone curve).
+    pub fn embedded(m: &Metadata) -> Self {
+        // camera RGB is linear ProPhoto D50, so XYZ_TO_PRO · forward = identity.
+        let forward = crate::color::inverse(XYZ_TO_PRO);
+        Self {
+            name: EMBEDDED.into(),
+            camera: format!("{} {}", m.make, m.model),
+            copyright: String::new(),
+            enhanced: None,
+            color1: None,
+            calibration_signature: String::new(),
+            matrix_calibration_signature: None,
+            color2: None,
+            forward1: forward,
+            forward2: forward,
+            kelvin1: 6504.,
+            kelvin2: 6504.,
+            hue1: None,
+            hue2: None,
+            look: None,
+            tone: vec![[0., 0.], [1., 1.]],
+            exposure: 0.,
+            black_render: BlackRender::None,
+        }
+    }
+    pub fn is_embedded(&self) -> bool {
+        self.name == EMBEDDED && self.color1.is_none() && self.look.is_none()
+    }
     /// The DNG rendering of a file that carries only a ColorMatrix: LibRaw's XYZ-to-camera
     /// matrix, no hue/look tables, and the published ACR 3 default tone curve. This is the
     /// neutral starting point when the user has imported no camera profile.

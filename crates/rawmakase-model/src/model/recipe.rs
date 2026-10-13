@@ -349,6 +349,23 @@ impl Recipe {
             ..Default::default()
         }
     }
+    /// A rendered file's starting edit, as Lightroom's for JPEG and TIFF: the
+    /// Embedded profile, no baseline exposure, Sharpening and Color noise
+    /// reduction at 0, white balance as shot.
+    pub fn for_rendered(m: &Metadata) -> Self {
+        Self {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(m),
+            )),
+            sharpening: 0.,
+            noise_chroma: 0.,
+            camera_exposure: 0.,
+            temperature: 6500.,
+            tint: 0.,
+            wb: [1.; 3],
+            ..Self::default()
+        }
+    }
     /// Lightroom's Adobe Default: the settings a photo starts from.
     pub fn with_profiles(
         m: &Metadata,
@@ -362,6 +379,9 @@ impl Recipe {
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
         preference: ProfilePreference,
     ) -> Self {
+        if m.is_rendered() {
+            return Self::for_rendered(m);
+        }
         let mut recipe = Self::for_metadata(m);
         let find = |name: &str| {
             profiles
@@ -898,5 +918,24 @@ mod tests {
             (local.retouch.len(), local.red_eye.len(), local.masks.len()),
             (1, 1, 1)
         );
+    }
+
+    #[test]
+    fn a_rendered_photo_starts_from_lightrooms_non_raw_defaults() {
+        use crate::camera_data::Source;
+        let m = Metadata {
+            source: Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        };
+        let r = Recipe::with_profile_preference(&m, &[], ProfilePreference::Camera);
+        assert!(r.profile.as_ref().unwrap().is_embedded());
+        assert_eq!(
+            (r.sharpening, r.noise_chroma, r.camera_exposure),
+            (0., 0., 0.)
+        );
+        assert!(r.validate().is_ok());
+        assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
     }
 }

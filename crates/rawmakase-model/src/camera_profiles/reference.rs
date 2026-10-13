@@ -4,8 +4,11 @@
 //! Per-camera baseline exposures live in data/cameras.toml (crate::cameras).
 use crate::camera_data::{HighlightTonePriority, Metadata};
 /// Camera Raw's default exposure for this photo: a DNG's own BaselineExposure,
-/// otherwise the camera table's value (data/cameras.toml).
+/// otherwise the camera table's value (data/cameras.toml). A rendered file has none.
 pub fn baseline_exposure(m: &Metadata) -> f32 {
+    if m.is_rendered() {
+        return 0.;
+    }
     if let Some(dng) = m.baseline_exposure {
         return dng;
     }
