@@ -105,6 +105,10 @@ enum Command {
         /// Apply Auto white balance, as the WB menu's Auto does (before --auto).
         #[arg(long)]
         auto_wb: bool,
+        /// Write the photo at a stage of the pipeline instead, as a 32-bit float TIFF
+        /// of linear ProPhoto RGB at full size (docs/scene-tone-stage.md).
+        #[arg(long, value_enum)]
+        tap: Option<Tap>,
     },
     /// Print each file's decode fingerprint as a line of JSON: what opening and
     /// unpacking it yields, for decode regression checks.
@@ -117,6 +121,12 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         iterations: usize,
     },
+}
+/// A stage `render --tap` writes.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum Tap {
+    SceneInput,
+    SceneOutput,
 }
 /// A windows-subsystem program starts without a console, so commands run from
 /// a terminal would print nothing. Writes to that terminal instead, unless the
@@ -326,6 +336,7 @@ fn main() -> Result<()> {
             recipe,
             auto,
             auto_wb,
+            tap,
         }) => {
             let t = Instant::now();
             let r = rawmakase::photo::open(&input)?;
@@ -348,10 +359,6 @@ fn main() -> Result<()> {
                 edit.profile = Some(rawmakase::camera_profiles::load(&p, &r.metadata)?);
                 // A chosen profile starts at 100%, as in the app.
                 edit.profile_amount = 1.;
-                edit.engine = edit.engine.max(3);
-                edit.profile_tone = true;
-                edit.reference_curves = true;
-                edit.wide_gamut_curves = true;
                 edit.use_camera_baseline(&r.metadata);
                 edit.sync_white_balance_controls(&r.metadata);
             }
@@ -404,6 +411,16 @@ fn main() -> Result<()> {
             if let Some(path) = save_recipe {
                 anyhow::ensure!(!path.exists(), "Recipe output already exists");
                 rawmakase::presets::save_preset(&path, &edit)?;
+            }
+            if let Some(tap) = tap {
+                let stage = match tap {
+                    Tap::SceneInput => develop::quality::Stage::SceneInput,
+                    Tap::SceneOutput => develop::quality::Stage::SceneOutput,
+                };
+                let out =
+                    develop::quality::render_stage(&im, &edit, stage, &AtomicBool::new(false))?;
+                save_stage(&output, &input, out, overwrite)?;
+                return Ok(());
             }
             let developed = t.elapsed();
             let out = develop::render(&im, &edit.checked()?, max_edge)?;
@@ -575,4 +592,83 @@ fn sync_folder(
         anyhow::bail!("Adding the new files failed: {e:#}");
     }
     Ok(())
+}
+
+/// Writes a stage tap as a 32-bit float TIFF at `output`, with an export's
+/// protections: never over a RAW file or the `input` it was rendered from, never over
+/// an existing file unless `overwrite`, and encoded beside it before being put in
+/// place, so a failed write leaves the destination as it was.
+fn save_stage(
+    output: &std::path::Path,
+    input: &std::path::Path,
+    out: rawmakase::rendered::Rendered,
+    overwrite: bool,
+) -> Result<()> {
+    use rawmakase::storage::{Replace, is_raw, write_atomic};
+    anyhow::ensure!(!is_raw(output), "A stage tap cannot overwrite a RAW file");
+    if output.exists() {
+        anyhow::ensure!(
+            std::fs::canonicalize(output)? != std::fs::canonicalize(input)?,
+            "Cannot overwrite the source"
+        );
+        anyhow::ensure!(overwrite, "Output already exists");
+    }
+    let image = image::Rgb32FImage::from_raw(
+        out.width,
+        out.height,
+        out.pixels.into_iter().flatten().collect(),
+    )
+    .ok_or_else(|| anyhow::anyhow!("Stage image has the wrong size"))?;
+    let replace = if overwrite {
+        Replace::Overwrite
+    } else {
+        Replace::NoClobber
+    };
+    write_atomic(output, replace, |file| {
+        // Flushed here, so a failed last write fails the tap instead of being lost when
+        // the writer is dropped.
+        let mut writer = std::io::BufWriter::new(file);
+        image.write_to(&mut writer, image::ImageFormat::Tiff)?;
+        std::io::Write::flush(&mut writer)?;
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tap() -> rawmakase::rendered::Rendered {
+        rawmakase::rendered::Rendered {
+            width: 2,
+            height: 1,
+            pixels: vec![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+        }
+    }
+
+    #[test]
+    fn stage_taps_never_replace_raws_their_source_or_unasked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("photo.dng");
+        std::fs::write(&raw, b"raw bytes").unwrap();
+        // Over the RAW it was rendered from, with or without --overwrite.
+        for overwrite in [false, true] {
+            assert!(save_stage(&raw, &raw, tap(), overwrite).is_err());
+            assert_eq!(std::fs::read(&raw).unwrap(), b"raw bytes");
+        }
+        // Over the source under a non-RAW name.
+        let source = dir.path().join("source.tif");
+        std::fs::write(&source, b"source").unwrap();
+        assert!(save_stage(&source, &source, tap(), true).is_err());
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+        // An existing file only with --overwrite.
+        let output = dir.path().join("tap.tif");
+        std::fs::write(&output, b"old").unwrap();
+        assert!(save_stage(&output, &raw, tap(), false).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"old");
+        save_stage(&output, &raw, tap(), true).unwrap();
+        let written = image::open(&output).unwrap().to_rgb32f();
+        assert_eq!(written.dimensions(), (2, 1));
+        assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
+    }
 }

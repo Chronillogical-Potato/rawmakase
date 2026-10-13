@@ -26,6 +26,7 @@ mod edit_records;
 mod edit_rows;
 mod edits;
 pub mod folder_sync;
+mod format_upgrade;
 mod info;
 mod ingest;
 pub mod legacy_sidecar;
@@ -369,6 +370,8 @@ mod checksums_tests;
 mod descriptive_tests;
 #[cfg(test)]
 mod edit_rows_tests;
+#[cfg(test)]
+mod format_upgrade_tests;
 #[cfg(test)]
 mod ingest_tests;
 #[cfg(test)]

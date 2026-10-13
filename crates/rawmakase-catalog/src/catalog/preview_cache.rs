@@ -15,12 +15,14 @@ use std::{
 const APP_ID: i64 = 0x4f4d5052;
 const VERSION: i64 = 1;
 // 2: previews keep their aspect ratio (generation 1 forced 360×240).
-const GENERATION: i64 = 2;
-// 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile. A RAW's
-// previews did not change, so they stay generation 2 and are not made again.
-const RASTER_GENERATION: i64 = 3;
+// 3: the one engine renders every edit differently from earlier releases.
+const GENERATION: i64 = 3;
+// 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
+// 4: the one engine, as `GENERATION` 3.
+const RASTER_GENERATION: i64 = 4;
 const LIMIT: i64 = 512 * 1024 * 1024;
-const SIZED_GENERATION: i64 = 1;
+// 2: the one engine, as `GENERATION` 3.
+const SIZED_GENERATION: i64 = 2;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.
@@ -606,11 +608,17 @@ mod tests {
         for path in [&raw, &jpeg] {
             cache.store(path, &Stamp::read(path)?, &im)?;
         }
-        // Rows as a build that ignored a JPEG's ICC profile left them.
-        cache.db.execute("UPDATE previews SET generation=2", [])?;
+        // A JPEG's row as a build that ignored its ICC profile left it.
+        cache.db.execute(
+            "UPDATE previews SET generation=2 WHERE source_path=?1",
+            [jpeg.to_string_lossy()],
+        )?;
         assert!(cache.load(&jpeg)?.is_none());
-        // A RAW's embedded thumbnail did not change, so it is kept.
+        // A RAW's current row is kept.
         assert!(cache.load(&raw)?.is_some());
+        // A RAW's row from before the one engine is made again.
+        cache.db.execute("UPDATE previews SET generation=2", [])?;
+        assert!(cache.load(&raw)?.is_none());
         cache.store(&jpeg, &Stamp::read(&jpeg)?, &im)?;
         assert!(cache.load(&jpeg)?.is_some());
         Ok(())
