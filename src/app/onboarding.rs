@@ -680,8 +680,10 @@ impl Editor {
                     {
                         self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx);
                     }
-                    ui.add_space(14.);
-                    hint(ui, "Or drag a folder onto this window.");
+                    if crate::platform::accepts_dropped_files() {
+                        ui.add_space(14.);
+                        hint(ui, "Or drag a folder onto this window.");
+                    }
                 } else {
                     if primary(ui, default_catalog_label(&default))
                         .on_hover_text(pretty_path(&default))
