@@ -69,10 +69,6 @@ impl Editor {
         let click = self.develop_rail(ui, self.develop_tabs_open());
         match click {
             Some(TabClick::Open(tab)) => {
-                // A tab in place of a tool's drawer ends the tool.
-                if has_drawer(self.view.tool) {
-                    self.view.toggle(self.view.tool);
-                }
                 self.set_develop_tab(tab);
                 self.open_develop_tabs();
             }
@@ -96,9 +92,13 @@ impl Editor {
         });
         self.panel_shown(WorkspacePanel::Presets) && (room || peek)
     }
-    /// Opens the tab panel, in a narrow window too; false if the layout
-    /// could not be saved.
+    /// Opens the tab panel on its tab, in a narrow window too, ending a
+    /// tool whose drawer had its place; false if the layout could not be
+    /// saved.
     fn open_develop_tabs(&mut self) -> bool {
+        if has_drawer(self.view.tool) {
+            self.view.toggle(self.view.tool);
+        }
         let room = self
             .context
             .data(|d| d.get_temp::<bool>(room_id()).unwrap_or(true));
@@ -124,11 +124,11 @@ impl Editor {
             self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets))
         }
     }
-    /// Folds the tab panel if it shows, or opens it, as its open tab's rail
-    /// button and the others do: for `panels:presets`. False if the layout
-    /// could not be saved.
+    /// Folds the tab panel if its tab shows, or opens it (in place of a
+    /// tool's drawer too), as its open tab's rail button and the others do:
+    /// for `panels:presets`. False if the layout could not be saved.
     pub(super) fn toggle_develop_tabs(&mut self) -> bool {
-        if self.develop_tabs_open() {
+        if self.develop_tabs_open() && !has_drawer(self.view.tool) {
             self.fold_develop_tabs()
         } else {
             self.open_develop_tabs()

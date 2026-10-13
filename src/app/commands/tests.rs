@@ -795,6 +795,13 @@ fn panels_presets_opens_develops_tab_panel_in_a_narrow_window_as_the_rail_does()
     run(&mut e);
     assert!(!frame(&mut e), "and folds it again");
     assert!(e.panel_shown(WorkspacePanel::Presets));
+    // Over a tool's drawer it shows the tab, ending the tool, as a tab's
+    // rail button does.
+    e.view.tool = crate::app::state::Tool::Crop;
+    assert!(frame(&mut e), "Crop's drawer opens the panel");
+    run(&mut e);
+    assert_eq!(e.view.tool, crate::app::state::Tool::None);
+    assert!(frame(&mut e), "the tab shows in its place");
 }
 #[test]
 fn panel_actions_hide_the_open_modules_panels_and_state_reports_them() {
