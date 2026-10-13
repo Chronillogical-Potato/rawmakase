@@ -1797,57 +1797,14 @@ fn drawer_caption(ui: &mut egui::Ui, name: &str) {
 pub(super) fn has_drawer(tool: Tool) -> bool {
     DRAWER_TOOLS.iter().any(|(t, ..)| *t == tool)
 }
-/// A drawer tool's icon, centred on `c`, bright while `strong`.
-pub(super) fn paint_tool_icon(painter: &egui::Painter, tool: Tool, c: Pos2, strong: bool) {
+/// A drawer tool's icon on the rail, a Lucide outline as its tabs' are.
+pub(super) fn tool_icon(tool: Tool) -> Icon {
     match tool {
-        Tool::Crop => crop_icon(painter, c, strong),
-        Tool::Remove => heal_icon(painter, c, strong),
-        Tool::RedEye => eye_icon(painter, c, strong),
-        _ => mask_icon(painter, c, strong),
+        Tool::Crop => Icon::Crop,
+        Tool::Remove => Icon::Bandage,
+        Tool::RedEye => Icon::Eye,
+        _ => Icon::MaskTool,
     }
-}
-/// A circle with an arrow leaving it: the Remove tool.
-fn heal_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let stroke = Stroke::new(
-        1.4,
-        theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 }),
-    );
-    painter.circle_stroke(c + Vec2::new(-2., 2.), 4.5, stroke);
-    painter.line_segment([c + Vec2::new(1.5, -1.5), c + Vec2::new(6., -6.)], stroke);
-    painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(2.5, -6.)], stroke);
-    painter.line_segment([c + Vec2::new(6., -6.), c + Vec2::new(6., -2.5)], stroke);
-}
-/// An eye: the Red Eye tool.
-fn eye_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
-    let stroke = Stroke::new(1.4, color);
-    let lid = |sign: f32| -> Vec<Pos2> {
-        (0..=12)
-            .map(|i| {
-                let t = i as f32 / 12. * std::f32::consts::PI;
-                c + Vec2::new(-6.5 * t.cos(), sign * 4. * t.sin())
-            })
-            .collect()
-    };
-    painter.add(egui::Shape::line(lid(1.), stroke));
-    painter.add(egui::Shape::line(lid(-1.), stroke));
-    painter.circle_filled(c, 2.2, color);
-}
-/// A dashed circle over a square: the Masking tool.
-fn mask_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
-    let stroke = Stroke::new(1.4, color);
-    painter.rect_stroke(
-        Rect::from_center_size(c, Vec2::splat(12.)),
-        1.,
-        stroke,
-        egui::StrokeKind::Inside,
-    );
-    painter.circle_filled(c + Vec2::new(1., 1.), 3.5, color);
-}
-fn crop_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::palette(painter.ctx()).gray(if strong { 240 } else { 170 });
-    icons::paint_at(painter, Icon::Crop, c, 15., color);
 }
 
 /// A small note aligned with the slider rails.

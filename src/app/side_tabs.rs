@@ -6,7 +6,7 @@
 //! tab or tool is asked for.
 use super::Editor;
 use super::icons::{self, Icon};
-use super::inspector::{DRAWER_TOOLS, has_drawer, paint_tool_icon};
+use super::inspector::{DRAWER_TOOLS, has_drawer, tool_icon};
 use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
 use super::state::Tool;
 use super::theme;
@@ -195,48 +195,49 @@ impl Editor {
                 ui.allocate_rect(rail, Sense::hover());
                 // A rail button: its fill, the open one's marker on the
                 // window's edge, and whether it was clicked.
-                let button = |ui: &mut egui::Ui,
-                              y: f32,
-                              id: egui::Id,
-                              active: bool,
-                              enabled: bool,
-                              tip: String,
-                              paint: &dyn Fn(&egui::Painter, Pos2, egui::Color32, bool)| {
-                    let center = Pos2::new(rail.center().x, rail.top() + y);
-                    let rect = Rect::from_center_size(center, Vec2::splat(28.));
-                    let sense = if enabled {
-                        Sense::click()
-                    } else {
-                        Sense::hover()
+                let button =
+                    |ui: &mut egui::Ui,
+                     y: f32,
+                     id: egui::Id,
+                     active: bool,
+                     enabled: bool,
+                     tip: String,
+                     paint: &dyn Fn(&egui::Painter, Pos2, egui::Color32)| {
+                        let center = Pos2::new(rail.center().x, rail.top() + y);
+                        let rect = Rect::from_center_size(center, Vec2::splat(28.));
+                        let sense = if enabled {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        };
+                        let response = ui
+                            .interact(rect, id, sense)
+                            .on_hover_text(tip)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        let hovered = enabled && response.hovered();
+                        if active || hovered {
+                            let fill = palette.gray(if active { 54 } else { 44 });
+                            ui.painter().rect_filled(rect, 6., fill);
+                        }
+                        if active {
+                            ui.painter().rect_filled(
+                                Rect::from_min_size(
+                                    Pos2::new(rail.right() - 2., rect.top() + 7.),
+                                    Vec2::new(2., rect.height() - 14.),
+                                ),
+                                1.,
+                                palette.accent(),
+                            );
+                        }
+                        let tint = palette.gray(match (enabled, active, hovered) {
+                            (false, ..) => 80,
+                            (_, true, _) => 245,
+                            (_, _, true) => 230,
+                            _ => 145,
+                        });
+                        paint(ui.painter(), center, tint);
+                        response.clicked()
                     };
-                    let response = ui
-                        .interact(rect, id, sense)
-                        .on_hover_text(tip)
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    let hovered = enabled && response.hovered();
-                    if active || hovered {
-                        let fill = palette.gray(if active { 54 } else { 44 });
-                        ui.painter().rect_filled(rect, 6., fill);
-                    }
-                    if active {
-                        ui.painter().rect_filled(
-                            Rect::from_min_size(
-                                Pos2::new(rail.right() - 2., rect.top() + 7.),
-                                Vec2::new(2., rect.height() - 14.),
-                            ),
-                            1.,
-                            palette.accent(),
-                        );
-                    }
-                    let tint = palette.gray(match (enabled, active, hovered) {
-                        (false, ..) => 80,
-                        (_, true, _) => 245,
-                        (_, _, true) => 230,
-                        _ => 145,
-                    });
-                    paint(ui.painter(), center, tint, active || hovered);
-                    response.clicked()
-                };
                 let mut y = 24.;
                 for (tab, icon, name) in TABS {
                     let active = open && !has_drawer(tool) && self.panels.develop_tab == tab;
@@ -245,7 +246,7 @@ impl Editor {
                     } else {
                         format!("Show {name}")
                     };
-                    let paint = |p: &egui::Painter, c: Pos2, tint: egui::Color32, _: bool| {
+                    let paint = |p: &egui::Painter, c: Pos2, tint: egui::Color32| {
                         icons::paint_at(p, icon, c, 16., tint)
                     };
                     if button(ui, y, rail_id(tab), active, true, tip, &paint) {
@@ -260,8 +261,8 @@ impl Editor {
                 // The tools after a gap, their drawers in the panel.
                 y += 14.;
                 for (t, tip, _) in DRAWER_TOOLS {
-                    let paint = |p: &egui::Painter, c: Pos2, _: egui::Color32, strong: bool| {
-                        paint_tool_icon(p, t, c, strong)
+                    let paint = |p: &egui::Painter, c: Pos2, tint: egui::Color32| {
+                        icons::paint_at(p, tool_icon(t), c, 16., tint)
                     };
                     let id = egui::Id::new(("develop-rail-tool", tip));
                     if button(ui, y, id, tool == t, photo, tip.to_string(), &paint) {

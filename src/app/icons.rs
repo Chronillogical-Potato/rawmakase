@@ -31,6 +31,8 @@ fastframe_icons::icons! {
         LoupeView => "square",
         SurveyView => "layout-dashboard",
         Presets => "layers",
+        Bandage => "bandage",
+        MaskTool => "circle-dot-dashed",
         History => "history",
         Settings => lucide "settings",
         Close => lucide "x",
