@@ -99,9 +99,9 @@ pub(super) fn folder_tree_row(
         );
     }
     let indent = depth.min(12) as f32 * 14.;
-    // Triangle in the gutter, folder icon at the same 10 px inset as the
-    // Catalog rows' text.
-    let x = rect.left() + indent + 3.;
+    // The chevron in the gutter, starting at the Catalog rows' 10 px inset
+    // under a drive's dot; the folder icon under the drive's name.
+    let x = rect.left() + indent + 12.;
     let y = rect.center().y;
     if !node.children.is_empty() {
         let chevron = if open {

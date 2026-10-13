@@ -1,12 +1,12 @@
 use super::Editor;
 use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
-use super::widgets::{section, segmented};
+use super::widgets::segmented;
 use super::worker::Event;
 use crate::app::theme;
 use crate::model::recipe::Recipe;
 use anyhow::Context as _;
-use eframe::egui::{self, Sense, Stroke, Vec2};
+use eframe::egui::{self, Sense, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -96,84 +96,86 @@ impl Editor {
             .id_salt("preset-list")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                section(ui, "Presets", false, |ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(4., 4.);
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.presets.filter)
-                                .hint_text("Search presets")
-                                .font(egui::FontId::proportional(12.))
-                                .desired_width(ui.available_width() - 26.),
-                        );
-                        let (rect, response) =
-                            ui.allocate_exact_size(Vec2::splat(22.), Sense::click());
-                        let color = palette.gray(if response.hovered() { 235 } else { 160 });
-                        if response.hovered() {
-                            ui.painter().rect_filled(rect, 3., palette.gray(50));
+                ui.scope(|ui| {
+                    ui.spacing_mut().item_spacing = Vec2::new(4., 8.);
+                    // The caption names the tab, with how many presets fit
+                    // this camera and the import menu at its right.
+                    let caption = super::widgets::panel_caption(ui, "Presets");
+                    let add = egui::Rect::from_center_size(
+                        egui::pos2(caption.right() - 14., caption.center().y),
+                        Vec2::splat(22.),
+                    );
+                    let response = ui.interact(add, ui.id().with("preset-import"), Sense::click());
+                    if response.hovered() {
+                        ui.painter().rect_filled(add, 4., palette.gray(44));
+                    }
+                    let tint = palette.gray(if response.hovered() { 235 } else { 150 });
+                    crate::app::icons::paint_at(
+                        ui.painter(),
+                        crate::app::icons::Icon::Add,
+                        add.center(),
+                        13.,
+                        tint,
+                    );
+                    let response = response
+                        .on_hover_text("Import Lightroom presets (.xmp)")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    egui::Popup::menu(&response).show(|ui| {
+                        ui.set_min_width(190.);
+                        if ui
+                            .add(egui::Button::new("Import Presets…").frame(false))
+                            .on_hover_text("Choose one or more .xmp presets")
+                            .clicked()
+                        {
+                            import = Some(FileDialog::ImportXmp);
+                            ui.close();
                         }
-                        crate::app::icons::paint_at(
-                            ui.painter(),
-                            crate::app::icons::Icon::Add,
-                            rect.center(),
-                            14.,
-                            color,
-                        );
-                        let response = response.on_hover_text("Import Lightroom presets (.xmp)");
-                        egui::Popup::menu(&response).show(|ui| {
-                            ui.set_min_width(190.);
-                            if ui
-                                .add(egui::Button::new("Import Presets…").frame(false))
-                                .on_hover_text("Choose one or more .xmp presets")
-                                .clicked()
-                            {
-                                import = Some(FileDialog::ImportXmp);
-                                ui.close();
-                            }
-                            if ui
-                                .add(egui::Button::new("Import Folder…").frame(false))
-                                .on_hover_text("Import every preset in a folder and its subfolders")
-                                .clicked()
-                            {
-                                import = Some(FileDialog::ImportFolder(ImportKind::Presets));
-                                ui.close();
-                            }
-                        });
+                        if ui
+                            .add(egui::Button::new("Import Folder…").frame(false))
+                            .on_hover_text("Import every preset in a folder and its subfolders")
+                            .clicked()
+                        {
+                            import = Some(FileDialog::ImportFolder(ImportKind::Presets));
+                            ui.close();
+                        }
                     });
+                    super::widgets::search_field(ui, &mut self.presets.filter, "Search presets");
                     let mut show = match (self.presets.favorites_only, self.presets.compatible_only)
                     {
                         (true, _) => 1,
                         (false, true) => 2,
                         _ => 0,
                     };
+                    // Each filter with how many presets it shows: Compatible,
+                    // those that fit this camera's photo.
+                    let total = library.presets.len();
+                    let favorites = library
+                        .presets
+                        .iter()
+                        .filter(|p| self.presets.favorites.contains(&p.id))
+                        .count();
+                    let fit = self.presets.issues.iter().filter(|e| e.is_none()).count();
+                    let labels = [
+                        format!("All {total}"),
+                        format!("Favorites {favorites}"),
+                        // Nothing to fit without a photo.
+                        if self.document.metadata.is_some() {
+                            format!("Compatible {fit}")
+                        } else {
+                            "Compatible".into()
+                        },
+                    ];
                     let w = ui.available_width();
                     if segmented(
                         ui,
                         &mut show,
-                        &[(0, "All"), (1, "Favorites"), (2, "Compatible")],
+                        &[(0, &labels[0]), (1, &labels[1]), (2, &labels[2])],
                         w,
                     ) {
                         self.presets.favorites_only = show == 1;
                         self.presets.compatible_only = show == 2;
                     }
                     self.preset_amount_ui(ui);
-                    let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
-                    // One line whatever the count, so switching photos never
-                    // moves the list below.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(if self.document.metadata.is_some() {
-                                format!(
-                                    "{available} of {} presets fit this camera",
-                                    library.presets.len()
-                                )
-                            } else {
-                                format!("{} presets", library.presets.len())
-                            })
-                            .size(10.)
-                            .color(palette.gray(125)),
-                        )
-                        .truncate(),
-                    );
                     if !library.errors.is_empty() {
                         ui.label(
                             egui::RichText::new(format!(
@@ -185,14 +187,17 @@ impl Editor {
                         )
                         .on_hover_text(library.errors.join("\n"));
                     }
-                    ui.add_space(2.);
                     let groups = self.preset_list();
                     if groups.is_empty() && !library.presets.is_empty() {
-                        ui.weak("No presets match these filters.");
-                        if ui.small_button("Clear filters").clicked() {
-                            self.presets.filter.clear();
-                            self.presets.favorites_only = false;
-                            self.presets.compatible_only = false;
+                        let empty = EmptyList::of(&self.presets, favorites);
+                        if empty_state(ui, &empty) {
+                            match empty.action {
+                                EmptyAction::ClearSearch => self.presets.filter.clear(),
+                                EmptyAction::ShowAll => {
+                                    self.presets.favorites_only = false;
+                                    self.presets.compatible_only = false;
+                                }
+                            }
                         }
                     }
                     ui.spacing_mut().item_spacing.y = 0.;
@@ -309,8 +314,6 @@ impl Editor {
                         }
                     }
                 });
-                self.snapshots_section(ui);
-                self.history_section(ui);
             });
         if let Some(dialog) = import {
             self.dialog(dialog, &ui.ctx().clone());
@@ -673,6 +676,84 @@ fn preset_detail(
     }
 }
 
+/// Why the preset list shows nothing, and the one step that brings presets
+/// back.
+struct EmptyList {
+    title: String,
+    detail: &'static str,
+    action: EmptyAction,
+}
+#[derive(Clone, Copy)]
+enum EmptyAction {
+    ClearSearch,
+    ShowAll,
+}
+impl EmptyList {
+    /// For a list emptied by the browser's search and filters; `favorites`
+    /// is how many favorites there are.
+    fn of(browser: &super::state::PresetBrowser, favorites: usize) -> Self {
+        let query = browser.filter.trim();
+        if browser.favorites_only && favorites == 0 {
+            Self {
+                title: "No favorites yet".into(),
+                detail: "Hover a preset and click its \u{2605} to keep it here.",
+                action: EmptyAction::ShowAll,
+            }
+        } else if !query.is_empty() {
+            Self {
+                title: format!("No presets match \u{201c}{query}\u{201d}"),
+                detail: if browser.favorites_only {
+                    "Searched your favorites only."
+                } else if browser.compatible_only {
+                    "Searched the presets that fit this camera only."
+                } else {
+                    "Try another name or group."
+                },
+                action: EmptyAction::ClearSearch,
+            }
+        } else {
+            Self {
+                title: "No presets fit this camera".into(),
+                detail: "Compatible shows the presets this photo can take in full.",
+                action: EmptyAction::ShowAll,
+            }
+        }
+    }
+}
+/// The empty list's message, centred, with its action as a button; returns
+/// whether the button was clicked.
+fn empty_state(ui: &mut egui::Ui, empty: &EmptyList) -> bool {
+    let palette = theme::palette(ui.ctx());
+    let mut clicked = false;
+    ui.add_space(20.);
+    ui.vertical_centered(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.;
+        ui.label(
+            egui::RichText::new(&empty.title)
+                .size(12.5)
+                .color(palette.gray(215)),
+        );
+        ui.label(
+            egui::RichText::new(empty.detail)
+                .size(11.)
+                .color(palette.gray(130)),
+        );
+        ui.add_space(6.);
+        let label = match empty.action {
+            EmptyAction::ClearSearch => "Clear Search",
+            EmptyAction::ShowAll => "Show All Presets",
+        };
+        clicked = ui
+            .add(
+                egui::Button::new(egui::RichText::new(label).size(12.))
+                    .corner_radius(6.)
+                    .min_size(Vec2::new(140., 26.)),
+            )
+            .clicked();
+    });
+    clicked
+}
+
 /// A Lightroom-style list row for preset folders and presets: fixed height,
 /// indent, optional disclosure triangle and right-aligned count.
 fn list_row(
@@ -687,46 +768,34 @@ fn list_row(
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2};
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     // Scrolled out of view: keep its place but skip laying out its text.
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    if selected || (enabled && response.hovered()) {
-        ui.painter().rect_filled(
-            rect,
-            2.,
-            if selected {
-                palette.selected_row()
-            } else {
-                palette.gray(43)
-            },
-        );
+    let hovered = enabled && response.hovered();
+    if selected || hovered {
+        let fill = if selected {
+            palette.selected_row()
+        } else {
+            palette.gray(34)
+        };
+        ui.painter().rect_filled(rect, 4., fill);
     }
-    let x = rect.left() + 8. + depth as f32 * 16.;
+    // A group's chevron as the folder tree's; a preset's name under the
+    // group's.
+    let x = rect.left() + 10. + depth as f32 * 14.;
     let y = rect.center().y;
     if let Some(open) = open {
-        let c = Pos2::new(x + 3., y);
-        let triangle = if open {
-            vec![
-                c + Vec2::new(-4., -2.),
-                c + Vec2::new(4., -2.),
-                c + Vec2::new(0., 3.),
-            ]
+        let chevron = if open {
+            crate::app::icons::Icon::ChevronDown
         } else {
-            vec![
-                c + Vec2::new(-2., -4.),
-                c + Vec2::new(3., 0.),
-                c + Vec2::new(-2., 4.),
-            ]
+            crate::app::icons::Icon::ChevronRight
         };
-        ui.painter().add(egui::Shape::convex_polygon(
-            triangle,
-            palette.gray(140),
-            Stroke::NONE,
-        ));
+        let tint = palette.gray(if hovered { 200 } else { 140 });
+        crate::app::icons::paint_at(ui.painter(), chevron, Pos2::new(x, y), 11., tint);
     }
-    let text_left = x + if open.is_some() { 14. } else { 6. };
+    let text_left = x + if open.is_some() { 12. } else { 0. };
     let right = rect.right() - if count.is_some() { 36. } else { 26. };
     let galley = egui::WidgetText::from(text).into_galley(
         ui,
@@ -737,12 +806,10 @@ fn list_row(
     ui.painter().galley(
         Pos2::new(text_left, y - galley.size().y / 2.),
         galley,
-        palette.gray(if !enabled {
-            95
-        } else if selected {
-            240
-        } else {
-            195
+        palette.gray(match (enabled, selected || hovered) {
+            (false, _) => 95,
+            (true, true) => 240,
+            (true, false) => 200,
         }),
     );
     if let Some(count) = count {
@@ -750,151 +817,13 @@ fn list_row(
             Pos2::new(rect.right() - 10., y),
             Align2::RIGHT_CENTER,
             count.to_string(),
-            FontId::proportional(10.),
+            FontId::proportional(10.5),
             palette.gray(120),
         );
     }
     response
 }
 
-impl Editor {
-    /// Lightroom's History panel: this session's steps, newest first, over
-    /// the photo's imported Lightroom steps. Clicking a step of this session
-    /// goes back (or forward) to it; later steps stay until the next edit.
-    fn history_section(&mut self, ui: &mut egui::Ui) {
-        if self.document.metadata.is_none() {
-            return;
-        }
-        let mut go_to = None;
-        let mut to_before = None;
-        let mut lightroom = None;
-        let (steps, applied) = self.document.edit.history().steps();
-        // A click goes to the step; its menu copies it to Before, as in Lightroom.
-        let mut row = |ui: &mut egui::Ui, n: usize, name: &str, value: &str| {
-            let response = history_row(ui, name, value, n == applied, n > applied);
-            if response.clicked() && !super::widgets::context_clicked(&response) {
-                go_to = Some(n);
-            }
-            super::widgets::context_menu(&response, |ui| {
-                ui.set_width(270.);
-                if super::widgets::menu_item(
-                    ui,
-                    "Copy History Step Settings to Before",
-                    "",
-                    true,
-                    false,
-                ) {
-                    to_before = Some(n);
-                    ui.close();
-                }
-            });
-        };
-        section(ui, "History", false, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.;
-            for (i, step) in steps.iter().enumerate().rev() {
-                row(ui, i + 1, &step.name, &step.value);
-            }
-            let opened = if self.document.lightroom_history.is_empty() {
-                "Opened"
-            } else {
-                "Opened with Lightroom edit"
-            };
-            row(ui, 0, opened, "");
-            if self.document.lightroom_history.is_empty() {
-                return;
-            }
-            ui.add_space(10.);
-            ui.label(
-                egui::RichText::new("From Lightroom")
-                    .size(11.)
-                    .color(theme::palette(ui.ctx()).gray(125)),
-            );
-            ui.add_space(4.);
-            for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
-                let name = if step.name.is_empty() {
-                    "Edit"
-                } else {
-                    step.name.as_str()
-                };
-                let response = history_row(ui, name, "", false, false);
-                let response = match step.created {
-                    // Lightroom counts seconds from 2001-01-01 UTC.
-                    Some(s) => response
-                        .on_hover_text(format!("{} UTC", format_unix(s as i64 + 978_307_200))),
-                    None => response,
-                };
-                if response.clicked() && !super::widgets::context_clicked(&response) {
-                    lightroom = Some((i, LightroomStep::Apply));
-                }
-                super::widgets::context_menu(&response, |ui| {
-                    ui.set_width(270.);
-                    if super::widgets::menu_item(
-                        ui,
-                        "Copy History Step Settings to Before",
-                        "",
-                        true,
-                        false,
-                    ) {
-                        lightroom = Some((i, LightroomStep::ToBefore));
-                        ui.close();
-                    }
-                });
-            }
-        });
-        if let Some(n) = to_before {
-            self.before_from_history(n);
-        }
-        if let Some(n) = go_to {
-            // A resize still being grouped is a step before the jump, so it isn't lost.
-            self.finish_wheel_gesture();
-            if self.document.edit.jump(n) {
-                self.ensure_upright();
-            }
-        }
-        if let Some((i, use_step)) = lightroom
-            && let Some(m) = &self.document.metadata
-        {
-            let step = &self.document.lightroom_history[i];
-            match crate::lr_develop::convert_develop(
-                &step.text,
-                m,
-                &self.document.profiles,
-                self.document
-                    .measures()
-                    .as_ref()
-                    .map(|m| m as &dyn crate::xmp::PhotoMeasures),
-            ) {
-                Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
-                    if !skipped.is_empty() {
-                        self.status = format!("Before · not rendered: {}", skipped.join(", "));
-                    }
-                    self.set_before(recipe);
-                }
-                Ok((recipe, skipped)) => {
-                    let name = format!("Lightroom: {}", step.name);
-                    self.status = if skipped.is_empty() {
-                        name.clone()
-                    } else {
-                        format!("{name} · not rendered: {}", skipped.join(", "))
-                    };
-                    self.document
-                        .edit
-                        .name_next_step(super::history::Step::new(name, ""));
-                    self.document.edit.replace(recipe);
-                }
-                Err(e) => self.status = format!("History step not applied: {e:#}"),
-            }
-        }
-    }
-}
-/// What a click on a Lightroom History step asked for.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum LightroomStep {
-    /// Apply it to the edit, as a step.
-    Apply,
-    /// Copy History Step Settings to Before.
-    ToBefore,
-}
 /// A preset's Upright mode, with this photo's own corrections rather than any the preset
 /// carries from the photo it was saved from; a mode without one is analysed on apply.
 /// New lens settings call for a new analysis, as pasting them does.
@@ -913,72 +842,35 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
         r.upright.analyse_again();
     }
 }
-/// A History row: the step on the left, its value on the right. The current
-/// step is highlighted; steps after it (undone) are dimmed, as in Lightroom.
-fn history_row(
-    ui: &mut egui::Ui,
-    name: &str,
-    value: &str,
-    current: bool,
-    undone: bool,
-) -> egui::Response {
-    let palette = theme::palette(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
-    if current {
-        ui.painter().rect_filled(rect, 3., palette.accent());
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, 3., palette.gray(43));
-    }
-    let color = if current {
-        palette.on_accent_text(250)
-    } else {
-        palette.gray(if undone { 120 } else { 205 })
-    };
-    let value_width = if value.is_empty() {
-        0.
-    } else {
-        let galley =
-            ui.painter()
-                .layout_no_wrap(value.to_string(), egui::FontId::proportional(12.), color);
-        let width = galley.size().x;
-        ui.painter().galley(
-            egui::pos2(
-                rect.right() - 8. - width,
-                rect.center().y - galley.size().y / 2.,
-            ),
-            galley,
-            color,
-        );
-        width + 16.
-    };
-    let clip = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2(rect.right() - 8. - value_width, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(clip).text(
-        rect.left_center() + Vec2::new(8., 0.),
-        egui::Align2::LEFT_CENTER,
-        name,
-        egui::FontId::proportional(12.),
-        color,
-    );
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-/// "2016-07-28 06:14" from Unix seconds.
-fn format_unix(seconds: i64) -> String {
-    let [year, month, day, hour, minute, _] = crate::time::utc(seconds);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
-}
-#[cfg(test)]
-#[test]
-fn formats_lightroom_history_dates() {
-    assert_eq!(format_unix(1_469_686_444), "2016-07-28 06:14");
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_preset_list_says_why_and_offers_the_way_back() {
+        let mut browser = crate::app::state::PresetBrowser {
+            favorites_only: true,
+            ..Default::default()
+        };
+        let none_yet = EmptyList::of(&browser, 0);
+        assert_eq!(none_yet.title, "No favorites yet");
+        assert!(matches!(none_yet.action, EmptyAction::ShowAll));
+        // With favorites, it is the search that found nothing among them.
+        browser.filter = " portra ".into();
+        let searched = EmptyList::of(&browser, 3);
+        assert_eq!(searched.title, "No presets match \u{201c}portra\u{201d}");
+        assert_eq!(searched.detail, "Searched your favorites only.");
+        assert!(matches!(searched.action, EmptyAction::ClearSearch));
+        // Compatible with nothing fitting and no search.
+        browser = crate::app::state::PresetBrowser {
+            compatible_only: true,
+            ..Default::default()
+        };
+        let none_fit = EmptyList::of(&browser, 3);
+        assert_eq!(none_fit.title, "No presets fit this camera");
+        assert!(matches!(none_fit.action, EmptyAction::ShowAll));
+    }
     /// A preset that changes only a lens setting leaves no Upright correction analysed
     /// through the old one: the editor analyses the photo again.
     #[test]

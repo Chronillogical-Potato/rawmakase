@@ -14,6 +14,7 @@ notarization must pass before anything is published. No AUR pushes occur.
 | Fedora x86_64 and aarch64 | `.rpm` | Fedora 43+ |
 | Arch x86_64 | `.pkg.tar.zst` | Current Arch system dependencies |
 | Linux archive | `rawmakase-VERSION-x86_64-linux.tar.gz`, `rawmakase-VERSION-aarch64-linux.tar.gz` | Same system baseline as DEB/RPM; not a universal static binary |
+| Linux AppImage | `rawmakase-VERSION-x86_64.AppImage`, `rawmakase-VERSION-aarch64.AppImage` | Same payload and system baseline as the archive; does not extend support to older distributions |
 | Windows x86_64 installer | `rawmakase-vVERSION-x86_64-pc-windows-msvc-setup.exe` | Windows 10+; per-user install, no administrator rights |
 | Windows x86_64 archive | `rawmakase-vVERSION-x86_64-pc-windows-msvc.zip` | Windows 10+ |
 | Windows ARM64 installer | `rawmakase-vVERSION-aarch64-pc-windows-msvc-setup.exe` | Windows 11 on ARM64; per-user install, no administrator rights |
@@ -22,8 +23,10 @@ notarization must pass before anything is published. No AUR pushes occur.
 The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
 not need Homebrew. The Linux tarball contains the same `/usr` layout, including
 private libraries; run the extracted `usr/bin/rawmakase` or install the whole
-tree under `/usr`. Do not copy just its executable. Linux still needs system
-Vulkan/graphics drivers, window-system libraries and a working file-dialog portal.
+tree under `/usr`. Do not copy just its executable. The AppImage packs that
+same payload (`packaging/linux/appimage.py`) with a pinned appimagetool and
+runtime. Linux still needs system Vulkan/graphics drivers, window-system
+libraries and a working file-dialog portal.
 
 Each Windows architecture's installer and archive hold the same folder: `rawmakase.exe`, with
 LibRaw, Little CMS and the C runtime linked in statically (so no Visual C++

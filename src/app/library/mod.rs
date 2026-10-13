@@ -85,6 +85,10 @@ pub(crate) struct Library {
     /// catalog opened.
     missing_noted: bool,
     volumes: volumes::Volumes,
+    /// The sidebar's folder and collection trees, built once per change to
+    /// the catalog's lists rather than every frame: the sidebar draws in
+    /// Develop too, whose frames come fast while a slider moves.
+    sidebar_trees: Option<std::sync::Arc<sidebar::Trees>>,
     /// The source and filter bar; `visible` is their result.
     filters: filter::Filters,
     /// The folder shown, as a tree key ("" is All Photographs).
@@ -202,6 +206,7 @@ impl Library {
             scroll_to_active: false,
             missing_noted: false,
             volumes: Default::default(),
+            sidebar_trees: None,
             filters: Default::default(),
             selected_folder: String::new(),
             expanded: HashSet::new(),

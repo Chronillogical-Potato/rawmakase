@@ -708,7 +708,8 @@ impl Editor {
                     .clone()
                     .unwrap_or_else(|| self.status.clone());
                 ui.horizontal(|ui| {
-                    ui.add(egui::Spinner::new().size(12.).color(palette.gray(170)));
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.), egui::Sense::hover());
+                    super::widgets::paint_spinner(ui, rect, Some(palette.gray(170)));
                     hint(ui, &status);
                 });
             }
@@ -939,10 +940,7 @@ fn mark(ui: &mut egui::Ui, center: egui::Pos2, mark: Mark) {
         }
         Mark::Working => {
             let rect = egui::Rect::from_center_size(center, Vec2::splat(16.));
-            ui.put(
-                rect,
-                egui::Spinner::new().size(16.).color(palette.gray(190)),
-            );
+            super::widgets::paint_spinner(ui, rect, Some(palette.gray(190)));
         }
         Mark::Done => {
             painter.circle_filled(center, 10., Color32::from_rgb(64, 132, 90));

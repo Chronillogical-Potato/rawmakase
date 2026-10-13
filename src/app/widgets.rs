@@ -89,6 +89,18 @@ pub(super) fn adjustment_section(
 pub(super) fn collapsed_sections_id() -> egui::Id {
     egui::Id::new("rawmakase-collapsed-sections")
 }
+/// Where the set of pinned section titles lives in egui memory; the editor
+/// seeds it from the session and saves it back when it changes.
+pub(super) fn pinned_sections_id() -> egui::Id {
+    egui::Id::new("rawmakase-pinned-sections")
+}
+/// Whether the section `title` is pinned above its side's scrolling panels.
+pub(super) fn pinned(ctx: &egui::Context, title: &str) -> bool {
+    ctx.data(|d| {
+        d.get_temp::<std::collections::BTreeSet<String>>(pinned_sections_id())
+            .is_some_and(|set| set.contains(title))
+    })
+}
 /// Where a control names the edit it just made, for the History panel. The
 /// editor takes it at the end of the frame.
 pub(super) fn history_step_id() -> egui::Id {
@@ -134,6 +146,9 @@ pub(super) enum HeaderButton {
     Reset,
     /// Adds an item, as the Snapshots panel's +.
     Add,
+    /// Pins the panel above the side's scrolling panels, or lets it scroll
+    /// with them; see [`pinned`].
+    Pin,
 }
 /// [`section`] with any header button; returns whether it was clicked.
 pub(super) fn section_with(
@@ -291,17 +306,22 @@ fn section_header(
         d.get_temp::<std::collections::BTreeSet<String>>(collapsed_sections_id())
             .is_some_and(|set| set.contains(key))
     });
-    ui.add_space(8.);
+    let sidebar = group == Some(SectionGroup::LibraryLeft.key());
+    // Space parts the panels; the catalog's sidebar lists sources closer.
+    ui.add_space(if sidebar { 8. } else { 14. });
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    let reset_rect = Rect::from_center_size(
-        Pos2::new(rect.right() - 16., rect.center().y),
-        Vec2::splat(24.),
-    );
-    let right = if resettable {
-        reset_rect.left()
-    } else {
-        rect.right()
-    };
+    // Outside the catalog's sidebar the chevron keeps the header's right end,
+    // its buttons before it.
+    let chevron_rect = (!sidebar).then(|| {
+        Rect::from_center_size(
+            Pos2::new(rect.right() - 14., rect.center().y),
+            Vec2::splat(24.),
+        )
+    });
+    let end = chevron_rect.map_or(rect.right(), |c| c.left());
+    let reset_rect =
+        Rect::from_center_size(Pos2::new(end - 14., rect.center().y), Vec2::splat(24.));
+    let right = if resettable { reset_rect.left() } else { end };
     let switch_rect =
         Rect::from_center_size(Pos2::new(right - 18., rect.center().y), Vec2::new(26., 20.));
     let toggle_right = if switch.is_some() {
@@ -313,6 +333,10 @@ fn section_header(
     let toggle = ui
         .interact(toggle_rect, id.with("toggle"), Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let chevron = chevron_rect.map(|c| {
+        ui.interact(c, id.with("chevron"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+    });
     let reset = ui.interact(
         reset_rect,
         id.with("reset"),
@@ -325,52 +349,83 @@ fn section_header(
     let reset = match button {
         HeaderButton::Reset => reset.on_hover_text(format!("Reset {title}")),
         HeaderButton::Add => reset.on_hover_text(format!("New {}", title.trim_end_matches('s'))),
+        HeaderButton::Pin if pinned(ui.ctx(), title) => {
+            reset.on_hover_text(format!("Unpin {title}: it scrolls with the panels"))
+        }
+        HeaderButton::Pin => reset.on_hover_text(format!("Pin {title} at the top")),
         HeaderButton::None => reset,
     };
     let enabled = switch.as_deref().is_none_or(|s| *s == PanelState::On);
-    // A filled header band marks each collapsible panel, as in Lightroom.
-    ui.painter().rect_filled(
-        rect,
-        3.,
-        palette.gray(if toggle.hovered() { 60 } else { 51 }),
-    );
-    ui.painter().rect_stroke(
-        rect,
-        3.,
-        Stroke::new(1., palette.gray(if open { 70 } else { 62 })),
-        egui::StrokeKind::Inside,
-    );
-    let c = Pos2::new(rect.left() + 13., rect.center().y);
-    let triangle = if open {
-        vec![
-            c + Vec2::new(-4., -2.),
-            c + Vec2::new(4., -2.),
-            c + Vec2::new(0., 3.),
-        ]
-    } else {
-        vec![
-            c + Vec2::new(-2., -4.),
-            c + Vec2::new(3., 0.),
-            c + Vec2::new(-2., 4.),
-        ]
-    };
-    ui.painter().add(egui::Shape::convex_polygon(
-        triangle,
-        palette.gray(if toggle.hovered() { 235 } else { 190 }),
-        Stroke::NONE,
-    ));
+    let hovered = toggle.hovered() || chevron.as_ref().is_some_and(|c| c.hovered());
+    // Every panel's header is a quiet caption with its chevron on the right.
+    // In the catalog's sidebar both show only while hovered (the chevron also
+    // while folded); elsewhere the header is a band with its chevron always.
+    if !sidebar || hovered {
+        let fill = match (sidebar, hovered) {
+            (true, _) => 32,
+            (false, true) => 38,
+            (false, false) => 30,
+        };
+        ui.painter().rect_filled(rect, 5., palette.gray(fill));
+    }
     ui.painter().text(
-        Pos2::new(rect.left() + 26., rect.center().y),
+        // Over the sidebar rows' text at their 10 px inset; elsewhere at the
+        // contents' 8 px margin.
+        Pos2::new(
+            rect.left() + if sidebar { 10. } else { 8. },
+            rect.center().y,
+        ),
         egui::Align2::LEFT_CENTER,
-        title,
-        egui::FontId::proportional(13.),
-        palette.gray(match (enabled, toggle.hovered()) {
-            (false, _) => 140,
-            (true, true) => 250,
-            (true, false) => 235,
+        title.to_uppercase(),
+        egui::FontId::proportional(11.),
+        palette.gray(match (enabled, hovered) {
+            (false, _) => 95,
+            (true, true) => 215,
+            (true, false) => 145,
         }),
     );
-    if resettable {
+    if !sidebar || hovered || !open {
+        let chevron = if open {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        };
+        // Ending where the sidebar's counts do, or at the header's right end.
+        let x = chevron_rect.map_or(right - 15.5, |c| c.center().x);
+        let tint = palette.gray(if hovered { 200 } else { 110 });
+        icons::paint_at(
+            ui.painter(),
+            chevron,
+            Pos2::new(x, rect.center().y),
+            12.,
+            tint,
+        );
+    }
+    if button == HeaderButton::Pin {
+        // Lit while pinned; at rest it stays quiet.
+        let on = pinned(ui.ctx(), title);
+        let color = palette.gray(match (reset.hovered(), on) {
+            (true, _) => 240,
+            (false, true) => 200,
+            (false, false) => 105,
+        });
+        let icon = if on && reset.hovered() {
+            Icon::PinOff
+        } else {
+            Icon::Pin
+        };
+        icons::paint_at(ui.painter(), icon, reset_rect.center(), 12., color);
+        if reset.clicked() {
+            ui.ctx().data_mut(|d| {
+                let set = d.get_temp_mut_or_default::<std::collections::BTreeSet<String>>(
+                    pinned_sections_id(),
+                );
+                if !set.remove(title) {
+                    set.insert(title.to_string());
+                }
+            });
+        }
+    } else if resettable {
         let color = palette.gray(if reset.hovered() { 240 } else { 150 });
         let icon = if button == HeaderButton::Add {
             Icon::Add
@@ -408,7 +463,9 @@ fn section_header(
             }
         });
     }
-    if toggle.clicked() && !context_clicked(&toggle) {
+    if (toggle.clicked() && !context_clicked(&toggle))
+        || chevron.as_ref().is_some_and(|c| c.clicked())
+    {
         open = !open;
         set_open(ui, key, open);
         if open && let Some(group) = group.filter(|g| solo(ui, g)) {
@@ -420,12 +477,18 @@ fn section_header(
     }
     if open {
         set_edit_context(ui, title);
+        // The catalog's rows span its sidebar, their own inset making the margin.
+        let side = if group == Some(SectionGroup::LibraryLeft.key()) {
+            0
+        } else {
+            8
+        };
         // Scope ids per section so equal slider labels (e.g. two "Amount"s) never clash.
         ui.push_id(title, |ui| {
             egui::Frame::new()
                 .inner_margin(egui::Margin {
-                    left: 8,
-                    right: 8,
+                    left: side,
+                    right: side,
                     top: 8,
                     bottom: 12,
                 })
@@ -1042,7 +1105,10 @@ pub(super) fn slider_styled(
     let before = *value;
     ui.push_id(label, |ui| {
         let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
-        let label_rect = Rect::from_min_max(row.min, Pos2::new(row.left() + 83., row.bottom()));
+        let label_rect = Rect::from_min_max(
+            row.min,
+            Pos2::new(row.left() + label_column(ui), row.bottom()),
+        );
         let label_response = ui.interact(label_rect, ui.id().with("label"), Sense::click());
         ui.painter().text(
             label_rect.right_center() - Vec2::new(5., 0.),
@@ -1093,6 +1159,12 @@ pub(super) fn slider_styled(
                 let spacing = ui.spacing_mut();
                 spacing.interact_size.x = SLIDER_VALUE_WIDTH;
                 spacing.button_padding.x = 4.;
+                // Set into the dark panels; a disabled field fades further.
+                let widgets = &mut ui.visuals_mut().widgets;
+                for (state, fill) in [(&mut widgets.inactive, 32), (&mut widgets.hovered, 42)] {
+                    state.bg_fill = palette.gray(fill);
+                    state.weak_bg_fill = palette.gray(fill);
+                }
                 ui.place(
                     value_rect,
                     // An imported value beyond the range shows as it is, rather
@@ -1387,7 +1459,15 @@ fn segment_track(
     let inset = SEGMENT_INSET;
     let radius = control_radius(style.height);
     let track = Rect::from_center_size(rect.center(), Vec2::new(rect.width(), style.height));
-    ui.painter().rect_filled(track, radius, palette.gray(21));
+    // Visible on the dark side panels as on lighter surfaces, so the pill
+    // sits inside a track as wide as the control.
+    ui.painter().rect(
+        track,
+        radius,
+        palette.gray(28),
+        Stroke::new(1., palette.gray(42)),
+        egui::StrokeKind::Inside,
+    );
     let (widths, font) = segment_layout(ui, labels, style, track.width() - 2. * inset);
     let starts: Vec<f32> = widths
         .iter()
@@ -1442,15 +1522,15 @@ fn segment_track(
     for (index, response) in responses.iter().enumerate() {
         if selected != Some(index) && enabled && response.hovered() {
             ui.painter()
-                .rect_filled(segment(index as f32), radius - inset, palette.gray(30));
+                .rect_filled(segment(index as f32), radius - inset, palette.gray(38));
         }
     }
     if selected.is_some() {
         ui.painter().rect(
             segment(position),
             radius - inset,
-            palette.gray(44),
-            Stroke::new(1., palette.gray(58)),
+            palette.gray(58),
+            Stroke::new(1., palette.gray(74)),
             egui::StrokeKind::Inside,
         );
     }
@@ -1462,7 +1542,7 @@ fn segment_track(
             None => 0.,
         };
         let color = if enabled {
-            palette.gray(140).lerp_to_gamma(palette.gray(245), weight)
+            palette.gray(160).lerp_to_gamma(palette.gray(245), weight)
         } else {
             palette.gray(70)
         };
@@ -1485,19 +1565,13 @@ fn segment_track(
         })
         .collect()
 }
-/// What an [`action_button`] does: the main action of its area, or any other.
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum ButtonKind {
-    Primary,
-    Secondary,
-}
-/// A toolbar button sized to its content: an optional icon and the label
-/// centred together, with the segmented controls' height and rounding.
+/// A primary button sized to its content, in the accent colour: an optional
+/// icon and the label centred together, with the segmented controls' height
+/// and rounding.
 pub(super) fn action_button(
     ui: &mut egui::Ui,
     label: &str,
     icon: Option<Icon>,
-    kind: ButtonKind,
     enabled: bool,
 ) -> egui::Response {
     let palette = theme::palette(ui.ctx());
@@ -1519,9 +1593,8 @@ pub(super) fn action_button(
     );
     let hovered = enabled && response.hovered();
     let pressed = enabled && response.is_pointer_button_down_on();
-    let (fill, stroke, ink) = match (kind, enabled) {
-        (_, false) => (palette.gray(34), palette.gray(44), palette.gray(85)),
-        (ButtonKind::Primary, true) => (
+    let (fill, stroke, ink) = if enabled {
+        (
             if hovered && !pressed {
                 palette.accent_hover()
             } else {
@@ -1529,18 +1602,9 @@ pub(super) fn action_button(
             },
             Color32::TRANSPARENT,
             palette.on_accent(),
-        ),
-        (ButtonKind::Secondary, true) => (
-            palette.gray(if pressed {
-                36
-            } else if hovered {
-                50
-            } else {
-                42
-            }),
-            palette.gray(60),
-            palette.gray(225),
-        ),
+        )
+    } else {
+        (palette.gray(34), palette.gray(44), palette.gray(85))
     };
     ui.painter().rect(
         rect,
@@ -2100,4 +2164,161 @@ mod segment_tests {
         let drawn = drawn.expect("drawn");
         assert!(drawn <= place + 0.5, "{drawn} wide in {place}");
     }
+}
+
+/// A spinner `size` points across with a hairline stroke: egui's draws three
+/// points thick at any size, heavy beside the interface's text.
+pub(super) fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    paint_spinner(ui, rect, None);
+    response
+}
+/// [`spinner`] painted into `rect`, in `color` or the interface's grey.
+pub(super) fn paint_spinner(ui: &egui::Ui, rect: Rect, color: Option<Color32>) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    ui.ctx().request_repaint();
+    let radius = rect.width().min(rect.height()) / 2. - 1.;
+    let time = ui.input(|i| i.time);
+    // egui's sweep: a turn a second, the arc growing and shrinking.
+    let start = time * std::f64::consts::TAU;
+    let end = start + 240f64.to_radians() * time.sin();
+    let points: Vec<Pos2> = (0..=24)
+        .map(|k| {
+            let angle = start + (end - start) * k as f64 / 24.;
+            let (sin, cos) = angle.sin_cos();
+            rect.center() + radius * Vec2::new(cos as f32, sin as f32)
+        })
+        .collect();
+    let color = color.unwrap_or_else(|| theme::palette(ui.ctx()).gray(175));
+    ui.painter()
+        .add(egui::Shape::line(points, Stroke::new(1.5, color)));
+}
+
+/// The slider grid's label column: captions end 5 pt short of it, slider
+/// rails and controls start 5 pt past it.
+const LABEL_COLUMN: f32 = 83.;
+fn label_column_id() -> egui::Id {
+    egui::Id::new("rawmakase-label-column")
+}
+/// The label column's width where `ui` draws: [`LABEL_COLUMN`], or a
+/// narrower one a [`LabelColumn`] set.
+pub(super) fn label_column(ui: &egui::Ui) -> f32 {
+    ui.ctx()
+        .data(|d| d.get_temp::<f32>(label_column_id()))
+        .unwrap_or(LABEL_COLUMN)
+}
+/// While alive, the slider grid's label column is `width` wide: Develop's
+/// tool drawers, whose labels are short, give the controls the room.
+pub(super) struct LabelColumn {
+    ctx: egui::Context,
+    before: Option<f32>,
+}
+impl LabelColumn {
+    pub(super) fn enter(ui: &egui::Ui, width: f32) -> Self {
+        let ctx = ui.ctx().clone();
+        let before = ctx.data_mut(|d| {
+            let before = d.get_temp::<f32>(label_column_id());
+            d.insert_temp(label_column_id(), width);
+            before
+        });
+        Self { ctx, before }
+    }
+}
+impl Drop for LabelColumn {
+    fn drop(&mut self) {
+        self.ctx.data_mut(|d| match self.before {
+            Some(width) => {
+                d.insert_temp(label_column_id(), width);
+            }
+            None => d.remove::<f32>(label_column_id()),
+        });
+    }
+}
+
+/// The caption band at the top of Develop's tab panel, naming what it shows
+/// as the panels' section headers do. Returns the band, for what its right
+/// end holds.
+pub(super) fn panel_caption(ui: &mut egui::Ui, name: &str) -> Rect {
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(8.);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    ui.painter().rect_filled(rect, 5., palette.gray(30));
+    ui.painter().text(
+        Pos2::new(rect.left() + 8., rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name.to_uppercase(),
+        egui::FontId::proportional(11.),
+        palette.gray(145),
+    );
+    rect
+}
+/// A search field: a rounded box with a magnifier, the text and a button that
+/// clears it. Returns the text field's response.
+pub(super) fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    let field = rect
+        .with_min_x(rect.left() + 28.)
+        .with_max_x(rect.right() - 26.);
+    // The box goes under the text, its look known once the field is drawn.
+    let backdrop = ui.painter().add(egui::Shape::Noop);
+    let response = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(field)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .hint_text(hint)
+                        .frame(egui::Frame::new())
+                        .font(egui::FontId::proportional(12.))
+                        .desired_width(field.width()),
+                )
+            },
+        )
+        .inner;
+    let focused = response.has_focus();
+    ui.painter().set(
+        backdrop,
+        egui::epaint::RectShape::new(
+            rect,
+            6.,
+            palette.gray(if focused { 26 } else { 30 }),
+            Stroke::new(
+                1.,
+                if focused {
+                    palette.accent()
+                } else {
+                    palette.gray(44)
+                },
+            ),
+            egui::StrokeKind::Inside,
+        ),
+    );
+    icons::paint_at(
+        ui.painter(),
+        Icon::Search,
+        Pos2::new(rect.left() + 15., rect.center().y),
+        13.,
+        palette.gray(130),
+    );
+    if !text.is_empty() {
+        let clear = Rect::from_center_size(
+            Pos2::new(rect.right() - 14., rect.center().y),
+            Vec2::splat(20.),
+        );
+        let hit = ui
+            .interact(clear, response.id.with("clear"), Sense::click())
+            .on_hover_text("Clear the search")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let tint = palette.gray(if hit.hovered() { 230 } else { 140 });
+        icons::paint_at(ui.painter(), Icon::Close, clear.center(), 11., tint);
+        if hit.clicked() {
+            text.clear();
+        }
+    }
+    response
 }

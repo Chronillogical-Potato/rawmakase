@@ -15,6 +15,10 @@ pub(crate) struct Session {
     /// others: "develop-left", "develop-right", "library-left", "library-right".
     #[serde(default)]
     pub solo: std::collections::BTreeSet<String>,
+    /// Titles of panel sections the user pinned above the scrolling panels:
+    /// "Navigator" and "Histogram" scroll with them until pinned.
+    #[serde(default)]
+    pub pinned: std::collections::BTreeSet<String>,
     /// The panels Develop and the Library show; all of them by default.
     #[serde(default, deserialize_with = "crate::app::panels::lenient")]
     pub panels: crate::app::panels::WorkspacePanels,

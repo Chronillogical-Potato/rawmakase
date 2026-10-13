@@ -133,6 +133,9 @@ pub(super) fn shortcut_action(key: Key, m: Modifiers) -> Option<commands::Action
             (Key::Tab, false, false, false) => A::Panels(PanelChange::Sides),
             (Key::F7, false, false, false) => A::Panels(PanelChange::Toggle(WorkspacePanel::Left)),
             (Key::F8, false, false, false) => A::Panels(PanelChange::Toggle(WorkspacePanel::Right)),
+            (Key::F8, false, true, false) => {
+                A::Panels(PanelChange::Toggle(WorkspacePanel::Presets))
+            }
             (Key::F6, false, false, false) => {
                 A::Panels(PanelChange::Toggle(WorkspacePanel::Filmstrip))
             }

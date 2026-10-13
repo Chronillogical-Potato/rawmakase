@@ -344,7 +344,7 @@ impl Editor {
         }
         match &updates.manual {
             Some(None) => {
-                ui.add(egui::Spinner::new().size(12.));
+                super::widgets::spinner(ui, 12.);
                 note(ui, "Checking…");
             }
             Some(Some(Ok(()))) => {
@@ -422,7 +422,7 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
         }
         Download::Installing => {
             ui.horizontal(|ui| {
-                ui.add(egui::Spinner::new().size(12.));
+                super::widgets::spinner(ui, 12.);
                 note(ui, "Preparing to restart…");
             });
         }

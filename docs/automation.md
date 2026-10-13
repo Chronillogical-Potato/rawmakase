@@ -80,7 +80,8 @@ buttons toggle their labels. Named `label:red` sets a label idempotently, while
 Panel actions hide or show the open module's panels, as the keyboard does:
 `panels:sides` (Tab), `panels:all` (Shift+Tab, with the filmstrip and status
 bar), and `panels:left`, `panels:right` and `panels:filmstrip` (F7, F8, F6).
-They need no photo. `state.panels` reports each panel of the open module as
+`panels:presets` folds or opens Develop's Presets and History panel, as its rail
+does. They need no photo. `state.panels` reports each panel of the open module as
 `shown` or `hidden`. A device button can also be set to `tab`, `shift+tab` or
 `f6`–`f8`.
 

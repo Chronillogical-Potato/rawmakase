@@ -15,6 +15,9 @@ pub(crate) const HEIGHT: f32 = 128.;
 /// The id of the strip's panel; its scroll area is salted the same way.
 /// Every view draws the one panel, so the strip keeps its scroll position.
 pub(super) const ID: &str = "filmstrip";
+/// A card's inset in its cell: cards are twice this apart, and the strip
+/// pads its ends by it so the first and last are as far from its edges.
+const CARD_INSET: f32 = 2.;
 
 /// The module the strip is shown in. Both mark the whole selection; the Library lets
 /// the view shown take a click, and Develop marks the photo it has open as active.
@@ -195,46 +198,66 @@ impl Library {
         // The grid's edits cover its selection; elsewhere the photo shown.
         let whole_selection = library && self.view() == View::Grid;
         let mut remeasured = false;
+        // In Develop on the photo area's margin, so its ends line up with the
+        // toolbar's; in the Library with its view bar's.
+        let inset = if library {
+            10
+        } else {
+            crate::app::workspace::PHOTO_MARGIN as i8
+        };
         egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(10, 3))
+            .inner_margin(egui::Margin::symmetric(inset, 3))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(self.source_name())
-                            .size(11.)
-                            .color(palette.gray(200)),
-                    );
-                    let selected = self.selection.selected.len();
-                    ui.label(filter_caption(
-                        &palette,
-                        &match position {
-                            Some(_) if selected > 1 => {
-                                format!("{} of {} photos selected", selected, self.visible.len())
-                            }
-                            Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
-                            None => format!("{} photos", self.visible.len()),
-                        },
-                    ));
-                    if let Some(p) = &photo {
+                // As tall as the rating and label controls on the right, so
+                // the captions placed before them centre on the same line.
+                ui.allocate_ui_with_layout(
+                    Vec2::new(
+                        ui.available_width(),
+                        crate::app::photo_metadata::CONTROLS_HEIGHT,
+                    ),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(self.source_name())
+                                .size(11.)
+                                .color(palette.gray(200)),
+                        );
+                        let selected = self.selection.selected.len();
                         ui.label(filter_caption(
                             &palette,
-                            &format!("{}{}", p.filename, cell::copy_suffix(p)),
+                            &match position {
+                                Some(_) if selected > 1 => {
+                                    format!(
+                                        "{} of {} photos selected",
+                                        selected,
+                                        self.visible.len()
+                                    )
+                                }
+                                Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
+                                None => format!("{} photos", self.visible.len()),
+                            },
                         ));
-                        // Right-aligned by the width the controls took last frame, so
-                        // the row never runs past the window and widens the strip.
-                        let width_id = ui.id().with("controls-width");
-                        let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
-                        ui.add_space((ui.available_width() - width).max(8.));
-                        let start = ui.cursor().left();
-                        changed = self.metadata_controls(ui, p.id, whole_selection);
-                        let taken = ui.min_rect().right() - start;
-                        if (taken - width).abs() > 0.5 {
-                            ui.data_mut(|d| d.insert_temp(width_id, taken));
-                            ui.ctx().request_repaint();
-                            remeasured = true;
+                        if let Some(p) = &photo {
+                            ui.label(filter_caption(
+                                &palette,
+                                &format!("{}{}", p.filename, cell::copy_suffix(p)),
+                            ));
+                            // Right-aligned by the width the controls took last frame, so
+                            // the row never runs past the window and widens the strip.
+                            let width_id = ui.id().with("controls-width");
+                            let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
+                            ui.add_space((ui.available_width() - width).max(8.));
+                            let start = ui.cursor().left();
+                            changed = self.metadata_controls(ui, p.id, whole_selection);
+                            let taken = ui.min_rect().right() - start;
+                            if (taken - width).abs() > 0.5 {
+                                ui.data_mut(|d| d.insert_temp(width_id, taken));
+                                ui.ctx().request_repaint();
+                                remeasured = true;
+                            }
                         }
-                    }
-                });
+                    },
+                );
             });
         // Scroll only to bring a newly shown photo into view, or one a sort
         // or filter moved: a photo already visible, e.g. one just clicked,
@@ -263,8 +286,11 @@ impl Library {
             .show_viewport(ui, |ui, viewport| {
                 // Only the cells in view are laid out and drawn, however
                 // many photos the source has.
-                ui.set_min_size(Vec2::new(size.x * self.visible.len() as f32, height));
-                let origin = ui.max_rect().min;
+                ui.set_min_size(Vec2::new(
+                    size.x * self.visible.len() as f32 + 2. * CARD_INSET,
+                    height,
+                ));
+                let origin = ui.max_rect().min + Vec2::new(CARD_INSET, 0.);
                 let at = |n: usize| {
                     egui::Rect::from_min_size(origin + Vec2::new(size.x * n as f32, 0.), size)
                 };
@@ -274,7 +300,11 @@ impl Library {
                         ui.scroll_to_rect(rect, None);
                     }
                 }
-                let (cells, past_end) = in_view(viewport, size.x, self.visible.len());
+                let (cells, past_end) = in_view(
+                    viewport.translate(Vec2::new(-CARD_INSET, 0.)),
+                    size.x,
+                    self.visible.len(),
+                );
                 if past_end {
                     redraw(ui.ctx(), "filmstrip scrolled past a shorter list");
                 }
@@ -386,7 +416,7 @@ fn paint_cell(
     hovered: bool,
 ) {
     let active = mark == Mark::Active;
-    let cell = rect.shrink(2.);
+    let cell = rect.shrink(CARD_INSET);
     let base = palette.gray(match mark {
         Mark::Active => 120,
         Mark::Selected => 78,

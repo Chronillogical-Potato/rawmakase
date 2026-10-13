@@ -82,12 +82,16 @@ impl Library {
         }
         let mut action = Action::None;
         self.filter_bar(ui);
+        // On the photo's backdrop, as the grid above it.
         egui::Panel::bottom("library-grid-toolbar")
-            .frame(egui::Frame::new())
+            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).photo_backdrop()))
             .show_separator_line(false)
             .show(ui, |ui| self.grid_toolbar(ui));
-        let columns = ((ui.available_width() / self.thumb_size).floor() as usize).max(1);
-        let width = (ui.available_width() / columns as f32).floor().max(80.);
+        // Inset on the photo's backdrop, as the Loupe's photo is.
+        let margin = crate::app::workspace::PHOTO_MARGIN;
+        let inner = ui.available_width() - 2. * margin;
+        let columns = ((inner / self.thumb_size).floor() as usize).max(1);
+        let width = (inner / columns as f32).floor().max(80.);
         let height = self.cell_style.height(width);
         // A new cell style keeps the same row at the top of the view.
         let drawn = std::mem::replace(&mut self.drawn_style, self.cell_style);
@@ -115,7 +119,8 @@ impl Library {
             scroll = scroll.vertical_scroll_offset((self.grid_offset + rows * height).max(0.));
         }
         egui::Frame::new()
-            .fill(theme::palette(ui.ctx()).gray(44))
+            .fill(theme::palette(ui.ctx()).photo_backdrop())
+            .inner_margin(egui::Margin::same(margin as i8))
             .show(ui, |ui| {
                 // A key moved the active photo: bring its row into view.
                 if std::mem::take(&mut self.scroll_to_active)

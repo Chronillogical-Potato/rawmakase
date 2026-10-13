@@ -30,6 +30,10 @@ fastframe_icons::icons! {
         GridView => "layout-grid",
         LoupeView => "square",
         SurveyView => "layout-dashboard",
+        Presets => "layers",
+        Bandage => "bandage",
+        MaskTool => "circle-dot-dashed",
+        History => "history",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",
@@ -39,6 +43,9 @@ fastframe_icons::icons! {
         ChevronRight => lucide "chevron-right",
         PanelLeft => lucide "panel-left",
         Eye => lucide "eye",
+        Search => lucide "search",
+        Pin => lucide "pin",
+        PinOff => lucide "pin-off",
         EyeOff => lucide "eye-off",
     }
 }

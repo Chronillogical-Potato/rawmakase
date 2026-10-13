@@ -151,17 +151,18 @@ impl Library {
             self.close_survey();
             return Action::None;
         }
+        // On the photo's backdrop, as the view above it.
         egui::Panel::bottom("library-survey-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(38))
+                    .fill(palette.photo_backdrop())
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
             .show(ui, |ui| self.survey_toolbar(ui));
         let area = ui.available_rect_before_wrap();
         ui.allocate_rect(area, egui::Sense::hover());
-        ui.painter().rect_filled(area, 0., palette.gray(36));
+        ui.painter().rect_filled(area, 0., palette.photo_backdrop());
         let ids = self.shown_surveyed();
         // The previews of every photo shown stay while they are shown.
         self.cache.shown_at_once = ids.len();

@@ -730,6 +730,59 @@ fn the_protocol_states_the_curve_limits_the_app_enforces() {
     assert_eq!(MINIMUM_INPUT_SPACING, MIN_INPUT_SPACING);
 }
 #[test]
+fn panels_presets_opens_develops_tab_panel_in_a_narrow_window_as_the_rail_does() {
+    use crate::app::panels::{DevelopTab, WorkspacePanel};
+    let (mut e, ctx) = editor();
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let frame = |e: &mut Editor| {
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(1200., 800.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| e.draw(ui),
+            );
+            output.textures_delta.clear();
+        }
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    let run = |e: &mut Editor| {
+        e.execute_command(
+            Command::new(Operation::Action(Action::parse("panels:presets").unwrap())),
+            &ctx,
+        )
+        .unwrap();
+    };
+    // 1200 points leave no room beside the sidebar and adjustments: folded.
+    assert!(!frame(&mut e));
+    assert_eq!(e.panels.develop_tab, DevelopTab::Presets);
+    run(&mut e);
+    assert!(frame(&mut e), "panels:presets opens it");
+    run(&mut e);
+    assert!(!frame(&mut e), "and folds it again");
+    assert!(e.panel_shown(WorkspacePanel::Presets));
+    // From the Library it folds Develop's, the only one there is.
+    e.module = Module::Library;
+    run(&mut e);
+    assert!(!e.panels.develop.shown(WorkspacePanel::Presets));
+    run(&mut e);
+    assert!(e.panels.develop.shown(WorkspacePanel::Presets));
+    e.module = Module::Develop;
+    // Over a tool's drawer it shows the tab, ending the tool, as a tab's
+    // rail button does.
+    e.view.tool = crate::app::state::Tool::Crop;
+    assert!(frame(&mut e), "Crop's drawer opens the panel");
+    run(&mut e);
+    assert_eq!(e.view.tool, crate::app::state::Tool::None);
+    assert!(frame(&mut e), "the tab shows in its place");
+}
+#[test]
 fn panel_actions_hide_the_open_modules_panels_and_state_reports_them() {
     let (mut e, ctx) = editor();
     let run = |e: &mut Editor, name: &str| {

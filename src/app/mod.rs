@@ -47,6 +47,8 @@ pub(crate) struct Editor {
     collapsed: std::collections::BTreeSet<String>,
     /// The sides in Solo Mode as last saved to the session.
     solo: std::collections::BTreeSet<String>,
+    /// Pinned panel sections as last saved to the session.
+    pinned: std::collections::BTreeSet<String>,
     /// The panels each module shows (Tab, Shift+Tab, F6–F8).
     panels: panels::WorkspacePanels,
     /// What the last Tab or Shift+Tab hid, and in which module.
@@ -196,6 +198,7 @@ impl Editor {
         ctx.data_mut(|d| {
             d.insert_temp(widgets::collapsed_sections_id(), session.collapsed.clone());
             d.insert_temp(widgets::solo_sections_id(), session.solo.clone());
+            d.insert_temp(widgets::pinned_sections_id(), session.pinned.clone());
         });
         ctx.all_styles_mut(|style| {
             style.spacing.item_spacing = Vec2::new(8., 5.);
@@ -280,6 +283,7 @@ impl Editor {
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
+            pinned: session.pinned.clone(),
             panels: session.panels,
             tabbed: None,
             onboarding: onboarding::Onboarding::new(show_onboarding),
@@ -364,6 +368,7 @@ impl Editor {
                     monitor: self.view.monitor.clone(),
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
+                    pinned: self.pinned.clone(),
                     panels: self.panels,
                     onboarding_done: self.onboarding_done,
                     library_source: self.saved_place.source.clone(),
@@ -791,6 +796,7 @@ mod export;
 pub(crate) mod folder_locations;
 mod folder_sync;
 mod guided_tool;
+mod history_panel;
 mod inspector;
 pub(crate) mod library;
 mod mask_tool;
@@ -808,6 +814,7 @@ mod readout;
 mod red_eye_tool;
 mod reference;
 mod retouch_tool;
+mod side_tabs;
 mod stand_in;
 #[cfg(feature = "telemetry")]
 mod stats;

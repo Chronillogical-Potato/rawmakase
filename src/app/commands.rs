@@ -269,6 +269,10 @@ impl Action {
             "panels:filmstrip",
             Self::Panels(PanelChange::Toggle(WorkspacePanel::Filmstrip)),
         ),
+        (
+            "panels:presets",
+            Self::Panels(PanelChange::Toggle(WorkspacePanel::Presets)),
+        ),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};
@@ -875,7 +879,7 @@ impl Editor {
             Next => return self.command_navigate(1),
             Previous => return self.command_navigate(-1),
             Panels(change) => {
-                if !self.change_panels(change) {
+                if !self.request_panels(change) {
                     return Err(Error::new("save_failed", self.status.clone()));
                 }
             }

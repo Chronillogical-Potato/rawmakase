@@ -317,7 +317,7 @@ impl Progress {
     pub(crate) fn show(&self, ui: &mut egui::Ui, edits_pending: usize) {
         let building = self.completed < self.total || edits_pending > 0;
         if building {
-            ui.add(egui::Spinner::new().size(11.));
+            crate::app::widgets::spinner(ui, 11.);
         }
         if edits_pending > 0 {
             ui.small(format!(

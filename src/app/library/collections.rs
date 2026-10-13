@@ -115,7 +115,7 @@ pub(super) fn collection_row(
     }
     // The same columns as the folder tree.
     let indent = depth.min(12) as f32 * 14.;
-    let x = rect.left() + indent + 3.;
+    let x = rect.left() + indent + 12.;
     let y = rect.center().y;
     if node.set && !node.children.is_empty() {
         let chevron = if collapsed {
