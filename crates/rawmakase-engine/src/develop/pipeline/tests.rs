@@ -33,6 +33,111 @@ fn fixture() -> CameraImage {
         scale_clipped: 0,
     }
 }
+/// A rendered file of one row of 8-bit sRGB pixels, decoded as the rendered decoder
+/// does: to linear ProPhoto RGB.
+fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
+    use rawmakase_model::camera_data::Source;
+    use rawmakase_model::camera_profiles::RGB_TO_PRO;
+    let decode = |v: u8| {
+        let v = v as f32 / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let width = srgb.len() as u32;
+    CameraImage {
+        recovered: Default::default(),
+        width,
+        height: 1,
+        pixels: srgb
+            .iter()
+            .map(|p| crate::color::mul(RGB_TO_PRO, p.map(decode)))
+            .collect(),
+        metadata: Metadata {
+            width,
+            height: 1,
+            source: Source::Rendered,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }
+}
+/// An untouched edit of a rendered file reproduces it (on the CPU): deep shadows, mid
+/// tones, saturated colours and near-white, where highlight recovery and the scene
+/// tone stage's toe and default black would otherwise act.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is() -> anyhow::Result<()> {
+    let mut srgb: Vec<[u8; 3]> = (0..=8).map(|v| [v, v, v]).collect();
+    srgb.extend([
+        [64, 64, 64],
+        [118, 118, 118],
+        [200, 30, 40],
+        [20, 160, 60],
+        [30, 60, 220],
+    ]);
+    srgb.extend((248..=255).map(|v| [v, v, v]));
+    srgb.extend([[255, 250, 240], [255, 255, 200]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    let mut off = Vec::new();
+    for (got, want) in out.rgb8().chunks(3).zip(&srgb) {
+        if (0..3).any(|c| (got[c] as i16 - want[c] as i16).abs() > 1) {
+            off.push((*want, [got[0], got[1], got[2]]));
+        }
+    }
+    assert!(off.is_empty(), "{off:?}");
+    Ok(())
+}
+/// At a rendered file's defaults the scene tone stage leaves every pixel as it is, not
+/// just within 8-bit rounding: Camera Raw's toe and white curves are relative to the
+/// file's own rendering, so a 16-bit export reproduces it too.
+#[test]
+fn the_scene_tone_stage_passes_a_rendered_file_through() -> anyhow::Result<()> {
+    use crate::develop::quality::{Stage, render_stage};
+    let mut srgb: Vec<[u8; 3]> = [0u8, 1, 4, 8, 16, 32, 64, 118, 200, 250, 255]
+        .iter()
+        .map(|&v| [v; 3])
+        .collect();
+    srgb.extend([[200, 30, 40], [20, 160, 60], [30, 60, 220], [255, 250, 240]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let input = render_stage(&im, &r, Stage::SceneInput, &cancel)?;
+    let output = render_stage(&im, &r, Stage::SceneOutput, &cancel)?;
+    for (i, o) in input.pixels.iter().zip(&output.pixels) {
+        assert_eq!(i, o);
+    }
+    Ok(())
+}
+/// Whites and Blacks (−1 to 1) still move a rendered file: Whites +50 lifts the light
+/// patches, Blacks −50 darkens the dark ones.
+#[test]
+fn whites_and_blacks_still_move_a_rendered_file() -> anyhow::Result<()> {
+    let srgb: Vec<[u8; 3]> = [10u8, 40, 118, 200, 240].iter().map(|&v| [v; 3]).collect();
+    let im = rendered_fixture(&srgb);
+    let base = Recipe::for_rendered(&im.metadata);
+    let render = |r: &Recipe| -> anyhow::Result<Vec<u8>> {
+        Ok(crate::develop::render(&im, &r.checked()?, 0)?.rgb8())
+    };
+    let whites = render(&Recipe {
+        whites: 0.5,
+        ..base.clone()
+    })?;
+    let blacks = render(&Recipe {
+        blacks: -0.5,
+        ..base
+    })?;
+    assert!(whites[4 * 3] > 240 && whites[3 * 3] >= 200, "{whites:?}");
+    assert!(blacks[0] < 10 && blacks[3] <= 40, "{blacks:?}");
+    Ok(())
+}
 /// Settings earlier releases saved to choose a rendering engine and its operators are
 /// dropped as they are read: one engine renders every recipe.
 #[test]

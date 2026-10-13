@@ -41,23 +41,47 @@ pub(crate) fn needs_haze(r: &Recipe) -> bool {
             .any(|m| m.is_active() && m.adjust.dehaze > 0.)
 }
 impl SceneTone {
+    /// For a rendered file (the Embedded profile), the global curves are relative to
+    /// its own rendering ([`GlobalTone::relative`]): with the white point at 1 and no
+    /// black point, measured on the photo, and at Whites and Blacks 0 the stage leaves
+    /// it as it is.
     pub(crate) fn new(r: &Recipe, measures: &PhotoMeasures, haze: Option<Dehazing>) -> Self {
-        Self {
-            global: GlobalTone::new(
-                [
-                    measures.sensor_white + r.exposure,
-                    measures.max + r.exposure,
-                    measures.whites_top(r.exposure),
-                    measures.white_point(r.exposure),
-                ],
+        let keys = [
+            measures.sensor_white + r.exposure,
+            measures.max + r.exposure,
+            measures.whites_top(r.exposure),
+            measures.white_point(r.exposure),
+        ];
+        let (black_key, dark_key) = (
+            measures.black_key(r.exposure),
+            measures.dark_key(r.exposure),
+        );
+        let global = match &r.profile {
+            Some(p) if p.is_embedded() => {
+                let [sensor, top, stretch, _] = keys;
+                let reference = GlobalTone::new(
+                    [sensor, top, stretch, 0.],
+                    0.,
+                    0.,
+                    black_key,
+                    dark_key,
+                    false,
+                );
+                GlobalTone::relative(r.whites, r.blacks, reference)
+            }
+            profile => GlobalTone::new(
+                keys,
                 r.whites,
                 r.blacks,
-                measures.black_key(r.exposure),
-                measures.dark_key(r.exposure),
-                r.profile
+                black_key,
+                dark_key,
+                profile
                     .as_ref()
                     .is_none_or(|p| p.black_render() != crate::camera_profiles::BlackRender::None),
             ),
+        };
+        Self {
+            global,
             dehaze: r.effects.dehaze,
             dehaze_key: measures.p99 + r.exposure,
             haze,

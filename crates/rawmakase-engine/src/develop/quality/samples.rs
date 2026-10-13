@@ -2,12 +2,18 @@
 use super::*;
 use crate::develop::recipe::RenderedRecipe;
 
-/// The highlight-recovered image, computed once per decoded image.
+/// The highlight-recovered image, computed once per decoded image. A rendered file's
+/// is the file as it is: recovery rebuilds a camera's clipped channels, and a rendered
+/// file's bright colours are its rendering, not clipping. (That costs one copy of its
+/// pixels, as recovery does.)
 pub fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImage>> {
     if let Some(recovered) = im.recovered.get() {
         return Ok(recovered.clone());
     }
-    let recovered = Arc::new(recover_highlights_cancellable(im, cancel)?);
+    let recovered = Arc::new(match im.metadata.is_rendered() {
+        true => im.clone(),
+        false => recover_highlights_cancellable(im, cancel)?,
+    });
     Ok(im.recovered.get_or_init(|| recovered).clone())
 }
 /// The retouched photo at full resolution, and the image it was retouched from.

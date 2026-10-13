@@ -151,6 +151,9 @@ pub(crate) struct GlobalTone {
     /// `NO_DEFAULT_BLACK`.
     default_black: Option<Box<[f32; Y_SAMPLES]>>,
     blacks_curve: Option<Box<[f32; Y_SAMPLES]>>,
+    /// In relative mode ([`Self::relative`]), the same curves at Whites and Blacks 0,
+    /// which the curves at the recipe's are applied relative to.
+    reference: Option<Box<GlobalTone>>,
 }
 impl GlobalTone {
     /// For the sensor's white, the level Whites stretches toward (the probes' maximum;
@@ -267,8 +270,29 @@ impl GlobalTone {
             linear_below,
             default_black,
             blacks_curve,
+            reference: None,
         };
         tone.white = tone.row_at(whites);
+        tone
+    }
+    /// Relative mode, for a photo that is already rendered: each channel scaled by the
+    /// curves at `whites` and `blacks` relative to the curves at 0, `p · C(p; whites,
+    /// blacks) / C(p; 0, 0)`, both applied as [`Self::apply`] does. Whites and Blacks
+    /// keep their shapes, and at 0 the stage leaves the photo exactly as it is.
+    /// `reference` is the curves for the photo's keys at Whites and Blacks 0.
+    pub(crate) fn relative(whites: f32, blacks: f32, reference: GlobalTone) -> Self {
+        let blacks_curve = (blacks != 0.).then(|| {
+            let corners = blacks_corners(reference.black_key, blacks);
+            Box::new(std::array::from_fn(|k| blacks_sample(&corners, k)))
+        });
+        let mut tone = Self {
+            whites,
+            blacks,
+            blacks_curve,
+            ..reference.clone()
+        };
+        tone.white = tone.row_at(whites);
+        tone.reference = Some(Box::new(reference));
         tone
     }
     /// The white curve at Whites `whites`, between the two rows around it.
@@ -303,6 +327,24 @@ impl GlobalTone {
         }
     }
     pub(crate) fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        let Some(reference) = &self.reference else {
+            return self.curves(p);
+        };
+        if self.whites == 0. && self.blacks == 0. {
+            return p;
+        }
+        let (curved, unchanged) = (self.curves(p), reference.curves(p));
+        std::array::from_fn(|c| {
+            if unchanged[c] > 1e-9 {
+                p[c] * (curved[c] / unchanged[c])
+            } else {
+                // Where the reference curve is at black, the difference.
+                p[c] + curved[c] - unchanged[c]
+            }
+        })
+    }
+    /// The white curve DNG RGBTone fashion, the default black and Blacks on `p`.
+    fn curves(&self, p: [f32; 3]) -> [f32; 3] {
         let p = rgb_tone(p, |x| self.white_at(&self.white, x));
         let p = match &self.default_black {
             // Above white (positive Whites' overshoot) it leaves the output alone.

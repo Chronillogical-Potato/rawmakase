@@ -10,7 +10,7 @@ gates a change to it must pass. Tracking issue: #374 (from #354).
 
 | # | Stage | Domain |
 |---|---|---|
-| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels | camera RGB |
+| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels (none for rendered files) | camera RGB |
 | S1 | White balance, the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
 | S2 | Exposure and the DNG exposure ramp (black point) | linear Rec.2020 |
 | S3 | **Scene tone**: Highlights, Shadows, Clarity, Dehaze, the white point and Whites, Blacks | linear ProPhoto, unclamped |
@@ -94,6 +94,17 @@ alone (identity when W* = 1), with the toe of its black point below about 0.02:
 
 Engine 4 clipped at 1 instead: a probe whose sensor white is at scene 4 rendered
 scene 1.0 at 1.0, where Camera Raw renders 0.69.
+
+### Rendered files
+
+A JPEG, PNG or TIFF is decoded to linear ProPhoto and already carries its rendering,
+so an untouched edit (the Embedded profile) must reproduce it within one 8-bit level.
+S0 does not recover highlights: its near-white colours are the rendering, not clipped
+channels. S3 runs in relative mode (`GlobalTone::relative`): each channel is scaled by
+the global curves at the recipe's Whites and Blacks over the same curves at 0,
+`p · C(p; Whites, Blacks) / C(p; 0, 0)`, with W* = 1, no black point and the photo's
+measured keys. At Whites and Blacks 0 the stage is exactly the identity, and the
+sliders keep their shapes. The GPU port does not implement relative mode yet.
 
 ### Whites and Blacks
 
