@@ -966,8 +966,11 @@ impl Editor {
         action
     }
     fn library_status_bar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("library-status").show(ui, |ui| {
-            ui.horizontal(|ui| {
+        egui::Panel::bottom("library-status")
+            .exact_size(STATUS_HEIGHT)
+            .frame(status_frame(ui))
+            .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
                 if let Some(work) = &self.catalog_work {
                     ui.add(egui::Spinner::new().size(11.));
                     ui.small(work);
@@ -1369,59 +1372,62 @@ impl Editor {
             .and_then(|l| l.message_detail())
     }
     fn status_bar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let display = if self.view.monitor.is_some() {
-                    if cfg!(target_os = "macos") {
-                        "Display: custom ICC (manual monitor conversion)"
+        egui::Panel::bottom("status")
+            .exact_size(STATUS_HEIGHT)
+            .frame(status_frame(ui))
+            .show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let display = if self.view.monitor.is_some() {
+                        if cfg!(target_os = "macos") {
+                            "Display: custom ICC (manual monitor conversion)"
+                        } else {
+                            "Display: custom ICC (disable compositor ICC conversion)"
+                        }
+                    } else if cfg!(target_os = "macos") {
+                        "Display: sRGB (managed by macOS)"
                     } else {
-                        "Display: custom ICC (disable compositor ICC conversion)"
+                        "Display: sRGB (compositor may manage the monitor)"
+                    };
+                    status_text(
+                        ui,
+                        self.document
+                            .edit
+                            .save_state()
+                            .message()
+                            .unwrap_or(&self.status),
+                        self.message_detail(&self.status),
+                        Some(display),
+                    );
+                    if !self.preview.status.is_empty() {
+                        ui.separator();
+                        ui.small(&self.preview.status);
                     }
-                } else if cfg!(target_os = "macos") {
-                    "Display: sRGB (managed by macOS)"
-                } else {
-                    "Display: sRGB (compositor may manage the monitor)"
-                };
-                status_text(
-                    ui,
-                    self.document
-                        .edit
-                        .save_state()
-                        .message()
-                        .unwrap_or(&self.status),
-                    self.message_detail(&self.status),
-                    Some(display),
-                );
-                if !self.preview.status.is_empty() {
-                    ui.separator();
-                    ui.small(&self.preview.status);
-                }
-                self.preview_progress(ui);
-                if !self.document.lightroom_notice.is_empty() {
-                    ui.separator();
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(
-                                self.document.lightroom_notice.lines().next().unwrap_or(""),
+                    self.preview_progress(ui);
+                    if !self.document.lightroom_notice.is_empty() {
+                        ui.separator();
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    self.document.lightroom_notice.lines().next().unwrap_or(""),
+                                )
+                                .small(),
                             )
-                            .small(),
+                            .truncate(),
                         )
-                        .truncate(),
-                    )
-                    .on_hover_text(&self.document.lightroom_notice);
-                }
-                if self.document.edit.save_state().is_protected() {
-                    ui.separator();
-                    ui.colored_label(
+                        .on_hover_text(&self.document.lightroom_notice);
+                    }
+                    if self.document.edit.save_state().is_protected() {
+                        ui.separator();
+                        ui.colored_label(
                         Color32::YELLOW,
                         egui::RichText::new(
                             "Saved edits protected; editing is temporary. Export or save a preset.",
                         )
                         .small(),
                     );
-                }
+                    }
+                });
             });
-        });
     }
 
     /// Library preview progress, right-aligned inside an existing status row
@@ -1815,6 +1821,14 @@ fn menu_separator(ui: &mut egui::Ui) {
 
 /// The photo's backdrop around it in Develop and the Library's views.
 pub(super) const PHOTO_MARGIN: f32 = 20.;
+
+/// The status line's height, its text centred in it.
+const STATUS_HEIGHT: f32 = 26.;
+/// The status line's frame: the panels' fill, inset at the sides only, so its
+/// text sits midway between the filmstrip and the window's edge.
+fn status_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 0))
+}
 
 /// What the close guard calls an export or preview a control command started.
 const OUTPUT: &str = "the output the control socket asked for";
