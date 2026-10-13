@@ -506,13 +506,6 @@ impl Editor {
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         egui::Popup::menu(&response).show(|ui| self.catalog_menu(ui, &ctx));
     }
-    /// The shortcuts and Preferences buttons in the bar's right-to-left run,
-    /// while the sidebar that holds them is hidden.
-    fn app_buttons(&mut self, ui: &mut egui::Ui) {
-        self.shortcuts_button(ui);
-        ui.add_space(8.);
-        self.gear_button(ui);
-    }
     fn shortcuts_button(&mut self, ui: &mut egui::Ui) {
         let hover = format!(
             "Keyboard shortcuts · {}",
@@ -613,10 +606,6 @@ impl Editor {
                             if library.on_hover_text("Library · G").clicked() && self.flush() {
                                 self.onboarding.visible = false;
                                 self.module = Module::Library;
-                            }
-                            if !sidebar {
-                                ui.add_space(12.);
-                                self.app_buttons(ui);
                             }
                         });
                     });
