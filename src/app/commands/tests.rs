@@ -867,7 +867,7 @@ fn temp_and_tint_on_a_rendered_photo_move_its_relative_white_balance() {
     assert_eq!((r.temperature, r.tint), (6500., 0.));
     assert_eq!(
         r.wb,
-        crate::model::white_balance::relative_gains(r.incremental_temperature, r.incremental_tint)
+        crate::model::white_balance::rendered_gains(r.incremental_temperature, r.incremental_tint)
     );
 }
 #[test]

@@ -1,6 +1,6 @@
 use super::panels::PanelSwitches;
 use crate::model::white_balance::{
-    estimate_temperature, illuminant_camera, relative_controls, relative_gains,
+    estimate_temperature, illuminant_camera, rendered_controls, rendered_gains,
 };
 use crate::{camera_data::Metadata, color::curve::ToneCurve};
 use anyhow::{Result, ensure};
@@ -712,10 +712,10 @@ impl Recipe {
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         if m.is_rendered() {
-            [self.incremental_temperature, self.incremental_tint] = relative_controls(self.wb);
-            // Gains the relative model cannot show (an eyedropper's, say) become the
+            [self.incremental_temperature, self.incremental_tint] = rendered_controls(self.wb);
+            // Gains the model cannot show (an eyedropper's, say) become the
             // nearest it can, so the next Temp or Tint edit does not jump.
-            self.wb = relative_gains(self.incremental_temperature, self.incremental_tint);
+            self.wb = rendered_gains(self.incremental_temperature, self.incremental_tint);
             return;
         }
         let mut adjusted = m.clone();
@@ -779,7 +779,7 @@ impl Recipe {
     }
     pub fn update_wb(&mut self, m: &Metadata) {
         if m.is_rendered() {
-            self.wb = relative_gains(self.incremental_temperature, self.incremental_tint);
+            self.wb = rendered_gains(self.incremental_temperature, self.incremental_tint);
             return;
         }
         if let Some(wb) = self

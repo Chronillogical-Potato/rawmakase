@@ -480,7 +480,7 @@ mod tests {
         );
         assert_eq!(
             auto.wb,
-            crate::model::white_balance::relative_gains(
+            crate::model::white_balance::rendered_gains(
                 auto.incremental_temperature,
                 auto.incremental_tint
             )

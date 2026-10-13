@@ -41,8 +41,6 @@ pub fn xy(temperature: f32, tint: f32) -> [f32; 2] {
 
 /// [`xy`] at reciprocal temperature `mired` (0–600; 0 is infinitely hot), without
 /// [`xy`]'s temperature clamp: a rendered file's Temp reaches past 50 000 K.
-// Unused outside tests until the rendered-file white balance calls it; remove this then.
-#[allow(dead_code)]
 pub fn xy_reciprocal(mired: f32, tint: f32) -> [f32; 2] {
     xy_at(f64::from(mired.clamp(0., 600.)), tint)
 }

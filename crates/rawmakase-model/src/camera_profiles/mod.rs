@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 type Matrix = [[f32; 3]; 3];
-const XYZ_TO_PRO: Matrix = [
+pub(crate) const XYZ_TO_PRO: Matrix = [
     [1.345943, -0.255608, -0.051111],
     [-0.544599, 1.508167, 0.020535],
     [0., 0., 1.211813],
