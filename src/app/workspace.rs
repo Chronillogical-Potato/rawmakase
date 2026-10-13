@@ -8,7 +8,7 @@ use super::workflow::Flushed;
 use crate::app::Module;
 use crate::app::theme;
 use crate::catalog::PhotoId;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::time::{Duration, Instant};
 
 impl Editor {
@@ -77,7 +77,16 @@ impl Editor {
                 self.panel_keys(&ctx);
             }
         }
-        self.workspace_bar(ui);
+        // The sidebar runs the window's height, beside the bar. Whether it
+        // shows is read once: its toggle hiding it must not bring the bar's
+        // toggle up under the same click.
+        let sidebar_shown = self.sidebar_shown();
+        let sidebar = if sidebar_shown {
+            self.library_left_panel(ui)
+        } else {
+            crate::app::library::Action::None
+        };
+        self.workspace_bar(ui, sidebar_shown);
         // A file dialog or a running Sync: nothing behind them takes clicks, so no
         // catalog action is chosen only to be dropped.
         if self.activity.is_busy() {
@@ -87,28 +96,30 @@ impl Editor {
             self.onboarding_ui(ui);
         } else if self.module == Module::Library {
             self.left_develop();
-            self.library_workspace(ui);
+            self.library_workspace(ui, sidebar);
         } else {
             let mut frame = self.begin_edit_frame();
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
-            // The Navigator column runs full height; the toolbar sits over
-            // the photo and the adjustments only. Each part may open another
-            // photo; what follows edits that one.
+            // The catalog's sidebar, drawn before the bar, runs the window's
+            // height; the filmstrip and toolbar take the rest of its width.
+            // Each part may open another photo; what follows edits that one.
+            self.follow_edit_frame(&mut frame);
+            self.library_action(sidebar, &ctx);
             self.follow_edit_frame(&mut frame);
             if self.panel_shown(WorkspacePanel::Filmstrip) {
                 self.status_bar(ui);
                 self.filmstrip(ui);
                 self.follow_edit_frame(&mut frame);
             }
-            if self.panel_shown(WorkspacePanel::Left) {
-                self.develop_left_panel(ui);
-                self.follow_edit_frame(&mut frame);
-            }
+            // The panels on the right run up to the bar; the toolbar sits
+            // over the photo alone.
+            self.develop_side_panels(ui);
+            self.follow_edit_frame(&mut frame);
             self.toolbar(ui);
             self.follow_edit_frame(&mut frame);
-            self.develop_panels(ui);
+            self.develop_photo(ui);
             self.finish_edit_frame(frame, &ctx);
         }
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
@@ -177,6 +188,15 @@ impl Editor {
             && solo != self.solo
         {
             self.solo = solo;
+            let _ = self.save_session();
+        }
+        let pinned = ctx.data(|d| {
+            d.get_temp::<std::collections::BTreeSet<String>>(super::widgets::pinned_sections_id())
+        });
+        if let Some(pinned) = pinned
+            && pinned != self.pinned
+        {
+            self.pinned = pinned;
             let _ = self.save_session();
         }
         self.sync_undo();
@@ -403,11 +423,116 @@ impl Editor {
         }
         ui.add_space(4.);
     }
-    /// Lightroom's top panel: catalog menu on the left, module picker on the
-    /// right. On macOS it is also the title bar, beside the traffic lights.
-    fn workspace_bar(&mut self, ui: &mut egui::Ui) {
+    /// Whether the catalog's sidebar shows: in both modules, not the setup view.
+    fn sidebar_shown(&self) -> bool {
+        !self.onboarding.visible && self.panel_shown(WorkspacePanel::Left)
+    }
+    /// The catalog's name, whose menu opens, creates or imports one. In the
+    /// sidebar (`width` given) it spans it, captioned "Catalog"; in the bar it
+    /// is as wide as the name.
+    fn catalog_switcher(&mut self, ui: &mut egui::Ui, width: Option<f32>) {
         let palette = theme::palette(ui.ctx());
         let ctx = ui.ctx().clone();
+        let catalog = self
+            .library
+            .as_ref()
+            .map(|library| library.session.catalog.location().name())
+            .unwrap_or_else(|| "No catalog".into());
+        let name = ui.painter().layout_no_wrap(
+            catalog,
+            egui::FontId::proportional(13.),
+            palette.gray(255),
+        );
+        let busy = self.activity.is_busy();
+        // In the bar, every element is painted in a 28 px slot so all centers line up.
+        let size = match width {
+            Some(width) => Vec2::new(width, 40.),
+            None => Vec2::new(name.size().x.min(320.) + 36., 28.),
+        };
+        let (rect, response) = ui.allocate_exact_size(
+            size,
+            if busy {
+                egui::Sense::hover()
+            } else {
+                egui::Sense::click()
+            },
+        );
+        let open = egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response));
+        let lit = response.hovered() || open;
+        if lit {
+            ui.painter().rect_filled(
+                rect,
+                6.,
+                palette.gray(if width.is_some() { 32 } else { 38 }),
+            );
+        }
+        let color = palette.gray(if lit { 240 } else { 215 });
+        // In the sidebar, on the columns of its captions and counts.
+        let (text_left, chevron_x) = if width.is_some() {
+            (rect.left() + 10., rect.right() - 15.5)
+        } else {
+            (rect.left() + 10., rect.right() - 14.)
+        };
+        let clip = Rect::from_min_max(
+            Pos2::new(text_left, rect.top()),
+            Pos2::new(chevron_x - 10., rect.bottom()),
+        );
+        let name_y = if width.is_some() {
+            rect.center().y - name.size().y + 1.
+        } else {
+            rect.center().y - name.size().y / 2.
+        };
+        ui.painter()
+            .with_clip_rect(clip)
+            .galley(Pos2::new(text_left, name_y), name, color);
+        if width.is_some() {
+            ui.painter().with_clip_rect(clip).text(
+                Pos2::new(text_left, rect.center().y + 2.),
+                egui::Align2::LEFT_TOP,
+                "Catalog",
+                egui::FontId::proportional(10.),
+                palette.gray(120),
+            );
+        }
+        super::icons::paint_at(
+            ui.painter(),
+            super::icons::Icon::ChevronDown,
+            Pos2::new(chevron_x, rect.center().y),
+            11.,
+            palette.gray(if lit { 220 } else { 130 }),
+        );
+        let response = response
+            .on_hover_text("Catalog: open, create or import")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        egui::Popup::menu(&response).show(|ui| self.catalog_menu(ui, &ctx));
+    }
+    fn shortcuts_button(&mut self, ui: &mut egui::Ui) {
+        let hover = format!(
+            "Keyboard shortcuts · {}",
+            super::shortcuts::keys_text("Cmd+/")
+        );
+        if super::shortcuts::icon_button(ui, super::icons::Icon::Keyboard, &hover).clicked() {
+            self.view.shortcuts = !self.view.shortcuts;
+        }
+    }
+    fn gear_button(&mut self, ui: &mut egui::Ui) {
+        let shortcut = if cfg!(target_os = "macos") {
+            "⌘,"
+        } else {
+            "Ctrl+,"
+        };
+        if super::preferences::gear_button(ui)
+            .on_hover_text(format!("Preferences · {shortcut}"))
+            .clicked()
+        {
+            self.open_preferences(super::preferences::Tab::General);
+        }
+    }
+    /// Lightroom's top panel: progress on the left, module picker on the
+    /// right. On macOS it is also the title bar, beside the traffic lights.
+    fn workspace_bar(&mut self, ui: &mut egui::Ui, sidebar: bool) {
+        let palette = theme::palette(ui.ctx());
+        // Its separator, as the side panels' edges are.
         egui::Panel::top("workspace-modes")
             .exact_size(BAR_HEIGHT)
             .frame(
@@ -416,65 +541,29 @@ impl Editor {
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
-                title_bar_drag(ui);
+                title_bar_drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
+                // Beside the sidebar, which holds the traffic lights, its
+                // toggle, the catalog menu, Preferences and the shortcuts.
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
-                    ui.add_space(fastframe_macos::traffic_light_inset(ui.ctx()));
+                    if !sidebar {
+                        ui.add_space(fastframe_macos::traffic_light_inset(ui.ctx()));
+                    }
                     // The panel toggles: none in the setup view, which has no panels.
                     let toggles = !self.onboarding.visible;
-                    if toggles {
+                    if toggles && !sidebar {
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
                             self.panel_toggle(ui, WorkspacePanel::Left);
                         });
                         ui.add_space(8.);
                     }
-                    let catalog = self
-                        .library
-                        .as_ref()
-                        .map(|library| library.session.catalog.location().name())
-                        .unwrap_or_else(|| "No catalog".into());
-                    // Every element is painted in a 28 px slot so all centers line up.
-                    let name = ui.painter().layout_no_wrap(
-                        catalog,
-                        egui::FontId::proportional(13.),
-                        palette.gray(255),
-                    );
-                    let busy = self.activity.is_busy();
-                    let (rect, response) = ui.allocate_exact_size(
-                        Vec2::new(name.size().x.min(320.) + 36., 28.),
-                        if busy {
-                            egui::Sense::hover()
-                        } else {
-                            egui::Sense::click()
-                        },
-                    );
-                    let open =
-                        egui::Popup::is_id_open(&ctx, egui::Popup::default_response_id(&response));
-                    if response.hovered() || open {
-                        ui.painter().rect_filled(rect, 4., palette.gray(38));
+                    // The setup view has no sidebar; its catalog menu stays here.
+                    if self.onboarding.visible {
+                        self.catalog_switcher(ui, None);
+                        ui.add_space(8.);
                     }
-                    let color = palette.gray(if response.hovered() || open { 235 } else { 175 });
-                    ui.painter()
-                        .with_clip_rect(rect.shrink2(Vec2::new(10., 0.)))
-                        .galley(
-                            rect.left_center() + Vec2::new(10., -name.size().y / 2.),
-                            name,
-                            color,
-                        );
-                    super::icons::paint_at(
-                        ui.painter(),
-                        super::icons::Icon::ChevronDown,
-                        rect.right_center() - Vec2::new(14., 0.),
-                        11.,
-                        color,
-                    );
-                    let response = response
-                        .on_hover_text("Catalog: open, create or import")
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
-                    egui::Popup::menu(&response).show(|ui| self.catalog_menu(ui, &ctx));
-                    ui.add_space(8.);
                     if self.activity.is_busy() {
-                        ui.spinner();
+                        super::widgets::spinner(ui, 14.);
                     }
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
@@ -518,40 +607,10 @@ impl Editor {
                                 self.onboarding.visible = false;
                                 self.module = Module::Library;
                             }
-                            ui.add_space(12.);
-                            let hover = format!(
-                                "Keyboard shortcuts · {}",
-                                super::shortcuts::keys_text("Cmd+/")
-                            );
-                            if super::shortcuts::icon_button(
-                                ui,
-                                super::icons::Icon::Keyboard,
-                                &hover,
-                            )
-                            .clicked()
-                            {
-                                self.view.shortcuts = !self.view.shortcuts;
-                            }
-                            ui.add_space(8.);
-                            let shortcut = if cfg!(target_os = "macos") {
-                                "⌘,"
-                            } else {
-                                "Ctrl+,"
-                            };
-                            if super::preferences::gear_button(ui)
-                                .on_hover_text(format!("Preferences · {shortcut}"))
-                                .clicked()
-                            {
-                                self.open_preferences(super::preferences::Tab::General);
-                            }
                         });
                     });
                 });
             });
-        egui::Panel::top("workspace-modes-rule")
-            .exact_size(1.)
-            .frame(egui::Frame::new().fill(palette.gray(16)))
-            .show(ui, |_| {});
     }
 
     /// A RAW in the Library's Loupe: loaded as the document, as Develop
@@ -604,9 +663,15 @@ impl Editor {
             self.presets.preview = None;
             self.schedule();
         }
-        let area = ui.available_rect_before_wrap();
+        // On the photo's backdrop with Develop's margin, under the toolbar.
+        let outer = ui.available_rect_before_wrap();
+        ui.painter()
+            .rect_filled(outer, 0., theme::palette(ui.ctx()).photo_backdrop());
+        let area = outer.shrink(PHOTO_MARGIN);
         let before = self.view.zoom.on;
-        self.viewport_ui(ui);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+            self.viewport_ui(ui)
+        });
         let Some(library) = &mut self.library else {
             return;
         };
@@ -626,7 +691,7 @@ impl Editor {
             self.view.zoom.on = on;
         }
     }
-    fn library_workspace(&mut self, ui: &mut egui::Ui) {
+    fn library_workspace(&mut self, ui: &mut egui::Ui, sidebar: crate::app::library::Action) {
         let ctx = ui.ctx().clone();
         // Export… and Export with Previous work in the Library too, on its selection.
         // Behind any dialog they don't; the chord is read from the key press itself.
@@ -654,31 +719,29 @@ impl Editor {
                 None => {}
             }
         }
+        // The catalog's sidebar, drawn before the bar, asked for this.
+        let mut action = sidebar;
         let filmstrip = self.panel_shown(WorkspacePanel::Filmstrip);
         if filmstrip {
             self.library_status_bar(ui);
         }
-        let mut action = crate::app::library::Action::None;
-        // The filmstrip runs the window's width, under both side panels, as
-        // in Develop. Hidden, the views are still brought up to date.
+        // The filmstrip runs under the right panel, as in Develop. Hidden,
+        // the views are still brought up to date.
         if let Some(library) = &mut self.library {
-            action = if filmstrip {
+            action = action.then(if filmstrip {
                 library.library_filmstrip(ui)
             } else {
                 library.prepare(ui.ctx());
                 crate::app::library::Action::None
-            };
+            });
         }
         let develops = self.library.as_ref().and_then(|l| l.loupe_develops());
         if develops != self.loupe_tried {
             self.loupe_tried = None;
         }
         self.loupe_stored_preview();
-        if self.panel_shown(WorkspacePanel::Left) {
-            action = action.then(self.library_left_panel(ui, develops));
-        }
         if self.panel_shown(WorkspacePanel::Right) {
-            action = action.then(self.library_right_panel(ui));
+            action = action.then(self.library_right_panel(ui, develops));
         }
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
@@ -701,89 +764,112 @@ impl Editor {
                 "the view changed what the filmstrip shows",
             );
         }
+        self.library_action(action, &ctx);
+    }
+    /// Does what the Library's grid, filmstrip or sidebar asked, unless a
+    /// file dialog or Sync is running.
+    fn library_action(&mut self, action: crate::app::library::Action, ctx: &egui::Context) {
         if !self.activity.is_busy() {
             match action {
                 crate::app::library::Action::Develop(id) => self.develop_catalog_photo(id),
                 crate::app::library::Action::RelinkRoot(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), ctx)
                 }
                 crate::app::library::Action::RelinkFolder(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), ctx)
                 }
                 crate::app::library::Action::AddFolder => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx)
+                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx)
                 }
                 crate::app::library::Action::None => {}
             }
         }
     }
-    /// The Library's left panel: Export…, the Loupe's Navigator, folders and
-    /// collections.
-    fn library_left_panel(
-        &mut self,
-        ui: &mut egui::Ui,
-        develops: Option<PhotoId>,
-    ) -> crate::app::library::Action {
+    /// The catalog's sidebar, on the left in both modules: its folders and
+    /// collections, with the Library's Export… at the foot.
+    fn library_left_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
+        let palette = theme::palette(ui.ctx());
         let mut action = crate::app::library::Action::None;
         egui::Panel::left("library-sidebar")
             .default_size(260.)
             .min_size(LIBRARY_SIDEBAR_MIN)
             .max_size(500.)
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.gray(22))
+                    .inner_margin(egui::Margin::symmetric(8, 0)),
+            )
             .show(ui, |ui| {
+                // Drawn before the bar, which disables what follows it.
+                if self.activity.is_busy() {
+                    ui.disable();
+                }
                 let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
-                // Lightroom's Export… at the foot of the Library's left panel, for the
-                // photos selected.
+                // The title bar's part over the sidebar: the traffic lights and
+                // the sidebar's toggle, then the catalog menu.
+                let (row, _) = ui.allocate_exact_size(
+                    Vec2::new(ui.available_width(), BAR_HEIGHT),
+                    egui::Sense::hover(),
+                );
+                title_bar_drag(ui, row.expand2(Vec2::new(8., 0.)));
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(row)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        ui.add_space(10. + fastframe_macos::traffic_light_inset(ui.ctx()));
+                        self.panel_toggle(ui, WorkspacePanel::Left);
+                    },
+                );
+                ui.add_space(4.);
+                self.catalog_switcher(ui, Some(ui.available_width()));
+                // Preferences and the shortcuts at the foot, with the Library's
+                // Export… for the photos selected; Develop's toolbar has its own.
                 let mut export = false;
-                if self.library.is_some() {
-                    egui::Panel::bottom("library-export")
-                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(8, 8)))
-                        .show_separator_line(false)
-                        .show(ui, |ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                export = super::widgets::action_button(
-                                    ui,
-                                    "Export…",
-                                    Some(super::icons::Icon::Export),
-                                    super::widgets::ButtonKind::Primary,
-                                    true,
-                                )
-                                .on_hover_text(if cfg!(target_os = "macos") {
-                                    "Export the selected photos · ⇧⌘E"
-                                } else {
-                                    "Export the selected photos · Ctrl+Shift+E"
-                                })
-                                .clicked();
-                            });
+                egui::Panel::bottom("library-export")
+                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                    .show_separator_line(false)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.;
+                            self.gear_button(ui);
+                            ui.add_space(4.);
+                            self.shortcuts_button(ui);
+                            if self.library.is_some() && self.module == Module::Library {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        export = super::widgets::action_button(
+                                            ui,
+                                            "Export…",
+                                            Some(super::icons::Icon::Export),
+                                            true,
+                                        )
+                                        .on_hover_text(if cfg!(target_os = "macos") {
+                                            "Export the selected photos · ⇧⌘E"
+                                        } else {
+                                            "Export the selected photos · Ctrl+Shift+E"
+                                        })
+                                        .clicked();
+                                    },
+                                );
+                            }
                         });
-                }
-                // The Navigator controls the zoom: Develop's for a RAW in the
-                // Loupe, the same one for other photos. Outside the Loupe it
-                // shows the selected photo, and a zoom chosen there opens it.
-                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
-                if develops.is_some() {
-                    self.navigator_ui(ui);
-                } else {
-                    let (photo, shown) = match &self.library {
-                        Some(l) if loupe => l
-                            .loupe_navigator()
-                            .map_or((None, None), |(photo, shown)| (Some(photo), shown)),
-                        Some(l) => (l.selected_preview(), None),
-                        None => (None, None),
-                    };
-                    if let Some(change) =
-                        crate::app::navigator::navigator(ui, photo, Some(self.view.zoom), shown)
-                    {
-                        self.library_zoom(change);
-                    }
-                }
+                    });
                 if export {
                     self.open_export_dialog();
                 }
                 if let Some(library) = &mut self.library {
                     action = action.then(library.sidebar(ui));
                 } else {
-                    ui.heading("Library");
-                    ui.label("Create an RAWmakase catalog or import a Lightroom catalog from the Catalog menu.");
+                    ui.add_space(12.);
+                    ui.label(
+                        egui::RichText::new(
+                            "Create an RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
+                        )
+                        .size(12.)
+                        .color(palette.gray(150)),
+                    );
                 }
             });
         action
@@ -804,29 +890,77 @@ impl Editor {
             library.open_loupe();
         }
     }
-    /// The Library's right panel: the active photo's info and metadata.
-    fn library_right_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
+    /// The Library's right panel: the Navigator, which stays at the top, over
+    /// the active photo's info and metadata.
+    fn library_right_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        develops: Option<PhotoId>,
+    ) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
+        // Dark as Develop's right panels and the catalog's sidebar.
+        let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("library-info")
             .default_size(270.)
             .min_size(LIBRARY_INFO_MIN)
             .max_size(420.)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(
                     ui,
                     super::widgets::SectionGroup::LibraryRight,
                 );
-                if let Some(library) = &mut self.library {
-                    action = action.then(library.info_panel(ui));
+                // The Navigator controls the zoom: Develop's for a RAW in the
+                // Loupe, the same one for other photos. Outside the Loupe it
+                // shows the selected photo, and a zoom chosen there opens it.
+                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+                let (photo, shown) = match &self.library {
+                    _ if develops.is_some() => self.navigator_view(),
+                    Some(l) if loupe => l
+                        .loupe_navigator()
+                        .map_or((None, None), |(photo, shown)| (Some(photo), shown)),
+                    Some(l) => (l.selected_preview(), None),
+                    None => (None, None),
+                };
+                let zoom = self.view.zoom;
+                let mut change = None;
+                let mut navigator = |ui: &mut egui::Ui| {
+                    ui.scope(|ui| {
+                        change = crate::app::navigator::navigator(ui, photo, Some(zoom), shown);
+                    });
+                };
+                // It scrolls with the info below it, or stays at the top once pinned.
+                let pinned = super::widgets::pinned(ui.ctx(), "Navigator");
+                if pinned {
+                    navigator(ui);
+                }
+                match &mut self.library {
+                    Some(library) => {
+                        action = action.then(library.info_panel(ui, |ui| {
+                            if !pinned {
+                                navigator(ui);
+                            }
+                        }));
+                    }
+                    None if !pinned => navigator(ui),
+                    None => {}
+                }
+                match change {
+                    Some(change) if develops.is_some() => self.navigator_change(change),
+                    Some(change) => self.library_zoom(change),
+                    None => {}
                 }
             });
         action
     }
     fn library_status_bar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("library-status").show(ui, |ui| {
-            ui.horizontal(|ui| {
+        egui::Panel::bottom("library-status")
+            .exact_size(STATUS_HEIGHT)
+            .frame(status_frame(ui, 8))
+            .show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
                 if let Some(work) = &self.catalog_work {
-                    ui.add(egui::Spinner::new().size(11.));
+                    super::widgets::spinner(ui, 11.);
                     ui.small(work);
                 } else {
                     let shown = self
@@ -1226,59 +1360,62 @@ impl Editor {
             .and_then(|l| l.message_detail())
     }
     fn status_bar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let display = if self.view.monitor.is_some() {
-                    if cfg!(target_os = "macos") {
-                        "Display: custom ICC (manual monitor conversion)"
+        egui::Panel::bottom("status")
+            .exact_size(STATUS_HEIGHT)
+            .frame(status_frame(ui, PHOTO_MARGIN as i8))
+            .show(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    let display = if self.view.monitor.is_some() {
+                        if cfg!(target_os = "macos") {
+                            "Display: custom ICC (manual monitor conversion)"
+                        } else {
+                            "Display: custom ICC (disable compositor ICC conversion)"
+                        }
+                    } else if cfg!(target_os = "macos") {
+                        "Display: sRGB (managed by macOS)"
                     } else {
-                        "Display: custom ICC (disable compositor ICC conversion)"
+                        "Display: sRGB (compositor may manage the monitor)"
+                    };
+                    status_text(
+                        ui,
+                        self.document
+                            .edit
+                            .save_state()
+                            .message()
+                            .unwrap_or(&self.status),
+                        self.message_detail(&self.status),
+                        Some(display),
+                    );
+                    if !self.preview.status.is_empty() {
+                        ui.separator();
+                        ui.small(&self.preview.status);
                     }
-                } else if cfg!(target_os = "macos") {
-                    "Display: sRGB (managed by macOS)"
-                } else {
-                    "Display: sRGB (compositor may manage the monitor)"
-                };
-                status_text(
-                    ui,
-                    self.document
-                        .edit
-                        .save_state()
-                        .message()
-                        .unwrap_or(&self.status),
-                    self.message_detail(&self.status),
-                    Some(display),
-                );
-                if !self.preview.status.is_empty() {
-                    ui.separator();
-                    ui.small(&self.preview.status);
-                }
-                self.preview_progress(ui);
-                if !self.document.lightroom_notice.is_empty() {
-                    ui.separator();
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(
-                                self.document.lightroom_notice.lines().next().unwrap_or(""),
+                    self.preview_progress(ui);
+                    if !self.document.lightroom_notice.is_empty() {
+                        ui.separator();
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    self.document.lightroom_notice.lines().next().unwrap_or(""),
+                                )
+                                .small(),
                             )
-                            .small(),
+                            .truncate(),
                         )
-                        .truncate(),
-                    )
-                    .on_hover_text(&self.document.lightroom_notice);
-                }
-                if self.document.edit.save_state().is_protected() {
-                    ui.separator();
-                    ui.colored_label(
+                        .on_hover_text(&self.document.lightroom_notice);
+                    }
+                    if self.document.edit.save_state().is_protected() {
+                        ui.separator();
+                        ui.colored_label(
                         Color32::YELLOW,
                         egui::RichText::new(
                             "Saved edits protected; editing is temporary. Export or save a preset.",
                         )
                         .small(),
                     );
-                }
+                    }
+                });
             });
-        });
     }
 
     /// Library preview progress, right-aligned inside an existing status row
@@ -1324,43 +1461,69 @@ impl Editor {
         }
     }
 
-    fn develop_left_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("presets")
-            .default_size(245.)
-            .min_size(PRESETS_MIN)
-            .max_size(400.)
-            .show(ui, |ui| {
-                let _side = super::widgets::SectionSide::enter(
-                    ui,
-                    super::widgets::SectionGroup::DevelopLeft,
-                );
-                self.navigator_ui(ui);
-                self.presets_ui(ui);
-            });
-    }
-    fn develop_panels(&mut self, ui: &mut egui::Ui) {
+    fn develop_side_panels(&mut self, ui: &mut egui::Ui) {
+        // From the window's right edge: the tab rail, the adjustments, then
+        // Presets or History beside the photo.
+        let tabs = self.develop_rail_edge(ui);
         if self.panel_shown(WorkspacePanel::Right) {
             self.develop_right_panel(ui);
         }
+        self.develop_tab_panel(ui, tabs);
+    }
+    fn develop_photo(&mut self, ui: &mut egui::Ui) {
+        // The photo's backdrop reaches the panels around it, leaving the
+        // photo a margin of its own colour.
+        let backdrop = theme::palette(ui.ctx()).photo_backdrop();
         let area = egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(backdrop)
+                    .inner_margin(egui::Margin::same(PHOTO_MARGIN as i8)),
+            )
             .show(ui, |ui| self.viewport_ui(ui))
             .response
             .rect;
         self.drop_area = Some(area);
     }
     fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
+        // Dark as the catalog's sidebar, around the lighter photo.
+        let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("adjustments")
-            .default_size(330.)
+            .default_size(ADJUSTMENTS_DEFAULT)
             .min_size(ADJUSTMENTS_MIN)
             .max_size(400.)
+            .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = super::widgets::SectionSide::enter(
                     ui,
                     super::widgets::SectionGroup::DevelopRight,
                 );
+                let enabled = self.document.full().is_some() && !self.view.compare.before_only();
+                // The Navigator and Histogram scroll with the panels below
+                // them, or stay at the top once pinned.
+                let navigator = super::widgets::pinned(ui.ctx(), "Navigator");
+                let histogram = super::widgets::pinned(ui.ctx(), "Histogram");
+                let top = |editor: &mut Self, ui: &mut egui::Ui, pinned: bool| {
+                    if navigator == pinned {
+                        ui.scope(|ui| editor.navigator_ui(ui));
+                    }
+                    if histogram == pinned {
+                        super::widgets::section_with(
+                            ui,
+                            "Histogram",
+                            super::widgets::HeaderButton::Pin,
+                            |ui| {
+                                ui.add_enabled_ui(enabled, |ui| editor.histogram_ui(ui));
+                            },
+                        );
+                    }
+                };
+                top(self, ui, true);
+                if navigator || histogram {
+                    ui.add_space(4.);
+                }
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    let enabled =
-                        self.document.full().is_some() && !self.view.compare.before_only();
+                    top(self, ui, false);
                     ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                 });
             });
@@ -1644,6 +1807,18 @@ fn menu_separator(ui: &mut egui::Ui) {
     ui.add_space(4.);
 }
 
+/// The photo's backdrop around it in Develop and the Library's views.
+pub(super) const PHOTO_MARGIN: f32 = 20.;
+
+/// The status line's height, its text centred in it.
+const STATUS_HEIGHT: f32 = 26.;
+/// The status line's frame: the panels' fill, inset at the sides only, so its
+/// text sits midway between the filmstrip and the window's edge; `side` is
+/// the inset, Develop's the photo area's margin.
+fn status_frame(ui: &egui::Ui, side: i8) -> egui::Frame {
+    egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(side, 0))
+}
+
 /// What the close guard calls an export or preview a control command started.
 const OUTPUT: &str = "the output the control socket asked for";
 /// What the close guard calls a folder change.
@@ -1651,12 +1826,16 @@ const FOLDER_CHANGE: &str = "the folder change";
 
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as
-/// its contents, leaving a strip of the window's black between. The left
-/// panels hold the Navigator, whose zoom levels need 224 points.
+/// its contents, leaving a strip of the window's black between. The right
+/// panels hold the Navigator, whose zoom levels need 224 points, as do the
+/// catalog's sidebar and Develop's Presets.
 pub(super) const PRESETS_MIN: f32 = 224.;
 pub(super) const ADJUSTMENTS_MIN: f32 = 300.;
+/// The adjustments' width until the user drags it; Develop's tab panel folds
+/// by itself when the photo would have too little room beside it.
+pub(super) const ADJUSTMENTS_DEFAULT: f32 = 330.;
 pub(super) const LIBRARY_SIDEBAR_MIN: f32 = 224.;
-pub(super) const LIBRARY_INFO_MIN: f32 = 220.;
+pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
@@ -1664,11 +1843,10 @@ pub(super) const BAR_HEIGHT: f32 = 44.;
 /// The bar's empty space moves the window, and a double click does what
 /// System Settings says, as a title bar does. Controls drawn later take their
 /// own clicks. Only macOS hides the system title bar.
-fn title_bar_drag(ui: &mut egui::Ui) {
+fn title_bar_drag(ui: &mut egui::Ui, bar: egui::Rect) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let bar = ui.max_rect().expand2(Vec2::new(18., 0.));
     let response = ui.interact(
         bar,
         ui.id().with("title-bar"),

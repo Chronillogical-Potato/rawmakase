@@ -276,13 +276,15 @@ above rather than implementing SQL, file formats or pixel processing.
 | [readout.rs](../src/app/readout.rs) | The RGB readout under the histogram: the rendered pixel under the pointer in Melissa RGB, and asking renders to keep their pixels only while the pointer is over the photo. |
 | [reference.rs](../src/app/reference.rs) | Reference View: the reference photo (set from the filmstrip's menu or by dragging it onto the Reference side), its lock, layout and own Fit/100% zoom, developing it with its saved edit, and keeping it while moving between photos. |
 | [crop_tool.rs](../src/app/crop_tool.rs) | The Crop tool's guide overlays (O, Shift+O), Straighten ruler, portrait/landscape swap (X) and Auto straighten. See [transform](transform.md#crop-and-straighten). |
+| [history_panel.rs](../src/app/history_panel.rs) | Develop's History panel: this session's steps, going back to one, and the photo's imported Lightroom steps applied or copied to Before. |
 | [guided_tool.rs](../src/app/guided_tool.rs) | The Guided Upright tool (Shift+T): drawing, moving, selecting and deleting guides, its loupe and grid. See [transform](transform.md#guided-upright). |
 | [overlay.rs](../src/app/overlay.rs) | The active tool's drawing over the photo (pins, circles, brush cursor, handles) and pointer ownership. |
 | [retouch_tool.rs](../src/app/retouch_tool.rs) | Remove tool (Q): spots, brushed areas, source dragging, keys and its drawer. |
 | [red_eye_tool.rs](../src/app/red_eye_tool.rs) | Red Eye tool: Red Eye and Pet Eye, finding a pupil from a dragged circle or a click, moving, Delete, Pupil Size, Darken and the pet eye's catchlight. |
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
-| [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), kept in the session; a panel being hidden first saves or ends what it was doing. |
+| [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), and Develop's open tab, kept in the session; a panel being hidden first saves or ends what it was doing. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application, the Amount slider and temporary hover previews. |
+| [side_tabs.rs](../src/app/side_tabs.rs) | Develop's tab panel beside the adjustments (Presets, or Snapshots over History, or the open tool's drawer) and the rail that switches and folds it and opens Crop, Remove, Red Eye and Masking. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
 | [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset, and Update, Rename and Delete for presets made here (`presets/user.rs`, written by `xmp/preset_write.rs`). |
@@ -291,6 +293,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [library/mod.rs](../src/app/library/mod.rs) | The Library: composes the owners below, hands metadata and virtual-copy changes to `catalog_session` and records them for undo, and draws the sidebar, grid, filmstrip and info panel. |
 | [library/filter.rs](../src/app/library/filter.rs) | The source (folder scope or collection), the filter bar's search, flag, rating and label, the offline filter and sort order; computes what is shown. |
 | [library/availability.rs](../src/app/library/availability.rs) | Which originals are online, found out in the background while the Library already shows them. |
+| [library/sidebar.rs](../src/app/library/sidebar.rs) | The catalog's sidebar in both modules: Catalog, Folders by drive and Collections, with their folder and collection trees built once per change to the session's lists. |
 | [library/volumes.rs](../src/app/library/volumes.rs) | Whether each drive is attached and its free space, probed off the UI thread, and the volume header row. |
 | [library/textures.rs](../src/app/library/textures.rs) | The bounded embedded and edited preview textures, their requests to the preview workers and the tickets that drop stale results. |
 | [library/copy_name.rs](../src/app/library/copy_name.rs) | The Copy Name field: the name being typed, saved on commit and kept across selection changes and failed saves. |

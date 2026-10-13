@@ -114,6 +114,9 @@ pub(super) fn label_color(palette: &theme::Palette, label: &str) -> Option<Color
     })
 }
 
+/// The height of a rating, flag or label control, which rows showing them
+/// (the filmstrip's header) centre their text on.
+pub(crate) const CONTROLS_HEIGHT: f32 = 22.;
 /// Rating, flag and label as fixed-size painted controls, so hovering never
 /// changes the layout.
 pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<Edit> {
@@ -126,7 +129,7 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
             let stars: Vec<_> = (1..=5)
                 .map(|star| {
                     let (rect, response) =
-                        ui.allocate_exact_size(Vec2::new(17., 22.), Sense::click());
+                        ui.allocate_exact_size(Vec2::new(17., CONTROLS_HEIGHT), Sense::click());
                     let response = response
                         .on_hover_text(format!("{star} stars · {star} key · click again to clear"));
                     if response.clicked() {
@@ -153,7 +156,8 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
             }
             ui.add_space(12.);
             for (flag, tip) in [(1, "Pick · P"), (-1, "Reject · X")] {
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(24., 22.), Sense::click());
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(24., CONTROLS_HEIGHT), Sense::click());
                 let active = photo.flag == flag;
                 if active || response.hovered() {
                     ui.painter().rect_filled(
@@ -169,7 +173,8 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
             }
             ui.add_space(12.);
             for label in LABELS {
-                let (rect, response) = ui.allocate_exact_size(Vec2::new(18., 22.), Sense::click());
+                let (rect, response) =
+                    ui.allocate_exact_size(Vec2::new(18., CONTROLS_HEIGHT), Sense::click());
                 let active = photo.label == label;
                 let chip = Rect::from_center_size(rect.center(), Vec2::splat(11.));
                 ui.painter().rect_filled(

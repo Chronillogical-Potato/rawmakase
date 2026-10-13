@@ -474,7 +474,7 @@ impl Editor {
             // Waiting for its first render; a 100% region alone is drawn below.
             None if before.region.is_none() => {
                 let at = Rect::from_center_size(pane.clip.center(), Vec2::splat(18.));
-                egui::Spinner::new().size(18.).paint_at(ui, at);
+                super::widgets::paint_spinner(ui, at, None);
             }
             None => {}
         }

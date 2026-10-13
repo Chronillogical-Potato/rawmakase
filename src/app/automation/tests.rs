@@ -250,6 +250,12 @@ mod mapping_tests {
             )))
         );
         assert_eq!(
+            run("shift+f8"),
+            Some(commands::Action::Panels(PanelChange::Toggle(
+                WorkspacePanel::Presets
+            )))
+        );
+        assert_eq!(
             parse_action("panels:filmstrip"),
             Some(Action::Named(commands::Action::Panels(
                 PanelChange::Toggle(WorkspacePanel::Filmstrip)

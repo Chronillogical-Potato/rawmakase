@@ -357,7 +357,7 @@ impl Editor {
         ui.add_space(6.);
         if upgrading {
             ui.horizontal(|ui| {
-                ui.spinner();
+                super::super::widgets::spinner(ui, 14.);
                 ui.label("Backing up and upgrading the catalog…");
             });
             return;
@@ -387,7 +387,7 @@ impl Editor {
         }
         if installing {
             ui.horizontal(|ui| {
-                ui.spinner();
+                super::super::widgets::spinner(ui, 14.);
                 ui.label("Working…");
             });
             return;
@@ -451,7 +451,7 @@ impl Editor {
     }
     fn selection_progress(&mut self, ui: &mut egui::Ui, request: Request) {
         control_label(ui, "Select", |ui| {
-            ui.spinner();
+            super::super::widgets::spinner(ui, 14.);
             // No percentage: the runtime reports none for a run.
             ui.label(format!(
                 "Finding the {}…",

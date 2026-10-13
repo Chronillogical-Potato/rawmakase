@@ -9,19 +9,31 @@ use serde::{Deserialize, Deserializer, Serialize};
 /// A panel the user can hide.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WorkspacePanel {
-    /// Develop's Navigator and presets; the Library's Navigator, folders and
-    /// collections.
+    /// The catalog, folders and collections, in both modules.
     Left,
-    /// Develop's adjustments; the Library's photo info and metadata.
+    /// The Navigator, over Develop's adjustments or the Library's photo info
+    /// and metadata; in Develop also the tab panel and its rail.
     Right,
     /// The filmstrip with the status bar above it.
     Filmstrip,
+    /// Develop's Presets and History tabs, beside the adjustments.
+    Presets,
+}
+impl WorkspacePanel {
+    const ALL: [Self; 4] = [Self::Left, Self::Right, Self::Filmstrip, Self::Presets];
+    /// The side panels `module` has, which Tab hides and shows together.
+    fn sides(module: Module) -> &'static [Self] {
+        match module {
+            Module::Develop => &[Self::Left, Self::Right, Self::Presets],
+            Module::Library => &[Self::Left, Self::Right],
+        }
+    }
 }
 
 /// How a request changes a module's panels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PanelChange {
-    /// One panel (F7, F8, F6, or its edge arrow).
+    /// One panel (F7, F8, F6, Shift+F8, its bar button, or Develop's tab rail).
     Toggle(WorkspacePanel),
     /// Both side panels (Tab).
     Sides,
@@ -63,6 +75,8 @@ pub(crate) struct PanelLayout {
     pub left: Visibility,
     pub right: Visibility,
     pub filmstrip: Visibility,
+    /// Develop's tab panel; the Library has none.
+    pub presets: Visibility,
 }
 impl PanelLayout {
     pub(super) fn shown(self, panel: WorkspacePanel) -> bool {
@@ -73,6 +87,7 @@ impl PanelLayout {
             WorkspacePanel::Left => self.left,
             WorkspacePanel::Right => self.right,
             WorkspacePanel::Filmstrip => self.filmstrip,
+            WorkspacePanel::Presets => self.presets,
         }
     }
     fn slot(&mut self, panel: WorkspacePanel) -> &mut Visibility {
@@ -80,23 +95,21 @@ impl PanelLayout {
             WorkspacePanel::Left => &mut self.left,
             WorkspacePanel::Right => &mut self.right,
             WorkspacePanel::Filmstrip => &mut self.filmstrip,
+            WorkspacePanel::Presets => &mut self.presets,
         }
     }
-    /// The layout after `change`. A group hides when any of it shows, and shows
-    /// again only once all of it is hidden, as Lightroom's Tab does.
-    pub(super) fn changed(self, change: PanelChange) -> Self {
-        let group: &[WorkspacePanel] = match change {
+    /// `module`'s layout after `change`. A group hides when any of it shows,
+    /// and shows again only once all of it is hidden, as Lightroom's Tab does.
+    pub(super) fn changed(self, change: PanelChange, module: Module) -> Self {
+        let sides = WorkspacePanel::sides(module);
+        let group: Vec<WorkspacePanel> = match change {
             PanelChange::Toggle(panel) => {
                 let mut layout = self;
                 *layout.slot(panel) = self.visibility(panel).flipped();
                 return layout;
             }
-            PanelChange::Sides => &[WorkspacePanel::Left, WorkspacePanel::Right],
-            PanelChange::All => &[
-                WorkspacePanel::Left,
-                WorkspacePanel::Right,
-                WorkspacePanel::Filmstrip,
-            ],
+            PanelChange::Sides => sides.to_vec(),
+            PanelChange::All => [sides, &[WorkspacePanel::Filmstrip]].concat(),
         };
         let to = if group.iter().any(|panel| self.shown(*panel)) {
             Visibility::Hidden
@@ -105,7 +118,7 @@ impl PanelLayout {
         };
         let mut layout = self;
         for panel in group {
-            *layout.slot(*panel) = to;
+            *layout.slot(panel) = to;
         }
         layout
     }
@@ -116,6 +129,7 @@ impl PanelLayout {
         self,
         change: PanelChange,
         last: Option<Tabbed>,
+        module: Module,
     ) -> (Self, Option<Tabbed>) {
         if let Some(last) = last
             && last.change == change
@@ -123,7 +137,7 @@ impl PanelLayout {
         {
             return (last.before, None);
         }
-        let next = self.changed(change);
+        let next = self.changed(change, module);
         let hid =
             !matches!(change, PanelChange::Toggle(_)) && self.hidden_by(next).next().is_some();
         (
@@ -137,13 +151,9 @@ impl PanelLayout {
     }
     /// The panels shown here and hidden in `next`.
     pub(super) fn hidden_by(self, next: Self) -> impl Iterator<Item = WorkspacePanel> {
-        [
-            WorkspacePanel::Left,
-            WorkspacePanel::Right,
-            WorkspacePanel::Filmstrip,
-        ]
-        .into_iter()
-        .filter(move |panel| self.shown(*panel) && !next.shown(*panel))
+        WorkspacePanel::ALL
+            .into_iter()
+            .filter(move |panel| self.shown(*panel) && !next.shown(*panel))
     }
 }
 
@@ -156,12 +166,33 @@ pub(super) struct Tabbed {
     after: PanelLayout,
 }
 
+/// The tab Develop's tab panel shows. Saved by name; any other value reads as
+/// Presets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", from = "String")]
+pub(crate) enum DevelopTab {
+    #[default]
+    Presets,
+    /// Snapshots over History, as in Lightroom.
+    History,
+}
+impl From<String> for DevelopTab {
+    fn from(name: String) -> Self {
+        if name == "history" {
+            Self::History
+        } else {
+            Self::Presets
+        }
+    }
+}
+
 /// Develop's panels and the Library's, as the session keeps them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct WorkspacePanels {
     pub develop: PanelLayout,
     pub library: PanelLayout,
+    pub develop_tab: DevelopTab,
 }
 impl WorkspacePanels {
     pub(super) fn of(self, module: Module) -> PanelLayout {
@@ -194,7 +225,7 @@ impl Editor {
             .tabbed
             .filter(|(module, _)| *module == self.module)
             .map(|(_, tabbed)| tabbed);
-        let (next, tabbed) = layout.changed_from(change, last);
+        let (next, tabbed) = layout.changed_from(change, last, self.module);
         for panel in layout.hidden_by(next) {
             match (self.module, panel) {
                 (Module::Library, WorkspacePanel::Right) => {
@@ -202,7 +233,7 @@ impl Editor {
                         return false;
                     }
                 }
-                (Module::Develop, WorkspacePanel::Left) => {
+                (Module::Develop, WorkspacePanel::Presets) => {
                     self.end_preset_hover();
                     self.commit_snapshot_rename();
                 }
@@ -211,12 +242,45 @@ impl Editor {
         }
         self.panels.set(self.module, next);
         self.tabbed = tabbed.map(|tabbed| (self.module, tabbed));
+        self.save_panels();
+        true
+    }
+    /// A panel change asked for by a key, a command or a device: as
+    /// [`Self::change_panels`], except that Develop's tab panel opens and
+    /// folds as its rail does, in a narrow window too. Returns whether the
+    /// panels changed.
+    pub(super) fn request_panels(&mut self, change: PanelChange) -> bool {
+        if change != PanelChange::Toggle(WorkspacePanel::Presets) {
+            return self.change_panels(change);
+        }
+        if self.module == Module::Develop {
+            return self.toggle_develop_tabs();
+        }
+        // The Library has no tab panel: Develop's folds or opens, as it shows
+        // there next.
+        self.panels.develop = self.panels.develop.changed(change, Module::Develop);
+        self.save_panels();
+        true
+    }
+    /// Switches Develop's tab panel to `tab`. The tab left first lets go of
+    /// what it was doing, as hiding the panel does.
+    pub(super) fn set_develop_tab(&mut self, tab: DevelopTab) {
+        if self.panels.develop_tab == tab {
+            return;
+        }
+        match self.panels.develop_tab {
+            DevelopTab::Presets => self.end_preset_hover(),
+            DevelopTab::History => self.commit_snapshot_rename(),
+        }
+        self.panels.develop_tab = tab;
+        self.save_panels();
+    }
+    fn save_panels(&mut self) {
         if let Err(e) = self.save_session() {
             self.status = format!("Panel layout not saved: {e:#}");
         }
-        true
     }
-    /// Tab, Shift+Tab and F6–F8, unless a field or control has the keyboard
+    /// Tab, Shift+Tab, F6–F8 and Shift+F8 (Develop's tab panel), unless a field or control has the keyboard
     /// focus (Tab then moves it on) or a menu is open. Run before any panel is
     /// drawn, so the Tab taken here does not also focus the first slider.
     pub(super) fn panel_keys(&mut self, ctx: &egui::Context) {
@@ -229,6 +293,9 @@ impl Editor {
                 Some(PanelChange::All)
             } else if i.consume_key(Modifiers::NONE, Key::Tab) {
                 Some(PanelChange::Sides)
+            } else if i.consume_key(Modifiers::SHIFT, Key::F8) {
+                // Before F8, whose plain pattern also matches with Shift held.
+                Some(PanelChange::Toggle(WorkspacePanel::Presets))
             } else if i.consume_key(Modifiers::NONE, Key::F7) {
                 Some(PanelChange::Toggle(WorkspacePanel::Left))
             } else if i.consume_key(Modifiers::NONE, Key::F8) {
@@ -241,7 +308,7 @@ impl Editor {
         });
         if let Some(change) = change {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
-            self.change_panels(change);
+            self.request_panels(change);
         }
     }
 }
@@ -253,12 +320,14 @@ impl Editor {
         use super::icons::Icon;
         let shown = self.panel_shown(panel);
         let (icon, name, key) = match (panel, shown) {
-            (WorkspacePanel::Left, true) => (Icon::PanelLeft, "the left panel", "F7"),
-            (WorkspacePanel::Left, false) => (Icon::PanelLeftOpen, "the left panel", "F7"),
-            (WorkspacePanel::Right, true) => (Icon::PanelRight, "the right panel", "F8"),
-            (WorkspacePanel::Right, false) => (Icon::PanelRightOpen, "the right panel", "F8"),
-            (WorkspacePanel::Filmstrip, true) => (Icon::PanelBottom, "the filmstrip", "F6"),
-            (WorkspacePanel::Filmstrip, false) => (Icon::PanelBottomOpen, "the filmstrip", "F6"),
+            (WorkspacePanel::Left, true) => (Icon::PanelLeft, "the left panel", " · F7"),
+            (WorkspacePanel::Left, false) => (Icon::PanelLeftOpen, "the left panel", " · F7"),
+            (WorkspacePanel::Right, true) => (Icon::PanelRight, "the right panel", " · F8"),
+            (WorkspacePanel::Right, false) => (Icon::PanelRightOpen, "the right panel", " · F8"),
+            (WorkspacePanel::Filmstrip, true) => (Icon::PanelBottom, "the filmstrip", " · F6"),
+            (WorkspacePanel::Filmstrip, false) => (Icon::PanelBottomOpen, "the filmstrip", " · F6"),
+            (WorkspacePanel::Presets, true) => (Icon::PanelRight, "Presets and History", ""),
+            (WorkspacePanel::Presets, false) => (Icon::PanelRightOpen, "Presets and History", ""),
         };
         let verb = if shown { "Hide" } else { "Show" };
         let palette = super::theme::palette(ui.ctx());
@@ -270,7 +339,7 @@ impl Editor {
         let color = palette.gray(if response.hovered() { 235 } else { 160 });
         super::icons::paint_at(ui.painter(), icon, rect.center(), 15., color);
         if response
-            .on_hover_text(format!("{verb} {name} · {key}"))
+            .on_hover_text(format!("{verb} {name}{key}"))
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
@@ -320,49 +389,67 @@ mod tests {
             left,
             right,
             filmstrip,
+            presets: SHOWN,
         }
     }
 
     #[test]
     fn tab_hides_both_sides_while_either_shows_and_brings_both_back() {
         let all = PanelLayout::default();
-        let sides_hidden = all.changed(PanelChange::Sides);
+        let sides_hidden = all.changed(PanelChange::Sides, Module::Library);
         assert_eq!(sides_hidden, layout(HIDDEN, HIDDEN, SHOWN));
-        assert_eq!(sides_hidden.changed(PanelChange::Sides), all);
+        assert_eq!(
+            sides_hidden.changed(PanelChange::Sides, Module::Library),
+            all
+        );
         // One side already hidden: Tab hides the other first.
         let left_only = layout(SHOWN, HIDDEN, SHOWN);
-        assert_eq!(left_only.changed(PanelChange::Sides), sides_hidden);
+        assert_eq!(
+            left_only.changed(PanelChange::Sides, Module::Library),
+            sides_hidden
+        );
     }
 
     #[test]
     fn a_second_tab_brings_back_what_the_first_hid() {
         // The left panel hidden with its button; Tab hides the right one.
         let right_only = layout(HIDDEN, SHOWN, SHOWN);
-        let (hidden, tabbed) = right_only.changed_from(PanelChange::Sides, None);
+        let (hidden, tabbed) = right_only.changed_from(PanelChange::Sides, None, Module::Library);
         assert_eq!(hidden, layout(HIDDEN, HIDDEN, SHOWN));
         // Tab again: the right panel alone comes back.
-        let (back, tabbed) = hidden.changed_from(PanelChange::Sides, tabbed);
+        let (back, tabbed) = hidden.changed_from(PanelChange::Sides, tabbed, Module::Library);
         assert_eq!(back, right_only);
         assert_eq!(tabbed, None);
 
         // Shift+Tab restores the layout it hid, filmstrip and all.
-        let (none, tabbed) = right_only.changed_from(PanelChange::All, None);
+        let (none, tabbed) = right_only.changed_from(PanelChange::All, None, Module::Library);
         assert_eq!(none, layout(HIDDEN, HIDDEN, HIDDEN));
-        assert_eq!(none.changed_from(PanelChange::All, tabbed).0, right_only);
+        assert_eq!(
+            none.changed_from(PanelChange::All, tabbed, Module::Library)
+                .0,
+            right_only
+        );
 
         // A panel changed in between: Tab starts from the panels as they are.
-        let (hidden, tabbed) = right_only.changed_from(PanelChange::Sides, None);
-        let (filmstrip_gone, tabbed) =
-            hidden.changed_from(PanelChange::Toggle(WorkspacePanel::Filmstrip), tabbed);
+        let (hidden, tabbed) = right_only.changed_from(PanelChange::Sides, None, Module::Library);
+        let (filmstrip_gone, tabbed) = hidden.changed_from(
+            PanelChange::Toggle(WorkspacePanel::Filmstrip),
+            tabbed,
+            Module::Library,
+        );
         assert_eq!(tabbed, None);
         assert_eq!(
-            filmstrip_gone.changed_from(PanelChange::Sides, tabbed).0,
+            filmstrip_gone
+                .changed_from(PanelChange::Sides, tabbed, Module::Library)
+                .0,
             layout(SHOWN, SHOWN, HIDDEN)
         );
         // Shift+Tab after Tab is its own change, not Tab's undo.
-        let (sides, tabbed) = right_only.changed_from(PanelChange::Sides, None);
+        let (sides, tabbed) = right_only.changed_from(PanelChange::Sides, None, Module::Library);
         assert_eq!(
-            sides.changed_from(PanelChange::All, tabbed).0,
+            sides
+                .changed_from(PanelChange::All, tabbed, Module::Library)
+                .0,
             layout(HIDDEN, HIDDEN, HIDDEN)
         );
     }
@@ -370,12 +457,12 @@ mod tests {
     #[test]
     fn shift_tab_takes_the_filmstrip_with_the_sides() {
         let all = PanelLayout::default();
-        let none = all.changed(PanelChange::All);
+        let none = all.changed(PanelChange::All, Module::Library);
         assert_eq!(none, layout(HIDDEN, HIDDEN, HIDDEN));
-        assert_eq!(none.changed(PanelChange::All), all);
+        assert_eq!(none.changed(PanelChange::All, Module::Library), all);
         // Tab's hidden sides with the filmstrip still up: Shift+Tab hides it too.
         assert_eq!(
-            layout(HIDDEN, HIDDEN, SHOWN).changed(PanelChange::All),
+            layout(HIDDEN, HIDDEN, SHOWN).changed(PanelChange::All, Module::Library),
             none
         );
     }
@@ -383,14 +470,40 @@ mod tests {
     #[test]
     fn a_single_toggle_changes_only_its_panel() {
         let all = PanelLayout::default();
-        let right = all.changed(PanelChange::Toggle(WorkspacePanel::Right));
+        let right = all.changed(PanelChange::Toggle(WorkspacePanel::Right), Module::Library);
         assert_eq!(right, layout(SHOWN, HIDDEN, SHOWN));
         assert_eq!(
             all.hidden_by(right).collect::<Vec<_>>(),
             [WorkspacePanel::Right]
         );
         assert_eq!(
-            right.changed(PanelChange::Toggle(WorkspacePanel::Right)),
+            right.changed(PanelChange::Toggle(WorkspacePanel::Right), Module::Library),
+            all
+        );
+    }
+
+    #[test]
+    fn develops_tab_goes_with_its_sides() {
+        let all = PanelLayout::default();
+        let sides = all.changed(PanelChange::Sides, Module::Develop);
+        assert_eq!(
+            sides,
+            PanelLayout {
+                presets: HIDDEN,
+                ..layout(HIDDEN, HIDDEN, SHOWN)
+            }
+        );
+        assert_eq!(sides.changed(PanelChange::Sides, Module::Develop), all);
+        // The tab panel folded alone: Tab hides the rest, then brings all back.
+        let folded = all.changed(
+            PanelChange::Toggle(WorkspacePanel::Presets),
+            Module::Develop,
+        );
+        assert_eq!(folded.changed(PanelChange::Sides, Module::Develop), sides);
+        // The Library has no tab panel: it never keeps Tab from showing its sides.
+        let library_sides = all.changed(PanelChange::Sides, Module::Library);
+        assert_eq!(
+            library_sides.changed(PanelChange::Sides, Module::Library),
             all
         );
     }
@@ -400,18 +513,23 @@ mod tests {
         let panels = WorkspacePanels {
             develop: layout(HIDDEN, SHOWN, HIDDEN),
             library: PanelLayout::default(),
+            develop_tab: DevelopTab::History,
         };
         let json = serde_json::to_value(panels).unwrap();
         assert_eq!(json["develop"]["left"], "hidden");
+        assert_eq!(json["develop_tab"], "history");
         assert_eq!(
             serde_json::from_value::<WorkspacePanels>(json).unwrap(),
             panels
         );
         let odd: WorkspacePanels = serde_json::from_str(
-            r#"{"develop":{"left":"folded","right":"hidden","extra":1},"future":{}}"#,
+            r#"{"develop":{"left":"folded","right":"hidden","extra":1},"future":{},"develop_tab":"ai"}"#,
         )
         .unwrap();
         assert_eq!(odd.develop, layout(SHOWN, HIDDEN, SHOWN));
         assert_eq!(odd.library, PanelLayout::default());
+        assert_eq!(odd.develop_tab, DevelopTab::Presets);
+        // Sessions from before the tab panel show it.
+        assert!(odd.develop.shown(WorkspacePanel::Presets));
     }
 }

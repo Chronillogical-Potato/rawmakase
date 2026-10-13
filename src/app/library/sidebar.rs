@@ -1,4 +1,4 @@
-//! The Library's left panel: Navigator, Catalog, Folders and Collections, and
+//! The Library's left panel: Catalog, Folders and Collections, and
 //! the source they choose.
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
@@ -8,12 +8,115 @@ use crate::catalog::{CollectionKind, FolderId, PhotoId, RootId};
 use eframe::egui::{self, Vec2};
 use std::collections::HashSet;
 
+/// The sidebar's trees, as the catalog's lists were when they were built.
+pub(super) struct Trees {
+    /// What the lists were: see [`Library::lists_key`].
+    key: ListsKey,
+    /// The startup disk first, then other drives by name.
+    volumes: Vec<Drive>,
+    collections: Vec<collections::CollectionNode>,
+}
+/// A drive in the Folders panel: its roots' folder trees and photo count.
+struct Drive {
+    volume: crate::platform::volume::Volume,
+    trees: Vec<FolderNode>,
+    photos: usize,
+}
+/// What the sidebar's trees are built from: the session's structural
+/// generation, which every full read changes, and the sizes of the lists the
+/// edits made without one change (collection members, a removal whose read
+/// failed, the Quick Collection made).
+type ListsKey = (u64, usize, usize, usize, usize);
+
 impl Library {
-    /// The left panel's catalog, folders and collections; the editor draws
-    /// the Navigator above them.
+    fn lists_key(&self) -> ListsKey {
+        let members = self
+            .session
+            .collection_photos
+            .values()
+            .map(|m| m.len())
+            .sum();
+        (
+            self.session.generation(),
+            self.session.folders.len(),
+            self.session.roots.len(),
+            self.session.collections.len(),
+            members,
+        )
+    }
+    /// The sidebar's trees, built again only when the lists changed.
+    fn sidebar_trees(&mut self) -> std::sync::Arc<Trees> {
+        let key = self.lists_key();
+        if let Some(trees) = self.sidebar_trees.as_ref().filter(|t| t.key == key) {
+            return trees.clone();
+        }
+        let mut volumes: std::collections::BTreeMap<
+            crate::platform::volume::Volume,
+            Vec<(RootId, String, Option<String>)>,
+        > = Default::default();
+        for root in &self.session.roots {
+            let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
+            volumes
+                .entry(crate::platform::volume::volume_of(&path))
+                .or_default()
+                .push(root.clone());
+        }
+        let mut volumes: Vec<_> = volumes
+            .into_iter()
+            .map(|(volume, roots)| {
+                let photos = roots
+                    .iter()
+                    .map(|(id, ..)| {
+                        self.session
+                            .folders
+                            .iter()
+                            .filter(|f| f.root == *id)
+                            .map(|f| f.count)
+                            .sum::<usize>()
+                    })
+                    .sum();
+                let trees = roots
+                    .into_iter()
+                    .map(|(root, original, mapped)| {
+                        let root_path = mapped.as_deref().unwrap_or(&original);
+                        let name = std::path::Path::new(&original)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        let mut tree = FolderNode::root(root, name, root_path.into());
+                        for f in self.session.folders.iter().filter(|f| f.root == root) {
+                            tree.insert(f);
+                        }
+                        tree.finish();
+                        tree
+                    })
+                    .collect();
+                Drive {
+                    volume,
+                    trees,
+                    photos,
+                }
+            })
+            .collect();
+        volumes.sort_by_key(|d: &Drive| (d.volume.mount.is_some(), d.volume.name.to_lowercase()));
+        let trees = std::sync::Arc::new(Trees {
+            key,
+            volumes,
+            collections: collections::tree(
+                &self.session.collections,
+                &self.session.collection_photos,
+            ),
+        });
+        self.sidebar_trees = Some(trees.clone());
+        trees
+    }
+    /// The left panel's catalog, folders and collections.
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) -> Action {
         let palette = theme::palette(ui.ctx());
         let mut action = Action::None;
+        // The folder and collection trees built when the lists last changed.
+        let trees = self.sidebar_trees();
         ui.spacing_mut().item_spacing.y = 0.;
         egui::ScrollArea::vertical()
             .id_salt("library-sources")
@@ -72,24 +175,16 @@ impl Library {
                 });
                 section(ui, "Folders", false, |ui| {
                     // Lightroom-style volume headers with an attached light.
-                    let mut volumes: std::collections::BTreeMap<
-                        crate::platform::volume::Volume,
-                        Vec<(RootId, String, Option<String>)>,
-                    > = Default::default();
-                    for root in self.session.roots.clone() {
-                        let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
-                        volumes
-                            .entry(crate::platform::volume::volume_of(&path))
-                            .or_default()
-                            .push(root);
-                    }
-                    self.volumes.check(ui.ctx(), volumes.keys());
+                    self.volumes
+                        .check(ui.ctx(), trees.volumes.iter().map(|v| &v.volume));
                     let online = self.volumes.snapshot();
                     self.volumes_checked(&online);
-                    // The startup disk first, then other drives by name.
-                    let mut volumes: Vec<_> = volumes.into_iter().collect();
-                    volumes.sort_by_key(|(v, _)| (v.mount.is_some(), v.name.to_lowercase()));
-                    for (volume, roots) in volumes {
+                    for (k, drive) in trees.volumes.iter().enumerate() {
+                        let volume = &drive.volume;
+                        // Room between drives, so each reads as its own group.
+                        if k > 0 {
+                            ui.add_space(10.);
+                        }
                         let state = online
                             .get(volume.mount.as_deref().unwrap_or(std::path::Path::new("/")))
                             .copied();
@@ -98,20 +193,10 @@ impl Library {
                             Some(_) => state.map(|s| s.0),
                         };
                         let space = state.and_then(|s| s.1);
-                        let photos: usize = roots
-                            .iter()
-                            .map(|(id, _, _)| {
-                                self.session
-                                    .folders
-                                    .iter()
-                                    .filter(|f| f.root == *id)
-                                    .map(|f| f.count)
-                                    .sum::<usize>()
-                            })
-                            .sum();
+                        let photos = drive.photos;
                         let key = format!("volume-collapsed:{}", volume.name);
                         let collapsed = self.expanded.contains(&key);
-                        if volumes::volume_row(ui, &volume, attached, space, photos, !collapsed)
+                        if volumes::volume_row(ui, volume, attached, space, photos, !collapsed)
                             .clicked()
                         {
                             if collapsed {
@@ -124,21 +209,10 @@ impl Library {
                             continue;
                         }
                         ui.add_space(2.);
-                        for (root, original, mapped) in roots {
-                            let root_path = mapped.as_deref().unwrap_or(&original);
-                            let name = std::path::Path::new(&original)
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .to_string();
-                            let mut tree = FolderNode::root(root, name, root_path.into());
-                            for f in self.session.folders.iter().filter(|f| f.root == root) {
-                                tree.insert(f);
-                            }
-                            tree.finish();
+                        for tree in &drive.trees {
                             match folder_tree_row(
                                 ui,
-                                &tree,
+                                tree,
                                 0,
                                 &mut self.expanded,
                                 &self.selected_folder,
@@ -177,7 +251,7 @@ impl Library {
                                 .color(palette.gray(120)),
                         );
                     }
-                    ui.add_space(12.);
+                    ui.add_space(16.);
                     if add_row(ui, "Add Folder…")
                         .on_hover_text(
                             "Add a folder of photos to this catalog. Photos stay where they are.",
@@ -188,11 +262,8 @@ impl Library {
                     }
                 });
                 section(ui, "Collections", false, |ui| {
-                    let tree = collections::tree(
-                        &self.session.collections,
-                        &self.session.collection_photos,
-                    );
-                    for node in &tree {
+                    let tree = &trees.collections;
+                    for node in tree {
                         if let Some(id) = collections::collection_row(
                             ui,
                             node,
@@ -359,24 +430,37 @@ impl Library {
         }
     }
 }
-/// A quiet full-width "+ label" row, Lightroom's add action in a panel.
+/// A full-width "+ label" button under a panel's list: outlined, so it reads
+/// as an action rather than another row.
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), egui::Sense::click());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), egui::Sense::click());
     let hovered = response.hovered();
-    if hovered {
-        ui.painter().rect_filled(rect, 3., palette.gray(43));
-    }
-    let color = palette.gray(if hovered { 235 } else { 165 });
-    // Same columns as folder rows: icon at 10 px, text at 29 px.
-    let c = egui::pos2(rect.left() + 16., rect.center().y);
-    crate::app::icons::paint_at(ui.painter(), crate::app::icons::Icon::Add, c, 13., color);
-    ui.painter().text(
-        egui::pos2(rect.left() + 29., rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(12.),
+    ui.painter().rect(
+        rect,
+        6.,
+        palette.gray(if hovered { 40 } else { 28 }),
+        egui::Stroke::new(1., palette.gray(if hovered { 70 } else { 52 })),
+        egui::StrokeKind::Inside,
+    );
+    let color = palette.gray(if hovered { 240 } else { 200 });
+    let text =
+        ui.painter()
+            .layout_no_wrap(label.to_string(), egui::FontId::proportional(12.), color);
+    // The icon and label centred together.
+    let width = 13. + 6. + text.size().x;
+    let left = rect.center().x - width / 2.;
+    crate::app::icons::paint_at(
+        ui.painter(),
+        crate::app::icons::Icon::Add,
+        egui::pos2(left + 6.5, rect.center().y),
+        13.,
+        color,
+    );
+    ui.painter().galley(
+        egui::pos2(left + 19., rect.center().y - text.size().y / 2.),
+        text,
         color,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

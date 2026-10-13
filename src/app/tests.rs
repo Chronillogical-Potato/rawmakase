@@ -3195,7 +3195,7 @@ fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
                 |ui| {
                     ui.set_width(width);
                     let frame = e.begin_edit_frame();
-                    rect = ui.scope(|ui| e.tool_strip(ui)).response.rect;
+                    rect = ui.scope(|ui| e.tool_drawer(ui)).response.rect;
                     e.finish_edit_frame(frame, &ctx);
                 },
             );
@@ -4372,9 +4372,10 @@ fn a_panel_header_switch_turns_the_panel_off_and_on_without_opening_it() {
         })
     };
     draw(&mut state, vec![], 0.);
-    // The switch sits left of the reset button, in the 28-point header 8 points down.
+    // The switch sits left of the reset button, which sits left of the
+    // chevron, in the 28-point header 14 points down.
     let area = area.get();
-    let switch = Pos2::new(area.right() - 28. - 18., area.top() + 8. + 14.);
+    let switch = Pos2::new(area.right() - 26. - 26. - 18., area.top() + 14. + 14.);
     draw(
         &mut state,
         click_at(switch, egui::PointerButton::Primary),
@@ -5612,6 +5613,78 @@ fn each_module_keeps_its_own_panels() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn shift_f8_folds_develops_tab_panel_alone() {
+    use super::panels::WorkspacePanel;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    // 1200 points leave it folded by itself; Shift+F8 opens it, as its rail does.
+    assert!(!drawn(&ctx));
+    let shift_f8 = || key_down(egui::Key::F8, egui::Modifiers::SHIFT);
+    panel_frame(&mut e, shift_f8(), FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(drawn(&ctx));
+    // F8's plain pattern did not take it: the adjustments stay.
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    panel_frame(&mut e, shift_f8(), FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+}
+#[test]
+fn hiding_develops_right_panel_takes_its_tab_panel_and_rail() {
+    use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
+    use super::side_tabs::rail_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_some());
+    assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Right)));
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
+    assert!(
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_none()
+    );
+    // A tool's drawer keeps to the hidden side too.
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
+}
+#[test]
+fn a_tool_opened_over_the_presets_ends_a_preset_preview() {
+    // A preset previewed under the pointer, then R: Crop's drawer takes the
+    // Presets tab's place, and the photo must not keep the preview.
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    e.presets.preview = Some(Recipe {
+        exposure: 1.,
+        ..Default::default()
+    });
+    e.presets.hover = Some((0, std::time::Instant::now()));
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(e.presets.preview.is_none());
+    assert!(e.presets.hover.is_none());
+}
+#[test]
 fn hiding_the_presets_ends_a_preset_preview() {
     use super::panels::PanelChange;
     let ctx = egui::Context::default();
@@ -5625,6 +5698,81 @@ fn hiding_the_presets_ends_a_preset_preview() {
     assert!(e.change_panels(PanelChange::Sides));
     assert!(e.presets.preview.is_none());
     assert!(e.presets.hover.is_none());
+}
+#[test]
+fn a_pinned_panel_is_kept_for_the_next_launch() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = dir.path().join("session.json");
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session::default(),
+        Some(session.clone()),
+    );
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    // Nothing is pinned until the user pins it.
+    assert!(!super::widgets::pinned(&ctx, "Navigator"));
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::pinned_sections_id(),
+            std::collections::BTreeSet::from(["Histogram".to_string()]),
+        )
+    });
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    let saved: crate::app::session::Session =
+        serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
+    assert!(saved.pinned.contains("Histogram"));
+    // Read back, it is pinned again.
+    let ctx = egui::Context::default();
+    let _e = Editor::with_context(&ctx, None, saved, None);
+    assert!(super::widgets::pinned(&ctx, "Histogram"));
+}
+#[test]
+fn a_narrow_window_folds_develops_tabs_until_one_is_asked_for() {
+    use super::panels::{DevelopTab, WorkspacePanel};
+    use super::side_tabs::rail_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    for _ in 0..3 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    // 1200 points leave no room for it beside the sidebar and adjustments:
+    // folded to its rail, the photo keeps its width.
+    assert!(e.panel_shown(WorkspacePanel::Presets));
+    assert!(!drawn(&ctx));
+    assert!(e.view.viewport.x > 400.);
+    let at = ctx
+        .read_response(rail_id(DevelopTab::History))
+        .expect("the rail's History button")
+        .rect
+        .center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    panel_frame(
+        &mut e,
+        vec![egui::Event::PointerMoved(at)],
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, vec![button(true)], FocusedButton::No);
+    panel_frame(&mut e, vec![button(false)], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    // Asked for, it opens on that tab; the layout saved is unchanged.
+    assert_eq!(e.panels.develop_tab, DevelopTab::History);
+    assert!(drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Presets));
 }
 #[test]
 fn the_library_info_panel_stays_while_a_field_in_it_cannot_be_saved() -> anyhow::Result<()> {
@@ -5774,16 +5922,22 @@ fn a_side_panels_edge_shows_the_resize_cursor() -> anyhow::Result<()> {
         output.textures_delta.clear();
         output.platform_output.cursor_icon
     };
-    for module in [Module::Library, Module::Develop] {
+    // Develop's tab panel last, with room made for it by hiding the sidebar.
+    for (module, panels) in [
+        (Module::Library, &["library-sidebar", "library-info"][..]),
+        (Module::Develop, &["library-sidebar", "adjustments"][..]),
+        (Module::Develop, &["presets"][..]),
+    ] {
         e.module = module;
+        if panels == ["presets"] {
+            e.change_panels(super::panels::PanelChange::Toggle(
+                super::panels::WorkspacePanel::Left,
+            ));
+        }
         for _ in 0..3 {
             frame(&mut e, vec![]);
         }
-        let panels = match module {
-            Module::Library => ["library-sidebar", "library-info"],
-            Module::Develop => ["presets", "adjustments"],
-        };
-        for panel in panels {
+        for &panel in panels {
             let edge = ctx
                 .read_response(egui::Id::new(panel).with("__resize"))
                 .expect("the panel's edge")
@@ -5883,12 +6037,19 @@ fn side_panels_stop_where_their_contents_stop() -> anyhow::Result<()> {
         modifiers: Default::default(),
     };
     for (module, panel, outward, min) in [
-        (Module::Develop, "presets", 0., PRESETS_MIN),
+        (Module::Develop, "library-sidebar", 0., LIBRARY_SIDEBAR_MIN),
+        (Module::Develop, "presets", 1200., PRESETS_MIN),
         (Module::Develop, "adjustments", 1200., ADJUSTMENTS_MIN),
         (Module::Library, "library-sidebar", 0., LIBRARY_SIDEBAR_MIN),
         (Module::Library, "library-info", 1200., LIBRARY_INFO_MIN),
     ] {
         e.module = module;
+        // The window has room for Develop's tab panel without the sidebar.
+        if panel == "presets" {
+            e.change_panels(super::panels::PanelChange::Toggle(
+                super::panels::WorkspacePanel::Left,
+            ));
+        }
         for _ in 0..3 {
             frame(&mut e, vec![]);
         }
@@ -5907,7 +6068,20 @@ fn side_panels_stop_where_their_contents_stop() -> anyhow::Result<()> {
         for _ in 0..3 {
             frame(&mut e, vec![egui::Event::PointerMoved(to)]);
         }
-        let laid_out = (edge(&ctx) - outward).abs();
+        // Develop's tab panel stops at the adjustments, and they at the tab
+        // rail, not the window's edge.
+        let inner = |id: &str| {
+            egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
+                .expect("the panel beside")
+                .outer_rect
+                .left()
+        };
+        let stop = match (module, panel) {
+            (Module::Develop, "presets") => inner("adjustments"),
+            (Module::Develop, "adjustments") => inner("develop-rail"),
+            _ => outward,
+        };
+        let laid_out = (edge(&ctx) - stop).abs();
         assert!(
             (laid_out - min).abs() <= 1.,
             "{panel}: laid out {laid_out}, painted {min}"

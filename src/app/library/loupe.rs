@@ -400,10 +400,11 @@ impl Library {
             self.close_loupe();
             return Action::None;
         };
+        // On the photo's backdrop, as the view above it.
         egui::Panel::bottom("library-loupe-toolbar")
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(38))
+                    .fill(palette.photo_backdrop())
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
@@ -418,10 +419,10 @@ impl Library {
         }
         let (rect, response) =
             ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
-        ui.painter().rect_filled(rect, 0., palette.gray(36));
+        ui.painter().rect_filled(rect, 0., palette.photo_backdrop());
         let ppp = ui.ctx().pixels_per_point();
         // The photo fits within the margin, as drawn below.
-        self.loupe.view = rect.shrink(16.).size() * ppp;
+        self.loupe.view = rect.shrink(crate::app::workspace::PHOTO_MARGIN).size() * ppp;
         let available = self.is_available(&photo.path);
         let edge = (rect.width().max(rect.height()) * ppp) as u32;
         // An offline RAW with a stored Standard preview shows it.
@@ -450,7 +451,7 @@ impl Library {
             self.loupe.reset();
         }
         self.request_previews(&photo, ui.ctx());
-        let inset = rect.shrink(16.);
+        let inset = rect.shrink(crate::app::workspace::PHOTO_MARGIN);
         // Until its own preview is in, the grid's stands in, enlarged.
         let own = available
             || stored.is_some()

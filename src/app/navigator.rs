@@ -3,7 +3,7 @@
 //! Develop, the Loupe and its JPEG/TIFF/PNG view all keep the same level and
 //! place; the panel shows the whole photo with the part in view outlined.
 use super::theme;
-use super::widgets::{section, segmented};
+use super::widgets::{HeaderButton, section_with, segmented};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Zoom levels the Navigator offers; 0 stands for Fit.
@@ -124,7 +124,7 @@ pub(super) fn navigator(
     let palette = theme::palette(ui.ctx());
     let mut change = None;
     ui.spacing_mut().item_spacing.y = 0.;
-    section(ui, "Navigator", false, |ui| {
+    section_with(ui, "Navigator", HeaderButton::Pin, |ui| {
         if let Some(zoom) = zoom {
             let mut level = zoom.shown();
             let w = ui.available_width();
