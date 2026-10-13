@@ -12,7 +12,7 @@ pub(super) enum WorkspacePanel {
     /// The catalog, folders and collections, in both modules.
     Left,
     /// The Navigator, over Develop's adjustments or the Library's photo info
-    /// and metadata.
+    /// and metadata; in Develop also the tab panel and its rail.
     Right,
     /// The filmstrip with the status bar above it.
     Filmstrip,

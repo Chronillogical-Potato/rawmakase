@@ -198,8 +198,15 @@ impl Library {
         // The grid's edits cover its selection; elsewhere the photo shown.
         let whole_selection = library && self.view() == View::Grid;
         let mut remeasured = false;
+        // In Develop on the photo area's margin, so its ends line up with the
+        // toolbar's; in the Library with its view bar's.
+        let inset = if library {
+            10
+        } else {
+            crate::app::workspace::PHOTO_MARGIN as i8
+        };
         egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(10, 3))
+            .inner_margin(egui::Margin::symmetric(inset, 3))
             .show(ui, |ui| {
                 // As tall as the rating and label controls on the right, so
                 // the captions placed before them centre on the same line.

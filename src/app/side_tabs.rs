@@ -45,24 +45,21 @@ fn peek_id() -> egui::Id {
 
 impl Editor {
     /// The rail, drawn first so it takes the window's right edge, outside
-    /// the adjustments. Hidden with them when the tab panel is folded too, as
-    /// Tab does. Returns whether the tab panel opens, for
-    /// [`Self::develop_tab_panel`] to draw once the adjustments are.
+    /// the adjustments. The right panel's toggle (F8) hides it, the tab panel
+    /// and the adjustments together; the rail folds the tab panel alone.
+    /// Returns whether the tab panel opens, for [`Self::develop_tab_panel`]
+    /// to draw once the adjustments are.
     pub(super) fn develop_rail_edge(&mut self, ui: &mut egui::Ui) -> bool {
         let ctx = ui.ctx().clone();
         let shown = self.panel_shown(WorkspacePanel::Presets);
-        if !shown && !self.panel_shown(WorkspacePanel::Right) {
+        if !self.panel_shown(WorkspacePanel::Right) {
             return false;
         }
         let width = |id: &str, default: f32| {
             egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
                 .map_or(default, |state| state.outer_rect.width())
         };
-        let adjustments = if self.panel_shown(WorkspacePanel::Right) {
-            width("adjustments", 330.)
-        } else {
-            0.
-        };
+        let adjustments = width("adjustments", 330.);
         let room = ui.available_width() - RAIL_WIDTH - adjustments - width("presets", PANEL_WIDTH)
             >= PHOTO_MIN;
         let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));

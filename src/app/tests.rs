@@ -5613,6 +5613,32 @@ fn each_module_keeps_its_own_panels() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn hiding_develops_right_panel_takes_its_tab_panel_and_rail() {
+    use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
+    use super::side_tabs::rail_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_some());
+    assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Right)));
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
+    assert!(
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_none()
+    );
+    // A tool's drawer keeps to the hidden side too.
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
+}
+#[test]
 fn a_tool_opened_over_the_presets_ends_a_preset_preview() {
     // A preset previewed under the pointer, then R: Crop's drawer takes the
     // Presets tab's place, and the photo must not keep the preview.
