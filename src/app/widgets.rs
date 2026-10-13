@@ -380,8 +380,8 @@ fn section_header(
         egui::FontId::proportional(11.),
         palette.gray(match (enabled, hovered) {
             (false, _) => 95,
-            (true, true) => 215,
-            (true, false) => 145,
+            (true, true) => 225,
+            (true, false) => 180,
         }),
     );
     if !sidebar || hovered || !open {

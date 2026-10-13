@@ -751,7 +751,7 @@ impl Editor {
             hint(
                 ui,
                 &self.themes.status().unwrap_or_else(|| {
-                    "Palette files in the themes folder are listed here. On Omarchy the desktop's theme is followed until you choose another. The photo's backdrop stays neutral grey.".into()
+                    "Palette files in the themes folder are listed here. On Omarchy the desktop's theme is followed until you choose another.".into()
                 }),
             );
         });
