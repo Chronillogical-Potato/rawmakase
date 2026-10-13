@@ -1,6 +1,4 @@
-//! Detail > Color noise reduction. [`NoiseModel::Measured`] follows Camera Raw 18.7,
-//! fitted to the frequency response of its renders of synthetic noisy charts (Amount
-//! 10–100 at two noise levels, Detail and Smoothness 0–100).
+//! Detail > Color noise reduction, following Camera Raw 18.7.
 //!
 //! Camera Raw's colour noise reduction is edge-aware and works at several scales: the
 //! finest detail keeps a share of its colour noise that Detail sets (about a quarter at
@@ -12,8 +10,22 @@
 //! luminance is left alone. It runs once on the camera image, before everything else,
 //! so previews and exports agree.
 //!
+//! [`NoiseModel::Adaptive`] (new edits) sets each level's threshold from the colour
+//! noise measured at that level in the photo itself, as Camera Raw sets it from the
+//! noise profile it knows for the camera and ISO: on synthetic noisy charts carrying a
+//! noise profile, the share of noise it keeps at each scale is the same from 1/16 to 4
+//! times the noise of a Nikon D7100 at ISO 2000, and at its default Amount 25 it takes
+//! out about 95% of the colour noise at every scale. The thresholds were fitted to
+//! those renders (Amount 10–100, Detail and Smoothness 0–100).
+//!
+//! [`NoiseModel::Measured`] (edits saved before) has fixed thresholds, fitted to the
+//! frequency response of Camera Raw's renders of charts without a noise profile, where
+//! it assumes little noise; on real photos it leaves most of the coarser blotches.
 //! Camera Raw also reduces strong single-pixel colour lines by about a quarter, which
-//! this keeps, and takes out somewhat less noise than this on very noisy photos.
+//! that keeps, and takes out somewhat less noise than it on very noisy photos.
+//!
+//! [`NoiseModel::Adaptive`]: crate::model::operators::NoiseModel::Adaptive
+//! [`NoiseModel::Measured`]: crate::model::operators::NoiseModel::Measured
 use crate::camera_data::CameraImage;
 use anyhow::{Result, ensure};
 use rayon::prelude::*;
@@ -44,6 +56,66 @@ const SMOOTHNESS_FACTOR: [[f32; 5]; LEVELS] = [
     [0., 0., 0., 7., 14.],
 ];
 
+/// The adaptive operator's thresholds, as multiples of each level's measured noise
+/// (finest first), at the Amounts Camera Raw rendered: fitted to the colour noise it
+/// keeps at each scale of synthetic noisy charts carrying their noise profile, at
+/// [`REFERENCE_NOISE`].
+const ADAPTIVE_AMOUNTS: [f32; 4] = [0.1, 0.25, 0.5, 1.];
+const ADAPTIVE_THRESHOLDS: [[f32; 4]; LEVELS + 1] = [
+    [7.29, 7.08, 6.83, 6.8],
+    [1.73, 3.34, 3.92, 4.03],
+    [1.86, 4.29, 5.98, 5.98],
+    [1.29, 2.74, 3.34, 3.35],
+    [1.29, 2.74, 3.34, 3.35],
+];
+/// Detail's factors on each level's threshold, at 0, 25, 50, 75 and 100: higher
+/// Detail keeps more of the finest colour.
+const ADAPTIVE_DETAIL: [[f32; 5]; LEVELS + 1] = [
+    [1.2, 1.11, 1., 0.58, 0.26],
+    [1.13, 1.07, 1., 0.73, 0.54],
+    [0.91, 0.93, 1., 1.16, 1.3],
+    [0.95, 0.95, 1., 1.06, 1.4],
+    [0.95, 0.95, 1., 1.06, 1.4],
+];
+/// Smoothness's factors on each level's threshold, at 0, 25, 50, 75 and 100: it
+/// reaches the coarsest blotches.
+const ADAPTIVE_SMOOTHNESS: [[f32; 5]; LEVELS + 1] = [
+    [1.; 5],
+    [0.96, 0.97, 1., 0.97, 0.98],
+    [0.53, 0.8, 1., 1.14, 1.21],
+    [0.28, 0.61, 1., 1.63, 2.12],
+    [0.28, 0.61, 1., 1.63, 2.12],
+];
+
+/// The finest level's noise the thresholds were fitted at, in square-root camera
+/// values (a Nikon D7100 at ISO 2000).
+const REFERENCE_NOISE: f32 = 0.0075;
+/// How much faster than the noise each level's threshold grows, as a power of the
+/// finest level's noise over [`REFERENCE_NOISE`]: Camera Raw keeps more of the coarse
+/// colour of clean photos than of noisy ones.
+const NOISE_EXPONENT: [f32; LEVELS + 1] = [0.16, 0.05, 0.1, 0.6, 0.6];
+/// The adaptive operator keeps detail by the sixth power of its size over the
+/// threshold (the measured one by the square), so a strong colour edge stays as sharp
+/// as Camera Raw keeps it while noise well under the threshold goes.
+const ADAPTIVE_STEEPNESS: i32 = 3;
+
+/// Level `l`'s threshold at `amount`: interpolated between the measured Amounts, and
+/// from none at Amount 0 to the lowest.
+fn adaptive_threshold(l: usize, amount: f32) -> f32 {
+    let t = &ADAPTIVE_THRESHOLDS[l];
+    let a = amount.clamp(0., 1.);
+    if a <= ADAPTIVE_AMOUNTS[0] {
+        return t[0] * a / ADAPTIVE_AMOUNTS[0];
+    }
+    let i = ADAPTIVE_AMOUNTS
+        .iter()
+        .rposition(|k| *k <= a)
+        .unwrap()
+        .min(2);
+    let f = (a - ADAPTIVE_AMOUNTS[i]) / (ADAPTIVE_AMOUNTS[i + 1] - ADAPTIVE_AMOUNTS[i]);
+    t[i] + (t[i + 1] - t[i]) * f
+}
+
 fn at_quarters(table: &[f32; 5], v: f32) -> f32 {
     let x = v.clamp(0., 1.) * 4.;
     let i = (x as usize).min(3);
@@ -55,16 +127,19 @@ fn at_quarters(table: &[f32; 5], v: f32) -> f32 {
 pub(crate) struct ChromaDenoise {
     /// Share of the finest level's noise kept.
     fine_kept: f32,
-    /// Thresholds of the coarser levels; 0 leaves a level alone.
-    thresholds: [f32; LEVELS],
+    /// Thresholds of each level, finest first; 0 leaves a level alone. In square-root
+    /// camera values, or with `adaptive` multiples of the noise measured at the level.
+    thresholds: [f32; LEVELS + 1],
+    adaptive: bool,
 }
 impl ChromaDenoise {
-    /// `None` at Amount 0.
+    /// [`NoiseModel::Measured`](crate::model::operators::NoiseModel::Measured); `None`
+    /// at Amount 0.
     pub(crate) fn new(amount: f32, detail: f32, smoothness: f32) -> Option<Self> {
         if amount <= 0. {
             return None;
         }
-        let thresholds = std::array::from_fn(|l| {
+        let coarse: [f32; LEVELS] = std::array::from_fn(|l| {
             let base = (amount.min(1.) - START[l]).max(0.) * SLOPE[l];
             let detail = if l == 0 {
                 at_quarters(&DETAIL_FACTOR, detail)
@@ -78,12 +153,35 @@ impl ChromaDenoise {
         let ramp = (amount / LOWEST_MEASURED).min(1.);
         Some(Self {
             fine_kept: 1. - (1. - at_quarters(&FINE_KEPT, detail)) * ramp,
+            thresholds: std::array::from_fn(|l| match l {
+                0 => FINE_THRESHOLD,
+                l => coarse[l - 1],
+            }),
+            adaptive: false,
+        })
+    }
+    /// [`NoiseModel::Adaptive`](crate::model::operators::NoiseModel::Adaptive): each
+    /// level's threshold is a multiple of the colour noise measured there. `None` at
+    /// Amount 0.
+    pub(crate) fn adaptive(amount: f32, detail: f32, smoothness: f32) -> Option<Self> {
+        if amount <= 0. {
+            return None;
+        }
+        let thresholds = std::array::from_fn(|l| {
+            adaptive_threshold(l, amount)
+                * at_quarters(&ADAPTIVE_DETAIL[l], detail)
+                * at_quarters(&ADAPTIVE_SMOOTHNESS[l], smoothness)
+        });
+        Some(Self {
+            fine_kept: 0.,
             thresholds,
+            adaptive: true,
         })
     }
     /// `im` with its colour noise reduced; stops with an error when `cancel` is set.
     pub(crate) fn apply(&self, im: &CameraImage, cancel: &AtomicBool) -> Result<CameraImage> {
         let (w, h) = (im.width as usize, im.height as usize);
+        let wb = im.metadata.wb.map(|v| v.max(0.001));
         let (luma, data): (Vec<f32>, Vec<[f32; 2]>) = im
             .pixels
             .par_iter()
@@ -92,8 +190,22 @@ impl ChromaDenoise {
                 ((r + 2. * g + b) * 0.25, [r - g, b - g])
             })
             .unzip();
+        // Where the noise can be measured: below the sensor's clipping, and above
+        // black (see `noise`).
+        let measurable = self.adaptive.then(|| Mask {
+            w,
+            h,
+            data: im
+                .pixels
+                .par_iter()
+                .map(|p| MaskPixel {
+                    unclipped: (0..3).all(|c| p[c] / wb[c] < MEASURABLE_PEAK),
+                    black: if p.iter().any(|v| *v <= 0.) { 1. } else { 0. },
+                })
+                .collect(),
+        });
         let chroma = Plane { w, h, data };
-        let chroma = self.filter(chroma, 0, cancel)?;
+        let chroma = self.filter(chroma, measurable, 0., 0., 0, cancel)?;
         let mut out = im.clone();
         out.recovered = Default::default();
         out.pixels
@@ -105,20 +217,56 @@ impl ChromaDenoise {
             });
         Ok(out)
     }
-    /// Filters `plane` as pyramid level `level`, recursing to the coarser ones.
-    fn filter(&self, plane: Plane, level: usize, cancel: &AtomicBool) -> Result<Plane> {
+    /// Filters `plane` as pyramid level `level`, recursing to the coarser ones. With
+    /// `measurable` (the adaptive operator), `finer_noise` and `finest_noise` are the
+    /// noise measured at the level above and at the finest level.
+    fn filter(
+        &self,
+        plane: Plane,
+        measurable: Option<Mask>,
+        finer_noise: f32,
+        finest_noise: f32,
+        level: usize,
+        cancel: &AtomicBool,
+    ) -> Result<Plane> {
         if level > LEVELS || plane.w < 4 || plane.h < 4 {
             return Ok(plane);
         }
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let coarse = plane.down();
         let up = coarse.up(plane.w, plane.h);
-        let coarse = self.filter(coarse, level + 1, cancel)?;
+        // A level too small or too clipped to measure has the finer level's noise, as
+        // much smaller as coarser levels usually are. Demosaiced noise is never larger
+        // at a coarser level, so more than the finer level's is colour detail.
+        let noise = measurable.as_ref().map(|m| match noise(&plane, &up, m) {
+            Some(n) if level == 0 => n,
+            Some(n) => n.min(finer_noise),
+            None => finer_noise * COARSER_NOISE,
+        });
+        let finest_noise = if level == 0 {
+            noise.unwrap_or(0.)
+        } else {
+            finest_noise
+        };
+        let coarse = self.filter(
+            coarse,
+            measurable.as_ref().map(Mask::down),
+            noise.unwrap_or(0.),
+            finest_noise,
+            level + 1,
+            cancel,
+        )?;
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let coarse_up = coarse.up(plane.w, plane.h);
-        let (kept, threshold) = match level {
-            0 => (self.fine_kept, FINE_THRESHOLD),
-            l => (0., self.thresholds[l - 1]),
+        let kept = if level == 0 { self.fine_kept } else { 0. };
+        let (threshold, steepness) = match noise {
+            Some(n) => (
+                self.thresholds[level]
+                    * n
+                    * (finest_noise / REFERENCE_NOISE).powf(NOISE_EXPONENT[level]),
+                ADAPTIVE_STEEPNESS,
+            ),
+            None => (self.thresholds[level], 1),
         };
         let data = plane
             .data
@@ -126,11 +274,17 @@ impl ChromaDenoise {
             .zip(up.data.par_iter().zip(coarse_up.data.par_iter()))
             .map(|(v, (u, c))| {
                 let d = [v[0] - u[0], v[1] - u[1]];
-                let gain = if threshold > 0. {
-                    let x2 = (d[0] * d[0] + d[1] * d[1]) / (threshold * threshold);
+                let size = d[0] * d[0] + d[1] * d[1];
+                let gain = if threshold <= 0. {
+                    1.
+                } else if steepness == 1 {
+                    let x2 = size / (threshold * threshold);
                     kept + (1. - kept) * x2 / (1. + x2)
                 } else {
-                    1.
+                    // As x / (1 + x) with x = (size / threshold²)^steepness, without
+                    // overflowing where the threshold is tiny next to the detail.
+                    let inverse = (threshold * threshold / size).powi(steepness);
+                    kept + (1. - kept) / (1. + inverse)
                 };
                 [c[0] + d[0] * gain, c[1] + d[1] * gain]
             })
@@ -140,6 +294,107 @@ impl ChromaDenoise {
             h: plane.h,
             data,
         })
+    }
+}
+
+/// Above this share of the sensor's range a channel may clip, and clipped pixels have
+/// no noise to measure.
+const MEASURABLE_PEAK: f32 = 0.95;
+/// How much smaller a level's colour noise is than the finer level's, on a Bayer
+/// photo's demosaiced noise.
+const COARSER_NOISE: f32 = 0.6;
+/// Side of the blocks the noise is measured in, at each level.
+const BLOCK: usize = 8;
+/// Which of the blocks, from the smoothest, give the noise: real colour detail only
+/// adds to a block's variation, so the smoothest blocks are the photo's noise alone.
+const BLOCK_PERCENTILE: f32 = 0.1;
+/// The fewest measurable blocks a level's noise is measured from.
+const MIN_BLOCKS: usize = 16;
+/// The colour noise of a level's detail (`plane` − `up`): the RMS of the detail in its
+/// smoothest measurable blocks, those with no black when there are enough of them;
+/// `None` with fewer than [`MIN_BLOCKS`] either way.
+fn noise(plane: &Plane, up: &Plane, measurable: &Mask) -> Option<f32> {
+    let (bw, bh) = (plane.w / BLOCK, plane.h / BLOCK);
+    let blocks: Vec<(f32, f32)> = (0..bw * bh)
+        .into_par_iter()
+        .filter_map(|b| {
+            let (x0, y0) = ((b % bw) * BLOCK, (b / bw) * BLOCK);
+            let (mut sum, mut black) = (0., 0.);
+            for y in y0..y0 + BLOCK {
+                for x in x0..x0 + BLOCK {
+                    let i = y * plane.w + x;
+                    if !measurable.data[i].unclipped {
+                        return None;
+                    }
+                    black += measurable.data[i].black;
+                    let (v, u) = (plane.data[i], up.data[i]);
+                    sum += (v[0] - u[0]).powi(2) + (v[1] - u[1]).powi(2);
+                }
+            }
+            let n = (BLOCK * BLOCK) as f32;
+            Some((sum / n, black / n))
+        })
+        .collect();
+    let within = |most: f32| -> Vec<f32> {
+        blocks
+            .iter()
+            .filter(|(_, black)| *black <= most)
+            .map(|(energy, _)| *energy)
+            .collect()
+    };
+    let mut energies = within(0.);
+    if energies.len() < MIN_BLOCKS {
+        energies = within(MAX_BLACK);
+    }
+    if energies.len() < MIN_BLOCKS {
+        return None;
+    }
+    let k = (energies.len() as f32 * BLOCK_PERCENTILE) as usize;
+    let (_, e, _) = energies.select_nth_unstable_by(k, f32::total_cmp);
+    Some(e.sqrt())
+}
+/// The most of a block's pixels that may be black in a channel when too few blocks have
+/// none: in a dark, noisy photo the noise reaches black in many pixels and is still
+/// noise to take out, while black areas have none to measure.
+const MAX_BLACK: f32 = 0.9;
+/// Where the noise can be measured at one pyramid level.
+struct Mask {
+    w: usize,
+    h: usize,
+    data: Vec<MaskPixel>,
+}
+#[derive(Clone, Copy)]
+struct MaskPixel {
+    /// No channel near the sensor's clipping.
+    unclipped: bool,
+    /// The share of pixels black in a channel.
+    black: f32,
+}
+impl Mask {
+    /// Halved as [`Plane::down`] halves: unclipped where every pixel its filter reads
+    /// is, with their share of black.
+    fn down(&self) -> Self {
+        let (w, h) = (self.w.div_ceil(2), self.h.div_ceil(2));
+        let data = (0..w * h)
+            .into_par_iter()
+            .map(|i| {
+                let (x, y) = ((i % w) as isize, (i / w) as isize);
+                let mut out = MaskPixel {
+                    unclipped: true,
+                    black: 0.,
+                };
+                for dy in -2..=2 {
+                    for dx in -2..=2 {
+                        let p = self.data
+                            [mirror(2 * y + dy, self.h) * self.w + mirror(2 * x + dx, self.w)];
+                        out.unclipped &= p.unclipped;
+                        out.black += p.black / 25.;
+                    }
+                }
+                out
+            })
+            .collect();
+        Self { w, h, data }
     }
 }
 
@@ -344,6 +599,111 @@ mod tests {
             assert!((luma(a) - luma(b)).abs() < 1e-4);
         }
     }
+    fn noisy(w: u32, h: u32, amplitude: f32, f: impl Fn(u32, u32) -> [f32; 3]) -> CameraImage {
+        let mut im = image(w, h, f);
+        // White balance 1: the sensor clips at 1 in every channel.
+        im.metadata.wb = [1.; 3];
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = (i as u32 % w, i as u32 / w);
+            // Shot noise: its spread grows with the square root of the signal.
+            for (c, v) in p.iter_mut().enumerate() {
+                *v += amplitude * v.sqrt() * hash(x, y, c as u32);
+            }
+        }
+        im
+    }
+    fn chroma_noise(im: &CameraImage, x0: u32, x1: u32) -> f32 {
+        let c: Vec<[f32; 2]> = im
+            .pixels
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| (x0..x1).contains(&(*i as u32 % im.width)))
+            .map(|(_, p)| chroma(*p))
+            .collect();
+        let n = c.len() as f32;
+        let m = c
+            .iter()
+            .fold([0.; 2], |a, v| [a[0] + v[0] / n, a[1] + v[1] / n]);
+        (c.iter()
+            .map(|v| (v[0] - m[0]).powi(2) + (v[1] - m[1]).powi(2))
+            .sum::<f32>()
+            / n)
+            .sqrt()
+    }
+    #[test]
+    fn adaptive_keeps_strong_colour_edges_and_clean_photos() {
+        let cancel = AtomicBool::new(false);
+        let d = ChromaDenoise::adaptive(0.25, 0.5, 0.5).unwrap();
+        let (red, cyan) = ([0.3, 0.06, 0.06], [0.05, 0.15, 0.25]);
+        let side = |x: u32| if x < 128 { red } else { cyan };
+        // Without noise, or with next to none (a tiny threshold), nothing changes.
+        for amplitude in [0., 1e-7] {
+            let clean = noisy(256, 128, amplitude, |x, _| side(x));
+            let out = d.apply(&clean, &cancel).unwrap();
+            for (a, b) in clean.pixels.iter().zip(&out.pixels) {
+                for c in 0..3 {
+                    assert!((a[c] - b[c]).abs() < 1e-4, "{amplitude}: {a:?} {b:?}");
+                }
+            }
+        }
+        // With noise, the noise goes and the edge stays sharp: three pixels from it the
+        // chroma is within 5% of the side's.
+        let im = noisy(256, 128, 0.03, |x, _| side(x));
+        let out = d.apply(&im, &cancel).unwrap();
+        assert!(chroma_noise(&out, 16, 112) < 0.2 * chroma_noise(&im, 16, 112));
+        let mean = |x: u32| {
+            let rows = (0..128).map(|y| chroma(out.pixels[(y * 256 + x) as usize]));
+            rows.fold([0.; 2], |a, v| [a[0] + v[0] / 128., a[1] + v[1] / 128.])
+        };
+        for (x, colour) in [(124, red), (131, cyan)] {
+            let (want, got) = (chroma(colour), mean(x));
+            let error = (want[0] - got[0]).hypot(want[1] - got[1]) / want[0].hypot(want[1]);
+            assert!(error < 0.05, "{x}: {got:?} {want:?}");
+        }
+    }
+    #[test]
+    fn adaptive_measures_the_noise_where_nothing_clips() {
+        // Half the photo clipped (no noise there) or black: the noise is measured in
+        // the rest and still taken out.
+        let cancel = AtomicBool::new(false);
+        let im = noisy(256, 128, 0.03, |x, _| match x {
+            0..64 => [1.; 3],
+            64..128 => [0.; 3],
+            _ => [0.18; 3],
+        });
+        let out = ChromaDenoise::adaptive(0.25, 0.5, 0.5)
+            .unwrap()
+            .apply(&im, &cancel)
+            .unwrap();
+        let (before, after) = (chroma_noise(&im, 140, 240), chroma_noise(&out, 140, 240));
+        assert!(after < 0.2 * before, "{before} {after}");
+    }
+    #[test]
+    fn adaptive_measures_dark_noise_that_clips_at_black() {
+        // A dark, noisy flat whose noise reaches black in a channel here and there
+        // (raw files clip it at zero), as underexposed high-ISO photos are: every block
+        // has some clipped pixels, and its noise is still measured and taken out.
+        let cancel = AtomicBool::new(false);
+        let mut im = noisy(256, 256, 0.15, |_, _| [0.002, 0.004, 0.003]);
+        for p in im.pixels.iter_mut() {
+            *p = p.map(|v| v.max(0.));
+        }
+        let clipped = im.pixels.iter().filter(|p| p.contains(&0.)).count();
+        assert!(clipped > im.pixels.len() / 20, "{clipped}");
+        let out = ChromaDenoise::adaptive(0.25, 0.5, 0.5)
+            .unwrap()
+            .apply(&im, &cancel)
+            .unwrap();
+        let (before, after) = (chroma_noise(&im, 0, 256), chroma_noise(&out, 0, 256));
+        assert!(after < 0.3 * before, "{before} {after}");
+        // A black frame has no noise to measure, and stays black.
+        let black = noisy(256, 256, 0.15, |_, _| [0.; 3]);
+        let out = ChromaDenoise::adaptive(1., 0.5, 0.5)
+            .unwrap()
+            .apply(&black, &cancel)
+            .unwrap();
+        assert!(out.pixels.iter().all(|p| *p == [0.; 3]));
+    }
     #[test]
     fn low_amounts_start_from_no_change_and_cancel_stops_it() {
         let im = image(64, 64, |x, y| {
@@ -354,13 +714,12 @@ mod tests {
             ]
         });
         let cancel = AtomicBool::new(false);
-        let barely = ChromaDenoise::new(0.005, 0.5, 0.5)
-            .unwrap()
-            .apply(&im, &cancel)
-            .unwrap();
-        for (a, b) in im.pixels.iter().zip(&barely.pixels) {
-            for c in 0..3 {
-                assert!((a[c] - b[c]).abs() < 2e-3, "{a:?} {b:?}");
+        for new in [ChromaDenoise::new, ChromaDenoise::adaptive] {
+            let barely = new(0.005, 0.5, 0.5).unwrap().apply(&im, &cancel).unwrap();
+            for (a, b) in im.pixels.iter().zip(&barely.pixels) {
+                for c in 0..3 {
+                    assert!((a[c] - b[c]).abs() < 2e-3, "{a:?} {b:?}");
+                }
             }
         }
         cancel.store(true, Ordering::Relaxed);

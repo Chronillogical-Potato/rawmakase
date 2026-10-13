@@ -1494,6 +1494,41 @@ fn marker_format_two_keeps_the_earlier_vibrance() -> Result<()> {
     );
     Ok(())
 }
+/// Lightroom's Color noise reduction takes the adaptive operator. A packet from a
+/// RAWmakase before it (marker format 3) could not name the measured one it kept, so
+/// it keeps that; one that predates the measured one keeps the original.
+#[test]
+fn colour_noise_reduction_takes_the_adaptive_operator() -> Result<()> {
+    use crate::model::operators::NoiseModel;
+    let m = Metadata::default();
+    let fresh = Recipe::with_profiles(&m, &[]);
+    let apply = |attrs: &str| {
+        parse(Path::new("p.xmp"), &xml(attrs, ""))?.apply(&Recipe::default(), &m, &[], None)
+    };
+    assert_eq!(
+        apply(r#"c:ColorNoiseReduction="25""#)?.noise_model,
+        NoiseModel::Adaptive
+    );
+    let rawmakase = |version: &str, markers: &str| {
+        apply(&format!(
+            r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase {version}" c:RAWmakaseMarkers="{markers}" c:ColorNoiseReduction="25""#
+        ))
+    };
+    assert_eq!(rawmakase("0.2.4", "3")?.noise_model, NoiseModel::Measured);
+    assert_eq!(rawmakase("0.2.5", "4")?.noise_model, NoiseModel::Adaptive);
+    let r = apply(
+        r#"xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:CreatorTool="RAWmakase 0.1.15" c:ColorNoiseReduction="25""#,
+    )?;
+    assert_eq!(r.noise_model, NoiseModel::Original);
+    // Settings without colour noise reduction leave a new photo's operator alone.
+    let exposure = parse(
+        Path::new("p.xmp"),
+        &xml(r#"c:RAWmakaseMarkers="3" c:Exposure2012="0.5""#, ""),
+    )?
+    .apply(&fresh, &m, &[], None)?;
+    assert_eq!(exposure.noise_model, NoiseModel::Adaptive);
+    Ok(())
+}
 #[test]
 fn lightroom_auto_black_white_takes_the_measured_gray() -> Result<()> {
     use crate::model::operators::BlackWhiteModel;

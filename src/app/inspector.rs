@@ -1183,7 +1183,7 @@ impl Editor {
             r.effects.luma_contrast = d.luma_contrast;
             // The oldest engines render only the original filter.
             r.set_color_noise_defaults(if r.engine >= 3 {
-                crate::model::operators::NoiseModel::Measured
+                crate::model::operators::NoiseModel::Adaptive
             } else {
                 crate::model::operators::NoiseModel::Original
             });

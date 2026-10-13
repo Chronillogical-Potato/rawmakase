@@ -896,7 +896,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
         texture_model: TextureModel::Measured,
         mixer_model: MixerModel::Chart,
         calibration_model: CalibrationModel::Measured,
-        noise_model: NoiseModel::Measured,
+        noise_model: NoiseModel::Adaptive,
         saturation_model: SaturationModel::Gray,
         vibrance_model: VibranceModel::Chart,
         black_white_model: crate::model::operators::BlackWhiteModel::Chart,
@@ -904,7 +904,7 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     };
     let packet = crate::xmp::write::packet(&measured, &m, &photo);
     assert!(!packet.contains("RAWmakaseOriginal"));
-    assert!(packet.contains(r#"crs:RAWmakaseMarkers="3""#), "{packet}");
+    assert!(packet.contains(r#"crs:RAWmakaseMarkers="4""#), "{packet}");
     let back = read(&measured)?;
     assert_eq!(back.sharpening_model, SharpeningModel::Measured);
     assert_eq!(back.lens_vignette_model, LensVignetteModel::Measured);
@@ -912,13 +912,24 @@ fn exported_xmp_keeps_the_operators_a_recipe_was_rendered_with() -> Result<()> {
     assert_eq!(back.texture_model, TextureModel::Measured);
     assert_eq!(back.mixer_model, MixerModel::Chart);
     assert_eq!(back.calibration_model, CalibrationModel::Measured);
-    assert_eq!(back.noise_model, NoiseModel::Measured);
+    assert_eq!(back.noise_model, NoiseModel::Adaptive);
     assert_eq!(
         back.black_white_model,
         crate::model::operators::BlackWhiteModel::Chart
     );
     assert_eq!(back.saturation_model, SaturationModel::Gray);
     assert_eq!(back.vibrance_model, VibranceModel::Chart);
+    // Colour noise reduction measured before the adaptive one is named, and kept.
+    let kept = Recipe {
+        noise_model: NoiseModel::Measured,
+        ..measured.clone()
+    };
+    let packet = crate::xmp::write::packet(&kept, &m, &photo);
+    assert!(
+        packet.contains(r#"crs:RAWmakaseOriginal="MeasuredColorNoise""#),
+        "{packet}"
+    );
+    assert_eq!(read(&kept)?.noise_model, NoiseModel::Measured);
     Ok(())
 }
 #[test]

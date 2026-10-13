@@ -597,7 +597,7 @@ impl Recipe {
         recipe.white_balance_model = crate::model::operators::WhiteBalanceModel::Calibrated;
         recipe.whites_model = crate::model::operators::WhitesModel::Adaptive;
         recipe.gamut_model = crate::model::operators::GamutModel::Clip;
-        recipe.set_color_noise_defaults(crate::model::operators::NoiseModel::Measured);
+        recipe.set_color_noise_defaults(crate::model::operators::NoiseModel::Adaptive);
         recipe.use_camera_baseline(m);
         recipe.reset_white_balance(m);
         recipe
@@ -846,7 +846,8 @@ impl Recipe {
         self.noise_model = model;
         self.noise_chroma = match model {
             crate::model::operators::NoiseModel::Original => 0.,
-            crate::model::operators::NoiseModel::Measured => 0.25,
+            crate::model::operators::NoiseModel::Measured
+            | crate::model::operators::NoiseModel::Adaptive => 0.25,
         };
         self.effects.chroma_detail = d.chroma_detail;
         self.effects.chroma_smoothness = d.chroma_smoothness;
