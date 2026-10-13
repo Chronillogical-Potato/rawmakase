@@ -641,3 +641,49 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     }
     Ok(())
 }
+
+#[test]
+fn exporting_a_jpeg_never_replaces_it() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("photo.jpg");
+    image::RgbImage::from_fn(32, 24, |x, y| {
+        image::Rgb([(x * 8) as u8, (y * 10) as u8, 128])
+    })
+    .save(&source)?;
+    let original = std::fs::read(&source)?;
+    let photos = vec![photo(&source)];
+    let export = |existing: Existing| {
+        let settings = ExportSettings {
+            destination: Destination::SameFolder,
+            naming: Some(crate::export_settings::Naming::Filename),
+            format: Format::Jpeg,
+            existing,
+            ..Default::default()
+        };
+        let batch = Batch {
+            plan: plan(&photos, &settings, Some(existing)).unwrap(),
+            photos: photos.clone(),
+            settings,
+            defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
+            watermark: None,
+            demosaic: Default::default(),
+        };
+        run_all(&batch)
+    };
+
+    match &export(Existing::Overwrite)[..] {
+        [Outcome::Failed(reason)] => {
+            assert!(reason.contains("Cannot overwrite source"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read(&source)?, original);
+    assert_eq!(listing(dir.path()), ["photo.jpg"]);
+
+    // Unique names it as every export does: the next free "name-2", "name-3"…
+    let outcomes = export(Existing::Unique);
+    assert_eq!(exported(&outcomes[0]), dir.path().join("photo-2.jpg"));
+    assert_eq!(std::fs::read(&source)?, original);
+    assert_eq!(listing(dir.path()), ["photo-2.jpg", "photo.jpg"]);
+    Ok(())
+}

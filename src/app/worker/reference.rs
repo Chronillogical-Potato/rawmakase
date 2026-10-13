@@ -1,7 +1,8 @@
 //! Develop's Reference View photo: another catalog photo, developed with its own
 //! edit beside the one being edited. Its own worker, so loading it never holds up
-//! the photo on screen; like opening a photo, a half-size decode comes first for
-//! Fit and the full one follows for 100%.
+//! the photo on screen; like opening a photo, a half-size decode of a RAW comes
+//! first for Fit and the full one follows for 100%. A JPEG, PNG or TIFF is ready
+//! at full size at once.
 use super::{Event, Latest, send};
 use crate::{
     app::library::EditSource,
@@ -9,6 +10,7 @@ use crate::{
     decode::{DecodePolicy, FullSize},
     decode_cache::DecodeCache,
     model::recipe::Recipe,
+    photo::Opened,
 };
 use eframe::egui;
 use std::{
@@ -79,7 +81,21 @@ fn develop(
     cache: &DecodeCache,
     mut ready: impl FnMut(ReferenceImage),
 ) -> anyhow::Result<()> {
-    let raw = crate::photo::open(&job.path)?;
+    let raw = match crate::photo::open_source(&job.path, &job.cancel)? {
+        Opened::Raw(raw) => raw,
+        // A JPEG, PNG or TIFF opens at full size: nothing to cache or refine.
+        Opened::Rendered(image) => {
+            let recipe = EditSource::recipe(Some(&job.edit), &image.metadata)?;
+            if !job.cancel.load(Ordering::Relaxed) {
+                ready(ReferenceImage {
+                    image: Arc::new(image),
+                    recipe,
+                    resolution: Resolution::Full,
+                });
+            }
+            return Ok(());
+        }
+    };
     let recipe = EditSource::recipe(Some(&job.edit), &raw.metadata)?;
     let full_size = FullSize::with_cache(&job.path, job.demosaic, cache.clone());
     if let Some(image) = full_size.cached(&raw.metadata) {
@@ -191,6 +207,39 @@ mod tests {
             assert_eq!(renamed.len(), 1);
             renamed.pop().unwrap()?;
         }
+        Ok(())
+    }
+
+    /// A JPEG is its full-size image: one stage, with its edit's Embedded
+    /// profile, and nothing kept in the decode cache.
+    #[test]
+    fn a_jpeg_reference_is_ready_at_full_size_at_once() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("photo.jpg");
+        image::RgbImage::from_pixel(12, 8, image::Rgb([90, 120, 150])).save(&path)?;
+        let cache = DecodeCache::new(dir.path().join("cache"), u64::MAX);
+        let job = ReferenceJob {
+            ticket: 1,
+            path,
+            edit: EditSource::Defaults(Default::default()),
+            cancel: Default::default(),
+            demosaic: Demosaic::default().effective(),
+        };
+        let mut images = Vec::new();
+        develop(&job, &cache, |image| images.push(image))?;
+        let [image] = &images[..] else {
+            panic!("{} stages", images.len());
+        };
+        assert_eq!(image.resolution, Resolution::Full);
+        assert!(!image.image.fast);
+        assert!(
+            image
+                .recipe
+                .profile
+                .as_ref()
+                .is_some_and(|p| p.is_embedded())
+        );
+        assert!(!dir.path().join("cache").exists());
         Ok(())
     }
 }

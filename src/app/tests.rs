@@ -764,6 +764,82 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     assert_eq!(recipe.exposure, 0.5);
     Ok(())
 }
+/// A rendered file's saved edit belongs to its file as a RAW's does: once the
+/// file is rewritten, opening it again starts from the file, with the saved edit
+/// protected rather than shown or replaced.
+#[test]
+fn an_edited_jpeg_whose_file_changed_reopens_from_the_file() -> anyhow::Result<()> {
+    use worker::LoadedHeader;
+    for (name, source) in [
+        ("photo.ARW", crate::camera_data::Source::Raw),
+        ("photo.jpg", crate::camera_data::Source::Rendered),
+    ] {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join(name);
+        let write = |side: u32| -> anyhow::Result<()> {
+            if source == crate::camera_data::Source::Rendered {
+                image::RgbImage::from_pixel(side, side, image::Rgb([90, 120, 150])).save(&file)?;
+            } else {
+                std::fs::write(&file, vec![7u8; side as usize])?;
+            }
+            Ok(())
+        };
+        write(16)?;
+        let path = dir.path().join("photos.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&path)?;
+        catalog.add_folder(dir.path())?;
+        let id = catalog.photos()?[0].id;
+        let saved = Recipe {
+            exposure: 1.,
+            ..Default::default()
+        };
+        catalog.save_edit(
+            id,
+            &file,
+            &saved,
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )?;
+        drop(catalog);
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+        let open = |editor: &mut Editor| {
+            editor.document.reset(Some(id));
+            let (generation, _) = editor.load.start();
+            editor
+                .tx
+                .send(Event::Header(Box::new(LoadedHeader {
+                    id: generation,
+                    path: file.clone(),
+                    metadata: Metadata {
+                        source,
+                        ..Default::default()
+                    },
+                    recipe: Recipe::default(),
+                    export: Default::default(),
+                    status: "Original".into(),
+                })))
+                .unwrap();
+            editor.events(&ctx);
+        };
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 1., "{name}");
+        assert!(!editor.document.edit.save_state().is_protected(), "{name}");
+
+        write(32)?;
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 0., "{name}");
+        assert!(editor.document.edit.save_state().is_protected(), "{name}");
+        assert!(
+            editor.document.lightroom_notice.contains("Photo changed"),
+            "{name}: {}",
+            editor.document.lightroom_notice
+        );
+    }
+    Ok(())
+}
 #[test]
 fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();

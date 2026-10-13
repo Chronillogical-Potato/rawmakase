@@ -10,6 +10,7 @@ use crate::export_settings::{Existing, ExportSettings};
 use crate::{
     edits::{self, EditRecord, Origin, PhotoRecord},
     model::recipe::Recipe,
+    photo::Opened,
     raw_defaults::DevelopDefaults,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -481,15 +482,15 @@ fn render(
     cancel: &AtomicBool,
     progress: &impl Fn(f32),
 ) -> Result<(job::Prepared, Vec<String>)> {
-    let raw = crate::photo::open(&photo.source)
+    let opened = crate::photo::open_source(&photo.source, cancel)
         .with_context(|| format!("{} can't be read", photo.source.display()))?;
     let (mut recipe, mut notes) = match &photo.edit {
         Edit::Catalog(record) => {
-            let (profiles, _) = crate::camera_profiles::installed(&raw.metadata);
+            let (profiles, _) = crate::camera_profiles::installed(opened.metadata());
             let resolved = edits::resolve(
                 record,
                 &photo.source,
-                &raw.metadata,
+                opened.metadata(),
                 &profiles,
                 &batch.defaults,
             )?;
@@ -524,12 +525,11 @@ fn render(
         }
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
-    let image = Arc::new(job::decode_full(
-        raw,
-        &photo.source,
-        batch.demosaic,
-        cancel,
-    )?);
+    let image = Arc::new(match opened {
+        Opened::Raw(raw) => job::decode_full(raw, &photo.source, batch.demosaic, cancel)?,
+        // A JPEG, PNG or TIFF opens at full size: there is nothing to decode or cache.
+        Opened::Rendered(image) => image,
+    });
     // Upright's corrections, as Develop works them out once the photo is open.
     if let Some(issue) = crate::develop::upright::complete(&mut recipe, &image)
         && recipe.upright.mode == crate::model::transform::UprightMode::Guided

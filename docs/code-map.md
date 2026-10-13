@@ -315,8 +315,8 @@ What each long-lived worker blocks on, how it stops and whether exit may wait fo
 | --- | --- |
 | [worker/mod.rs](../src/app/worker/mod.rs) | Named event payloads, load/render jobs, task kinds, render stages and repaint notification. |
 | [worker/latest.rs](../src/app/worker/latest.rs) | Single-slot mailbox: submitting a new job replaces pending work rather than growing a queue; optional lanes each keep their own latest job. A panicking job does not end the thread. |
-| [worker/loader.rs](../src/app/worker/loader.rs) | RAW metadata and profile loading, embedded preview, the half-size then full decoded image and neighboring thumbnails. |
-| [worker/reference.rs](../src/app/worker/reference.rs) | Develops Reference View's photo with its catalog edit on its own thread: half size first for Fit, then in full (through the decode cache) for 100%. |
+| [worker/loader.rs](../src/app/worker/loader.rs) | Opening a photo for Develop: metadata and profiles, then for a RAW its embedded preview, the half-size then full decoded image and the neighbour's prefetch; a JPEG, PNG or TIFF goes straight to its full-size image, never through the decode cache. |
+| [worker/reference.rs](../src/app/worker/reference.rs) | Develops Reference View's photo with its catalog edit on its own thread: a RAW at half size first for Fit, then in full (through the decode cache) for 100%; a JPEG, PNG or TIFF in full at once. |
 | [worker/renderer.rs](../src/app/worker/renderer.rs) | Fit previews, reduced-then-full 100% regions, cancellation, monitor conversion and clipping overlays, for the edit and, in its own lane with its own caches and textures, Before beside it. After a panic it reports the job failed and rebuilds all of its state. |
 
 ## How an operation moves through the app

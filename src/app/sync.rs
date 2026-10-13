@@ -208,9 +208,9 @@ fn prepare(
 ) -> Result<Prepared> {
     // Read first, so a file replaced while its settings are worked out is noticed.
     let identity = crate::storage::Identity::read(&target.path)?;
-    let raw = crate::photo::open(&target.path)
+    let opened = crate::photo::open_source(&target.path, &Default::default())
         .with_context(|| format!("{} can't be read", target.name))?;
-    let metadata = raw.metadata.clone();
+    let metadata = opened.metadata().clone();
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let record = catalog.edit_record(target.id)?;
     let resolved = edits::resolve(&record, &target.path, &metadata, &profiles, defaults)?;
@@ -265,7 +265,12 @@ fn prepare(
     // Guided solves this photo's own guides beside that analysis.
     if after.upright.needs_analysis() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
-        let image = raw.develop(crate::camera_data::Decode::full(demosaic), &cancel)?;
+        let image = match opened {
+            crate::photo::Opened::Raw(raw) => {
+                raw.develop(crate::camera_data::Decode::full(demosaic), &cancel)?
+            }
+            crate::photo::Opened::Rendered(image) => image,
+        };
         if let Some(issue) = crate::develop::upright::complete(&mut after, &image)
             && after.upright.mode == crate::model::transform::UprightMode::Guided
         {
@@ -584,6 +589,43 @@ mod tests {
             path: path.to_path_buf(),
             name: path.file_name().unwrap().to_string_lossy().into(),
         }
+    }
+
+    /// A JPEG takes the settings it can from a RAW and keeps its own profile.
+    #[test]
+    fn sync_saves_a_jpegs_edit_from_a_raws_settings() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: mut c,
+            photos,
+        } = catalog()?;
+        let folder = photos[0].1.parent().unwrap().to_path_buf();
+        let jpeg = folder.join("e.jpg");
+        image::RgbImage::from_pixel(24, 16, image::Rgb([90, 120, 150])).save(&jpeg)?;
+        c.add_folder(&folder)?;
+        let id = c.photos()?.into_iter().find(|p| p.path == jpeg).unwrap().id;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
+        let (profiles, _) = crate::camera_profiles::installed(&metadata);
+        let mut source = Recipe::with_profiles(&metadata, &profiles);
+        source.exposure = 0.5;
+        let source = Settings {
+            recipe: source,
+            metadata,
+        };
+        let result = synchronize(
+            &mut c,
+            &source,
+            &BatchChange::Settings(GroupSelection::default()),
+            &[target(id, &jpeg)],
+            &DevelopDefaults::default(),
+            crate::camera_data::Demosaic::default(),
+        );
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        assert_eq!(result.synced.len(), 1);
+        let saved = c.load_edit(id, &jpeg)?.unwrap().recipe;
+        assert_eq!(saved.exposure, 0.5);
+        assert!(saved.profile.is_some_and(|p| p.is_embedded()));
+        Ok(())
     }
 
     #[test]

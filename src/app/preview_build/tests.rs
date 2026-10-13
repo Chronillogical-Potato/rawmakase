@@ -916,3 +916,34 @@ fn discarding_a_photo_stops_its_build_under_way() {
             .unwrap()
     );
 }
+
+/// A JPEG renders from the file itself, at full size, with its own defaults:
+/// unedited, a preview of it reproduces it.
+#[test]
+fn a_jpeg_preview_renders_from_the_file() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("photo.jpg");
+    let colour = image::Rgb([90, 120, 150]);
+    image::RgbImage::from_pixel(48, 32, colour).save(&path)?;
+    let item = Item {
+        catalog: CatalogLocation::File(dir.path().join("c.rawmakase")),
+        photo: PhotoId(1),
+        name: "photo.jpg".into(),
+        path,
+        record: EditRecord::default(),
+        defaults: Default::default(),
+        demosaic: Demosaic::default(),
+        identity: "a".into(),
+        kind: PreviewKind::Standard,
+        edge: 2048,
+        ticket: None,
+    };
+    let preview = render(&item, &AtomicBool::new(false))?;
+    assert_eq!(preview.dimensions(), (48, 32));
+    for p in preview.pixels() {
+        for (got, want) in p.0.iter().zip(colour.0) {
+            assert!(got.abs_diff(want) <= 2, "{p:?}");
+        }
+    }
+    Ok(())
+}

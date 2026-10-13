@@ -18,6 +18,7 @@ use crate::catalog::preview_cache::{PreviewCache, PreviewKind, Stamp};
 use crate::catalog::{CatalogLocation, PhotoId};
 use crate::edits::EditRecord;
 use crate::model::recipe::Recipe;
+use crate::photo::Opened;
 use crate::raw_defaults::DevelopDefaults;
 use anyhow::{Context, ensure};
 use eframe::egui::{self, Color32, Sense, Vec2};
@@ -188,14 +189,17 @@ fn thumbnail(image: &image::RgbImage) -> image::RgbImage {
 /// identity-checked record (a protected or unreadable edit fails, never falling
 /// back to the defaults), Upright completed, then a cancellable render.
 pub(super) fn render(item: &Item, cancel: &AtomicBool) -> anyhow::Result<image::RgbImage> {
-    let raw = crate::photo::open(&item.path)
+    let opened = crate::photo::open_source(&item.path, cancel)
         .with_context(|| format!("{} can't be read", item.path.display()))?;
-    let (profiles, _) = crate::camera_profiles::installed(&raw.metadata);
-    let mut recipe = item_recipe(item, &raw.metadata, &profiles)?;
-    let image = if needs_full(&recipe, &raw.metadata, item.edge) {
-        crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
-    } else {
-        raw.develop(Decode::Half, cancel)?
+    let (profiles, _) = crate::camera_profiles::installed(opened.metadata());
+    let mut recipe = item_recipe(item, opened.metadata(), &profiles)?;
+    let image = match opened {
+        Opened::Raw(raw) if needs_full(&recipe, &raw.metadata, item.edge) => {
+            crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
+        }
+        Opened::Raw(raw) => raw.develop(Decode::Half, cancel)?,
+        // A JPEG, PNG or TIFF opens at full size: there is no smaller decode.
+        Opened::Rendered(image) => image,
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     develop(&mut recipe, &image, item.edge, cancel)
