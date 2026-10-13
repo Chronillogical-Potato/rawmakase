@@ -314,7 +314,7 @@ fn render(
         return Ok(thumbnails::downscale(&crate::raster::decode(path)?, edge));
     }
     let raw = crate::photo::open(path)?;
-    let recipe = EditSource::recipe(edit, &raw)?;
+    let recipe = EditSource::recipe(edit, &raw.metadata)?;
     let image = raw.develop(crate::camera_data::Decode::Half, cancel)?;
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     let out = crate::develop::render(&image, &recipe.checked()?, edge)?;

@@ -80,7 +80,7 @@ fn develop(
     mut ready: impl FnMut(ReferenceImage),
 ) -> anyhow::Result<()> {
     let raw = crate::photo::open(&job.path)?;
-    let recipe = EditSource::recipe(Some(&job.edit), &raw)?;
+    let recipe = EditSource::recipe(Some(&job.edit), &raw.metadata)?;
     let full_size = FullSize::with_cache(&job.path, job.demosaic, cache.clone());
     if let Some(image) = full_size.cached(&raw.metadata) {
         // Closed before the reference is ready: Windows refuses to rename or
