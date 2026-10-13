@@ -146,6 +146,8 @@ pub(crate) struct GlobalTone {
     /// response, over log2 white-curve outputs. Absent for DefaultBlackRender None.
     default_black: Option<Box<[f32; Y_SAMPLES]>>,
     blacks_curve: Option<Box<[f32; Y_SAMPLES]>>,
+    /// Default-black curves at positive Shadows 0..1 in steps of 0.1, for masks.
+    shadow_black: Option<(f32, Vec<f32>)>,
 }
 impl GlobalTone {
     /// For the sensor's white, the level Whites stretches toward (the probes' maximum;
@@ -271,6 +273,7 @@ impl GlobalTone {
             linear_below,
             default_black,
             blacks_curve,
+            shadow_black: None,
         };
         tone.white = tone.row_at(whites);
         tone
@@ -306,18 +309,64 @@ impl GlobalTone {
             _ => y,
         }
     }
+    pub(crate) fn set_shadow_black(&mut self, shadows: f32, dark_keys: &[f32; 11]) {
+        if self.black_point {
+            self.shadow_black = Some((
+                shadows,
+                dark_keys
+                    .iter()
+                    .flat_map(|key| black_correction(*key, self.top - 14.).to_vec())
+                    .collect(),
+            ));
+        }
+    }
+    pub(crate) fn shadow_black_samples(&self) -> Option<(f32, &[f32])> {
+        self.shadow_black
+            .as_ref()
+            .map(|(s, rows)| (*s, rows.as_slice()))
+    }
     pub(crate) fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        self.apply_with_shadow(p, 0.)
+    }
+    fn apply_with_shadow(&self, p: [f32; 3], shadow_delta: f32) -> [f32; 3] {
         let p = rgb_tone(p, |x| self.white_at(&self.white, x));
-        let p = match &self.default_black {
-            // Above white (positive Whites' overshoot) it leaves the output alone.
-            Some(curve) => p.map(|v| {
+        let p = if let Some((shadows, rows)) = &self.shadow_black
+            && shadow_delta != 0.
+        {
+            let f = (shadows + shadow_delta).clamp(0., 1.) * 10.;
+            let i = (f as usize).min(9);
+            let t = f - i as f32;
+            p.map(|v| {
                 if v < 1. {
-                    evaluate(&curve[..], Y_FIRST, Y_STEP, v)
+                    let a = evaluate(
+                        &rows[i * Y_SAMPLES..(i + 1) * Y_SAMPLES],
+                        Y_FIRST,
+                        Y_STEP,
+                        v,
+                    );
+                    let b = evaluate(
+                        &rows[(i + 1) * Y_SAMPLES..(i + 2) * Y_SAMPLES],
+                        Y_FIRST,
+                        Y_STEP,
+                        v,
+                    );
+                    a + (b - a) * t
                 } else {
                     v
                 }
-            }),
-            None => p,
+            })
+        } else {
+            match &self.default_black {
+                // Above white (positive Whites' overshoot) it leaves the output alone.
+                Some(curve) => p.map(|v| {
+                    if v < 1. {
+                        evaluate(&curve[..], Y_FIRST, Y_STEP, v)
+                    } else {
+                        v
+                    }
+                }),
+                None => p,
+            }
         };
         match &self.blacks_curve {
             Some(blacks) => p.map(|v| evaluate(&blacks[..], Y_FIRST, Y_STEP, v)),
@@ -326,8 +375,8 @@ impl GlobalTone {
     }
     /// As [`Self::apply`], then a mask's Whites and Blacks (−1 to 1) on the result, as
     /// their own curves.
-    pub(crate) fn apply_at(&self, p: [f32; 3], whites: f32, blacks: f32) -> [f32; 3] {
-        let p = self.apply(p);
+    pub(crate) fn apply_at(&self, p: [f32; 3], whites: f32, blacks: f32, shadows: f32) -> [f32; 3] {
+        let p = self.apply_with_shadow(p, shadows);
         let p = if whites != 0. {
             rgb_tone(p, |y| mask_curve(0, whites, y))
         } else {
@@ -678,15 +727,15 @@ mod tests {
     fn a_masks_whites_and_blacks_follow_the_global_curves() {
         let render = GlobalTone::new([1.3, 0.2, 0.2, 1.2], 0.2, -0.1, -5., -5., true);
         let p = [0.4f32, 0.3, 0.6];
-        assert_eq!(render.apply_at(p, 0., 0.), render.apply(p));
+        assert_eq!(render.apply_at(p, 0., 0., 0.), render.apply(p));
         // Measured: a mask's Whites +50 takes 0.18 (default output 0.177) to 0.240.
         let plain = reaching(0., 0., 0., true);
-        let lifted = plain.apply_at([0.18; 3], 0.5, 0.)[0];
+        let lifted = plain.apply_at([0.18; 3], 0.5, 0., 0.)[0];
         assert!((lifted - 0.240).abs() < 0.005, "{lifted}");
         // Continuous through 0.
-        let small = plain.apply_at([0.18; 3], 0.01, 0.)[0];
+        let small = plain.apply_at([0.18; 3], 0.01, 0., 0.)[0];
         assert!((small - plain.apply([0.18; 3])[0]).abs() < 0.005);
-        let dark = plain.apply_at([0.05; 3], 0., -0.5)[0];
+        let dark = plain.apply_at([0.05; 3], 0., -0.5, 0.)[0];
         assert!(dark < plain.apply([0.05; 3])[0]);
     }
 

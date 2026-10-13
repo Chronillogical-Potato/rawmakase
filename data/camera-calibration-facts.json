@@ -1,7 +1,7 @@
 {
   "about": "CameraCalibration facts from Adobe DNG Converter, not profile content. Public sample hashes and URLs refer to tests/corpus/pixls.json. Non-diagonal, illuminant-dependent and non-identity AnalogBalance cases require separate handling. Local sample entries contain only anonymous hashes and numerical calibration facts. NativeDaylightWB is read from the original Sony RAW, not its converted DNG.",
   "converter": "18.7 (2743)",
-  "checked": "2026-10-08",
+  "checked": "2026-10-13",
   "samples": [
     {
       "make": "SONY",
@@ -3205,6 +3205,96 @@
           2016
         ]
       }
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M2",
+      "measured": [
+        1.01,
+        1.0,
+        0.9707
+      ],
+      "sha256": "c055ebe3605d1dd598938a98fcd695dbe488b98841def6fc3c9c98d8fc5abfeb",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.01 0 0 0 1 0 0 0 0.9707",
+        "CameraCalibration2": "1.01 0 0 0 1 0 0 0 0.9707",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "BaselineExposure": 0.35,
+        "WhiteLevel": 16300,
+        "BlackLevel": "512 512 512 512",
+        "ISO": 100,
+        "NativeDaylightWB": [
+          2412.0,
+          1024.0,
+          1500.0
+        ]
+      },
+      "source": "local"
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M2",
+      "measured": [
+        1.01,
+        1.0,
+        0.9579
+      ],
+      "sha256": "6fd8d91430a75d086fe8237c96304203d6fff4f00c49705fa97812213379698e",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.01 0 0 0 1 0 0 0 0.9579",
+        "CameraCalibration2": "1.01 0 0 0 1 0 0 0 0.9579",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "BaselineExposure": 0.35,
+        "WhiteLevel": 16300,
+        "BlackLevel": "512 512 512 512",
+        "ISO": 6400,
+        "NativeDaylightWB": [
+          2412.0,
+          1024.0,
+          1520.0
+        ]
+      },
+      "source": "local"
+    },
+    {
+      "make": "SONY",
+      "model": "ILCE-7M2",
+      "measured": [
+        1.01,
+        1.0,
+        0.9707
+      ],
+      "sha256": "85f50a0e0b8f22a3d1547f898a0a471fdfc2f167712f6c6e24704a878b4480e2",
+      "tags": {
+        "Make": "SONY",
+        "Model": "ILCE-7M2",
+        "DNGVersion": "1 4 0 0",
+        "CameraCalibration1": "1.01 0 0 0 1 0 0 0 0.9707",
+        "CameraCalibration2": "1.01 0 0 0 1 0 0 0 0.9707",
+        "CameraCalibrationSig": "com.adobe",
+        "ProfileCalibrationSig": "com.adobe",
+        "AnalogBalance": "1 1 1",
+        "BaselineExposure": 0.35,
+        "WhiteLevel": 16300,
+        "BlackLevel": "512 512 512 512",
+        "ISO": 100,
+        "NativeDaylightWB": [
+          2412.0,
+          1024.0,
+          1500.0
+        ]
+      },
+      "source": "local"
     }
   ]
 }

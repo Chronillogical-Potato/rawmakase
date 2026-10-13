@@ -97,8 +97,11 @@ impl SceneTone {
         } else {
             pro
         };
-        match local.filter(|d| uses(d, &SCENE_SLOTS)) {
-            Some(d) => self.global.apply_at(pro, d[slot::WHITES], d[slot::BLACKS]),
+        match local.filter(|d| uses(d, &SCENE_SLOTS) || d[slot::SHADOWS] != 0.) {
+            Some(d) => {
+                self.global
+                    .apply_at(pro, d[slot::WHITES], d[slot::BLACKS], d[slot::SHADOWS])
+            }
             None => self.global.apply(pro),
         }
     }
