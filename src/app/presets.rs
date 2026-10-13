@@ -139,25 +139,6 @@ impl Editor {
                             ui.close();
                         }
                     });
-                    let total = library.presets.len();
-                    let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
-                    let (count, tip) = if self.document.metadata.is_some() {
-                        (
-                            format!("{available} / {total}"),
-                            format!("{available} of {total} presets fit this camera"),
-                        )
-                    } else {
-                        (total.to_string(), format!("{total} presets"))
-                    };
-                    let count = ui.painter().text(
-                        egui::pos2(add.left() - 6., caption.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        count,
-                        egui::FontId::proportional(10.5),
-                        palette.gray(120),
-                    );
-                    ui.interact(count, ui.id().with("preset-count"), Sense::hover())
-                        .on_hover_text(tip);
                     super::widgets::search_field(ui, &mut self.presets.filter, "Search presets");
                     let mut show = match (self.presets.favorites_only, self.presets.compatible_only)
                     {
@@ -165,11 +146,30 @@ impl Editor {
                         (false, true) => 2,
                         _ => 0,
                     };
+                    // Each filter with how many presets it shows: Compatible,
+                    // those that fit this camera's photo.
+                    let total = library.presets.len();
+                    let favorites = library
+                        .presets
+                        .iter()
+                        .filter(|p| self.presets.favorites.contains(&p.id))
+                        .count();
+                    let fit = self.presets.issues.iter().filter(|e| e.is_none()).count();
+                    let labels = [
+                        format!("All {total}"),
+                        format!("Favorites {favorites}"),
+                        // Nothing to fit without a photo.
+                        if self.document.metadata.is_some() {
+                            format!("Compatible {fit}")
+                        } else {
+                            "Compatible".into()
+                        },
+                    ];
                     let w = ui.available_width();
                     if segmented(
                         ui,
                         &mut show,
-                        &[(0, "All"), (1, "Favorites"), (2, "Compatible")],
+                        &[(0, &labels[0]), (1, &labels[1]), (2, &labels[2])],
                         w,
                     ) {
                         self.presets.favorites_only = show == 1;
