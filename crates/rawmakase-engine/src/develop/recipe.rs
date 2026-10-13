@@ -24,10 +24,15 @@ impl RenderedRecipe for Recipe {
         )
     }
     fn chroma_denoise(&self) -> Option<crate::develop::color_noise::ChromaDenoise> {
+        use crate::model::operators::NoiseModel;
         if !self.measures_color_noise() {
             return None;
         }
-        crate::develop::color_noise::ChromaDenoise::new(
+        let new = match self.noise_model {
+            NoiseModel::Adaptive => crate::develop::color_noise::ChromaDenoise::adaptive,
+            _ => crate::develop::color_noise::ChromaDenoise::new,
+        };
+        new(
             self.noise_chroma,
             self.effects.chroma_detail,
             self.effects.chroma_smoothness,

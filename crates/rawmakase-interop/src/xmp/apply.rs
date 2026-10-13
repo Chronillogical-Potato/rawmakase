@@ -434,7 +434,7 @@ impl Preset {
             0.,
             1.,
         )?;
-        // Lightroom's values mean the measured operator, also on a recipe saved before.
+        // Lightroom's values mean the adaptive operator, also on a recipe saved before.
         if [
             "Sharpness",
             "SharpenRadius",
@@ -461,6 +461,9 @@ impl Preset {
         .iter()
         .any(|k| settings.values.contains_key(*k))
         {
+            r.noise_model = crate::model::operators::NoiseModel::Adaptive;
+        }
+        if settings.keeps_original(super::write::MEASURED_COLOR_NOISE) {
             r.noise_model = crate::model::operators::NoiseModel::Measured;
         }
         if settings.keeps_original(super::write::ORIGINAL_COLOR_NOISE) {

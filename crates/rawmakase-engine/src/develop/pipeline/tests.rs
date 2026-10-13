@@ -1512,10 +1512,10 @@ fn new_edits_render_grain_at_camera_raw_strength() -> anyhow::Result<()> {
     assert!((5.8..8.8).contains(&deviation), "{deviation}");
     Ok(())
 }
-/// New edits start at Lightroom's Color noise reduction of 25 with the measured
-/// operator, which reduces a flat's colour noise as Camera Raw does: its chart's
-/// chroma noise dropped from 5.0 to 2.7 at that setting. Saved recipes keep the
-/// original operator.
+/// New edits start at Lightroom's Color noise reduction of 25 with the adaptive
+/// operator, which takes out a flat's colour noise as Camera Raw does on photos.
+/// Recipes saved with the measured operator keep its milder reduction (its chart's
+/// chroma noise dropped from 5.0 to 2.7 at that setting), older ones the original.
 #[test]
 fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     use crate::model::operators::NoiseModel;
@@ -1554,7 +1554,7 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     let mut r = Recipe::with_profiles(&m, &[]);
     assert_eq!(
         (r.noise_model, r.noise_chroma),
-        (NoiseModel::Measured, 0.25)
+        (NoiseModel::Adaptive, 0.25)
     );
     r.sharpening = 0.;
     let chroma_noise = |r: &Recipe| -> anyhow::Result<f32> {
@@ -1580,6 +1580,10 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     off.noise_chroma = 0.;
     let off = chroma_noise(&off)?;
     let ratio = on / off;
+    assert!(ratio < 0.15, "{ratio}");
+    let mut measured = r.clone();
+    measured.noise_model = NoiseModel::Measured;
+    let ratio = chroma_noise(&measured)? / off;
     assert!((0.35..0.7).contains(&ratio), "{ratio}");
     // The original operator at 25 barely touched it.
     let mut original = r;
@@ -1587,6 +1591,100 @@ fn new_edits_reduce_colour_noise_as_camera_raw() -> anyhow::Result<()> {
     assert!(chroma_noise(&original)? / off > 0.75);
     let saved: Recipe = serde_json::from_value(serde_json::to_value(Recipe::default())?)?;
     assert_eq!(saved.noise_model, NoiseModel::Original);
+    Ok(())
+}
+/// Issue 465: at ISO 2000 a photo's colour noise, demosaiced, forms blotches several
+/// pixels across, which Lightroom's default Color noise reduction takes out and the
+/// measured operator (fitted to Camera Raw on charts without a noise profile) kept.
+/// New edits take them out; the noise is measured in the photo, so a photo four times
+/// as noisy loses as much of it.
+#[test]
+fn new_edits_take_out_colour_blotches() -> anyhow::Result<()> {
+    use crate::model::operators::NoiseModel;
+    let (width, height) = (256, 256);
+    let m = Metadata {
+        width,
+        height,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let hash = |x: u32, y: u32, c: u32| {
+        let mut v =
+            x.wrapping_mul(0x9e3779b9) ^ y.wrapping_mul(0x85ebca6b) ^ c.wrapping_mul(0xc2b2ae35);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2c1b3c6d);
+        v ^= v >> 12;
+        (v as f32 / u32::MAX as f32) * 2. - 1.
+    };
+    // Fine noise plus blotches: noise on a 4-pixel grid, interpolated.
+    let blotch = |x: u32, y: u32, c: u32| {
+        let (fx, fy) = ((x % 4) as f32 / 4., (y % 4) as f32 / 4.);
+        let (gx, gy) = (x / 4, y / 4);
+        let at = |dx, dy| hash(gx + dx, gy + dy, c + 7);
+        (at(0, 0) * (1. - fx) + at(1, 0) * fx) * (1. - fy)
+            + (at(0, 1) * (1. - fx) + at(1, 1) * fx) * fy
+    };
+    let image = |amplitude: f32| CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let (x, y) = (i % width, i / width);
+                std::array::from_fn(|c| {
+                    let c = c as u32;
+                    0.18 * (1. + amplitude * (0.5 * hash(x, y, c) + blotch(x, y, c)))
+                })
+            })
+            .collect(),
+        metadata: m.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    // The colour noise of 8×8 block averages: the blotches, without the finest noise.
+    let blotches = |im: &CameraImage, r: &Recipe| -> anyhow::Result<f32> {
+        let out = crate::develop::render(im, &r.checked()?, 0)?;
+        let blocks: Vec<[f32; 2]> = (0..(width / 8) * (height / 8))
+            .map(|b| {
+                let (bx, by) = (b % (width / 8) * 8, b / (width / 8) * 8);
+                let mut s = [0.; 2];
+                for y in by..by + 8 {
+                    for x in bx..bx + 8 {
+                        let p = out.pixels[(y * width + x) as usize];
+                        s = [s[0] + (p[0] - p[1]) / 64., s[1] + (p[2] - p[1]) / 64.];
+                    }
+                }
+                s
+            })
+            .collect();
+        let n = blocks.len() as f32;
+        let mean = blocks
+            .iter()
+            .fold([0.; 2], |a, v| [a[0] + v[0] / n, a[1] + v[1] / n]);
+        Ok((blocks
+            .iter()
+            .map(|v| (v[0] - mean[0]).powi(2) + (v[1] - mean[1]).powi(2))
+            .sum::<f32>()
+            / n)
+            .sqrt())
+    };
+    let mut r = Recipe::with_profiles(&m, &[]);
+    r.sharpening = 0.;
+    let mut off = r.clone();
+    off.noise_chroma = 0.;
+    let mut measured = r.clone();
+    measured.noise_model = NoiseModel::Measured;
+    for amplitude in [0.04, 0.16] {
+        let im = image(amplitude);
+        let before = blotches(&im, &off)?;
+        let kept = blotches(&im, &r)? / before;
+        assert!(kept < 0.3, "{amplitude}: {kept}");
+        let kept = blotches(&im, &measured)? / before;
+        assert!(kept > 0.6, "{amplitude}: measured {kept}");
+    }
     Ok(())
 }
 /// Engines before 3 develop without the measured Color noise reduction, so a recipe

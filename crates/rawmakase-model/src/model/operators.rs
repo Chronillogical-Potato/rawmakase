@@ -114,8 +114,13 @@ pub enum NoiseModel {
     /// recipes saved before the measured one keep, so they render as they did.
     #[default]
     Original,
-    /// The colour noise reduction measured in Camera Raw.
+    /// The colour noise reduction measured in Camera Raw on charts without a noise
+    /// profile: what recipes saved before the adaptive one keep.
     Measured,
+    /// The colour noise reduction measured in Camera Raw with the photo's noise
+    /// known, as it renders camera raw files: thresholds follow the noise measured in
+    /// the photo.
+    Adaptive,
 }
 impl NoiseModel {
     pub fn is_original(&self) -> bool {
@@ -381,7 +386,11 @@ mod tests {
         use NoiseModel as N;
         stored_as(
             N::Original,
-            &[(N::Original, "Original"), (N::Measured, "Measured")],
+            &[
+                (N::Original, "Original"),
+                (N::Measured, "Measured"),
+                (N::Adaptive, "Adaptive"),
+            ],
         );
         use VibranceModel as V;
         stored_as(
