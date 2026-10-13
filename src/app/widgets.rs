@@ -2237,3 +2237,89 @@ impl Drop for LabelColumn {
         });
     }
 }
+
+/// The caption band at the top of Develop's tab panel, naming what it shows
+/// as the panels' section headers do. Returns the band, for what its right
+/// end holds.
+pub(super) fn panel_caption(ui: &mut egui::Ui, name: &str) -> Rect {
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(8.);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    ui.painter().rect_filled(rect, 5., palette.gray(30));
+    ui.painter().text(
+        Pos2::new(rect.left() + 8., rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name.to_uppercase(),
+        egui::FontId::proportional(11.),
+        palette.gray(145),
+    );
+    rect
+}
+/// A search field: a rounded box with a magnifier, the text and a button that
+/// clears it. Returns the text field's response.
+pub(super) fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    let field = rect
+        .with_min_x(rect.left() + 28.)
+        .with_max_x(rect.right() - 26.);
+    // The box goes under the text, its look known once the field is drawn.
+    let backdrop = ui.painter().add(egui::Shape::Noop);
+    let response = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(field)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(text)
+                        .hint_text(hint)
+                        .frame(egui::Frame::new())
+                        .font(egui::FontId::proportional(12.))
+                        .desired_width(field.width()),
+                )
+            },
+        )
+        .inner;
+    let focused = response.has_focus();
+    ui.painter().set(
+        backdrop,
+        egui::epaint::RectShape::new(
+            rect,
+            6.,
+            palette.gray(if focused { 26 } else { 30 }),
+            Stroke::new(
+                1.,
+                if focused {
+                    palette.accent()
+                } else {
+                    palette.gray(44)
+                },
+            ),
+            egui::StrokeKind::Inside,
+        ),
+    );
+    icons::paint_at(
+        ui.painter(),
+        Icon::Search,
+        Pos2::new(rect.left() + 15., rect.center().y),
+        13.,
+        palette.gray(130),
+    );
+    if !text.is_empty() {
+        let clear = Rect::from_center_size(
+            Pos2::new(rect.right() - 14., rect.center().y),
+            Vec2::splat(20.),
+        );
+        let hit = ui
+            .interact(clear, response.id.with("clear"), Sense::click())
+            .on_hover_text("Clear the search")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let tint = palette.gray(if hit.hovered() { 230 } else { 140 });
+        icons::paint_at(ui.painter(), Icon::Close, clear.center(), 11., tint);
+        if hit.clicked() {
+            text.clear();
+        }
+    }
+    response
+}

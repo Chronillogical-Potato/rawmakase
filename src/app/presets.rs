@@ -6,7 +6,7 @@ use super::worker::Event;
 use crate::app::theme;
 use crate::model::recipe::Recipe;
 use anyhow::Context as _;
-use eframe::egui::{self, Sense, Stroke, Vec2};
+use eframe::egui::{self, Sense, Vec2};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -96,50 +96,69 @@ impl Editor {
             .id_salt("preset-list")
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                ui.add_space(8.);
                 ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(4., 4.);
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.presets.filter)
-                                .hint_text("Search presets")
-                                .font(egui::FontId::proportional(12.))
-                                .desired_width(ui.available_width() - 26.),
-                        );
-                        let (rect, response) =
-                            ui.allocate_exact_size(Vec2::splat(22.), Sense::click());
-                        let color = palette.gray(if response.hovered() { 235 } else { 160 });
-                        if response.hovered() {
-                            ui.painter().rect_filled(rect, 3., palette.gray(50));
+                    ui.spacing_mut().item_spacing = Vec2::new(4., 8.);
+                    // The caption names the tab, with how many presets fit
+                    // this camera and the import menu at its right.
+                    let caption = super::widgets::panel_caption(ui, "Presets");
+                    let add = egui::Rect::from_center_size(
+                        egui::pos2(caption.right() - 14., caption.center().y),
+                        Vec2::splat(22.),
+                    );
+                    let response = ui.interact(add, ui.id().with("preset-import"), Sense::click());
+                    if response.hovered() {
+                        ui.painter().rect_filled(add, 4., palette.gray(44));
+                    }
+                    let tint = palette.gray(if response.hovered() { 235 } else { 150 });
+                    crate::app::icons::paint_at(
+                        ui.painter(),
+                        crate::app::icons::Icon::Add,
+                        add.center(),
+                        13.,
+                        tint,
+                    );
+                    let response = response
+                        .on_hover_text("Import Lightroom presets (.xmp)")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    egui::Popup::menu(&response).show(|ui| {
+                        ui.set_min_width(190.);
+                        if ui
+                            .add(egui::Button::new("Import Presets…").frame(false))
+                            .on_hover_text("Choose one or more .xmp presets")
+                            .clicked()
+                        {
+                            import = Some(FileDialog::ImportXmp);
+                            ui.close();
                         }
-                        crate::app::icons::paint_at(
-                            ui.painter(),
-                            crate::app::icons::Icon::Add,
-                            rect.center(),
-                            14.,
-                            color,
-                        );
-                        let response = response.on_hover_text("Import Lightroom presets (.xmp)");
-                        egui::Popup::menu(&response).show(|ui| {
-                            ui.set_min_width(190.);
-                            if ui
-                                .add(egui::Button::new("Import Presets…").frame(false))
-                                .on_hover_text("Choose one or more .xmp presets")
-                                .clicked()
-                            {
-                                import = Some(FileDialog::ImportXmp);
-                                ui.close();
-                            }
-                            if ui
-                                .add(egui::Button::new("Import Folder…").frame(false))
-                                .on_hover_text("Import every preset in a folder and its subfolders")
-                                .clicked()
-                            {
-                                import = Some(FileDialog::ImportFolder(ImportKind::Presets));
-                                ui.close();
-                            }
-                        });
+                        if ui
+                            .add(egui::Button::new("Import Folder…").frame(false))
+                            .on_hover_text("Import every preset in a folder and its subfolders")
+                            .clicked()
+                        {
+                            import = Some(FileDialog::ImportFolder(ImportKind::Presets));
+                            ui.close();
+                        }
                     });
+                    let total = library.presets.len();
+                    let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
+                    let (count, tip) = if self.document.metadata.is_some() {
+                        (
+                            format!("{available} / {total}"),
+                            format!("{available} of {total} presets fit this camera"),
+                        )
+                    } else {
+                        (total.to_string(), format!("{total} presets"))
+                    };
+                    let count = ui.painter().text(
+                        egui::pos2(add.left() - 6., caption.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        count,
+                        egui::FontId::proportional(10.5),
+                        palette.gray(120),
+                    );
+                    ui.interact(count, ui.id().with("preset-count"), Sense::hover())
+                        .on_hover_text(tip);
+                    super::widgets::search_field(ui, &mut self.presets.filter, "Search presets");
                     let mut show = match (self.presets.favorites_only, self.presets.compatible_only)
                     {
                         (true, _) => 1,
@@ -157,24 +176,6 @@ impl Editor {
                         self.presets.compatible_only = show == 2;
                     }
                     self.preset_amount_ui(ui);
-                    let available = self.presets.issues.iter().filter(|e| e.is_none()).count();
-                    // One line whatever the count, so switching photos never
-                    // moves the list below.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(if self.document.metadata.is_some() {
-                                format!(
-                                    "{available} of {} presets fit this camera",
-                                    library.presets.len()
-                                )
-                            } else {
-                                format!("{} presets", library.presets.len())
-                            })
-                            .size(10.)
-                            .color(palette.gray(125)),
-                        )
-                        .truncate(),
-                    );
                     if !library.errors.is_empty() {
                         ui.label(
                             egui::RichText::new(format!(
@@ -186,7 +187,6 @@ impl Editor {
                         )
                         .on_hover_text(library.errors.join("\n"));
                     }
-                    ui.add_space(2.);
                     let groups = self.preset_list();
                     if groups.is_empty() && !library.presets.is_empty() {
                         ui.weak("No presets match these filters.");
@@ -686,46 +686,34 @@ fn list_row(
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2};
     let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     // Scrolled out of view: keep its place but skip laying out its text.
     if !ui.is_rect_visible(rect) {
         return response;
     }
-    if selected || (enabled && response.hovered()) {
-        ui.painter().rect_filled(
-            rect,
-            2.,
-            if selected {
-                palette.selected_row()
-            } else {
-                palette.gray(43)
-            },
-        );
+    let hovered = enabled && response.hovered();
+    if selected || hovered {
+        let fill = if selected {
+            palette.selected_row()
+        } else {
+            palette.gray(34)
+        };
+        ui.painter().rect_filled(rect, 4., fill);
     }
-    let x = rect.left() + 8. + depth as f32 * 16.;
+    // A group's chevron as the folder tree's; a preset's name under the
+    // group's.
+    let x = rect.left() + 10. + depth as f32 * 14.;
     let y = rect.center().y;
     if let Some(open) = open {
-        let c = Pos2::new(x + 3., y);
-        let triangle = if open {
-            vec![
-                c + Vec2::new(-4., -2.),
-                c + Vec2::new(4., -2.),
-                c + Vec2::new(0., 3.),
-            ]
+        let chevron = if open {
+            crate::app::icons::Icon::ChevronDown
         } else {
-            vec![
-                c + Vec2::new(-2., -4.),
-                c + Vec2::new(3., 0.),
-                c + Vec2::new(-2., 4.),
-            ]
+            crate::app::icons::Icon::ChevronRight
         };
-        ui.painter().add(egui::Shape::convex_polygon(
-            triangle,
-            palette.gray(140),
-            Stroke::NONE,
-        ));
+        let tint = palette.gray(if hovered { 200 } else { 140 });
+        crate::app::icons::paint_at(ui.painter(), chevron, Pos2::new(x, y), 11., tint);
     }
-    let text_left = x + if open.is_some() { 14. } else { 6. };
+    let text_left = x + if open.is_some() { 12. } else { 0. };
     let right = rect.right() - if count.is_some() { 36. } else { 26. };
     let galley = egui::WidgetText::from(text).into_galley(
         ui,
@@ -736,12 +724,10 @@ fn list_row(
     ui.painter().galley(
         Pos2::new(text_left, y - galley.size().y / 2.),
         galley,
-        palette.gray(if !enabled {
-            95
-        } else if selected {
-            240
-        } else {
-            195
+        palette.gray(match (enabled, selected || hovered) {
+            (false, _) => 95,
+            (true, true) => 240,
+            (true, false) => 200,
         }),
     );
     if let Some(count) = count {
@@ -749,7 +735,7 @@ fn list_row(
             Pos2::new(rect.right() - 10., y),
             Align2::RIGHT_CENTER,
             count.to_string(),
-            FontId::proportional(10.),
+            FontId::proportional(10.5),
             palette.gray(120),
         );
     }

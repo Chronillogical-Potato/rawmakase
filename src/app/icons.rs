@@ -43,6 +43,7 @@ fastframe_icons::icons! {
         ChevronRight => lucide "chevron-right",
         PanelLeft => lucide "panel-left",
         Eye => lucide "eye",
+        Search => lucide "search",
         Pin => lucide "pin",
         PinOff => lucide "pin-off",
         EyeOff => lucide "eye-off",

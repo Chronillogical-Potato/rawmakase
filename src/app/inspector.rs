@@ -210,7 +210,7 @@ impl Editor {
         else {
             return;
         };
-        drawer_caption(ui, name);
+        super::widgets::panel_caption(ui, name);
         let drawer = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             drawer_frame().show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
@@ -1778,20 +1778,6 @@ fn drawer_frame() -> egui::Frame {
         top: 6,
         bottom: 12,
     })
-}
-/// The drawer's caption, as the panels' section headers name them.
-fn drawer_caption(ui: &mut egui::Ui, name: &str) {
-    let palette = theme::palette(ui.ctx());
-    ui.add_space(8.);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    ui.painter().rect_filled(rect, 5., palette.gray(30));
-    ui.painter().text(
-        Pos2::new(rect.left() + 8., rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        name.to_uppercase(),
-        egui::FontId::proportional(11.),
-        palette.gray(145),
-    );
 }
 /// Whether `tool` has a drawer in the tab panel.
 pub(super) fn has_drawer(tool: Tool) -> bool {
