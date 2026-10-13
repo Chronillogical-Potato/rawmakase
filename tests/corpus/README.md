@@ -70,7 +70,7 @@ RAWMAKASE_CORPUS=… RAWMAKASE_PROFILES=<folder of DCPs> cargo test --release --
 
 ## Scripts
 
-All run from the repository root with a Python that has numpy (`/opt/homebrew/bin/python3.12` here). Photoshop scripts refuse to start while Photoshop has documents open, open only RAW or DNG copies (never TIFFs, which block Photoshop with a dialog), and delete every render once it is reduced.
+All run from the repository root with a Python that has numpy (`/opt/homebrew/bin/python3.12` here; the dataset gate scripts below also need tifffile, which the dataset's `~/.cache/rawmakase-vlm-venv` has). Photoshop scripts refuse to start while Photoshop has documents open, open only RAW or DNG copies (never TIFFs, which block Photoshop with a dialog), and delete every render once it is reduced.
 
 - `scripts/corpus/synthetic-looks.py`: writes the synthetic look profiles in `looks/`. Camera Raw reads them from the sidecar (`crs:Look` with its parameters and the `Table_` attribute), so nothing is installed.
 - `scripts/corpus/camera-raw-charts.py`: Camera Raw renders of the synthetic charts into `camera-raw/`; with `--adobe`, of the camera charts with Adobe Standard into the private corpus.
@@ -160,11 +160,11 @@ python3 scripts/corpus/dataset-gate.py report $run/<name>     # --split holdout 
 - **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
 - **report** says how far a run is from Camera Raw: median ΔE00 by control, stratum and source, the furthest settings, the lightness bias per tone band, and what could not be scored.
 - **Default parity:** `gate.py default-parity --survey $RAWMAKASE_DATASET/references/<family>/survey --rawmakase … --data-dir $lib --out <folder>` scores default renders against the survey's Camera Raw renders, leaving holdout photos out.
-- **Baselines** are runs of `main`, named by its commit (`main-418d0ca7`: validation and holdout); record a new one when `main`'s rendering changes. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
+- **Baselines** are runs of `main`, named by its commit; record a new one when `main`'s rendering changes. The current one is `main-9ef177b8`, the scene tone engine (#416), recorded with LibRaw from `packaging/native-deps.sh`; `main-418d0ca7` is the engine before it. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
 
 ### Testing a rendering-engine change
 
-On the machine with the dataset, from the branch's checkout, built against `packaging/native-deps.sh`'s LibRaw (`cargo build --release`):
+On the machine with the dataset, from the branch's checkout, built against `packaging/native-deps.sh`'s LibRaw (`PKG_CONFIG_PATH=<its prefix>/lib/pkgconfig cargo build --release`; `otool -L target/release/rawmakase` names that prefix, not Homebrew's LibRaw):
 
 | Step | Command | Time | Expect |
 |---|---|---|---|
