@@ -189,11 +189,15 @@ impl Editor {
                     }
                     let groups = self.preset_list();
                     if groups.is_empty() && !library.presets.is_empty() {
-                        ui.weak("No presets match these filters.");
-                        if ui.small_button("Clear filters").clicked() {
-                            self.presets.filter.clear();
-                            self.presets.favorites_only = false;
-                            self.presets.compatible_only = false;
+                        let empty = EmptyList::of(&self.presets, favorites);
+                        if empty_state(ui, &empty) {
+                            match empty.action {
+                                EmptyAction::ClearSearch => self.presets.filter.clear(),
+                                EmptyAction::ShowAll => {
+                                    self.presets.favorites_only = false;
+                                    self.presets.compatible_only = false;
+                                }
+                            }
                         }
                     }
                     ui.spacing_mut().item_spacing.y = 0.;
@@ -672,6 +676,84 @@ fn preset_detail(
     }
 }
 
+/// Why the preset list shows nothing, and the one step that brings presets
+/// back.
+struct EmptyList {
+    title: String,
+    detail: &'static str,
+    action: EmptyAction,
+}
+#[derive(Clone, Copy)]
+enum EmptyAction {
+    ClearSearch,
+    ShowAll,
+}
+impl EmptyList {
+    /// For a list emptied by the browser's search and filters; `favorites`
+    /// is how many favorites there are.
+    fn of(browser: &super::state::PresetBrowser, favorites: usize) -> Self {
+        let query = browser.filter.trim();
+        if browser.favorites_only && favorites == 0 {
+            Self {
+                title: "No favorites yet".into(),
+                detail: "Hover a preset and click its \u{2605} to keep it here.",
+                action: EmptyAction::ShowAll,
+            }
+        } else if !query.is_empty() {
+            Self {
+                title: format!("No presets match \u{201c}{query}\u{201d}"),
+                detail: if browser.favorites_only {
+                    "Searched your favorites only."
+                } else if browser.compatible_only {
+                    "Searched the presets that fit this camera only."
+                } else {
+                    "Try another name or group."
+                },
+                action: EmptyAction::ClearSearch,
+            }
+        } else {
+            Self {
+                title: "No presets fit this camera".into(),
+                detail: "Compatible shows the presets this photo can take in full.",
+                action: EmptyAction::ShowAll,
+            }
+        }
+    }
+}
+/// The empty list's message, centred, with its action as a button; returns
+/// whether the button was clicked.
+fn empty_state(ui: &mut egui::Ui, empty: &EmptyList) -> bool {
+    let palette = theme::palette(ui.ctx());
+    let mut clicked = false;
+    ui.add_space(20.);
+    ui.vertical_centered(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.;
+        ui.label(
+            egui::RichText::new(&empty.title)
+                .size(12.5)
+                .color(palette.gray(215)),
+        );
+        ui.label(
+            egui::RichText::new(empty.detail)
+                .size(11.)
+                .color(palette.gray(130)),
+        );
+        ui.add_space(6.);
+        let label = match empty.action {
+            EmptyAction::ClearSearch => "Clear Search",
+            EmptyAction::ShowAll => "Show All Presets",
+        };
+        clicked = ui
+            .add(
+                egui::Button::new(egui::RichText::new(label).size(12.))
+                    .corner_radius(6.)
+                    .min_size(Vec2::new(140., 26.)),
+            )
+            .clicked();
+    });
+    clicked
+}
+
 /// A Lightroom-style list row for preset folders and presets: fixed height,
 /// indent, optional disclosure triangle and right-aligned count.
 fn list_row(
@@ -764,6 +846,31 @@ fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_preset_list_says_why_and_offers_the_way_back() {
+        let mut browser = crate::app::state::PresetBrowser {
+            favorites_only: true,
+            ..Default::default()
+        };
+        let none_yet = EmptyList::of(&browser, 0);
+        assert_eq!(none_yet.title, "No favorites yet");
+        assert!(matches!(none_yet.action, EmptyAction::ShowAll));
+        // With favorites, it is the search that found nothing among them.
+        browser.filter = " portra ".into();
+        let searched = EmptyList::of(&browser, 3);
+        assert_eq!(searched.title, "No presets match \u{201c}portra\u{201d}");
+        assert_eq!(searched.detail, "Searched your favorites only.");
+        assert!(matches!(searched.action, EmptyAction::ClearSearch));
+        // Compatible with nothing fitting and no search.
+        browser = crate::app::state::PresetBrowser {
+            compatible_only: true,
+            ..Default::default()
+        };
+        let none_fit = EmptyList::of(&browser, 3);
+        assert_eq!(none_fit.title, "No presets fit this camera");
+        assert!(matches!(none_fit.action, EmptyAction::ShowAll));
+    }
     /// A preset that changes only a lens setting leaves no Upright correction analysed
     /// through the old one: the editor analyses the photo again.
     #[test]
