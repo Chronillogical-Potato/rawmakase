@@ -36,7 +36,18 @@ const TABLE: [[f64; 4]; 31] = [
 ];
 
 pub fn xy(temperature: f32, tint: f32) -> [f32; 2] {
-    let reciprocal = 1e6 / f64::from(temperature.clamp(2000., 50000.));
+    xy_at(1e6 / f64::from(temperature.clamp(2000., 50000.)), tint)
+}
+
+/// [`xy`] at reciprocal temperature `mired` (0–600; 0 is infinitely hot), without
+/// [`xy`]'s temperature clamp: a rendered file's Temp reaches past 50 000 K.
+// Unused outside tests until the rendered-file white balance calls it; remove this then.
+#[allow(dead_code)]
+pub fn xy_reciprocal(mired: f32, tint: f32) -> [f32; 2] {
+    xy_at(f64::from(mired.clamp(0., 600.)), tint)
+}
+
+fn xy_at(reciprocal: f64, tint: f32) -> [f32; 2] {
     let i = (0..30)
         .find(|&i| reciprocal < TABLE[i + 1][0])
         .unwrap_or(29);
@@ -108,5 +119,39 @@ mod tests {
                 assert!((result[1] - tint).abs() < 0.1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod reciprocal_tests {
+    use super::*;
+
+    /// `xy` is `xy_reciprocal` at 1e6 / temperature, to the bit, inside its clamp.
+    #[test]
+    fn xy_is_xy_reciprocal_by_temperature() {
+        for (temperature, tint) in [
+            (2000., 0.),
+            (2856., 5.),
+            (5000., 0.),
+            (6504., -12.),
+            (50000., 30.),
+        ] {
+            let via_kelvin = xy(temperature, tint);
+            let via_mired = xy_reciprocal((1e6 / f64::from(temperature)) as f32, tint);
+            assert!(
+                (via_kelvin[0] - via_mired[0]).abs() < 1e-6
+                    && (via_kelvin[1] - via_mired[1]).abs() < 1e-6,
+                "{temperature} K: {via_kelvin:?} vs {via_mired:?}"
+            );
+        }
+    }
+
+    /// Past 50 000 K (under 20 mired) the locus goes on to infinite temperature.
+    #[test]
+    fn xy_reciprocal_reaches_infinite_temperature() {
+        let [x0, y0] = xy_reciprocal(0., 0.);
+        let [x20, y20] = xy_reciprocal(20., 0.);
+        assert!(x0 < x20 && y0 < y20, "{x0},{y0} vs {x20},{y20}");
+        assert_eq!(xy_reciprocal(-5., 0.), xy_reciprocal(0., 0.));
     }
 }
