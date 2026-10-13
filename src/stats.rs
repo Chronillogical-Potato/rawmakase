@@ -95,12 +95,15 @@ pub fn blocked_by_environment() -> Option<&'static str> {
         .find(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty() && v != "0"))
 }
 
-/// How this copy was installed, as fastframe-update finds it to decide
-/// whether it may update itself: the release download it came from, or the
-/// package manager that owns it. Inspecting the install can run the package
-/// manager, so this runs off the UI thread.
+/// How this copy was installed: an AppImage, else as fastframe-update finds
+/// it to decide whether it may update itself: the release download it came
+/// from, or the package manager that owns it. Inspecting the install can run
+/// the package manager, so this runs off the UI thread.
 fn channel() -> &'static str {
     use fastframe_update::{Kind, PackageManager, Unsupported};
+    if runs_from_appimage() {
+        return "linux-appimage";
+    }
     match crate::updates::installation() {
         Ok(installation) => match installation.kind {
             Kind::MacBundle => "macos-dmg",
@@ -123,6 +126,21 @@ fn channel() -> &'static str {
             _ => "unknown",
         },
     }
+}
+
+/// The AppImage runtime sets `APPDIR` to where it mounted or extracted the
+/// image. Programs started from the app inherit it, so only an executable
+/// inside that directory is the AppImage itself.
+fn runs_from_appimage() -> bool {
+    let Some(app_dir) = std::env::var_os("APPDIR") else {
+        return false;
+    };
+    std::env::current_exe().is_ok_and(|executable| is_inside(&executable, Path::new(&app_dir)))
+}
+
+/// Whether `executable`, already resolved, is inside `directory`.
+fn is_inside(executable: &Path, directory: &Path) -> bool {
+    std::fs::canonicalize(directory).is_ok_and(|directory| executable.starts_with(directory))
 }
 
 #[cfg(target_os = "macos")]
@@ -486,6 +504,20 @@ mod tests {
         assert_eq!(report.os, std::env::consts::OS);
         assert_eq!(report.os == "linux", report.distro != "none");
         assert_eq!(report.os == "linux", report.display != "none");
+    }
+
+    #[test]
+    fn only_an_executable_inside_the_app_dir_is_an_appimage() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_dir = dir.path().join("app dir");
+        std::fs::create_dir(&app_dir).unwrap();
+        let app_dir = std::fs::canonicalize(app_dir).unwrap();
+        let inside = app_dir.join("usr/lib/rawmakase/rawmakase");
+        assert!(is_inside(&inside, &app_dir));
+        // A tarball or package copy started from an AppImage inherits APPDIR.
+        let outside = app_dir.with_file_name("app dir2").join("rawmakase");
+        assert!(!is_inside(&outside, &app_dir));
+        assert!(!is_inside(&inside, &dir.path().join("gone")));
     }
 
     #[test]

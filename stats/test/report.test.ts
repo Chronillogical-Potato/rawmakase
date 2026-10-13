@@ -26,6 +26,7 @@ const mac = {
 describe("parseReport", () => {
   it("accepts a complete report", () => {
     expect(parseReport(valid)).toEqual(valid);
+    expect(parseReport({ ...valid, channel: "linux-appimage" })).not.toBeTypeOf("string");
     expect(parseReport({ ...valid, version: "0.2.0-beta.1" })).not.toBeTypeOf("string");
   });
 
