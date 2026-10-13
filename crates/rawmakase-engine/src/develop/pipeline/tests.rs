@@ -35,7 +35,7 @@ fn fixture() -> CameraImage {
 }
 /// A rendered file of one row of 8-bit sRGB pixels, decoded as the rendered decoder
 /// does: to linear ProPhoto RGB.
-fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
+pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
     use rawmakase_model::camera_data::Source;
     use rawmakase_model::camera_profiles::RGB_TO_PRO;
     let decode = |v: u8| {

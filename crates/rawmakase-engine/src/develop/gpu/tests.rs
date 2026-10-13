@@ -460,13 +460,69 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
         .count();
     assert!(changed > with.pixels.len() / 50, "{changed} pixels changed");
     let lifted_recipes = [recipes[1].clone(), recipes[toned].clone()];
-    let cases =
-        (recipes.iter().map(|r| (&image, r))).chain(lifted_recipes.iter().map(|r| (&lifted, r)));
-    for (i, (image, recipe)) in cases.enumerate() {
+    // A rendered file (the Embedded profile's relative scene tone stage): its 8-bit
+    // levels and colours as its own samples, and the wide samples above, at its
+    // defaults and with Whites and Blacks.
+    let srgb: Vec<[u8; 3]> = (0..=255u8)
+        .map(|v| [v; 3])
+        .chain((0..256).map(|i| {
+            let w = |k: f32| (wave(i, k) * 255.).round() as u8;
+            [w(0.71), w(0.53), w(0.29)]
+        }))
+        .collect();
+    let rendered = Arc::new(crate::develop::pipeline::rendered_fixture(&srgb));
+    let rendered_samples = Arc::new(Samples {
+        width: srgb.len() as u32,
+        height: 1,
+        pixels: rendered.pixels.clone(),
+        positions: (0..srgb.len()).map(|i| [i as f32, 0.]).collect(),
+    });
+    let untouched = Recipe::for_rendered(&rendered.metadata);
+    let rendered_recipes = [
+        untouched.clone(),
+        Recipe {
+            whites: 0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            blacks: -0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            whites: -0.4,
+            blacks: 0.3,
+            exposure: 0.5,
+            ..untouched
+        },
+    ];
+    let cases = (recipes.iter().map(|r| (&image, r, &samples)))
+        .chain(lifted_recipes.iter().map(|r| (&lifted, r, &samples)))
+        .chain(
+            rendered_recipes
+                .iter()
+                .flat_map(|r| [(&rendered, r, &rendered_samples), (&rendered, r, &samples)]),
+        );
+    for (i, (image, recipe, samples)) in cases.enumerate() {
         let source = Source::new(image);
         let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
-        let expected = develop_samples(source, recipe, &samples, &cancel, None)?;
-        let actual = gpu.develop(&samples, &params, &cancel)?;
+        let expected = develop_samples(source, recipe, samples, &cancel, None)?;
+        let actual = gpu.develop(samples, &params, &cancel)?;
+        // At a rendered file's defaults the GPU reproduces the file, as the CPU does.
+        if std::ptr::eq(samples, &rendered_samples) && std::ptr::eq(recipe, &rendered_recipes[0]) {
+            let off = |pixels: &[[f32; 3]]| -> Vec<_> {
+                (pixels.iter().zip(&srgb))
+                    .filter(|(got, want)| {
+                        (0..3).any(|c| (got[c] * 255. - want[c] as f32).abs() > 1.)
+                    })
+                    .map(|(got, want)| (*want, got.map(|v| v * 255.)))
+                    .collect()
+            };
+            let (cpu, gpu) = (off(&expected.pixels), off(&actual.pixels));
+            assert!(
+                cpu.is_empty() && gpu.is_empty(),
+                "recipe {i}: CPU {cpu:?}, GPU {gpu:?}"
+            );
+        }
         let d: Vec<f32> = actual
             .pixels
             .iter()
@@ -975,6 +1031,57 @@ fn gpu_masks_match_cpu_pixel_stage() -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The GPU port applies the scene tone stage's Whites and Blacks relative to a rendered
+/// file's own rendering (the Embedded profile), and absolutely to a RAW file.
+#[test]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn scene_relative_is_set_for_rendered_files_only() {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::pipeline::{Source, pixel_params::pixel_params, rendered_fixture},
+    };
+    use std::sync::Arc;
+    let relative = |image: &CameraImage, r: &Recipe| {
+        pixel_params(Source::new(image), r)
+            .expect("GPU port covers this recipe")
+            .get("SCENE_RELATIVE")
+            .to_vec()
+    };
+    let rendered = rendered_fixture(&[[0; 3], [118; 3], [255; 3]]);
+    let untouched = Recipe::for_rendered(&rendered.metadata);
+    assert_eq!(relative(&rendered, &untouched), [1.]);
+    let whites = Recipe {
+        whites: 0.5,
+        ..untouched
+    };
+    assert_eq!(relative(&rendered, &whites), [1.]);
+    let metadata = Metadata {
+        make: "Fujifilm".into(),
+        model: "X100F".into(),
+        width: 3,
+        height: 1,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let raw = CameraImage {
+        metadata: metadata.clone(),
+        ..rendered
+    };
+    let r = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    assert_eq!(relative(&raw, &r), [0.]);
 }
 
 /// Every shader module, assembled as the device receives it, parses and validates

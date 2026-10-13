@@ -26,6 +26,9 @@ const FIELDS: &[(&str, usize)] = &[
     // `GlobalTone::gpu_keys`.
     ("SCENE_TABLES", 1),
     ("SCENE_KEYS", 6),
+    // 1 when the curves apply relative to the curves at Whites and Blacks 0, as for a
+    // rendered file (`GlobalTone::relative`), else 0.
+    ("SCENE_RELATIVE", 1),
     // Dehaze and the level negative Dehaze's response is relative to
     // (`SceneTone::dehaze_key`).
     ("DEHAZE", 2),
@@ -288,6 +291,7 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     p.set("SCENE_DEFAULT_BLACK", &[default_black]);
     p.set("SCENE_BLACKS", &[blacks]);
     p.set("SCENE_KEYS", &global.gpu_keys());
+    p.set("SCENE_RELATIVE", &[global.is_relative() as u8 as f32]);
     p.set("SCENE_TABLES", &[-1.]);
     p.set("DEHAZE", &[lut.scene.dehaze, lut.scene.dehaze_key]);
     match &lut.scene.haze {

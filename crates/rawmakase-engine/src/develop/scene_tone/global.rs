@@ -377,6 +377,10 @@ impl GlobalTone {
             p
         }
     }
+    /// Whether this is relative mode ([`Self::relative`]), for the GPU port.
+    pub(crate) fn is_relative(&self) -> bool {
+        self.reference.is_some()
+    }
     /// What the GPU reads with the curves: the photo's maximum, the black key, whether
     /// there is a black point, the recipe's Whites and Blacks, and where the curve
     /// continues linearly without a black point.

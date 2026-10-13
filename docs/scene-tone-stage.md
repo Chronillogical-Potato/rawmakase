@@ -104,7 +104,10 @@ channels. S3 runs in relative mode (`GlobalTone::relative`): each channel is sca
 the global curves at the recipe's Whites and Blacks over the same curves at 0,
 `p · C(p; Whites, Blacks) / C(p; 0, 0)`, with W* = 1, no black point and the photo's
 measured keys. At Whites and Blacks 0 the stage is exactly the identity, and the
-sliders keep their shapes. The GPU port does not implement relative mode yet.
+sliders keep their shapes. The GPU port does the same when `SCENE_RELATIVE` is 1
+(`scene_global` in `develop.wgsl`), evaluating both sets of curves from the same
+uploaded rows; S0's skip needs nothing on the GPU, which samples the recovered
+image the CPU prepares.
 
 ### Whites and Blacks
 
