@@ -75,7 +75,8 @@ pub struct Recipe {
     pub incremental_tint: f32,
     pub wb: [f32; 3],
     /// Temperature and Tint that Auto white balance chose, so the WB menu shows Auto
-    /// while the photo still has them.
+    /// while the photo still has them: Kelvin for a RAW, the relative
+    /// `incremental_temperature` and `incremental_tint` for a rendered file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_white_balance: Option<[f32; 2]>,
     pub contrast: f32,
@@ -712,6 +713,9 @@ impl Recipe {
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         if m.is_rendered() {
             [self.incremental_temperature, self.incremental_tint] = relative_controls(self.wb);
+            // Gains the relative model cannot show (an eyedropper's, say) become the
+            // nearest it can, so the next Temp or Tint edit does not jump.
+            self.wb = relative_gains(self.incremental_temperature, self.incremental_tint);
             return;
         }
         let mut adjusted = m.clone();

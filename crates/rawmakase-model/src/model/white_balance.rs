@@ -173,6 +173,24 @@ mod relative_tests {
     }
 
     #[test]
+    fn picked_gains_on_a_rendered_photo_become_those_its_controls_show() {
+        let m = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        let mut r = Recipe::for_rendered(&m);
+        // An eyedropper's gains, off the relative model's plane (and green ≠ 1).
+        r.wb = [1.4, 0.9, 1.2];
+        r.sync_white_balance_controls(&m);
+        let shown = relative_gains(r.incremental_temperature, r.incremental_tint);
+        assert_eq!(r.wb, shown);
+        // So the next Temp edit moves on from them rather than jumping.
+        let mut moved = r.clone();
+        moved.update_wb(&m);
+        assert_eq!(moved.wb, r.wb);
+    }
+
+    #[test]
     fn a_raw_recipe_saves_without_relative_white_balance() {
         let text = serde_json::to_string(&Recipe::default()).unwrap();
         assert!(!text.contains("incremental"));
