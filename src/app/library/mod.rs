@@ -404,13 +404,14 @@ impl Library {
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
     }
-    /// Why photo `id` can't be exported, if it can't: what keeps Develop from
-    /// opening it.
+    /// Why photo `id` can't be exported or built, if it can't, for work over many
+    /// photos: [`availability_refusal`], as no file is read for it. A file Develop
+    /// can't edit fails as that photo's export or build, with the reason.
     /// The file is looked at directly: the availability scan counts every photo
     /// as there until it has checked.
     pub(in crate::app) fn export_refusal(&self, id: PhotoId) -> Option<Refusal> {
         let photo = self.photo(id)?;
-        develop_refusal(photo, photo.path.is_file())
+        availability_refusal(photo.path.is_file())
     }
     /// Whether Develop could open photo `id`, by what the Library last found
     /// online rather than by asking the file system: a file Develop can't read
@@ -990,12 +991,21 @@ pub(in crate::app) struct DevelopSource {
     /// changes whenever any of them does.
     pub tag: String,
 }
+/// Why Develop cannot open a photo whose file is `available` or not, by what is
+/// known without reading the file: for work over many photos (export, preview
+/// builds), where reading every file's header first would hold the app up. Such
+/// work meets a file Develop can't edit when it opens it, as that photo's failure.
+pub(in crate::app) fn availability_refusal(available: bool) -> Option<Refusal> {
+    (!available).then_some(Refusal::Offline)
+}
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
-/// `available`: offline, or a JPEG, PNG or TIFF whose header says Develop can't
-/// edit its pixels (`raster::probe`). A RAW's file is not read.
+/// `available`: [`availability_refusal`], or a JPEG, PNG or TIFF whose header
+/// says Develop can't edit its pixels (`raster::probe`). It reads the file (a
+/// whole JPEG), so it is for one photo at a time: opening it, or showing why it
+/// can't be. A RAW's file is not read.
 pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
-    if !available {
-        return Some(Refusal::Offline);
+    if let Some(refusal) = availability_refusal(available) {
+        return Some(refusal);
     }
     if crate::storage::is_raw(&photo.path) {
         return None;

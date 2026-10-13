@@ -229,3 +229,33 @@ fn show_in_finder_opens_one_window_for_each_folder_exported_to() {
     assert_eq!(to_show(&many).len(), 5);
     assert_eq!(folders(&many), 20);
 }
+
+/// Choosing what to export reads no file: a JPEG Develop can't edit is chosen,
+/// and fails as its export, with the reason.
+#[test]
+fn a_cmyk_jpeg_is_exported_and_fails_with_why() -> anyhow::Result<()> {
+    use image::ImageEncoder;
+    let (dir, mut e, ids, ctx) = editor()?;
+    let library = e.library.as_mut().unwrap();
+    let jpeg = library.photo(ids[2]).unwrap().path.clone();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(&jpeg)?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    library.select(Some(ids[2]));
+    let scope = e.export_scope().expect("photos to export");
+    assert_eq!(scope.photos.len(), 1);
+    assert!(scope.left_out.is_empty(), "{:?}", scope.left_out);
+    let out = dir.path().join("out");
+    export(&mut e, scope, settings(&out))?;
+    wait(&mut e, &ctx);
+    assert!(listing(&out).is_empty());
+    let summary = e.exports.summary.clone().expect("a report");
+    assert_eq!(summary.problems.len(), 1);
+    assert_eq!(summary.problems[0].0, "c.jpg");
+    assert!(
+        summary.problems[0].1.contains("CMYK"),
+        "{:?}",
+        summary.problems
+    );
+    Ok(())
+}
