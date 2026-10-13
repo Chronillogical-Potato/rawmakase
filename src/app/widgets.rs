@@ -1514,15 +1514,15 @@ fn segment_track(
     for (index, response) in responses.iter().enumerate() {
         if selected != Some(index) && enabled && response.hovered() {
             ui.painter()
-                .rect_filled(segment(index as f32), radius - inset, palette.gray(30));
+                .rect_filled(segment(index as f32), radius - inset, palette.gray(38));
         }
     }
     if selected.is_some() {
         ui.painter().rect(
             segment(position),
             radius - inset,
-            palette.gray(44),
-            Stroke::new(1., palette.gray(58)),
+            palette.gray(58),
+            Stroke::new(1., palette.gray(74)),
             egui::StrokeKind::Inside,
         );
     }
@@ -1534,7 +1534,7 @@ fn segment_track(
             None => 0.,
         };
         let color = if enabled {
-            palette.gray(140).lerp_to_gamma(palette.gray(245), weight)
+            palette.gray(160).lerp_to_gamma(palette.gray(245), weight)
         } else {
             palette.gray(70)
         };

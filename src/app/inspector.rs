@@ -567,10 +567,16 @@ impl Editor {
                     ui.add_space(88.);
                     ui.small(format!("{} profiles unavailable", profile_errors.len()))
                         .on_hover_text(profile_errors.join("\n"));
-                    if !adobe.is_empty() && ui.small_button("Import Adobe base profile").clicked() {
-                        import_adobe = true;
-                    }
                 });
+                // On a line of its own, so it never widens the panel.
+                if !adobe.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(88.);
+                        if ui.small_button("Import Adobe base profile").clicked() {
+                            import_adobe = true;
+                        }
+                    });
+                }
             }
             if old_profile != r.profile {
                 // A newly chosen profile starts at 100%, as in Lightroom.
