@@ -1397,10 +1397,18 @@ impl Editor {
 
         let mut switch = PanelSwitch::new(r, Panel::Calibration);
         if switched_section(ui, "Calibration", &mut switch.state, |ui| {
-            subheading(ui, "Process");
-            if r.engine < 4 {
-                ui.horizontal(|ui| {
-                    ui.small(format!("Version {} (older rendering preserved)", r.engine));
+            // The process version as a row of the slider grid, its rendering
+            // choices under it at the rails' start.
+            ui.add_space(4.);
+            control_row(ui, "Process", |ui| {
+                let palette = theme::palette(ui.ctx());
+                if r.engine < 4 {
+                    ui.label(
+                        egui::RichText::new(format!("Version {}", r.engine))
+                            .size(12.)
+                            .color(palette.gray(210)),
+                    )
+                    .on_hover_text("Older rendering preserved");
                     if ui
                         .small_button("Update")
                         .on_hover_text(
@@ -1410,25 +1418,31 @@ impl Editor {
                     {
                         r.update_process(metadata.as_ref());
                     }
-                });
-            } else {
-                ui.small("Current version");
-            }
+                } else {
+                    ui.label(
+                        egui::RichText::new("Current version")
+                            .size(12.)
+                            .color(palette.gray(210)),
+                    );
+                }
+            });
             if r.profile.is_some() {
-                ui.checkbox(&mut r.profile_tone, "Profile tone rendering")
+                rail_check(ui, &mut r.profile_tone, "Profile tone rendering")
                     .on_hover_text("Use the camera profile's base tone curve. Older edits retain their original rendering until enabled.");
                 if let Some(m) = &metadata {
                     let baseline = crate::camera_profiles::reference::baseline_exposure(m);
-                    if baseline != r.camera_exposure
-                        && ui.small_button("Use camera exposure baseline")
-                            .on_hover_text("Apply the camera's reference exposure offset while leaving the Exposure slider unchanged.")
-                            .clicked()
-                    {
-                        r.camera_exposure = baseline;
+                    if baseline != r.camera_exposure {
+                        let use_baseline = rail_row(ui, |ui| {
+                            ui.small_button("Use camera exposure baseline")
+                                .on_hover_text("Apply the camera's reference exposure offset while leaving the Exposure slider unchanged.")
+                        });
+                        if use_baseline.clicked() {
+                            r.camera_exposure = baseline;
+                        }
                     }
                 }
             }
-            if ui.checkbox(&mut r.reference_curves, "Reference tone curves")
+            if rail_check(ui, &mut r.reference_curves, "Reference tone curves")
                 .on_hover_text("Natural cubic curves, hue-preserving master processing and an sRGB transfer in ProPhoto RGB. Older edits keep their saved curve behavior until enabled.")
                 .changed()
                 && r.reference_curves
@@ -1441,11 +1455,11 @@ impl Editor {
                 }
             }
             if !r.reference_curves {
-                ui.checkbox(&mut r.wide_gamut_curves, "Legacy wide-gamut curves");
+                rail_check(ui, &mut r.wide_gamut_curves, "Legacy wide-gamut curves");
             }
-            ui.checkbox(&mut r.reference_color, "Reference color rendering")
+            rail_check(ui, &mut r.reference_color, "Reference color rendering")
                 .on_hover_text("Updated vibrance, color mixer luminance and RGB-hue split toning. Older saved edits retain their original rendering until enabled.");
-            ui.checkbox(&mut r.reference_calibration, "Reference calibration")
+            rail_check(ui, &mut r.reference_calibration, "Reference calibration")
                 .on_hover_text("Neutral-preserving primary adjustments and corrected shadow tint. Older edits keep their saved behavior until enabled.");
             subheading(ui, "Shadows");
             ui.push_id("calibration-shadows", |ui| {
@@ -1793,6 +1807,18 @@ pub(super) fn tool_icon(tool: Tool) -> Icon {
     }
 }
 
+/// A row starting at the slider rails, returning what `add` does.
+fn rail_row<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.add_space(label_column(ui) + 5. - ui.spacing().item_spacing.x);
+        add(ui)
+    })
+    .inner
+}
+/// A checkbox starting at the slider rails.
+fn rail_check(ui: &mut egui::Ui, value: &mut bool, text: &str) -> egui::Response {
+    rail_row(ui, |ui| ui.checkbox(value, text))
+}
 /// A small note aligned with the slider rails.
 fn hint_row(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
