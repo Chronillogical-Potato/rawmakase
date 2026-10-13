@@ -15,6 +15,9 @@ pub(crate) const HEIGHT: f32 = 128.;
 /// The id of the strip's panel; its scroll area is salted the same way.
 /// Every view draws the one panel, so the strip keeps its scroll position.
 pub(super) const ID: &str = "filmstrip";
+/// A card's inset in its cell: cards are twice this apart, and the strip
+/// pads its ends by it so the first and last are as far from its edges.
+const CARD_INSET: f32 = 2.;
 
 /// The module the strip is shown in. Both mark the whole selection; the Library lets
 /// the view shown take a click, and Develop marks the photo it has open as active.
@@ -283,8 +286,11 @@ impl Library {
             .show_viewport(ui, |ui, viewport| {
                 // Only the cells in view are laid out and drawn, however
                 // many photos the source has.
-                ui.set_min_size(Vec2::new(size.x * self.visible.len() as f32, height));
-                let origin = ui.max_rect().min;
+                ui.set_min_size(Vec2::new(
+                    size.x * self.visible.len() as f32 + 2. * CARD_INSET,
+                    height,
+                ));
+                let origin = ui.max_rect().min + Vec2::new(CARD_INSET, 0.);
                 let at = |n: usize| {
                     egui::Rect::from_min_size(origin + Vec2::new(size.x * n as f32, 0.), size)
                 };
@@ -294,7 +300,11 @@ impl Library {
                         ui.scroll_to_rect(rect, None);
                     }
                 }
-                let (cells, past_end) = in_view(viewport, size.x, self.visible.len());
+                let (cells, past_end) = in_view(
+                    viewport.translate(Vec2::new(-CARD_INSET, 0.)),
+                    size.x,
+                    self.visible.len(),
+                );
                 if past_end {
                     redraw(ui.ctx(), "filmstrip scrolled past a shorter list");
                 }
@@ -406,7 +416,7 @@ fn paint_cell(
     hovered: bool,
 ) {
     let active = mark == Mark::Active;
-    let cell = rect.shrink(2.);
+    let cell = rect.shrink(CARD_INSET);
     let base = palette.gray(match mark {
         Mark::Active => 120,
         Mark::Selected => 78,
