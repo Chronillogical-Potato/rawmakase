@@ -35,6 +35,7 @@ pub use preview_renderer::PreviewRenderer;
 pub mod quality;
 mod recipe;
 pub mod red_eye;
+pub mod rendered;
 pub mod retouch;
 mod scene_tone;
 mod stage_cache;
