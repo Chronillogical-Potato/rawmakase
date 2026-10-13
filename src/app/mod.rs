@@ -796,6 +796,7 @@ mod export;
 pub(crate) mod folder_locations;
 mod folder_sync;
 mod guided_tool;
+mod history_panel;
 mod inspector;
 pub(crate) mod library;
 mod mask_tool;
