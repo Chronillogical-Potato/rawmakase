@@ -24,8 +24,8 @@ struct FullJob {
     prefetch: Option<Prefetch>,
 }
 /// What a failed load says: why Develop refuses the file, or the error.
-fn load_error(e: &anyhow::Error) -> String {
-    crate::app::library::Refusal::opening(e).map_or_else(|| format!("{e:#}"), |r| r.detail())
+fn load_error(path: &std::path::Path, e: &anyhow::Error) -> String {
+    crate::app::library::Refusal::opening(path, e).map_or_else(|| format!("{e:#}"), |r| r.detail())
 }
 /// Runs `load`, turning a panic into an error, so the photo does not stay loading.
 fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
@@ -98,7 +98,7 @@ fn full_loader(
                 Event::Failed {
                     id: job.id,
                     task: TaskKind::Load,
-                    error: load_error(&e),
+                    error: load_error(&job.path, &e),
                 },
             );
         }
@@ -275,7 +275,7 @@ fn opener(
                 Event::Failed {
                     id: job.id,
                     task: TaskKind::Load,
-                    error: load_error(&e),
+                    error: load_error(&job.path, &e),
                 },
             );
         }

@@ -83,9 +83,10 @@ implementing file formats, SQL or pixel processing itself. Thumbnail decoding
 belongs to `raw`; library browsing does not call into the preview renderer.
 
 Whether Develop opens a catalog photo has one owner, `app::library::Refusal`:
-`develop_refusal` refuses only an offline file, and `Refusal::opening` turns what
-opening found (`raster::Unsupported`, such as a CMYK JPEG) into the reason the
-loader reports. Whether the Library shows a photo developed or as its file is
+`develop_refusal` refuses an offline file, and a JPEG, PNG or TIFF whose header
+`raster::probe` finds Develop can't edit (`raster::Unsupported`, such as a CMYK
+JPEG), before anything opens it; `Refusal::opening` turns the same error, should
+opening find it, into the reason the loader reports. Whether the Library shows a photo developed or as its file is
 `Library::develops`: a RAW always, a JPEG, PNG or TIFF once it has an edit, since
 its defaults reproduce the file. Preview builds and stored previews follow the
 same rule from the photo's edit record.

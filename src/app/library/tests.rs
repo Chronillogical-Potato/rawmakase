@@ -79,30 +79,30 @@ fn an_unsupported_jpeg_says_why_in_develop() -> Result<()> {
     let mut encoder = image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(&file)?);
     encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
     encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
-    // What opening it says.
-    let error = crate::photo::open_source(&file, &Default::default())
-        .err()
-        .expect("a CMYK file can't be opened");
-    let refusal = Refusal::opening(&error).expect("a refusal");
-    assert!(matches!(&refusal, Refusal::Unsupported(_)), "{refusal:?}");
-    assert_eq!(refusal.detail(), "RAWmakase can't edit CMYK images");
-    // Develop says so when it opens it.
     let path = directory.path().join("library.rawmakase");
     Catalog::create(&path)?.add_folder(&folder)?;
     let ctx = egui::Context::default();
     let library = Library::load(&path, ctx.clone())?;
     let photo = library.session.photos[0].clone();
+    // Found before anything opens it.
+    let refusal = develop_refusal(&photo, true).expect("refused");
+    assert_eq!(refusal.label(), "JPG file");
+    assert_eq!(refusal.detail(), "RAWmakase can't edit CMYK images");
+    // What opening it fails with says the same.
+    let error = crate::photo::open_source(&file, &Default::default())
+        .err()
+        .expect("a CMYK file can't be opened");
+    assert_eq!(Refusal::opening(&file, &error), Some(refusal));
+    // Develop says so in its dialog, and stays in the Library.
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
     editor.module = Module::Library;
     editor.develop_catalog_photo(photo.id);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while editor.load.is_running() {
-        assert!(std::time::Instant::now() < until, "the load never ended");
-        editor.events(&ctx);
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    assert_eq!(editor.status, "RAWmakase can't edit CMYK images");
+    assert!(editor.module == Module::Library);
+    assert!(!editor.load.is_running());
+    let (title, reason) = editor.not_editable.clone().expect("the dialog");
+    assert_eq!(title, "print.jpg can't be opened in Develop");
+    assert_eq!(reason, "RAWmakase can't edit CMYK images");
     Ok(())
 }
 

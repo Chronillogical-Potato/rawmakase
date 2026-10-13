@@ -175,6 +175,8 @@ pub(crate) struct Library {
     /// The offline RAW in the Loupe and its stored preview's identity, as the
     /// editor works it out.
     loupe_stored: Option<(PhotoId, String)>,
+    /// The photo whose refusal the right panel last showed, and that refusal.
+    refusal_shown: Option<((PhotoId, std::path::PathBuf, bool), Option<Refusal>)>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -252,6 +254,7 @@ impl Library {
             read_request: None,
             previews_request: None,
             loupe_stored: None,
+            refusal_shown: None,
             reread: None,
             reread_finished: false,
         };
@@ -410,10 +413,25 @@ impl Library {
         develop_refusal(photo, photo.path.is_file())
     }
     /// Whether Develop could open photo `id`, by what the Library last found
-    /// online rather than by asking the file system.
+    /// online rather than by asking the file system: a file Develop can't read
+    /// is found when it is opened.
     pub(in crate::app) fn known_developable(&self, id: PhotoId) -> bool {
-        self.photo(id)
-            .is_some_and(|p| develop_refusal(p, self.is_available(&p.path)).is_none())
+        self.photo(id).is_some_and(|p| self.is_available(&p.path))
+    }
+    /// Why Develop cannot open `photo`, for the Library to show: as
+    /// [`develop_refusal`] finds, with a file's header read once while it stays
+    /// selected and online.
+    pub(super) fn shown_refusal(&mut self, photo: &Photo) -> Option<Refusal> {
+        let available = self.is_available(&photo.path);
+        let key = (photo.id, photo.path.clone(), available);
+        match &self.refusal_shown {
+            Some((shown, refusal)) if *shown == key => refusal.clone(),
+            _ => {
+                let refusal = develop_refusal(photo, available);
+                self.refusal_shown = Some((key, refusal.clone()));
+                refusal
+            }
+        }
     }
     pub(crate) fn available_count(&self) -> usize {
         self.availability.count(&self.session.photos)
@@ -917,26 +935,39 @@ impl Library {
     }
 }
 /// Why Develop cannot open a photo: it edits RAW, JPEG, PNG and TIFF files that
-/// are online and that it can read.
+/// are online and whose pixels it can read.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) enum Refusal {
     Offline,
-    /// Found when the file is opened: pixels Develop can't edit, e.g. "CMYK".
-    Unsupported(String),
+    /// A JPEG, PNG or TIFF of a kind Develop can't edit: its `format` (e.g. "JPG")
+    /// and the `reason` (e.g. "CMYK").
+    Unsupported {
+        format: String,
+        reason: String,
+    },
 }
 impl Refusal {
-    /// What opening a photo failed with, when it is a refusal rather than an
-    /// error: a JPEG, PNG or TIFF of a kind Develop can't edit.
-    pub(in crate::app) fn opening(error: &anyhow::Error) -> Option<Self> {
+    /// What opening `path` failed with, when it is a refusal rather than an error:
+    /// a JPEG, PNG or TIFF of a kind Develop can't edit.
+    pub(in crate::app) fn opening(path: &std::path::Path, error: &anyhow::Error) -> Option<Self> {
         error
             .downcast_ref::<crate::raster::Unsupported>()
-            .map(|unsupported| Self::Unsupported(unsupported.0.clone()))
+            .map(|unsupported| Self::unsupported(path, unsupported))
+    }
+    fn unsupported(path: &std::path::Path, unsupported: &crate::raster::Unsupported) -> Self {
+        Self::Unsupported {
+            format: path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default(),
+            reason: unsupported.0.clone(),
+        }
     }
     /// A word or two, shown beside a greyed-out Open in Develop.
     pub(in crate::app) fn label(&self) -> String {
         match self {
             Self::Offline => "Offline".into(),
-            Self::Unsupported(reason) => format!("{reason} file"),
+            Self::Unsupported { format, .. } => format!("{format} file"),
         }
     }
     /// The reason in full, with what to do about it.
@@ -946,7 +977,7 @@ impl Refusal {
                 "The photo is offline. Use Locate root folder or right-click its folder to relink it."
                     .into()
             }
-            Self::Unsupported(reason) => format!("RAWmakase can't edit {reason} images"),
+            Self::Unsupported { reason, .. } => format!("RAWmakase can't edit {reason} images"),
         }
     }
 }
@@ -960,10 +991,18 @@ pub(in crate::app) struct DevelopSource {
     pub tag: String,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
-/// `available`. Whatever its format, an available photo opens; one Develop can't
-/// read is refused when opened (see [`Refusal::opening`]).
-pub(in crate::app) fn develop_refusal(_photo: &Photo, available: bool) -> Option<Refusal> {
-    (!available).then_some(Refusal::Offline)
+/// `available`: offline, or a JPEG, PNG or TIFF whose header says Develop can't
+/// edit its pixels (`raster::probe`). A RAW's file is not read.
+pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
+    if !available {
+        return Some(Refusal::Offline);
+    }
+    if crate::storage::is_raw(&photo.path) {
+        return None;
+    }
+    crate::raster::probe(&photo.path)
+        .err()
+        .map(|unsupported| Refusal::unsupported(&photo.path, &unsupported))
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
 /// else its Lightroom settings.

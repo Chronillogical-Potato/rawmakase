@@ -98,6 +98,17 @@ pub fn open(path: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
     })
 }
 
+/// Whether Develop can convert the pixels of the file at `path`, from its header
+/// and embedded ICC profile alone, without decoding them: [`Unsupported`] for a
+/// colour space [`open`] refuses. A file that can't be read is not refused here;
+/// opening it says what is wrong.
+pub fn probe(path: &Path) -> std::result::Result<(), Unsupported> {
+    match prepare(path) {
+        Ok((decoder, _, Some(profile))) => layout(&profile, decoder.color_type()).map(|_| ()),
+        _ => Ok(()),
+    }
+}
+
 /// A file's colour space is one Develop does not handle, e.g. "CMYK images".
 #[derive(Debug)]
 pub struct Unsupported(pub String);
@@ -108,6 +119,20 @@ impl std::fmt::Display for Unsupported {
 }
 impl std::error::Error for Unsupported {}
 
+/// How pixels of type `color` in `profile` are read: RGB, or grey for a colourless
+/// image. Anything else is [`Unsupported`].
+fn layout(
+    profile: &ColorProfile,
+    color: image::ColorType,
+) -> std::result::Result<Layout, Unsupported> {
+    match profile.color_space {
+        DataColorSpace::Rgb => Ok(Layout::Rgb),
+        DataColorSpace::Gray if !color.has_color() => Ok(Layout::Gray),
+        DataColorSpace::Cmyk => Err(Unsupported("CMYK".into())),
+        other => Err(Unsupported(format!("{other:?}"))),
+    }
+}
+
 /// A conversion from a file's profile to linear ProPhoto, in f32.
 struct ToLinear {
     transform: std::sync::Arc<moxcms::TransformF32Executor>,
@@ -117,12 +142,7 @@ struct ToLinear {
 /// The conversion for pixels of type `color` in `profile`; RGB, or grey for a
 /// colourless image. Anything else is [`Unsupported`].
 fn to_linear(profile: &ColorProfile, color: image::ColorType) -> Result<ToLinear> {
-    let layout = match profile.color_space {
-        DataColorSpace::Rgb => Layout::Rgb,
-        DataColorSpace::Gray if !color.has_color() => Layout::Gray,
-        DataColorSpace::Cmyk => return Err(Unsupported("CMYK".into()).into()),
-        other => return Err(Unsupported(format!("{other:?}")).into()),
-    };
+    let layout = layout(profile, color)?;
     // An empty curve is the identity in ICC: ProPhoto's primaries, no gamma.
     let mut linear_pro = ColorProfile::new_pro_photo_rgb();
     linear_pro.red_trc = Some(ToneReprCurve::Lut(vec![]));
@@ -450,6 +470,35 @@ mod tests {
             .downcast_ref::<super::Unsupported>()
             .expect("Unsupported");
         assert_eq!(refused.0, "CMYK");
+    }
+
+    #[test]
+    fn a_probe_refuses_a_cmyk_file_without_decoding_it() {
+        // A minimal ICC header that says its pixels are CMYK.
+        let mut icc = vec![0u8; 132];
+        icc[0..4].copy_from_slice(&132u32.to_be_bytes());
+        icc[8..12].copy_from_slice(&0x0240_0000u32.to_be_bytes());
+        icc[12..16].copy_from_slice(b"prtr");
+        icc[16..20].copy_from_slice(b"CMYK");
+        icc[20..24].copy_from_slice(b"Lab ");
+        icc[36..40].copy_from_slice(b"acsp");
+        for (i, v) in [0x0000_F6D6u32, 0x0001_0000, 0x0000_D32D]
+            .iter()
+            .enumerate()
+        {
+            icc[68 + 4 * i..72 + 4 * i].copy_from_slice(&v.to_be_bytes());
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let cmyk = dir.path().join("cmyk.png");
+        png(&cmyk, &[10; 6], ExtendedColorType::Rgb8, Some(icc));
+        assert_eq!(super::probe(&cmyk).unwrap_err().0, "CMYK");
+        let srgb = dir.path().join("srgb.png");
+        png(&srgb, &[10; 6], ExtendedColorType::Rgb8, None);
+        assert!(super::probe(&srgb).is_ok());
+        // Not this probe's to refuse: opening says what is wrong with it.
+        let damaged = dir.path().join("damaged.jpg");
+        std::fs::write(&damaged, b"not a jpeg").unwrap();
+        assert!(super::probe(&damaged).is_ok());
     }
 
     /// A 2x1 JPEG whose EXIF says Orientation 6 (rotate 90 clockwise).

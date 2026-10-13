@@ -372,6 +372,15 @@ const DESCRIPTORS: [Descriptor; 59] = [
 ];
 
 impl ParameterId {
+    /// The setting this control moves on photo `m`: a JPEG, PNG or TIFF keeps its
+    /// white balance as relative Temp and Tint, so Temperature and Tint move those.
+    pub fn for_photo(self, m: Option<&crate::camera_data::Metadata>) -> Self {
+        match self {
+            Self::Temperature if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTemperature,
+            Self::Tint if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTint,
+            other => other,
+        }
+    }
     /// The parametric curve's regions, in the order of `Effects::parametric`.
     pub const PARAMETRIC: [Self; 4] = [
         Self::ParametricShadows,
@@ -704,6 +713,30 @@ impl LocalParameterId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rendered_photo_moves_temp_and_tint_relatively() {
+        let rendered = crate::camera_data::Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let raw = crate::camera_data::Metadata::default();
+        for (id, relative) in [
+            (
+                ParameterId::Temperature,
+                ParameterId::IncrementalTemperature,
+            ),
+            (ParameterId::Tint, ParameterId::IncrementalTint),
+        ] {
+            assert_eq!(id.for_photo(Some(&rendered)), relative);
+            assert_eq!(id.for_photo(Some(&raw)), id);
+            assert_eq!(id.for_photo(None), id);
+        }
+        assert_eq!(
+            ParameterId::Exposure.for_photo(Some(&rendered)),
+            ParameterId::Exposure
+        );
+    }
 
     #[test]
     fn every_parameter_has_its_own_descriptor() {

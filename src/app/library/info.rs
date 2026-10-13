@@ -26,9 +26,7 @@ impl Library {
             .show(ui, |ui| {
                 top(ui);
                 section(ui, "Quick Develop", false, |ui| {
-                    let refusal = photo
-                        .as_ref()
-                        .and_then(|p| super::develop_refusal(p, self.is_available(&p.path)));
+                    let refusal = photo.as_ref().and_then(|p| self.shown_refusal(p));
                     let open = ui
                         .add_enabled(
                             photo.is_some() && refusal.is_none(),
@@ -53,7 +51,7 @@ impl Library {
                         Some(super::Refusal::Offline) => {
                             "Offline: relink its folder to edit".into()
                         }
-                        Some(super::Refusal::Unsupported(reason)) => {
+                        Some(super::Refusal::Unsupported { reason, .. }) => {
                             format!("{reason} images can't be edited in Develop")
                         }
                         None if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) => {
