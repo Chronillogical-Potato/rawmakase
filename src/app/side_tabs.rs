@@ -254,7 +254,7 @@ impl Editor {
                 }
                 // The tools after a gap, their drawers in the panel.
                 y += 14.;
-                for (t, tip) in DRAWER_TOOLS {
+                for (t, tip, _) in DRAWER_TOOLS {
                     let paint = |p: &egui::Painter, c: Pos2, _: egui::Color32, strong: bool| {
                         paint_tool_icon(p, t, c, strong)
                     };
