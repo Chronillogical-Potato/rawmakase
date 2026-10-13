@@ -11,6 +11,7 @@ use std::{
 };
 mod ffi;
 use crate::camera_data::{CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata};
+pub(crate) use ffi::Sensor;
 pub use ffi::{display_transform, srgb_profile, version};
 /// Runs `work` on a thread of its own at background priority: a lower
 /// scheduling priority, and LibRaw decodes on two OpenMP threads. Every worker
@@ -50,13 +51,19 @@ impl Raw {
             let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
             String::from_utf8_lossy(&bytes[..end]).into_owned()
         };
+        let (make, model) = (text(&m.make), text(&m.model));
+        let adobe_names = rawmakase_model::cameras::adobe_names(
+            &make,
+            &model,
+            (&text(&m.normalized_make), &text(&m.normalized_model)),
+        );
         let margin = [m.left_margin, m.top_margin];
         let frame = [m.crop_left, m.crop_top, m.crop_width, m.crop_height];
         let aspect = [m.aspect_left, m.aspect_top, m.aspect_width, m.aspect_height];
         let [crop_left, crop_top, crop_width, crop_height] = visible(frame, margin);
         let metadata = Metadata {
-            make: text(&m.make),
-            model: text(&m.model),
+            make,
+            model,
             width: m.width,
             height: m.height,
             raw_width: m.raw_width,
@@ -88,6 +95,8 @@ impl Raw {
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: None,
             lens_model: text(&m.lens).trim().to_string(),
+            lens_id: m.lens_id,
+            adobe_names,
             baseline_exposure: None,
             dng_neutral_calibration: None,
             dng_matrix_profile_signature: None,
@@ -104,6 +113,10 @@ impl Raw {
     /// The embedded JPEG preview, as stored.
     pub fn thumbnail(&mut self) -> Result<Vec<u8>> {
         self.handle.thumbnail()
+    }
+    /// The unpacked sensor data as development reads it, without developing.
+    pub(crate) fn sensor(&self) -> Result<Sensor> {
+        self.handle.sensor()
     }
     pub fn develop(self, decode: Decode, cancel: &AtomicBool) -> Result<CameraImage> {
         match decode {

@@ -65,6 +65,16 @@ pub struct Metadata {
     /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
+    /// The maker's numeric lens ID from the maker notes (Nikon's `LensIDNumber`,
+    /// which is also the lens profiles' `stCamera:LensID`); 0 when the file records
+    /// none. Cameras that write no lens model leave the ID as the only lens identity.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lens_id: u32,
+    /// Other names, as "Make Model", that Adobe's camera profiles may use for this
+    /// camera: LibRaw's canonical name for a body sold under several names, and
+    /// `crate::cameras::adobe_names`' table. See `CameraProfile::ensure_camera`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub adobe_names: Vec<String>,
     /// DNG BaselineExposure (0 when the DNG has none); `None` for other formats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_exposure: Option<f32>,
@@ -100,6 +110,9 @@ impl Metadata {
             self.crop_height = height;
         }
     }
+}
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 /// Canon Highlight Tone Priority: the camera exposes a stop darker to keep
 /// highlights, and Camera Raw brightens the photo by that stop again.

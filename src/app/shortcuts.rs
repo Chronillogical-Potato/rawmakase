@@ -75,7 +75,7 @@ const GENERAL: [Shortcut; 8] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 47] = [
+const DEVELOP: [Shortcut; 49] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -116,6 +116,8 @@ const DEVELOP: [Shortcut; 47] = [
     ("J", "Show shadow and highlight clipping"),
     ("Z / F", "Toggle zoom / fit"),
     ("Left / Right", "Previous / next photo"),
+    ("Cmd+A", "Select all in the filmstrip, for Sync"),
+    ("Cmd+D", "Select none in the filmstrip"),
     ("Cmd+Shift+C / Cmd+Shift+V", "Copy / paste settings"),
     ("Cmd+Option+V", "Paste settings from previous photo"),
     ("Cmd+Shift+S", "Sync settings to the selected photos"),

@@ -25,6 +25,11 @@ impl Editor {
                     self.catalog_work = None;
                     self.catalog_ready(result);
                 }
+                Event::FolderSyncScanned(scanned) => self.folder_sync_scanned(*scanned),
+                Event::FolderSyncApplied(result) => {
+                    self.catalog_work = None;
+                    self.folder_synced(result);
+                }
                 // The dialog's own DialogClosed follows.
                 Event::FolderQuestion(question) => {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
@@ -309,13 +314,49 @@ impl Editor {
             }
         }
     }
-    fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
+    /// Whether the catalog `l`, opened again after a synchronization, still
+    /// has the photo open in Develop: where its file was found moved, there.
+    fn keeps_open_photo(&self, l: &super::library::Library) -> bool {
+        let Some((id, path)) = &self.relink_open else {
+            return false;
+        };
+        self.document.catalog_photo == Some(*id)
+            && self
+                .library
+                .as_ref()
+                .is_some_and(|old| old.session.catalog.location() == l.session.catalog.location())
+            && l.photo(*id)
+                .is_some_and(|p| path.as_ref().is_none_or(|path| &p.path == path))
+    }
+    pub(super) fn catalog_ready(&mut self, result: Result<Box<super::library::Library>, String>) {
         self.activity.finish_dialog();
         // Folder locations may have changed with it.
         self.save_computer_name();
         self.preferences.locations = None;
         match result {
+            Ok(mut l) if self.keeps_open_photo(&l) => {
+                // After a synchronization the open photo stays open, its
+                // edit, History and pending save kept; where its file was
+                // found moved, the document follows it.
+                let (_, path) = self.relink_open.take().expect("kept");
+                if let Some(path) = path {
+                    self.document.relink(path);
+                }
+                self.onboarding.catalog_error = None;
+                if !l.message.is_empty() {
+                    self.status = l.message.clone();
+                }
+                l.set_defaults(self.raw_defaults.clone());
+                let selected = self.document.catalog_photo;
+                self.library = Some(l);
+                if let (Some(library), Some(id)) = (&mut self.library, selected) {
+                    library.apply_layout(&self.saved_layout);
+                    library.select(Some(id));
+                }
+                let _ = self.save_session();
+            }
             Ok(mut l) => {
+                self.relink_open = None;
                 self.onboarding.catalog_error = None;
                 self.load.invalidate();
                 // The photo being left is Previous, as when moving between photos.
@@ -378,6 +419,7 @@ impl Editor {
                 let _ = self.save_session();
             }
             Err(e) => {
+                self.relink_open = None;
                 self.pending_photo = None;
                 self.onboarding.catalog_error = Some(e.clone());
                 self.status = format!("Catalog operation failed: {e}");

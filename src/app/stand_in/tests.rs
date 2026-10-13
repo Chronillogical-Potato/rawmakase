@@ -228,3 +228,40 @@ fn a_stored_preview_arriving_after_a_region_render_is_dropped() {
     );
     assert!(e.preview.stand_in.is_none());
 }
+
+#[test]
+fn stepping_onto_a_neighbour_prepared_ahead_does_not_hang() {
+    let (dir, mut e, ids, cache) = editor(&["a.ARW", "b.ARW"]);
+    store(&e, &cache, ids[1], 200);
+    open(&mut e, ids[0], Some(ids[1]));
+    until(&mut e, |e| !e.stand_ins.prepared.is_empty());
+    e.module = crate::app::Module::Develop;
+    // → in Develop, as a key: showing the prepared preview uploads a texture,
+    // which must not happen while the frame's input is locked (issue 455).
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let ctx = e.context.clone();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: [true, false]
+                    .map(|pressed| egui::Event::Key {
+                        key: egui::Key::ArrowRight,
+                        physical_key: Some(egui::Key::ArrowRight),
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    })
+                    .into(),
+                ..Default::default()
+            },
+            |ui| e.draw(ui),
+        );
+        output.textures_delta.clear();
+        let _ = done_tx.send((e.document.catalog_photo, e.preview.stand_in.is_some(), dir));
+    });
+    let (photo, standing_in, _dir) = done_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the frame never finished");
+    assert_eq!(photo, Some(ids[1]));
+    assert!(standing_in);
+}

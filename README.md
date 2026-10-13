@@ -13,6 +13,9 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Wi
 
 It is a personal project in active development. It develops photos from almost every current camera; the exceptions are Sigma's Foveon cameras, monochrome cameras such as the Leica Monochrom, and DNGs that are already demosaiced ("linear" DNGs, such as merged HDR or panorama files). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
+> [!WARNING]
+> **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. Your originals are never modified, but keep exports of finished work.
+
 ## Features
 
 - **Develop**: white balance and picker, one-click Auto tone and Auto white balance, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
@@ -28,7 +31,7 @@ It is a personal project in active development. It develops photos from almost e
 ## Coming soon
 
 - LUT support
-- AI-powered masks and object removal
+- AI object removal
 - Agentic features: e.g. culling assistance
 
 ## Install
@@ -168,6 +171,7 @@ rawmakase render photo.dng edited.jpg --exposure 0.7 --max-edge 2400
 rawmakase render photo.dng edited.tiff --xmp preset.xmp
 rawmakase render photo.dng edited.jpg --auto
 rawmakase import-catalog Lightroom.lrcat Photos.rawmakase
+rawmakase fingerprint *.NEF        # decode facts per file as JSON lines, for regression checks
 rawmakase help
 ```
 

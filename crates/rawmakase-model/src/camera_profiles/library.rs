@@ -268,6 +268,15 @@ fn import_into(
     Ok(imported)
 }
 
+/// Whether `name` is one of the photo's cameras followed by any phone module, so
+/// the import offers the phone's other modules too.
+fn module_of_camera(name: &str, m: &Metadata) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.match_indices(' ').any(|(i, _)| {
+        super::PhoneModule::parse(&lower[i + 1..]).is_some() && super::camera_fits(&name[..i], m)
+    })
+}
+
 /// Adobe's own profiles for this camera from a local Lightroom / Camera Raw
 /// installation (Adobe Standard plus Camera Matching), skipping ones already
 /// in the library, so the app can offer to import them. Nothing is read from
@@ -280,13 +289,36 @@ pub fn adobe_installed(m: &Metadata) -> Vec<std::path::PathBuf> {
     } else {
         return Vec::new();
     });
-    let camera = format!("{} {}", m.make, m.model);
-    let mut paths = vec![
-        root.join("Adobe Standard")
-            .join(format!("{camera} Adobe Standard.dcp")),
-    ];
-    if let Ok(entries) = std::fs::read_dir(root.join("Camera").join(&camera)) {
-        paths.extend(entries.flatten().map(|e| e.path()));
+    // Every Adobe Standard whose camera fits the photo, under the names Adobe
+    // uses for it (see `CameraProfile::ensure_camera`), every module's for a phone
+    // so photos from its other cameras fit too, and its Camera Matching folder.
+    let fits = |name: &str| super::camera_fits(name, m) || module_of_camera(name, m);
+    let mut paths = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root.join("Adobe Standard")) {
+        paths.extend(entries.flatten().map(|e| e.path()).filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| {
+                    let lower = s.to_ascii_lowercase();
+                    let end = lower
+                        .rfind(" adobe standard")
+                        .or_else(|| lower.rfind(" adobe_standard"))?;
+                    Some(s[..end].to_string())
+                })
+                .is_some_and(|camera| fits(&camera))
+        }));
+    }
+    if let Ok(entries) = std::fs::read_dir(root.join("Camera")) {
+        for dir in entries.flatten().map(|e| e.path()) {
+            if dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| super::camera_fits(n, m))
+                && let Ok(files) = std::fs::read_dir(&dir)
+            {
+                paths.extend(files.flatten().map(|e| e.path()));
+            }
+        }
     }
     let installed = crate::storage::data_dir().join("camera-profiles");
     paths

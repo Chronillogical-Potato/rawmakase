@@ -4,18 +4,23 @@
 //! edit live here, and nowhere else writes those rows; a backend that
 //! detected conflicting edits would do it here.
 //!
-//! Four operations: a checked save or clear ([`write_edit`]), an opaque
-//! copy for virtual copies ([`copy_edit`]), removal with a virtual copy
-//! ([`delete_edits`]), and the catalog upgrade's migration of every stored
-//! edit ([`migrate_edits`]).
+//! Six operations: a checked save or clear ([`write_edit`]), of a photo
+//! being added too ([`CheckedNew`]), an opaque copy for virtual copies
+//! ([`copy_edit`]), a checked identity refresh for a file found moved
+//! ([`refresh_identity`]), removal with a virtual copy ([`delete_edits`]),
+//! and the catalog upgrade's migration of every stored edit
+//! ([`migrate_edits`]).
 use super::db::{Reads, Write, sql};
 use super::value::row;
 use super::{Catalog, EditChange, HistoryUpdate, PhotoId};
 use crate::storage::Identity;
+use crate::{export_settings::ExportOptions, model::recipe::Recipe};
 use anyhow::{Result, ensure};
+use std::path::Path;
 
 /// A change to one photo's edit, checked and ready to write. Only
-/// [`Catalog::check_edit`] makes one, so nothing unchecked is written.
+/// [`Catalog::check_edit`] and [`CheckedNew`] make one, so nothing
+/// unchecked is written.
 pub(super) struct CheckedChange<'a> {
     id: PhotoId,
     save: Option<Checked<'a>>,
@@ -41,6 +46,19 @@ struct Checked<'a> {
     assets: super::mask_assets::Assets,
 }
 
+/// The edit of a photo that the same transaction adds, checked as a save is,
+/// with no saved edit to replace. Only [`Catalog::check_new_edit`] makes one.
+pub(super) struct CheckedNew(Checked<'static>);
+impl CheckedNew {
+    /// The change that writes it for photo `id`, once the photo is inserted.
+    pub(super) fn change(self, id: PhotoId) -> CheckedChange<'static> {
+        CheckedChange {
+            id,
+            save: Some(self.0),
+        }
+    }
+}
+
 impl Catalog {
     /// Checks `change` before it is written: the recipe and export options
     /// are valid, the photo's file can be identified, and the edit it
@@ -55,29 +73,55 @@ impl Catalog {
             }
             EditChange::Save(e) => e,
         };
-        e.recipe.validate()?;
-        e.export.validate()?;
-        let identity = Identity::read(e.path)?;
+        let save = self.checked(e.path, e.recipe, e.export, e.history)?;
         // Refuse replacing an edit after the underlying source changed.
         let _ = self.load_edit(e.id, e.path)?;
-        let (saved, local) = e.recipe.split_local();
-        let history_ids = match e.history {
+        Ok(CheckedChange {
+            id: e.id,
+            save: Some(save),
+        })
+    }
+    /// Checks the edit of a photo not yet in the catalog, as `check_edit`
+    /// checks a save.
+    pub(super) fn check_new_edit(
+        &self,
+        path: &Path,
+        recipe: &Recipe,
+        export: &ExportOptions,
+    ) -> Result<CheckedNew> {
+        Ok(CheckedNew(self.checked(
+            path,
+            recipe,
+            export,
+            HistoryUpdate::Keep,
+        )?))
+    }
+    /// A valid edit for `path`, as its rows store it.
+    fn checked<'a>(
+        &self,
+        path: &Path,
+        recipe: &Recipe,
+        export: &ExportOptions,
+        history: HistoryUpdate<'a>,
+    ) -> Result<Checked<'a>> {
+        recipe.validate()?;
+        export.validate()?;
+        let identity = Identity::read(path)?;
+        let (saved, local) = recipe.split_local();
+        let history_ids = match history {
             HistoryUpdate::Replace(h) => h.mask_asset_ids(),
             HistoryUpdate::Keep => Default::default(),
         };
-        let assets = self.assets_of(e.recipe.mask_asset_ids().chain(history_ids))?;
-        Ok(CheckedChange {
-            id: e.id,
-            save: Some(Checked {
-                recipe: serde_json::to_string(&saved)?,
-                export: serde_json::to_string(e.export)?,
-                identity: serde_json::to_string(&identity)?,
-                local: (!local.is_empty())
-                    .then(|| serde_json::to_string(&local))
-                    .transpose()?,
-                history: e.history,
-                assets,
-            }),
+        let assets = self.assets_of(recipe.mask_asset_ids().chain(history_ids))?;
+        Ok(Checked {
+            recipe: serde_json::to_string(&saved)?,
+            export: serde_json::to_string(export)?,
+            identity: serde_json::to_string(&identity)?,
+            local: (!local.is_empty())
+                .then(|| serde_json::to_string(&local))
+                .transpose()?,
+            history,
+            assets,
         })
     }
 }
@@ -177,6 +221,44 @@ pub(super) fn copy_edit(w: &mut Write<'_>, from: PhotoId, to: PhotoId) -> Result
         &[&to, &from],
     )?;
     Ok(())
+}
+
+/// What [`refresh_identity`] did to a photo's edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Refresh {
+    /// The photo has no saved edit.
+    NoEdit,
+    /// Its edit now names the file found.
+    Done,
+    /// Its edit was saved for another version of the file: it stays
+    /// protected, as before the move.
+    Protected,
+}
+
+/// Gives the saved edit of `photo`, whose file was found moved, the identity
+/// of the file found (`now`), only when that edit was saved for exactly the
+/// version `was` names (mtime included) and the file found was verified to
+/// have that version's content. An edit saved for another version stays
+/// bound to it.
+pub(super) fn refresh_identity(
+    w: &mut Write<'_>,
+    photo: PhotoId,
+    was: &Identity,
+    now: &Identity,
+) -> Result<Refresh> {
+    let saved: Option<Option<String>> =
+        w.read_optional(sql!("SELECT identity FROM photos WHERE id=?"), &[&photo])?;
+    let Some(Some(saved)) = saved else {
+        return Ok(Refresh::NoEdit);
+    };
+    if serde_json::from_str::<Identity>(&saved).ok().as_ref() != Some(was) {
+        return Ok(Refresh::Protected);
+    }
+    w.execute(
+        sql!("UPDATE photos SET identity=? WHERE id=?"),
+        &[&serde_json::to_string(now)?, &photo],
+    )?;
+    Ok(Refresh::Done)
 }
 
 /// Removes a photo's spots, masks and History, before the photo itself goes.

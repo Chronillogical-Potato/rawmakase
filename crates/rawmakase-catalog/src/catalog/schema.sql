@@ -137,6 +137,30 @@ CREATE TABLE IF NOT EXISTS photo_info (
     height INTEGER
 );
 
+-- The file a master photo was, to find it once it is moved or renamed outside
+-- RAWmakase (see `storage::FileChecksum`). Read in the background.
+CREATE TABLE IF NOT EXISTS photo_checksums (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    size INTEGER NOT NULL,
+    quick_hash TEXT NOT NULL,     -- SHA-256 of the size and three 64 KiB blocks, hex
+    full_hash TEXT,               -- SHA-256 of the file, hex; NULL until read
+    identity TEXT NOT NULL,       -- Identity JSON of the version read
+    version INTEGER NOT NULL      -- of the hashing; another version is read again
+);
+CREATE INDEX IF NOT EXISTS photo_checksums_quick ON photo_checksums(size, quick_hash);
+
+-- Which Add Photo Folder or Synchronize added each photo; Previous Import is
+-- the newest batch.
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY,
+    at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    kind TEXT NOT NULL            -- 'add' or 'sync'
+);
+CREATE TABLE IF NOT EXISTS photo_imports (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    batch INTEGER NOT NULL REFERENCES import_batches(id)
+);
+
 -- Facts about the catalog itself, by name.
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

@@ -84,7 +84,7 @@ struct Preview {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Export {
-    /// Absolute path for a new JPEG or TIFF. Existing files are never replaced.
+    /// Absolute path for a new JPEG, TIFF or PNG. Existing files are never replaced.
     path: String,
     target: McpTarget,
     /// Optional maximum edge; omit for full size.

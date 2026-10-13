@@ -41,6 +41,8 @@ pub(super) struct State {
     /// The selection and `shown_version` the strip was last drawn with, to
     /// notice a view drawn after it changing either.
     drawn: (Selection, u64),
+    /// The strip's glide after a trackpad swipe.
+    kinetic: super::kinetic::Kinetic,
 }
 
 /// Draws the frame again before it is shown, as egui allows once a frame
@@ -137,6 +139,16 @@ impl Library {
             self.selection.anchor = Some(open);
         }
         true
+    }
+    /// Lightroom's Cmd+A in Develop's filmstrip: selects every shown photo, so Sync
+    /// reaches them all, keeping the open photo active.
+    pub(crate) fn develop_select_all(&mut self, open: Option<PhotoId>) {
+        self.select_all();
+        if let Some(open) = open {
+            self.selection.selected.insert(open);
+            self.selection.active = Some(open);
+            self.selection.anchor = Some(open);
+        }
     }
     /// A filmstrip click in the Library, as the view shown takes it: Grid,
     /// Loupe and Survey select as the grid does (Cmd and Shift add), Compare
@@ -241,6 +253,10 @@ impl Library {
         }
         let height = ui.available_height().max(40.);
         let size = Vec2::new(height * 1.25, height);
+        if reveal.is_some() {
+            self.strip.kinetic.stop();
+        }
+        let glide = self.strip.kinetic.begin(ui);
         egui::ScrollArea::horizontal()
             .id_salt(ID)
             .auto_shrink(false)
@@ -281,6 +297,7 @@ impl Library {
                     }
                 }
             });
+        self.strip.kinetic.end(ui, glide);
         Outcome {
             pick: target,
             metadata_changed: changed,

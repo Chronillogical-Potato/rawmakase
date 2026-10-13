@@ -281,10 +281,12 @@ impl Editor {
                 .selected_text(match s.format {
                     Format::Jpeg => "JPEG",
                     Format::Tiff => "TIFF",
+                    Format::Png => "PNG",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut s.format, Format::Jpeg, "JPEG");
                     ui.selectable_value(&mut s.format, Format::Tiff, "TIFF");
+                    ui.selectable_value(&mut s.format, Format::Png, "PNG");
                 });
         });
         // One row for either format, so nothing below moves.
@@ -297,6 +299,9 @@ impl Editor {
                 ui.label(
                     egui::RichText::new("16 bits/component, uncompressed").color(palette.gray(225)),
                 );
+            }),
+            Format::Png => form_row(ui, "Bit Depth", |ui| {
+                ui.label(egui::RichText::new("8 bits/component").color(palette.gray(225)));
             }),
         }
         form_row(ui, "Color Space", |ui| {

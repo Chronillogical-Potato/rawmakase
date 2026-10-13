@@ -3317,7 +3317,9 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -3354,6 +3356,7 @@ dependencies = [
  "image",
  "md-5",
  "memmap2",
+ "png 0.18.1",
  "rawmakase-catalog",
  "rawmakase-engine",
  "rawmakase-interop",
@@ -3415,12 +3418,14 @@ dependencies = [
  "bytemuck",
  "cc",
  "image",
+ "moxcms",
  "pkg-config",
  "rawmakase-engine",
  "rawmakase-model",
  "rayon",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

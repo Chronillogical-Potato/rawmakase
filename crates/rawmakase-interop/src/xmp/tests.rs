@@ -1436,3 +1436,45 @@ fn packets_record_the_rendered_crop() {
     assert!(packet.contains(r#"crs:CropLeft="0.150000""#), "{packet}");
     assert!(packet.contains(r#"crs:CropBottom="0.750000""#), "{packet}");
 }
+#[test]
+fn adobe_standard_resolves_to_the_phone_module_that_took_the_photo() -> Result<()> {
+    // Adobe profiles some phones per camera module only; Camera Raw renders this
+    // raw.pixls.us Pixel 7 Pro DNG (117 mm equivalent) with the Telephoto profile.
+    use crate::camera_profiles::CameraProfile;
+    let m = Metadata {
+        make: "Google".into(),
+        model: "Pixel 7 Pro".into(),
+        focal: 19.,
+        focal_35mm: 117.,
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+        ..Default::default()
+    };
+    let profiles: Vec<_> = ["Front", "Telephoto", "Ultrawide", "Wide"]
+        .into_iter()
+        .map(|module| {
+            let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+            p.name = "Adobe Standard".into();
+            p.camera = format!("Google Pixel 7 Pro {module} Camera");
+            std::sync::Arc::new(p)
+        })
+        .collect();
+    let p = parse(
+        Path::new("p.xmp"),
+        &xml(r#"c:CameraProfile="Adobe Standard""#, ""),
+    )?;
+    let recipe = p.apply(&Recipe::default(), &m, &profiles, None)?;
+    assert_eq!(
+        recipe.profile.unwrap().camera,
+        "Google Pixel 7 Pro Telephoto Camera"
+    );
+    // Without a focal length the module is unknown: an error, not a guess.
+    let unknown = Metadata {
+        focal_35mm: 0.,
+        ..m
+    };
+    let e = p
+        .apply(&Recipe::default(), &unknown, &profiles, None)
+        .unwrap_err();
+    assert!(format!("{e:#}").contains("Missing camera profile ‘Adobe Standard’"));
+    Ok(())
+}

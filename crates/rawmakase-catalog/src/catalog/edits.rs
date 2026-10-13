@@ -1,6 +1,6 @@
 //! A photo's saved edit: its recipe and export options, the spots and masks
 //! kept beside them, and the bitmaps recipes refer to by hash.
-use super::db::{Reads, sql};
+use super::db::{Reads, Write, sql};
 use super::value::row;
 use super::{Catalog, PhotoId};
 use crate::edits::{SavedEdit, local_edits};
@@ -28,12 +28,7 @@ impl Catalog {
     pub fn put_bitmap(&mut self, bitmap: &crate::storage::bitmaps::Bitmap) -> Result<String> {
         let hash = bitmap.hash();
         let data = bitmap.compress()?;
-        self.db.write(|w| {
-            w.execute(
-                sql!("INSERT INTO bitmaps(hash, data) VALUES (?, ?) ON CONFLICT DO NOTHING"),
-                &[&hash, &data],
-            )
-        })?;
+        self.db.write(|w| insert_bitmap(w, &hash, &data))?;
         Ok(hash)
     }
     #[cfg(test)]
@@ -178,6 +173,16 @@ impl Catalog {
         };
         Ok((recipe, texts.lightroom))
     }
+}
+
+/// Stores a compressed bitmap under `hash`, in `w`'s transaction, unless
+/// one is there already.
+pub(super) fn insert_bitmap(w: &mut Write<'_>, hash: &str, data: &[u8]) -> Result<()> {
+    w.execute(
+        sql!("INSERT INTO bitmaps(hash, data) VALUES (?, ?) ON CONFLICT DO NOTHING"),
+        &[&hash, &data],
+    )?;
+    Ok(())
 }
 
 /// The photo's spots and masks as stored, unread.

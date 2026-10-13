@@ -21,7 +21,8 @@ fetch lcms2-2.19.1.tar.gz https://github.com/mm2/Little-CMS/releases/download/lc
 # LibRaw from its master branch: the Sony A7 V (ILCE-7M5) and the ARW6 decoder
 # its compressed files need landed after 0.22.2, and there is no release with
 # them yet. Master carries every fix in 0.22.2. Git archives have no configure
-# script, so it is generated below.
+# script, so it is generated below. A new LibRaw is checked with the decode
+# fingerprints over the test dataset (scripts/corpus/dataset-fingerprints.py).
 libraw=4f0144031c4adfadf7e053937826c49ed80cfa89
 fetch "LibRaw-$libraw.tar.gz" "https://github.com/LibRaw/LibRaw/archive/$libraw.tar.gz" f3c70df0f3e2638e5a84fb3b31c580a26e8ad395242589b063787225e0e41510
 jobs=$(getconf _NPROCESSORS_ONLN)

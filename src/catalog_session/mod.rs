@@ -2,6 +2,7 @@
 //! shows it: opening needs no UI, and reading it again keeps the lists in step.
 mod backfill;
 pub(crate) mod background;
+mod checksums;
 mod descriptive;
 
 use crate::catalog::{
@@ -23,9 +24,19 @@ pub(crate) struct CatalogSession {
     /// Each collection's photos, limited to the ones in `photos`.
     pub collection_photos: HashMap<CollectionId, HashSet<PhotoId>>,
     pub roots: Vec<(RootId, String, Option<String>)>,
+    /// Previous Import: the photos the last Add Photo Folder or Synchronize
+    /// added.
+    pub previous_import: HashSet<PhotoId>,
     backfill: backfill::Backfill,
     wake: Wake,
+    /// Changes whenever photos may have changed place, name or master (see
+    /// [`Self::reload`]), so a background result read before is dropped.
+    generation: u64,
 }
+
+/// The last structural generation given out, by any session: unique across
+/// catalogs, and across one catalog opened again.
+static GENERATIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// A catalog just opened, with what opening it could not finish.
 pub(crate) struct Opened {
@@ -58,14 +69,21 @@ impl CatalogSession {
             collections: Vec::new(),
             collection_photos: HashMap::new(),
             roots: Vec::new(),
+            previous_import: HashSet::new(),
             backfill: Default::default(),
             wake: std::sync::Arc::new(|| {}),
+            generation: 0,
         };
         session.reload()?;
         Ok(Opened {
             session,
             keyword_export,
         })
+    }
+    /// The structural generation (see [`Self::reload`]): a plan scanned
+    /// under another applies to nothing.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
     }
     /// Calls `wake` whenever a background read has something to save, for
     /// whoever shows the catalog to poll it.
@@ -168,11 +186,17 @@ impl CatalogSession {
             members.retain(|id| ids.contains(id));
         }
         let roots = self.catalog.roots()?;
+        let previous_import = self.catalog.previous_import()?.into_iter().collect();
         self.photos = photos;
+        self.previous_import = previous_import;
         self.folders = folders;
         self.collections = collections;
         self.collection_photos = collection_photos;
         self.roots = roots;
+        // Read again after a change that may move, rename, promote or
+        // remove photos: what was read before no longer applies.
+        self.generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        self.count_checksums();
         Ok(())
     }
 }

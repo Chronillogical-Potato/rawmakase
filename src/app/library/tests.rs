@@ -2230,3 +2230,28 @@ fn develop_filmstrip_cmd_and_shift_select_while_the_open_photo_stays_active() ->
     assert_eq!(library.selected_photos(), ids[1..]);
     Ok(())
 }
+
+#[test]
+fn a_copy_made_while_previous_import_is_shown_is_shown() -> Result<()> {
+    let (_d, mut e, ids) = crate::app::tests::editor_with_catalog(&["a.RAF", "b.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    // Adding the folder was the last import.
+    library.show_previous_import();
+    assert_eq!(library.shown().len(), 2);
+    let copy = library.create_virtual_copy(ids[0])?.value;
+    assert_eq!(library.selected(), Some(copy));
+    assert!(library.shown().contains(&copy));
+    Ok(())
+}
+
+#[test]
+fn develop_select_all_takes_every_shown_photo_with_the_open_one_active() -> anyhow::Result<()> {
+    let (_d, mut library) = library_of(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let ids = library.shown();
+    library.select(Some(ids[2]));
+    library.develop_select_all(Some(ids[2]));
+    // Every shown photo is selected, and the open one is still the active photo.
+    assert_eq!(library.selected_photos(), ids);
+    assert_eq!(library.selected(), Some(ids[2]));
+    Ok(())
+}

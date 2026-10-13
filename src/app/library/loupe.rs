@@ -100,7 +100,7 @@ impl Loupe {
                 let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let image = match &job.stored {
                         Some(identity) => stored(&job.path, identity),
-                        None => thumbnails::raster(&job.path),
+                        None => crate::raster::decode(&job.path),
                     };
                     image.map(|image| Prepared {
                         full: image.dimensions(),

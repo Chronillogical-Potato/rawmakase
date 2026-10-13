@@ -1,4 +1,5 @@
-//! JPEG and 16-bit TIFF encoding with an ICC profile, EXIF directories and XMP.
+//! JPEG, 16-bit TIFF and 8-bit PNG encoding with an ICC profile, EXIF
+//! directories and XMP.
 use super::Embed;
 use crate::{
     exif::{
@@ -93,6 +94,39 @@ pub(super) fn tiff(
     Ok(())
 }
 
+/// An 8-bit PNG, its EXIF in an eXIf chunk and its XMP in an uncompressed
+/// iTXt chunk, as the XMP specification asks.
+pub(super) fn png(
+    out: &mut impl Write,
+    image: &Rendered,
+    profile: Vec<u8>,
+    directories: CameraExif,
+    embed: &Embed,
+) -> Result<()> {
+    let mut info = png::Info::with_size(image.width, image.height);
+    info.color_type = png::ColorType::Rgb;
+    info.bit_depth = png::BitDepth::Eight;
+    info.icc_profile = Some(profile.into());
+    info.exif_metadata = Some(super::metadata::png_exif(directories).into());
+    // pHYs counts pixels per metre.
+    let ppm = (embed.ppi.clamp(1, 10_000) as f64 / 0.0254).round() as u32;
+    info.pixel_dims = Some(png::PixelDimensions {
+        xppu: ppm,
+        yppu: ppm,
+        unit: png::Unit::Meter,
+    });
+    if let Some(xmp) = &embed.xmp {
+        info.utf8_text
+            .push(png::text_metadata::ITXtChunk::new("XML:com.adobe.xmp", xmp));
+    }
+    let mut e = png::Encoder::with_info(out, info)?;
+    e.set_compression(png::Compression::High);
+    let mut w = e.write_header()?;
+    w.write_image_data(&image.rgb8())?;
+    w.finish()?;
+    Ok(())
+}
+
 /// XMP goes in its own APP1 segment, after the EXIF and ICC ones; what does
 /// not fit one follows as ExtendedXMP.
 pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
@@ -133,20 +167,6 @@ pub(super) fn insert_xmp(jpeg: Vec<u8>, xmp: &str) -> Result<Vec<u8>> {
 
 /// Writes one EXIF field into a TIFF directory with its own type. BYTE, SBYTE
 /// and UNDEFINED values are written as bytes.
-/// A camera's text as a TIFF ASCII value can hold it: 7-bit, without NULs. Parts a
-/// NUL separates (Copyright's photographer and editor) are joined, padding trimmed,
-/// and other characters replaced.
-fn tiff_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .split('\0')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("; ")
-        .chars()
-        .map(|c| if c.is_ascii() { c } else { '?' })
-        .collect()
-}
 fn write_field<W: Write + Seek, K: TiffKind>(
     dir: &mut DirectoryEncoder<'_, W, K>,
     f: &Field,
@@ -163,12 +183,7 @@ fn write_field<W: Write + Seek, K: TiffKind>(
             .map(|c| c.as_chunks::<4>().0)
     };
     match f.kind {
-        ASCII => {
-            let text = tiff_text(&f.bytes);
-            if !text.is_empty() {
-                dir.write_tag(tag, text.as_str())?;
-            }
-        }
+        ASCII => dir.write_tag(tag, CameraText::new(&f.bytes))?,
         SHORT => dir.write_tag(
             tag,
             halves()
@@ -225,6 +240,28 @@ fn write_field<W: Write + Seek, K: TiffKind>(
         _ => dir.write_tag(tag, f.bytes.as_slice())?,
     }
     Ok(())
+}
+
+/// An ASCII value as the camera wrote it, ending in one NUL. The encoder's own
+/// strings refuse an inner NUL and bytes past ASCII, but EXIF's Copyright holds
+/// two strings separated by NUL (photographer, editor), and cameras and
+/// catalogs write names in UTF-8, which JPEG exports keep too.
+struct CameraText(Vec<u8>);
+impl CameraText {
+    fn new(bytes: &[u8]) -> Self {
+        let end = bytes.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+        Self([&bytes[..end], &[0]].concat())
+    }
+}
+impl tiff::encoder::TiffValue for CameraText {
+    const BYTE_LEN: u8 = 1;
+    const FIELD_TYPE: tiff::tags::Type = tiff::tags::Type::ASCII;
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+    fn data(&self) -> std::borrow::Cow<'_, [u8]> {
+        std::borrow::Cow::Borrowed(&self.0)
+    }
 }
 
 /// The encoder takes rationals only as fixed-size arrays; EXIF uses up to four

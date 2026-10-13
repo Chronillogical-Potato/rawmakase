@@ -5,8 +5,9 @@ against Lightroom yet, and details may change.
 
 The Masking tool (Shift+W) works like Lightroom Classic's Masking panel for the
 masks that need no AI model: Brush, Linear Gradient, Radial Gradient, Color Range and
-Luminance Range, plus **Select Subject** and **Select Background**, which run a model on
-this computer (below). Sky, Objects, People and Depth masks are not implemented yet.
+Luminance Range, plus **Select Subject**, **Select Sky** and **Select Background**,
+which run models on this computer (below). Objects, People and Depth masks are not
+implemented yet.
 
 ## Select Subject, Sky and Background
 

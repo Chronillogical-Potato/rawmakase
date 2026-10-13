@@ -21,6 +21,8 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+sha2 = "0.11"
+unicode-normalization = "0.1"
 tempfile = "3"
 
 [dev-dependencies]

@@ -158,7 +158,9 @@ and tests), or finished on the device (the desktop).
 
 The port covers every recipe resolved with a camera profile, which is every photo
 once it has been resolved (`pixel_params::supported`). Machines without a usable
-adapter render on the CPU; a GPU failure disables the GPU for the session. Export
+adapter render on the CPU; a GPU failure disables the GPU for the session. A region
+beyond the device's buffer limits or the develop memory budget is not a failure: it
+renders on the CPU and the next region uses the GPU again. Export
 always uses the CPU, which remains the reference.
 
 Profile tables are read with explicit trilinear interpolation from a storage buffer

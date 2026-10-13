@@ -11,8 +11,9 @@
 //! - `ora_develop` and `ora_cfa_open` report the size whose pixels the matching
 //!   copy function then writes in full: `width × height × 3` floats for
 //!   `ora_copy`, `width × height` for `ora_cfa_copy`.
-//! - `ora_thumbnail` points into the handle's own buffer, valid until the next
-//!   call on that handle.
+//! - `ora_thumbnail` and `ora_sensor` point into the handle's own buffers, valid
+//!   until the next call on that handle; `ora_sensor`'s data holds `height` rows
+//!   of `pitch` values and its black levels `black_size` values.
 use anyhow::{Result, bail, ensure};
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
@@ -57,8 +58,35 @@ pub(super) struct NativeMetadata {
     pub(super) aspect_top: u32,
     pub(super) aspect_width: u32,
     pub(super) aspect_height: u32,
+    /// The maker's numeric lens ID (Nikon's `LensIDNumber`); 0 when there is none.
+    pub(super) lens_id: u32,
+    /// LibRaw's canonical name for bodies sold under several names.
+    pub(super) normalized_make: [c_char; 64],
+    pub(super) normalized_model: [c_char; 64],
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 460);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 592);
+/// Mirrors `struct Sensor` in `native/raw.cpp`, as [`NativeMetadata`] does `Metadata`;
+/// `native_sensor_layout_matches` compares the sizes.
+#[repr(C)]
+struct NativeSensor {
+    data: *const u16,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    channels: u32,
+    left: u32,
+    top: u32,
+    area_width: u32,
+    area_height: u32,
+    black: *const u32,
+    base_black: u32,
+    black_size: u32,
+    white: u32,
+    linear_white: [u32; 4],
+    pattern_rows: u32,
+    pattern_cols: u32,
+    pattern: [u8; 256],
+}
 
 /// Size of the error buffers `native/raw.cpp`'s `message` writes into.
 const ERR: usize = 512;
@@ -90,6 +118,8 @@ unsafe extern "C" {
         err: *mut c_char,
     ) -> c_int;
     fn ora_cfa_copy(h: *mut c_void, out: *mut f32);
+    fn ora_sensor_size() -> u32;
+    fn ora_sensor(h: *mut c_void, s: *mut NativeSensor, err: *mut c_char) -> c_int;
     fn ora_thumbnail(h: *mut c_void, data: *mut *mut u8, size: *mut u32, err: *mut c_char)
     -> c_int;
     fn ora_srgb_profile(data: *mut u8, size: u32) -> u32;
@@ -112,6 +142,11 @@ pub(super) fn background_thread() {
 fn native_metadata_size() -> usize {
     // SAFETY: `ora_metadata_size` takes nothing and returns a constant.
     unsafe { ora_metadata_size() as usize }
+}
+/// `sizeof(Sensor)` on the native side.
+fn native_sensor_size() -> usize {
+    // SAFETY: `ora_sensor_size` takes nothing and returns a constant.
+    unsafe { ora_sensor_size() as usize }
 }
 /// The text in a NUL-terminated buffer the native side filled.
 fn text(buf: &[c_char]) -> String {
@@ -156,6 +191,27 @@ pub(super) struct Cfa {
     pub pattern: [u8; crate::demosaic::PATTERN * crate::demosaic::PATTERN],
     /// `width × height` values, (raw − black) / (white − black), not white balanced.
     pub data: Vec<f32>,
+}
+/// The unpacked sensor data with the levels development reads, for decode
+/// fingerprints. Channels are LibRaw's: 0 red, 1 green, 2 blue, 3 second green.
+pub(crate) struct Sensor {
+    /// 1 for a mosaic, 3 or 4 for small RAW files.
+    pub channels: u32,
+    /// Where the visible area starts in the raw buffer: left, top.
+    pub origin: [u32; 2],
+    /// SHA-256 of the values development reads (the visible area; the stored
+    /// rotated area of a Super CCD), `channels` per pixel, row by row,
+    /// little-endian. Not the borders: LibRaw leaves rows and columns past some
+    /// decoders' data unwritten, so they hold whatever the memory held.
+    pub data_sha256: [u8; 32],
+    pub black: [u32; 4],
+    /// The black pattern added to `black`: rows, columns and every value.
+    pub black_pattern: (u32, u32, Vec<u32>),
+    pub white: u32,
+    pub linear_white: [u32; 4],
+    /// The colour of each visible pixel over one period of the mosaic; empty
+    /// without one.
+    pub pattern: Vec<Vec<u8>>,
 }
 /// LibRaw's own development: demosaiced camera-space pixels.
 pub(super) struct Developed {
@@ -239,6 +295,69 @@ impl Handle {
             data,
         }))
     }
+    /// Unpacks the sensor data as development does and describes it.
+    pub(super) fn sensor(&self) -> Result<Sensor> {
+        use sha2::Digest;
+        ensure!(
+            native_sensor_size() == std::mem::size_of::<NativeSensor>(),
+            "The native RAW bridge was built from a different Sensor layout"
+        );
+        let mut err = [0 as c_char; ERR];
+        // SAFETY: NativeSensor is integers, arrays and pointers, for which all
+        // zeros (null pointers) is valid; the native side overwrites it.
+        let mut s: NativeSensor = unsafe { std::mem::zeroed() };
+        // SAFETY: the handle is open; `s` and `err` are live and writable.
+        let rc = unsafe { ora_sensor(self.0, &mut s, err.as_mut_ptr()) };
+        ensure!(rc == 0, "{}", text(&err));
+        let channels = s.channels as usize;
+        let row = s.width as usize * channels;
+        ensure!(
+            !s.data.is_null()
+                && !s.black.is_null()
+                && (6..=4104).contains(&s.black_size)
+                && s.width > 0
+                && s.height > 0
+                && (s.pitch as usize) >= row
+                && s.area_width > 0
+                && s.area_height > 0
+                && u64::from(s.left) + u64::from(s.area_width) <= u64::from(s.width)
+                && u64::from(s.top) + u64::from(s.area_height) <= u64::from(s.height)
+                && u64::from(s.pitch) * u64::from(s.height) <= 1_000_000_000
+                && s.pattern_rows as usize * s.pattern_cols as usize <= s.pattern.len(),
+            "Invalid RAW dimensions"
+        );
+        // SAFETY: on success `black` points at `black_size` values of the
+        // handle's levels, valid until the handle is used again, which `&self`
+        // rules out until they are copied below.
+        let black = unsafe { std::slice::from_raw_parts(s.black, s.black_size as usize) };
+        let mut hash = sha2::Sha256::new();
+        let width = s.area_width as usize * channels;
+        let mut bytes = Vec::with_capacity(width * 2);
+        for y in s.top as usize..(s.top + s.area_height) as usize {
+            let start = y * s.pitch as usize + s.left as usize * channels;
+            // SAFETY: `data` points at the handle's raw buffer of `height` rows
+            // of `pitch` values; the area was checked to lie inside it and the
+            // decoder wrote it (only borders may be left unwritten). It stays
+            // valid until the handle is used again, which `&self` rules out.
+            let row = unsafe { std::slice::from_raw_parts(s.data.add(start), width) };
+            bytes.clear();
+            bytes.extend(row.iter().flat_map(|v| v.to_le_bytes()));
+            hash.update(&bytes);
+        }
+        let cols = s.pattern_cols as usize;
+        Ok(Sensor {
+            channels: s.channels,
+            origin: [s.left, s.top],
+            data_sha256: hash.finalize().into(),
+            black: std::array::from_fn(|c| s.base_black + black[c]),
+            black_pattern: (black[4], black[5], black[6..].to_vec()),
+            white: s.white,
+            linear_white: s.linear_white,
+            pattern: (0..s.pattern_rows as usize)
+                .map(|r| s.pattern[r * cols..(r + 1) * cols].to_vec())
+                .collect(),
+        })
+    }
     /// LibRaw's development (half size when `fast`), stopping early when `cancel`
     /// is set.
     pub(super) fn develop(&self, fast: bool, cancel: &AtomicBool) -> Result<Developed> {
@@ -294,6 +413,13 @@ pub fn srgb_profile() -> Result<Vec<u8>> {
     // SAFETY: `data` has the `size` bytes the native side was told it may write.
     let written = unsafe { ora_srgb_profile(data.as_mut_ptr(), size) };
     ensure!(written == size, "Cannot serialize sRGB profile");
+    // Little CMS dates the profile as it saves it. A fixed date keeps the
+    // profile, and every export that embeds it, the same whenever it is made.
+    // The profile carries no ID (an MD5 of the header) for this to break.
+    ensure!(data.len() >= 128, "sRGB profile too short");
+    for (at, value) in [2024u16, 1, 1, 0, 0, 0].into_iter().enumerate() {
+        data[24 + 2 * at..26 + 2 * at].copy_from_slice(&value.to_be_bytes());
+    }
     Ok(data)
 }
 /// Converts 8-bit sRGB pixels in place to the monitor profile at `path`.
@@ -328,6 +454,20 @@ mod tests {
             .collect()
     }
     #[test]
+    fn the_srgb_profile_is_the_same_whenever_it_is_made() {
+        // Little CMS dates a profile when saving it: exports would differ
+        // second to second, and a profile compared with a later one too.
+        let profile = super::srgb_profile().unwrap();
+        let date: Vec<u16> = profile[24..36]
+            .chunks(2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+            .collect();
+        assert_eq!(date, [2024, 1, 1, 0, 0, 0]);
+        // No profile ID, which the date would have to be hashed into.
+        assert!(profile[84..100].iter().all(|b| *b == 0));
+        assert_eq!(super::srgb_profile().unwrap(), profile);
+    }
+    #[test]
     fn black_level_far_below_the_masked_border_is_corrected() {
         // LibRaw reads the EOS R6 Mark III's black as 71 on average over its
         // channels; its masked border, and Adobe's DNG, say 512.
@@ -353,6 +493,13 @@ mod tests {
         assert_eq!(
             std::mem::size_of::<super::NativeMetadata>(),
             super::native_metadata_size()
+        );
+    }
+    #[test]
+    fn native_sensor_layout_matches() {
+        assert_eq!(
+            std::mem::size_of::<super::NativeSensor>(),
+            super::native_sensor_size()
         );
     }
     #[test]

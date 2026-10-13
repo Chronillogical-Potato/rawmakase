@@ -118,6 +118,11 @@ pub(crate) struct Library {
     /// A folder chosen in the Folders panel to be removed, for the editor
     /// to confirm.
     removal_request: Option<FolderRemoval>,
+    /// Synchronize Folder chosen in the Folders panel, for the editor.
+    sync_request: Option<(crate::catalog::folder_sync::SyncScope, String)>,
+    /// After a synchronization added photos, the status bar offers to show
+    /// them.
+    pub(in crate::app) offer_previous_import: bool,
     copy_names: copy_name::CopyNames,
     /// Title, caption and the other descriptive fields being shown or typed.
     fields: metadata_fields::Fields,
@@ -148,6 +153,8 @@ pub(crate) struct Library {
     keep_in_place: Option<(PhotoId, usize)>,
     /// The grid's scroll offset last frame.
     grid_offset: f32,
+    /// The grid's glide after a trackpad swipe.
+    grid_kinetic: kinetic::Kinetic,
     /// Positions in `visible` the grid drew last frame; all until it is drawn.
     grid_shown: std::ops::Range<usize>,
     /// External volumes attached at the last check, to notice one returning;
@@ -212,6 +219,8 @@ impl Library {
             ctx,
             copy_request: None,
             removal_request: None,
+            sync_request: None,
+            offer_previous_import: false,
             copy_names: Default::default(),
             fields: Default::default(),
             done: Vec::new(),
@@ -230,6 +239,7 @@ impl Library {
             loupe_info: Default::default(),
             keep_in_place: None,
             grid_offset: 0.,
+            grid_kinetic: Default::default(),
             grid_shown: 0..usize::MAX,
             attached: None,
             message: String::new(),
@@ -271,9 +281,37 @@ impl Library {
         self.screen.retry_failed();
         self.filter();
     }
-    /// Reads the catalog again without checking which files are online, for
-    /// tests.
-    #[cfg(test)]
+    /// After a change made through another connection that could not be
+    /// shown by opening the catalog again: forgets the previews of the
+    /// photos `removed` (new photos may have their ids) and reads the
+    /// catalog again. If that fails too, no photo is shown, so none can be
+    /// changed under an id that now names another; the catalog stays open,
+    /// for an edit still to be saved.
+    pub(in crate::app) fn reread_after(&mut self, removed: &[PhotoId]) -> Result<()> {
+        for id in removed {
+            self.cache.forget(*id);
+            self.screen.forget(*id);
+        }
+        let reread = self.reload();
+        match &reread {
+            // Moved and added photos are looked for where they are now.
+            Ok(()) => self.check_files(),
+            Err(_) => {
+                // Neither photos nor folders: a folder removed may have
+                // given its id to a new one.
+                self.session.photos.clear();
+                self.session.folders.clear();
+                self.session.roots.clear();
+                self.session.collection_photos.clear();
+                self.session.previous_import.clear();
+                self.filters.folder_scope = None;
+                self.selected_folder.clear();
+                self.reloaded();
+            }
+        }
+        reread
+    }
+    /// Reads the catalog again into the lists shown.
     fn reload(&mut self) -> Result<()> {
         self.session.reload()?;
         self.reloaded();
@@ -284,6 +322,9 @@ impl Library {
         self.cell_info.clear();
         self.sort_keys = None;
         self.shown_version += 1;
+        if self.filters.previous_import {
+            self.filters.members = self.session.previous_import.clone();
+        }
         if let Some(id) = self.filters.collection {
             if self.session.collections.iter().any(|c| c.id == id) {
                 self.filters.members = self
@@ -572,6 +613,44 @@ impl Library {
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }
+    pub(in crate::app) fn take_sync_request(
+        &mut self,
+    ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
+        self.sync_request.take()
+    }
+    /// What Synchronize Folder covers for the folder selected in the
+    /// Folders panel, and its name; none for All Photographs or a collection.
+    pub(in crate::app) fn selected_sync_scope(
+        &self,
+    ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
+        use crate::catalog::folder_sync::SyncScope;
+        let rest = self.selected_folder.strip_prefix("root:")?;
+        let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
+        let root = root.parse::<i64>().ok().map(RootId)?;
+        if relative.is_empty() {
+            let name = self
+                .session
+                .roots
+                .iter()
+                .find(|(id, ..)| *id == root)
+                .map(|(_, original, _)| {
+                    std::path::Path::new(original)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .unwrap_or_default();
+            return Some((SyncScope::Root(root), name));
+        }
+        let folder = self
+            .session
+            .folders
+            .iter()
+            .find(|f| f.root == root && f.relative.trim_end_matches('/') == relative)?;
+        let name = relative.rsplit('/').next().unwrap_or(relative).to_string();
+        Some((SyncScope::Folder(folder.id), name))
+    }
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()
     }
@@ -662,6 +741,7 @@ impl Library {
         }
         self.start_capture_times();
         self.start_photo_info();
+        self.start_checksums();
         Ok(removed)
     }
     /// Removes virtual copy `id`; returns its master, which is selected. An
@@ -699,6 +779,7 @@ impl Library {
         {
             if !self.filters.members.contains(&id) {
                 self.filters.collection = None;
+                self.filters.previous_import = false;
             }
             // Filters turned off with Cmd+L hide nothing, and are kept.
             if self.filters.enabled {
@@ -714,6 +795,7 @@ impl Library {
         {
             self.filters.folder_scope = None;
             self.filters.collection = None;
+            self.filters.previous_import = false;
             self.filters.only_missing = false;
             self.selected_folder.clear();
             self.filter();
@@ -727,6 +809,7 @@ impl Library {
         }
         self.poll_capture_times();
         self.poll_photo_info();
+        self.poll_checksums();
         self.poll_reread();
         self.cache.poll(ctx);
         self.screen.poll(ctx);
@@ -891,6 +974,7 @@ mod capture;
 /// Lightroom-style grid cells: the label tints the cell, while selection uses
 /// a lighter surround instead of the app's blue button fill.
 mod cell;
+mod checksums;
 mod collections;
 mod compare;
 mod copy_name;
@@ -900,6 +984,7 @@ mod filter;
 mod filter_bar;
 mod grid;
 mod info;
+mod kinetic;
 mod layout;
 mod loupe;
 mod metadata;

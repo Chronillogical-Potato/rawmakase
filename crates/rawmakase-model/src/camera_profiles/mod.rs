@@ -76,6 +76,93 @@ impl std::fmt::Display for OtherCamera {
 }
 impl std::error::Error for OtherCamera {}
 
+/// One camera of a phone that Adobe profiles per module, named after the phone,
+/// e.g. `Google Pixel 7 Pro Telephoto Camera` or `Samsung Galaxy S23 Rear Wide Camera`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PhoneModule {
+    Front,
+    Ultrawide,
+    Wide,
+    Telephoto,
+    SuperTelephoto,
+}
+/// Whether a profile made for `camera` (its UniqueCameraModel) fits the photo:
+/// the camera's make and model, the model alone, or one of the names Adobe uses
+/// for it (`Metadata::adobe_names`), compared without case, spaces or underscores
+/// (LibRaw's Nikon "Z 6_2" is Adobe's "Z 6 2"); for a phone, also such a name
+/// followed by the module that took the photo.
+pub(crate) fn camera_fits(camera: &str, m: &Metadata) -> bool {
+    let key = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace() && *c != '_')
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    let names: Vec<String> = [format!("{} {}", m.make, m.model), m.model.clone()]
+        .into_iter()
+        .chain(m.adobe_names.iter().cloned())
+        .map(|n| key(&n))
+        .collect();
+    let camera_lower = camera.to_ascii_lowercase();
+    names.contains(&key(camera))
+        // "<camera> <module>": every split at a space, the module after it.
+        || camera_lower.match_indices(' ').any(|(i, _)| {
+            names.contains(&key(&camera_lower[..i]))
+                && PhoneModule::named(&camera_lower[..i], &camera_lower[i + 1..])
+                    .is_some_and(|module| Some(module) == PhoneModule::of(m))
+        })
+}
+
+impl PhoneModule {
+    /// The module a lowercase profile camera-name suffix names on the phone the
+    /// rest of the name (`camera`) names: Huawei calls its main module "Rear Main"
+    /// and its ultrawide "Rear Wide", where Google's "Wide" is the main module.
+    fn named(camera: &str, suffix: &str) -> Option<Self> {
+        match Self::parse(suffix)? {
+            Self::Wide
+                if camera.starts_with("huawei")
+                    && suffix.trim_start_matches("rear ") == "wide camera" =>
+            {
+                Some(Self::Ultrawide)
+            }
+            module => Some(module),
+        }
+    }
+    /// The module a lowercase profile camera-name suffix names, if it names one.
+    fn parse(suffix: &str) -> Option<Self> {
+        let role = suffix.strip_suffix(" camera")?;
+        let role = role.strip_prefix("rear ").unwrap_or(role);
+        Some(match role {
+            "front" => Self::Front,
+            "ultrawide" => Self::Ultrawide,
+            "wide" | "main" => Self::Wide,
+            "telephoto" => Self::Telephoto,
+            "super telephoto" => Self::SuperTelephoto,
+            _ => return None,
+        })
+    }
+    /// The module that took the photo. Phone DNGs don't name it, so as Camera
+    /// Raw does (checked against its profile digests for raw.pixls.us Pixel 4 XL,
+    /// 4a, 6 Pro, 7 Pro and 8 Pro DNGs) go by the 35 mm equivalent focal length.
+    /// The front camera only when the lens model says so. Unknown without a
+    /// focal length; from 150 mm only a super telephoto module fits, so a phone
+    /// without one has no profile there rather than a guessed one.
+    fn of(m: &Metadata) -> Option<Self> {
+        let lens = m.lens_model.to_ascii_lowercase();
+        if lens.contains("front") {
+            return Some(Self::Front);
+        }
+        let f = m.focal_35mm;
+        Some(match f {
+            f if !f.is_finite() || f <= 0. => return None,
+            f if f < 20. => Self::Ultrawide,
+            f if f < 35. => Self::Wide,
+            f if f < 150. => Self::Telephoto,
+            _ => Self::SuperTelephoto,
+        })
+    }
+}
+
 /// An imported look whose base camera profile was not imported with it.
 #[derive(Debug)]
 pub struct MissingBase {
@@ -329,15 +416,7 @@ impl CameraProfile {
         Ok(())
     }
     pub fn ensure_camera(&self, m: &Metadata) -> Result<()> {
-        let key = |s: &str| {
-            s.to_ascii_lowercase()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        if key(&self.camera) == key(&format!("{} {}", m.make, m.model))
-            || key(&self.camera) == key(&m.model)
-        {
+        if camera_fits(&self.camera, m) {
             return Ok(());
         }
         Err(OtherCamera {

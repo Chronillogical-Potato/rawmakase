@@ -110,6 +110,14 @@ fn render_resident(
     sampling[slot::LENS.start..slot::VIGNETTING_AMOUNT.end].copy_from_slice(&lens);
     sampling.extend(tables);
     let backend = &mut *stages.backend;
+    // A region too large for the device renders on the CPU, without turning the GPU off.
+    if !backend
+        .gpu
+        .as_ref()
+        .is_some_and(|gpu| gpu.fits_develop(w, h, &params))
+    {
+        return Ok(None);
+    }
     let Some(samples) = backend.run_resident(cancel, |gpu| {
         gpu.scoped(|gpu| gpu.sample(source, sampling, (w, h), key, cancel))
     }) else {

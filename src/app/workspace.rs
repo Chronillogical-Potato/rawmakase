@@ -50,7 +50,13 @@ impl Editor {
         self.events(&ctx);
         self.poll_updates(&ctx);
         self.themes.poll(&ctx);
+        // Checksums are read only while nothing heavier reads files.
+        let busy = self.checksums_paused
+            || self.exporting()
+            || self.load.is_running()
+            || self.preview_builds.progress().is_some_and(|p| p.running());
         if let Some(library) = &mut self.library {
+            library.session.pause_checksums(busy);
             library.publish_shown();
             library.poll_previews(&ctx);
         }
@@ -61,7 +67,8 @@ impl Editor {
             || self.modal.is_some()
             || self.not_editable.is_some()
             || self.view.shortcuts
-            || self.curve_save_open();
+            || self.curve_save_open()
+            || self.folder_sync.is_reviewing();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -117,6 +124,10 @@ impl Editor {
                 PreviewsRequest::Discard(ids, kinds) => self.discard_previews(&ids, &kinds),
             }
         }
+        if let Some((scope, name)) = self.library.as_mut().and_then(|l| l.take_sync_request()) {
+            self.start_folder_sync(scope, name);
+        }
+        self.poll_folder_sync();
         if let Some(removal) = self.library.as_mut().and_then(|l| l.take_removal_request()) {
             self.modal = Some(super::Modal::RemoveFolder(removal));
         }
@@ -132,6 +143,7 @@ impl Editor {
         }
         self.remove_copy_window(&ctx);
         self.remove_folder_window(&ctx);
+        self.folder_sync_window(&ctx);
         self.read_metadata_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
@@ -341,6 +353,37 @@ impl Editor {
             self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx);
             ui.close();
         }
+        let selected = self.library.as_ref().and_then(|l| l.selected_sync_scope());
+        let scanning = self.folder_sync.is_scanning();
+        if menu_row(
+            ui,
+            Icon::Folder,
+            "Synchronize Folder…",
+            selected.is_some() && !scanning,
+        )
+        .on_hover_text(
+            "Find photos added, deleted, moved or renamed outside RAWmakase in the selected folder",
+        )
+        .clicked()
+            && let Some((scope, name)) = selected
+        {
+            self.start_folder_sync(scope, name);
+            ui.close();
+        }
+        if menu_row(
+            ui,
+            Icon::Folder,
+            "Synchronize All Folders…",
+            location.is_some() && !scanning,
+        )
+        .clicked()
+        {
+            self.start_folder_sync(
+                crate::catalog::folder_sync::SyncScope::All,
+                "All Folders".into(),
+            );
+            ui.close();
+        }
         menu_separator(ui);
         if menu_row(ui, Icon::Folder, "Open Catalog…", true).clicked() {
             self.catalog_dialog(CatalogDialog::Open, ctx);
@@ -435,6 +478,7 @@ impl Editor {
                     }
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
+                    self.folder_sync_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
@@ -791,6 +835,12 @@ impl Editor {
                         .filter(|l| !l.message.is_empty())
                         .map_or(self.status.as_str(), |l| l.message.as_str());
                     status_text(ui, shown, self.message_detail(shown), None);
+                    if let Some(library) = &mut self.library
+                        && library.offer_previous_import
+                        && ui.small_button("Show").clicked()
+                    {
+                        library.show_previous_import();
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = ui
@@ -853,17 +903,21 @@ impl Editor {
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
-            let (mut copy, mut paste, mut reset) = (false, false, false);
-            let mut previous = false;
+            let (copy, paste, previous, treatment);
+            let mut reset = false;
             let mut sync = false;
             let mut match_exposures = false;
             let mut new_preset = false;
             let mut auto = false;
-            let mut treatment = false;
+            let mut select_all = false;
+            let mut select_none = false;
             let mut export = None;
             let mut transfer = None;
             let mut targeted = None;
-            ctx.input(|i| {
+            {
+                // A copy: `ctx.input` holds the context's lock, and a shortcut that
+                // opens a photo uploads a texture, which waits for it forever.
+                let i = &ctx.input(|i| i.clone());
                 // Lightroom's Copy After's Settings to Before (←), Copy Before's to
                 // After (→) and Swap (↑), with Cmd+Option+Shift.
                 let m = i.modifiers;
@@ -900,21 +954,23 @@ impl Editor {
                     };
                     self.set_compare(self.view.compare.toggled(view));
                 }
-                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::C) {
-                    copy = true;
-                }
-                if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::V) {
-                    paste = true;
-                }
+                // With the modifiers held for the key, which a quick shortcut can
+                // release in the same frame.
+                let shift_command = |want: egui::Key| {
+                    i.events.iter().any(|event| {
+                        matches!(event, egui::Event::Key { key, pressed: true, modifiers, .. }
+                            if *key == want && modifiers.command && modifiers.shift)
+                    })
+                };
+                copy = shift_command(egui::Key::C);
+                paste = shift_command(egui::Key::V);
                 // Lightroom's Paste Settings from Previous. Option changes the typed
                 // letter on macOS, so match the physical key too.
-                let v = i.events.iter().any(|event| {
-                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, .. }
-                        if *key == egui::Key::V || *physical_key == Some(egui::Key::V))
+                previous = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key, physical_key, pressed: true, repeat: false, modifiers }
+                        if (*key == egui::Key::V || *physical_key == Some(egui::Key::V))
+                            && modifiers.command && modifiers.alt && !modifiers.shift)
                 });
-                if v && i.modifiers.command && i.modifiers.alt && !i.modifiers.shift {
-                    previous = true;
-                }
                 // Lightroom's Match Total Exposures; Option changes the typed letter
                 // on macOS, so match the physical key too.
                 let m = i.events.iter().any(|event| {
@@ -962,11 +1018,12 @@ impl Editor {
                     reset = true;
                 }
                 // Lightroom's Convert to Black & White.
-                // Once per press: holding V does not flip it back and forth.
-                treatment = !i.modifiers.any()
-                    && i.events.iter().any(|event| {
-                        matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, .. })
-                    });
+                // Once per press: holding V does not flip it back and forth. With the
+                // key's own modifiers: Shift+Cmd+V released in the same frame pastes.
+                treatment = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, repeat: false, modifiers, .. }
+                        if !modifiers.any())
+                });
                 // Lightroom's Auto Settings.
                 if i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::U) {
                     auto = true;
@@ -980,6 +1037,23 @@ impl Editor {
                 });
                 if e && i.modifiers.command && i.modifiers.shift {
                     export = Some(i.modifiers.alt);
+                }
+                // Lightroom's Select All, as in the Library grid: every photo in
+                // the filmstrip joins the selection so Sync reaches them all. Read
+                // from the event, whose modifiers are those held for the press,
+                // not the frame's, which a quick Cmd+A can outrun.
+                if i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::A, pressed: true, modifiers, .. }
+                        if modifiers.command)
+                }) {
+                    select_all = true;
+                }
+                // Lightroom's Select None, as in the Library grid.
+                if i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::D, pressed: true, modifiers, .. }
+                        if modifiers.command)
+                }) {
+                    select_none = true;
                 }
                 // Cmd+Z / Cmd+Shift+Z on macOS, Ctrl+Z / Ctrl+Shift+Z or Ctrl+Y elsewhere.
                 if i.modifiers.command && i.key_pressed(egui::Key::Z) {
@@ -996,11 +1070,13 @@ impl Editor {
                 {
                     self.redo();
                 }
-                // Shift+R is Reference View, below.
-                if (i.key_pressed(egui::Key::C)
-                    || i.key_pressed(egui::Key::R) && !i.modifiers.shift)
-                    && !i.modifiers.command
-                {
+                // Shift+R is Reference View, below. C with its own modifiers, as
+                // Shift+Cmd+C released in the same frame copies.
+                let c = i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::C, pressed: true, modifiers, .. }
+                        if !modifiers.command)
+                });
+                if c || i.key_pressed(egui::Key::R) && !i.modifiers.shift && !i.modifiers.command {
                     self.view.toggle(Tool::Crop);
                 }
                 if i.key_pressed(egui::Key::R)
@@ -1025,7 +1101,10 @@ impl Editor {
                     self.view.clipping.toggle_both();
                 }
                 if i.key_pressed(egui::Key::Backslash) {
-                    let view = self.view.compare.toggled(super::before_after::Compare::BeforeOnly);
+                    let view = self
+                        .view
+                        .compare
+                        .toggled(super::before_after::Compare::BeforeOnly);
                     self.set_compare(view);
                 }
                 if i.key_pressed(egui::Key::Enter)
@@ -1069,7 +1148,11 @@ impl Editor {
                     let kind = if i.key_pressed(egui::Key::K) && !i.modifiers.shift {
                         Some(Kind::Brush)
                     } else if i.key_pressed(egui::Key::M) {
-                        Some(if i.modifiers.shift { Kind::Radial } else { Kind::Linear })
+                        Some(if i.modifiers.shift {
+                            Kind::Radial
+                        } else {
+                            Kind::Linear
+                        })
                     } else if i.key_pressed(egui::Key::J) && i.modifiers.shift {
                         Some(Kind::Color)
                     } else {
@@ -1079,7 +1162,18 @@ impl Editor {
                         self.create_mask(kind, None);
                     }
                 }
-            });
+            }
+            // Select All takes the filmstrip's shown photos, so a following Sync
+            // reaches them all; the open photo stays active.
+            if select_all {
+                let open = self.document.catalog_photo;
+                if let Some(library) = &mut self.library {
+                    library.develop_select_all(open);
+                }
+            }
+            if select_none && let Some(library) = &mut self.library {
+                library.select(None);
+            }
             // As in Lightroom, Shift+Cmd+C opens Copy Settings. Not while a folder is
             // being picked: the folder question that follows would replace it.
             if copy && !self.activity.is_busy() {
@@ -1394,6 +1488,40 @@ impl Editor {
 /// What dropping files onto the window does, shown while they are dragged
 /// over it: the main `area` becomes the drop zone, drawn over whatever it
 /// showed; the side panels stay as they are.
+/// egui-winit reads Cmd+C and Cmd+V with any other modifier as the clipboard's
+/// Copy and Paste and drops the key, so Shift+Cmd+C (Copy Settings),
+/// Shift+Cmd+V (Paste Settings) and Option+Cmd+V (Paste from Previous) never
+/// reach the shortcuts. Their keys go back in after the clipboard events, which
+/// text fields still take. A Paste with an empty clipboard is not sent at all.
+pub(super) fn clipboard_shortcut_keys(ctx: &egui::Context, input: &mut egui::RawInput) {
+    let mut modifiers = ctx.input(|i| i.modifiers);
+    let mut events = Vec::with_capacity(input.events.len());
+    for event in input.events.drain(..) {
+        let key = match &event {
+            egui::Event::ModifiersChanged(changed) => {
+                modifiers = *changed;
+                None
+            }
+            egui::Event::Copy => Some(egui::Key::C),
+            egui::Event::Paste(_) => Some(egui::Key::V),
+            _ => None,
+        };
+        events.push(event);
+        if let Some(key) = key
+            && modifiers.command
+            && (modifiers.shift || modifiers.alt)
+        {
+            events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            });
+        }
+    }
+    input.events = events;
+}
 fn drop_overlay(ctx: &egui::Context, area: egui::Rect, catalog: Option<&str>) {
     let palette = theme::palette(ctx);
     let painter = ctx

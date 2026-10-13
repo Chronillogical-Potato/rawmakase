@@ -92,6 +92,7 @@ impl Editor {
         stopping.extend(self.selection.stop());
         stopping.extend(self.automation.stop_outputs());
         stopping.extend(self.controls.stop());
+        stopping.extend(self.stop_folder_sync());
         if let Some(library) = &mut self.library {
             stopping.extend(library.close_previews());
         }

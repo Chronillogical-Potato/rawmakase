@@ -311,7 +311,7 @@ fn render(
     cancel: &AtomicBool,
 ) -> anyhow::Result<image::RgbImage> {
     if !crate::storage::is_raw(path) {
-        return Ok(thumbnails::downscale(&thumbnails::raster(path)?, edge));
+        return Ok(thumbnails::downscale(&crate::raster::decode(path)?, edge));
     }
     let raw = crate::photo::open(path)?;
     let recipe = EditSource::recipe(edit, &raw)?;

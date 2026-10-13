@@ -17,6 +17,9 @@ const VERSION: i64 = 1;
 // 2: previews keep their aspect ratio (generation 1 forced 360×240).
 // 3: the one engine renders every edit differently from earlier releases.
 const GENERATION: i64 = 3;
+// 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
+// 4: the one engine, as `GENERATION` 3.
+const RASTER_GENERATION: i64 = 4;
 const LIMIT: i64 = 512 * 1024 * 1024;
 // 2: the one engine, as `GENERATION` 3.
 const SIZED_GENERATION: i64 = 2;
@@ -84,6 +87,14 @@ fn tagged(path: &Path, tag: &str) -> String {
         key(path)
     } else {
         format!("{}#{tag}", key(path))
+    }
+}
+/// The generation a thumbnail of `path` is made in now.
+fn generation(path: &Path) -> i64 {
+    if crate::storage::is_raw(path) {
+        GENERATION
+    } else {
+        RASTER_GENERATION
     }
 }
 /// Whether the file at `path` is no longer the one a row was made from. An
@@ -169,7 +180,7 @@ impl PreviewCache {
                 .db
                 .execute("DELETE FROM previews WHERE source_path=?", [&key]);
         };
-        if generation != GENERATION || stale {
+        if generation != self::generation(path) || stale {
             forget();
             return Ok(None);
         }
@@ -212,7 +223,7 @@ impl PreviewCache {
             image::ExtendedColorType::Rgb8,
         )?;
         // prefix_hash, which needed the file's first 64 KB, is no longer checked.
-        self.db.execute("INSERT INTO previews VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET source_size=excluded.source_size,modified_ns=excluded.modified_ns,prefix_hash=excluded.prefix_hash,generation=excluded.generation,width=excluded.width,height=excluded.height,jpeg=excluded.jpeg,last_used=excluded.last_used",params![tagged(path, tag),stamp.size as i64,stamp.modified_ns.to_string(),"",GENERATION,image.width(),image.height(),jpeg,now()])?;
+        self.db.execute("INSERT INTO previews VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source_path) DO UPDATE SET source_size=excluded.source_size,modified_ns=excluded.modified_ns,prefix_hash=excluded.prefix_hash,generation=excluded.generation,width=excluded.width,height=excluded.height,jpeg=excluded.jpeg,last_used=excluded.last_used",params![tagged(path, tag),stamp.size as i64,stamp.modified_ns.to_string(),"",generation(path),image.width(),image.height(),jpeg,now()])?;
         self.writes += 1;
         if self.writes.is_multiple_of(32) {
             self.prune(LIMIT)?;
@@ -455,6 +466,20 @@ impl PreviewCache {
     /// Forgets the requests for these catalog photos: of `kind`, or of every
     /// kind when the photos left the catalog, so a later photo that reuses an
     /// id starts without any.
+    /// Points `photo`'s requests at its file's new path, after the file was
+    /// found moved, so its previews are built from there.
+    pub fn move_intent(
+        &mut self,
+        catalog: &CatalogLocation,
+        photo: PhotoId,
+        path: &Path,
+    ) -> Result<()> {
+        self.db.execute(
+            "UPDATE preview_intent SET source_path=? WHERE catalog=? AND photo_id=?",
+            params![key(path), catalog_key(catalog), photo.0],
+        )?;
+        Ok(())
+    }
     pub fn forget_intent(
         &mut self,
         catalog: &CatalogLocation,
@@ -569,6 +594,27 @@ mod tests {
             assert!(cache.load(&raw)?.is_some());
             assert!(cache.load_tagged(&raw, "edit-1")?.is_some());
         }
+        Ok(())
+    }
+    #[test]
+    fn jpeg_thumbnails_made_before_colour_management_are_made_again() -> Result<()> {
+        let d = tempfile::tempdir()?;
+        let raw = d.path().join("photo.ARW");
+        let jpeg = d.path().join("photo.jpg");
+        std::fs::write(&raw, b"original raw")?;
+        std::fs::write(&jpeg, b"original jpeg")?;
+        let mut cache = PreviewCache::open(&d.path().join("previews.sqlite3"))?;
+        let im = image::RgbImage::new(8, 8);
+        for path in [&raw, &jpeg] {
+            cache.store(path, &Stamp::read(path)?, &im)?;
+        }
+        // Rows as a build that ignored a JPEG's ICC profile left them.
+        cache.db.execute("UPDATE previews SET generation=2", [])?;
+        assert!(cache.load(&jpeg)?.is_none());
+        // A RAW's embedded thumbnail did not change, so it is kept.
+        assert!(cache.load(&raw)?.is_some());
+        cache.store(&jpeg, &Stamp::read(&jpeg)?, &im)?;
+        assert!(cache.load(&jpeg)?.is_some());
         Ok(())
     }
     #[test]

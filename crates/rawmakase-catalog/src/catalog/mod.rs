@@ -16,6 +16,7 @@ pub struct Catalog {
     computer: locations::Computer,
 }
 
+mod checksums;
 mod copies;
 mod db;
 mod defaults;
@@ -24,6 +25,7 @@ mod develop_history;
 mod edit_records;
 mod edit_rows;
 mod edits;
+pub mod folder_sync;
 mod format_upgrade;
 mod info;
 mod ingest;
@@ -40,6 +42,7 @@ mod value;
 pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 #[doc(hidden)]
+pub use checksums::ReadChecksum;
 pub use db::assert_shape as assert_sql_shape;
 pub use defaults::MetadataDefaults;
 pub use descriptive::MetadataSnapshot;
@@ -362,11 +365,15 @@ pub use sidecar::Merge;
 #[cfg(test)]
 mod boundary_tests;
 #[cfg(test)]
+mod checksums_tests;
+#[cfg(test)]
 mod descriptive_tests;
 #[cfg(test)]
 mod edit_rows_tests;
 #[cfg(test)]
 mod format_upgrade_tests;
+#[cfg(test)]
+mod ingest_tests;
 #[cfg(test)]
 mod locations_tests;
 #[cfg(test)]

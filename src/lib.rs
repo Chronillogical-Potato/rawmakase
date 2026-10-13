@@ -21,8 +21,8 @@ pub use rawmakase_engine::develop;
 pub use rawmakase_export::{export, watermark};
 // LibRaw and Little CMS, demosaicing, opening and decoding a photo
 // (crates/rawmakase-native).
-pub(crate) use rawmakase_native::decode;
-pub use rawmakase_native::{decode_cache, photo, raw};
+pub(crate) use rawmakase_native::{decode, raster};
+pub use rawmakase_native::{decode_cache, fingerprint, photo, raw};
 // File formats and presets over the model (crates/rawmakase-interop).
 pub use rawmakase_interop::{exif, export_settings, jpeg, lr_develop, presets, raw_defaults, xmp};
 pub(crate) use rawmakase_model::time;
@@ -35,6 +35,8 @@ pub(crate) mod catalog_session;
 pub mod comparison;
 pub(crate) mod edit_session;
 pub(crate) mod platform;
+/// For headless commands: whether a path's volume is mounted.
+pub use platform::volume::mounted as volume_mounted;
 #[cfg(feature = "telemetry")]
 pub(crate) mod stats;
 pub mod updates;

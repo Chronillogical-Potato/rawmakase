@@ -48,6 +48,11 @@ pub(super) fn directories(m: &Metadata, embed: &Embed, width: u32, height: u32) 
     d
 }
 
+/// The eXIf payload of a PNG export: the TIFF stream alone.
+pub(super) fn png_exif(d: CameraExif) -> Vec<u8> {
+    tiff_block(d)
+}
+
 /// The APP1 EXIF payload of a JPEG export.
 pub(super) fn jpeg_exif(mut d: CameraExif) -> Vec<u8> {
     // Required for JPEG by the EXIF standard: chroma samples are centered.

@@ -63,6 +63,8 @@ pub(super) enum TreeAction {
     /// Remove from Catalog: the folder's name, it and its subfolders, and
     /// their photos' count.
     Remove(String, HashSet<FolderId>, usize),
+    /// Synchronize Folder: what to synchronize, and its name.
+    Synchronize(crate::catalog::folder_sync::SyncScope, String),
 }
 pub(super) fn folder_tree_row(
     ui: &mut egui::Ui,
@@ -162,7 +164,7 @@ pub(super) fn folder_tree_row(
         node.path.display(),
         node.count,
         if can_relink {
-            " including subfolders\nRight-click to locate or remove"
+            " including subfolders\nRight-click to locate, synchronize or remove"
         } else {
             ""
         }
@@ -178,6 +180,17 @@ pub(super) fn folder_tree_row(
                 .clicked()
         {
             action = relink();
+            ui.close();
+        }
+        let scope = match (node.root, node.folder) {
+            (Some(root), _) => Some(crate::catalog::folder_sync::SyncScope::Root(root)),
+            (None, Some(folder)) => Some(crate::catalog::folder_sync::SyncScope::Folder(folder)),
+            _ => None,
+        };
+        if let Some(scope) = scope
+            && ui.button("Synchronize Folder…").clicked()
+        {
+            action = Some(TreeAction::Synchronize(scope, node.name.clone()));
             ui.close();
         }
         if !node.ids.is_empty() && ui.button("Remove from Catalog…").clicked() {

@@ -131,11 +131,46 @@ fn profiles_for(im: &CameraImage) -> Vec<Arc<CameraProfile>> {
 struct Accepted {
     width: u32,
     height: u32,
+    /// The long edge the photo was reduced to before rendering; 0 for full size.
+    #[serde(default)]
+    source_edge: u32,
     cases: BTreeMap<String, PatchValues>,
 }
 
+/// RAWMAKASE_PHOTO_SOURCE_EDGE: render photo cases from the decoded photo reduced
+/// to this long edge, as the app's previews are, instead of at full size; about
+/// thirty times faster on a 24 MP photo. Unset or 0: full size.
+fn photo_source_edge() -> u32 {
+    std::env::var("RAWMAKASE_PHOTO_SOURCE_EDGE")
+        .ok()
+        .map(|v| {
+            v.parse()
+                .expect("RAWMAKASE_PHOTO_SOURCE_EDGE is a number of pixels")
+        })
+        .unwrap_or(0)
+}
+
+/// One photo's outcome in `photos_match_accepted_renders`, for RAWMAKASE_REPORT.
+#[derive(Serialize)]
+struct PhotoOutcome {
+    /// Relative to $RAWMAKASE_CORPUS/raws.
+    raw: String,
+    /// `unchanged`, `changed`, `size changed` (of the render, or of the source
+    /// it was reduced from), `no accepted render`, `cannot
+    /// develop` (with an accepted render), `skipped` (without one), `cannot
+    /// render`, `blessed` or `kept` (RAWMAKASE_BLESS=new, already accepted).
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    /// Changed cases: mean, p95 and max ΔE00 against the accepted render.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    cases: BTreeMap<String, [f64; 3]>,
+}
+
 /// Real photos in $RAWMAKASE_CORPUS/raws against RAWmakase's last accepted renders
-/// in $RAWMAKASE_CORPUS/accepted. Uses RAWMAKASE_PROFILES when set.
+/// in $RAWMAKASE_CORPUS/accepted. Uses RAWMAKASE_PROFILES when set. With
+/// RAWMAKASE_REPORT set, writes every photo's outcome there as JSON, which
+/// `scripts/corpus/dataset-renders.py` groups by the dataset's classifications.
 #[test]
 #[ignore = "Needs RAWMAKASE_CORPUS with RAW files"]
 fn photos_match_accepted_renders() {
@@ -147,20 +182,66 @@ fn photos_match_accepted_renders() {
         corpus.join("raws").display()
     );
     let cases = cases();
+    let source_edge = photo_source_edge();
     let failures = std::sync::Mutex::new(Vec::new());
     let skipped = std::sync::Mutex::new(Vec::new());
+    let outcomes = std::sync::Mutex::new(Vec::new());
+    let outcome = |raw: &Path, status, detail: Option<String>, cases| {
+        outcomes.lock().unwrap().push(PhotoOutcome {
+            raw: raw
+                .strip_prefix(corpus.join("raws"))
+                .unwrap()
+                .display()
+                .to_string(),
+            status,
+            detail,
+            cases,
+        })
+    };
+    // Accepted renders used to be named by the RAW's path with its extension
+    // replaced twice (`x.orf` and `x.ori` became `x.json`, as did `x 2.00.rw2`
+    // and `x 2.71.rw2`); such a name is still read for a photo that no other
+    // photo shares it with.
+    let legacy_of = |raw: &Path| {
+        let relative = raw.strip_prefix(corpus.join("raws")).unwrap();
+        corpus
+            .join("accepted")
+            .join(relative.with_extension("").with_extension("json"))
+    };
+    let mut legacy_names = BTreeMap::<PathBuf, usize>::new();
+    for raw in &raws {
+        *legacy_names.entry(legacy_of(raw)).or_default() += 1;
+    }
     // One photo at a time (LibRaw develops with its own threads).
     raws.iter().for_each(|raw| {
         let relative = raw
             .strip_prefix(corpus.join("raws"))
             .unwrap()
             .with_extension("");
+        let named = raw.strip_prefix(corpus.join("raws")).unwrap();
         let path = corpus
             .join("accepted")
-            .join(relative.with_extension("json"));
-        let accepted: Option<Accepted> = std::fs::read(&path)
-            .ok()
-            .map(|b| serde_json::from_slice(&b).expect("accepted renders"));
+            .join(format!("{}.json", named.display()));
+        let legacy = legacy_of(raw);
+        let read = |p: &Path| {
+            std::fs::read(p)
+                .ok()
+                .map(|b| serde_json::from_slice::<Accepted>(&b).expect("accepted renders"))
+        };
+        // A new name can equal another photo's old one (`x.orf.json` for
+        // `x.orf` and `x.orf.2.rw2`): then it is that photo's, not this one's.
+        let shared = legacy_names.contains_key(&path) && path != legacy;
+        let accepted = (!shared).then(|| read(&path)).flatten().or_else(|| {
+            (legacy_names[&legacy] == 1)
+                .then(|| read(&legacy))
+                .flatten()
+        });
+        // RAWMAKASE_BLESS=new records only photos that have no accepted render
+        // yet, as after adding photos or an interrupted run.
+        if accepted.is_some() && std::env::var_os("RAWMAKASE_BLESS").is_some_and(|v| v == "new") {
+            outcome(raw, "kept", None, BTreeMap::new());
+            return;
+        }
         let im = match rawmakase::photo::open(raw).and_then(|r| {
             r.develop(
                 rawmakase::camera_data::Decode::full(Default::default()),
@@ -173,6 +254,7 @@ fn photos_match_accepted_renders() {
                     .lock()
                     .unwrap()
                     .push(format!("{}: {e}", relative.display()));
+                outcome(raw, "skipped", Some(e.to_string()), BTreeMap::new());
                 return;
             }
             Err(e) => {
@@ -180,11 +262,20 @@ fn photos_match_accepted_renders() {
                     .lock()
                     .unwrap()
                     .push(format!("{}: {e}", relative.display()));
+                outcome(raw, "cannot develop", Some(e.to_string()), BTreeMap::new());
                 return;
             }
         };
         let profiles = profiles_for(&im);
-        let mut current = Accepted::default();
+        let im = match source_edge {
+            0 => im,
+            edge => rawmakase::develop::preview(&im, edge),
+        };
+        let mut current = Accepted {
+            source_edge,
+            ..Default::default()
+        };
+        let mut render_errors = Vec::new();
         for case in cases.cases.iter().filter(|c| c.photos) {
             let name = &case.name;
             match render(&im, &profiles, &case.xmp(&cases.base, &[]), PHOTO_EDGE) {
@@ -194,15 +285,28 @@ fn photos_match_accepted_renders() {
                         measure::patches(out.width, &out.pixels, &blocks(out.width, out.height));
                     current.cases.insert(name.clone(), values);
                 }
-                Err(e) => failures
-                    .lock()
-                    .unwrap()
-                    .push(format!("{} / {name}: {e}", relative.display())),
+                Err(e) => {
+                    failures
+                        .lock()
+                        .unwrap()
+                        .push(format!("{} / {name}: {e}", relative.display()));
+                    render_errors.push(format!("{name}: {e}"));
+                }
             }
+        }
+        if !render_errors.is_empty() {
+            outcome(
+                raw,
+                "cannot render",
+                Some(render_errors.join("; ")),
+                BTreeMap::new(),
+            );
+            return;
         }
         if bless() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, serde_json::to_vec(&current).unwrap()).unwrap();
+            outcome(raw, "blessed", None, BTreeMap::new());
             return;
         }
         let Some(accepted) = accepted else {
@@ -210,8 +314,21 @@ fn photos_match_accepted_renders() {
                 .lock()
                 .unwrap()
                 .push(format!("{}: no accepted render", relative.display()));
+            outcome(raw, "no accepted render", None, BTreeMap::new());
             return;
         };
+        if accepted.source_edge != source_edge {
+            let edges = format!(
+                "accepted from a source of {} px, rendered from {} px (0: full size)",
+                accepted.source_edge, source_edge
+            );
+            failures
+                .lock()
+                .unwrap()
+                .push(format!("{}: {edges}", relative.display()));
+            outcome(raw, "size changed", Some(edges), BTreeMap::new());
+            return;
+        }
         if (accepted.width, accepted.height) != (current.width, current.height) {
             failures.lock().unwrap().push(format!(
                 "{}: size changed from {}×{} to {}×{}",
@@ -221,8 +338,14 @@ fn photos_match_accepted_renders() {
                 current.width,
                 current.height
             ));
+            let size = format!(
+                "{}×{} to {}×{}",
+                accepted.width, accepted.height, current.width, current.height
+            );
+            outcome(raw, "size changed", Some(size), BTreeMap::new());
             return;
         }
+        let mut changed = BTreeMap::new();
         for (name, values) in &current.cases {
             let Some(expected) = accepted.cases.get(name) else {
                 continue;
@@ -236,9 +359,21 @@ fn photos_match_accepted_renders() {
                     c.p95,
                     c.max
                 ));
+                changed.insert(name.clone(), [c.mean, c.p95, c.max]);
             }
         }
+        let status = if changed.is_empty() {
+            "unchanged"
+        } else {
+            "changed"
+        };
+        outcome(raw, status, None, changed);
     });
+    if let Some(path) = std::env::var_os("RAWMAKASE_REPORT") {
+        let mut outcomes = outcomes.into_inner().unwrap();
+        outcomes.sort_by(|a, b| a.raw.cmp(&b.raw));
+        std::fs::write(&path, serde_json::to_vec_pretty(&outcomes).unwrap()).unwrap();
+    }
     for s in skipped.into_inner().unwrap() {
         println!("skipped, cannot develop: {s}");
     }

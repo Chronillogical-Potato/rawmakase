@@ -301,12 +301,27 @@ impl Backend {
     ) -> Option<Rendered> {
         self.run(cancel, |gpu| gpu.finish(image, recipe, max_edge, cancel))
     }
+    /// Whether the GPU can develop `samples` with `params`; checked before [`Self::run`],
+    /// so a region too large for the device renders on the CPU without turning the GPU
+    /// off for the next one.
+    fn fits(
+        &self,
+        samples: &super::pipeline::Samples,
+        params: &super::pipeline::pixel_params::PixelParams,
+    ) -> bool {
+        self.gpu
+            .as_ref()
+            .is_some_and(|gpu| gpu.fits_develop(samples.width, samples.height, params))
+    }
     pub(crate) fn develop(
         &mut self,
         samples: &Arc<super::pipeline::Samples>,
         params: &super::pipeline::pixel_params::PixelParams,
         cancel: &AtomicBool,
     ) -> Option<Rendered> {
+        if !self.fits(samples, params) {
+            return None;
+        }
         self.run(cancel, |gpu| gpu.develop(samples, params, cancel))
     }
     pub(crate) fn present(
@@ -318,6 +333,9 @@ impl Backend {
         display: &gpu::Display,
         cancel: &AtomicBool,
     ) -> Option<gpu::Frame> {
+        if !self.fits(samples, params) {
+            return None;
+        }
         self.run(cancel, |gpu| {
             gpu.present(
                 gpu::Input::Cpu(samples),
@@ -966,5 +984,34 @@ mod tests {
         }
         let error = error / (60. * 45. * 3.);
         assert!(error < 0.02, "mean error {error}");
+    }
+    #[test]
+    #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+    fn a_region_beyond_the_gpu_limits_renders_on_the_cpu_and_keeps_the_gpu() {
+        use crate::develop::pipeline::{Samples, pixel_params::PixelParams};
+        let mut p = PreviewRenderer::with_gpu();
+        assert!(p.gpu().is_some(), "{:?}", p.fallback_reason());
+        let cancel = AtomicBool::new(false);
+        let params = PixelParams {
+            params: Vec::new(),
+            tables: Vec::new(),
+            weights: Vec::new(),
+        };
+        // Over the develop memory budget, then over the device's buffer limits; their
+        // size alone, as the region is refused before its pixels are read.
+        for edge in [5_000, 40_000] {
+            let samples = Arc::new(Samples {
+                width: edge,
+                height: edge,
+                pixels: Vec::new(),
+                positions: Vec::new(),
+            });
+            assert!(p.backend.develop(&samples, &params, &cancel).is_none());
+            assert!(p.gpu().is_some(), "{edge}: {:?}", p.fallback_reason());
+        }
+        // The next, smaller render still uses the GPU (finishing, at full size).
+        p.render(&image(400, 300, 0.2), &Recipe::default(), 0, None, &cancel)
+            .unwrap();
+        assert!(p.used_gpu());
     }
 }

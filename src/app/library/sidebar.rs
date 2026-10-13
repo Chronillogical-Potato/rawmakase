@@ -22,12 +22,14 @@ impl Library {
                     let offline = self.session.photos.len() - self.available_count();
                     let all = self.filters.folder_scope.is_none()
                         && self.filters.collection.is_none()
-                        && !self.filters.only_missing;
+                        && !self.filters.only_missing
+                        && !self.filters.previous_import;
                     if source_row(ui, "All Photographs", self.session.photos.len(), all).clicked() {
                         self.filters.folder_scope = None;
                         self.selected_folder.clear();
                         self.filters.collection = None;
                         self.filters.only_missing = false;
+                        self.filters.previous_import = false;
                         self.filter()
                     }
                     if source_row(
@@ -41,6 +43,19 @@ impl Library {
                         && let Err(e) = self.show_quick()
                     {
                         self.message = format!("Quick Collection unavailable: {e}");
+                    }
+                    let imported = self.session.previous_import.len();
+                    if imported > 0
+                        && source_row(
+                            ui,
+                            "Previous Import",
+                            imported,
+                            self.filters.previous_import,
+                        )
+                        .on_hover_text("The photos the last Add Photo Folder or Synchronize added")
+                        .clicked()
+                    {
+                        self.show_previous_import();
                     }
                     if offline > 0
                         && source_row(
@@ -132,11 +147,15 @@ impl Library {
                                     self.selected_folder = key;
                                     self.filters.folder_scope = Some(ids);
                                     self.filters.collection = None;
+                                    self.filters.previous_import = false;
                                     self.filter();
                                 }
                                 Some(TreeAction::RelinkRoot(id)) => action = Action::RelinkRoot(id),
                                 Some(TreeAction::RelinkFolder(id)) => {
                                     action = Action::RelinkFolder(id)
+                                }
+                                Some(TreeAction::Synchronize(scope, name)) => {
+                                    self.sync_request = Some((scope, name));
                                 }
                                 Some(TreeAction::Remove(name, folders, photos)) => {
                                     self.removal_request = Some(super::FolderRemoval {
@@ -205,7 +224,19 @@ impl Library {
             .map(|t| (t.id(), t.size_vec2()))
     }
     /// Shows collection `id`'s photos; the filter bar still applies.
+    /// Shows Previous Import: the photos the last import added.
+    pub(in crate::app) fn show_previous_import(&mut self) {
+        self.filters.previous_import = true;
+        self.filters.members = self.session.previous_import.clone();
+        self.filters.collection = None;
+        self.filters.folder_scope = None;
+        self.filters.only_missing = false;
+        self.selected_folder.clear();
+        self.offer_previous_import = false;
+        self.filter();
+    }
     pub(super) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
+        self.filters.previous_import = false;
         self.filters.collection = Some(id);
         self.filters.members = self
             .session
@@ -289,6 +320,9 @@ impl Library {
     }
     /// The selected source's name, as Lightroom shows it above the filmstrip.
     pub(in crate::app) fn source_name(&self) -> String {
+        if self.filters.previous_import {
+            return "Previous Import".into();
+        }
         if let Some(id) = self.filters.collection {
             return self
                 .session

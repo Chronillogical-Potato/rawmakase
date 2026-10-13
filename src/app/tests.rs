@@ -1927,6 +1927,69 @@ fn auto_shortcut_starts_auto_once_the_photo_is_decoded() {
     assert!(e.document.auto.is_running());
 }
 #[test]
+fn select_all_shortcut_selects_the_filmstrip_for_sync() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    let ctx = e.context.clone();
+    // Cmd+A on macOS, Ctrl+A elsewhere.
+    let modifiers = egui::Modifiers::COMMAND;
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::ModifiersChanged(modifiers),
+            egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: Some(egui::Key::A),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+    output.textures_delta.clear();
+    let library = e.library.as_ref().unwrap();
+    assert_eq!(library.selected_photos(), ids);
+    assert_eq!(library.selected(), Some(ids[1]));
+    Ok(())
+}
+#[test]
+fn select_none_shortcut_clears_the_filmstrip_selection() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    e.module = Module::Develop;
+    e.document.catalog_photo = Some(ids[1]);
+    let ctx = e.context.clone();
+    let press = |e: &mut Editor, key: egui::Key, modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |_| e.develop_shortcuts(&ctx));
+        output.textures_delta.clear();
+    };
+    // Cmd+A takes every shown photo, the open one active.
+    e.library.as_mut().unwrap().select(Some(ids[1]));
+    press(&mut e, egui::Key::A, egui::Modifiers::COMMAND);
+    assert_eq!(e.library.as_ref().unwrap().selected_photos(), ids);
+    // Cmd+D selects none.
+    press(&mut e, egui::Key::D, egui::Modifiers::COMMAND);
+    let library = e.library.as_ref().unwrap();
+    assert!(library.selected_photos().is_empty());
+    assert_eq!(library.selected(), None);
+    Ok(())
+}
+#[test]
 fn auto_arriving_mid_drag_lands_between_the_two_halves_of_the_drag() {
     let ctx = egui::Context::default();
     let mut editor =
@@ -4088,6 +4151,33 @@ fn a_click_after_a_wheel_scroll_closes_it_at_once() {
     assert_eq!(editor.document.edit.history().steps().1, 1);
 }
 #[test]
+fn a_quick_cmd_a_in_remove_does_not_toggle_visualize_spots() {
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    let mut press = |modifiers: egui::Modifiers| {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+                // Cmd released within the same frame: Select All's press.
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| ui.input(|i| editor.retouch_keys(i)));
+        output.textures_delta.clear();
+        editor.view.retouch.visualize
+    };
+    assert!(!press(egui::Modifiers::COMMAND));
+    assert!(press(egui::Modifiers::NONE));
+}
+#[test]
 fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
     let ctx = egui::Context::default();
     let (mut editor, _) =
@@ -5852,4 +5942,64 @@ fn a_change_still_waiting_for_the_undo_log_forgets_a_removed_folders_photos() ->
     // Its id may be the next photo's: nothing may undo onto it.
     assert!(!editor.undo_log.can_undo());
     Ok(())
+}
+#[test]
+fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
+    use eframe::App as _;
+    let ctx = egui::Context::default();
+    let (mut editor, _) =
+        editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    // egui-winit turns Cmd+C and Cmd+V with any other modifier into Copy and
+    // Paste, without the key: what Shift+Cmd+C and Shift+Cmd+V arrive as.
+    let frame = |editor: &mut Editor, event: egui::Event, modifiers: egui::Modifiers| {
+        let mut input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+            // Released in the same frame, as a quick shortcut can be. egui-winit
+            // drops only the press: the release comes through.
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                event.clone(),
+                egui::Event::Key {
+                    key: match event {
+                        egui::Event::Copy => egui::Key::C,
+                        _ => egui::Key::V,
+                    },
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers,
+                },
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+            ],
+            ..Default::default()
+        };
+        editor.raw_input_hook(&ctx, &mut input);
+        let mut output = ctx.run_ui(input, |ui| editor.draw(ui));
+        output.textures_delta.clear();
+    };
+    let shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+    frame(&mut editor, egui::Event::Copy, shift);
+    assert!(
+        matches!(&editor.modal, Some(Modal::CopySettings(dialog))
+            if dialog.purpose == settings_transfer::Transfer::Copy),
+        "Shift+Cmd+C opens Copy Settings"
+    );
+    // The C, with its modifiers gone by the frame's end, is not Crop's.
+    assert!(editor.view.tool == state::Tool::None);
+    editor.close_copy_dialog(settings_transfer::CopyChoice::Confirm);
+    let copied = editor.document.edit.recipe().exposure;
+    editor.document.edit.setup_mut().exposure = copied + 1.5;
+    frame(&mut editor, egui::Event::Paste("text".into()), shift);
+    assert_eq!(
+        editor.document.edit.recipe().exposure,
+        copied,
+        "Shift+Cmd+V pastes"
+    );
+    // Not V: no Black & White, even with nothing copied to paste.
+    editor.clipboard = None;
+    frame(&mut editor, egui::Event::Paste("text".into()), shift);
+    assert!(!editor.document.edit.recipe().effects.monochrome);
+    // Plain Cmd+C stays the clipboard's: no Copy Settings.
+    frame(&mut editor, egui::Event::Copy, egui::Modifiers::COMMAND);
+    assert!(editor.modal.is_none());
 }

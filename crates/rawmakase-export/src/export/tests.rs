@@ -312,15 +312,9 @@ fn jpeg_carries_camera_exif_gps_and_xmp() -> Result<()> {
     Ok(())
 }
 #[test]
-fn a_tiff_export_writes_camera_text_tiff_cannot_hold_as_is() -> Result<()> {
-    // Fujifilm X100F files pad Artist with spaces, and Copyright's photographer and
-    // editor parts too, with a NUL between them, which a TIFF ASCII value cannot hold.
-    let padded = |tag, text: &[u8]| crate::exif::Field {
-        tag,
-        kind: crate::tiff::kind::ASCII,
-        count: text.len() as u32,
-        bytes: text.to_vec(),
-    };
+fn tiff_keeps_camera_text_that_is_not_plain_ascii() -> Result<()> {
+    // Fujifilm writes Copyright in EXIF's two-part form (photographer, NUL,
+    // editor), here padded with spaces; artists' names are often UTF-8.
     let dir = tempfile::tempdir()?;
     let source = dir.path().join("source.RAF");
     fs::write(&source, b"source")?;
@@ -332,13 +326,10 @@ fn a_tiff_export_writes_camera_text_tiff_cannot_hold_as_is() -> Result<()> {
     let embed = Embed {
         camera: Some(crate::exif::CameraExif {
             main: vec![
-                crate::exif::Field::ascii(0x010f, "FUJIFILM"),
-                padded(0x013b, b"        \0"),
-                padded(0x8298, b"   \0    \0"),
-                padded(0x0110, b"Caf\xe9\0"),
+                crate::exif::Field::ascii(0x8298, "Ann Photographer \0 Bob Editor   "),
+                crate::exif::Field::ascii(0x013b, "José Ñuñez"),
             ],
-            exif: Vec::new(),
-            gps: Vec::new(),
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -352,9 +343,75 @@ fn a_tiff_export_writes_camera_text_tiff_cannot_hold_as_is() -> Result<()> {
         &embed,
         Replace::NoClobber,
     )?;
-    assert!(image::open(&tif).is_ok());
     let bytes = fs::read(&tif)?;
-    assert!(bytes.windows(4).any(|w| w == b"Caf?"));
+    let has = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    assert!(has(b"Ann Photographer \0 Bob Editor   \0"));
+    assert!(has("José Ñuñez\0".as_bytes()));
+    assert!(image::open(&tif).is_ok());
+    Ok(())
+}
+#[test]
+fn png_carries_icc_camera_exif_xmp_and_resolution() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.ARW");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 256,
+        height: 2,
+        pixels: (0..512)
+            .map(|i| [(i % 256) as f32 / 255., 0.25, 1.])
+            .collect(),
+    };
+    let embed = Embed {
+        camera: Some(crate::exif::CameraExif {
+            main: vec![crate::exif::Field::ascii(0x010f, "SONY")],
+            exif: vec![crate::exif::Field::ascii(0xa434, "FE 55mm F1.8 ZA")],
+            gps: Vec::new(),
+        }),
+        xmp: Some("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"/>".into()),
+        ppi: 300,
+        ..Default::default()
+    };
+    let png = dir.path().join("out.png");
+    export_with(
+        &png,
+        &source,
+        &image,
+        &Metadata::default(),
+        &ExportOptions::default(),
+        &embed,
+        Replace::NoClobber,
+    )?;
+    let decoder = png::Decoder::new(std::io::BufReader::new(fs::File::open(&png)?));
+    let reader = decoder.read_info()?;
+    let info = reader.info();
+    assert_eq!(
+        (info.color_type, info.bit_depth),
+        (png::ColorType::Rgb, png::BitDepth::Eight)
+    );
+    assert_eq!(
+        info.icc_profile.as_deref(),
+        Some(raw::srgb_profile()?.as_slice())
+    );
+    let exif = info.exif_metadata.as_deref().unwrap();
+    // eXIf holds the TIFF stream itself, without JPEG's "Exif" header.
+    assert!(exif.starts_with(b"II*\0"));
+    assert!(exif.windows(15).any(|w| w == b"FE 55mm F1.8 ZA"));
+    let xmp: Vec<_> = info
+        .utf8_text
+        .iter()
+        .filter(|t| t.keyword == "XML:com.adobe.xmp")
+        .collect();
+    assert_eq!(xmp.len(), 1);
+    assert!(!xmp[0].compressed);
+    assert_eq!(
+        xmp[0].get_text()?,
+        "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"/>"
+    );
+    // 300 pixels per inch, in pixels per metre.
+    let dims = info.pixel_dims.unwrap();
+    assert_eq!((dims.xppu, dims.unit), (11_811, png::Unit::Meter));
+    assert_eq!(image::open(&png)?.to_rgb8().into_raw(), image.rgb8());
     Ok(())
 }
 #[test]
@@ -521,19 +578,19 @@ fn export_refuses_to_destroy_a_raw_the_source_or_an_existing_file() -> Result<()
     assert_eq!(left, ["out.jpg", "source.ARW", "source.bin"]);
 
     // An extension the encoder does not write is refused before anything is created.
-    let png = dir.path().join("out.png");
+    let webp = dir.path().join("out.webp");
     assert_eq!(
         message(export(
-            &png,
+            &webp,
             &source,
             &image,
             &m,
             &options,
             Replace::NoClobber
         )),
-        "Export extension must be .jpg, .jpeg, .tif or .tiff"
+        "Export extension must be .jpg, .jpeg, .tif, .tiff or .png"
     );
-    assert!(!png.exists());
+    assert!(!webp.exists());
     Ok(())
 }
 

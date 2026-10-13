@@ -9,7 +9,7 @@ use crate::optics::lcp::{Candidate, Chromatic, Entry, ImportedProfile, PhotoProf
 use crate::optics::{LensCorrection, Radial};
 use anyhow::{Context, Result, ensure};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::SystemTime,
@@ -33,9 +33,31 @@ fn key(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+/// Whether an entry describes the photo's lens: it names the lens the file records,
+/// or, for a file recording no lens at all, it carries the maker's lens ID. Nikon
+/// bodies that write no lens model (the D600 among them) leave `stCamera:LensID`
+/// and the maker note's `LensIDNumber` as the only identity, and they are the same
+/// number.
 fn lens_matches(e: &Entry, m: &Metadata) -> bool {
     let lens = key(&m.lens_model);
-    !lens.is_empty() && e.lens.iter().any(|l| key(l) == lens)
+    if !lens.is_empty() {
+        return e.lens.iter().any(|l| key(l) == lens);
+    }
+    lens_id_matches(e, m)
+}
+/// Whether an entry matches the photo's lens by the maker's lens ID alone, for a
+/// file that records no lens name. Adobe's files hold the maker's own numbering
+/// there, so another maker's profile never stands in for this camera's ID.
+fn lens_id_matches(e: &Entry, m: &Metadata) -> bool {
+    m.lens_model.is_empty()
+        && m.lens_id != 0
+        && e.lens_id == Some(m.lens_id)
+        && maker(&e.make) == maker(&m.make)
+}
+/// The maker's first word, so Adobe's "NIKON CORPORATION" is the "Nikon" a camera
+/// records: lens IDs only compare within one maker.
+fn maker(s: &str) -> String {
+    key(s).split(' ').next().unwrap_or("").to_string()
 }
 /// The photo's crop factor, when its 35mm-equivalent focal length is recorded.
 fn crop_factor(m: &Metadata) -> Option<f32> {
@@ -269,10 +291,38 @@ impl Library {
         }
         Self::from_texts(files.iter().map(|(n, t)| (n.as_str(), t.as_str())))
     }
+    /// The lens IDs that cannot say which lens a photo used, because the profiles
+    /// carrying them describe more than one lens. Adobe's files hold the maker's own
+    /// numbering, and it is not unique: Nikon's 165 is the 105mm f/1.4E, the 35mm
+    /// f/1.8G and the 28-300mm f/3.5-5.6 alike, and a photo leaves no way to tell
+    /// them apart. RAW and non-RAW files of one lens name the same lens, so they
+    /// stay usable.
+    fn shared_lens_ids(&self, m: &Metadata) -> HashSet<u32> {
+        let mut lenses: HashMap<u32, HashSet<String>> = HashMap::new();
+        for e in self.profiles.iter().flat_map(|p| p.entries.iter()) {
+            let Some(id) = e.lens_id else { continue };
+            if maker(&e.make) != maker(&m.make) {
+                continue;
+            }
+            let lens = e.lens.iter().map(|l| key(l)).collect::<Vec<_>>().join("|");
+            lenses.entry(id).or_default().insert(lens);
+        }
+        lenses
+            .into_iter()
+            .filter(|(_, lenses)| lenses.len() > 1)
+            .map(|(id, _)| id)
+            .collect()
+    }
     /// The profiles a photo can use, Lightroom's Profile menus for its camera: those
     /// with an entry covering its sensor, raw profiles in place of non-raw ones for
     /// the same lens.
     pub fn for_photo(&self, m: &Metadata) -> PhotoProfiles {
+        // An entry that matches only by the maker's lens ID identifies the lens when
+        // that ID picks out one lens among the profiles this maker's files describe.
+        let shared = self.shared_lens_ids(m);
+        let identifies = |e: &Entry| {
+            lens_matches(e, m) && !(shared.contains(&m.lens_id) && lens_id_matches(e, m))
+        };
         let fits: Vec<&Arc<ImportedProfile>> = self
             .profiles
             .iter()
@@ -305,7 +355,7 @@ impl Library {
                     .usable()
                     // Entries of this lens without a correction model don't make it
                     // a profile of this lens.
-                    .filter(|e| e.has_model(m) && lens_matches(e, m))
+                    .filter(|e| e.has_model(m) && identifies(e))
                     .filter_map(|e| make_rank(e, m))
                     .min(),
                 correction: OnceLock::new(),
@@ -493,11 +543,24 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
 /// first radial parameters (k1, a1).
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_profile(make: &str, lens: &str, name: &str, distortion: f32, vignette: f32) -> String {
+    test_profile_with_lens_id(make, lens, name, None, distortion, vignette)
+}
+/// `test_profile` with the profile's `stCamera:LensID` (Nikon's `LensIDNumber`) set.
+#[cfg(any(test, feature = "test-support"))]
+pub fn test_profile_with_lens_id(
+    make: &str,
+    lens: &str,
+    name: &str,
+    lens_id: Option<u32>,
+    distortion: f32,
+    vignette: f32,
+) -> String {
+    let id = lens_id.map_or_else(String::new, |v| format!(" stCamera:LensID=\"{v}\""));
     format!(
         r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
 <rdf:Description xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">
 <photoshop:CameraProfiles><rdf:Seq>
-<rdf:li><rdf:Description stCamera:Make="{make}" stCamera:CameraRawProfile="True" stCamera:Lens="{lens}"
+<rdf:li><rdf:Description stCamera:Make="{make}" stCamera:CameraRawProfile="True" stCamera:Lens="{lens}"{id}
  stCamera:LensPrettyName="{make} {lens}" stCamera:ProfileName="{name}" stCamera:SensorFormatFactor="1"
  stCamera:FocalLength="35" stCamera:ApertureValue="2">
  <stCamera:PerspectiveModel><rdf:Description stCamera:RadialDistortParam1="{distortion}">
@@ -621,6 +684,163 @@ mod tests {
         let crop = correction(&entries, &aps_c).unwrap();
         assert!((crop.vignetting_gain(1.) - c.vignetting_gain(2. / 3.)).abs() < 0.01);
         assert!(parse("<x/>").is_err());
+    }
+    #[test]
+    fn a_lens_id_matches_when_the_file_records_no_lens() {
+        // A D600 writes no lens model, leaving the maker note's LensIDNumber, which
+        // is also the profile's stCamera:LensID, as the only lens identity.
+        let text = test_profile_with_lens_id(
+            "NIKON CORPORATION",
+            "105.0 mm f/2.8",
+            "Adobe (Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED)",
+            Some(138),
+            -0.28,
+            -0.5,
+        );
+        assert_eq!(parse(&text).unwrap()[0].lens_id, Some(138));
+        let library = Library::from_texts([("105.lcp", text.as_str())]);
+        let d600 = |lens_model: &str, lens_id: u32| {
+            let mut m = Metadata {
+                make: "Nikon".into(),
+                model: "D600".into(),
+                lens_model: lens_model.into(),
+                lens_id,
+                focal: 35.,
+                aperture: 2.,
+                width: 6034,
+                height: 4028,
+                ..Default::default()
+            };
+            m.lens_profiles = library.for_photo(&m);
+            m
+        };
+        let unnamed = d600("", 138);
+        assert_eq!(
+            unnamed
+                .lens_profiles
+                .auto(&unnamed)
+                .map(|c| c.profile.filename.as_str()),
+            Some("105.lcp")
+        );
+        // Another lens' ID does not stand in for it.
+        let other = d600("", 39);
+        assert!(other.lens_profiles.auto(&other).is_none());
+        // A file that does record a lens still matches by name, not by ID.
+        let named = d600("105.0 mm f/2.8", 39);
+        assert_eq!(
+            named
+                .lens_profiles
+                .auto(&named)
+                .map(|c| c.profile.filename.as_str()),
+            Some("105.lcp")
+        );
+    }
+    #[test]
+    fn a_shared_lens_id_is_not_matched_automatically() {
+        // Adobe's files hold the maker's own lens numbering, and Nikon's is not
+        // unique: 165 is the 105mm f/1.4E and the 35mm f/1.8G alike, so an ID on its
+        // own cannot say which lens took the photo.
+        let nikon = |lens: &str, id: u32| {
+            test_profile_with_lens_id(
+                "NIKON CORPORATION",
+                lens,
+                &format!("Adobe (Nikon {lens})"),
+                Some(id),
+                -0.1,
+                -0.5,
+            )
+        };
+        let f14 = nikon("105.0 mm f/1.4", 165);
+        let f18 = nikon("35.0 mm f/1.8", 165);
+        let micro = nikon("105.0 mm f/2.8", 138);
+        // Another maker numbers its own lenses: its 138 says nothing about this camera.
+        let canon = test_profile_with_lens_id(
+            "Canon",
+            "50.0 mm f/1.4",
+            "Adobe (Canon 50mm f/1.4)",
+            Some(138),
+            -0.1,
+            -0.5,
+        );
+        let library = Library::from_texts([
+            ("f14.lcp", f14.as_str()),
+            ("f18.lcp", f18.as_str()),
+            ("micro.lcp", micro.as_str()),
+            ("canon.lcp", canon.as_str()),
+        ]);
+        let photo = |lens_id: u32| {
+            let mut m = Metadata {
+                make: "Nikon".into(),
+                model: "D600".into(),
+                lens_id,
+                focal: 35.,
+                aperture: 2.,
+                width: 6034,
+                height: 4028,
+                ..Default::default()
+            };
+            m.lens_profiles = library.for_photo(&m);
+            m
+        };
+        // Two lenses to choose from: neither is taken, but both stay in the menus.
+        let shared = photo(165);
+        assert_eq!(shared.lens_profiles.all().len(), 4);
+        assert!(shared.lens_profiles.auto(&shared).is_none());
+        // A lens ID only this maker's one profile carries is the automatic choice.
+        let unique = photo(138);
+        assert_eq!(
+            unique
+                .lens_profiles
+                .auto(&unique)
+                .map(|c| c.profile.filename.as_str()),
+            Some("micro.lcp")
+        );
+    }
+    #[test]
+    fn reads_entries_written_as_parse_type_resource() {
+        let text = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">
+<photoshop:CameraProfiles><rdf:Seq>
+<rdf:li rdf:parseType="Resource">
+<stCamera:Make>NIKON CORPORATION</stCamera:Make>
+<stCamera:CameraRawProfile>True</stCamera:CameraRawProfile>
+<stCamera:Lens>105.0 mm f/2.8</stCamera:Lens>
+<stCamera:LensPrettyName>Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED</stCamera:LensPrettyName>
+<stCamera:ProfileName>Adobe (Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED)</stCamera:ProfileName>
+<stCamera:SensorFormatFactor>1.000000</stCamera:SensorFormatFactor>
+<stCamera:FocalLength>105.000000</stCamera:FocalLength>
+<stCamera:ApertureValue>2.970854</stCamera:ApertureValue>
+<stCamera:PerspectiveModel rdf:parseType="Resource">
+<stCamera:FocalLengthX>2.793782</stCamera:FocalLengthX>
+<stCamera:RadialDistortParam1>-0.281840</stCamera:RadialDistortParam1>
+<stCamera:RadialDistortParam2>2.421015</stCamera:RadialDistortParam2>
+<stCamera:ChromaticRedGreenModel rdf:parseType="Resource">
+<stCamera:ScaleFactor>0.999994</stCamera:ScaleFactor>
+<stCamera:RadialDistortParam1>0.000811</stCamera:RadialDistortParam1>
+</stCamera:ChromaticRedGreenModel>
+<stCamera:ChromaticBlueGreenModel rdf:parseType="Resource">
+<stCamera:ScaleFactor>0.999850</stCamera:ScaleFactor>
+<stCamera:RadialDistortParam1>-0.004575</stCamera:RadialDistortParam1>
+</stCamera:ChromaticBlueGreenModel>
+<stCamera:VignetteModel rdf:parseType="Resource">
+<stCamera:VignetteModelParam1>-23.421628</stCamera:VignetteModelParam1>
+<stCamera:VignetteModelParam2>513.557706</stCamera:VignetteModelParam2>
+<stCamera:VignetteModelParam3>-2930.260133</stCamera:VignetteModelParam3>
+</stCamera:VignetteModel>
+</stCamera:PerspectiveModel>
+</rdf:li>
+</rdf:Seq></photoshop:CameraProfiles></rdf:Description></rdf:RDF></x:xmpmeta>"#;
+        let entries = parse(text).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].lens, ["105.0 mm f/2.8"]);
+        assert_eq!(
+            entries[0].name,
+            "Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED"
+        );
+        assert!(entries[0].raw);
+        assert!(entries[0].distortion.is_some());
+        assert!(entries[0].vignette.is_some());
+        assert!(entries[0].red.is_some() && entries[0].blue.is_some());
     }
     #[test]
     fn import_validates_and_copies() {

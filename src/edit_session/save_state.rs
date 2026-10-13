@@ -84,6 +84,13 @@ impl SaveState {
             error,
         };
     }
+    /// A save that failed is tried again at once, as after its file was
+    /// found again.
+    pub(crate) fn retry_now(&mut self) {
+        if let Self::Failed { retry_after, .. } = self {
+            *retry_after = Instant::now();
+        }
+    }
     pub(crate) fn message(&self) -> Option<&str> {
         match self {
             Self::Failed { error, .. } | Self::Protected(error) => Some(error),
