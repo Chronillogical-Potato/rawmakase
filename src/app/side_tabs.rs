@@ -42,6 +42,10 @@ pub(super) fn rail_id(tab: DevelopTab) -> egui::Id {
 fn peek_id() -> egui::Id {
     egui::Id::new("develop-tabs-peek")
 }
+/// Whether the window had room for the panel beside the photo last frame.
+fn room_id() -> egui::Id {
+    egui::Id::new("develop-tabs-room")
+}
 
 impl Editor {
     /// The rail, drawn first so it takes the window's right edge, outside
@@ -51,7 +55,6 @@ impl Editor {
     /// to draw once the adjustments are.
     pub(super) fn develop_rail_edge(&mut self, ui: &mut egui::Ui) -> bool {
         let ctx = ui.ctx().clone();
-        let shown = self.panel_shown(WorkspacePanel::Presets);
         if !self.panel_shown(WorkspacePanel::Right) {
             return false;
         }
@@ -62,8 +65,8 @@ impl Editor {
         let adjustments = width("adjustments", super::workspace::ADJUSTMENTS_DEFAULT);
         let room = ui.available_width() - RAIL_WIDTH - adjustments - width("presets", PANEL_WIDTH)
             >= PHOTO_MIN;
-        let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));
-        let click = self.develop_rail(ui, shown && (room || peek));
+        ctx.data_mut(|d| d.insert_temp(room_id(), room));
+        let click = self.develop_rail(ui, self.develop_tabs_open());
         match click {
             Some(TabClick::Open(tab)) => {
                 // A tab in place of a tool's drawer ends the tool.
@@ -71,25 +74,65 @@ impl Editor {
                     self.view.toggle(self.view.tool);
                 }
                 self.set_develop_tab(tab);
-                if !shown {
-                    self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets));
-                }
-                ctx.data_mut(|d| d.insert_temp(peek_id(), !room));
-            }
-            // Asked for in a narrow window, it folds back to fit; otherwise
-            // it stays folded.
-            Some(TabClick::Fold) if peek && !room => {
-                ctx.data_mut(|d| d.insert_temp(peek_id(), false));
+                self.open_develop_tabs();
             }
             Some(TabClick::Fold) => {
-                self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets));
+                self.fold_develop_tabs();
             }
             Some(TabClick::Tool(tool)) => self.view.toggle(tool),
             None => {}
         }
         // A tool's drawer opens the panel whatever its fold or the room.
-        let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));
-        has_drawer(self.view.tool) || self.panel_shown(WorkspacePanel::Presets) && (room || peek)
+        has_drawer(self.view.tool) || self.develop_tabs_open()
+    }
+    /// Whether the tab panel shows its tab: not folded, and with room beside
+    /// the photo as last laid out, or asked for in a narrow window.
+    fn develop_tabs_open(&self) -> bool {
+        let (room, peek) = self.context.data(|d| {
+            (
+                d.get_temp::<bool>(room_id()).unwrap_or(true),
+                d.get_temp::<bool>(peek_id()).unwrap_or(false),
+            )
+        });
+        self.panel_shown(WorkspacePanel::Presets) && (room || peek)
+    }
+    /// Opens the tab panel, in a narrow window too; false if the layout
+    /// could not be saved.
+    fn open_develop_tabs(&mut self) -> bool {
+        let room = self
+            .context
+            .data(|d| d.get_temp::<bool>(room_id()).unwrap_or(true));
+        let shown = self.panel_shown(WorkspacePanel::Presets)
+            || self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets));
+        self.context.data_mut(|d| d.insert_temp(peek_id(), !room));
+        shown
+    }
+    /// Folds the tab panel. One asked for in a narrow window folds back to
+    /// fit and stays unfolded for a wider one; false if the layout could not
+    /// be saved.
+    fn fold_develop_tabs(&mut self) -> bool {
+        let (room, peek) = self.context.data(|d| {
+            (
+                d.get_temp::<bool>(room_id()).unwrap_or(true),
+                d.get_temp::<bool>(peek_id()).unwrap_or(false),
+            )
+        });
+        if peek && !room {
+            self.context.data_mut(|d| d.insert_temp(peek_id(), false));
+            true
+        } else {
+            self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets))
+        }
+    }
+    /// Folds the tab panel if it shows, or opens it, as its open tab's rail
+    /// button and the others do: for `panels:presets`. False if the layout
+    /// could not be saved.
+    pub(super) fn toggle_develop_tabs(&mut self) -> bool {
+        if self.develop_tabs_open() {
+            self.fold_develop_tabs()
+        } else {
+            self.open_develop_tabs()
+        }
     }
     /// The tab panel between the adjustments and the photo, if `open`.
     pub(super) fn develop_tab_panel(&mut self, ui: &mut egui::Ui, open: bool) {
