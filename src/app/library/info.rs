@@ -53,8 +53,8 @@ impl Library {
                         Some(super::Refusal::Offline) => {
                             "Offline: relink its folder to edit".into()
                         }
-                        Some(super::Refusal::NotRaw(format)) => {
-                            format!("{format} files can't be edited in Develop")
+                        Some(super::Refusal::Unsupported(reason)) => {
+                            format!("{reason} images can't be edited in Develop")
                         }
                         None if photo.as_ref().is_some_and(|p| p.has_lightroom_edits) => {
                             "Has Lightroom edits".into()

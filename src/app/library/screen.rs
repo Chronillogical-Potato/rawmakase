@@ -301,30 +301,42 @@ fn work(
     }
 }
 
-/// `path` within `edge` pixels: a RAW developed with its edit (or the
-/// defaults Develop opens it with) from the fast half-size decode; a JPEG,
-/// TIFF or PNG as it is.
+/// `path` within `edge` pixels: developed with its edit (or, for a RAW, the
+/// defaults Develop opens it with), as `previews::develop_quickly` does; a JPEG,
+/// TIFF or PNG without an edit as it is, which its defaults reproduce.
 fn render(
     path: &Path,
     edge: u32,
     edit: Option<&EditSource>,
     cancel: &AtomicBool,
 ) -> anyhow::Result<image::RgbImage> {
-    if !crate::storage::is_raw(path) {
+    let edited = matches!(edit, Some(EditSource::Recipe(_) | EditSource::Lightroom(_)));
+    if !edited && !crate::storage::is_raw(path) {
         return Ok(thumbnails::downscale(&crate::raster::decode(path)?, edge));
     }
-    let raw = crate::photo::open(path)?;
-    let recipe = EditSource::recipe(edit, &raw.metadata)?;
-    let image = raw.develop(crate::camera_data::Decode::Half, cancel)?;
-    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
-    let out = crate::develop::render(&image, &recipe.checked()?, edge)?;
-    image::RgbImage::from_raw(out.width, out.height, out.rgb8())
-        .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))
+    super::previews::develop_quickly(path, edit, edge, cancel)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_jpeg_shows_with_its_edit_and_as_it_is_without() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("photo.jpg");
+        let edit = super::super::previews::tests::edited_jpeg(&path)?;
+        let cancel = AtomicBool::new(false);
+        let edited = render(&path, 64, Some(&edit), &cancel)?;
+        assert!(
+            edited.pixels().all(|p| p.0[1] > 75),
+            "{:?}",
+            edited.get_pixel(0, 0)
+        );
+        let unedited = render(&path, 64, None, &cancel)?;
+        assert!(unedited.pixels().all(|p| p.0[1].abs_diff(60) <= 2));
+        Ok(())
+    }
 
     fn photo(id: PhotoId, path: &Path) -> Photo {
         Photo {

@@ -400,13 +400,16 @@ impl Editor {
             .as_ref()
             .map(|m| egui::Id::new(("adobe-profiles", &m.make, &m.model)));
         let adobe: Vec<std::path::PathBuf> = match (adobe_key, &self.document.metadata) {
-            (Some(key), Some(m)) => ui.ctx().data_mut(|d| {
+            // A JPEG, TIFF or PNG has its Embedded profile only.
+            (Some(key), Some(m)) if !m.is_rendered() => ui.ctx().data_mut(|d| {
                 d.get_temp_mut_or_insert_with(key, || crate::camera_profiles::adobe_installed(m))
                     .clone()
             }),
             _ => Vec::new(),
         };
         let metadata = self.document.metadata.clone();
+        // A JPEG, TIFF or PNG: its Embedded profile, and relative white balance.
+        let rendered = metadata.as_ref().is_some_and(|m| m.is_rendered());
         let profiles = self.document.profiles.clone();
         let profile_errors = self.document.profile_errors.clone();
         let histogram = self.preview.histogram.bins;
@@ -490,10 +493,15 @@ impl Editor {
                     .width(ui.available_width())
                     .selected_text(r.profile.as_ref().map_or(matrix, |p| p.name.as_str()))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut r.profile, None, matrix);
+                        if !rendered {
+                            ui.selectable_value(&mut r.profile, None, matrix);
+                        }
                         for profile in &profiles {
                             ui.selectable_value(&mut r.profile, Some(profile.clone()), &profile.name)
                                 .on_hover_text(&profile.copyright);
+                        }
+                        if rendered {
+                            return;
                         }
                         ui.separator();
                         if !adobe.is_empty()
@@ -576,13 +584,24 @@ impl Editor {
                 (shot.temperature, shot.tint)
             });
             control_row(ui, "WB", |ui| {
-                let current = (r.temperature, r.tint);
+                // A rendered file's white balance is relative Temp and Tint, which
+                // Auto records too; As Shot is 0 and 0.
+                let (current, as_shot) = if rendered {
+                    (
+                        (r.incremental_temperature, r.incremental_tint),
+                        Some((0., 0.)),
+                    )
+                } else {
+                    ((r.temperature, r.tint), as_shot)
+                };
                 let near =
                     |(t, n): (f32, f32)| (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5;
                 let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
                     "Auto"
                 } else if as_shot.is_some_and(near) {
                     "As Shot"
+                } else if rendered {
+                    "Custom"
                 } else {
                     NamedWhiteBalance::ALL
                         .into_iter()
@@ -633,7 +652,13 @@ impl Editor {
                         {
                             auto_request = Some(AutoKind::WhiteBalance);
                         }
-                        for named in NamedWhiteBalance::ALL {
+                        // Kelvin presets are for RAW files, as in Lightroom.
+                        let named = if rendered {
+                            &[][..]
+                        } else {
+                            &NamedWhiteBalance::ALL[..]
+                        };
+                        for &named in named {
                             if ui
                                 .selectable_label(selected == named.name(), named.name())
                                 .clicked()
@@ -653,8 +678,13 @@ impl Editor {
                     });
             });
             let photo = metadata.as_ref();
-            setting_control(ui, r, ParameterId::Temperature, 6500., photo);
-            setting_control(ui, r, ParameterId::Tint, 0., photo);
+            if rendered {
+                setting_control(ui, r, ParameterId::IncrementalTemperature, 0., photo);
+                setting_control(ui, r, ParameterId::IncrementalTint, 0., photo);
+            } else {
+                setting_control(ui, r, ParameterId::Temperature, 6500., photo);
+                setting_control(ui, r, ParameterId::Tint, 0., photo);
+            }
             subheading(ui, "Tone");
             for id in [
                 ParameterId::Exposure,

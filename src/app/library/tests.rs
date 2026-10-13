@@ -47,28 +47,97 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     let ctx = egui::Context::default();
     let library = Library::load(&path, ctx.clone())?;
     let photo = library.session.photos[0].clone();
-    assert_eq!(
-        develop_refusal(&photo, true),
-        Some(Refusal::NotRaw("JPG".into()))
-    );
+    // A JPEG opens in Develop; only an offline file is refused.
+    assert_eq!(develop_refusal(&photo, true), None);
     assert_eq!(develop_refusal(&photo, false), Some(Refusal::Offline));
-    assert_eq!(Refusal::NotRaw("JPG".into()).label(), "JPG file");
+    assert_eq!(Refusal::Offline.label(), "Offline");
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
     editor.module = Module::Library;
     editor.develop_catalog_photo(photo.id);
+    assert!(editor.module == Module::Develop);
+    assert!(editor.not_editable.is_none());
+    assert_eq!(editor.document.catalog_photo, Some(photo.id));
+    // Back in the Library, the file goes offline.
+    editor.module = Module::Library;
+    std::fs::remove_file(folder.join("a.jpg"))?;
+    editor.develop_catalog_photo(photo.id);
     assert!(editor.module == Module::Library);
     let (title, reason) = editor.not_editable.clone().unwrap();
     assert_eq!(title, "a.jpg can't be opened in Develop");
-    assert!(reason.contains("camera RAW"));
-    // Dismissed, then the file goes offline.
-    editor.not_editable = None;
-    std::fs::remove_file(folder.join("a.jpg"))?;
-    editor.develop_catalog_photo(photo.id);
-    assert!(editor.not_editable.unwrap().1.contains("offline"));
+    assert!(reason.contains("offline"));
     Ok(())
 }
 
+#[test]
+fn an_unsupported_jpeg_says_why_in_develop() -> Result<()> {
+    use image::ImageEncoder;
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("print.jpg");
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(&file)?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    // What opening it says.
+    let error = crate::photo::open_source(&file, &Default::default())
+        .err()
+        .expect("a CMYK file can't be opened");
+    let refusal = Refusal::opening(&error).expect("a refusal");
+    assert!(matches!(&refusal, Refusal::Unsupported(_)), "{refusal:?}");
+    assert_eq!(refusal.detail(), "RAWmakase can't edit CMYK images");
+    // Develop says so when it opens it.
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].clone();
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.module = Module::Library;
+    editor.develop_catalog_photo(photo.id);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while editor.load.is_running() {
+        assert!(std::time::Instant::now() < until, "the load never ended");
+        editor.events(&ctx);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(editor.status, "RAWmakase can't edit CMYK images");
+    Ok(())
+}
+
+/// The Loupe shows an edited JPEG through Develop's pipeline, with its edit; an
+/// unedited one keeps its own, quicker preview, which looks the same.
+#[test]
+fn loupe_develops_a_jpeg_once_it_has_an_edit() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("a.jpg");
+    image::RgbImage::from_pixel(64, 48, image::Rgb([90, 120, 150])).save(&file)?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx)?;
+    library.wait_for_availability();
+    let id = library.session.photos[0].id;
+    library.select(Some(id));
+    library.open_loupe();
+    assert_eq!(library.loupe_develops(), None);
+    let recipe = crate::model::recipe::Recipe {
+        exposure: 1.,
+        ..Default::default()
+    };
+    library.session.catalog.save_edit(
+        id,
+        &file,
+        &recipe,
+        &Default::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
+    assert_eq!(library.loupe_develops(), Some(id));
+    Ok(())
+}
 #[test]
 fn a_file_found_again_is_checked_back_online() -> Result<()> {
     let directory = tempfile::tempdir()?;

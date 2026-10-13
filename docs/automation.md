@@ -213,7 +213,8 @@ different command ends that group. Auto tone and white-balance commands return
 Common error codes include `invalid_request`, `unsupported_protocol`,
 `unauthorized`, `busy`, `stale_target`, `target_required`, `no_document`,
 `not_ready`, `unsupported_parameter`, `not_editable`, `protected`, `save_failed`,
-`already_exists` and `unknown_job`.
+`already_exists` and `unknown_job`. `open` returns `not_editable` for a photo whose
+file is offline; a JPEG, PNG or TIFF opens as a RAW does.
 
 The request limit is 64 KiB, the input queue is bounded and at most 16 socket
 clients are served concurrently. If a request has not started within three

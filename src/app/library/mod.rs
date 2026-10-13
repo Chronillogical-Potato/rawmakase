@@ -916,20 +916,27 @@ impl Library {
         self.fields.clear();
     }
 }
-/// Why Develop cannot open a photo: it edits camera RAW files that are
-/// online.
+/// Why Develop cannot open a photo: it edits RAW, JPEG, PNG and TIFF files that
+/// are online and that it can read.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) enum Refusal {
     Offline,
-    /// Not a camera RAW: the file's format, e.g. "JPEG".
-    NotRaw(String),
+    /// Found when the file is opened: pixels Develop can't edit, e.g. "CMYK".
+    Unsupported(String),
 }
 impl Refusal {
+    /// What opening a photo failed with, when it is a refusal rather than an
+    /// error: a JPEG, PNG or TIFF of a kind Develop can't edit.
+    pub(in crate::app) fn opening(error: &anyhow::Error) -> Option<Self> {
+        error
+            .downcast_ref::<crate::raster::Unsupported>()
+            .map(|unsupported| Self::Unsupported(unsupported.0.clone()))
+    }
     /// A word or two, shown beside a greyed-out Open in Develop.
     pub(in crate::app) fn label(&self) -> String {
         match self {
             Self::Offline => "Offline".into(),
-            Self::NotRaw(format) => format!("{format} file"),
+            Self::Unsupported(reason) => format!("{reason} file"),
         }
     }
     /// The reason in full, with what to do about it.
@@ -939,9 +946,7 @@ impl Refusal {
                 "The photo is offline. Use Locate root folder or right-click its folder to relink it."
                     .into()
             }
-            Self::NotRaw(format) => format!(
-                "{format} files can be browsed in Library; Develop edits camera RAW files."
-            ),
+            Self::Unsupported(reason) => format!("RAWmakase can't edit {reason} images"),
         }
     }
 }
@@ -955,15 +960,10 @@ pub(in crate::app) struct DevelopSource {
     pub tag: String,
 }
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
-/// `available`.
-pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
-    if !available {
-        Some(Refusal::Offline)
-    } else if !crate::storage::is_raw(&photo.path) {
-        Some(Refusal::NotRaw(photo.format.clone()))
-    } else {
-        None
-    }
+/// `available`. Whatever its format, an available photo opens; one Develop can't
+/// read is refused when opened (see [`Refusal::opening`]).
+pub(in crate::app) fn develop_refusal(_photo: &Photo, available: bool) -> Option<Refusal> {
+    (!available).then_some(Refusal::Offline)
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
 /// else its Lightroom settings.

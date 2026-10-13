@@ -268,6 +268,29 @@ fn refused_open_does_not_claim_another_photo_opened() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn a_jpeg_opens_in_develop_by_command() -> anyhow::Result<()> {
+    let (mut e, ctx) = editor();
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    image::RgbImage::new(8, 8).save(photos.join("a.jpg"))?;
+    let db = dir.path().join("catalog.rawmakase");
+    crate::catalog::Catalog::create(&db)?.add_folder(&photos)?;
+    e.library = Some(Box::new(super::super::library::Library::load(
+        &db,
+        ctx.clone(),
+    )?));
+    e.module = Module::Library;
+    let id = e.library.as_ref().unwrap().session.photos[0].id;
+    let outcome = e
+        .execute_command(Command::new(Operation::Open(PhotoTarget::Id(id))), &ctx)
+        .map_err(|error| anyhow::anyhow!("{}: {}", error.code, error.message))?;
+    assert!(matches!(outcome, Outcome::Opened { .. }));
+    assert_eq!(e.document.catalog_photo, Some(id));
+    assert!(e.module == Module::Develop);
+    Ok(())
+}
+#[test]
 fn output_job_publishes_the_captured_revision_and_never_clobbers() -> anyhow::Result<()> {
     let (mut e, ctx) = editor();
     let dir = tempfile::tempdir()?;

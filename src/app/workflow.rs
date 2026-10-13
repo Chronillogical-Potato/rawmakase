@@ -97,7 +97,12 @@ impl Editor {
         if let Some(photo) = photo {
             self.request_stand_ins(id, photo, neighbour);
         }
-        self.status = "Reading RAW…".into();
+        self.status = if crate::storage::is_raw(&path) {
+            "Reading RAW…"
+        } else {
+            "Reading photo…"
+        }
+        .into();
         self.loader.submit(LoadJob {
             id,
             path,

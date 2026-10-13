@@ -82,6 +82,9 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
     let library = e.library.as_mut().unwrap();
     library.select(Some(ids[0]));
     library.select_range_to(ids[2]);
+    // The second RAW goes offline; the JPEG is exported like the first.
+    let offline = library.photo(ids[1]).unwrap().path.clone();
+    std::fs::remove_file(&offline)?;
     let scope = e.export_scope().expect("photos to export");
     assert_eq!(
         scope
@@ -89,16 +92,16 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
             .iter()
             .map(|p| p.name.as_str())
             .collect::<Vec<_>>(),
-        ["a.dng", "b.dng"]
+        ["a.dng", "c.jpg"]
     );
     assert_eq!(scope.left_out.len(), 1, "{:?}", scope.left_out);
-    assert_eq!(scope.left_out[0].0, "c.jpg");
+    assert_eq!(scope.left_out[0].0, "b.dng");
     let out = dir.path().join("out");
     export(&mut e, scope.clone(), settings(&out))?;
     wait(&mut e, &ctx);
-    assert_eq!(listing(&out), ["a.tif", "b.tif"]);
+    assert_eq!(listing(&out), ["a.tif", "c.tif"]);
     assert_eq!(e.status, "Exported 2 of 3 · 1 not exported");
-    // Kept in the top bar until read: the JPEG, and why.
+    // Kept in the top bar until read: the offline RAW, and why.
     let summary = e.exports.summary.clone().expect("a report");
     assert_eq!(summary.problems.len(), 1);
     assert!(summary.problems[0].1.contains("can't be exported"));
@@ -106,14 +109,14 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
     // Again into the same folder: Ask asks once for both files.
     export(&mut e, scope, settings(&out))?;
     let pending = e.exports.pending.take().expect("the question");
-    assert_eq!(pending.conflicts, [out.join("a.tif"), out.join("b.tif")]);
+    assert_eq!(pending.conflicts, [out.join("a.tif"), out.join("c.tif")]);
     e.plan_export(pending, Some(Existing::Unique));
     wait(&mut e, &ctx);
-    assert_eq!(listing(&out), ["a-2.tif", "a.tif", "b-2.tif", "b.tif"]);
+    assert_eq!(listing(&out), ["a-2.tif", "a.tif", "c-2.tif", "c.tif"]);
     // That export went well, but the first one's report is unread: it stays, and
     // the two add up until it is dismissed.
     let summary = e.exports.summary.clone().expect("the unread report");
-    // The JPEG was left out of both.
+    // The offline RAW was left out of both.
     assert_eq!(summary.line(), "Exported 4 of 6 · 2 not exported");
     Ok(())
 }

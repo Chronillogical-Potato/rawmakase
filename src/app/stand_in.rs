@@ -124,10 +124,12 @@ impl Editor {
     fn stand_in_for(&self, photo: PhotoId) -> Option<Wanted> {
         let library = self.library.as_ref()?;
         let path = library.photo(photo)?.path.clone();
-        if !crate::storage::is_raw(&path) {
+        let record = library.session.catalog.edit_record(photo).ok()?;
+        // A JPEG, TIFF or PNG without an edit is shown as its file is, and never
+        // stored (see `build_items`).
+        if !crate::storage::is_raw(&path) && !super::preview_build::has_edit(&record) {
             return None;
         }
-        let record = library.session.catalog.edit_record(photo).ok()?;
         Some(Wanted {
             photo,
             path,
@@ -212,7 +214,7 @@ impl Editor {
         let Some(library) = &self.library else {
             return;
         };
-        let offline = library.loupe_offline_raw();
+        let offline = library.loupe_offline_developed();
         if offline == library.loupe_stored().map(|(id, _)| *id) {
             return;
         }

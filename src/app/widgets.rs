@@ -989,8 +989,12 @@ pub(super) fn setting_slider(
     default: f32,
 ) -> SliderEvent {
     let gradient = match id {
-        ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
-        ParameterId::Tint | ParameterId::ShadowTint => Some(TINT_GRADIENT),
+        ParameterId::Temperature | ParameterId::IncrementalTemperature => {
+            Some(TEMPERATURE_GRADIENT)
+        }
+        ParameterId::Tint | ParameterId::IncrementalTint | ParameterId::ShadowTint => {
+            Some(TINT_GRADIENT)
+        }
         _ => None,
     };
     descriptor_slider(ui, id.descriptor(), value, default, gradient)

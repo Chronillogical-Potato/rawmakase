@@ -74,7 +74,7 @@ pub(super) fn identity(
 
 /// Whether a photo has an edit of its own, saved or from Lightroom; the grid
 /// shows the embedded preview of a photo without one.
-fn has_edit(record: &EditRecord) -> bool {
+pub(super) fn has_edit(record: &EditRecord) -> bool {
     record.recipe.is_some() || record.lightroom().is_some()
 }
 
@@ -752,8 +752,8 @@ impl Editor {
         builds.builder(&ctx)
     }
 
-    /// What building `ids` would capture now: an item per available RAW, and how
-    /// many others were skipped.
+    /// What building `ids` would capture now: an item per available RAW or edited
+    /// JPEG, TIFF or PNG, and how many others were skipped.
     fn build_items(
         &self,
         ids: &[PhotoId],
@@ -792,25 +792,28 @@ impl Editor {
             .photo_records(&photo_ids)
             .map_err(|e| format!("The catalog could not be read: {e:#}"))?;
         let edge = self.preview_builds.edge(kind);
-        let items = chosen
-            .into_iter()
-            .zip(records)
-            .map(|((photo, name, path), record)| Item {
+        let mut items = Vec::with_capacity(chosen.len());
+        for ((photo, name, path), record) in chosen.into_iter().zip(records) {
+            let edited = has_edit(&record.edit);
+            // A JPEG, TIFF or PNG without an edit is its own preview.
+            if !edited && !crate::storage::is_raw(&path) {
+                skipped += 1;
+                continue;
+            }
+            items.push(Item {
                 catalog: catalog.clone(),
                 photo,
                 name,
                 identity: identity(&record.edit, &self.raw_defaults, self.demosaic),
-                ticket: has_edit(&record.edit)
-                    .then(|| library.edited_ticket(photo))
-                    .flatten(),
+                ticket: edited.then(|| library.edited_ticket(photo)).flatten(),
                 record: record.edit,
                 path,
                 defaults: self.raw_defaults.clone(),
                 demosaic: self.demosaic.effective(),
                 kind,
                 edge,
-            })
-            .collect();
+            });
+        }
         Ok((items, skipped))
     }
 

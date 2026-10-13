@@ -23,6 +23,10 @@ struct FullJob {
     full: FullSize,
     prefetch: Option<Prefetch>,
 }
+/// What a failed load says: why Develop refuses the file, or the error.
+fn load_error(e: &anyhow::Error) -> String {
+    crate::app::library::Refusal::opening(e).map_or_else(|| format!("{e:#}"), |r| r.detail())
+}
 /// Runs `load`, turning a panic into an error, so the photo does not stay loading.
 fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(load)).unwrap_or_else(|panic| {
@@ -94,7 +98,7 @@ fn full_loader(
                 Event::Failed {
                     id: job.id,
                     task: TaskKind::Load,
-                    error: format!("{e:#}"),
+                    error: load_error(&e),
                 },
             );
         }
@@ -271,7 +275,7 @@ fn opener(
                 Event::Failed {
                     id: job.id,
                     task: TaskKind::Load,
-                    error: format!("{e:#}"),
+                    error: load_error(&e),
                 },
             );
         }
@@ -279,7 +283,7 @@ fn opener(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::app) mod tests {
     use super::*;
     use crate::decode_cache::DecodeCache;
     use std::{sync::mpsc, time::Duration};
@@ -373,7 +377,7 @@ mod tests {
     }
 
     /// A minimal ICC profile that says its pixels are CMYK.
-    fn cmyk_profile() -> Vec<u8> {
+    pub(in crate::app) fn cmyk_profile() -> Vec<u8> {
         let mut icc = vec![0u8; 132];
         icc[0..4].copy_from_slice(&132u32.to_be_bytes());
         icc[8..12].copy_from_slice(&0x0240_0000u32.to_be_bytes());
@@ -410,7 +414,7 @@ mod tests {
                     error,
                 },
             ] => {
-                assert!(error.contains("CMYK"), "{error}")
+                assert_eq!(error, "RAWmakase can't edit CMYK images")
             }
             other => panic!("{:?}", other.iter().map(name).collect::<Vec<_>>()),
         }

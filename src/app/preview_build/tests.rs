@@ -136,23 +136,25 @@ fn save_edit(e: &mut Editor, id: PhotoId, exposure: f32) {
 }
 
 #[test]
-fn only_stale_raws_of_the_selection_are_built() {
-    let (_dir, mut e, ids, cache) = editor(&["a.ARW", "b.ARW", "c.JPG", "d.ARW"]);
-    let [a, b, c, d] = ids[..] else {
-        panic!("four photos")
+fn only_stale_raws_and_edited_files_of_the_selection_are_built() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW", "b.ARW", "c.JPG", "d.ARW", "e.JPG"]);
+    let [a, b, c, d, edited] = ids[..] else {
+        panic!("five photos")
     };
     e.build_previews(&[a], PreviewKind::Standard).unwrap();
     settle(&mut e);
     assert!(fresh(&cache, &e, a));
     std::fs::remove_file(path_of(&e, d)).unwrap();
+    save_edit(&mut e, edited, 1.);
     let queued = e
-        .build_previews(&[a, b, c, d], PreviewKind::Standard)
+        .build_previews(&[a, b, c, d, edited], PreviewKind::Standard)
         .unwrap();
-    // The JPEG and the offline RAW are skipped; the fresh one costs nothing.
+    // The unedited JPEG (its file is its preview) and the offline RAW are skipped;
+    // the fresh one costs nothing; the edited JPEG is built with its edit.
     assert_eq!(
         queued,
         Queued {
-            queued: 2,
+            queued: 3,
             skipped: 2
         }
     );
@@ -160,9 +162,11 @@ fn only_stale_raws_of_the_selection_are_built() {
     assert_eq!(renders_of(&path_of(&e, a)), 1);
     assert_eq!(renders_of(&path_of(&e, b)), 1);
     assert_eq!(renders_of(&path_of(&e, c)), 0);
+    assert_eq!(renders_of(&path_of(&e, edited)), 1);
     assert!(fresh(&cache, &e, b));
+    assert!(fresh(&cache, &e, edited));
     let progress = e.preview_builds.progress().unwrap();
-    assert_eq!((progress.done, progress.total), (2, 2));
+    assert_eq!((progress.done, progress.total), (3, 3));
     assert!(progress.failed.is_empty());
 }
 
