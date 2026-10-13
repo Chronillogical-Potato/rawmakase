@@ -155,7 +155,7 @@ impl Catalog {
     pub fn has_edit(&self, id: PhotoId) -> Result<bool> {
         self.db.read_one(
             sql!(
-                "SELECT recipe IS NOT NULL OR lightroom_develop IS NOT NULL FROM photos WHERE id=?"
+                "SELECT recipe IS NOT NULL OR COALESCE(lightroom_develop, '') <> '' FROM photos WHERE id=?"
             ),
             &[&id],
         )
