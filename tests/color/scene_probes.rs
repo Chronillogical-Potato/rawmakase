@@ -165,6 +165,87 @@ fn scene_output(im: &CameraImage, profiles: &[Arc<CameraProfile>], xmp: &str) ->
     .unwrap()
 }
 
+/// A clipped plateau with a smooth bright edge, surrounded by a dark scene. The
+/// unconstrained Highlights fit solarized it: the centre became much darker than
+/// its rim. Compare spatial contrast with independent Camera Raw measurements,
+/// through DNG decoding, XMP slider/mask translation and the full scene stage.
+#[test]
+fn clipped_highlights_do_not_solarize() {
+    #[derive(Deserialize)]
+    struct Spot {
+        background_ev: i32,
+        highlights: i32,
+        ratio: f64,
+    }
+    #[derive(Deserialize)]
+    struct Spots {
+        cases: Vec<Spot>,
+    }
+    let refs: Spots = serde_json::from_slice(
+        &std::fs::read(corpus().join("camera-raw/highlight-spots.json")).unwrap(),
+    )
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    for key in [-5, -7, -9] {
+        let scene: Vec<[f64; 3]> = (0..480 * 480)
+            .map(|i| {
+                let radius = ((i % 480) as f64 - 240.).hypot((i / 480) as f64 - 240.);
+                let level = f64::from(key) * (1. - ((90. - radius) / 50.).clamp(0., 1.));
+                [level.exp2(); 3]
+            })
+            .collect();
+        let path = dir.path().join("spot.dng");
+        std::fs::write(&path, dng::write_probe(480, 480, &scene, 0.)).unwrap();
+        let im = develop(&path);
+        let profiles = embedded_profiles(&im);
+        for reference in refs.cases.iter().filter(|r| r.background_ev == key) {
+            for masked in [false, true] {
+                let slider = reference.highlights;
+                let case = ProbeCase {
+                    probe: String::new(),
+                    settings: if masked {
+                        BTreeMap::new()
+                    } else {
+                        BTreeMap::from([("Highlights2012".into(), slider.to_string())])
+                    },
+                    mask: if masked {
+                        BTreeMap::from([(
+                            "LocalHighlights2012".into(),
+                            (f64::from(slider) / 100.).to_string(),
+                        )])
+                    } else {
+                        BTreeMap::new()
+                    },
+                    camera_raw: Vec::new(),
+                };
+                let out = scene_output(&im, &profiles, &xmp(&case));
+                let lum = |x: usize, y: usize| {
+                    out.pixels[y * 480 + x]
+                        .iter()
+                        .map(|v| f64::from(*v))
+                        .sum::<f64>()
+                        / 3.
+                };
+                let centre = (235..245)
+                    .flat_map(|y| (235..245).map(move |x| (x, y)))
+                    .map(|(x, y)| lum(x, y))
+                    .sum::<f64>()
+                    / 100.;
+                let rim = (240..331).map(|x| lum(x, 240)).fold(0., f64::max);
+                assert!(centre > 0. && centre.is_finite());
+                let ratio = rim / centre;
+                // Allow 5 percentage points for our different spatial filter. Do
+                // not re-bless the Camera Raw ratios to accommodate a regression.
+                assert!(
+                    ratio <= reference.ratio + 0.05,
+                    "key {key}, Highlights {slider}, masked {masked}: rim/centre {ratio}, Camera Raw {}",
+                    reference.ratio
+                );
+            }
+        }
+    }
+}
+
 /// Patch means (over the three channels) or block luminances of a render.
 fn measure(probe: &Probe, out: &Rendered) -> Vec<f64> {
     let at = |x: u32, y: u32| out.pixels[(y * out.width + x) as usize].map(f64::from);

@@ -66,7 +66,8 @@ pub(super) const SHADOWS: Family = Family {
             0.0000, 0.0000, 0.0000, 0.0000,
         ],
     ],
-};
+}
+.monotone();
 pub(super) const SHADOWS_DETAIL: Family = Family {
     values: [-1., -0.5, -0.25, 0.25, 0.5, 1.],
     lo: -8.0,
@@ -115,7 +116,8 @@ pub(super) const SHADOWS_DETAIL: Family = Family {
             -0.0750, -0.0988, -0.1160, -0.1228, -0.1191,
         ],
     ],
-};
+}
+.monotone();
 pub(super) const SHADOWS_REGION: Family = Family {
     values: [-1., -0.5, -0.25, 0.25, 0.5, 1.],
     lo: -8.0,
@@ -164,7 +166,8 @@ pub(super) const SHADOWS_REGION: Family = Family {
             0.0860, 0.0949, 0.1038, 0.1127, 0.1216, 0.1306,
         ],
     ],
-};
+}
+.monotone();
 pub(super) const HIGHLIGHTS: Family = Family {
     values: [-1., -0.5, -0.25, 0.25, 0.5, 1.],
     lo: -6.0,
@@ -216,7 +219,8 @@ pub(super) const HIGHLIGHTS: Family = Family {
             1.5639, 1.8947, 2.0915, 2.0825, 1.9356,
         ],
     ],
-};
+}
+.monotone();
 pub(super) const DEHAZE: Family = Family {
     values: [-1., -0.4, -0.2, 0.2, 0.4, 1.],
     lo: -12.0,
@@ -268,4 +272,5 @@ pub(super) const DEHAZE: Family = Family {
             0.0132,
         ],
     ],
-};
+}
+.monotone();

@@ -174,6 +174,36 @@ gain (median ΔE00 on the training photos, Shadows +100 1.55 → 1.53 and +50 1.
 Highlights unchanged within 0.02); the cross-validated figures above are from the earlier
 taps.
 
+**Brightness ordering of measured tables.** The fits' smoothness penalty does not
+prevent a decreasing output curve, especially where the clipped-reference exclusion
+leaves few samples. The original Highlights −100 tail had output slopes down to
+−2.28 (log luminance out per log luminance in), turning bright centres darker than
+edges. Smaller violations occurred at Highlights −50, Shadows −100, positive
+Shadows' regional +100 row and Dehaze −100.
+
+`Family::monotone` projects each row's **input + log gain** onto nondecreasing
+values with pooled adjacent violators. This is the least-squares correction in
+output log luminance; it leaves unaffected bins unchanged and permits flat
+compression, rather than inventing a minimum contrast. It runs at compile time on
+the shared data, so slider interpolation, masks, CPU rendering and GPU uploads
+read the same corrected rows. Generated tables retain this projection. It constrains
+each scalar response, not spatial ordering between pixels with different local
+bases, nor every composition of controls. Clarity's spatial contrast is not such
+a scalar response. The existing scene-probe baselines are not changed.
+
+The engine snapshot for `synthetic-d65 / highlights-100` is updated for this
+intentional correction: the offending bright neutral patches become darker
+(largest change ΔE00 3.51; chart mean 0.058). Only that engine snapshot case is
+updated; Camera Raw references and parity-distance baselines remain unchanged.
+
+The clipped-spot references also show that Camera Raw has a modest spatial edge
+lift of its own. Passing the ordering and rim tests does not establish an exact
+match for highlight brightness in every scene; isolated highlights in very dark
+scenes remain an approximation. Cloud contrast at Exposure 0 can also remain
+flatter than Camera Raw after the ordering and partially clipped recovery fixes.
+These regressions protect against solarization, not all differences in highlight
+recovery or the strength of Shadows in dark scenes.
+
 **Positive Highlights' bright end.** The photo tables have few samples far above the
 key: in a dark photo with a bright object, the region 5–7 stops above the key, the
 +100 table lifted 1.09 EV at +5, 0.50 at +6 and 1.03 at +7, a fitting artefact. Positive
@@ -311,6 +341,17 @@ global sliders in Camera Raw (within 0.006–0.012 encoded, against effects of
 
 ## Testing
 
+- **Clipped-highlight regressions (CI)**: `clipped_highlights_do_not_solarize`
+  decodes a synthetic clipped plateau with a smooth radial edge on backgrounds
+  five, seven and nine stops darker. Highlights 0, −50 and −100 run through both
+  global XMP settings and a full-frame mask. Rim/centre luminance ratios must not
+  exceed Camera Raw 18.7's measurements by more than 0.05. References are in
+  `camera-raw/highlight-spots.json`, reproduced by
+  `scripts/corpus/highlight-probes.py`; they are independent references, not
+  blessable engine snapshots. The scalar curve test also sweeps every integer
+  slider position, including interpolation and the clamped extensions, and checks
+  global, per-pixel and GPU-uploaded tables. The hardware test
+  `gpu_measured_tails_match_cpu_globally_and_in_masks` checks actual GPU evaluation.
 - **Tier 1 (stage probes, CI)**: `scene_probes_do_not_regress` (`tests/color/scene_probes.rs`)
   renders synthetic probes to the S3 output tap (`develop::quality::render_stage`) and
   compares them with Camera Raw 18.7's renders of the same probes

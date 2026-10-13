@@ -217,6 +217,61 @@ mod tests {
         assert!(recover_highlights(&im).pixels.iter().all(|p| *p == [1.; 3]));
     }
     #[test]
+    fn wide_partial_highlight_keeps_the_surviving_channels_colour() {
+        let mut im = fixture();
+        im.pixels.fill([0.8, 0.4, 0.2]);
+        for y in 30..51 {
+            for x in 30..51 {
+                im.pixels[y * 96 + x] = [1., 0.6, 0.3];
+            }
+        }
+        let recovered = recover_highlights(&im);
+        for x in 30..51 {
+            let p = recovered.pixels[40 * 96 + x];
+            assert!((p[0] - 1.2).abs() < 1e-4, "x {x}: {p:?}");
+            assert_eq!(p[1..], [0.6, 0.3]);
+        }
+        assert_eq!(recovered.pixels[0], im.pixels[0]);
+    }
+    #[test]
+    fn wide_highlight_with_only_red_remaining_uses_white_balanced_ratios() {
+        let mut im = fixture();
+        im.metadata.wb = [2., 1., 1.5];
+        im.pixels.fill([0.6, 0.8, 1.35]);
+        for y in 30..51 {
+            for x in 30..51 {
+                // 1.5× the surrounding colour, with green and blue sensor-clipped.
+                im.pixels[y * 96 + x] = [0.9, 1., 1.5];
+            }
+        }
+        let recovered = recover_highlights(&im);
+        for x in 30..51 {
+            let p = recovered.pixels[40 * 96 + x];
+            assert_eq!(p[0], 0.9);
+            assert!((p[1] - 1.2).abs() < 1e-4, "x {x}: {p:?}");
+            assert!((p[2] - 2.025).abs() < 1e-4, "x {x}: {p:?}");
+        }
+    }
+    #[test]
+    fn wide_highlight_does_not_borrow_colour_across_a_dark_gap() {
+        let mut im = fixture();
+        im.pixels.fill([0.05; 3]);
+        for y in 20..51 {
+            for x in 5..21 {
+                im.pixels[y * 96 + x] = [0.8, 0.4, 0.2];
+            }
+            for x in 50..71 {
+                im.pixels[y * 96 + x] = [1., 0.6, 0.3];
+            }
+        }
+        let recovered = recover_highlights(&im);
+        // The clipped object's colour is unknown. The separate red object must
+        // not cause its missing channel to be extrapolated to 1.2.
+        let p = recovered.pixels[35 * 96 + 60];
+        assert!((p[0] - 0.45).abs() < 1e-5, "{p:?}");
+        assert_eq!(p[1..], [0.6, 0.3]);
+    }
+    #[test]
     fn cancellation_does_not_publish_partial_frame() {
         let im = fixture();
         assert!(

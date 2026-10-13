@@ -23,6 +23,57 @@ pub(crate) const FLOOR: f32 = 6.103_515_6e-5;
 const REGION_SCALE: f32 = 0.25;
 const REGION_RANGE: f32 = 4.;
 
+impl Family {
+    /// Project output log luminance (input + gain), not gain, onto nondecreasing
+    /// values. Pool adjacent violators gives the least-squares correction, leaving
+    /// every already ordered run alone unless it joins a violating neighbour.
+    ///
+    /// The unconstrained fits exclude clipped reference pixels and can turn back
+    /// on themselves in poorly sampled tails. Do this once, at compile time, on
+    /// the shared data: global curves, masks and GPU uploads must all use it.
+    /// Linear interpolation of these rows (including the identity) preserves the
+    /// constraint. A flat output is allowed; no unmeasured minimum contrast is added.
+    pub(super) const fn monotone(mut self) -> Self {
+        let step = (self.hi - self.lo) / 48.;
+        let mut row = 0;
+        while row < 6 {
+            let mut sums = [0.; 48];
+            let mut counts = [0_usize; 48];
+            let mut blocks = 0;
+            let mut i = 0;
+            while i < 48 {
+                sums[blocks] = self.tables[row][i] + i as f32 * step;
+                counts[blocks] = 1;
+                blocks += 1;
+                while blocks > 1
+                    && sums[blocks - 2] / counts[blocks - 2] as f32
+                        > sums[blocks - 1] / counts[blocks - 1] as f32
+                {
+                    sums[blocks - 2] += sums[blocks - 1];
+                    counts[blocks - 2] += counts[blocks - 1];
+                    blocks -= 1;
+                }
+                i += 1;
+            }
+            i = 0;
+            let mut block = 0;
+            while block < blocks {
+                let end = i + counts[block];
+                while i < end {
+                    // Preserve untouched bins bit for bit (especially identity rows).
+                    if counts[block] > 1 {
+                        self.tables[row][i] = sums[block] / counts[block] as f32 - i as f32 * step;
+                    }
+                    i += 1;
+                }
+                block += 1;
+            }
+            row += 1;
+        }
+        self
+    }
+}
+
 pub(crate) struct LocalToneMap {
     pub(crate) width: usize,
     pub(crate) height: usize,
@@ -378,6 +429,78 @@ pub(super) fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measured_curves_do_not_reverse_brightness() {
+        let mut failures = Vec::new();
+        let gpu = gpu_families();
+        for (slot, (name, f)) in [
+            ("Shadows", &SHADOWS),
+            ("Highlights", &HIGHLIGHTS),
+            ("Dehaze", &super::super::local_tone_data::DEHAZE),
+            ("Shadows detail", &SHADOWS_DETAIL),
+            ("Shadows region", &SHADOWS_REGION),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(&gpu[slot * 296..slot * 296 + 288], f.tables.as_flattened());
+            for s in -100..=100 {
+                let s = s as f32 / 100.;
+                let curve = Curve::new(f, s, 0.);
+                let output = |x: f32| x + family(f, s, 0., x);
+                for i in -40..520 {
+                    let x = f.lo + (f.hi - f.lo) * i as f32 / 480.;
+                    let next = x + (f.hi - f.lo) / 480.;
+                    assert!(output(x).is_finite());
+                    assert!(
+                        (family(f, s, 0., x) - curve.as_ref().map_or(0., |c| c.eval(x))).abs()
+                            < 1e-5
+                    );
+                    if output(next) < output(x) - 1e-5 {
+                        failures.push(format!("{name} at {s}: reversal near {x}"));
+                        break;
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn highlights_do_not_solarize_a_bright_spot_in_a_dark_scene() {
+        let w = 240;
+        let lum: Vec<f32> = (0..w * w)
+            .map(|i| {
+                let r = (i % w) as f32 - 120.;
+                let y = (i / w) as f32 - 120.;
+                let radius = r.hypot(y);
+                (-7. + 7. * ((45. - radius) / 25.).clamp(0., 1.)).exp2()
+            })
+            .collect();
+        let m = LocalToneMap::from_luminance(
+            lum.clone(),
+            [w as u32; 2],
+            [w as u32; 2],
+            Sliders {
+                highlights: -1.,
+                ..Default::default()
+            },
+            true,
+        );
+        let out = |x: usize| {
+            let y = lum[120 * w + x];
+            let global = m.gain(x as f32, 120., y);
+            let masked = m.gain_with(x as f32, 120., y, [0., -1., 0.]);
+            assert!((global - masked).abs() < 1e-5);
+            y * global
+        };
+        let centre = out(120);
+        let rim = (121..165).map(out).fold(0., f32::max);
+        // Camera Raw also has a modest edge lift on a clipped plateau: on this
+        // probe the rim/centre ratio is 1.30. The broken fit produces 2.20.
+        assert!(rim <= centre * 1.35, "centre {centre}, rim {rim}");
+    }
+
     #[test]
     fn blur_preserves_constants_and_means() {
         let x = vec![2.; 30];
