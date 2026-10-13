@@ -10,7 +10,7 @@ Each adjusted render was compared with the default render of the same photo. For
 
 ## Black point
 
-Camera Raw's default render has a black point with a toe below about 0.02 (scene-linear), which does not follow the camera's baseline exposure. It is part of the scene tone stage's measured curves ([what the default render does](scene-tone-stage.md#what-the-default-render-does-in-s3)); a profile whose DefaultBlackRender is None renders without it. The earlier DNG SDK exposure ramp, with its black at 0.0015 × 2^exposure fitted to three photos, scaled with the baseline and crushed the deep shadows of files with a large one. It is kept only as the basis Auto measures ([Auto](#auto)).
+Camera Raw's default render has a black point with a toe below about 0.02 (scene-linear). Its response follows the photo's dark scene level, including camera baseline exposure and Exposure. It is part of the scene tone stage's measured curves ([what the default render does](scene-tone-stage.md#what-the-default-render-does-in-s3)); a profile whose DefaultBlackRender is None renders without it. The earlier DNG SDK exposure ramp, with its black at 0.0015 × 2^exposure fitted to three photos, scaled with the baseline and crushed the deep shadows of files with a large one. It is kept only as the basis Auto measures ([Auto](#auto)).
 
 ## Implementation
 
