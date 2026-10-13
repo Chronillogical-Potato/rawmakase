@@ -3,14 +3,42 @@
 //! the camera embedded, a DNG's profile, baseline exposure, colour matrix, lens
 //! and default crop, and the imported lens profiles that fit. Everything that
 //! develops, previews or exports a photo opens it here.
+use crate::raster;
 use crate::raw::Raw;
 use anyhow::Result;
+use rawmakase_model::camera_data::{CameraImage, Metadata};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 /// The imported lens profiles, shared by everything that opens photos (Develop's
 /// loaders, the Library's previews, exports, Sync Settings) so they are read once
 /// each time the files change, not once per thread.
 static LENS_PROFILES: crate::lens::lcp::LibraryCache = crate::lens::lcp::LibraryCache::new();
+
+/// A photo opened for developing: a RAW still to decode, or a rendered file
+/// already decoded (it has no half-size or cached stage).
+pub enum Opened {
+    Raw(Raw),
+    Rendered(CameraImage),
+}
+impl Opened {
+    pub fn metadata(&self) -> &Metadata {
+        match self {
+            Opened::Raw(raw) => &raw.metadata,
+            Opened::Rendered(image) => &image.metadata,
+        }
+    }
+}
+
+/// Opens `path` as a RAW (LibRaw) when its extension is a RAW's, otherwise as a
+/// JPEG, PNG or TIFF.
+pub fn open_source(path: &Path, cancel: &AtomicBool) -> Result<Opened> {
+    if rawmakase_model::storage::is_raw(path) {
+        open(path).map(Opened::Raw)
+    } else {
+        raster::open(path, cancel).map(Opened::Rendered)
+    }
+}
 
 /// The photo at `path`, opened for developing.
 pub fn open(path: &Path) -> Result<Raw> {
@@ -239,5 +267,32 @@ mod tests {
         }
         let recipe = rawmakase_model::model::recipe::Recipe::with_profiles(&m, &[]);
         assert_eq!(recipe.crop, crop);
+    }
+
+    #[test]
+    fn open_source_opens_a_png_as_rendered() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("photo.png");
+        image::RgbImage::from_pixel(2, 2, image::Rgb([10, 20, 30]))
+            .save(&path)
+            .unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        match super::open_source(&path, &cancel).unwrap() {
+            super::Opened::Rendered(image) => assert!(image.metadata.is_rendered()),
+            super::Opened::Raw(_) => panic!("a PNG must open as rendered"),
+        }
+    }
+
+    #[test]
+    fn open_source_sends_a_raw_path_to_libraw() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("garbage.ARW");
+        std::fs::write(&path, b"not a raw file").unwrap();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let libraw = super::open(&path).err().expect("LibRaw refuses garbage");
+        let opened = super::open_source(&path, &cancel)
+            .err()
+            .expect("LibRaw refuses garbage");
+        assert_eq!(opened.to_string(), libraw.to_string());
     }
 }
