@@ -21,8 +21,8 @@ impl Editor {
                 egui::Frame::new()
                     .fill(palette.photo_backdrop())
                     .inner_margin(egui::Margin {
-                        left: 20,
-                        right: 20,
+                        left: super::workspace::PHOTO_MARGIN as i8,
+                        right: super::workspace::PHOTO_MARGIN as i8,
                         top: 0,
                         bottom: 10,
                     }),

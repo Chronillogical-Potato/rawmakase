@@ -59,7 +59,7 @@ impl Editor {
             egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
                 .map_or(default, |state| state.outer_rect.width())
         };
-        let adjustments = width("adjustments", 330.);
+        let adjustments = width("adjustments", super::workspace::ADJUSTMENTS_DEFAULT);
         let room = ui.available_width() - RAIL_WIDTH - adjustments - width("presets", PANEL_WIDTH)
             >= PHOTO_MIN;
         let peek = ctx.data(|d| d.get_temp::<bool>(peek_id()).unwrap_or(false));

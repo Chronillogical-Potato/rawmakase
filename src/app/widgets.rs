@@ -1563,18 +1563,13 @@ fn segment_track(
         })
         .collect()
 }
-/// What an [`action_button`] does: the main action of its area, or any other.
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum ButtonKind {
-    Primary,
-}
-/// A toolbar button sized to its content: an optional icon and the label
-/// centred together, with the segmented controls' height and rounding.
+/// A primary button sized to its content, in the accent colour: an optional
+/// icon and the label centred together, with the segmented controls' height
+/// and rounding.
 pub(super) fn action_button(
     ui: &mut egui::Ui,
     label: &str,
     icon: Option<Icon>,
-    kind: ButtonKind,
     enabled: bool,
 ) -> egui::Response {
     let palette = theme::palette(ui.ctx());
@@ -1596,9 +1591,8 @@ pub(super) fn action_button(
     );
     let hovered = enabled && response.hovered();
     let pressed = enabled && response.is_pointer_button_down_on();
-    let (fill, stroke, ink) = match (kind, enabled) {
-        (_, false) => (palette.gray(34), palette.gray(44), palette.gray(85)),
-        (ButtonKind::Primary, true) => (
+    let (fill, stroke, ink) = if enabled {
+        (
             if hovered && !pressed {
                 palette.accent_hover()
             } else {
@@ -1606,7 +1600,9 @@ pub(super) fn action_button(
             },
             Color32::TRANSPARENT,
             palette.on_accent(),
-        ),
+        )
+    } else {
+        (palette.gray(34), palette.gray(44), palette.gray(85))
     };
     ui.painter().rect(
         rect,

@@ -843,7 +843,6 @@ impl Editor {
                                             ui,
                                             "Export…",
                                             Some(super::icons::Icon::Export),
-                                            super::widgets::ButtonKind::Primary,
                                             true,
                                         )
                                         .on_hover_text(if cfg!(target_os = "macos") {
@@ -1490,7 +1489,7 @@ impl Editor {
         // Dark as the catalog's sidebar, around the lighter photo.
         let fill = theme::palette(ui.ctx()).gray(22);
         egui::Panel::right("adjustments")
-            .default_size(330.)
+            .default_size(ADJUSTMENTS_DEFAULT)
             .min_size(ADJUSTMENTS_MIN)
             .max_size(400.)
             .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
@@ -1831,6 +1830,9 @@ const FOLDER_CHANGE: &str = "the folder change";
 /// catalog's sidebar and Develop's Presets.
 pub(super) const PRESETS_MIN: f32 = 224.;
 pub(super) const ADJUSTMENTS_MIN: f32 = 300.;
+/// The adjustments' width until the user drags it; Develop's tab panel folds
+/// by itself when the photo would have too little room beside it.
+pub(super) const ADJUSTMENTS_DEFAULT: f32 = 330.;
 pub(super) const LIBRARY_SIDEBAR_MIN: f32 = 224.;
 pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 
