@@ -113,7 +113,6 @@ impl Library {
     }
     /// The left panel's catalog, folders and collections.
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) -> Action {
-        let palette = theme::palette(ui.ctx());
         let mut action = Action::None;
         // The folder and collection trees built when the lists last changed.
         let trees = self.sidebar_trees();
@@ -244,12 +243,7 @@ impl Library {
                         }
                     }
                     if self.session.roots.is_empty() {
-                        ui.add_space(4.);
-                        ui.label(
-                            egui::RichText::new("No folders yet")
-                                .size(11.)
-                                .color(palette.gray(120)),
-                        );
+                        empty_note(ui, "No folders yet");
                     }
                     ui.add_space(16.);
                     if add_row(ui, "Add Folder…")
@@ -275,12 +269,7 @@ impl Library {
                         }
                     }
                     if tree.is_empty() {
-                        ui.add_space(4.);
-                        ui.label(
-                            egui::RichText::new("No collections")
-                                .size(11.)
-                                .color(palette.gray(120)),
-                        );
+                        empty_note(ui, "No collections");
                     }
                 });
             });
@@ -432,6 +421,15 @@ impl Library {
 }
 /// A full-width "+ label" button under a panel's list: outlined, so it reads
 /// as an action rather than another row.
+/// A section's note that it is empty, inset as its rows' names are.
+fn empty_note(ui: &mut egui::Ui, text: &str) {
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(4.);
+    ui.horizontal(|ui| {
+        ui.add_space(10.);
+        ui.label(egui::RichText::new(text).size(11.).color(palette.gray(120)));
+    });
+}
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) =
