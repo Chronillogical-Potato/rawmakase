@@ -120,14 +120,17 @@ impl std::fmt::Display for Unsupported {
 impl std::error::Error for Unsupported {}
 
 /// How pixels of type `color` in `profile` are read: RGB, or grey for a colourless
-/// image. Anything else is [`Unsupported`].
+/// image. `None` for a grey profile on a colour image, which does not describe
+/// its pixels, so they are taken as sRGB, as [`decode`] does. Any other colour
+/// space is [`Unsupported`].
 fn layout(
     profile: &ColorProfile,
     color: image::ColorType,
-) -> std::result::Result<Layout, Unsupported> {
+) -> std::result::Result<Option<Layout>, Unsupported> {
     match profile.color_space {
-        DataColorSpace::Rgb => Ok(Layout::Rgb),
-        DataColorSpace::Gray if !color.has_color() => Ok(Layout::Gray),
+        DataColorSpace::Rgb => Ok(Some(Layout::Rgb)),
+        DataColorSpace::Gray if !color.has_color() => Ok(Some(Layout::Gray)),
+        DataColorSpace::Gray => Ok(None),
         DataColorSpace::Cmyk => Err(Unsupported("CMYK".into())),
         other => Err(Unsupported(format!("{other:?}"))),
     }
@@ -140,22 +143,33 @@ struct ToLinear {
 }
 
 /// The conversion for pixels of type `color` in `profile`; RGB, or grey for a
-/// colourless image. Anything else is [`Unsupported`].
+/// colourless image. As in [`decode`], a profile that does not describe the
+/// pixels (a grey one on a colour image) or that has no transform is taken to be
+/// sRGB. Any other colour space is [`Unsupported`].
 fn to_linear(profile: &ColorProfile, color: image::ColorType) -> Result<ToLinear> {
-    let layout = layout(profile, color)?;
     // An empty curve is the identity in ICC: ProPhoto's primaries, no gamma.
     let mut linear_pro = ColorProfile::new_pro_photo_rgb();
     linear_pro.red_trc = Some(ToneReprCurve::Lut(vec![]));
     linear_pro.green_trc = Some(ToneReprCurve::Lut(vec![]));
     linear_pro.blue_trc = Some(ToneReprCurve::Lut(vec![]));
-    let transform = profile
-        .create_transform_f32(
+    let build = |profile: &ColorProfile, layout| {
+        profile.create_transform_f32(
             layout,
             &linear_pro,
             Layout::Rgb,
             TransformOptions::default(),
         )
-        .map_err(|e| anyhow!("Could not convert the image to ProPhoto: {e}"))?;
+    };
+    let own =
+        layout(profile, color)?.and_then(|layout| Some((build(profile, layout).ok()?, layout)));
+    let (transform, layout) = match own {
+        Some(own) => own,
+        None => (
+            build(&ColorProfile::new_srgb(), Layout::Rgb)
+                .map_err(|e| anyhow!("Could not convert the image to ProPhoto: {e}"))?,
+            Layout::Rgb,
+        ),
+    };
     Ok(ToLinear {
         transform,
         gray: layout == Layout::Gray,
@@ -456,6 +470,21 @@ mod tests {
         let distinct: std::collections::BTreeSet<u32> =
             im.pixels.iter().map(|p| p[1].to_bits()).collect();
         assert_eq!(distinct.len(), 1024);
+        Ok(())
+    }
+
+    #[test]
+    fn a_grey_profile_on_a_colour_image_opens_as_srgb() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("grey-profile.png");
+        let grey = moxcms::ColorProfile::new_gray_with_gamma(1.).encode()?;
+        png(&path, &[128, 128, 128], ExtendedColorType::Rgb8, Some(grey));
+        assert!(super::probe(&path).is_ok());
+        let plain = dir.path().join("plain.png");
+        png(&plain, &[128, 128, 128], ExtendedColorType::Rgb8, None);
+        let opened = super::open(&path, &Default::default())?;
+        let srgb = super::open(&plain, &Default::default())?;
+        assert_eq!(opened.pixels, srgb.pixels);
         Ok(())
     }
 
