@@ -1344,11 +1344,12 @@ sample = "4 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 E
 [[camera]]
 make = "Sony"
 model = "ILCE-7M2"
+sony_daylight_reference = [2436, 1024, 1456]
 aliases = ["A7 II"]
-baseline_exposure = 0.3
-source = "fitted"
-checked = "2026-09-26"
-sample = "8 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 EV bright"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-13"
+sample = "3 anonymous photos at ISO 100 and 6400; DNG BaselineExposure +0.35, verified against Camera Raw with Adobe Color"
 
 [[camera]]
 make = "Sony"

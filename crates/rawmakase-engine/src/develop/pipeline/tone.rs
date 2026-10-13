@@ -58,6 +58,52 @@ impl CurveSet {
                 ))
             },
         );
+        if (r.shadows > 0. || local_tone)
+            && let Some(map) = &lut.local
+        {
+            // The black response follows the median positive-Shadows gain. Masks
+            // select this response locally; an unmasked pixel keeps the global key.
+            let levels: Vec<f32> = small
+                .pixels
+                .par_iter()
+                .map(|p| {
+                    crate::develop::scene_tone::luminance(exposure_stage(
+                        scene_color(*p, r, &lut, matrix, None),
+                        &lut,
+                        None,
+                    ))
+                })
+                .collect();
+            let shift = |shadows: f32| {
+                if shadows <= 0. {
+                    return 0.;
+                }
+                let mut gains: Vec<f32> = levels
+                    .par_iter()
+                    .enumerate()
+                    .map(|(i, y)| {
+                        let x = (i % small.width as usize) as f32 / map.scale[0];
+                        let yy = (i / small.width as usize) as f32 / map.scale[1];
+                        (map.gain_with(x, yy, *y, [shadows, 0., 0.])
+                            / map.gain_with(x, yy, *y, [0., 0., 0.]))
+                        .log2()
+                    })
+                    .collect();
+                let k = (gains.len() - 1) / 2;
+                gains.select_nth_unstable_by(k, f32::total_cmp);
+                gains[k]
+            };
+            let mut adjusted = lut.measures;
+            adjusted.dark += shift(r.shadows);
+            let mask_keys = local_tone.then(|| {
+                std::array::from_fn(|i| lut.measures.dark_key(r.exposure) + shift(i as f32 / 10.))
+            });
+            let haze = lut.scene.haze.take();
+            lut.scene = crate::develop::scene_tone::SceneTone::new(r, &adjusted, haze);
+            if let Some(keys) = mask_keys {
+                lut.scene.global.set_shadow_black(r.shadows, &keys);
+            }
+        }
         lut
     }
     /// Curves with the scene tone stage for this image's measures, and Contrast at

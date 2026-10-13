@@ -26,6 +26,185 @@ const DARK: f64 = 1. / 4096.;
 /// Scene blocks Camera Raw renders brighter than this may be clipped.
 const BRIGHT: f64 = 0.9;
 
+fn shadow_gap_scene(size: u32) -> Vec<[f64; 3]> {
+    (0..size * size)
+        .map(|i| {
+            let x = (i % size) as f64;
+            let y = (i / size) as f64;
+            let mut level = -6.3
+                + 0.7
+                    * (x / 640. * std::f64::consts::TAU).sin()
+                    * (y / 640. * std::f64::consts::TAU).sin();
+            for (cx, cy) in [
+                (100., 220.),
+                (200., 250.),
+                (160., 400.),
+                (400., 150.),
+                (470., 350.),
+                (550., 200.),
+            ] {
+                let spot = 0.7 - 8. * ((x - cx).hypot(y - cy) - 4.).max(0.) / 6.;
+                level = level.max(spot);
+            }
+            [level.exp2(); 3]
+        })
+        .collect()
+}
+
+#[test]
+fn shadows_lift_a_dark_scene_with_small_bright_gaps() {
+    let size = 640;
+    let scene = shadow_gap_scene(size);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shadow-gaps.dng");
+    std::fs::write(&path, dng::write_probe(size, size, &scene, 1.)).unwrap();
+    let im = develop(&path);
+    let profiles = embedded_profiles(&im);
+    for (exposure, camera_raw) in [
+        (-2, 0.5995982538287945),
+        (0, 0.7852627805513078),
+        (2, 0.5721837060845278),
+    ] {
+        let render = |shadows: i32| {
+            let case = ProbeCase {
+                probe: String::new(),
+                settings: BTreeMap::from([
+                    ("Shadows2012".into(), shadows.to_string()),
+                    ("Exposure2012".into(), exposure.to_string()),
+                ]),
+                mask: BTreeMap::new(),
+                camera_raw: Vec::new(),
+            };
+            scene_output(&im, &profiles, &xmp(&case))
+        };
+        let base = render(0);
+        let lifted = render(100);
+        let mut gains = Vec::new();
+        for y in 100..540 {
+            for x in 100..540 {
+                let i = y * 640 + x;
+                let luminance =
+                    |p: [f32; 3]| p.iter().zip(Y).map(|(v, w)| f64::from(*v) * w).sum::<f64>();
+                let before = luminance(base.pixels[i]);
+                if before > 2_f64.powi(-11) && before < 0.15 {
+                    gains.push((luminance(lifted.pixels[i]) / before).log2());
+                }
+            }
+        }
+        gains.sort_by(f64::total_cmp);
+        let median = gains[gains.len() / 2];
+        // Camera Raw 18.7 (2743), Process Version 15.4, linear embedded profile,
+        // default black rendering, other Basic settings zero, Shadows +100 at several exposures.
+
+        assert!(
+            (median - camera_raw).abs() < 0.1,
+            "Exposure {exposure}, Shadows +100 lifts the scene by {median} EV; Camera Raw {camera_raw} EV"
+        );
+    }
+}
+
+#[test]
+fn shadows_lift_dark_scene_without_default_black() {
+    let size = 640;
+    let scene = shadow_gap_scene(size);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("shadow-gaps.dng");
+    std::fs::write(
+        &path,
+        dng::write_probe_black_render(size, size, &scene, 1., dng::BlackRender::None),
+    )
+    .unwrap();
+    let im = develop(&path);
+    let profiles = embedded_profiles(&im);
+    let render = |shadows: i32| {
+        let case = ProbeCase {
+            probe: String::new(),
+            settings: BTreeMap::from([("Shadows2012".into(), shadows.to_string())]),
+            mask: BTreeMap::new(),
+            camera_raw: Vec::new(),
+        };
+        scene_output(&im, &profiles, &xmp(&case))
+    };
+    let base = render(0);
+    let lifted = render(100);
+    let mut gains = Vec::new();
+    for y in 100..540 {
+        for x in 100..540 {
+            let i = y * 640 + x;
+            let luminance =
+                |p: [f32; 3]| p.iter().zip(Y).map(|(v, w)| f64::from(*v) * w).sum::<f64>();
+            let before = luminance(base.pixels[i]);
+            if before > 2_f64.powi(-11) && before < 0.15 {
+                gains.push((luminance(lifted.pixels[i]) / before).log2());
+            }
+        }
+    }
+    gains.sort_by(f64::total_cmp);
+    let median = gains[gains.len() / 2];
+    // Camera Raw 18.7 (2743), Process Version 15.4, linear embedded profile,
+    // DefaultBlackRender None, all Basic settings zero except Shadows +100.
+    let camera_raw = 0.5244576436042451;
+    assert!(
+        (median - camera_raw).abs() < 0.1,
+        "Shadows +100 lifts the scene by {median} EV; Camera Raw {camera_raw} EV"
+    );
+}
+
+#[test]
+fn shadows_respond_to_spatial_arrangement_with_the_same_histogram() {
+    let size = 640;
+    let scattered = shadow_gap_scene(size);
+    let mut sorted = scattered.clone();
+    sorted.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let dir = tempfile::tempdir().unwrap();
+    let gains: Vec<f64> = [scattered, sorted]
+        .iter()
+        .enumerate()
+        .map(|(index, scene)| {
+            let path = dir.path().join(format!("arrangement-{index}.dng"));
+            std::fs::write(&path, dng::write_probe(size, size, scene, 1.)).unwrap();
+            let im = develop(&path);
+            let profiles = embedded_profiles(&im);
+            let render = |shadows: i32| {
+                let case = ProbeCase {
+                    probe: String::new(),
+                    settings: BTreeMap::from([("Shadows2012".into(), shadows.to_string())]),
+                    mask: BTreeMap::new(),
+                    camera_raw: Vec::new(),
+                };
+                scene_output(&im, &profiles, &xmp(&case))
+            };
+            let before = render(0);
+            let after = render(100);
+            let luminance =
+                |p: &[f32; 3]| p.iter().zip(Y).map(|(v, w)| f64::from(*v) * w).sum::<f64>();
+            let mut gain: Vec<f64> = before
+                .pixels
+                .iter()
+                .zip(&after.pixels)
+                .filter_map(|(a, b)| {
+                    let a = luminance(a);
+                    (a > 2_f64.powi(-11) && a < 0.15).then(|| (luminance(b) / a).log2())
+                })
+                .collect();
+            assert!(!gain.is_empty());
+            gain.sort_by(f64::total_cmp);
+            gain[gain.len() / 2]
+        })
+        .collect();
+    // Camera Raw 18.7 (2743), PV 15.4, neutral linear embedded profile,
+    // DefaultBlackRender Auto; only Shadows changes from 0 to +100.
+    // The two scenes contain exactly the same input values. The second merely
+    // sorts their spatial positions. A histogram-only strength adjustment cannot
+    // reproduce the measured difference in lift.
+    let expected = 0.7852627805513078 - 0.4357064155855821;
+    let difference = gains[0] - gains[1];
+    assert!(
+        (difference - expected).abs() < 0.1,
+        "scattered/sorted Shadows gains {gains:?} EV; difference {difference}, Camera Raw {expected}"
+    );
+}
+
 #[test]
 fn default_black_follows_scene_darkness_across_camera_baselines() {
     let values: Vec<f64> = (-8..=0).map(|e| 2_f64.powi(e)).collect();

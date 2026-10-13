@@ -117,9 +117,15 @@ scene 1.0 at 1.0, where Camera Raw renders 0.69.
   Blacks does not depend on it. Negative Blacks works on each channel.
 - **The default black** follows the photo's dark scene level, including camera
   baseline exposure and the user's Exposure. Its key is the 0.1th percentile of
-  the measurement copy's luminance, measured before local tone adjustments, red-eye
-  correction and spot removal. A local repair therefore does not move the whole
-  photo's black. Blacks retains its separate minimum-based key.
+  the measurement copy's luminance before red-eye correction and spot removal.
+  Positive global Shadows moves this key by its median log-luminance gain on the
+  measurement copy. This is a robust approximation to Camera Raw's moving black
+  response; using the unchanged key overstated the gain at negative Exposure.
+  A mask selects the response at its combined Shadows value locally, interpolating
+  prepared curves at steps of 0.1; pixels outside it keep the global response.
+  Full-frame masked Shadows matches the global adjustment in Camera Raw probes
+  with both Auto and None default-black rendering. Blacks retains its separate
+  minimum-based key.
 
   Camera Raw 18.7 neutral ramps with the same scene values and different camera
   baselines produce the same dark outputs; raising Exposure moves the response.
@@ -261,6 +267,41 @@ to −0.2–6.1 L*. Still failing: Shadows +100 with Adobe Color on bright photo
 (Sony A6100: 0.94 with engine 4, 2.38 here, as before this change; each slider alone is
 within 1.3), where Camera Raw's Highlights darkens bright areas less when Shadows is raised
 than the sum of the two gains does.
+
+**Sparse highlights in dark scenes.** The mean-only Shadows key under-lifts
+large dark areas when small bright gaps are scattered through the image. The same
+input histogram arranged as a bright strip needs a different correction in Camera
+Raw. Positive Shadows now adds a calibrated scene-context offset to its regional
+key; negative Shadows and Highlights keep their keys. Ten log-luminance percentiles
+and luminance/texture distributions at four spatial scales distinguish these cases.
+All statistics are relative to mean luminance, so increasing Exposure does not
+activate the correction. The existing measurement copy defines the spatial scale;
+CPU, GPU and masks share the corrected key.
+
+The calibration contains 137 anonymous contexts (22 photos, 115 synthetic scenes).
+`data/shadow-context.json` keeps their 34 statistics and squared gain-error curves
+for offsets −2..2 EV, without pixels, profiles or private paths. Regenerate the
+runtime table with `python3 scripts/corpus/shadow-context.py`; `--check` checks it
+without rewriting it. The minimum includes a weak 0.002·offset² penalty. Smooth
+inverse-distance weighting, with bandwidth set by the third neighbour, interpolates
+these bounded offsets without switching abruptly between reference scenes.
+
+The reported tree photo is explicitly a calibration case. Independent checks include
+other photos and procedurally generated texture/spatial arrangements. The descriptor and interpolation were selected with grouped cross-validation
+on the original 21 usable photo maps and synthetic seeds; the separate texture
+probes were withheld. Calibration errors are approximations, not a claim to
+reproduce Adobe's proprietary algorithm.
+Regression tests compare actual rendered lift with fixed Camera Raw measurements,
+including Exposure −2/0/+2, default black Auto/None, and identical pixels arranged
+as scattered gaps versus a strip. Camera Raw references are not regenerated to
+accommodate the engine.
+The engine snapshots for ten positive-Shadows chart cases are refreshed. Against
+unchanged Camera Raw chart references, Shadows +100 mean ΔE00 improves 6.64 → 5.21,
++60 improves 4.11 → 3.18, and the look at Amount 100 improves 1.58 → 1.13. One mixed
+case is worse: warm white balance, Contrast +25, Highlights −40 and Shadows +30
+moves from mean/p95 1.35/3.33 to 1.56/4.15. Only that case's accepted-distance entry
+is updated; the general tolerances stay unchanged. Combined-control parity remains
+an approximation; this tradeoff must not be described as universal parity.
 
 What did not work, on the same photos:
 

@@ -213,7 +213,7 @@ fn reduce(x: &[f32], w: usize, h: usize, f: usize) -> (Vec<f32>, usize, usize) {
 }
 
 /// A Gaussian blur of σ `sigma` px as three box blurs, clamped at the borders.
-fn gauss(x: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
+pub(super) fn gauss(x: &[f32], w: usize, h: usize, sigma: f32) -> Vec<f32> {
     if sigma < 0.5 {
         return x.to_vec();
     }
