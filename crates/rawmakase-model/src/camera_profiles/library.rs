@@ -5,26 +5,94 @@ use super::{
 };
 use crate::camera_data::Metadata;
 use anyhow::{Context, Result, ensure};
-use std::{path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 pub fn load(path: &Path, m: &Metadata) -> Result<Arc<CameraProfile>> {
-    ensure!(
-        std::fs::metadata(path)?.len() <= 16_000_000,
-        "Profile too large"
-    );
     if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
     {
+        ensure!(
+            std::fs::metadata(path)?.len() <= 16_000_000,
+            "Profile too large"
+        );
         let look = LookFile::read(path)?;
         let (profiles, _) = installed(m);
         let base = look_base(&look, &profiles, builtin(m).as_deref())
             .context("Unsupported XMP look or missing matching base camera profile")?;
         return Ok(Arc::new(look.compose(base)?));
     }
-    let p = from_bytes(&std::fs::read(path)?)?;
+    let p = read_dcp(path)?;
     p.ensure_camera(m)?;
     Ok(Arc::new(p))
 }
+fn read_dcp(path: &Path) -> Result<CameraProfile> {
+    ensure!(
+        std::fs::metadata(path)?.len() <= 16_000_000,
+        "Profile too large"
+    );
+    from_bytes(&std::fs::read(path)?)
+}
+/// What tells that a profile file may have changed: its size, its modification time
+/// and, on Unix, its status change time, which any write or permission change moves
+/// even when the modification time is put back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    size: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    changed: (i64, i64),
+}
+impl Stamp {
+    fn read(path: &Path) -> Option<Self> {
+        let m = std::fs::metadata(path).ok()?;
+        Some(Self {
+            size: m.len(),
+            modified: m.modified().ok(),
+            #[cfg(unix)]
+            changed: {
+                use std::os::unix::fs::MetadataExt;
+                (m.ctime(), m.ctime_nsec())
+            },
+        })
+    }
+}
+/// The camera each DCP in the library was made for, as last read, so a scan parses
+/// only the files of the photo's camera: a library holding Adobe's profiles for
+/// every camera has thousands. A profile's camera comes from its bytes alone; a
+/// file whose [`Stamp`] changed is read again, and one that failed to read is not
+/// remembered, so its error is reported every time.
+#[derive(Default)]
+struct Cameras {
+    known: Mutex<HashMap<PathBuf, (Stamp, String)>>,
+    /// Files read, for the tests.
+    #[cfg(test)]
+    reads: std::sync::atomic::AtomicUsize,
+}
+impl Cameras {
+    fn get(&self, path: &Path, stamp: Stamp) -> Option<String> {
+        let map = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(path)
+            .filter(|(s, _)| *s == stamp)
+            .map(|(_, camera)| camera.clone())
+    }
+    fn set(&self, path: &Path, stamp: Stamp, camera: &str) {
+        #[cfg(test)]
+        self.reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut map = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        map.insert(path.to_path_buf(), (stamp, camera.to_string()));
+    }
+    /// Forgets the files a scan no longer found.
+    fn keep(&self, found: &HashSet<&Path>) {
+        let mut map = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        map.retain(|path, _| found.contains(path.as_path()));
+    }
+}
+static CAMERAS: std::sync::LazyLock<Cameras> = std::sync::LazyLock::new(Cameras::default);
 /// The profile a DNG embeds for its camera, which Lightroom lists as the file's own.
 /// No Adobe profiles are bundled; RAWmakase's own profiles are in `open`.
 pub fn builtin(m: &Metadata) -> Option<Arc<CameraProfile>> {
@@ -40,6 +108,13 @@ pub fn library_dirs() -> Vec<std::path::PathBuf> {
 }
 
 pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
+    installed_in(&library_dirs(), m, &CAMERAS)
+}
+fn installed_in(
+    dirs: &[PathBuf],
+    m: &Metadata,
+    cameras: &Cameras,
+) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
     let mut profiles = Vec::new();
     let mut errors = Vec::new();
     if let Some(p) = builtin(m) {
@@ -52,11 +127,11 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
             .map(Arc::new),
     );
     let mut files = Vec::new();
-    for dir in library_dirs() {
-        collect(&dir, 0, &mut files);
+    for dir in dirs {
+        collect(dir, 0, &mut files);
     }
     let mut looks = Vec::new();
-    for path in files {
+    for path in &files {
         if path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("xmp"))
@@ -70,7 +145,21 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
         {
             continue;
         }
-        match load(&path, m) {
+        // Read before the file, so a change while reading it is read again next time.
+        let stamp = Stamp::read(path);
+        if let Some(camera) = stamp.and_then(|s| cameras.get(path, s))
+            && !super::camera_fits(&camera, m)
+        {
+            continue;
+        }
+        let loaded = read_dcp(path).and_then(|p| {
+            if let Some(stamp) = stamp {
+                cameras.set(path, stamp, &p.camera);
+            }
+            p.ensure_camera(m)?;
+            Ok(Arc::new(p))
+        });
+        match loaded {
             Ok(p) => {
                 if !profiles
                     .iter()
@@ -87,9 +176,10 @@ pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
             }
         }
     }
+    cameras.keep(&files.iter().map(PathBuf::as_path).collect());
     let bases = profiles.clone();
     for path in looks {
-        let composed = LookFile::read(&path).and_then(|look| {
+        let composed = LookFile::read(path).and_then(|look| {
             let base = look_base(&look, &bases, builtin(m).as_deref()).with_context(|| {
                 let name = match &look.base {
                     LookBase::Named(name) => name.as_str(),
@@ -333,6 +423,118 @@ pub fn adobe_installed(m: &Metadata) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A minimal DCP: the camera it is for, its name and an identity forward matrix.
+    fn dcp(camera: &str, name: &str) -> Vec<u8> {
+        let text = |s: &str| [s.as_bytes(), b"\0"].concat();
+        let matrix: Vec<u8> = (0..9)
+            .flat_map(|i| [i32::from(i % 4 == 0), 1])
+            .flat_map(i32::to_le_bytes)
+            .collect();
+        let entries = [
+            (50708u16, 2u16, text(camera)),
+            (50936, 2, text(name)),
+            (50964, 10, matrix),
+        ];
+        let mut data_at = 8 + 2 + entries.len() * 12 + 4;
+        let mut b = b"IIRC".to_vec();
+        b.extend(8u32.to_le_bytes());
+        b.extend((entries.len() as u16).to_le_bytes());
+        let mut data: Vec<u8> = Vec::new();
+        for (tag, kind, bytes) in &entries {
+            let count = if *kind == 10 { 9 } else { bytes.len() };
+            b.extend(tag.to_le_bytes());
+            b.extend(kind.to_le_bytes());
+            b.extend((count as u32).to_le_bytes());
+            b.extend((data_at as u32).to_le_bytes());
+            data_at += bytes.len();
+            data.extend(bytes);
+        }
+        b.extend(0u32.to_le_bytes());
+        b.extend(data);
+        b
+    }
+    fn camera(model: &str) -> Metadata {
+        Metadata {
+            make: "Sony".into(),
+            model: model.into(),
+            ..Default::default()
+        }
+    }
+    fn names(profiles: &[Arc<CameraProfile>]) -> Vec<&str> {
+        profiles
+            .iter()
+            .filter(|p| p.camera.starts_with("Sony"))
+            .map(|p| p.name.as_str())
+            .collect()
+    }
+    #[test]
+    fn a_rescan_reads_only_the_photos_cameras_profiles_and_changed_files() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let dirs = [dir.path().to_path_buf()];
+        let (mine, other) = (dir.path().join("mine.dcp"), dir.path().join("other.dcp"));
+        std::fs::write(&mine, dcp("Sony ILCE-7M2", "Mine"))?;
+        std::fs::write(&other, dcp("Sony ILCE-7M4", "Other"))?;
+        let cameras = Cameras::default();
+        let m = camera("ILCE-7M2");
+        let (profiles, errors) = installed_in(&dirs, &m, &cameras);
+        assert_eq!((names(&profiles), errors.len()), (vec!["Mine"], 0));
+        let reads = || cameras.reads.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(reads(), 2);
+        // While unchanged, the other camera's file is not read again; this
+        // camera's is, for its profile.
+        let (profiles, errors) = installed_in(&dirs, &m, &cameras);
+        assert_eq!((names(&profiles), errors.len()), (vec!["Mine"], 0));
+        assert_eq!(reads(), 3);
+        // Changed, it is read again: now made for this camera.
+        std::fs::write(&other, dcp("Sony ILCE-7M2", "Now mine"))?;
+        let (profiles, _) = installed_in(&dirs, &m, &cameras);
+        assert_eq!(names(&profiles), ["Mine", "Now mine"]);
+        // A file that cannot be read reports its error on every scan.
+        std::fs::write(&other, b"not a profile")?;
+        for _ in 0..2 {
+            let (profiles, errors) = installed_in(&dirs, &m, &cameras);
+            assert_eq!((names(&profiles), errors.len()), (vec!["Mine"], 1));
+        }
+        // A removed file is forgotten.
+        std::fs::remove_file(&other)?;
+        installed_in(&dirs, &m, &cameras);
+        assert_eq!(cameras.known.lock().unwrap().len(), 1);
+        // Another camera's photo gets its own profiles from the same index.
+        std::fs::write(&other, dcp("Sony ILCE-7M4", "Other"))?;
+        let (profiles, _) = installed_in(&dirs, &camera("ILCE-7M4"), &cameras);
+        assert_eq!(names(&profiles), ["Other"]);
+        Ok(())
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_rescan_notices_changes_that_keep_the_size_and_modification_time() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir()?;
+        let dirs = [dir.path().to_path_buf()];
+        let other = dir.path().join("other.dcp");
+        std::fs::write(&other, dcp("Sony ILCE-7M4", "Other"))?;
+        let cameras = Cameras::default();
+        let m = camera("ILCE-7M2");
+        assert!(names(&installed_in(&dirs, &m, &cameras).0).is_empty());
+        // Rewritten for this camera, same size, its modification time put back.
+        let modified = std::fs::metadata(&other)?.modified()?;
+        std::fs::write(&other, dcp("Sony ILCE-7M2", "Other"))?;
+        std::fs::File::options()
+            .write(true)
+            .open(&other)?
+            .set_modified(modified)?;
+        assert_eq!(names(&installed_in(&dirs, &m, &cameras).0), ["Other"]);
+        // Made unreadable, it is reported as the first scan would, for any camera.
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o000))?;
+        let unreadable = std::fs::read(&other).is_err();
+        let (_, errors) = installed_in(&dirs, &camera("ILCE-7M4"), &cameras);
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o600))?;
+        // Root reads it anyway.
+        if unreadable {
+            assert_eq!(errors.len(), 1, "{errors:?}");
+        }
+        Ok(())
+    }
     #[test]
     #[ignore = "Needs a published DCP; set RAWMAKASE_TEST_DCP"]
     fn imports_are_explicit_persistent_and_do_not_overwrite_different_files() -> Result<()> {
