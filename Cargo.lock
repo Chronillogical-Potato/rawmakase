@@ -3421,6 +3421,7 @@ dependencies = [
  "moxcms",
  "pkg-config",
  "rawmakase-engine",
+ "rawmakase-interop",
  "rawmakase-model",
  "rayon",
  "serde",

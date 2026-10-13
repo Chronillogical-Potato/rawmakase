@@ -264,6 +264,14 @@ pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     (info != Default::default()).then_some(info)
 }
 
+/// The EXIF Make and Model of a JPEG, TIFF or TIFF-based RAW, trimmed, each
+/// empty when missing; `None` when the file has no EXIF at all.
+pub fn camera_names(path: &Path) -> Option<(String, String)> {
+    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
+    let text = |tag| exif.get(tag).and_then(Field::text).unwrap_or_default();
+    Some((text(MAKE), text(MODEL)))
+}
+
 /// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
 /// names holds it: standard output sensitivity, recommended
 /// exposure index or ISO speed.
@@ -416,4 +424,49 @@ fn fields(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod camera_names_tests {
+    use super::camera_names;
+
+    /// A little-endian TIFF whose only directory holds Make and Model.
+    fn tiff(make: &str, model: &str) -> Vec<u8> {
+        let (make, model) = (format!("{make}\0"), format!("{model}\0"));
+        let data = 8 + 2 + 2 * 12 + 4;
+        let mut t = b"II*\0\x08\0\0\0\x02\0".to_vec();
+        for (tag, len, at) in [
+            (0x010f_u16, make.len(), data),
+            (0x0110, model.len(), data + make.len()),
+        ] {
+            t.extend(tag.to_le_bytes());
+            t.extend(2u16.to_le_bytes());
+            t.extend((len as u32).to_le_bytes());
+            t.extend((at as u32).to_le_bytes());
+        }
+        t.extend([0; 4]);
+        t.extend(make.bytes().chain(model.bytes()));
+        // Files are read in a 108-byte head, as a real one's is longer.
+        t.resize(t.len().max(108), 0);
+        t
+    }
+
+    #[test]
+    fn make_and_model_are_read_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.tif");
+        std::fs::write(&path, tiff("FUJIFILM", "X-T5")).unwrap();
+        assert_eq!(
+            camera_names(&path),
+            Some(("FUJIFILM".into(), "X-T5".into()))
+        );
+    }
+
+    #[test]
+    fn a_file_without_exif_has_no_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.bin");
+        std::fs::write(&path, [0u8; 200]).unwrap();
+        assert_eq!(camera_names(&path), None);
+    }
 }

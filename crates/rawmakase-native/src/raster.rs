@@ -1,16 +1,24 @@
 //! Opening a JPEG, PNG or TIFF, the files RAWmakase shows without developing.
 use anyhow::{Result, anyhow};
-use image::{DynamicImage, RgbImage};
-use moxcms::{ColorProfile, DataColorSpace, Layout, TransformExecutor, TransformOptions};
+use image::{DynamicImage, ImageDecoder, RgbImage};
+use moxcms::{
+    ColorProfile, DataColorSpace, Layout, ToneReprCurve, TransformExecutor, TransformOptions,
+};
+use rawmakase_model::camera_data::{CameraImage, Metadata, Source};
 use rayon::prelude::*;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-/// The image at `path` decoded, turned upright and converted from its embedded
-/// ICC profile to 8-bit sRGB; refused above 150 MP. A file without a profile,
-/// or with one that cannot be read or does not describe its pixels (RGB, or
-/// grey for a grey image), is taken to be sRGB already.
-pub fn decode(path: &Path) -> Result<RgbImage> {
-    use image::ImageDecoder;
+/// A file's decoder with what both ways of reading it need first: refused
+/// above 150 MP, its orientation, and its embedded ICC profile when it has one
+/// that can be read.
+fn prepare(
+    path: &Path,
+) -> Result<(
+    impl image::ImageDecoder,
+    image::metadata::Orientation,
+    Option<ColorProfile>,
+)> {
     let mut decoder = image::ImageReader::open(path)?
         .with_guessed_format()?
         .into_decoder()?;
@@ -20,17 +28,142 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
         "Image too large to preview"
     );
     let orientation = decoder.orientation()?;
-    let transform = decoder
+    let profile = decoder
         .icc_profile()
         .ok()
         .flatten()
-        .and_then(|icc| ColorProfile::new_from_slice(&icc).ok())
-        .and_then(|profile| ToSrgb::new(&profile, decoder.color_type()));
+        .and_then(|icc| ColorProfile::new_from_slice(&icc).ok());
+    Ok((decoder, orientation, profile))
+}
+
+/// The image at `path` decoded, turned upright and converted from its embedded
+/// ICC profile to 8-bit sRGB; refused above 150 MP. A file without a profile,
+/// or with one that cannot be read or does not describe its pixels (RGB, or
+/// grey for a grey image), is taken to be sRGB already.
+pub fn decode(path: &Path) -> Result<RgbImage> {
+    let (decoder, orientation, profile) = prepare(path)?;
+    let transform = profile.and_then(|profile| ToSrgb::new(&profile, decoder.color_type()));
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
     match transform {
         Some(transform) => transform.apply(image),
         None => Ok(image.into_rgb8()),
+    }
+}
+
+/// The photo at `path` for Develop: decoded, turned upright and converted
+/// from its embedded ICC profile to linear ProPhoto (D50) in f32, so wide
+/// gamuts and 16-bit levels survive. A file without a readable profile is taken
+/// to be sRGB. Transparency is dropped, as Lightroom ignores it in Develop.
+/// A colour space other than RGB or grey is refused with [`Unsupported`]: an
+/// edit of wrong colours is worse than none. `cancel` is checked between rows.
+/// The EXIF camera and exposure are kept when the file has them.
+pub fn open(path: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
+    let (decoder, orientation, profile) = prepare(path)?;
+    let profile = profile.unwrap_or_else(ColorProfile::new_srgb);
+    let linear = to_linear(&profile, decoder.color_type())?;
+    let mut image = DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    let (width, height) = (image.width(), image.height());
+    let pixels = linear.apply(image, cancel)?;
+    let info = rawmakase_interop::exif::photo_info(path).unwrap_or_default();
+    let (make, model) = rawmakase_interop::exif::camera_names(path).unwrap_or_default();
+    let number = |v: Option<f64>| v.map_or(0., |v| v as f32);
+    let metadata = Metadata {
+        make,
+        model,
+        width,
+        height,
+        raw_width: width,
+        raw_height: height,
+        iso: number(info.iso),
+        shutter: number(info.exposure),
+        aperture: number(info.aperture),
+        focal: number(info.focal),
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        source: Source::Rendered,
+        ..Default::default()
+    };
+    Ok(CameraImage {
+        width,
+        height,
+        recovered: Default::default(),
+        pixels,
+        metadata,
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    })
+}
+
+/// A file's colour space is one Develop does not handle, e.g. "CMYK images".
+#[derive(Debug)]
+pub struct Unsupported(pub String);
+impl std::fmt::Display for Unsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} images", self.0)
+    }
+}
+impl std::error::Error for Unsupported {}
+
+/// A conversion from a file's profile to linear ProPhoto, in f32.
+struct ToLinear {
+    transform: std::sync::Arc<moxcms::TransformF32Executor>,
+    gray: bool,
+}
+
+/// The conversion for pixels of type `color` in `profile`; RGB, or grey for a
+/// colourless image. Anything else is [`Unsupported`].
+fn to_linear(profile: &ColorProfile, color: image::ColorType) -> Result<ToLinear> {
+    let layout = match profile.color_space {
+        DataColorSpace::Rgb => Layout::Rgb,
+        DataColorSpace::Gray if !color.has_color() => Layout::Gray,
+        DataColorSpace::Cmyk => return Err(Unsupported("CMYK".into()).into()),
+        other => return Err(Unsupported(format!("{other:?}")).into()),
+    };
+    // An empty curve is the identity in ICC: ProPhoto's primaries, no gamma.
+    let mut linear_pro = ColorProfile::new_pro_photo_rgb();
+    linear_pro.red_trc = Some(ToneReprCurve::Lut(vec![]));
+    linear_pro.green_trc = Some(ToneReprCurve::Lut(vec![]));
+    linear_pro.blue_trc = Some(ToneReprCurve::Lut(vec![]));
+    let transform = profile
+        .create_transform_f32(
+            layout,
+            &linear_pro,
+            Layout::Rgb,
+            TransformOptions::default(),
+        )
+        .map_err(|e| anyhow!("Could not convert the image to ProPhoto: {e}"))?;
+    Ok(ToLinear {
+        transform,
+        gray: layout == Layout::Gray,
+    })
+}
+impl ToLinear {
+    /// `image`'s pixels as linear ProPhoto, a row at a time.
+    fn apply(&self, image: DynamicImage, cancel: &AtomicBool) -> Result<Vec<[f32; 3]>> {
+        let (width, height) = (image.width() as usize, image.height() as usize);
+        let mut out = vec![[0f32; 3]; width * height];
+        if out.is_empty() {
+            return Ok(out);
+        }
+        let (samples, per_pixel) = if self.gray {
+            (image.to_luma32f().into_raw(), 1)
+        } else {
+            (image.into_rgb32f().into_raw(), 3)
+        };
+        samples
+            .par_chunks(width * per_pixel)
+            .zip(out.par_chunks_mut(width))
+            .try_for_each(|(from, to)| {
+                anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Opening cancelled");
+                self.transform
+                    .transform(from, bytemuck::cast_slice_mut(to))
+                    .map_err(|e| anyhow!("Could not convert the image to ProPhoto: {e}"))
+            })?;
+        Ok(out)
     }
 }
 
@@ -234,5 +367,127 @@ mod tests {
         let icc = b"not a profile".to_vec();
         png(&path, &pixels, ExtendedColorType::Rgb8, Some(icc));
         assert_eq!(decode(&path).unwrap().as_raw(), &pixels);
+    }
+
+    fn linear_srgb_to_prophoto(rgb: [f32; 3]) -> [f32; 3] {
+        // Bradford-adapted sRGB D65 -> ProPhoto D50.
+        rawmakase_model::color::mul(rawmakase_model::camera_profiles::RGB_TO_PRO, rgb)
+    }
+    fn srgb_decode(v: u8) -> f32 {
+        let v = v as f32 / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    #[test]
+    fn an_srgb_png_opens_as_linear_prophoto() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("a.png");
+        // 4x1: black, mid grey, a saturated red, white; no ICC (taken as sRGB).
+        let px: [[u8; 3]; 4] = [[0, 0, 0], [118, 118, 118], [200, 30, 40], [255, 255, 255]];
+        image::RgbImage::from_fn(4, 1, |x, _| image::Rgb(px[x as usize])).save(&path)?;
+        let im = super::open(&path, &Default::default())?;
+        assert_eq!((im.width, im.height), (4, 1));
+        assert!(im.metadata.is_rendered());
+        for (got, want) in im.pixels.iter().zip(px) {
+            let want = linear_srgb_to_prophoto(want.map(srgb_decode));
+            for c in 0..3 {
+                assert!((got[c] - want[c]).abs() < 2e-3, "{got:?} vs {want:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_adobe_rgb_green_keeps_its_gamut() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("adobe.png");
+        let mut bytes = Vec::new();
+        let mut e = image::codecs::png::PngEncoder::new(&mut bytes);
+        e.set_icc_profile(moxcms::ColorProfile::new_adobe_rgb().encode()?)?;
+        e.write_image(&[0, 255, 0], 1, 1, ExtendedColorType::Rgb8)?;
+        std::fs::write(&path, bytes)?;
+        let im = super::open(&path, &Default::default())?;
+        // Adobe RGB green -> XYZ D65 -> Bradford D50 -> linear ProPhoto,
+        // worked out from the published matrices.
+        let want = [0.1133, 0.8330, 0.0738];
+        for (got, want) in im.pixels[0].iter().zip(want) {
+            assert!((got - want).abs() < 5e-3, "{:?}", im.pixels[0]);
+        }
+        // sRGB's own green is [0.330, 0.874, 0.118] in ProPhoto: an sRGB clip
+        // on the way in would have pulled R up to about there.
+        assert!(im.pixels[0][0] < 0.2);
+        Ok(())
+    }
+
+    #[test]
+    fn a_sixteen_bit_tiff_keeps_every_level() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("ramp.tif");
+        let ramp = image::ImageBuffer::<image::Rgb<u16>, _>::from_fn(1024, 1, |x, _| {
+            let v = (x * 64) as u16;
+            image::Rgb([v, v, v])
+        });
+        ramp.save(&path)?;
+        let im = super::open(&path, &Default::default())?;
+        let distinct: std::collections::BTreeSet<u32> =
+            im.pixels.iter().map(|p| p[1].to_bits()).collect();
+        assert_eq!(distinct.len(), 1024);
+        Ok(())
+    }
+
+    #[test]
+    fn a_cmyk_profile_is_refused_for_develop() {
+        let mut profile = moxcms::ColorProfile::new_srgb();
+        profile.color_space = moxcms::DataColorSpace::Cmyk;
+        let err = super::to_linear(&profile, image::ColorType::Rgb8)
+            .map(|_| ())
+            .unwrap_err();
+        let refused = err
+            .downcast_ref::<super::Unsupported>()
+            .expect("Unsupported");
+        assert_eq!(refused.0, "CMYK");
+    }
+
+    /// A 2x1 JPEG whose EXIF says Orientation 6 (rotate 90 clockwise).
+    fn rotated_jpeg(path: &Path) {
+        let mut jpeg = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 95)
+            .write_image(&[200, 0, 0, 0, 0, 200], 2, 1, ExtendedColorType::Rgb8)
+            .unwrap();
+        // Big-endian TIFF: one IFD entry, Orientation (0x0112), SHORT, 1, 6.
+        let mut exif = b"Exif\0\0MM\0\x2a\0\0\0\x08\0\x01".to_vec();
+        exif.extend([0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]);
+        let mut app1 = vec![0xff, 0xe1];
+        app1.extend(((exif.len() + 2) as u16).to_be_bytes());
+        app1.extend(exif);
+        jpeg.splice(2..2, app1);
+        std::fs::write(path, jpeg).unwrap();
+    }
+
+    #[test]
+    fn an_exif_rotated_jpeg_opens_upright() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("rotated.jpg");
+        rotated_jpeg(&path);
+        let im = super::open(&path, &Default::default())?;
+        assert_eq!((im.width, im.height), (1, 2));
+        assert_eq!((im.metadata.width, im.metadata.height), (1, 2));
+        assert_eq!(im.metadata.flip, 0);
+        assert_eq!(im.pixels.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn a_cancelled_open_stops() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("a.png");
+        image::RgbImage::new(4, 4).save(&path)?;
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        assert!(super::open(&path, &cancel).is_err());
+        Ok(())
     }
 }
