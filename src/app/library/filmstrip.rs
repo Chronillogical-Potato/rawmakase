@@ -188,43 +188,62 @@ impl Library {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(10, 3))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(self.source_name())
-                            .size(11.)
-                            .color(palette.gray(200)),
-                    );
-                    let selected = self.selection.selected.len();
-                    ui.label(filter_caption(
-                        &palette,
-                        &match position {
-                            Some(_) if selected > 1 => {
-                                format!("{} of {} photos selected", selected, self.visible.len())
-                            }
-                            Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
-                            None => format!("{} photos", self.visible.len()),
-                        },
-                    ));
-                    if let Some(p) = &photo {
+                // As tall as the controls on the right were last frame, so the
+                // captions placed before them centre on the same line.
+                let height_id = ui.id().with("header-height");
+                let height = ui
+                    .data(|d| d.get_temp::<f32>(height_id))
+                    .unwrap_or(ui.spacing().interact_size.y);
+                let row = ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), height),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new(self.source_name())
+                                .size(11.)
+                                .color(palette.gray(200)),
+                        );
+                        let selected = self.selection.selected.len();
                         ui.label(filter_caption(
                             &palette,
-                            &format!("{}{}", p.filename, cell::copy_suffix(p)),
+                            &match position {
+                                Some(_) if selected > 1 => {
+                                    format!(
+                                        "{} of {} photos selected",
+                                        selected,
+                                        self.visible.len()
+                                    )
+                                }
+                                Some(at) => format!("{} of {} photos", at + 1, self.visible.len()),
+                                None => format!("{} photos", self.visible.len()),
+                            },
                         ));
-                        // Right-aligned by the width the controls took last frame, so
-                        // the row never runs past the window and widens the strip.
-                        let width_id = ui.id().with("controls-width");
-                        let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
-                        ui.add_space((ui.available_width() - width).max(8.));
-                        let start = ui.cursor().left();
-                        changed = self.metadata_controls(ui, p.id, whole_selection);
-                        let taken = ui.min_rect().right() - start;
-                        if (taken - width).abs() > 0.5 {
-                            ui.data_mut(|d| d.insert_temp(width_id, taken));
-                            ui.ctx().request_repaint();
-                            remeasured = true;
+                        if let Some(p) = &photo {
+                            ui.label(filter_caption(
+                                &palette,
+                                &format!("{}{}", p.filename, cell::copy_suffix(p)),
+                            ));
+                            // Right-aligned by the width the controls took last frame, so
+                            // the row never runs past the window and widens the strip.
+                            let width_id = ui.id().with("controls-width");
+                            let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
+                            ui.add_space((ui.available_width() - width).max(8.));
+                            let start = ui.cursor().left();
+                            changed = self.metadata_controls(ui, p.id, whole_selection);
+                            let taken = ui.min_rect().right() - start;
+                            if (taken - width).abs() > 0.5 {
+                                ui.data_mut(|d| d.insert_temp(width_id, taken));
+                                ui.ctx().request_repaint();
+                                remeasured = true;
+                            }
                         }
-                    }
-                });
+                    },
+                );
+                let taken = row.response.rect.height();
+                if (taken - height).abs() > 0.5 {
+                    ui.data_mut(|d| d.insert_temp(height_id, taken));
+                    ui.ctx().request_repaint();
+                }
             });
         // Scroll only to bring a newly shown photo into view, or one a sort
         // or filter moved: a photo already visible, e.g. one just clicked,
