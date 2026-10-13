@@ -4,14 +4,16 @@
 export const SCHEMA = 1;
 export const OS = ["macos", "linux", "windows"] as const;
 export const ARCH = ["x86_64", "aarch64"] as const;
-/// How the copy was installed, as the app's updater detects it: the release
-/// download it came from, or the package manager that owns it. pacman can't
-/// tell the release package from an AUR build, so both are `arch-package`.
+/// How the copy was installed: an AppImage, else as the app's updater detects
+/// it: the release download it came from, or the package manager that owns
+/// it. pacman can't tell the release package from an AUR build, so both are
+/// `arch-package`.
 export const CHANNEL = [
   "macos-dmg",
   "windows-installer",
   "windows-zip",
   "linux-tarball",
+  "linux-appimage",
   "deb",
   "rpm",
   "arch-package",
