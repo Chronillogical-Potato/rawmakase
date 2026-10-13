@@ -1,5 +1,7 @@
 use super::panels::PanelSwitches;
-use crate::model::white_balance::{estimate_temperature, illuminant_camera};
+use crate::model::white_balance::{
+    estimate_temperature, illuminant_camera, relative_controls, relative_gains,
+};
 use crate::{camera_data::Metadata, color::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,13 @@ pub struct Recipe {
     pub camera_exposure: f32,
     pub temperature: f32,
     pub tint: f32,
+    /// A rendered file's Temp and Tint, Lightroom's relative −100..+100 sliders; its
+    /// kelvin `temperature` and `tint` stay 6500 and 0 so older builds still read the
+    /// recipe. Omitted at 0, so RAW recipes save as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_temperature: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_tint: f32,
     pub wb: [f32; 3],
     /// Temperature and Tint that Auto white balance chose, so the WB menu shows Auto
     /// while the photo still has them.
@@ -184,6 +193,8 @@ impl Default for Recipe {
             camera_exposure: 0.,
             temperature: 6500.,
             tint: 0.,
+            incremental_temperature: 0.,
+            incremental_tint: 0.,
             wb: [1.; 3],
             auto_white_balance: None,
             contrast: 0.,
@@ -437,6 +448,10 @@ impl Recipe {
             "White balance out of bounds"
         );
         ensure!(
+            self.incremental_temperature.abs() <= 100. && self.incremental_tint.abs() <= 100.,
+            "Relative white balance out of bounds"
+        );
+        ensure!(
             self.wb
                 .iter()
                 .all(|v| v.is_finite() && *v >= 0.01 && *v <= 100.),
@@ -678,6 +693,13 @@ impl Recipe {
         self.camera_exposure = crate::camera_profiles::reference::baseline_exposure(m);
     }
     pub fn reset_white_balance(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            self.incremental_temperature = 0.;
+            self.incremental_tint = 0.;
+            self.wb = [1.; 3];
+            self.auto_white_balance = None;
+            return;
+        }
         let values = self
             .color_profile(m)
             .and_then(|p| p.as_shot_white_balance(m))
@@ -688,6 +710,10 @@ impl Recipe {
         self.auto_white_balance = None;
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            [self.incremental_temperature, self.incremental_tint] = relative_controls(self.wb);
+            return;
+        }
         let mut adjusted = m.clone();
         adjusted.wb = std::array::from_fn(|c| m.wb[c] * self.wb[c]);
         // A profile that cannot map gains back (no ColorMatrix1) is also left to the
@@ -748,6 +774,10 @@ impl Recipe {
         }
     }
     pub fn update_wb(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            self.wb = relative_gains(self.incremental_temperature, self.incremental_tint);
+            return;
+        }
         if let Some(wb) = self
             .color_profile(m)
             .and_then(|p| p.white_balance(self.temperature, self.tint, m))
@@ -886,6 +916,7 @@ mod tests {
             "lens_vignetting": 0.5,
             "lens_manual_distortion": 0.25,
             "profile_amount": 0.5,
+            "incremental_temperature": 12.0,
             "auto_white_balance": [5000.0, 10.0],
             "curve_saturation": 0.5,
             "point_colors": [{

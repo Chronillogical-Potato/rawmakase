@@ -157,6 +157,9 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         wb,
         temperature,
         tint,
+        // A rendered file's Temp and Tint only set `wb`, which is keyed.
+        incremental_temperature: _,
+        incremental_tint: _,
         auto_white_balance,
         profile,
         profile_amount,

@@ -47,6 +47,8 @@ fn everything_changed() -> Recipe {
         camera_exposure: 0.3,
         temperature: 4000.,
         tint: 12.,
+        incremental_temperature: 20.,
+        incremental_tint: -10.,
         wb: [1.5, 1., 0.8],
         auto_white_balance: Some([4000., 12.]),
         contrast: 0.1,

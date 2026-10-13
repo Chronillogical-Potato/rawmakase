@@ -238,6 +238,8 @@ impl SettingGroup {
             WhiteBalance => {
                 to.temperature = from.temperature;
                 to.tint = from.tint;
+                to.incremental_temperature = from.incremental_temperature;
+                to.incremental_tint = from.incremental_tint;
             }
             Exposure => to.exposure = from.exposure,
             Contrast => to.contrast = from.contrast,
@@ -587,6 +589,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         camera_exposure: _,
         temperature: _,
         tint: _,
+        incremental_temperature: _,
+        incremental_tint: _,
         wb: _,
         auto_white_balance: _,
         contrast: _,
@@ -673,6 +677,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("camera_exposure", Derived),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
+        ("incremental_temperature", Group(WhiteBalance)),
+        ("incremental_tint", Group(WhiteBalance)),
         ("wb", Derived),
         ("auto_white_balance", Derived),
         ("contrast", Group(Contrast)),

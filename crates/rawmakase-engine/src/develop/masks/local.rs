@@ -112,8 +112,8 @@ impl LocalMath {
                 [gain(temp), gain(tint)]
             }
             // Without a profile's white balance model: a plain warm/cool and
-            // green/magenta shift of similar size.
-            _ => [[0.25, 0., -0.3], [0.12, -0.2, 0.12]],
+            // green/magenta shift of similar size, per slider unit (±1 = ±100).
+            _ => crate::model::white_balance::RELATIVE_WHITE_BALANCE,
         };
         Self { white_balance }
     }

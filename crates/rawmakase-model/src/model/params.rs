@@ -29,6 +29,9 @@ pub enum ParameterId {
     Saturation,
     Temperature,
     Tint,
+    /// A rendered file's Temp and Tint, relative −100..+100.
+    IncrementalTemperature,
+    IncrementalTint,
     /// The Crop panel's Angle, in degrees.
     Straighten,
     /// Detail: Sharpening.
@@ -182,7 +185,7 @@ const fn percent<Id: Copy>(id: Id, label: &'static str) -> Descriptor<Id> {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 57] = [
+const DESCRIPTORS: [Descriptor; 59] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -220,6 +223,32 @@ const DESCRIPTORS: [Descriptor; 57] = [
         label: "Tint",
         interactive: -TINT_LIMIT..=TINT_LIMIT,
         valid: -TINT_LIMIT..=TINT_LIMIT,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTemperature,
+        label: "Temp",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTint,
+        label: "Tint",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
         tick: Tick::Linear(1.),
         drag_step: None,
         display: Display {
@@ -357,7 +386,7 @@ impl ParameterId {
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
     #[cfg(test)]
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 59] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -371,6 +400,8 @@ impl ParameterId {
         Self::Saturation,
         Self::Temperature,
         Self::Tint,
+        Self::IncrementalTemperature,
+        Self::IncrementalTint,
         Self::Straighten,
         Self::SharpeningAmount,
         Self::SharpeningRadius,
@@ -435,6 +466,8 @@ impl ParameterId {
             Self::Saturation => &mut r.saturation,
             Self::Temperature => &mut r.temperature,
             Self::Tint => &mut r.tint,
+            Self::IncrementalTemperature => &mut r.incremental_temperature,
+            Self::IncrementalTint => &mut r.incremental_tint,
             Self::Straighten => &mut r.straighten,
             Self::SharpeningAmount => &mut r.sharpening,
             Self::SharpeningRadius => &mut r.sharpening_radius,
