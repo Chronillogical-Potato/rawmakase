@@ -250,12 +250,17 @@ impl Editor {
     /// folds as its rail does, in a narrow window too. Returns whether the
     /// panels changed.
     pub(super) fn request_panels(&mut self, change: PanelChange) -> bool {
-        if change == PanelChange::Toggle(WorkspacePanel::Presets) && self.module == Module::Develop
-        {
-            self.toggle_develop_tabs()
-        } else {
-            self.change_panels(change)
+        if change != PanelChange::Toggle(WorkspacePanel::Presets) {
+            return self.change_panels(change);
         }
+        if self.module == Module::Develop {
+            return self.toggle_develop_tabs();
+        }
+        // The Library has no tab panel: Develop's folds or opens, as it shows
+        // there next.
+        self.panels.develop = self.panels.develop.changed(change, Module::Develop);
+        self.save_panels();
+        true
     }
     /// Switches Develop's tab panel to `tab`. The tab left first lets go of
     /// what it was doing, as hiding the panel does.

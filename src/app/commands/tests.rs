@@ -795,6 +795,13 @@ fn panels_presets_opens_develops_tab_panel_in_a_narrow_window_as_the_rail_does()
     run(&mut e);
     assert!(!frame(&mut e), "and folds it again");
     assert!(e.panel_shown(WorkspacePanel::Presets));
+    // From the Library it folds Develop's, the only one there is.
+    e.module = Module::Library;
+    run(&mut e);
+    assert!(!e.panels.develop.shown(WorkspacePanel::Presets));
+    run(&mut e);
+    assert!(e.panels.develop.shown(WorkspacePanel::Presets));
+    e.module = Module::Develop;
     // Over a tool's drawer it shows the tab, ending the tool, as a tab's
     // rail button does.
     e.view.tool = crate::app::state::Tool::Crop;
