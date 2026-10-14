@@ -253,12 +253,47 @@ fn monitor(bytes: vec3<f32>) -> vec3<f32> {
 // The histogram's bins as this workgroup counts them: per channel 256 levels, then
 // the clipped highlights and shadows (`Histogram`), added to `histogram` once per
 // workgroup rather than per pixel, which on integrated GPUs serialised on the global
-// atomics.
+// atomics. Each workgroup finishes a 64 × 64 tile, each invocation a 4 × 4 lattice of
+// it (neighbouring invocations on neighbouring pixels), so few tiles add their counts.
 const BINS: u32 = 774u;
+const TILE: u32 = 64u;
 var<workgroup> counts: array<atomic<u32>, 774>;
+fn finish_pixel(x: u32, y: u32, counting: bool) {
+    let bx = p.crop_x + x;
+    let by = p.crop_y + y;
+    var color = rgb(by * p.width + bx);
+    if p.effects != 0u {
+        color = spatial(color, p.origin_x + bx, p.origin_y + by);
+    }
+    let clamped = clamp(color, vec3(0.0), vec3(1.0));
+    if counting {
+        let bins = vec3<u32>(clamped * 255.0);
+        atomicAdd(&counts[bins.r], 1u);
+        atomicAdd(&counts[256u + bins.g], 1u);
+        atomicAdd(&counts[512u + bins.b], 1u);
+        // `Clipped`: per channel, highlights then shadows, at `HIGHLIGHT_CLIP`
+        // and `SHADOW_CLIP` of the rendered values, before the monitor profile.
+        for (var c = 0u; c < 3u; c++) {
+            if color[c] >= 0.999 { atomicAdd(&counts[768u + c], 1u); }
+            if color[c] <= 0.001 { atomicAdd(&counts[771u + c], 1u); }
+        }
+    }
+    var bytes = floor(clamped * 255.0 + 0.5);
+    if p.lut_size > 1u {
+        bytes = monitor(bytes);
+    }
+    // `ClipOverlay`: 1 highlights, 2 shadows.
+    if (p.clipping & 1u) != 0u && any(color >= vec3(0.999)) {
+        bytes = vec3(255.0, 40.0, 40.0);
+    } else if (p.clipping & 2u) != 0u && all(color <= vec3(0.001)) {
+        bytes = vec3(40.0, 80.0, 255.0);
+    }
+    textureStore(shown, vec2(x, y), vec4(bytes / 255.0, 1.0));
+}
 @compute @workgroup_size(16, 16)
 fn present(
-    @builtin(global_invocation_id) id: vec3<u32>,
+    @builtin(workgroup_id) group: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(local_invocation_index) local: u32,
 ) {
     let counting = p.count != 0u;
@@ -268,38 +303,15 @@ fn present(
         }
     }
     workgroupBarrier();
-    // Every invocation reaches the barriers; those outside the crop skip the work.
-    if id.x < p.crop_w && id.y < p.crop_h {
-        let bx = p.crop_x + id.x;
-        let by = p.crop_y + id.y;
-        var color = rgb(by * p.width + bx);
-        if p.effects != 0u {
-            color = spatial(color, p.origin_x + bx, p.origin_y + by);
-        }
-        let clamped = clamp(color, vec3(0.0), vec3(1.0));
-        if counting {
-            let bins = vec3<u32>(clamped * 255.0);
-            atomicAdd(&counts[bins.r], 1u);
-            atomicAdd(&counts[256u + bins.g], 1u);
-            atomicAdd(&counts[512u + bins.b], 1u);
-            // `Clipped`: per channel, highlights then shadows, at `HIGHLIGHT_CLIP`
-            // and `SHADOW_CLIP` of the rendered values, before the monitor profile.
-            for (var c = 0u; c < 3u; c++) {
-                if color[c] >= 0.999 { atomicAdd(&counts[768u + c], 1u); }
-                if color[c] <= 0.001 { atomicAdd(&counts[771u + c], 1u); }
+    // Every invocation reaches the barriers; pixels outside the crop are skipped.
+    for (var dy = 0u; dy < 4u; dy++) {
+        for (var dx = 0u; dx < 4u; dx++) {
+            let x = group.x * TILE + lid.x + 16u * dx;
+            let y = group.y * TILE + lid.y + 16u * dy;
+            if x < p.crop_w && y < p.crop_h {
+                finish_pixel(x, y, counting);
             }
         }
-        var bytes = floor(clamped * 255.0 + 0.5);
-        if p.lut_size > 1u {
-            bytes = monitor(bytes);
-        }
-        // `ClipOverlay`: 1 highlights, 2 shadows.
-        if (p.clipping & 1u) != 0u && any(color >= vec3(0.999)) {
-            bytes = vec3(255.0, 40.0, 40.0);
-        } else if (p.clipping & 2u) != 0u && all(color <= vec3(0.001)) {
-            bytes = vec3(40.0, 80.0, 255.0);
-        }
-        textureStore(shown, vec2(id.x, id.y), vec4(bytes / 255.0, 1.0));
     }
     workgroupBarrier();
     if counting {
