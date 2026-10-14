@@ -247,7 +247,11 @@ equivalent performance or numerical precision.
 The per-pixel color and tone stage runs on the GPU for previews
 (`gpu/develop.wgsl`, fed by `pipeline/pixel_params.rs`), on the stage cache's
 samples, for every recipe resolved with a camera profile; unresolved recipes and
-all exports use the CPU stage, which is the reference.
+all exports use the CPU stage, which is the reference. Each pass is compiled for the
+features its parameters use (`gpu::develop::Variant`); the Shadows/Highlights map's
+grids stay on the device per map base, and each sample set's camera colour per the
+recipe fields it reads (`gpu::develop::Kept`), written once a second render with the
+same settings asks for it and read after its pass is submitted.
 When the GPU renders a preview, the developed pixels stay on the device and
 `gpu/present.wgsl` finishes them into a texture that egui draws directly (registered
 as a native texture by the render worker): sharpening, vignettes and grain, the
