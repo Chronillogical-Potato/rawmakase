@@ -134,6 +134,10 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
     use egui::{Align2, FontId, Rect, Sense, Stroke, StrokeKind, Vec2};
     let mut edit = None;
     ui.push_id(("photo-metadata", photo.id), |ui| {
+        // The row starts as tall as it ends up, so a row centring it (the
+        // filmstrip's header) places it on its line rather than growing to
+        // fit it.
+        ui.spacing_mut().interact_size.y = controls_height(ui);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.;
             let stars: Vec<_> = (1..=5)
