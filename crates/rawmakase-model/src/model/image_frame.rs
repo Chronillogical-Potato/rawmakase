@@ -95,6 +95,13 @@ impl ImageFrame {
         let [x1, y1] = self.from_unrotated([r, b]);
         [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]
     }
+    /// The unrotated frame's `[left, top, right, bottom]` of an image-space rectangle,
+    /// as Lightroom records crops; the inverse of [`Self::rect_from_unrotated`].
+    pub fn rect_to_unrotated(&self, [l, t, r, b]: [f32; 4]) -> [f32; 4] {
+        let [x0, y0] = turn(self.turns, l, t);
+        let [x1, y1] = turn(self.turns, r, b);
+        [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)]
+    }
     /// Decoded sample coordinates of an image-space position.
     pub fn to_source(&self, p: [f32; 2]) -> [f32; 2] {
         let [x, y] = turn(self.turns, p[0], p[1]);

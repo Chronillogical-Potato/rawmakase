@@ -1,7 +1,7 @@
 //! Presets made in RAWmakase: XMP files in the user library's "User Presets" folder,
 //! one folder per group, which Lightroom and Camera Raw can read too. Only these are
 //! updated, renamed or deleted from the app; imported and built-in presets are not.
-use crate::model::recipe::Recipe;
+use crate::{camera_data::Metadata, model::recipe::Recipe};
 use crate::{
     model::settings_groups::{GroupInclusion, GroupSelection},
     storage::Replace,
@@ -40,30 +40,32 @@ impl UserPresets {
                 .get("RAWmakasePreset")
                 .is_some_and(|v| v == "1")
     }
-    /// Saves a new preset of `r`'s `groups`; returns its file.
+    /// Saves a new preset of `r`'s `groups`, edited on the photo `shown`; returns its
+    /// file.
     pub fn create(
         &self,
         r: &Recipe,
+        shown: &Metadata,
         info: &PresetInfo,
         groups: &GroupSelection,
     ) -> Result<PathBuf> {
         ensure!(!info.name.is_empty(), "A preset needs a name");
         ensure!(!groups.is_empty(), "Choose at least one setting");
         let path = self.file_for(info)?;
-        write(&path, Replace::NoClobber, &preset(r, info, groups)).with_context(|| {
+        write(&path, Replace::NoClobber, &preset(r, shown, info, groups)).with_context(|| {
             format!("A preset named {} is already in {}", info.name, info.group)
         })?;
         Ok(path)
     }
     /// Lightroom's Update with Current Settings: the preset keeps its name, group,
     /// identity and the setting groups it had.
-    pub fn update(&self, existing: &Preset, r: &Recipe) -> Result<()> {
+    pub fn update(&self, existing: &Preset, r: &Recipe, shown: &Metadata) -> Result<()> {
         ensure!(self.owns(existing), "Only presets made here can be updated");
         let info = info_of(existing);
         write(
             &existing.path,
             Replace::Overwrite,
-            &preset(r, &info, &groups_of(existing)),
+            &preset(r, shown, &info, &groups_of(existing)),
         )
     }
     /// Renames a preset, keeping its settings and identity; returns its new file.
@@ -234,14 +236,16 @@ mod tests {
             exposure: 0.4,
             ..Default::default()
         };
+        let shown = Metadata::default();
         let info = PresetInfo::new("Bright/airy", "Mine");
-        let path = user.create(&r, &info, &groups)?;
+        let path = user.create(&r, &shown, &info, &groups)?;
         assert_eq!(path, user.dir.join("Mine").join("Bright-airy.xmp"));
         // The same name in the same group is refused.
-        assert!(user.create(&r, &info, &groups).is_err());
+        assert!(user.create(&r, &shown, &info, &groups).is_err());
         assert!(
             user.create(
                 &r,
+                &shown,
                 &PresetInfo::new("Empty", "Mine"),
                 &GroupSelection::none()
             )
@@ -260,6 +264,7 @@ mod tests {
                 contrast: 0.5,
                 ..Default::default()
             },
+            &shown,
         )?;
         let updated = library(&user.dir).presets.remove(0);
         assert_eq!(updated.settings["Exposure2012"], "+1.00");
@@ -275,7 +280,7 @@ mod tests {
         user.delete(&presets[0])?;
         assert!(library(&user.dir).presets.is_empty());
         // A case-only rename keeps the one file.
-        let created = user.create(&r, &PresetInfo::new("lower", "Mine"), &groups)?;
+        let created = user.create(&r, &shown, &PresetInfo::new("lower", "Mine"), &groups)?;
         let lower = library(&user.dir).presets.remove(0);
         let upper = user.rename(&lower, "Lower")?;
         assert_eq!(library(&user.dir).presets.len(), 1);
@@ -283,16 +288,16 @@ mod tests {
         assert_ne!(created, upper);
         user.delete(&library(&user.dir).presets[0])?;
         // Windows-unsafe names are made safe.
-        let odd = user.create(&r, &PresetInfo::new("x? <b>.", "a|b"), &groups)?;
+        let odd = user.create(&r, &shown, &PresetInfo::new("x? <b>.", "a|b"), &groups)?;
         assert_eq!(odd, user.dir.join("a-b").join("x- -b-.xmp"));
-        let reserved = user.create(&r, &PresetInfo::new("CON", "a|b"), &groups)?;
+        let reserved = user.create(&r, &shown, &PresetInfo::new("CON", "a|b"), &groups)?;
         assert_eq!(reserved, user.dir.join("a-b").join("_CON.xmp"));
         // Names of four bytes but fewer characters are names like any other.
         for name in ["éé", "🙂", "COMé"] {
-            let made = user.create(&r, &PresetInfo::new(name, "a|b"), &groups)?;
+            let made = user.create(&r, &shown, &PresetInfo::new(name, "a|b"), &groups)?;
             assert_eq!(made, user.dir.join("a-b").join(format!("{name}.xmp")));
         }
-        let com = user.create(&r, &PresetInfo::new("com1.x", "a|b"), &groups)?;
+        let com = user.create(&r, &shown, &PresetInfo::new("com1.x", "a|b"), &groups)?;
         assert_eq!(com, user.dir.join("a-b").join("_com1.x.xmp"));
         // A file copied into the folder from elsewhere is not ours to change.
         let foreign = crate::xmp::Preset {
