@@ -21,6 +21,7 @@
 make = "Canon"
 model = "EOS 200D"
 baseline_exposure = 0.5
+unit_calibration = { preset = "shade", reference = [2158, 1024, 1502] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.00 plus +0.48 for the white level"
@@ -29,6 +30,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.00 plus +0.48 fo
 make = "Canon"
 model = "EOS 250D"
 baseline_exposure = 0.4
+unit_calibration = { preset = "daylight", reference = [1869, 1024, 1662] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.12 plus +0.52 for the white level"
@@ -37,6 +39,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.12 plus +0.52 fo
 make = "Canon"
 model = "EOS 77D"
 baseline_exposure = 0.55
+unit_calibration = { preset = "daylight", reference = [1853, 1024, 1702] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 3200; BaselineExposure +0.32 plus +0.22 for the white level"
@@ -45,6 +48,7 @@ sample = "raw.pixls.us, 1 photo at ISO 3200; BaselineExposure +0.32 plus +0.22 f
 make = "Canon"
 model = "EOS 800D"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1893, 1024, 1697] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.00 plus +0.48 for the white level"
@@ -53,6 +57,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.00 plus +0.48 fo
 make = "Canon"
 model = "EOS 850D"
 baseline_exposure = 0.05
+unit_calibration = { preset = "daylight", reference = [1869, 1024, 1662] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.46 plus +0.52 for the white level"
@@ -61,6 +66,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.46 plus +0.52 fo
 make = "Canon"
 model = "EOS 90D"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1799, 1024, 1638] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 for the white level"
@@ -69,6 +75,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 fo
 make = "Canon"
 model = "EOS M200"
 baseline_exposure = 0.4
+unit_calibration = { preset = "daylight", reference = [1560, 1024, 1327] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.12 plus +0.52 for the white level"
@@ -77,6 +84,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.12 plus +0.52 fo
 make = "Canon"
 model = "EOS M5"
 baseline_exposure = 0.3
+unit_calibration = { preset = "daylight", reference = [1561, 1024, 1359] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.04 for the white level"
@@ -85,6 +93,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.04 fo
 make = "Canon"
 model = "EOS M50"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1540, 1024, 1314] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.02 plus +0.48 for the white level"
@@ -93,6 +102,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.02 plus +0.48 fo
 make = "Canon"
 model = "EOS M50 Mark II"
 baseline_exposure = 0.4
+unit_calibration = { preset = "daylight", reference = [1560, 1024, 1327] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 5000; BaselineExposure -0.35 plus +0.77 for the white level"
@@ -101,6 +111,7 @@ sample = "raw.pixls.us, 1 photo at ISO 5000; BaselineExposure -0.35 plus +0.77 f
 make = "Canon"
 model = "EOS M6 Mark II"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1799, 1024, 1638] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640; BaselineExposure -0.20 plus +0.70 for the white level"
@@ -109,6 +120,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640; BaselineExposure -0.20 plus +0.70 fo
 make = "Canon"
 model = "EOS R"
 baseline_exposure = 0.6
+unit_calibration = { preset = "daylight", reference = [2032, 1024, 1498] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.38 plus +0.23 for the white level"
@@ -117,6 +129,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.38 plus +0.23 fo
 make = "Canon"
 model = "EOS R10"
 baseline_exposure = 0.4
+unit_calibration = { preset = "daylight", reference = [1739, 1024, 1774] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
@@ -125,6 +138,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "Canon"
 model = "EOS R100"
 baseline_exposure = 0.35
+unit_calibration = { preset = "daylight", reference = [1859, 1024, 1786] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640; BaselineExposure -0.40 plus +0.77 for the white level"
@@ -133,6 +147,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640; BaselineExposure -0.40 plus +0.77 fo
 make = "Canon"
 model = "EOS R3"
 baseline_exposure = 0.3
+unit_calibration = { preset = "daylight", reference = [1990, 1024, 1824] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 800; Adobe +1.08 with Highlight Tone Priority, which adds 1 EV; BaselineExposure +1.08 plus +0.22 for the white level"
@@ -141,6 +156,7 @@ sample = "raw.pixls.us, 1 photo at ISO 800; Adobe +1.08 with Highlight Tone Prio
 make = "Canon"
 model = "EOS R5"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1971, 1024, 1913] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
@@ -149,6 +165,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 make = "Canon"
 model = "EOS R5 Mark II"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1920, 1024, 1577] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125"
@@ -157,6 +174,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 make = "Canon"
 model = "EOS R50"
 baseline_exposure = 0.3
+unit_calibration = { preset = "daylight", reference = [1739, 1024, 1774] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
@@ -173,6 +191,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 make = "Canon"
 model = "EOS R6"
 baseline_exposure = 0.35
+unit_calibration = { preset = "daylight", reference = [1910, 1024, 1608] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
@@ -181,6 +200,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 make = "Canon"
 model = "EOS R6 Mark II"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [1938, 1024, 1533] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.27 plus +0.23 for the white level"
@@ -197,6 +217,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.26 plus +0.24 fo
 make = "Canon"
 model = "EOS R7"
 baseline_exposure = 0.4
+unit_calibration = { preset = "daylight", reference = [1824, 1024, 1542] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
@@ -205,6 +226,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 make = "Canon"
 model = "EOS R8"
 baseline_exposure = 0.25
+unit_calibration = { preset = "daylight", reference = [1938, 1024, 1533] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; Adobe +1.27 with Highlight Tone Priority, which adds 1 EV"
@@ -213,6 +235,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; Adobe +1.27 with Highlight Tone Prio
 make = "Canon"
 model = "EOS RP"
 baseline_exposure = 0.5
+unit_calibration = { preset = "daylight", reference = [2072, 1024, 1699] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.32 plus +0.18 for the white level"
@@ -229,6 +252,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.40 plus +0.03 fo
 make = "Canon"
 model = "PowerShot G1 X Mark III"
 baseline_exposure = 0.3
+unit_calibration = { preset = "daylight", reference = [1540, 1024, 1314] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.04 for the white level"
@@ -237,6 +261,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.04 fo
 make = "Canon"
 model = "PowerShot G5 X Mark II"
 baseline_exposure = 0.25
+unit_calibration = { preset = "daylight", reference = [2250, 1024, 1814] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 for the white level; Adobe's value 0.35 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
@@ -245,6 +270,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 fo
 make = "Canon"
 model = "PowerShot G7 X Mark III"
 baseline_exposure = 0.35
+unit_calibration = { preset = "daylight", reference = [2250, 1024, 1814] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 for the white level"
@@ -253,6 +279,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.13 plus +0.22 fo
 make = "Canon"
 model = "PowerShot G9 X Mark II"
 baseline_exposure = 0.3
+unit_calibration = { preset = "daylight", reference = [2120, 1024, 1795] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.25 plus +0.04 for the white level"
@@ -269,6 +296,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.16 plus +0.34 fo
 make = "Fujifilm"
 model = "GFX 100"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [605, 302, 478] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -287,6 +315,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX 50S"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [567, 302, 440] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -296,6 +325,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX100 II"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [613, 302, 482] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -305,6 +335,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.22 at DR200, which adds 1.2
 make = "Fujifilm"
 model = "GFX100RF"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [613, 302, 482] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -314,6 +345,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for
 make = "Fujifilm"
 model = "GFX100S"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [605, 302, 478] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -323,6 +355,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "GFX100S II"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [613, 302, 482] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -332,6 +365,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.01 plus -0.05 for
 make = "Fujifilm"
 model = "GFX50S II"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [567, 302, 440] }
 fujifilm_dr100_shift = -0.49
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -341,6 +375,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.01 plus -0.05 fo
 make = "Fujifilm"
 model = "X-A7"
 baseline_exposure = -0.15
+unit_calibration = { preset = "d65", reference = [550, 256, 396] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
@@ -349,6 +384,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "Fujifilm"
 model = "X-E3"
 baseline_exposure = 0.15
+unit_calibration = { preset = "d65", reference = [676, 302, 495] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -358,6 +394,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250"
 make = "Fujifilm"
 model = "X-E4"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160"
@@ -374,6 +411,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.02 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X-H1"
 baseline_exposure = 0.2
+unit_calibration = { preset = "d65", reference = [659, 302, 509] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -383,6 +421,7 @@ sample = "raw.pixls.us, 1 photo at ISO 800"
 make = "Fujifilm"
 model = "X-H2"
 baseline_exposure = -0.35
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.40 EV away, so fitted to it"
@@ -391,6 +430,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 
 make = "Fujifilm"
 model = "X-H2S"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 320, DR200; Adobe's +1.07 (0.07 at DR100) left the Camera Raw 18.7 render -0.14 EV away, so fitted to it"
@@ -399,6 +439,7 @@ sample = "raw.pixls.us, 1 photo at ISO 320, DR200; Adobe's +1.07 (0.07 at DR100)
 make = "Fujifilm"
 model = "X-M5"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640"
@@ -407,6 +448,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 make = "Fujifilm"
 model = "X-Pro2"
 baseline_exposure = 0.15
+unit_calibration = { preset = "d65", reference = [659, 302, 509] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -416,6 +458,7 @@ sample = "raw.pixls.us, 1 photo at ISO 500"
 make = "Fujifilm"
 model = "X-Pro3"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640"
@@ -424,6 +467,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 make = "Fujifilm"
 model = "X-S10"
 baseline_exposure = -0.1
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera Raw 18.7 render -0.17 EV away, so fitted to it"
@@ -432,6 +476,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera R
 make = "Fujifilm"
 model = "X-S20"
 baseline_exposure = -0.05
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
@@ -440,6 +485,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.05 left the Camera R
 make = "Fujifilm"
 model = "X-T2"
 baseline_exposure = 0.15
+unit_calibration = { preset = "d65", reference = [659, 302, 509] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -449,6 +495,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400"
 make = "Fujifilm"
 model = "X-T20"
 baseline_exposure = 0.15
+unit_calibration = { preset = "d65", reference = [690, 302, 501] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -458,6 +505,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "Fujifilm"
 model = "X-T200"
 baseline_exposure = -0.15
+unit_calibration = { preset = "d65", reference = [522, 256, 413] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
@@ -466,6 +514,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "Fujifilm"
 model = "X-T3"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160"
@@ -474,6 +523,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160"
 make = "Fujifilm"
 model = "X-T30"
 baseline_exposure = 0.1
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; Adobe -0.88 at extended ISO 100, which takes 1 EV off"
@@ -482,6 +532,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; Adobe -0.88 at extended ISO 100, whi
 make = "Fujifilm"
 model = "X-T30 II"
 baseline_exposure = -0.2
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.1 left the Camera Raw 18.7 render -0.38 EV away, so fitted to it"
@@ -490,6 +541,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; Adobe's value 0.1 left the Camera Ra
 make = "Fujifilm"
 model = "X-T30 III"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 320; Adobe +1.07 at DR200, which adds 1 EV"
@@ -498,6 +550,7 @@ sample = "raw.pixls.us, 1 photo at ISO 320; Adobe +1.07 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X-T4"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160"
@@ -506,6 +559,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160"
 make = "Fujifilm"
 model = "X-T5"
 baseline_exposure = -0.1
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.14 EV away, so fitted to it"
@@ -522,7 +576,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250; Adobe +1.02 at DR200, which adds 1 E
 make = "Fujifilm"
 model = "X100F"
 baseline_exposure = 0.15
-neutral_calibration = [0.9883, 1.0, 1.031]
+unit_calibration = { preset = "d65", reference = [673, 302, 499] }
 fujifilm_exposure_shift = "ignored"
 source = "adobe-dng"
 checked = "2026-09-26"
@@ -532,6 +586,7 @@ sample = "2 Lightroom DNGs (ISO 200 and 400), see docs/macos-lightroom-validatio
 make = "Fujifilm"
 model = "X100V"
 baseline_exposure = 0.05
+unit_calibration = { preset = "d65", reference = [627, 302, 475] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 160"
@@ -540,6 +595,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160"
 make = "Fujifilm"
 model = "X100VI"
 baseline_exposure = -0.15
+unit_calibration = { preset = "d65", reference = [615, 302, 499] }
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 18.7 render -0.18 EV away, so fitted to it"
@@ -548,6 +604,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; Adobe's value 0 left the Camera Raw 
 make = "Fujifilm"
 model = "XF10"
 baseline_exposure = -0.3
+unit_calibration = { preset = "d65", reference = [547, 256, 384] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure -0.25 plus -0.05 for the white level"
@@ -1180,7 +1237,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.50 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M5A"
-sony_daylight_reference = [2316, 1024, 1836]
+unit_calibration = { preset = "daylight", reference = [2316, 1024, 1836] }
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1189,7 +1246,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M6"
-sony_daylight_reference = [2344, 1024, 1916]
+unit_calibration = { preset = "daylight", reference = [2344, 1024, 1916] }
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1198,7 +1255,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX100M7"
-sony_daylight_reference = [2240, 1024, 1692]
+unit_calibration = { preset = "daylight", reference = [2240, 1024, 1692] }
 baseline_exposure = -0.4
 source = "fitted"
 checked = "2026-10-05"
@@ -1207,7 +1264,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "DSC-RX10M4"
-sony_daylight_reference = [2292, 1024, 1936]
+unit_calibration = { preset = "daylight", reference = [2292, 1024, 1936] }
 baseline_exposure = -0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1216,7 +1273,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "DSC-RX1RM2"
-sony_daylight_reference = [2356, 1024, 1712]
+unit_calibration = { preset = "daylight", reference = [2356, 1024, 1712] }
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1225,7 +1282,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCA-99M2"
-sony_daylight_reference = [2500, 1024, 1612]
+unit_calibration = { preset = "daylight", reference = [2500, 1024, 1612] }
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1234,7 +1291,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-1"
-sony_daylight_reference = [2429, 1024, 1607]
+unit_calibration = { preset = "daylight", reference = [2429, 1024, 1607] }
 aliases = ["A1"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1244,7 +1301,7 @@ sample = "raw.pixls.us, 1 photo at ISO 500"
 [[camera]]
 make = "Sony"
 model = "ILCE-6000"
-sony_daylight_reference = [2608, 1024, 1632]
+unit_calibration = { preset = "daylight", reference = [2608, 1024, 1632] }
 aliases = ["A6000"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1254,7 +1311,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6100"
-sony_daylight_reference = [2600, 1024, 1816]
+unit_calibration = { preset = "daylight", reference = [2600, 1024, 1816] }
 aliases = ["A6100"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1264,7 +1321,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-6300"
-sony_daylight_reference = [2768, 1024, 1772]
+unit_calibration = { preset = "daylight", reference = [2768, 1024, 1772] }
 aliases = ["A6300"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1274,7 +1331,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6400"
-sony_daylight_reference = [2600, 1024, 1816]
+unit_calibration = { preset = "daylight", reference = [2600, 1024, 1816] }
 aliases = ["A6400"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1284,7 +1341,7 @@ sample = "raw.pixls.us, 1 photo at ISO 250"
 [[camera]]
 make = "Sony"
 model = "ILCE-6500"
-sony_daylight_reference = [2768, 1024, 1772]
+unit_calibration = { preset = "daylight", reference = [2768, 1024, 1772] }
 aliases = ["A6500"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1294,7 +1351,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-6600"
-sony_daylight_reference = [2600, 1024, 1816]
+unit_calibration = { preset = "daylight", reference = [2600, 1024, 1816] }
 aliases = ["A6600"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1304,7 +1361,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-6700"
-sony_daylight_reference = [2705, 1024, 1746]
+unit_calibration = { preset = "daylight", reference = [2705, 1024, 1746] }
 aliases = ["A6700"]
 baseline_exposure = 0.1
 source = "adobe-dng"
@@ -1314,7 +1371,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 [[camera]]
 make = "Sony"
 model = "ILCE-7C"
-sony_daylight_reference = [2464, 1024, 1508]
+unit_calibration = { preset = "daylight", reference = [2464, 1024, 1508] }
 aliases = ["A7C"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1324,7 +1381,7 @@ sample = "raw.pixls.us, 1 photo at ISO 2000"
 [[camera]]
 make = "Sony"
 model = "ILCE-7CM2"
-sony_daylight_reference = [2411, 1024, 1638]
+unit_calibration = { preset = "daylight", reference = [2411, 1024, 1638] }
 aliases = ["A7C II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1334,7 +1391,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7CR"
-sony_daylight_reference = [2423, 1024, 1799]
+unit_calibration = { preset = "daylight", reference = [2423, 1024, 1799] }
 aliases = ["A7CR"]
 baseline_exposure = 0.3
 source = "fitted"
@@ -1344,7 +1401,7 @@ sample = "4 private photos; 0.25 leaves them 0.03-0.07 EV dark, 0.35 0.04-0.08 E
 [[camera]]
 make = "Sony"
 model = "ILCE-7M2"
-sony_daylight_reference = [2436, 1024, 1456]
+unit_calibration = { preset = "daylight", reference = [2436, 1024, 1456] }
 aliases = ["A7 II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1354,7 +1411,7 @@ sample = "3 anonymous photos at ISO 100 and 6400; DNG BaselineExposure +0.35, ve
 [[camera]]
 make = "Sony"
 model = "ILCE-7M3"
-sony_daylight_reference = [2464, 1024, 1508]
+unit_calibration = { preset = "daylight", reference = [2464, 1024, 1508] }
 aliases = ["A7 III"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1364,7 +1421,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7M4"
-sony_daylight_reference = [2411, 1024, 1638]
+unit_calibration = { preset = "daylight", reference = [2411, 1024, 1638] }
 aliases = ["A7 IV"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1374,7 +1431,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 [[camera]]
 make = "Sony"
 model = "ILCE-7M5"
-sony_daylight_reference = [2324, 1024, 1808]
+unit_calibration = { preset = "daylight", reference = [2324, 1024, 1808] }
 aliases = ["A7 V"]
 baseline_exposure = 0.5
 source = "fitted"
@@ -1384,7 +1441,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; Adobe's BaselineExposure 0.35 on a 1
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM2"
-sony_daylight_reference = [2356, 1024, 1712]
+unit_calibration = { preset = "daylight", reference = [2356, 1024, 1712] }
 aliases = ["A7R II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1394,7 +1451,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM3"
-sony_daylight_reference = [2464, 1024, 1648]
+unit_calibration = { preset = "daylight", reference = [2464, 1024, 1648] }
 aliases = ["A7R III"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1404,7 +1461,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM4"
-sony_daylight_reference = [2572, 1024, 1668]
+unit_calibration = { preset = "daylight", reference = [2572, 1024, 1668] }
 aliases = ["A7R IV"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1414,7 +1471,7 @@ sample = "raw.pixls.us, 1 photo at ISO 50; Adobe -0.65 at extended ISO 50, which
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM5"
-sony_daylight_reference = [2423, 1024, 1799]
+unit_calibration = { preset = "daylight", reference = [2423, 1024, 1799] }
 aliases = ["A7R V"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1424,7 +1481,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-7RM6"
-sony_daylight_reference = [2252, 1024, 1838]
+unit_calibration = { preset = "daylight", reference = [2252, 1024, 1838] }
 aliases = ["A7R VI"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1434,7 +1491,7 @@ sample = "1 private photo at ISO 100, Adobe DNG Converter 18.7; LibRaw's white l
 [[camera]]
 make = "Sony"
 model = "ILCE-7SM2"
-sony_daylight_reference = [2500, 1024, 1716]
+unit_calibration = { preset = "daylight", reference = [2500, 1024, 1716] }
 aliases = ["A7S II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1444,7 +1501,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ILCE-7SM3"
-sony_daylight_reference = [2568, 1024, 1549]
+unit_calibration = { preset = "daylight", reference = [2568, 1024, 1549] }
 aliases = ["A7S III"]
 baseline_exposure = 0.15
 source = "adobe-dng"
@@ -1454,7 +1511,7 @@ sample = "raw.pixls.us, 1 photo at ISO 80"
 [[camera]]
 make = "Sony"
 model = "ILCE-9"
-sony_daylight_reference = [2460, 1024, 1608]
+unit_calibration = { preset = "daylight", reference = [2460, 1024, 1608] }
 aliases = ["A9"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1464,7 +1521,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILCE-9M2"
-sony_daylight_reference = [2460, 1024, 1608]
+unit_calibration = { preset = "daylight", reference = [2460, 1024, 1608] }
 aliases = ["A9 II"]
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1474,7 +1531,7 @@ sample = "raw.pixls.us, 1 photo at ISO 640"
 [[camera]]
 make = "Sony"
 model = "ILCE-9M3"
-sony_daylight_reference = [2128, 1024, 1729]
+unit_calibration = { preset = "daylight", reference = [2128, 1024, 1729] }
 aliases = ["A9 III"]
 baseline_exposure = 0.25
 source = "adobe-dng"
@@ -1484,7 +1541,7 @@ sample = "raw.pixls.us, 1 photo at ISO 1000"
 [[camera]]
 make = "Sony"
 model = "ILME-FX2"
-sony_daylight_reference = [2411, 1024, 1638]
+unit_calibration = { preset = "daylight", reference = [2411, 1024, 1638] }
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1493,7 +1550,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Sony"
 model = "ILME-FX3"
-sony_daylight_reference = [2568, 1024, 1549]
+unit_calibration = { preset = "daylight", reference = [2568, 1024, 1549] }
 baseline_exposure = 0.15
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1502,7 +1559,7 @@ sample = "raw.pixls.us, 1 photo at ISO 20000"
 [[camera]]
 make = "Sony"
 model = "ILME-FX30"
-sony_daylight_reference = [2705, 1024, 1746]
+unit_calibration = { preset = "daylight", reference = [2705, 1024, 1746] }
 baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1511,7 +1568,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 [[camera]]
 make = "Sony"
 model = "ZV-1"
-sony_daylight_reference = [2416, 1024, 1804]
+unit_calibration = { preset = "daylight", reference = [2416, 1024, 1804] }
 baseline_exposure = -0.2
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1520,7 +1577,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.20 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ZV-1M2"
-sony_daylight_reference = [2416, 1024, 1804]
+unit_calibration = { preset = "daylight", reference = [2416, 1024, 1804] }
 baseline_exposure = -0.2
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1529,7 +1586,7 @@ sample = "raw.pixls.us, 1 photo at ISO 160; BaselineExposure -0.20 plus +0.01 fo
 [[camera]]
 make = "Sony"
 model = "ZV-E1"
-sony_daylight_reference = [2568, 1024, 1549]
+unit_calibration = { preset = "daylight", reference = [2568, 1024, 1549] }
 baseline_exposure = 0.15
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1538,7 +1595,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 [[camera]]
 make = "Sony"
 model = "ZV-E10"
-sony_daylight_reference = [2848, 1024, 1868]
+unit_calibration = { preset = "daylight", reference = [2848, 1024, 1868] }
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1547,7 +1604,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400"
 [[camera]]
 make = "Sony"
 model = "ZV-E10M2"
-sony_daylight_reference = [2705, 1024, 1746]
+unit_calibration = { preset = "daylight", reference = [2705, 1024, 1746] }
 baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"

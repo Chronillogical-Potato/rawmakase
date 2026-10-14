@@ -73,7 +73,10 @@ def run_set(args, d, refs, out):
     if score.exists():
         # Kept from an interrupted run only when this build made it, for these
         # references, with this profile library.
-        made_by = json.loads(score.read_text()).get('rendered_by') or {}
+        previous = json.loads(score.read_text())
+        if previous.get('metric_policy') != gate.METRIC_POLICY:
+            return f'{family}/{name} (old metrics: use a new --out to render and score)', False, 0
+        made_by = previous.get('rendered_by') or {}
         expected = dict(references=gate.digest(refs / 'references.json'), rawmakase=gate.digest(args.rawmakase),
                         profiles=args.profiles, policy=gate.RENDER_POLICY)
         if any(made_by.get(k) != v for k, v in expected.items()):
@@ -116,6 +119,8 @@ def run(args):
     identity = dict(rawmakase_sha256=gate.digest(args.rawmakase), profiles=args.profiles)
     # One run folder is one build with one profile library; a split may be added.
     previous = json.loads((out / 'run.json').read_text()) if (out / 'run.json').exists() else None
+    if previous and previous.get('metric_policy') != gate.METRIC_POLICY:
+        raise Setup(f'{out} holds older metrics: use a new --out; frozen references are unchanged')
     if previous and any(previous.get(k) != v for k, v in identity.items()):
         raise Setup(f'{out} holds a run of another build or profile library: use a new --out')
     splits = sorted(set((previous or {}).get('splits', [])) | {args.split})
@@ -129,7 +134,8 @@ def run(args):
     built_from = args.rawmakase
     args.rawmakase = pinned
     (out / 'run.json').write_text(json.dumps(dict(
-        identity, rawmakase=str(built_from), commit=built or None, data_dir=str(args.data_dir), splits=splits,
+        identity, metric_policy=gate.METRIC_POLICY,
+        rawmakase=str(built_from), commit=built or None, data_dir=str(args.data_dir), splits=splits,
         started=(previous or {}).get('started') or datetime.datetime.now().isoformat(timespec='seconds')),
         indent=1))
     todo = sets(d, args.split)
@@ -168,15 +174,14 @@ def accept(args):
             failing.append((name, text.getvalue().strip().splitlines()[-1]))
             continue
         for r in results:
-            # A pair fails on any reason but an inconclusive one; one that is both
-            # inconclusive on a rule and failing another still fails.
+            # Keep inconclusive coverage visible, but never call it a pass.
             hard = [why for why in r['reasons'] if not why.startswith('inconclusive')]
             counts['pairs'] += 1
             counts['fail' if hard else 'inconclusive' if r['reasons'] else 'pass'] += 1
-            if hard:
-                failing.append((name, f'{r["name"]} {r["stratum"]}: ' + '; '.join(hard)))
+            if r['reasons']:
+                failing.append((name, f'{r["name"]} {r["stratum"]}: ' + '; '.join(r['reasons'])))
     print(f'{args.split}: {len(expected)} sets, {counts["pairs"]} setting × stratum pairs: {counts["pass"]} pass, '
-          f'{counts["fail"]} fail, {counts["inconclusive"]} inconclusive (fewer than three photos)'
+          f'{counts["fail"]} fail, {counts["inconclusive"]} inconclusive (also fails acceptance)'
           + (f'; {counts["missing"]} sets not scored by both runs' if counts['missing'] else ''))
     for name, why in failing:
         print(f'  {name}: {why}')
@@ -201,7 +206,18 @@ def report(args):
     p90 = lambda v: sorted(v)[int(0.9 * (len(v) - 1))] if v else float('nan')
     kind = lambda r: 'default' if r['name'].endswith('default') else 'edited'
     v = [r['median_de00'] for r in valid]
-    print(f'{args.split}, {len(files)} sets: {len(valid)} of {len(rows)} cases scored; median ΔE00 {med(v):.2f}, 90% within {p90(v):.2f}\n')
+    print(f'{args.split}, {len(files)} sets: {len(valid)} of {len(rows)} cases scored; '
+          f'case-weighted median ΔE00 {med(v):.2f}, p90 of per-case medians {p90(v):.2f}')
+    print(f'{len({r["sha256"] for r in valid})} of {len({r["sha256"] for r in rows})} unique photos scored; '
+          f'{sum(kind(r) == "default" for r in rows)} default cases (repeated across sets).')
+    unique = defaultdict(list)
+    for r in valid:
+        unique[(r['sha256'], r['name'])].append(r['median_de00'])
+    per_photo = defaultdict(list)
+    for (sha, _), values in unique.items():
+        per_photo[sha].append(med(values))
+    print(f'Equal-photo-weight median (deduplicated settings): '
+          f'{med([med(v) for v in per_photo.values()]):.2f}. Scores are not an acceptance verdict.\n')
     for key, label in (('control', 'set'), ('stratum', 'stratum'), ('source', 'source')):
         groups = defaultdict(list)
         for r in valid:
@@ -248,7 +264,7 @@ def main():
     s.add_argument('--candidate', type=Path, required=True, help='a run folder')
     s.add_argument('--baseline', type=Path, required=True, help='a run folder')
     s.add_argument('--split', choices=['validation', 'holdout', 'train'], default='validation')
-    s.add_argument('--rule', choices=['regression', 'switch'], default='regression')
+    s.add_argument('--rule', choices=['regression', 'switch', 'parity'], default='regression')
     s.add_argument('--exclude', type=Path, help='photos to leave out (gate.py accept --exclude)')
     s.add_argument('--verbose', action='store_true', help='every set\'s table')
     s = sub.add_parser('report')

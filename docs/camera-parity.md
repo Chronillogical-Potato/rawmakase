@@ -8,62 +8,94 @@ Neither is a runtime dependency of RAWmakase.
 
 ## White-balance calibration
 
-Install ExifTool and Adobe DNG Converter, then audit public RAW samples:
+Install ExifTool and Adobe DNG Converter, then audit RAW samples:
 
 ```sh
 python3 scripts/cameras/check-calibration.py --converter /path/to/converter \
   --report /tmp/calibration.json sample.ARW another.NEF
 ```
 
-For already converted DNGs omit `--converter`. Auditing Sony model references
-also needs the original RAW daylight metadata, so use `--converter` for Sony. The script converts temporary
-copies, checks calibration signatures and matrix shape, and compares exact camera
-models and aliases against `data/cameras.toml`. A mismatch or unsupported matrix
-returns a nonzero exit status. The report proposes gains or a Sony daylight
-reference; it does not edit the
-table. Check multiple samples, especially different ISO and recording modes,
-before applying a proposal. Conflicting samples must be investigated.
+The script converts temporary copies, reads the calibration DNG Converter
+records and the white-balance presets stored in the original RAW, and compares
+exact camera models and aliases against `data/cameras.toml`. Already converted
+DNGs can be audited without `--converter`, but then the native presets are
+missing and a per-unit reference cannot be checked or proposed. A mismatch,
+missing row, conflict or unsupported calibration returns a nonzero exit status.
+The report proposes `unit_calibration` rows; it does not edit the table.
 
-Sony calibration is per individual camera unit, not a fixed model gain. The native
-adapter reads `WB_Coeffs[Daylight]` from LibRaw (the RAW's `WB_RGBLevelsDaylight`,
-not LibRaw's matrix-derived `pre_mul`). The model divides its measured
-`sony_daylight_reference` by that per-file preset, normalizing both to green,
-and rounds to the four decimals recorded by DNG Converter. Missing/invalid
-presets retain identity rather than borrowing another unit's correction.
-The 36 public Sony samples reproduce their converter gains exactly. Two A7CR
-samples from different units additionally verify different corrections:
-`[.9432, 1, .9994]` and `[.9284, 1, 1.0158]`, from the same model reference
-`[2423, 1024, 1799]`. This independently measured relationship agrees with the
-[RawSpeed calibration investigation](https://github.com/darktable-org/rawspeed/compare/develop...tdonovan4:rawspeed:camera-calibration-matrix).
-Three A7 II samples at ISO 100 and 6400 reproduce converter corrections
-`[1.01, 1, .9707]` and `[1.01, 1, .9579]` from the model reference
-`[2436, 1024, 1456]`. The same conversions record BaselineExposure +0.35;
-the previous fitted +0.30 left the current default render too dark.
-Fresh Camera Raw 18.7 comparisons of these two A7CR samples pass both defaults
-and all eight custom-WB cases (median ΔE00 .45–1.01 for custom WB).
+### Per-unit calibration
 
-Non-Sony converter facts remain diagnostic evidence; they are not installed as
-fixed corrections for native RAWs. One sample cannot establish that a correction
-applies to every unit, firmware or recording mode. The existing X100F correction,
-previously measured from two DNG exports, is retained. DNG files use their own
-supported calibration regardless of make.
+Adobe calibrates each camera unit, not each model. DNG Converter records a
+diagonal CameraCalibration, equal for both illuminants, that is a model reference
+divided by a white-balance preset the unit stored in its own RAW, both normalized
+to green and rounded to four decimals. The camera table holds the reference and
+which preset it divides:
 
-The supported correction is equal, positive diagonal CameraCalibration1/2 with
-identity AnalogBalance and matching Adobe signatures. Unknown cameras retain
-identity calibration; there is no make-wide calibration fallback. Illuminant-
-dependent matrices, off-diagonal matrices and non-identity AnalogBalance need a
-full matrix implementation and are reported as unsupported. Do not flatten them
-into gains or copy another body's values.
+```toml
+unit_calibration = { preset = "daylight", reference = [1893, 1024, 1697] }
+```
+
+| Make | Preset | RAW tag (ExifTool) | LibRaw |
+|---|---|---|---|
+| Sony | `daylight` | `WB_RGBLevelsDaylight` | `WB_Coeffs[Daylight]` |
+| Canon (most bodies) | `daylight` | `WB_RGGBLevelsDaylight` | `WB_Coeffs[Daylight]` |
+| Canon EOS 200D, 5D Mark IV, 5DS R, 6D Mark II | `shade` | `WB_RGGBLevelsShade` | `WB_Coeffs[Shade]` |
+| Fujifilm | `d65` | `WB_GRBLevelsStandard`, the entry for light source 21 | `WB_Coeffs[D65]` |
+
+The native adapter exports these presets for every native RAW, not LibRaw's
+matrix-derived `pre_mul`; `cameras::neutral_calibration` applies the row. A
+missing or invalid preset, or a camera without a row, keeps identity rather than
+borrowing another unit's correction, and there is no make-wide fallback.
+
+Evidence (Adobe DNG Converter 18.7, 2026-10-14): 544 samples, 354 public
+raw.pixls.us files and 190 anonymous local ones, including bodies of the same
+model identified by serial number. For 59 models, bodies with different
+calibrations reproduce Adobe's four-decimal values exactly from one integer
+reference: 23 Sony and 31 Canon models with the Daylight preset, 3 Canon models
+with Shade and 2 Fujifilm models with D65. Different ISO settings and recording
+modes of one unit (RAW and C-RAW, compressed and uncompressed, sRAW and mRAW)
+record one calibration. Separately measured models that share a sensor or
+processor generation share their reference (Fujifilm X-T3, X-T30, X-T4, X-S10,
+X-E4, X-Pro3 and X100V; Canon 250D and 850D, R6 Mark II and R8, R10 and R50),
+which further supports single-sample rows. The A7CR, A7 II and X100F rows have
+been checked against Lightroom or Camera Raw on the owner's bodies. This agrees
+with the [RawSpeed calibration investigation](https://github.com/darktable-org/rawspeed/compare/develop...tdonovan4:rawspeed:camera-calibration-matrix)
+for Sony.
+
+Rows are installed when the samples identify one preset. Unresolved, so identity:
+
+- Canon EOS-1D X Mark III: its one sample fits both Daylight and Shade.
+- Canon EOS R6 Mark III, R50 V and PowerShot V1: no stored preset reproduces the
+  sample; the R6 Mark III Daylight preset even varies between files of one body.
+- Canon EOS M3 and Olympus E-M5 Mark III: units differ in a way no preset
+  explains. Older PowerShots and FinePix bodies without the tag are likewise
+  unexplained, but have no table rows.
+- Nikon, Panasonic, Pentax and the Fujifilm GFX 50R, X-E5 and X-T50 get identity
+  calibration from Adobe, which RAWmakase matches.
+
+The EOS 5D Mark IV, 5DS R, 6D Mark II, 7D Mark II, 80D and 1D X Mark II have
+verified references in the facts but no table row, which needs a baseline
+exposure checked against Camera Raw renders first (see [camera table](cameras.md)).
+
+AnalogBalance is a separate per-file factor (XYZ-to-camera = AnalogBalance x
+CameraCalibration x ColorMatrix). DNG Converter writes it for linear DNGs of
+in-camera white-balanced modes (Canon sRAW and mRAW, Nikon small RAW, Sony's
+non-mosaic modes), and their CameraCalibration matches mosaic RAWs of the same
+unit, so the audit records it apart. RAWmakase opens native sRAW files but not
+linear DNGs, so it never applies an AnalogBalance.
+
+Off-diagonal CameraCalibration and different matrices for the two illuminants,
+which phone DNGs carry, are not applied; such DNGs keep identity. Do not flatten
+them into gains or copy another body's values. A DNG's own supported calibration
+applies regardless of make.
 
 `data/camera-calibration-facts.json` records the converter version, public source
-URLs and SHA-256 hashes, and numerical tags for 142 public samples plus seven
-anonymous local samples (two A7CR, one A7R IV, one A7R VI, three A7 II). Local entries contain no filenames or paths. CI validates
-all measured tags and checks supported Sony/X100F native calibration against the
-camera table without requiring Adobe software. Other native makes with non-identity
-converter calibration remain reported mismatches. RAWs and
-Adobe profiles are not committed. The existing `source` and `checked` fields in
-camera rows describe baseline exposure; calibration provenance is in this separate
-facts file.
+URLs and SHA-256 hashes, the numerical DNG tags and the native presets. Local
+entries contain no filenames or paths. RAWs and Adobe profiles are not committed.
+CI checks without Adobe software that every row's reference reproduces each of its
+samples, that units of one model share a reference unless listed as unresolved,
+and that every reference has committed evidence. The camera rows' `source` and
+`checked` fields describe baseline exposure.
 
 ```sh
 python3 -m unittest discover -s scripts/cameras -p test_calibration.py
@@ -125,12 +157,10 @@ A DNG's own calibration takes precedence over the native-camera table. A
 matrix-only embedded profile retains its signature through the fallback profile;
 matching signatures enable the supported correction, and mismatches keep identity.
 This includes RAWmakase Standard and Color, which use that same camera matrix.
-The fallback signature is stored separately so legacy WB conversion stays unsigned.
-Recipes carrying it save as version 10 so older releases refuse them as newer
-instead of failing on an unknown profile field. Existing recipes keep their version.
-`WhiteBalanceModel` preserves the previous calibration for saved edits and old
-RAWmakase XMP; new edits and Adobe WB imports use `Calibrated`. This keeps old
-gains and the next Temperature/Tint change continuous. The original X100F
-correction remains part of the legacy conversion. Choosing As Shot also retains
-the edit’s version; resetting the whole photo or pasting calibrated White Balance
-settings selects the new conversion.
+
+Calibration changes which gains a Temperature and Tint mean, not a saved edit's
+gains, which rendering uses. A changed reference therefore leaves existing edits'
+colors as they were, while imported Lightroom and Camera Raw settings, including
+their resolved As Shot values, get the gains they have in Lightroom. A saved edit
+keeps the Temperature and Tint it shows; its next Temperature or Tint change uses
+the current calibration.

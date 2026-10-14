@@ -33,7 +33,10 @@ struct Metadata {
     float focal_35mm;
     int highlight_tone_priority;
     float fuji_exposure_shift;
-    float sony_daylight_wb[3];
+    // The camera's own stored Daylight, Shade and D65 presets (WB_Coeffs, as
+    // R, G, B), zero when the RAW has none. Per-unit calibration divides a camera
+    // table reference by one of them; DNGs carry their calibration instead.
+    float preset_daylight[3], preset_shade[3], preset_d65[3];
     // The visible image's offset in the raw data, and the camera's aspect-ratio
     // crop in raw coordinates, as crop_* are (cleft 0xffff when there is none).
     unsigned left_margin, top_margin;
@@ -246,9 +249,12 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         m->highlight_tone_priority=d.makernotes.canon.HighlightTonePriority;
         m->fuji_exposure_shift=d.makernotes.fuji.ExpoMidPointShift;
-        if (d.idata.maker_index == LIBRAW_CAMERAMAKER_Sony && !d.idata.dng_version) {
-            for (int c=0; c<3; ++c)
-                m->sony_daylight_wb[c] = d.color.WB_Coeffs[LIBRAW_WBI_Daylight][c];
+        if (!d.idata.dng_version) {
+            for (int c=0; c<3; ++c) {
+                m->preset_daylight[c] = d.color.WB_Coeffs[LIBRAW_WBI_Daylight][c];
+                m->preset_shade[c] = d.color.WB_Coeffs[LIBRAW_WBI_Shade][c];
+                m->preset_d65[c] = d.color.WB_Coeffs[LIBRAW_WBI_D65][c];
+            }
         }
         for(int c=0;c<3;++c) {
             m->daylight_wb[c] = d.color.pre_mul[c];

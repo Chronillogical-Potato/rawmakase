@@ -465,7 +465,38 @@ disagreement: the fraction of pixels where exactly one render is at white (any
 channel ≥ 0.995) or at black (all ≤ 0.005). Valid pixels: the common frame less a
 3-pixel border. Final-render scores include clipped pixels.
 
-**Acceptance rule** (fixed before fitting). For every setting, on validation and then
+Metric policy 2 additionally retains mean ΔE00 for every overlapping spatial
+window (edge 1/16 of the valid frame's long edge, half-window steps, including
+the far edges). Corresponding windows are compared individually: a bad region
+elsewhere cannot hide a new defect. Reference-defined highlights (L* ≥ 90) and
+shadows (L* ≤ 10) are also scored separately whenever they contain at least 16
+pixels, even below 1% of the frame. These use unsigned colour distance, so
+light/dark or colour errors cannot cancel. Any non-finite pixel invalidates a
+photo rather than being silently discarded.
+
+All acceptance modes require three scored photos in **every** brightness
+stratum for every declared setting. Missing strata, missing settings, unscored
+references and inconclusive results fail, including in `dataset-gate.py`.
+Every corresponding spatial or tonal region must stay within baseline +2 ΔE00;
+every photo's clipping disagreement must stay within baseline +0.5 percentage
+points, independently of the stratum average. These checks supplement, not
+replace, the clipped-plateau and monotonicity regressions above.
+
+`--rule regression` protects the preceding engine's measured behaviour.
+`--rule parity` adds absolute requirements on **each photo**, including defaults:
+median ΔE00 ≤ 2, every spatial/tonal region's mean ΔE00 ≤ 5, and clipping
+disagreement ≤ 0.5%. These are initial engineering acceptance budgets, not
+experimentally established perceptual-equivalence thresholds. They deliberately
+do not become looser when the baseline is bad. Review regional crops and retain
+full-resolution/detail tests before claiming Lightroom parity. Sharpening, noise
+reduction, lens corrections and errors outside sRGB remain outside this gate.
+
+Scores made before metric policy 2 cannot pass acceptance or resume a new metric
+run: they do not contain regional errors. Rescore retained renders, or render
+the same pinned baseline and candidate binaries into new run folders when the
+renders were deleted. Keep Camera Raw references and old scores unchanged.
+
+**Switch rule** (`--rule switch`, fixed before fitting). For every setting, on validation and then
 holdout, in every brightness stratum:
 
 1. **Material improvement**: the setting's score ≤ the default render's score + 1.0,

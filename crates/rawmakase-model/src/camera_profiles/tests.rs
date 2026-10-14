@@ -7,7 +7,7 @@ fn a7ii_native_neutral_matches_adobe_as_shot() {
         let m = Metadata {
             make: "Sony".into(),
             model: "ILCE-7M2".into(),
-            sony_daylight_wb: Some([2412., 1024., daylight_blue]),
+            wb_presets: daylight_preset([2412., 1024., daylight_blue]),
             wb: [2.453125, 1., 1.3945312],
             ..x100f()
         };
@@ -50,7 +50,7 @@ fn a7iv_dng_neutral_solves_adobe_as_shot_and_custom_white_balance() {
     let m = Metadata {
         make: "Sony".into(),
         model: "ILCE-7M4".into(),
-        sony_daylight_wb: Some([2456., 1024., 1691.]),
+        wb_presets: daylight_preset([2456., 1024., 1691.]),
         wb: [2380. / 1024., 1., 1920. / 1024.],
         ..x100f()
     };
@@ -90,7 +90,7 @@ fn dng_without_calibration_does_not_inherit_a_native_camera_correction() {
     let mut m = Metadata {
         make: "Sony".into(),
         model: "ILCE-7M4".into(),
-        sony_daylight_wb: Some([2456., 1024., 1691.]),
+        wb_presets: daylight_preset([2456., 1024., 1691.]),
         baseline_exposure: Some(0.),
         ..x100f()
     };
@@ -105,6 +105,12 @@ fn dng_without_calibration_does_not_inherit_a_native_camera_correction() {
     p.calibration_signature = "different".into();
     assert_eq!(p.neutral_calibration(&m), [1.; 3]);
 }
+fn daylight_preset(v: [f32; 3]) -> crate::camera_data::WhiteBalancePresets {
+    crate::camera_data::WhiteBalancePresets {
+        daylight: Some(v),
+        ..Default::default()
+    }
+}
 #[allow(clippy::approx_constant)] // Exact camera matrix coefficients, not mathematical constants.
 fn x100f() -> Metadata {
     // X100F D65 ColorMatrix, as Adobe writes it into DNGs and LibRaw reports as cam_xyz.
@@ -112,6 +118,11 @@ fn x100f() -> Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
+        // This unit's stored D65 preset gives the calibration in Lightroom's DNGs.
+        wb_presets: crate::camera_data::WhiteBalancePresets {
+            d65: Some([681., 302., 484.]),
+            ..Default::default()
+        },
         cam_xyz: [
             [1.1434, -0.4948, -0.121],
             [-0.3746, 1.2042, 0.1903],
@@ -234,7 +245,7 @@ fn a7cr_native_units_use_their_own_daylight_metadata() {
         let mut m = Metadata {
             make: "Sony".into(),
             model: "ILCE-7CR".into(),
-            sony_daylight_wb: Some(daylight),
+            wb_presets: daylight_preset(daylight),
             ..x100f()
         };
         let mut profile = CameraProfile::camera_matrix_default(&m).unwrap();
@@ -242,11 +253,11 @@ fn a7cr_native_units_use_their_own_daylight_metadata() {
         assert_eq!(profile.neutral_calibration(&m), expected);
         m.model = "A7CR".into();
         assert_eq!(profile.neutral_calibration(&m), expected);
-        m.sony_daylight_wb = None;
+        m.wb_presets.daylight = None;
         assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
-        m.sony_daylight_wb = Some([0., 1024., 1800.]);
+        m.wb_presets.daylight = Some([0., 1024., 1800.]);
         assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
-        m.sony_daylight_wb = Some(daylight);
+        m.wb_presets.daylight = Some(daylight);
         profile.calibration_signature.clear();
         assert_eq!(profile.neutral_calibration(&m), [1.; 3]);
     }

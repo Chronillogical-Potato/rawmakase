@@ -29,6 +29,45 @@ impl Source {
     }
 }
 
+/// A white-balance preset a camera stores for itself, as R, G, B multipliers.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WhiteBalancePreset {
+    Daylight,
+    Shade,
+    D65,
+}
+
+/// The presets of a native RAW that individual-unit calibration uses: Sony and
+/// most Canon bodies record theirs as Daylight, some Canon bodies as Shade, and
+/// Fujifilm as the D65 entry of its standard-illuminant table. Each is `None`
+/// when the RAW has none or it is not positive and finite.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct WhiteBalancePresets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daylight: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shade: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub d65: Option<[f32; 3]>,
+}
+impl WhiteBalancePresets {
+    pub fn get(&self, preset: WhiteBalancePreset) -> Option<[f32; 3]> {
+        match preset {
+            WhiteBalancePreset::Daylight => self.daylight,
+            WhiteBalancePreset::Shade => self.shade,
+            WhiteBalancePreset::D65 => self.d65,
+        }
+    }
+    /// Keeps a preset only when every multiplier is positive and finite.
+    pub fn valid(v: [f32; 3]) -> Option<[f32; 3]> {
+        v.iter().all(|v| v.is_finite() && *v > 0.).then_some(v)
+    }
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Metadata {
     pub make: String,
@@ -69,10 +108,10 @@ pub struct Metadata {
     pub focal_35mm: f32,
     pub wb: [f32; 3],
     pub daylight_wb: [f32; 3],
-    /// Sony's per-unit daylight preset, read from the native RAW maker notes.
-    /// Unlike `daylight_wb`, this is not calculated from a color matrix.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sony_daylight_wb: Option<[f32; 3]>,
+    /// White-balance presets the camera stored in a native RAW's maker notes.
+    /// Unlike `daylight_wb`, these are not calculated from a color matrix.
+    #[serde(default, skip_serializing_if = "WhiteBalancePresets::is_empty")]
+    pub wb_presets: WhiteBalancePresets,
     pub matrix: [[f32; 3]; 3],
     /// LibRaw's XYZ(D65)-to-camera matrix, equivalent to a DNG ColorMatrix. Zero when unknown.
     #[serde(default)]

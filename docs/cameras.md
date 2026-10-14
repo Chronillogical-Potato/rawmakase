@@ -3,11 +3,11 @@
 `data/cameras.toml` holds what RAWmakase knows about camera bodies beyond what the raw
 file says, one `[[camera]]` row per model. It is compiled into the app
 (`src/cameras.rs`) and checked by a unit test, so a malformed row fails `cargo test`.
-A row carries baseline exposure. Sony rows also hold a white-balance daylight
-reference combined with the individual RAW’s daylight preset. The existing
-X100F correction is retained; other non-Sony converter measurements remain
-diagnostic facts until their applicability across camera units is verified. Calibration uses exact model/alias matching and identity for unknown
-bodies; it does not use the baseline exposure fallback. See
+A row carries baseline exposure. Sony, Canon and Fujifilm rows may also hold a
+`unit_calibration`: a white-balance reference that, divided by a preset the
+individual RAW stores, gives Adobe's calibration of that camera unit.
+Calibration uses exact model/alias matching and identity for unknown bodies; it
+does not use the baseline exposure fallback. See
 [camera parity](camera-parity.md) for calibration provenance and automated audits.
 
 ## Baseline exposure
