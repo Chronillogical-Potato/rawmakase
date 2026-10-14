@@ -53,6 +53,9 @@ jobs:
           # Recipe-only preparation downloads and checks both published DMGs.
           native-packages prepare "${RELEASE_TAG#v}" --output dist/homebrew-recipes
       - name: Audit and install the cask
+        env:
+          # Unauthenticated, the online audit shares the runner IP's GitHub API limit.
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           brew tap-new pch/rawmakase-validation
           tap=$(brew --repository pch/rawmakase-validation)
