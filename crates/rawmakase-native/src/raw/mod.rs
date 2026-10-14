@@ -10,7 +10,9 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod ffi;
-use crate::camera_data::{CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata};
+use crate::camera_data::{
+    CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata, WhiteBalancePresets,
+};
 pub(crate) use ffi::Sensor;
 pub use ffi::{display_transform, srgb_profile, version};
 /// Runs `work` on a thread of its own at background priority: a lower
@@ -86,11 +88,11 @@ impl Raw {
             focal_35mm: m.focal_35mm,
             wb: m.wb,
             daylight_wb: m.daylight_wb,
-            sony_daylight_wb: m
-                .sony_daylight_wb
-                .iter()
-                .all(|v| v.is_finite() && *v > 0.)
-                .then_some(m.sony_daylight_wb),
+            wb_presets: WhiteBalancePresets {
+                daylight: WhiteBalancePresets::valid(m.preset_daylight),
+                shade: WhiteBalancePresets::valid(m.preset_shade),
+                d65: WhiteBalancePresets::valid(m.preset_d65),
+            },
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),
             lens: None,
