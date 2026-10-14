@@ -60,8 +60,14 @@ impl Raw {
             (&text(&m.normalized_make), &text(&m.normalized_model)),
         );
         let margin = [m.left_margin, m.top_margin];
-        let frame = [m.crop_left, m.crop_top, m.crop_width, m.crop_height];
-        let aspect = [m.aspect_left, m.aspect_top, m.aspect_width, m.aspect_height];
+        let (frame, aspect) = sensor_frame(
+            &make,
+            panasonic_sensor(path),
+            [m.crop_left, m.crop_top, m.crop_width, m.crop_height],
+            [m.aspect_left, m.aspect_top, m.aspect_width, m.aspect_height],
+            [m.width, m.height],
+            margin,
+        );
         let [crop_left, crop_top, crop_width, crop_height] = visible(frame, margin);
         let metadata = Metadata {
             make,
@@ -240,6 +246,115 @@ fn camera_crop(
     let (w, h) = (crop[2] - crop[0], crop[3] - crop[1]);
     (w >= 0.01 && h >= 0.01 && w.min(h) < 0.99).then_some(crop)
 }
+/// The frame and the in-camera aspect-ratio crop, both raw-coordinate rectangles,
+/// for files where LibRaw's default crop `frame` already is the aspect crop and
+/// `aspect` is unset: Panasonic and Leica's RW2 crop tags replace the sensor
+/// borders `sensor`, and a Sony ARW's default crop is the aspect ratio's. Camera
+/// Raw's frame is then the sensor's, and the aspect ratio its starting crop.
+/// Other files keep LibRaw's rectangles.
+fn sensor_frame(
+    make: &str,
+    sensor: Option<[u32; 4]>,
+    frame: [u32; 4],
+    aspect: [u32; 4],
+    size: [u32; 2],
+    margin: [u32; 2],
+) -> ([u32; 4], [u32; 4]) {
+    if aspect[0] != UNSET || aspect[1] != UNSET {
+        return (frame, aspect);
+    }
+    if let Some(sensor) = sensor {
+        return (sensor, frame);
+    }
+    if make.eq_ignore_ascii_case("sony")
+        && let Some(full) = sony_frame(frame, size, margin)
+    {
+        return full;
+    }
+    (frame, aspect)
+}
+/// A Sony default crop `frame` at another ratio than the sensor's (3:2, or 4:3 on
+/// the small-sensor compacts, whichever is nearer the decoded image of `size`),
+/// widened along the side the ratio cuts to the sensor's ratio, as the frame and
+/// the crop placed in raw coordinates (centred when LibRaw has no position).
+/// `None` when the crop is at the sensor's ratio (within 1%) or the frame would
+/// leave the decoded image.
+fn sony_frame(
+    [left, top, width, height]: [u32; 4],
+    [w, h]: [u32; 2],
+    [mx, my]: [u32; 2],
+) -> Option<([u32; 4], [u32; 4])> {
+    if width == 0 || height == 0 || width > w || height > h {
+        return None;
+    }
+    let decoded = w as f32 / h as f32;
+    let sensor = [1.5f32, 4. / 3.]
+        .into_iter()
+        .min_by(|a, b| (a - decoded).abs().total_cmp(&(b - decoded).abs()))?;
+    let ratio = width as f32 / height as f32 / sensor;
+    if (0.99..=1.01).contains(&ratio) {
+        return None;
+    }
+    let (fw, fh) = if ratio > 1. {
+        (width, (width as f32 / sensor).round() as u32)
+    } else {
+        ((height as f32 * sensor).round() as u32, height)
+    };
+    if fw > w || fh > h {
+        return None;
+    }
+    // The crop's position in raw coordinates, centred when unknown; the frame is
+    // centred on it and kept inside the decoded image.
+    let place = |v: u32, len: u32, m: u32, span: u32| {
+        if v < UNSET && v >= m {
+            v
+        } else {
+            m + (span - len) / 2
+        }
+    };
+    let (left, top) = (place(left, width, mx, w), place(top, height, my, h));
+    let around = |v: u32, len: u32, flen: u32, m: u32, span: u32| {
+        (v - (flen - len) / 2).clamp(m, m + span - flen)
+    };
+    let frame = [
+        around(left, width, fw, mx, w),
+        around(top, height, fh, my, h),
+        fw,
+        fh,
+    ];
+    Some((frame, [left, top, width, height]))
+}
+/// The sensor borders of a Panasonic or Leica RW2 (RWL) header, tags 4 to 7 (top,
+/// left, bottom, right), as `[left, top, width, height]` in raw coordinates.
+/// LibRaw replaces them with the camera's aspect-ratio crop (tags 47 to 50).
+fn panasonic_sensor(path: &Path) -> Option<[u32; 4]> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; 8];
+    f.read_exact(&mut head).ok()?;
+    if &head[..4] != b"IIU\0" {
+        return None;
+    }
+    f.seek(SeekFrom::Start(
+        u32::from_le_bytes(head[4..].try_into().ok()?) as u64,
+    ))
+    .ok()?;
+    let mut count = [0u8; 2];
+    f.read_exact(&mut count).ok()?;
+    let mut b = vec![0; usize::from(u16::from_le_bytes(count)).min(1024) * 12];
+    f.read_exact(&mut b).ok()?;
+    let mut border = [None; 4];
+    for e in b.as_chunks::<12>().0 {
+        let tag = u16::from_le_bytes([e[0], e[1]]);
+        if (4..=7).contains(&tag) && u16::from_le_bytes([e[2], e[3]]) == 3 {
+            border[usize::from(tag - 4)] = Some(u32::from(u16::from_le_bytes([e[8], e[9]])));
+        }
+    }
+    let [Some(top), Some(left), Some(bottom), Some(right)] = border else {
+        return None;
+    };
+    (right > left && bottom > top).then_some([left, top, right - left, bottom - top])
+}
 /// The camera's recommended crop from the RAF header directory: tags 0x110 (top, left)
 /// and 0x111 (height, width), big-endian. Lightroom uses it as the default crop.
 fn fuji_crop(path: &Path) -> Option<[u32; 4]> {
@@ -385,6 +500,122 @@ mod tests {
             super::visible([4, 4, 10, 10], [8, 8]),
             [super::UNSET, super::UNSET, 10, 10]
         );
+    }
+    /// Camera Raw's starting crop (its XMP `CropLeft`… on the default settings) of
+    /// files whose LibRaw default crop is the camera's aspect ratio, from LibRaw's
+    /// rectangles and the RW2 sensor borders of each file.
+    #[test]
+    fn panasonic_and_sony_aspect_ratios_are_crops_of_the_sensor_frame() {
+        let crop = |make, sensor, frame, size| {
+            let (frame, aspect) =
+                super::sensor_frame(make, sensor, frame, [super::UNSET; 4], size, [0, 0]);
+            super::camera_crop(frame, aspect, size, [0, 0])
+        };
+        let near = |got: Option<[f32; 4]>, want: [f32; 4], within: f32| {
+            let got = got.expect("a camera crop");
+            assert!(
+                got.iter().zip(want).all(|(g, w)| (g - w).abs() < within),
+                "{got:?} is not {want:?}"
+            );
+        };
+        // DMC-FZ2500 at 4:3 and DMC-G85 at 1:1: CropLeft…CropBottom inside the sensor.
+        let fz2500 = [8, 8, 5472, 3648];
+        let got = crop(
+            "Panasonic",
+            Some(fz2500),
+            [312, 8, 4864, 3648],
+            [5488, 3664],
+        );
+        near(got, [0.055556, 0., 0.944444, 1.], 1e-5);
+        let got = crop(
+            "Panasonic",
+            Some([8, 8, 4592, 3448]),
+            [592, 20, 3424, 3424],
+            [4608, 3464],
+        );
+        near(got, [0.127178, 0.00348, 0.872822, 0.99652], 1e-5);
+        // At the sensor's own ratio the crop tags are the sensor borders.
+        let (frame, aspect) = super::sensor_frame(
+            "Panasonic",
+            Some(fz2500),
+            fz2500,
+            [super::UNSET; 4],
+            [5488, 3664],
+            [0, 0],
+        );
+        assert_eq!(
+            super::camera_crop(frame, aspect, [5488, 3664], [0, 0]),
+            None
+        );
+        // ILCE-7M2 at 16:9 (a centred size only), ILCE-7RM3A at 16:9 and DSC-HX99's
+        // 4:3 sensor at 16:9.
+        let unset = super::UNSET;
+        near(
+            crop("Sony", None, [unset, unset, 6000, 3376], [6024, 4024]),
+            [0., 0.078, 1., 0.922],
+            1e-5,
+        );
+        near(
+            crop("Sony", None, [0, 422, 7952, 4472], [7968, 5320]),
+            [0., 0.078431, 1., 0.921569],
+            5e-4,
+        );
+        near(
+            crop("SONY", None, [12, 478, 4896, 2752], [4928, 3708]),
+            [0., 0.125272, 1., 0.874728],
+            1e-5,
+        );
+        // Sony crops at the sensor's ratio stay the frame, also in the DSC-RX1RM3's
+        // smaller image sizes, whose decoded image is not 3:2.
+        for (frame, size) in [
+            ([unset, unset, 6000, 4000], [6024, 4024]),
+            ([16, 10, 4752, 3168], [5120, 3584]),
+            ([22, 14, 6640, 4432], [7168, 4608]),
+            ([0, 20, 9504, 6336], [9568, 6376]),
+        ] {
+            let got = super::sensor_frame("Sony", None, frame, [unset; 4], size, [0, 0]);
+            assert_eq!(got, (frame, [unset; 4]));
+        }
+        // An aspect crop LibRaw found (Olympus, Canon) is kept, whatever the make.
+        let olympus = ([8, 8, 5184, 3888], [8, 494, 5184, 2916]);
+        let got = super::sensor_frame(
+            "Sony",
+            Some(fz2500),
+            olympus.0,
+            olympus.1,
+            [5200, 3904],
+            [0, 0],
+        );
+        assert_eq!(got, olympus);
+    }
+    #[test]
+    fn reads_panasonic_sensor_borders() {
+        let mut rw2 = b"IIU\0".to_vec();
+        rw2.extend(8u32.to_le_bytes());
+        let tags = [
+            (4u16, 8u16),
+            (5, 8),
+            (6, 3656),
+            (7, 5480),
+            (0x2f, 8),
+            (0x30, 312),
+        ];
+        rw2.extend((tags.len() as u16).to_le_bytes());
+        for (tag, v) in tags {
+            rw2.extend(tag.to_le_bytes());
+            rw2.extend(3u16.to_le_bytes());
+            rw2.extend(1u32.to_le_bytes());
+            rw2.extend(u32::from(v).to_le_bytes());
+        }
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), &rw2).unwrap();
+        assert_eq!(super::panasonic_sensor(f.path()), Some([8, 8, 5472, 3648]));
+        // Without every border, or in a TIFF, there is none.
+        std::fs::write(f.path(), &rw2[..rw2.len() - 4 * 12]).unwrap();
+        assert_eq!(super::panasonic_sensor(f.path()), None);
+        rw2[2] = b'*';
+        std::fs::write(f.path(), &rw2).unwrap();
+        assert_eq!(super::panasonic_sensor(f.path()), None);
     }
     #[test]
     fn corrupt_raw_is_an_error() {
