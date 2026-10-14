@@ -168,14 +168,24 @@ Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
 GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
 and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
-Four rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+Six rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`), the A7 II and A7CR, fitted to Camera Raw 18.6
-renders of private photos (8 and 4), and the A7R VI, read from Adobe DNG Converter
-18.7's DNG of one private photo. LibRaw does not identify the A7R VI by name yet, but
-its white level, black level and crop match Adobe's.
+renders of private photos (8 and 4), and the A7R VI, EOS 700D and A7R, read from
+Adobe DNG Converter 18.7's DNG of one private photo each. LibRaw does not identify
+the A7R VI by name yet, but its white level, black level and crop match Adobe's.
+
+The 35 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
+Fujifilm bodies; see [camera parity](camera-parity.md)) are `adobe-dng` values from
+one test-dataset photo each, at the ISO the row says. Against Camera Raw 18.7 default
+renders of 84 dataset photos of these bodies, the median midtone exposure difference
+went from 0.14 EV to 0.02 EV, and 80 photos are within 0.1 EV (35 before). Of the
+other four, two 80D frames of one shoot were already 0.44 EV brighter than Camera Raw
+and are now 0.58 brighter, the row moving every 80D photo alike, and a 5DS R and a
+Rebel T6 photo at other ISO settings than their rows' samples went from 0.3 EV to
+0.16 EV off, Canon's white level being ISO-dependent.
 
 Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
 fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names
-alike; and bodies whose only CC0 sample is an sRAW or other non-mosaic file (EOS 5D
-Mark IV, 5DS R, 6D Mark II, 7D Mark II, 80D, 1D X Mark II, Nikon D810, Sony RX1R III
-and A1 II).
+alike; the Nikon D810, whose only CC0 sample is an sRAW; and bodies with calibration
+evidence whose baseline no Camera Raw render has checked yet (listed in
+[camera parity](camera-parity.md)).

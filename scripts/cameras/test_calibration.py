@@ -69,7 +69,7 @@ class CalibrationTests(unittest.TestCase):
                     unit = row['unit_calibration']
                     self.assertEqual(found.get(unit['preset']), unit['reference'], found)
         # Units with different calibrations, explained by one reference per model.
-        self.assertGreaterEqual(explained, 59)
+        self.assertGreaterEqual(explained, 60)
 
     def test_every_reference_has_committed_evidence(self):
         facts, rows = committed()
