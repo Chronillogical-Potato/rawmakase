@@ -58,7 +58,10 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
 /// A colour space other than RGB or grey is refused with [`Unsupported`]: an
 /// edit of wrong colours is worse than none. `cancel` is checked between rows.
 /// The EXIF camera and exposure are kept when the file has them.
-pub fn open(path: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
+///
+/// This is the file as decoded, not yet the pseudo-scene Develop renders: open it
+/// for Develop through [`crate::photo::open_source`], which converts it.
+pub(crate) fn open(path: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
     let (decoder, orientation, profile) = prepare(path)?;
     let profile = profile.unwrap_or_else(ColorProfile::new_srgb);
     let linear = to_linear(&profile, decoder.color_type())?;

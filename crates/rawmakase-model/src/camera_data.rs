@@ -12,7 +12,10 @@ pub struct NeutralCalibration {
 }
 
 /// What kind of file a photo's pixels come from: a camera RAW (LibRaw), or a
-/// rendered JPEG, PNG or TIFF decoded through its colour profile.
+/// rendered JPEG, PNG or TIFF decoded through its colour profile. A rendered file's
+/// develop [`CameraImage`] holds its pseudo-scene: linear ProPhoto values whose
+/// Camera Raw default rendering is the file (see `develop::rendered`), not the
+/// file's own values.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Source {
     #[default]
@@ -223,6 +226,9 @@ impl crate::metadata::PhotoInfo {
         }
     }
 }
+/// A decoded photo for developing. For a RAW, camera-space values; for a rendered
+/// file ([`Source::Rendered`]), its pseudo-scene: linear ProPhoto values whose Camera
+/// Raw default rendering is the file (see `develop::rendered`).
 #[derive(Clone)]
 pub struct CameraImage {
     pub width: u32,
