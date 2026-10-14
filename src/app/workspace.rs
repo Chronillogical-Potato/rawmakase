@@ -61,6 +61,9 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         self.poll_preview_builds();
+        // Entering a module draws its chrome: the whole-window mode belongs to
+        // the module it was turned on in.
+        self.chrome.entered(self.module);
         // Preferences is modal: keys go to it, not to the photo behind.
         let modal = self.preferences.open
             || self.export_modal()
@@ -70,6 +73,15 @@ impl Editor {
             || self.curve_save_open()
             || self.folder_sync.is_reviewing();
         if !modal {
+            // Escape leaves the whole-window mode, as it does in Lightroom. It
+            // is taken here, before the Library's views and Develop's tools, so
+            // they keep it while the chrome is up and the photo is the way out
+            // while it is not.
+            if self.chrome.hidden(self.module)
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                self.chrome.toggle(self.module);
+            }
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
             self.preferences_shortcut(&ctx);
@@ -86,7 +98,9 @@ impl Editor {
         } else {
             crate::app::library::Action::None
         };
-        self.workspace_bar(ui, sidebar_shown);
+        if self.chrome.shown(self.module) {
+            self.workspace_bar(ui, sidebar_shown);
+        }
         // A file dialog or a running Sync: nothing behind them takes clicks, so no
         // catalog action is chosen only to be dropped.
         if self.activity.is_busy() {
@@ -117,10 +131,15 @@ impl Editor {
             // over the photo alone.
             self.develop_side_panels(ui);
             self.follow_edit_frame(&mut frame);
-            self.toolbar(ui);
+            if self.chrome.shown(self.module) {
+                self.toolbar(ui);
+            }
             self.follow_edit_frame(&mut frame);
             self.develop_photo(ui);
             self.finish_edit_frame(frame, &ctx);
+        }
+        if self.chrome.hidden(self.module) {
+            title_bar_pad(ui);
         }
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
             self.virtual_copy(request);
@@ -303,6 +322,28 @@ impl Editor {
                 if let Some(id) = id {
                     self.virtual_copy(crate::app::library::CopyAction::Create(id));
                 }
+            }
+            // F hides the chrome, leaving the photo the window (see `chrome`).
+            // No modifier at all, so Shift+F is not it; the event's own
+            // modifiers, which a quick key-up cannot outrun. Held, it changes
+            // once, and the setup view has no chrome to hide.
+            let hide = !self.onboarding.visible
+                && ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Key {
+                                key: egui::Key::F,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } if !modifiers.any()
+                        )
+                    })
+                });
+            if hide {
+                self.chrome.toggle(self.module);
             }
             if plain(egui::Key::D) {
                 if self.module == Module::Library {
@@ -743,11 +784,12 @@ impl Editor {
         if self.panel_shown(WorkspacePanel::Right) {
             action = action.then(self.library_right_panel(ui, develops));
         }
+        let chrome = self.chrome.shown(self.module);
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| match &mut self.library {
                 Some(l) if !l.session.photos.is_empty() => {
-                    action = action.then(l.grid(ui, &mut self.view.zoom));
+                    action = action.then(l.grid(ui, &mut self.view.zoom, chrome));
                     if let Some(id) = l.loupe_develops() {
                         self.loupe_viewport(ui, id);
                     }
@@ -999,7 +1041,8 @@ impl Editor {
     }
 
     /// Develop's zoom keys, shared with the Library's Loupe: Cmd+= and Cmd+-
-    /// step through the zoom levels, Z toggles Fit and the last zoom, F fits.
+    /// step through the zoom levels, Z toggles Fit and the last zoom. F is not
+    /// here: it hides the chrome (see `chrome`), as Lightroom's does.
     pub(super) fn zoom_keys(&mut self, ctx: &egui::Context) {
         use egui::Key;
         // Each key with the modifiers held for it, which a quick shortcut
@@ -1029,7 +1072,6 @@ impl Editor {
                 Key::Minus if modifiers.command => self.step_zoom(-1),
                 // Once per press: a held Z must not flicker the zoom.
                 Key::Z if !modifiers.any() && !repeat => self.view.zoom.on = !self.view.zoom.on,
-                Key::F if !modifiers.any() => self.view.zoom.on = false,
                 _ => {}
             }
         }
@@ -1869,6 +1911,17 @@ fn title_bar_drag(ui: &mut egui::Ui, bar: egui::Rect) {
         // AppKit only starts a drag during the original mouse-down.
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
     }
+}
+/// With the chrome hidden the window has no bar to drag by. This keeps a grab
+/// beside the traffic lights, the size of their inset, so the window still
+/// moves while almost all of the photo stays its own.
+fn title_bar_pad(ui: &mut egui::Ui) {
+    let corner = ui.max_rect().min;
+    let width = fastframe_macos::traffic_light_inset(ui.ctx()) + 24.;
+    title_bar_drag(
+        ui,
+        egui::Rect::from_min_size(corner, egui::Vec2::new(width, BAR_HEIGHT)),
+    );
 }
 /// A status line showing `text`, with `detail` (a Library summary's items)
 /// or else `hover` on hover.

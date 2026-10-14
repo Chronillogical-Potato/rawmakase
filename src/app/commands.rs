@@ -199,6 +199,8 @@ pub(super) enum Action {
     Previous,
     /// Hides or shows the open module's panels, as Tab, Shift+Tab and F6–F8 do.
     Panels(PanelChange),
+    /// Hides or shows everything but the photo, as F does.
+    Chrome,
 }
 impl Action {
     const NAMED: &[(&'static str, Self)] = &[
@@ -273,6 +275,7 @@ impl Action {
             "panels:presets",
             Self::Panels(PanelChange::Toggle(WorkspacePanel::Presets)),
         ),
+        ("chrome", Self::Chrome),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};
@@ -883,6 +886,7 @@ impl Editor {
                     return Err(Error::new("save_failed", self.status.clone()));
                 }
             }
+            Chrome => self.chrome.toggle(self.module),
             Loupe => {
                 self.command_module(false)?;
                 if let Some(library) = &mut self.library {
