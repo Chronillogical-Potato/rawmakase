@@ -389,8 +389,7 @@ fn read_bounded(
         if cancel.load(Ordering::Relaxed) {
             return Err(ClientError::Cancelled);
         }
-        within(deadline, stream)?;
-        let Some(n) = one_read(stream, &mut prefix[seen..])? else {
+        let Some(n) = read_within(stream, &mut prefix[seen..], deadline)? else {
             if seen == 0 {
                 return Ok(None);
             }
@@ -412,8 +411,7 @@ fn read_bounded(
         if cancel.load(Ordering::Relaxed) {
             return Err(ClientError::Cancelled);
         }
-        within(deadline, stream)?;
-        match one_read(stream, &mut frame[filled..])? {
+        match read_within(stream, &mut frame[filled..], deadline)? {
             // The worker went away mid-frame.
             None => {
                 return Err(ClientError::Failed(
@@ -426,17 +424,26 @@ fn read_bounded(
     Ok(Some(frame))
 }
 
-/// Caps the socket's read timeout at the shorter of the remaining budget and
-/// [`READ_POLL`]. The budget having run out is a timeout error, never a clean
-/// end.
-fn within(deadline: std::time::Instant, stream: &mut TcpStream) -> Result<(), ClientError> {
+/// One [`one_read`] with the socket's read timeout capped at the shorter of
+/// the remaining budget and [`READ_POLL`]. The budget having run out is a
+/// timeout error, never a clean end. A socket that no longer takes a timeout
+/// has been reset by the worker (macOS answers `EINVAL`), so that is a
+/// hang-up like the read itself would report.
+fn read_within(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: std::time::Instant,
+) -> Result<Option<usize>, ClientError> {
     let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
         return Err(timed_out());
     };
-    stream
+    if stream
         .set_read_timeout(Some(remaining.min(READ_POLL)))
-        .map_err(|e| ClientError::Unavailable(e.to_string()))?;
-    Ok(())
+        .is_err()
+    {
+        return Ok(None);
+    }
+    one_read(stream, buffer)
 }
 
 /// One socket read, mapped to the client's errors. `Ok(None)` is a hang-up or
