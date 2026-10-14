@@ -85,10 +85,12 @@ does. They need no photo. `state.panels` reports each panel of the open module a
 `shown` or `hidden`. A device button can also be set to `tab`, `shift+tab` or
 `f6`–`f8`.
 
-`chrome` hides or shows everything but the photo or the grid, as F does: the
-workspace bar, the panels, the filmstrip and the views' toolbars. It needs no
-photo, and shows the same panels again when it is applied a second time. The
-window itself is not changed and a module switch shows its chrome again.
+`chrome` hides or shows everything but the photo, as F does: the workspace bar,
+the panels, the filmstrip and the views' toolbars. It needs no photo. In the
+Library the grid takes the window first and, applied again, the photo (the
+Loupe) does; in Develop the photo has it from the first application. Applied
+once more, or after a module switch, the chrome and the panels are back. The
+window itself is not changed.
 
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.

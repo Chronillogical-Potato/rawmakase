@@ -63,7 +63,8 @@ impl Editor {
         self.poll_preview_builds();
         // Entering a module draws its chrome: the whole-window mode belongs to
         // the module it was turned on in.
-        self.chrome.entered(self.module);
+        let entered = self.chrome.entered(self.module);
+        self.chrome_view(entered);
         // Preferences is modal: keys go to it, not to the photo behind.
         let modal = self.preferences.open
             || self.export_modal()
@@ -80,7 +81,8 @@ impl Editor {
             if self.chrome.hidden(self.module)
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
-                self.chrome.toggle(self.module);
+                let shown = self.chrome.show();
+                self.chrome_view(shown);
             }
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -323,10 +325,12 @@ impl Editor {
                     self.virtual_copy(crate::app::library::CopyAction::Create(id));
                 }
             }
-            // F hides the chrome, leaving the photo the window (see `chrome`).
-            // No modifier at all, so Shift+F is not it; the event's own
-            // modifiers, which a quick key-up cannot outrun. Held, it changes
-            // once, and the setup view has no chrome to hide.
+            // F hides the chrome, leaving the photo the window; in the Library
+            // it is the grid that takes the window first, and the photo that
+            // takes it on the next press (see `chrome`). No modifier at all, so
+            // Shift+F is not it; the event's own modifiers, which a quick
+            // key-up cannot outrun. Held, it changes once, and the setup view
+            // has no chrome to hide.
             let hide = !self.onboarding.visible
                 && ctx.input(|i| {
                     i.events.iter().any(|e| {
@@ -343,7 +347,9 @@ impl Editor {
                     })
                 });
             if hide {
-                self.chrome.toggle(self.module);
+                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+                let view = self.chrome.toggle(self.module, loupe);
+                self.chrome_view(view);
             }
             if plain(egui::Key::D) {
                 if self.module == Module::Library {
@@ -354,6 +360,19 @@ impl Editor {
                     self.module = Module::Develop;
                 }
             }
+        }
+    }
+
+    /// Applies what the whole-window mode did to the Library's view: the photo
+    /// takes the window, or the grid takes it back.
+    pub(super) fn chrome_view(&mut self, view: super::chrome::View) {
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        match view {
+            super::chrome::View::Unchanged => {}
+            super::chrome::View::OpenLoupe => library.open_loupe(),
+            super::chrome::View::CloseLoupe => library.close_loupe(),
         }
     }
 

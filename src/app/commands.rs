@@ -886,7 +886,11 @@ impl Editor {
                     return Err(Error::new("save_failed", self.status.clone()));
                 }
             }
-            Chrome => self.chrome.toggle(self.module),
+            Chrome => {
+                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+                let view = self.chrome.toggle(self.module, loupe);
+                self.chrome_view(view);
+            }
             Loupe => {
                 self.command_module(false)?;
                 if let Some(library) = &mut self.library {
