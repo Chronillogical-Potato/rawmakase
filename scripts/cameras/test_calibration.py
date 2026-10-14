@@ -12,7 +12,7 @@ spec.loader.exec_module(c)
 
 ROOT = Path(__file__).resolve().parents[2]
 # Models whose units differ in a way no stored preset explains (see docs/camera-parity.md).
-UNRESOLVED = {('Canon', 'EOS M3'), ('Olympus', 'E-M5MarkIII')}
+UNRESOLVED = {('Canon', 'EOS M3')}
 
 
 def committed():
@@ -69,7 +69,7 @@ class CalibrationTests(unittest.TestCase):
                     unit = row['unit_calibration']
                     self.assertEqual(found.get(unit['preset']), unit['reference'], found)
         # Units with different calibrations, explained by one reference per model.
-        self.assertGreaterEqual(explained, 60)
+        self.assertGreaterEqual(explained, 61)
 
     def test_every_reference_has_committed_evidence(self):
         facts, rows = committed()
@@ -112,6 +112,13 @@ class CalibrationTests(unittest.TestCase):
         # Fujifilm: G, R, B and an EXIF light source per entry; 21 is D65.
         fuji = c.native_presets({'WB_GRBLevelsStandard': '302 383 859 17 302 679 500 21'})
         self.assertEqual(fuji, {'d65': [679., 302., 500.]})
+        # Olympus: R, B, G, G at 5300 K, which LibRaw names Fine Weather.
+        olympus = c.native_presets({'WB_RBLevels5300K': '460 540 256 256'})
+        self.assertEqual(olympus, {'fine-weather': [460., 256., 540.]})
+        older = c.native_presets({'WB_RBLevels5300K': '461 341', 'WB_GLevel5300K': '256'})
+        self.assertEqual(older, {'fine-weather': [461., 256., 341.]})
+        no_green = c.native_presets({'WB_RBLevels5300K': '477 342'})
+        self.assertEqual(no_green, {'fine-weather': [477., 256., 342.]})
         self.assertEqual(c.native_presets({'WB_RGGBLevelsDaylight': '0 1024 1024 1479'}), {})
 
     def tags(self, make='SONY', model='ILCE-7M4', gains=(.9817, 1., .9687)):
