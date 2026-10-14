@@ -38,6 +38,7 @@ fn markers_of_earlier_releases_are_ignored() -> Result<()> {
         r#"c:RAWmakaseWhiteBalanceModel="Original""#,
         r#"c:RAWmakaseWhiteBalanceModel="Unknown""#,
         r#"c:RAWmakasePreset="1""#,
+        r#"c:RAWmakasePreset="2""#,
     ] {
         let attrs = format!("{markers} {plain}");
         let back = parse(Path::new("old.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
@@ -429,6 +430,22 @@ fn lightroom_crops_of_a_photo_held_upright_are_of_the_unrotated_frame() -> Resul
     let r = apply(&cw, left)?;
     near(r.crop, [0., 0., 1., 0.5]);
     assert!(write::packet(&r, &cw, &photo).contains(r#"crs:CropRight="0.500000""#));
+    // A preset RAWmakase wrote before this (marked 1) holds the crop as shown.
+    let legacy = format!(r#"c:RAWmakasePreset="1" {left}"#);
+    near(apply(&cw, &legacy)?.crop, [0., 0., 0.5, 1.]);
+    // Presets written now carry it unrotated, and read back as drawn.
+    let drawn = Recipe {
+        crop: [0., 0., 1., 0.5],
+        ..base.clone()
+    };
+    let preset = crate::xmp::preset_write::preset(
+        &drawn,
+        &cw,
+        &crate::xmp::preset_write::PresetInfo::new("Top", "Mine"),
+        &crate::model::settings_groups::GroupSelection::all(),
+    );
+    let back = parse(Path::new("top.xmp"), &preset)?.apply(&base, &cw, &[], None)?;
+    near(back.crop, drawn.crop);
     Ok(())
 }
 #[test]

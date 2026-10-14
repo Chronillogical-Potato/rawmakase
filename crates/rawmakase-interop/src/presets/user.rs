@@ -38,7 +38,7 @@ impl UserPresets {
             && preset
                 .settings
                 .get("RAWmakasePreset")
-                .is_some_and(|v| v == "1")
+                .is_some_and(|v| matches!(v.as_str(), "1" | "2"))
     }
     /// Saves a new preset of `r`'s `groups`, edited on the photo `shown`; returns its
     /// file.
