@@ -106,7 +106,8 @@ Pixels and masks only. One request, one reply, length-prefixed JSON frames:
 the photo as 8-bit sRGB (the same 1280-pixel-edge render local inference is
 given), the answer as 8-bit coverage, and prompts as fractions. Every request
 carries an id; a cancel is a tiny separate frame the client sends when the
-drawer's Cancel is used, and the worker stops the model run it can. The worker
+drawer's Cancel is used, and the worker stops the model run it can; a cancel
+that overtakes its request is remembered, so that request starts cancelled. The worker
 runs at most one model at a time (a second request waits), refuses oversized
 or malformed frames before they reach the models, and bounds every read and
 write with timeouts. The definitions live in `crates/rawmakase-remote`; the

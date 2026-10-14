@@ -769,3 +769,109 @@ fn malformed_requests_are_refused_without_touching_the_engine() {
     // None of the above reached the engine.
     assert_eq!(runs.load(Ordering::SeqCst), 0, "{runs:?}");
 }
+
+/// Reads one reply frame, failing the test instead of hanging when none comes.
+fn reply_within(stream: &mut std::net::TcpStream, wait: Duration) -> rawmakase_remote::Response {
+    stream.set_read_timeout(Some(wait)).unwrap();
+    let mut length = [0u8; 4];
+    stream
+        .read_exact(&mut length)
+        .expect("the worker answered in time");
+    let mut reply = vec![0u8; u32::from_le_bytes(length) as usize];
+    stream.read_exact(&mut reply).unwrap();
+    serde_json::from_slice(&reply).unwrap()
+}
+
+/// The client's watcher sends its cancel on a connection of its own, so it can
+/// reach the worker before the request it cancels has been read. That request
+/// still stops, instead of running the model to the end for nobody.
+#[test]
+fn a_cancel_that_overtakes_its_request_still_stops_it() {
+    let mut fake = Fake::of(Photo::of("k1", 2, 2, 1));
+    // Without the cancel, the run would hold forever.
+    fake.holding = Some(Arc::new(AtomicBool::new(true)));
+    let (endpoint, engine_cancelled, _) = worker(fake);
+    let frame = |id: &str, op: Op| {
+        serde_json::to_vec(&Request {
+            v: rawmakase_remote::protocol::VERSION,
+            id: id.to_string(),
+            op,
+        })
+        .unwrap()
+    };
+
+    let mut canceller = std::net::TcpStream::connect(&endpoint).unwrap();
+    write_frame(
+        &mut canceller,
+        &frame(
+            "cancel-early",
+            Op::Cancel {
+                target: "early".into(),
+            },
+        ),
+    )
+    .unwrap();
+    assert!(
+        reply_within(&mut canceller, Duration::from_secs(5))
+            .ok
+            .is_some()
+    );
+
+    let mut stream = std::net::TcpStream::connect(&endpoint).unwrap();
+    write_frame(
+        &mut stream,
+        &frame(
+            "early",
+            Op::Analyze {
+                width: 2,
+                height: 2,
+                pixels: photo(2, 2).data,
+            },
+        ),
+    )
+    .unwrap();
+    let answer = reply_within(&mut stream, Duration::from_secs(5));
+    assert_eq!(
+        answer.err.as_ref().map(|e| e.code),
+        Some(rawmakase_remote::protocol::Code::Cancelled),
+        "{answer:?}"
+    );
+    assert!(engine_cancelled.load(Ordering::SeqCst));
+}
+
+/// A cancel the request loop notices before the watcher does is still
+/// forwarded: the worker hears about every cancelled request.
+#[test]
+fn a_cancel_is_forwarded_even_when_the_request_notices_it_first() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = listener.local_addr().unwrap().to_string();
+    let (seen, cancels) = std::sync::mpsc::channel();
+    // A "worker" that reports every cancel it is sent and answers nothing.
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let seen = seen.clone();
+            std::thread::spawn(move || {
+                let mut stream = stream;
+                if let Ok(Some(frame)) = rawmakase_remote::protocol::read_frame(
+                    &mut stream,
+                    rawmakase_remote::protocol::MAX_FRAME_BYTES,
+                ) && let Ok(request) = serde_json::from_slice::<Request>(&frame)
+                    && let Op::Cancel { target } = request.op
+                {
+                    let _ = seen.send(target);
+                }
+            });
+        }
+    });
+    let session = RemoteSession::new(&endpoint);
+    // Raised before the request starts: the request loop sees it at once.
+    let cancel = AtomicBool::new(true);
+    assert_eq!(
+        session.analyze(&photo(2, 2), &cancel),
+        Err(ClientError::Cancelled)
+    );
+    let target = cancels
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the cancel was forwarded");
+    assert!(!target.is_empty());
+}

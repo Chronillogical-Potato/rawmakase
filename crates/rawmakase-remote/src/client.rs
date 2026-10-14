@@ -482,9 +482,10 @@ fn timed_out() -> ClientError {
 
 /// While a request is out, raises of the caller's flag are forwarded to the
 /// worker on a connection of their own, so the model run stops instead of
-/// finishing into a dropped socket. Best effort and bounded: the send gets a
-/// short timeout of its own, so this thread can never hold the request's join
-/// past a few seconds.
+/// finishing into a dropped socket. A raise the request loop noticed first is
+/// forwarded all the same: the loop ending is no sign the worker heard. Best
+/// effort and bounded: the send gets a short timeout of its own, so this
+/// thread can never hold the request's join past a few seconds.
 fn watch_for_cancel(
     endpoint: String,
     target: String,
@@ -492,24 +493,24 @@ fn watch_for_cancel(
     done: Arc<AtomicBool>,
     connect_timeout: Duration,
 ) {
-    while !done.load(Ordering::Acquire) {
-        if cancel.load(Ordering::Relaxed) {
-            let request = Request {
-                v: protocol::VERSION,
-                id: format!("cancel-{target}"),
-                op: Op::Cancel { target },
-            };
-            if let Ok(payload) = serde_json::to_vec(&request)
-                && let Ok(mut addresses) = endpoint.to_socket_addrs()
-                && let Some(address) = addresses.next()
-                && let Ok(mut stream) = TcpStream::connect_timeout(&address, connect_timeout)
-            {
-                let _ = stream.set_nodelay(true);
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                let _ = protocol::write_frame(&mut stream, &payload);
-            }
-            return;
-        }
+    while !done.load(Ordering::Acquire) && !cancel.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(15));
+    }
+    if !cancel.load(Ordering::Relaxed) {
+        return;
+    }
+    let request = Request {
+        v: protocol::VERSION,
+        id: format!("cancel-{target}"),
+        op: Op::Cancel { target },
+    };
+    if let Ok(payload) = serde_json::to_vec(&request)
+        && let Ok(mut addresses) = endpoint.to_socket_addrs()
+        && let Some(address) = addresses.next()
+        && let Ok(mut stream) = TcpStream::connect_timeout(&address, connect_timeout)
+    {
+        let _ = stream.set_nodelay(true);
+        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+        let _ = protocol::write_frame(&mut stream, &payload);
     }
 }

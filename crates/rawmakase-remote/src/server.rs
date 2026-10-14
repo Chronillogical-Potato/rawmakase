@@ -201,14 +201,26 @@ pub struct Server<E: Engine> {
     engine: std::sync::Mutex<E>,
     /// The cancel flag of the request running under each id, so a `cancel`
     /// frame from the client's watcher reaches the model run.
-    cancels: std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>,
+    cancels: std::sync::Mutex<Cancels>,
+}
+
+/// How many cancels for requests not yet read the worker remembers.
+const EARLY_CANCELS: usize = 64;
+
+#[derive(Default)]
+struct Cancels {
+    running: HashMap<String, Arc<AtomicBool>>,
+    /// Cancels that arrived before their request: the client's watcher uses a
+    /// connection of its own and can overtake the request it cancels. The
+    /// newest few are kept, so that request starts out cancelled.
+    early: VecDeque<String>,
 }
 
 impl<E: Engine> Server<E> {
     pub fn new(engine: E) -> Self {
         Self {
             engine: std::sync::Mutex::new(engine),
-            cancels: std::sync::Mutex::new(HashMap::new()),
+            cancels: std::sync::Mutex::new(Cancels::default()),
         }
     }
 }
@@ -299,6 +311,7 @@ impl<E: Engine + 'static> Server<E> {
                     self.cancels
                         .lock()
                         .expect("cancel registry")
+                        .running
                         .remove(&request_id);
                     match outcome {
                         Ok(outcome) => self.answer(
@@ -348,6 +361,7 @@ impl<E: Engine + 'static> Server<E> {
                     self.cancels
                         .lock()
                         .expect("cancel registry")
+                        .running
                         .remove(&request_id);
                     match coverage {
                         Ok(coverage) => self.answer(
@@ -368,12 +382,18 @@ impl<E: Engine + 'static> Server<E> {
                 }
                 Op::Cancel { target } => {
                     // A cancel for a request that is gone is normal: the answer
-                    // may already be on its way, and nothing is owed.
-                    if target.len() <= MAX_LABEL_BYTES
-                        && let Some(flag) =
-                            self.cancels.lock().expect("cancel registry").get(&target)
-                    {
-                        flag.store(true, Ordering::Relaxed);
+                    // may already be on its way, and nothing is owed. One for a
+                    // request not read yet is kept for when it arrives.
+                    if target.len() <= MAX_LABEL_BYTES {
+                        let mut cancels = self.cancels.lock().expect("cancel registry");
+                        if let Some(flag) = cancels.running.get(&target) {
+                            flag.store(true, Ordering::Relaxed);
+                        } else {
+                            if cancels.early.len() == EARLY_CANCELS {
+                                cancels.early.pop_front();
+                            }
+                            cancels.early.push_back(target);
+                        }
                     }
                     self.answer(&mut stream, &request_id, Reply::Ack)?;
                 }
@@ -383,13 +403,18 @@ impl<E: Engine + 'static> Server<E> {
 
     /// Puts a running request's cancel flag in the registry, refusing an id
     /// that is already live: whatever else a duplicate would break, one
-    /// request's completion must not be able to unregister another's.
+    /// request's completion must not be able to unregister another's. A
+    /// request whose cancel came first starts out cancelled.
     fn register(&self, id: &str, flag: Arc<AtomicBool>) -> Result<(), String> {
         let mut cancels = self.cancels.lock().expect("cancel registry");
-        if cancels.contains_key(id) {
+        if cancels.running.contains_key(id) {
             return Err(format!("a request with the id `{id}` is already running"));
         }
-        cancels.insert(id.to_string(), flag);
+        if let Some(at) = cancels.early.iter().position(|early| early == id) {
+            cancels.early.remove(at);
+            flag.store(true, Ordering::Relaxed);
+        }
+        cancels.running.insert(id.to_string(), flag);
         Ok(())
     }
 
