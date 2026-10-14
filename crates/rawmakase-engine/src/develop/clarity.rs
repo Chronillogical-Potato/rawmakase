@@ -45,6 +45,7 @@ fn weights(amount: f32) -> [[f32; KNOTS]; 4] {
 /// Clarity's detail on a map grid: the photo's log luminance less its edge-aware blurs
 /// at each scale, and the base level relative to the key, so the gain can be read at
 /// any amount (a mask's added to the global slider).
+#[derive(Clone)]
 pub(crate) struct ClarityDetail {
     details: [Vec<f32>; 4],
     base: Vec<f32>,

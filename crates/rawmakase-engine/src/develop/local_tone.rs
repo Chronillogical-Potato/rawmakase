@@ -165,48 +165,44 @@ impl Sliders {
         }
     }
 }
-/// log2 of a scene luminance, as the map reads it.
-pub(crate) fn level(y: f32) -> f32 {
-    y.max(FLOOR).log2()
+/// What a map takes from the photo whatever the slider values: the measurement copy's
+/// scene luminance and its log, the guided filter's coefficients and the keys, and
+/// (made the first time a map reads them) positive Shadows' key offset and regional
+/// level and Clarity's detail. It depends only on the copy and its scene luminance, so
+/// renders that change only the sliders keep it (`scene_tone::Measured::map_base`).
+pub(crate) struct MapBase {
+    width: usize,
+    height: usize,
+    lum: Vec<f32>,
+    logs: Vec<f32>,
+    a: Vec<f32>,
+    b: Vec<f32>,
+    shadow_key: f32,
+    highlight_key: f32,
+    clarity_key: f32,
+    lift_offset: std::sync::OnceLock<f32>,
+    region: std::sync::OnceLock<Vec<f32>>,
+    detail: std::sync::OnceLock<super::clarity::ClarityDetail>,
 }
-impl LocalToneMap {
-    /// The map of `small`, the photo's measurement copy (`Toned::measured`) for a
-    /// `source`-sized image; `scene` maps a camera sample to its scene luminance at the
-    /// scene tone stage's input. Built when either slider or the measured `clarity` is
-    /// set, or when `local` (masks change Shadows or Highlights).
-    pub(crate) fn build(
-        small: &crate::camera_data::CameraImage,
-        source: [u32; 2],
-        sliders: Sliders,
-        local: bool,
-        scene: impl Fn([f32; 3]) -> f32 + Sync,
-    ) -> Option<Self> {
-        if sliders.shadows == 0.
-            && sliders.highlights == 0.
-            && sliders.clarity == 0.
-            && !sliders.mask_clarity
-            && !local
-        {
-            return None;
-        }
-        let lum: Vec<f32> = small.pixels.par_iter().map(|p| scene(*p)).collect();
-        Some(Self::from_luminance(
-            lum,
-            [small.width, small.height],
-            source,
-            sliders,
-            local,
-        ))
+impl std::fmt::Debug for MapBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MapBase")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
     }
-    /// The map from scene luminance at `size` pixels of a `source`-sized photo, as
-    /// `build` computes it; `local` when masks change Shadows or Highlights.
-    pub(crate) fn from_luminance(
-        lum: Vec<f32>,
-        size: [u32; 2],
-        source: [u32; 2],
-        sliders: Sliders,
-        local: bool,
+}
+impl MapBase {
+    /// Of `small`, the measurement copy, with `scene` its samples' scene luminance.
+    pub(crate) fn of(
+        small: &crate::camera_data::CameraImage,
+        scene: impl Fn([f32; 3]) -> f32 + Sync,
     ) -> Self {
+        let lum: Vec<f32> = small.pixels.par_iter().map(|p| scene(*p)).collect();
+        Self::new(lum, [small.width, small.height])
+    }
+    /// From scene luminance at `size` pixels.
+    pub(crate) fn new(lum: Vec<f32>, size: [u32; 2]) -> Self {
         let (w, h) = (size[0] as usize, size[1] as usize);
         let logs: Vec<f32> = lum.iter().map(|y| level(*y)).collect();
         let percentile = |q: f32| {
@@ -230,46 +226,117 @@ impl LocalToneMap {
             .collect();
         let b: Vec<f32> = m.iter().zip(&a).map(|(m, a)| m - a * m).collect();
         let (a, b) = rayon::join(|| mean(&a), || mean(&b));
-        // Masks may evaluate either sign. Negative Shadows follows mean luminance;
-        // positive Shadows also measures spatial scene context. Highlights keeps
-        // its range key (docs/scene-tone-stage.md).
         let average = logs.iter().map(|l| l.exp2() as f64).sum::<f64>() / logs.len() as f64;
-        let shadow_key = (average as f32).log2();
-        let lift_key = shadow_key
-            + if sliders.shadows > 0. || local {
-                super::shadow_context::offset(&logs, shadow_key, w, h)
-            } else {
-                0.
-            };
-        let keys = [
-            shadow_key,
-            0.5 * percentile(0.75) + 0.5 * percentile(0.01),
-            lift_key,
-        ];
+        let highlight_key = 0.5 * percentile(0.75) + 0.5 * percentile(0.01);
         // Clarity's weights were fitted relative to the photo's brightest levels.
         let clarity_key = 0.25 * percentile(0.999) + 0.75 * percentile(0.99);
-        let detail = (sliders.clarity != 0. || sliders.mask_clarity).then(|| {
-            let base: Vec<f32> = logs
-                .iter()
-                .zip(a.iter().zip(&b))
-                .map(|(l, (a, b))| a * l + b)
-                .collect();
-            super::clarity::ClarityDetail::of(&logs, &base, w, h, clarity_key)
-        });
-        let clarity = detail
-            .as_ref()
-            .filter(|_| sliders.clarity != 0.)
-            .map(|d| d.field(sliders.clarity));
-        let region = (sliders.shadows > 0. || local).then(|| {
+        Self {
+            width: w,
+            height: h,
+            lum,
+            logs,
+            a,
+            b,
+            shadow_key: (average as f32).log2(),
+            highlight_key,
+            clarity_key,
+            lift_offset: Default::default(),
+            region: Default::default(),
+            detail: Default::default(),
+        }
+    }
+    /// The copy's scene luminance.
+    pub(crate) fn lum(&self) -> &[f32] {
+        &self.lum
+    }
+    /// Positive Shadows' key less the negative one: the photo's spatial scene context.
+    fn lift_offset(&self) -> f32 {
+        *self.lift_offset.get_or_init(|| {
+            super::shadow_context::offset(&self.logs, self.shadow_key, self.width, self.height)
+        })
+    }
+    /// The regional level positive Shadows reads.
+    fn region(&self) -> &Vec<f32> {
+        self.region.get_or_init(|| {
             let [k] = super::clarity::bilateral(
-                &logs,
-                w,
-                h,
-                [REGION_SCALE * w.max(h) as f32],
+                &self.logs,
+                self.width,
+                self.height,
+                [REGION_SCALE * self.width.max(self.height) as f32],
                 REGION_RANGE,
             );
             k
-        });
+        })
+    }
+    /// Clarity's detail.
+    fn detail(&self) -> &super::clarity::ClarityDetail {
+        self.detail.get_or_init(|| {
+            let base: Vec<f32> = self
+                .logs
+                .iter()
+                .zip(self.a.iter().zip(&self.b))
+                .map(|(l, (a, b))| a * l + b)
+                .collect();
+            super::clarity::ClarityDetail::of(
+                &self.logs,
+                &base,
+                self.width,
+                self.height,
+                self.clarity_key,
+            )
+        })
+    }
+}
+/// log2 of a scene luminance, as the map reads it.
+pub(crate) fn level(y: f32) -> f32 {
+    y.max(FLOOR).log2()
+}
+impl LocalToneMap {
+    /// Whether a map (of the photo's measurement copy, `MapBase`) is built for
+    /// `sliders`: when either slider or the measured Clarity is set, or masks change
+    /// Clarity, or `local` (masks change Shadows or Highlights).
+    pub(crate) fn needed(sliders: Sliders, local: bool) -> bool {
+        sliders.shadows != 0.
+            || sliders.highlights != 0.
+            || sliders.clarity != 0.
+            || sliders.mask_clarity
+            || local
+    }
+    /// The map from scene luminance at `size` pixels of a `source`-sized photo; `local`
+    /// when masks change Shadows or Highlights.
+    #[cfg(test)]
+    pub(crate) fn from_luminance(
+        lum: Vec<f32>,
+        size: [u32; 2],
+        source: [u32; 2],
+        sliders: Sliders,
+        local: bool,
+    ) -> Self {
+        Self::from_base(&MapBase::new(lum, size), source, sliders, local)
+    }
+    /// The map of `base` for a `source`-sized photo at these slider values.
+    pub(crate) fn from_base(
+        base: &MapBase,
+        source: [u32; 2],
+        sliders: Sliders,
+        local: bool,
+    ) -> Self {
+        let (w, h) = (base.width, base.height);
+        // Masks may evaluate either sign. Negative Shadows follows mean luminance;
+        // positive Shadows also measures spatial scene context. Highlights keeps
+        // its range key (docs/scene-tone-stage.md).
+        let lift_key = base.shadow_key
+            + if sliders.shadows > 0. || local {
+                base.lift_offset()
+            } else {
+                0.
+            };
+        let keys = [base.shadow_key, base.highlight_key, lift_key];
+        let detail = (sliders.clarity != 0. || sliders.mask_clarity).then(|| base.detail());
+        let clarity = detail
+            .filter(|_| sliders.clarity != 0.)
+            .map(|d| d.field(sliders.clarity));
+        let region = (sliders.shadows > 0. || local).then(|| base.region().clone());
         let lift = (sliders.shadows > 0.)
             .then(|| {
                 Some([
@@ -281,8 +348,8 @@ impl LocalToneMap {
         Self {
             width: w,
             height: h,
-            a,
-            b,
+            a: base.a.clone(),
+            b: base.b.clone(),
             scale: [w as f32 / source[0] as f32, h as f32 / source[1] as f32],
             shadows: Curve::new(&SHADOWS, sliders.shadows, keys[0]),
             highlights: Curve::new(&HIGHLIGHTS, sliders.highlights, keys[1]),
@@ -290,7 +357,7 @@ impl LocalToneMap {
             lift,
             keys,
             clarity,
-            clarity_detail: detail.filter(|_| sliders.mask_clarity),
+            clarity_detail: detail.filter(|_| sliders.mask_clarity).cloned(),
         }
     }
     /// Luminance gain for a pixel of scene luminance `lum` at camera-image sample
