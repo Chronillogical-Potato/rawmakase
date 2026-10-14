@@ -66,8 +66,10 @@ pub(super) struct NativeMetadata {
     /// LibRaw's canonical name for bodies sold under several names.
     pub(super) normalized_make: [c_char; 64],
     pub(super) normalized_model: [c_char; 64],
+    /// The DNG version, 0 for a camera's own format.
+    pub(super) dng_version: u32,
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 628);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 632);
 /// Mirrors `struct Sensor` in `native/raw.cpp`, as [`NativeMetadata`] does `Metadata`;
 /// `native_sensor_layout_matches` compares the sizes.
 #[repr(C)]
