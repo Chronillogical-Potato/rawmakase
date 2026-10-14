@@ -80,11 +80,24 @@ pub(crate) struct Camera {
 }
 /// No clip: `Camera::clip` for samples kept as they are.
 pub(crate) const UNCLIPPED: f32 = f32::MAX;
-/// The camera stage of `m` rendered with `r`.
+/// The camera stage of `m` rendered with `r`. A rendered file's white balance is a
+/// matrix and a clip of its own (`white_balance::rendered_white_balance`), before the
+/// profile's matrix; a RAW's is `Recipe::wb`, unclipped.
 pub(crate) fn camera_stage(m: &Metadata, r: &Recipe) -> Camera {
+    let matrix = profile_matrix(m, r);
+    if !m.is_rendered() {
+        return Camera {
+            matrix,
+            clip: [UNCLIPPED; 3],
+        };
+    }
+    let wb = crate::model::white_balance::rendered_white_balance(
+        r.incremental_temperature,
+        r.incremental_tint,
+    );
     Camera {
-        matrix: profile_matrix(m, r),
-        clip: [UNCLIPPED; 3],
+        matrix: crate::color::mul_matrix(matrix, wb.matrix),
+        clip: wb.clip.map(|c| c.min(UNCLIPPED)),
     }
 }
 fn profile_matrix(m: &Metadata, r: &Recipe) -> [[f32; 3]; 3] {

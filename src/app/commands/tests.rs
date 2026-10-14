@@ -865,10 +865,8 @@ fn temp_and_tint_on_a_rendered_photo_move_its_relative_white_balance() {
     let r = e.document.edit.recipe();
     assert_eq!(r.incremental_tint, 100.);
     assert_eq!((r.temperature, r.tint), (6500., 0.));
-    assert_eq!(
-        r.wb,
-        crate::model::white_balance::rendered_gains(r.incremental_temperature, r.incremental_tint)
-    );
+    // Temp and Tint carry a rendered photo's white balance; its gains stay 1.
+    assert_eq!(r.wb, [1.; 3]);
 }
 #[test]
 fn a_cmyk_jpeg_is_not_editable_by_command() -> anyhow::Result<()> {

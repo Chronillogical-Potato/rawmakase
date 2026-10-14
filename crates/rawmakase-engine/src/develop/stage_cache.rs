@@ -157,9 +157,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         wb,
         temperature,
         tint,
-        // A rendered file's Temp and Tint only set `wb`, which is keyed.
-        incremental_temperature: _,
-        incremental_tint: _,
+        incremental_temperature,
+        incremental_tint,
         auto_white_balance,
         profile,
         profile_amount,
@@ -272,6 +271,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             wb: *wb,
             temperature: *temperature,
             tint: *tint,
+            incremental_temperature: *incremental_temperature,
+            incremental_tint: *incremental_tint,
             auto_white_balance: *auto_white_balance,
             profile: profile.clone(),
             profile_amount: *profile_amount,
@@ -441,10 +442,17 @@ mod tests {
         }
         // (edit, changes the photo's measures)
         let measures = |r: &Recipe| stage_recipes(&base).measures != stage_recipes(r).measures;
-        let cases: [(&str, Recipe, bool); 12] = [
+        let cases: [(&str, Recipe, bool); 14] = [
             ("white balance", edit(&|r| r.wb = [1.2, 1., 0.8]), true),
             ("temperature", edit(&|r| r.temperature = 3000.), true),
             ("tint", edit(&|r| r.tint = 10.), true),
+            // A rendered file's white balance.
+            (
+                "relative temperature",
+                edit(&|r| r.incremental_temperature = 30.),
+                true,
+            ),
+            ("relative tint", edit(&|r| r.incremental_tint = -20.), true),
             ("profile amount", edit(&|r| r.profile_amount = 0.5), true),
             ("camera exposure", edit(&|r| r.camera_exposure = 0.3), true),
             (

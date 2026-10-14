@@ -264,6 +264,8 @@ pub(super) fn photo_measures(
     let metadata = &small.metadata;
     let as_shot = Recipe {
         wb: [1.; 3],
+        incremental_temperature: 0.,
+        incremental_tint: 0.,
         temperature: r
             .profile
             .as_ref()

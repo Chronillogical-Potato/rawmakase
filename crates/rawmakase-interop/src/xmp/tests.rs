@@ -1494,7 +1494,7 @@ fn xmp_reads_and_writes_relative_white_balance_for_a_jpeg() -> Result<()> {
     let sidecar = parse(Path::new("photo.xmp"), &xml(attrs, ""))?;
     let r = sidecar.apply(&Recipe::for_rendered(&m), &m, &profiles, None)?;
     assert_eq!((r.incremental_temperature, r.incremental_tint), (25., -10.));
-    assert_eq!(r.wb, crate::model::white_balance::rendered_gains(25., -10.));
+    assert_eq!(r.wb, [1.; 3]);
     assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
     let text = write::packet(
         &r,

@@ -172,8 +172,7 @@ fn fit_white_balance(im: &CameraImage, r: &mut Recipe) -> Result<()> {
 }
 
 fn fit_white_balance_to(samples: &[[f32; 3]], m: &Metadata, r: &mut Recipe) -> Result<()> {
-    r.wb = gray_world(samples)?;
-    r.sync_white_balance_controls(m);
+    r.pick_white_balance(gray_world(samples)?, m);
     if m.is_rendered() {
         // A rendered file's white balance is relative Temp and Tint; its Kelvin
         // values stay as they are. The warmer shift was measured on RAWs only.
@@ -478,13 +477,8 @@ mod tests {
             "{}",
             auto.incremental_temperature
         );
-        assert_eq!(
-            auto.wb,
-            crate::model::white_balance::rendered_gains(
-                auto.incremental_temperature,
-                auto.incremental_tint
-            )
-        );
+        // Temp and Tint carry it; the gains stay 1.
+        assert_eq!(auto.wb, [1.; 3]);
         assert_eq!(
             auto.auto_white_balance,
             Some([auto.incremental_temperature, auto.incremental_tint])

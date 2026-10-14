@@ -6455,11 +6455,8 @@ fn auto_white_balance_on_a_jpeg_sets_its_relative_temp_and_tint() {
         r.incremental_temperature
     );
     assert_eq!((r.temperature, r.tint), (6500., 0.));
-    // The gains are those the sliders show, and the WB menu shows Auto.
-    assert_eq!(
-        r.wb,
-        crate::model::white_balance::rendered_gains(r.incremental_temperature, r.incremental_tint)
-    );
+    // The sliders carry it (the gains stay 1), and the WB menu shows Auto.
+    assert_eq!(r.wb, [1.; 3]);
     assert_eq!(
         r.auto_white_balance,
         Some([r.incremental_temperature, r.incremental_tint])

@@ -196,6 +196,48 @@ fn white_balance_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Lightroom white-balances a rendered file's colours by a matrix, not channel gains
+/// (sky at Temp −35 is 30 levels redder than gains give), and in the cool magenta
+/// corner takes blue to 0. There red is 5 levels high: the matrix leaves ProPhoto blue
+/// below 0 there, which the tone stage carries and Lightroom's apparently does not.
+#[test]
+fn white_balance_on_a_rendered_files_colours_follows_lightroom() -> anyhow::Result<()> {
+    let (sky, foliage, skin, grey) = (0, 1, 2, 3);
+    let im = rendered_fixture(&[[110, 150, 200], [80, 115, 55], [190, 140, 110], [39; 3]]);
+    for (temperature, tint, levels) in [
+        (
+            -35.,
+            0.,
+            vec![
+                (sky, [112u8, 160, 244]),
+                (foliage, [35, 129, 101]),
+                (skin, [172, 156, 171]),
+            ],
+        ),
+        (
+            75.,
+            0.,
+            vec![(sky, [203, 206, 193]), (foliage, [173, 175, 15])],
+        ),
+        (-75., 75., vec![(grey, [35, 47, 0])]),
+    ] {
+        let tolerance = if tint > 50. { 6 } else { 4 };
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (patch, want) in levels {
+            let got = out[patch];
+            assert!(
+                near(got, want, tolerance),
+                "Temp {temperature} Tint {tint}: patch {patch} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Whites and Blacks act on the pseudo-scene as on a raw scene: Whites +50 lifts the
 /// upper tones more than the mid-tones and keeps white white; Blacks −50 darkens shadows.
 #[test]

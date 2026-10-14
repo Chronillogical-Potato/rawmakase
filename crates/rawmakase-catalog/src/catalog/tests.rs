@@ -301,7 +301,7 @@ fn lightroom_jpeg_edits_import_with_embedded_and_relative_white_balance() -> Res
     assert!(w.is_empty(), "{w:?}");
     assert_eq!(r.exposure, 0.5);
     assert_eq!((r.incremental_temperature, r.incremental_tint), (25., -10.));
-    assert_eq!(r.wb, crate::model::white_balance::rendered_gains(25., -10.));
+    assert_eq!(r.wb, [1.; 3]);
     assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
     Ok(())
 }

@@ -1,7 +1,5 @@
 use super::panels::PanelSwitches;
-use crate::model::white_balance::{
-    estimate_temperature, illuminant_camera, rendered_controls, rendered_gains,
-};
+use crate::model::white_balance::{estimate_temperature, illuminant_camera, rendered_controls};
 use crate::{camera_data::Metadata, color::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -715,16 +713,9 @@ impl Recipe {
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         if m.is_rendered() {
-            // Gains that are already the controls' keep them (and Auto) as they are,
-            // rather than a search's nearby Temp and Tint.
-            let shown = rendered_gains(self.incremental_temperature, self.incremental_tint);
-            if (0..3).all(|c| (shown[c] - self.wb[c]).abs() <= 1e-3 * shown[c].abs()) {
-                return;
-            }
-            [self.incremental_temperature, self.incremental_tint] = rendered_controls(self.wb);
-            // Gains the model cannot show (an eyedropper's, say) become the
-            // nearest it can, so the next Temp or Tint edit does not jump.
-            self.wb = rendered_gains(self.incremental_temperature, self.incremental_tint);
+            // Temp and Tint are a rendered file's white balance (and keep Auto); its
+            // gains stay 1.
+            self.wb = [1.; 3];
             return;
         }
         let mut adjusted = m.clone();
@@ -786,9 +777,22 @@ impl Recipe {
             self.wb = shown.wb;
         }
     }
+    /// White balance from `gains` that make a picked colour neutral (the eyedropper's,
+    /// Auto's): a RAW's gains, or for a rendered file the nearest Temp and Tint, which
+    /// carry its white balance (`white_balance::rendered_white_balance`).
+    pub fn pick_white_balance(&mut self, gains: [f32; 3], m: &Metadata) {
+        if m.is_rendered() {
+            [self.incremental_temperature, self.incremental_tint] = rendered_controls(gains);
+            self.wb = [1.; 3];
+            return;
+        }
+        self.wb = gains;
+        self.sync_white_balance_controls(m);
+    }
     pub fn update_wb(&mut self, m: &Metadata) {
         if m.is_rendered() {
-            self.wb = rendered_gains(self.incremental_temperature, self.incremental_tint);
+            // Temp and Tint render as `white_balance::rendered_white_balance`.
+            self.wb = [1.; 3];
             return;
         }
         if let Some(wb) = self

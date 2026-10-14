@@ -12,7 +12,9 @@ Lightroom treats the pseudo-scene as a camera whose RGB is linear ProPhoto, as t
 SDK would: the gains are the file's D50 white Bradford-adapted from the white Temp and
 Tint name to D50, scaled by that white's largest ProPhoto channel. Each file's gains
 therefore give its white; this prints that white as a DNG reciprocal temperature and
-tint, both tables, and the tables' error against every file's gains."""
+tint, both tables, and the tables' error against every file's gains. Greys need only
+that; colours and the cool magenta corner need the whole of
+white_balance::rendered_white_balance (a matrix with the SDK's limits, and a clip)."""
 import json, re, sys
 from pathlib import Path
 import numpy as np

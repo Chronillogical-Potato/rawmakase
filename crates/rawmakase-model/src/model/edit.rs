@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rendered_photos_relative_white_balance_edit_recomputes_the_gains() {
+    fn a_rendered_photos_relative_white_balance_edit_clears_auto() {
         use crate::camera_data::Source;
         let m = Metadata {
             source: Source::Rendered,
@@ -106,7 +106,8 @@ mod tests {
         change_setting(&mut r, ParameterId::IncrementalTemperature, Some(&m), |r| {
             r.incremental_temperature = 30.
         });
-        assert_ne!(r.wb, [1.; 3]);
+        // Temp and Tint carry a rendered file's white balance; its gains stay 1.
+        assert_eq!((r.incremental_temperature, r.wb), (30., [1.; 3]));
         assert_eq!(r.auto_white_balance, None);
     }
 }

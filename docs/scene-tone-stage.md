@@ -11,7 +11,7 @@ gates a change to it must pass. Tracking issue: #374 (from #354).
 | # | Stage | Domain |
 |---|---|---|
 | S0 | Decode, demosaic, highlight recovery of sensor-clipped channels (none for rendered files) | camera RGB |
-| S1 | White balance, the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
+| S1 | White balance (a rendered file's: a clip and a matrix), the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
 | S2 | Exposure and the DNG exposure ramp (black point) | linear Rec.2020 |
 | S3 | **Scene tone**: Highlights, Shadows, Clarity, Dehaze, the white point and Whites, Blacks | linear ProPhoto, unclamped |
 | S4 | Profile LookTable, enhanced look's HSV table, ProfileToneCurve, look curve | as before |
@@ -109,14 +109,11 @@ rendering, not clipping.
 
 Measured against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts and 32
 photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 on greys;
-Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance:
-`model::white_balance::rendered_gains`. Known gaps: Highlights/Shadows on very dark or
+Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance is a matrix and a clip
+in S1 (`model::white_balance::rendered_white_balance`, see
+[colour pipeline](color-pipeline.md)). Known gaps: Highlights/Shadows on very dark or
 bright files, Saturation, Vibrance, Clarity, Dehaze, fully saturated colours at large
-Exposure, and coloured patches under strong cooling (greys are within 0.6/3.2/3.1/255 on
-average at Temp −35/−50/−75, but colours' 95th percentile is about 30–50/255). Strong
-cooling with strong magenta (Temp −50 with Tint +50, say) is barely measured: there
-Lightroom stays nearer neutral than the tables (greys about 10/255 off), and past it the
-white is bounded so recipes stay valid.
+Exposure, and parts of the cool magenta corner of Temp and Tint.
 
 ### Whites and Blacks
 

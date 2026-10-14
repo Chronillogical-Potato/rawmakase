@@ -500,10 +500,16 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
                 whites: 0.3,
                 contrast: 0.5,
                 incremental_temperature: 25.,
-                ..untouched
+                ..untouched.clone()
             };
             r.update_wb(&rendered.metadata);
             r
+        },
+        // The cool magenta corner, where the camera stage holds blue at 0.
+        Recipe {
+            incremental_temperature: -75.,
+            incremental_tint: 75.,
+            ..untouched
         },
     ];
     let cases = (recipes.iter().map(|r| (&image, r, &samples)))

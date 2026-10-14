@@ -174,41 +174,100 @@ const BRADFORD: [[f32; 3]; 3] = [
     [0.0389, -0.0685, 1.0296],
 ];
 
-/// The ProPhoto channel gains the DNG SDK gives a camera whose RGB is linear ProPhoto
-/// (Lightroom's view of a rendered file's pseudo-scene) under the white at `mired`,
-/// `tint`: the file's D50 white, Bradford-adapted from that white to D50, and scaled
-/// by that white's largest ProPhoto channel, as the SDK normalises a camera neutral.
-/// Strong cooling with magenta takes the white outside real colours; each of its cone
-/// responses is kept at least 4% of the largest, below every measured white's (the
-/// coldest, Temp −100, has 4.7%), so the gains stay finite and positive.
-fn camera_white_balance(mired: f32, tint: f32) -> [f32; 3] {
-    use crate::camera_profiles::XYZ_TO_PRO;
-    use crate::color::{inverse, mul};
+/// The XYZ (Y = 1) of the white at `mired`, `tint`, its xy held inside the range of
+/// real ones as the DNG SDK's `XYtoXYZ` holds them.
+fn white_xyz(mired: f32, tint: f32) -> [f32; 3] {
     let [x, y] = crate::camera_profiles::temperature::xy_reciprocal(mired, tint);
-    let cone = mul(BRADFORD, [x / y, 1., (1. - x - y) / y]);
-    let largest = cone.into_iter().fold(f32::NEG_INFINITY, f32::max);
-    let cone = cone.map(|v| v.max(0.04 * largest));
-    let to_xyz = inverse(BRADFORD);
-    let d50 = mul(BRADFORD, mul(inverse(XYZ_TO_PRO), [1.; 3]));
-    let adapted = mul(to_xyz, std::array::from_fn(|c| d50[c] * d50[c] / cone[c]));
-    let scale = mul(XYZ_TO_PRO, mul(to_xyz, cone))
-        .into_iter()
-        .fold(f32::NEG_INFINITY, f32::max);
-    mul(XYZ_TO_PRO, adapted).map(|v| v * scale)
+    let (mut x, mut y) = (x.clamp(1e-6, 1. - 1e-6), y.clamp(1e-6, 1. - 1e-6));
+    if x + y > 1. - 1e-6 {
+        let scale = (1. - 1e-6) / (x + y);
+        (x, y) = (x * scale, y * scale);
+    }
+    [x / y, 1., (1. - x - y) / y]
 }
 
-/// The ProPhoto channel gains of a rendered file's Temp and Tint (−100…100), as
-/// Lightroom applies them to the scene its rendering is of: a camera white balance
-/// from the file's D50 white to the white Temp and Tint name ([`camera_white_balance`]),
-/// which brightens the photo as Lightroom does. Exactly `[1, 1, 1]` at 0, 0.
-pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
+/// The DNG SDK's `MapWhiteMatrix`: Bradford adaptation from white `from` to white `to`
+/// (XYZ), each cone's response taken as at least 0 and its scaling held to 0.1…10.
+fn map_white(from: [f32; 3], to: [f32; 3]) -> [[f32; 3]; 3] {
+    use crate::color::{inverse, mul, mul_matrix};
+    let (from, to) = (mul(BRADFORD, from), mul(BRADFORD, to));
+    let scale: [f32; 3] = std::array::from_fn(|c| {
+        let (from, to) = (from[c].max(0.), to[c].max(0.));
+        if from > 0. { to / from } else { 10. }.clamp(0.1, 10.)
+    });
+    let diagonal =
+        std::array::from_fn(|i| std::array::from_fn(|j| if i == j { scale[i] } else { 0. }));
+    mul_matrix(inverse(BRADFORD), mul_matrix(diagonal, BRADFORD))
+}
+
+/// The DNG SDK's camera to ProPhoto matrix, and camera white, for a camera whose RGB
+/// is linear ProPhoto and has no forward matrix (Lightroom's view of a rendered file's
+/// pseudo-scene), under `white` (XYZ): ProPhoto to camera is the colour matrix after
+/// adaptation from D50 to the white, scaled so its largest channel of D50 is 1; the
+/// camera white is the white in camera RGB, its largest channel 1 and none below 0:
+/// Lightroom's renders of the cool magenta corner, where the white's ProPhoto blue is
+/// negative, have blue at 0, as a camera white held at 0 gives.
+fn camera_to_prophoto(white: [f32; 3]) -> ([[f32; 3]; 3], [f32; 3]) {
+    use crate::camera_profiles::XYZ_TO_PRO;
+    use crate::color::{inverse, mul, mul_matrix};
+    let d50 = mul(inverse(XYZ_TO_PRO), [1.; 3]);
+    let to_camera = mul_matrix(XYZ_TO_PRO, map_white(d50, white));
+    let largest = |v: [f32; 3]| v.into_iter().fold(f32::NEG_INFINITY, f32::max);
+    let scale = largest(mul(to_camera, d50));
+    let to_camera = to_camera.map(|row| row.map(|v| v / scale));
+    let camera_white = mul(XYZ_TO_PRO, white);
+    let camera_white = camera_white.map(|v| (v / largest(camera_white)).clamp(0., 1.));
+    (mul_matrix(XYZ_TO_PRO, inverse(to_camera)), camera_white)
+}
+
+/// A rendered file's white balance as Lightroom applies it to the scene its rendering
+/// is of (`develop::rendered`): each channel of the scene held at most at `clip`, then
+/// `matrix`, linear ProPhoto to linear ProPhoto.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderedWhiteBalance {
+    pub matrix: [[f32; 3]; 3],
+    /// `f32::MAX` where nothing is held.
+    pub clip: [f32; 3],
+}
+
+/// Where a rendered file's scene stands against the camera white Lightroom clips it
+/// at: the file's white (about 1 in the scene) times this. Measured on Lightroom's
+/// renders of strong cooling and the cool magenta corner: at 1 the brightest greys at
+/// Temp −90 and −100 lose blue Lightroom keeps (greys 6 → 19 levels off at −100);
+/// 2 to 8 fit equally.
+const CAMERA_WHITE_SCALE: f32 = 4.;
+
+/// A rendered file's white balance at its Temp and Tint (−100…100): what the DNG SDK
+/// does to a camera whose RGB is linear ProPhoto ([`camera_to_prophoto`]) under the
+/// white they name, against the file's own D50 white. The camera white
+/// ([`CAMERA_WHITE_SCALE`] times it) holds each channel, as the SDK clips camera
+/// values at it; in the cool magenta corner that takes blue to 0, as in Lightroom.
+/// The file as it is at 0, 0.
+pub fn rendered_white_balance(temperature: f32, tint: f32) -> RenderedWhiteBalance {
+    if temperature == 0. && tint == 0. {
+        return RenderedWhiteBalance {
+            matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            clip: [f32::MAX; 3],
+        };
+    }
     let white = |temperature: f32, tint: f32| {
         let [_, mired, drift] = interpolate(&RENDERED_TEMPERATURE, temperature);
         let [_, tint] = interpolate(&RENDERED_TINT, tint);
-        camera_white_balance(mired, tint + drift)
+        white_xyz(mired, tint + drift)
     };
-    let (gains, file) = (white(temperature, tint), white(0., 0.));
-    std::array::from_fn(|c| gains[c] / file[c])
+    let (file, _) = camera_to_prophoto(white(0., 0.));
+    let (matrix, camera_white) = camera_to_prophoto(white(temperature, tint));
+    RenderedWhiteBalance {
+        matrix: crate::color::mul_matrix(matrix, crate::color::inverse(file)),
+        clip: camera_white.map(|c| c * CAMERA_WHITE_SCALE),
+    }
+}
+
+/// The ProPhoto channel gains greys below [`rendered_white_balance`]'s clip get at a
+/// rendered file's Temp and Tint: what the eyedropper's and Auto's gains are matched
+/// against. Exactly `[1, 1, 1]` at 0, 0.
+pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
+    crate::color::mul(rendered_white_balance(temperature, tint).matrix, [1.; 3])
 }
 
 /// The rendered file's Temp and Tint whose [`rendered_gains`] are nearest `gains`
@@ -299,6 +358,37 @@ mod rendered_tests {
         }
     }
 
+    /// Lightroom's scene values (its export through `F⁻¹`) for a file's scene values,
+    /// at Temp and Tint: a colour, which channel gains alone miss (foliage at Temp −75
+    /// came out 0.089 red against Lightroom's 0.069), and greys in the cool magenta
+    /// corner, whose blue Lightroom takes to 0.
+    #[test]
+    fn rendered_white_balance_matches_lightroom() {
+        let foliage = [0.0617, 0.0867, 0.0391];
+        let cases: [(f32, f32, [f32; 3], [f32; 3]); 4] = [
+            (-75., 0., foliage, [0.0693, 0.1314, 0.2162]),
+            (75., 0., foliage, [0.171, 0.1928, 0.0425]),
+            (-75., 75., [0.0141; 3], [0.0115, 0.017, 0.]),
+            (-50., 100., [0.0141; 3], [0.013, 0.0139, 0.]),
+        ];
+        for (t, n, scene, want) in cases {
+            let wb = rendered_white_balance(t, n);
+            let held: [f32; 3] = std::array::from_fn(|c| scene[c].min(wb.clip[c]));
+            let got = crate::color::mul(wb.matrix, held).map(|v| v.max(0.));
+            assert!(
+                (0..3).all(|c| (got[c] - want[c]).abs() <= 0.0005_f32.max(0.03 * want[c])),
+                "Temp {t} Tint {n}: {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_white_balance_leaves_the_file_as_it_is_at_zero() {
+        let wb = rendered_white_balance(0., 0.);
+        assert_eq!(wb.matrix, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+        assert!(wb.clip.iter().all(|&c| c == f32::MAX));
+    }
+
     #[test]
     fn rendered_gains_stay_finite_and_positive() {
         let mut previous = f32::NEG_INFINITY;
@@ -358,11 +448,10 @@ mod rendered_tests {
         let mut r = Recipe::for_rendered(&m);
         r.incremental_temperature = 40.;
         r.update_wb(&m);
-        assert!(r.wb[0] > 1. && r.wb[2] <= r.wb[0]);
-        assert_eq!(r.wb, rendered_gains(40., 0.));
+        assert_eq!(r.wb, [1.; 3]);
         assert_eq!((r.temperature, r.tint), (6500., 0.));
         r.sync_white_balance_controls(&m);
-        assert!((r.incremental_temperature - 40.).abs() < 0.5);
+        assert_eq!(r.incremental_temperature, 40.);
         r.reset_white_balance(&m);
         assert_eq!(
             (r.incremental_temperature, r.incremental_tint, r.wb),
@@ -391,10 +480,10 @@ mod rendered_tests {
     }
 
     /// Copying Treatment & Profile without White Balance, or picking a profile,
-    /// re-syncs the controls: gains that are already those of the controls keep
-    /// them exactly, and with them the WB menu's Auto.
+    /// re-syncs the controls: a rendered photo's Temp and Tint are its white balance,
+    /// so they stay as they are, and with them the WB menu's Auto.
     #[test]
-    fn a_rendered_photos_matching_gains_keep_its_temp_and_tint() {
+    fn a_rendered_photo_keeps_its_temp_and_tint_when_controls_sync() {
         let m = Metadata {
             source: Source::Rendered,
             ..Default::default()
@@ -402,35 +491,44 @@ mod rendered_tests {
         let mut r = Recipe::for_rendered(&m);
         r.incremental_temperature = -77.;
         r.incremental_tint = 30.;
-        r.wb = rendered_gains(-77., 30.);
         r.auto_white_balance = Some([-77., 30.]);
-        let before = r.clone();
         r.sync_white_balance_controls(&m);
         assert_eq!(
             (r.incremental_temperature, r.incremental_tint, r.wb),
-            (-77., 30., before.wb)
+            (-77., 30., [1.; 3])
         );
         assert_eq!(r.auto_white_balance, Some([-77., 30.]));
         r.profile_changed(&m);
         assert_eq!((r.incremental_temperature, r.incremental_tint), (-77., 30.));
     }
 
+    /// An eyedropper's (or Auto's) gains on a rendered photo become the nearest Temp
+    /// and Tint, which then carry the white balance: gains stay 1.
     #[test]
-    fn picked_gains_on_a_rendered_photo_become_those_its_controls_show() {
+    fn picked_gains_on_a_rendered_photo_become_its_temp_and_tint() {
         let m = Metadata {
             source: Source::Rendered,
             ..Default::default()
         };
         let mut r = Recipe::for_rendered(&m);
-        // An eyedropper's gains, off the model's reach (and green ≠ 1).
-        r.wb = [1.4, 0.9, 1.2];
-        r.sync_white_balance_controls(&m);
-        let shown = rendered_gains(r.incremental_temperature, r.incremental_tint);
-        assert_eq!(r.wb, shown);
-        // So the next Temp edit moves on from them rather than jumping.
-        let mut moved = r.clone();
-        moved.update_wb(&m);
-        assert_eq!(moved.wb, r.wb);
+        // Off the model's reach (and green ≠ 1).
+        r.pick_white_balance([1.4, 0.9, 1.2], &m);
+        assert_eq!(r.wb, [1.; 3]);
+        let [t, n] = rendered_controls([1.4, 0.9, 1.2]);
+        assert_eq!((r.incremental_temperature, r.incremental_tint), (t, n));
+        assert!(t > 0. && n != 0., "{t} {n}");
+        // A neutral pick on a warmed photo takes it back to the file's white balance.
+        r.pick_white_balance([1.; 3], &m);
+        assert_eq!((r.incremental_temperature, r.incremental_tint), (0., 0.));
+        assert_eq!(r.wb, [1.; 3]);
+    }
+
+    #[test]
+    fn picked_gains_on_a_raw_are_its_white_balance() {
+        let m = Metadata::default();
+        let mut r = Recipe::for_metadata(&m);
+        r.pick_white_balance([1.4, 1., 1.2], &m);
+        assert_eq!(r.wb, [1.4, 1., 1.2]);
     }
 
     #[test]
