@@ -202,14 +202,15 @@ fn a_cancelled_selection_says_so_and_stops_the_worker() {
         started.elapsed() < Duration::from_secs(10),
         "the cancel was waited for, not a timeout"
     );
+    // The request is over: the worker takes new ones. The ping waits for the
+    // engine, and the held run only ends on the forwarded flag, so once it is
+    // answered the flag has been seen; checked before it, the flag can still
+    // be on its way on the cancel connection.
+    assert!(session.ping().is_ok());
     assert!(
         engine_cancelled.load(Ordering::SeqCst),
         "the worker's run saw the forwarded flag"
     );
-    // The request is over: the worker takes new ones.
-    let after = Arc::new(AtomicBool::new(false));
-    assert!(session.ping().is_ok());
-    drop(after);
 }
 
 #[test]
