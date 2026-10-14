@@ -419,6 +419,8 @@ fn lightroom_crops_of_a_photo_held_upright_are_of_the_unrotated_frame() -> Resul
         apply(&m, r#"c:CropTop="0.25""#)?.crop,
         [0.25, 0.0555, 1., 0.9445],
     );
+    // A value past the opposite edge is an invalid crop, not a reordered one.
+    assert!(apply(&m, r#"c:CropLeft="0.95""#).is_err());
     // Turned a quarter clockwise (orientation 6), the sensor's left half is the top.
     let cw = Metadata {
         flip: 6,

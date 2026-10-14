@@ -955,6 +955,8 @@ impl Preset {
                 settings.assign(&format!("Crop{name}"), &mut crop[i], 1., 0., 1.)?;
             }
             if crop != start {
+                // Turning sorts the edges, so a reversed crop is refused before it is.
+                ensure!(crop[0] < crop[2] && crop[1] < crop[3], "Invalid crop");
                 r.crop = frame.rect_from_unrotated(crop);
             }
         }
