@@ -74,6 +74,12 @@ def has_gate_mask(text):
 
 # How render runs rawmakase (its environment); a change makes earlier renders stale.
 RENDER_POLICY = 2
+# Independent of render identity: old pixels can be rescored, old summaries
+# cannot supply the regional measurements introduced here.
+METRIC_POLICY = 2
+LOCAL_REGRESSION_LIMIT = 2.0  # ΔE00 in any matched region, not pooled over photos
+PARITY_MEDIAN_LIMIT = 2.0
+PARITY_LOCAL_LIMIT = 5.0
 PERCENT = {'Contrast2012': 'contrast', 'Highlights2012': 'highlights', 'Shadows2012': 'shadows',
            'Whites2012': 'whites', 'Blacks2012': 'blacks', 'Texture': 'texture', 'Clarity2012': 'clarity',
            'Dehaze': 'dehaze'}
@@ -173,8 +179,24 @@ def photo_metrics(reference, render):
     la, lb = lab(a), lab(b)
     d = metrics.de00(la, lb)
     valid = np.isfinite(d)
+    if not valid.all():
+        return dict(valid=0., error='non-finite pixels')
     clip = (at_white(a) ^ at_white(b)) | (at_black(a) ^ at_black(b))
+    # Overlapping windows, 1/16 of the long edge, at half-window steps. Keep
+    # each window so a pre-existing error elsewhere cannot hide a new defect.
+    edge = max(1, round(max(d.shape) / 16))
+    step = max(1, edge // 2)
+    windows = lambda n: sorted(set(range(0, max(1, n - edge + 1), step)) | {max(0, n - edge)})
+    regions = [float(d[y:y + edge, x:x + edge].mean())
+               for y in windows(d.shape[0]) for x in windows(d.shape[1])]
+    # Reference-defined masks include tiny bright/dark objects (>=16 pixels),
+    # independently of their share of the whole image; no signed cancellation.
+    tones = {}
+    for name, mask in (('highlights', la[..., 0] >= 90), ('shadows', la[..., 0] <= 10)):
+        if mask.sum() >= 16:
+            tones[name] = float(d[mask].mean())
     return dict(median_de00=float(np.median(d[valid])), mean_de00=float(d[valid].mean()),
+                regions_de00=regions, tone_de00=tones,
                 valid=float(valid.mean()) * (a.shape[0] * a.shape[1]) / (reference.shape[0] * reference.shape[1]),
                 clipping=float(clip[valid].mean()), L_ref=la[..., 0][valid], L_out=lb[..., 0][valid])
 
@@ -448,7 +470,8 @@ def default_parity(args):
         for r in valid:
             groups.setdefault(r[key], []).append(r['median_de00'])
         summary[key] = {k: dict(n=len(v), median=float(np.median(v))) for k, v in sorted(groups.items())}
-    result = dict(schema=1, survey=str(survey), camera_raw=pool.get('camera_raw'), holdout_left_out=left_out,
+    result = dict(schema=2, metric_policy=METRIC_POLICY,
+                  survey=str(survey), camera_raw=pool.get('camera_raw'), holdout_left_out=left_out,
                   rendered_by=dict(rawmakase=digest(args.rawmakase), profiles=library_digest(library),
                                    policy=RENDER_POLICY),
                   median_de00=float(np.median([r['median_de00'] for r in valid])) if valid else None,
@@ -549,7 +572,9 @@ def score(args):
             pixels.setdefault((c['name'], photo['stratum']), []).append(L)
         rows.append(dict(row, **m))
     band_rows = {f'{n}|{s}': bands(p) for (n, s), p in pixels.items()}
-    args.out.write_text(json.dumps(dict(schema=1, set=frozen['set'], rendered_by=made_by, photos=rows,
+    args.out.write_text(json.dumps(dict(schema=2, metric_policy=METRIC_POLICY,
+                                        settings=sorted({c['name'] for c in frozen['cases']}),
+                                        set=frozen['set'], rendered_by=made_by, photos=rows,
                                         bands=band_rows), indent=1))
     print(f'{len(rows)} scores -> {args.out}')
 
@@ -558,7 +583,7 @@ def summarise(scores):
     """setting -> stratum -> dict(score, mean, photos{i: score}, clipping, n)."""
     out = {}
     for r in scores['photos']:
-        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid={}))
+        s = out.setdefault(r['name'], {}).setdefault(r['stratum'], dict(photos={}, clipping=[], invalid={}, rows={}))
         if r.get('valid', 0) < 0.5:
             # With why: a photo framed otherwise than Camera Raw in both is the
             # same limitation; one that is no longer rendered is not.
@@ -566,6 +591,7 @@ def summarise(scores):
             continue
         # By the RAW's hash: photo indices restart in every set.
         s['photos'][r.get('sha256', r['photo'])] = r['median_de00']
+        s['rows'][r.get('sha256', r['photo'])] = r
         s.setdefault('clipped', {})[r.get('sha256', r['photo'])] = r['clipping']
         s['clipping'].append(r['clipping'])
     for setting in out.values():
@@ -626,6 +652,13 @@ def excluded(path):
 
 def accept(args):
     cand, base = json.loads(args.candidate.read_text()), json.loads(args.baseline.read_text())
+    for label, doc in (('candidate', cand), ('baseline', base)):
+        if doc.get('metric_policy') != METRIC_POLICY:
+            print(f'{label}: metric policy {METRIC_POLICY} required; rescore the renders in a new run folder')
+            return 1
+        if not doc.get('settings'):
+            print(f'{label}: missing declared settings')
+            return 1
     # Photos left out of the verdict (holdout photos already looked at): dropped
     # from both sides, and said so.
     skip = excluded(args.exclude)
@@ -658,7 +691,8 @@ def accept(args):
     print(f'{"setting":28s} {"stratum":7s} {"n":>2s} {"e4":>6s} {"new":>6s} {"dflt":>6s}  result')
     # Every setting either side scored: one the candidate lacks fails, as does an
     # empty candidate.
-    names = sorted(C.keys() | B.keys(), key=lambda n: (n != 'default', n))
+    names = sorted(C.keys() | B.keys() | set(cand['settings']) | set(base['settings']),
+                   key=lambda n: (n != 'default', n))
     if not names:
         print('no scores')
         return 1
@@ -666,25 +700,22 @@ def accept(args):
         default_name = 'color-default' if name.startswith('color-') else 'default'
         for st, _, _ in STRATA:
             c, b = C.get(name, {}).get(st), B.get(name, {}).get(st)
-            # `score` writes a row for every frozen case, so a stratum neither
-            # file has is one the references have no photo in.
-            if not c and not b:
-                continue
             cd, bd = C.get(default_name, {}).get(st), B.get(default_name, {}).get(st)
             reasons = []
-            if not c or not b:
+            if not c and not b:
+                reasons.append('inconclusive (no reference photos in this stratum)')
+            elif not c or not b:
                 reasons.append('missing from the ' + ('candidate' if not c else 'baseline'))
             elif any(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items()):
                 # A photo the candidate can't score as the baseline could, or for
                 # another reason (no longer rendered, say).
                 n = sum(b['invalid'].get(p, 'scored') != why for p, why in c['invalid'].items())
                 reasons.append(f'{n} photos no longer render or score as in the baseline')
-            elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] != b['invalid'] or not cd or not bd
+            elif (c['n'] < 3 or b['n'] < 3 or c['invalid'] or b['invalid'] or not cd or not bd
                   or c['photos'].keys() != b['photos'].keys()):
-                # Photos invalid on both sides alike (framed otherwise than
-                # Camera Raw, say) are left out; anything else is no verdict on
-                # the setting, but a photo both scored still may not get worse.
-                reasons.append('inconclusive (fewer than 3 photos, photos invalid on one side only or different photos)')
+                # Unscored references are coverage gaps even when both engines
+                # fail on them. Still check the photos both sides did score.
+                reasons.append('inconclusive (fewer than 3 photos, unscored references or different photos)')
                 limit = COLOR_LIMITS[family] if family else 1.0 if magnitude.get(name, 0) <= 50 else 2.0
                 common = c['photos'].keys() & b['photos'].keys()
                 for p in common:
@@ -699,7 +730,7 @@ def accept(args):
                 if name.endswith('default'):
                     if c['score'] > b['score'] + 0.1:
                         reasons.append('5: default worse than engine 4 + 0.1')
-                elif family or args.rule == 'regression':
+                elif family or args.rule in ('regression', 'parity'):
                     if c['score'] > b['score'] + 0.1:
                         reasons.append('R: median worse than the baseline + 0.1')
                 elif name not in magnitude:
@@ -726,6 +757,14 @@ def accept(args):
                         reasons.append(f'3: photo {str(p)[:12]} {b["photos"][p]:.2f} -> {v:.2f}')
                 if c['clipping'] > b['clipping'] + 0.005:
                     reasons.append(f'4: clipping {100 * b["clipping"]:.2f}% -> {100 * c["clipping"]:.2f}%')
+            # Regional and absolute checks apply even to underfilled strata.
+            # Invalid measurements never become a successful parity verdict.
+            if c and b:
+                for p in c['photos'].keys() & b['photos'].keys():
+                    cr, br = c['rows'][p], b['rows'][p]
+                    reasons += regional_reasons(cr, br, args.rule, str(p)[:12])
+                if args.rule == 'parity' and c['invalid']:
+                    reasons.append('parity: unscored reference photos')
             dflt = cd['score'] if cd else float('nan')
             print(f'{name:28s} {st:7s} {c["n"] if c else 0:2d} {b["score"] if b else float("nan"):6.2f} '
                   f'{c["score"] if c else float("nan"):6.2f} {dflt:6.2f}  {"PASS" if not reasons else "; ".join(reasons)}')
@@ -736,6 +775,42 @@ def accept(args):
                 args.results.append(dict(name=name, stratum=st, reasons=reasons))
     print(f'{len(failed)} failing setting/stratum pairs')
     return int(bool(failed))
+
+
+def regional_reasons(candidate, baseline, rule, photo):
+    """Compare matching spatial/tonal regions, never averages across photos."""
+    reasons = []
+    for key in ('regions_de00', 'tone_de00'):
+        c, b = candidate.get(key), baseline.get(key)
+        if key == 'tone_de00':
+            if not isinstance(c, dict) or not isinstance(b, dict) or c.keys() != b.keys():
+                reasons.append(f'regional: photo {photo} missing or different tone regions')
+                continue
+            c, b = list(c.values()), [b[k] for k in candidate[key]]
+        elif not isinstance(c, list) or not isinstance(b, list) or not c or len(c) != len(b):
+            reasons.append(f'regional: photo {photo} missing or different spatial regions')
+            continue
+        if not all(isinstance(v, (int, float)) and np.isfinite(v) and v >= 0 for v in c + b):
+            reasons.append(f'regional: photo {photo} invalid measurements')
+            continue
+        if any(cv > bv + LOCAL_REGRESSION_LIMIT for cv, bv in zip(c, b)):
+            reasons.append(f'regional: photo {photo} {key} worsens by > {LOCAL_REGRESSION_LIMIT} ΔE00')
+        if rule == 'parity' and any(v > PARITY_LOCAL_LIMIT for v in c):
+            reasons.append(f'parity: photo {photo} {key} exceeds {PARITY_LOCAL_LIMIT} ΔE00')
+    for key in ('median_de00', 'mean_de00', 'clipping'):
+        if not all(isinstance(r.get(key), (int, float)) and np.isfinite(r[key]) and r[key] >= 0
+                   for r in (candidate, baseline)):
+            reasons.append(f'regional: photo {photo} invalid {key}')
+    if reasons:
+        return reasons
+    if candidate['clipping'] > baseline['clipping'] + 0.005:
+        reasons.append(f'4: photo {photo} clipping worsens by > 0.5 percentage points')
+    if rule == 'parity':
+        if candidate['median_de00'] > PARITY_MEDIAN_LIMIT:
+            reasons.append(f'parity: photo {photo} median exceeds {PARITY_MEDIAN_LIMIT} ΔE00')
+        if candidate['clipping'] > 0.005:
+            reasons.append(f'parity: photo {photo} clipping disagreement exceeds 0.5%')
+    return reasons
 
 
 def main():
@@ -770,9 +845,9 @@ def main():
     s.add_argument('--candidate', type=Path, required=True)
     s.add_argument('--baseline', type=Path, required=True)
     s.add_argument('--exclude', type=Path, help='photos to leave out: SHA-256 hashes or prefixes, one per line')
-    s.add_argument('--rule', choices=['regression', 'switch'], default='regression',
+    s.add_argument('--rule', choices=['regression', 'switch', 'parity'], default='regression',
                    help='regression (default): no setting worse than the baseline; switch: the scene tone '
-                        'engine\'s rule, which also requires far-off tone settings to improve (rules 1 and 2)')
+                        'engine\'s improvement rule; parity: regression plus absolute per-photo and regional limits')
     s = sub.add_parser('default-parity', help='default renders against the survey\'s Camera Raw renders')
     s.add_argument('--survey', type=Path, required=True, help='a references/<family>/survey folder')
     s.add_argument('--references', type=Path, help='the references root, for the holdout sets to leave out')
