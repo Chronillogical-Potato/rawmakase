@@ -94,17 +94,6 @@ fn render_resident(
     sampling[slot::SPREAD.start] = spread;
     sampling[slot::CROP.start..slot::HOMOGRAPHY.end].copy_from_slice(&g.gpu_params());
     sampling[slot::MANUAL].copy_from_slice(&g.gpu_manual());
-    let e = &base.effects;
-    sampling[slot::NOISE].copy_from_slice(&[
-        base.noise_luma,
-        // The sampling stage's colour term: Color noise reduction runs on the camera
-        // image (`color_noise`).
-        0.,
-        e.luma_detail,
-        e.chroma_detail,
-        e.luma_contrast,
-        e.chroma_smoothness,
-    ]);
     let mut tables = Vec::new();
     let lens = develop::pipeline::lens_gpu_params(source, &base, slot::HEADER, &mut tables);
     sampling[slot::LENS.start..slot::VIGNETTING_AMOUNT.end].copy_from_slice(&lens);

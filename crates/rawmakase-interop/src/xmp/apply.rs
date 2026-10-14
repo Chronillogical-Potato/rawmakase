@@ -1003,8 +1003,23 @@ impl Preset {
                 settings.seen.insert(format!("Crop{name}"));
             }
         } else {
+            // Lightroom records the crop on the frame before the camera orientation, as
+            // the camera records its aspect-ratio crop; RAWmakase's is of the photo as
+            // shown. Rotate and Flip stay out of XMP (docs/transform.md). Presets from
+            // RAWmakase before #483 (marked 1) hold the crop as shown, and keep meaning it.
+            let mut frame = crate::model::image_frame::ImageFrame::for_metadata(m);
+            if v.get("RAWmakasePreset").is_some_and(|v| v == "1") {
+                frame.turns = 0;
+            }
+            let start = frame.rect_to_unrotated(r.crop);
+            let mut crop = start;
             for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
-                settings.assign(&format!("Crop{name}"), &mut r.crop[i], 1., 0., 1.)?;
+                settings.assign(&format!("Crop{name}"), &mut crop[i], 1., 0., 1.)?;
+            }
+            if crop != start {
+                // Turning sorts the edges, so a reversed crop is refused before it is.
+                ensure!(crop[0] < crop[2] && crop[1] < crop[3], "Invalid crop");
+                r.crop = frame.rect_from_unrotated(crop);
             }
         }
         // Lightroom's Constrain Crop, not to be confused with `CropConstrainToUnitSquare`.

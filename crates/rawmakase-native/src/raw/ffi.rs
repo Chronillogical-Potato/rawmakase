@@ -54,6 +54,7 @@ pub(super) struct NativeMetadata {
     pub(super) preset_daylight: [f32; 3],
     pub(super) preset_shade: [f32; 3],
     pub(super) preset_d65: [f32; 3],
+    pub(super) preset_fine_weather: [f32; 3],
     pub(super) left_margin: u32,
     pub(super) top_margin: u32,
     pub(super) aspect_left: u32,
@@ -66,7 +67,7 @@ pub(super) struct NativeMetadata {
     pub(super) normalized_make: [c_char; 64],
     pub(super) normalized_model: [c_char; 64],
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 616);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 628);
 /// Mirrors `struct Sensor` in `native/raw.cpp`, as [`NativeMetadata`] does `Metadata`;
 /// `native_sensor_layout_matches` compares the sizes.
 #[repr(C)]

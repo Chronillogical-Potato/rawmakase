@@ -33,10 +33,11 @@ struct Metadata {
     float focal_35mm;
     int highlight_tone_priority;
     float fuji_exposure_shift;
-    // The camera's own stored Daylight, Shade and D65 presets (WB_Coeffs, as
-    // R, G, B), zero when the RAW has none. Per-unit calibration divides a camera
-    // table reference by one of them; DNGs carry their calibration instead.
-    float preset_daylight[3], preset_shade[3], preset_d65[3];
+    // The camera's own stored Daylight, Shade, D65 and Fine Weather presets
+    // (WB_Coeffs, as R, G, B), zero when the RAW has none. Per-unit calibration
+    // divides a camera table reference by one of them; DNGs carry their
+    // calibration instead. LibRaw files Olympus's 5300 K entry as Fine Weather.
+    float preset_daylight[3], preset_shade[3], preset_d65[3], preset_fine_weather[3];
     // The visible image's offset in the raw data, and the camera's aspect-ratio
     // crop in raw coordinates, as crop_* are (cleft 0xffff when there is none).
     unsigned left_margin, top_margin;
@@ -254,6 +255,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
                 m->preset_daylight[c] = d.color.WB_Coeffs[LIBRAW_WBI_Daylight][c];
                 m->preset_shade[c] = d.color.WB_Coeffs[LIBRAW_WBI_Shade][c];
                 m->preset_d65[c] = d.color.WB_Coeffs[LIBRAW_WBI_D65][c];
+                m->preset_fine_weather[c] = d.color.WB_Coeffs[LIBRAW_WBI_FineWeather][c];
             }
         }
         for(int c=0;c<3;++c) {

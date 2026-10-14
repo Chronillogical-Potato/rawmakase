@@ -717,7 +717,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.effects.clarity = 0.3;
             recipe.effects.texture = -0.4;
             recipe.whites = 0.6;
-            // Geometry, lens correction and noise reduction in the sampling stage.
+            // Geometry and lens correction sample the denoised camera image.
             recipe.straighten = 3.;
             recipe.crop = [0.05, 0.1, 0.95, 0.92];
             recipe.transform.vertical = 0.2;

@@ -3,8 +3,8 @@
 `data/cameras.toml` holds what RAWmakase knows about camera bodies beyond what the raw
 file says, one `[[camera]]` row per model. It is compiled into the app
 (`src/cameras.rs`) and checked by a unit test, so a malformed row fails `cargo test`.
-A row carries baseline exposure. Sony, Canon and Fujifilm rows may also hold a
-`unit_calibration`: a white-balance reference that, divided by a preset the
+A row carries baseline exposure. Sony, Canon, Fujifilm, Olympus and OM System rows may
+also hold a `unit_calibration`: a white-balance reference that, divided by a preset the
 individual RAW stores, gives Adobe's calibration of that camera unit.
 Calibration uses exact model/alias matching and identity for unknown bodies; it
 does not use the baseline exposure fallback. See
@@ -57,6 +57,11 @@ The worst cases are bodies unlike the rest of their make: Pentax's 645Z (−0.5 
 at −0.25, Nikon Coolpix at −0.3, against +0.3 for their makes' larger sensors). No
 rule from the raw's own metadata did better: within a make, neither white level nor
 black level orders the baselines. The same-make median is the fallback.
+
+The 45 older Canon, Sony and Fujifilm rows added on 2026-10-14 moved the Canon median
+from 0.4 to 0.3 EV; the other makes' medians did not change. Canon bodies still without
+a row are mostly older ones: on Camera Raw 18.7 default renders of one photo each of 24
+such EOS bodies, the median exposure difference went from 0.18 EV too bright to 0.04 EV.
 
 The camera-matching DCPs (Camera Standard and so on) of some Sony bodies carry a
 BaselineExposureOffset of −0.35 EV, which RAWmakase applies with those profiles; Adobe
@@ -168,14 +173,25 @@ Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
 GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
 and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
-Four rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+Six rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`), the A7 II and A7CR, fitted to Camera Raw 18.6
-renders of private photos (8 and 4), and the A7R VI, read from Adobe DNG Converter
-18.7's DNG of one private photo. LibRaw does not identify the A7R VI by name yet, but
-its white level, black level and crop match Adobe's.
+renders of private photos (8 and 4), and the A7R VI, EOS 700D and A7R, read from
+Adobe DNG Converter 18.7's DNG of one private photo each. LibRaw does not identify
+the A7R VI by name yet, but its white level, black level and crop match Adobe's.
+
+The 45 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
+Fujifilm bodies; see [camera parity](camera-parity.md)) are `adobe-dng` values from
+one test-dataset photo each, at the ISO the row says. Against Camera Raw 18.7 default
+renders of 110 photos of these bodies (the dataset's, and 26 rendered for bodies it
+had none of), the median midtone exposure difference went from 0.15 EV to 0.02 EV, and
+103 photos are within 0.1 EV (41 before). Of the other seven, two 80D frames of one
+shoot were already 0.44 EV brighter than Camera Raw and are now 0.58 brighter, the
+row moving every 80D photo alike; a 30D photo is 0.30 EV brighter where another body's
+at the same ISO matches; a 5DS R and a Rebel T6 photo at other ISO settings than their
+rows' samples went from 0.3 EV to 0.16 EV off, Canon's white level being
+ISO-dependent; and two RX1R III frames stay 0.14 EV darker, the row's value being the
+Sony fallback they had.
 
 Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
 fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names
-alike; and bodies whose only CC0 sample is an sRAW or other non-mosaic file (EOS 5D
-Mark IV, 5DS R, 6D Mark II, 7D Mark II, 80D, 1D X Mark II, Nikon D810, Sony RX1R III
-and A1 II).
+alike; and the Nikon D810, whose only CC0 sample is an sRAW.

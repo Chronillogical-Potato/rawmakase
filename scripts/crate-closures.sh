@@ -42,5 +42,9 @@ check rawmakase-export "rawmakase|eframe|winit|egui-wgpu|egui-winit|egui_extras|
 # Inference itself is a leaf: it takes pixels and returns coverage, and knows no
 # workspace crate, window, GPU or imaging library.
 check rawmakase-inference "rawmakase|rawmakase-model|rawmakase-catalog|rawmakase-engine|rawmakase-export|rawmakase-interop|rawmakase-native|rawmakase-protocol|wgpu.*|naga|$gui|$native"
+# The remote worker and its client sit on top of inference alone: the protocol
+# and the worker know no catalog, renderer, GUI or native library, and only the
+# app composes the client.
+check rawmakase-remote "rawmakase|rawmakase-model|rawmakase-catalog|rawmakase-engine|rawmakase-export|rawmakase-interop|rawmakase-native|rawmakase-protocol|wgpu.*|naga|$gui|$native"
 [ "$status" -eq 0 ] && echo "The extracted crates depend on no app, GPU, GUI or native imaging crate beyond their own."
 exit "$status"

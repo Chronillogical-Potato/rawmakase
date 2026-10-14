@@ -29,6 +29,12 @@
 
 ## Tests
 
+- Before running dataset rendering or Camera Raw parity checks, read
+  `tests/corpus/README.md` and, when available, the local handoff at
+  `$RAWMAKASE_DATASET/baselines/STRESS-REFERENCES.md`. It records the stress-only
+  run commands, reference status, exclusions and coverage limits. This handoff
+  is local and Git-ignored; do not assume it exists on another machine or commit
+  its private content or machine-specific paths.
 - Reproduce bugs with a failing regression test before fixing them. Test
   observable behavior at the relevant boundary, including UI or protocol input
   when translation is the risk.

@@ -36,12 +36,16 @@ pub enum WhiteBalancePreset {
     Daylight,
     Shade,
     D65,
+    /// Olympus's 5300 K entry, which LibRaw names Fine Weather.
+    #[serde(rename = "fine-weather")]
+    FineWeather,
 }
 
 /// The presets of a native RAW that individual-unit calibration uses: Sony and
-/// most Canon bodies record theirs as Daylight, some Canon bodies as Shade, and
-/// Fujifilm as the D65 entry of its standard-illuminant table. Each is `None`
-/// when the RAW has none or it is not positive and finite.
+/// most Canon bodies record theirs as Daylight, some Canon bodies as Shade,
+/// Fujifilm as the D65 entry of its standard-illuminant table, and Olympus and
+/// OM System as the 5300 K entry (Fine Weather). Each is `None` when the RAW has
+/// none or it is not positive and finite.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct WhiteBalancePresets {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,6 +54,8 @@ pub struct WhiteBalancePresets {
     pub shade: Option<[f32; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub d65: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fine_weather: Option<[f32; 3]>,
 }
 impl WhiteBalancePresets {
     pub fn get(&self, preset: WhiteBalancePreset) -> Option<[f32; 3]> {
@@ -57,6 +63,7 @@ impl WhiteBalancePresets {
             WhiteBalancePreset::Daylight => self.daylight,
             WhiteBalancePreset::Shade => self.shade,
             WhiteBalancePreset::D65 => self.d65,
+            WhiteBalancePreset::FineWeather => self.fine_weather,
         }
     }
     /// Keeps a preset only when every multiplier is positive and finite.

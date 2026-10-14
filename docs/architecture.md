@@ -16,7 +16,11 @@ highlight recovery); `crates/rawmakase-export` develops and writes exports with
 their watermarks over both; `crates/rawmakase-inference` is the one leaf that runs
 the subject selection model through a lazily loaded ONNX Runtime (pixels in,
 coverage out; it knows no other workspace crate, and no value, catalog or
-rendering crate can reach it, so saved masks render without any inference). The app crate re-exports these crates' modules at its
+rendering crate can reach it, so saved masks render without any inference);
+`crates/rawmakase-remote` sits directly on inference alone — the optional
+worker binary that runs the same models on another computer, and the client the
+app uses when configured to, over a bounded TCP protocol that knows no catalog,
+renderer or GUI. The app crate re-exports these crates' modules at its
 root (`crate::model`, `crate::xmp`, `crate::catalog`, `crate::develop`…), so paths
 read the same on either side. The desktop app and CLI compose these APIs;
 parsing, persistence and rendering implementations do not import the desktop UI.
@@ -276,8 +280,12 @@ the GPU, and `CPU` otherwise.
 
 For the same recipes, the stages before the per-pixel stage also run on the device
 when the photo fits its buffer limits (`gpu/resident.rs`): the photo or pyramid level
-is kept there, and regions are sampled there through geometry, lens correction and
-noise reduction. The Shadows/Highlights map (with Clarity's gain) is built on the
+is kept there, and regions are sampled there through geometry and lens correction.
+Color and luminance noise reduction run on the full camera image before retouching
+and before building the preview pyramid. `develop::recipe::Denoise` captures their
+settings and execution together; the retouch cache keys that value and the source
+image identity. Exports run the same stage without the cache, and the GPU samples
+the already denoised image. The Shadows/Highlights map (with Clarity's gain) is built on the
 CPU from the photo's measurement copy, and the scene tone stage reads it
 in `develop.wgsl`. Texture's image is made on the CPU, and a mask's Clarity or
 Texture renders the whole preview on the CPU. A failure in these stages turns off

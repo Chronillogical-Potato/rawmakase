@@ -114,9 +114,19 @@ pub(super) fn label_color(palette: &theme::Palette, label: &str) -> Option<Color
     })
 }
 
-/// The height of a rating, flag or label control, which rows showing them
-/// (the filmstrip's header) centre their text on.
+/// The height of a rating, flag or label control.
 pub(crate) const CONTROLS_HEIGHT: f32 = 22.;
+/// The icon the controls' menu button shows.
+const MENU_ICON: f32 = 14.;
+/// The height a row of the controls takes: the controls themselves, or the
+/// menu button beside them, whichever is taller. A row that can show them
+/// (the filmstrip's header) is this tall, and centres its text on it, so it
+/// keeps its height when there is no photo open and the controls are absent.
+pub(crate) fn controls_height(ui: &egui::Ui) -> f32 {
+    let spacing = &ui.spacing();
+    let menu = MENU_ICON + 2. * spacing.button_padding.y;
+    menu.max(spacing.interact_size.y).max(CONTROLS_HEIGHT)
+}
 /// Rating, flag and label as fixed-size painted controls, so hovering never
 /// changes the layout.
 pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> Option<Edit> {
@@ -124,6 +134,10 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
     use egui::{Align2, FontId, Rect, Sense, Stroke, StrokeKind, Vec2};
     let mut edit = None;
     ui.push_id(("photo-metadata", photo.id), |ui| {
+        // The row starts as tall as it ends up, so a row centring it (the
+        // filmstrip's header) places it on its line rather than growing to
+        // fit it.
+        ui.spacing_mut().interact_size.y = controls_height(ui);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.;
             let stars: Vec<_> = (1..=5)
@@ -205,7 +219,7 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
             // Always shown, so a photo's label never changes the row's width.
             ui.add_space(4.);
             ui.menu_image_button(
-                crate::app::icons::Icon::More.image(palette.gray(200), 14.),
+                crate::app::icons::Icon::More.image(palette.gray(200), MENU_ICON),
                 |ui| {
                     for label in custom {
                         if ui.selectable_label(photo.label == *label, label).clicked() {

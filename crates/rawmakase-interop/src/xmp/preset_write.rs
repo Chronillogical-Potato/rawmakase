@@ -1,8 +1,8 @@
 //! Writes a Lightroom Develop preset: the chosen setting groups of a recipe as an XMP
 //! file Lightroom and Camera Raw read, laid out as the presets Lightroom writes.
 use super::write::{curve, settings};
-use crate::model::recipe::Recipe;
 use crate::xml::{escape_text, ns::CRS, xmpmeta};
+use crate::{camera_data::Metadata, model::recipe::Recipe};
 use crate::{
     color::curve::ToneCurve,
     model::settings_groups::{GroupInclusion, GroupSelection, SettingGroup},
@@ -44,8 +44,8 @@ fn new_uuid() -> String {
     format!("{:016X}{:016X}", half(), half())
 }
 
-/// The preset for `r`'s settings in `groups`.
-pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String {
+/// The preset for `r`'s settings in `groups`, edited on the photo `shown`.
+pub fn preset(r: &Recipe, shown: &Metadata, info: &PresetInfo, groups: &GroupSelection) -> String {
     // A preset never carries one photo's Upright correction, so Upright Transforms
     // brings nothing, not even the Transform panel's switch.
     let mut groups = groups.clone();
@@ -73,13 +73,14 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
         ("Copyright", ""),
         ("ContactInfo", ""),
         ("Version", "15.4"),
-        ("RAWmakasePreset", "1"),
+        // 2: the crop is on the unrotated frame, as Lightroom's; 1 wrote it as shown.
+        ("RAWmakasePreset", "2"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
     .collect();
     attributes.extend(
-        settings(r, None)
+        settings(r, shown, None)
             .0
             .into_iter()
             .filter(|(key, _)| group_of_key(key).is_some_and(|g| groups.contains(g)))
@@ -99,7 +100,7 @@ pub fn preset(r: &Recipe, info: &PresetInfo, groups: &GroupSelection) -> String 
     if active.effects.vignette == 0. {
         active.effects.vignette = -1.;
     }
-    let dormant: Vec<_> = settings(&active, None)
+    let dormant: Vec<_> = settings(&active, shown, None)
         .0
         .into_iter()
         .filter(|(key, _)| {
@@ -263,6 +264,11 @@ mod tests {
     use crate::model::settings_groups::GroupInclusion;
     use std::path::Path;
 
+    /// A photo whose orientation leaves crops as they are.
+    fn landscape() -> Metadata {
+        Metadata::default()
+    }
+
     /// A recipe whose every written setting differs from the default.
     fn edited() -> Recipe {
         let mut r = Recipe {
@@ -307,6 +313,7 @@ mod tests {
         };
         let text = preset(
             &r,
+            &landscape(),
             &PresetInfo::new("Faded", "User Presets"),
             &GroupSelection::all(),
         );
@@ -334,7 +341,12 @@ mod tests {
         r.update_wb(&m);
         let mut white_balance = GroupSelection::none();
         white_balance.set(SettingGroup::WhiteBalance, GroupInclusion::Included);
-        let text = preset(&r, &PresetInfo::new("Warm", "User Presets"), &white_balance);
+        let text = preset(
+            &r,
+            &m,
+            &PresetInfo::new("Warm", "User Presets"),
+            &white_balance,
+        );
         assert!(
             text.contains(r#"crs:IncrementalTemperature="+20""#),
             "{text}"
@@ -366,7 +378,7 @@ mod tests {
         ] {
             tones.set(group, GroupInclusion::Included);
         }
-        let text = preset(&edited(), &info, &tones);
+        let text = preset(&edited(), &landscape(), &info, &tones);
         assert!(text.contains(r#"crs:SupportsAmount="True""#), "{text}");
         let parsed = crate::xmp::parse(Path::new("Soft.xmp"), &text)?;
         let m = crate::camera_data::Metadata {
@@ -384,14 +396,14 @@ mod tests {
         for group in [SettingGroup::Crop, SettingGroup::LensProfileCorrections] {
             let mut with = tones.clone();
             with.set(group, GroupInclusion::Included);
-            let text = preset(&edited(), &info, &with);
+            let text = preset(&edited(), &landscape(), &info, &with);
             assert!(text.contains(r#"crs:SupportsAmount="False""#), "{group:?}");
         }
         Ok(())
     }
     #[test]
     fn every_key_written_belongs_to_a_group() {
-        let unplaced: Vec<_> = settings(&edited(), None)
+        let unplaced: Vec<_> = settings(&edited(), &landscape(), None)
             .0
             .into_iter()
             .map(|(k, _)| k)
@@ -420,17 +432,16 @@ mod tests {
             ..Default::default()
         };
         let m = crate::camera_data::Metadata::default();
-        let applied = crate::xmp::parse(Path::new("Warm.xmp"), &preset(&r, &info, &color))?.apply(
-            &target,
-            &m,
-            &[],
-            None,
-        )?;
+        let applied = crate::xmp::parse(
+            Path::new("Warm.xmp"),
+            &preset(&r, &landscape(), &info, &color),
+        )?
+        .apply(&target, &m, &[], None)?;
         assert_eq!(applied.point_colors.len(), 1);
         assert_eq!(applied.point_colors[0].shift, swatch.shift);
         assert_eq!(applied.point_colors[0].variance, swatch.variance);
         // Without swatches, Lightroom's empty selection clears the target's.
-        let text = preset(&Recipe::default(), &info, &color);
+        let text = preset(&Recipe::default(), &landscape(), &info, &color);
         assert!(text.contains("<rdf:li>-1.000000, -1.000000"), "{text}");
         let cleared =
             crate::xmp::parse(Path::new("Clear.xmp"), &text)?.apply(&target, &m, &[], None)?;
@@ -438,7 +449,7 @@ mod tests {
         // Other groups leave them alone.
         let mut exposure = GroupSelection::none();
         exposure.set(SettingGroup::Exposure, GroupInclusion::Included);
-        assert!(!preset(&r, &info, &exposure).contains("PointColors"));
+        assert!(!preset(&r, &landscape(), &info, &exposure).contains("PointColors"));
         Ok(())
     }
 
@@ -449,7 +460,7 @@ mod tests {
         groups.set(SettingGroup::ToneCurve, GroupInclusion::Included);
         let info = PresetInfo::new("Bright & airy", "User Presets");
         assert_eq!(info.uuid.len(), 32);
-        let text = preset(&edited(), &info, &groups);
+        let text = preset(&edited(), &landscape(), &info, &groups);
         let parsed = crate::xmp::parse(Path::new("Bright.xmp"), &text)?;
         assert_eq!(parsed.name, "Bright & airy");
         assert_eq!(parsed.group, "User Presets");
@@ -476,14 +487,14 @@ mod tests {
         // Every group: the whole edit comes back.
         let all = crate::xmp::parse(
             Path::new("All.xmp"),
-            &preset(&edited(), &info, &GroupSelection::all()),
+            &preset(&edited(), &landscape(), &info, &GroupSelection::all()),
         )?
         .apply(&Recipe::default(), &m, &[], None)?;
         assert!(all.effects.monochrome);
         // A chosen panel's switch is written either way, so applying turns it on.
         let mut grain = GroupSelection::none();
         grain.set(SettingGroup::Grain, GroupInclusion::Included);
-        let text = preset(&Recipe::default(), &info, &grain);
+        let text = preset(&Recipe::default(), &landscape(), &info, &grain);
         assert!(text.contains(r#"crs:EnableEffects="True""#), "{text}");
         assert!(!text.contains("crs:EnableDetail"));
         // As the photo has it: an Effects panel switched off stays off.
@@ -492,19 +503,19 @@ mod tests {
             crate::model::panels::Panel::Effects,
             crate::model::panels::PanelState::Off,
         );
-        let text = preset(&off, &info, &grain);
+        let text = preset(&off, &landscape(), &info, &grain);
         assert!(text.contains(r#"crs:EnableEffects="False""#), "{text}");
         // Upright travels as its mode only, never this photo's corrections.
         let mut upright = Recipe::default();
         upright.upright.mode = crate::model::transform::UprightMode::Level;
         upright.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
-        let text = preset(&upright, &info, &GroupSelection::all());
+        let text = preset(&upright, &landscape(), &info, &GroupSelection::all());
         assert!(text.contains("crs:PerspectiveUpright"));
         assert!(!text.contains("UprightTransform"), "{text}");
         // Upright Transforms alone, left over from a Copy selection, brings nothing.
         let mut transforms = GroupSelection::none();
         transforms.set(SettingGroup::UprightTransforms, GroupInclusion::Included);
-        let text = preset(&upright, &info, &transforms);
+        let text = preset(&upright, &landscape(), &info, &transforms);
         assert!(
             !text.contains("Transform") && !text.contains("Upright"),
             "{text}"
@@ -514,7 +525,7 @@ mod tests {
         mix.set(SettingGroup::BlackWhiteMix, GroupInclusion::Included);
         let mut color = Recipe::default();
         color.effects.gray_mix[0] = 0.3;
-        let text = preset(&color, &info, &mix);
+        let text = preset(&color, &landscape(), &info, &mix);
         assert!(text.contains(r#"crs:GrayMixerRed="+30""#), "{text}");
         assert!(!text.contains("ConvertToGrayscale"), "{text}");
         // Grain and vignette shapes travel with their groups at a zero amount.
@@ -524,7 +535,7 @@ mod tests {
         let mut quiet = Recipe::default();
         quiet.effects.grain_size = 0.6;
         quiet.effects.vignette_roundness = 0.4;
-        let text = preset(&quiet, &info, &effects);
+        let text = preset(&quiet, &landscape(), &info, &effects);
         assert!(text.contains(r#"crs:GrainAmount="0""#), "{text}");
         assert!(text.contains(r#"crs:GrainSize="60""#), "{text}");
         assert!(text.contains(r#"crs:PostCropVignetteAmount="0""#), "{text}");
