@@ -192,7 +192,8 @@ mod tests {
             baseline_exposure(&camera("Canon", "EOS R1")),
             crate::cameras::baseline_exposure("Canon", "EOS R1").ev
         );
-        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.3);
+        // The Canon median, 0.3 EV with the older bodies' rows.
+        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.2);
     }
     #[test]
     fn canon_highlight_tone_priority_adds_a_stop() {

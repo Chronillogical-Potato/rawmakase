@@ -47,17 +47,20 @@ matrix-derived `pre_mul`; `cameras::neutral_calibration` applies the row. A
 missing or invalid preset, or a camera without a row, keeps identity rather than
 borrowing another unit's correction, and there is no make-wide fallback.
 
-Evidence (Adobe DNG Converter 18.7, 2026-10-14): 544 samples, 354 public
-raw.pixls.us files and 190 anonymous local ones, including bodies of the same
-model identified by serial number. For 59 models, bodies with different
+Evidence (Adobe DNG Converter 18.7, 2026-10-14): 591 samples, 373 public
+raw.pixls.us files and 218 anonymous local ones, including bodies of the same
+model identified by serial number. For 60 models, bodies with different
 calibrations reproduce Adobe's four-decimal values exactly from one integer
-reference: 23 Sony and 31 Canon models with the Daylight preset, 3 Canon models
+reference: 24 Sony and 31 Canon models with the Daylight preset, 3 Canon models
 with Shade and 2 Fujifilm models with D65. Different ISO settings and recording
 modes of one unit (RAW and C-RAW, compressed and uncompressed, sRAW and mRAW)
 record one calibration. Separately measured models that share a sensor or
 processor generation share their reference (Fujifilm X-T3, X-T30, X-T4, X-S10,
-X-E4, X-Pro3 and X100V; Canon 250D and 850D, R6 Mark II and R8, R10 and R50),
-which further supports single-sample rows. The A7CR, A7 II and X100F rows have
+X-E4, X-Pro3 and X100V; Canon 250D and 850D, R6 Mark II and R8, R10 and R50,
+100D, 650D and 700D, 600D and 1200D, 1300D and 3000D, 6D and 70D; Sony ILCE-5000
+and SLT-A37), which further supports single-sample rows. A body sold under several
+names (the 1100D as the Rebel T3, the 3000D as the 4000D and Rebel T100) has one
+reference under each name. The A7CR, A7 II and X100F rows have
 been checked against Lightroom or Camera Raw on the owner's bodies. This agrees
 with the [RawSpeed calibration investigation](https://github.com/darktable-org/rawspeed/compare/develop...tdonovan4:rawspeed:camera-calibration-matrix)
 for Sony.
@@ -73,9 +76,13 @@ Rows are installed when the samples identify one preset. Unresolved, so identity
 - Nikon, Panasonic, Pentax and the Fujifilm GFX 50R, X-E5 and X-T50 get identity
   calibration from Adobe, which RAWmakase matches.
 
-The EOS 5D Mark IV, 5DS R, 6D Mark II, 7D Mark II, 80D and 1D X Mark II have
-verified references in the facts but no table row, which needs a baseline
-exposure checked against Camera Raw renders first (see [camera table](cameras.md)).
+The rows added on 2026-10-14 were checked against Camera Raw 18.7 default renders
+of the test dataset. As Shot Temperature and Tint of 521 of 539 photos now land
+within Camera Raw's rounding of its displayed values (Temperature to 50 K, Tint to
+1), against 427 before, and so do all 27 renders made for ten bodies the dataset had
+no render of. The rest are Olympus and OM System bodies, two phones, the EOS M3 and
+1D X Mark III listed above, and two photos within a mired of Camera Raw at 7900 K
+and 14 000 K.
 
 AnalogBalance is a separate per-file factor (XYZ-to-camera = AnalogBalance x
 CameraCalibration x ColorMatrix). DNG Converter writes it for linear DNGs of
