@@ -1537,6 +1537,32 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
     assert_eq!(textured.measures, plain.measures);
 }
 
+/// A rendered file's Contrast pivots higher than a raw photo's of the same scene, as
+/// Lightroom's does on JPEGs (`basic_tone::RENDERED_PIVOT_OFFSET`).
+#[test]
+fn a_rendered_photos_contrast_pivots_higher_than_a_raws() {
+    use crate::develop::basic_tone::RENDERED_PIVOT_OFFSET;
+    // Dark with a few bright pixels, so neither pivot is at its bounds.
+    let srgb: Vec<[u8; 3]> = (0..96u8)
+        .map(|i| if i % 9 == 0 { [240; 3] } else { [40 + i; 3] })
+        .collect();
+    let rendered = rendered_fixture(&srgb);
+    let mut raw = rendered.clone();
+    raw.metadata.source = rawmakase_model::camera_data::Source::Raw;
+    let r = Recipe {
+        contrast: 0.6,
+        ..Recipe::for_rendered(&rendered.metadata)
+    };
+    let camera = camera_stage(&rendered.metadata, &r);
+    let measures = CurveSet::with_photo_measures((&rendered).into(), &r, camera).measures;
+    let pivot = |im: &CameraImage| tone::contrast_pivot(im.into(), &r, camera, &measures, None);
+    let (rendered, raw) = (pivot(&rendered), pivot(&raw));
+    assert!(
+        (rendered - raw - RENDERED_PIVOT_OFFSET).abs() < 1e-6,
+        "rendered {rendered}, raw {raw}"
+    );
+}
+
 /// A look's parametric curve: a second curve after the user's, as Camera Raw 18.7
 /// renders it.
 #[test]

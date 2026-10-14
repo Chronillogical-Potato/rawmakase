@@ -125,6 +125,36 @@ mod tests {
         assert!(default_rendering(white[0] * 0.98) < 1.);
     }
 
+    /// Below the table's first output the pseudo-scene is linear, and meets the table
+    /// there without a step.
+    #[test]
+    fn below_the_table_the_pseudo_scene_is_linear() {
+        let first = table()[0];
+        assert!(first > 0., "{first}");
+        let at = scene_value(first);
+        assert!((at / FIRST.exp2() - 1.).abs() < 1e-4, "{at}");
+        for y in [first * 0.999, first * 0.5, first * 1e-3] {
+            let ratio = scene_value(y) / y;
+            assert!((ratio * first / at - 1.).abs() < 1e-4, "{y}: {ratio}");
+        }
+        let above = scene_value(first * 1.001);
+        assert!(above > at && above < at * 1.01, "{above}");
+    }
+
+    /// The table reaches white within its range, so values at and above white all
+    /// take the scene value where `F` first reaches 1, short of the table's end.
+    #[test]
+    fn white_and_above_take_the_scene_white() {
+        let outputs = table();
+        assert_eq!(outputs[SAMPLES - 1], 1.);
+        let white = scene_value(1.);
+        assert!(white < LAST.exp2(), "{white}");
+        for y in [1. + 1e-6, 1.5, 100., f32::MAX] {
+            assert_eq!(scene_value(y), white, "{y}");
+        }
+        assert!(scene_value(1. - 1e-4) < white);
+    }
+
     /// RGBTone: the middle channel keeps its place between the others, so hue holds.
     #[test]
     fn colours_keep_their_hue() {

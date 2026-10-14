@@ -429,7 +429,7 @@ fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
 /// recipe's profile, white balance and calibration render it, at the camera's
 /// exposure: the user's Exposure does not move it (measured on the chart). Dehaze is
 /// rendered, the photo's `haze` read at the copy's own pixels.
-fn contrast_pivot(
+pub(super) fn contrast_pivot(
     im: Source,
     r: &Recipe,
     camera: Camera,
