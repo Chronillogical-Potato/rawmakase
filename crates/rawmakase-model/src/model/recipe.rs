@@ -715,6 +715,12 @@ impl Recipe {
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
         if m.is_rendered() {
+            // Gains that are already the controls' keep them (and Auto) as they are,
+            // rather than a search's nearby Temp and Tint.
+            let shown = rendered_gains(self.incremental_temperature, self.incremental_tint);
+            if (0..3).all(|c| (shown[c] - self.wb[c]).abs() <= 1e-3 * shown[c].abs()) {
+                return;
+            }
             [self.incremental_temperature, self.incremental_tint] = rendered_controls(self.wb);
             // Gains the model cannot show (an eyedropper's, say) become the
             // nearest it can, so the next Temp or Tint edit does not jump.

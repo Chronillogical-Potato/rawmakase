@@ -389,6 +389,31 @@ mod rendered_tests {
         }
     }
 
+    /// Copying Treatment & Profile without White Balance, or picking a profile,
+    /// re-syncs the controls: gains that are already those of the controls keep
+    /// them exactly, and with them the WB menu's Auto.
+    #[test]
+    fn a_rendered_photos_matching_gains_keep_its_temp_and_tint() {
+        let m = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        let mut r = Recipe::for_rendered(&m);
+        r.incremental_temperature = -77.;
+        r.incremental_tint = 30.;
+        r.wb = rendered_gains(-77., 30.);
+        r.auto_white_balance = Some([-77., 30.]);
+        let before = r.clone();
+        r.sync_white_balance_controls(&m);
+        assert_eq!(
+            (r.incremental_temperature, r.incremental_tint, r.wb),
+            (-77., 30., before.wb)
+        );
+        assert_eq!(r.auto_white_balance, Some([-77., 30.]));
+        r.profile_changed(&m);
+        assert_eq!((r.incremental_temperature, r.incremental_tint), (-77., 30.));
+    }
+
     #[test]
     fn picked_gains_on_a_rendered_photo_become_those_its_controls_show() {
         let m = Metadata {
