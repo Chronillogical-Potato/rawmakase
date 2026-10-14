@@ -1541,3 +1541,77 @@ fn colour_blotches_are_taken_out() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+fn noisy_luminance_fixture() -> CameraImage {
+    let mut im = fixture();
+    im.width = 128;
+    im.height = 128;
+    im.metadata.width = 128;
+    im.metadata.height = 128;
+    let hash = |x: u32, y: u32| {
+        let mut v = x.wrapping_mul(0x9e3779b9) ^ y.wrapping_mul(0x85ebca6b);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2c1b3c6d);
+        v ^= v >> 12;
+        v as f32 / u32::MAX as f32 - 0.5
+    };
+    im.pixels = (0..128 * 128)
+        .map(|i| {
+            let (x, y) = (i % 128, i / 128);
+            [0.1 + 0.02 * hash(x, y) + 0.025 * hash(x / 4, y / 4); 3]
+        })
+        .collect();
+    im
+}
+
+/// Issue #386: luminance NR must suppress multi-pixel blotches, not only soften
+/// single-pixel grain. Measure the rendered flat in 4×4 blocks, as in the photo
+/// investigation, relative to the same render at Amount 0.
+#[test]
+fn luminance_noise_reduces_coarse_capture_noise() -> Result<()> {
+    let im = noisy_luminance_fixture();
+    let mut r = Recipe {
+        sharpening: 0.,
+        noise_chroma: 0.,
+        ..Recipe::for_metadata(&im.metadata)
+    };
+    let energy = |out: &Rendered| {
+        let mut means = Vec::new();
+        for by in 4..28 {
+            for bx in 4..28 {
+                let mut sum = 0.;
+                for y in by * 4..by * 4 + 4 {
+                    for x in bx * 4..bx * 4 + 4 {
+                        sum += out.pixels[y * 128 + x][1] / 16.;
+                    }
+                }
+                means.push(sum);
+            }
+        }
+        let mean = means.iter().sum::<f32>() / means.len() as f32;
+        means.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
+    };
+    let baseline = energy(&render(&im, &r.checked()?, 0)?);
+    r.noise_luma = 0.5;
+    let reduced = energy(&render(&im, &r.checked()?, 0)?);
+    let retained = (reduced / baseline).sqrt();
+    assert!(retained < 0.65, "coarse noise retained: {retained}");
+    Ok(())
+}
+
+#[test]
+fn color_detail_does_not_control_luminance_noise_reduction() -> Result<()> {
+    let im = noisy_luminance_fixture();
+    let mut r = Recipe {
+        noise_luma: 0.5,
+        noise_chroma: 0.,
+        sharpening: 0.,
+        ..Recipe::for_metadata(&im.metadata)
+    };
+    r.effects.chroma_detail = 0.;
+    let low = render(&im, &r.checked()?, 0)?;
+    r.effects.chroma_detail = 1.;
+    let high = render(&im, &r.checked()?, 0)?;
+    assert_eq!(low.pixels, high.pixels);
+    Ok(())
+}

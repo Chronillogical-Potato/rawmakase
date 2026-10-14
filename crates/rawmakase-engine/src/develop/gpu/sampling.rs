@@ -40,8 +40,6 @@ slots! {
     INSET: 4,
     TRANSFORM: 1,
     HOMOGRAPHY: 9,
-    // Luma, chroma, luma detail, chroma detail, luma contrast, chroma smoothness.
-    NOISE: 6,
     LENS: 1,
     CENTER: 2,
     HALF: 1,
@@ -72,7 +70,8 @@ mod tests {
 
     /// The offsets the shader used when they were written out by hand, less the
     /// local-tone gain's, which is no longer sampled, and the reduced size's, which
-    /// nothing reduces on the device any more.
+    /// nothing reduces on the device any more, and noise reduction, now prepared
+    /// on the full camera image.
     #[test]
     fn slots_keep_the_offsets_the_shader_was_written_with() {
         let offsets: Vec<(&str, usize)> = ALL.iter().map(|(n, r)| (*n, r.start)).collect();
@@ -94,21 +93,20 @@ mod tests {
                 ("INSET", 21),
                 ("TRANSFORM", 25),
                 ("HOMOGRAPHY", 26),
-                ("NOISE", 35),
-                ("LENS", 41),
-                ("CENTER", 42),
-                ("HALF", 44),
-                ("FILL", 45),
-                ("AMOUNT", 46),
-                ("DISTORTION", 47),
-                ("RED", 49),
-                ("BLUE", 51),
-                ("VIGNETTING", 53),
-                ("VIGNETTING_AMOUNT", 55),
-                ("COUNT", 56),
-                ("MANUAL", 57),
+                ("LENS", 35),
+                ("CENTER", 36),
+                ("HALF", 38),
+                ("FILL", 39),
+                ("AMOUNT", 40),
+                ("DISTORTION", 41),
+                ("RED", 43),
+                ("BLUE", 45),
+                ("VIGNETTING", 47),
+                ("VIGNETTING_AMOUNT", 49),
+                ("COUNT", 50),
+                ("MANUAL", 51),
             ]
         );
-        assert_eq!(HEADER, 60);
+        assert_eq!(HEADER, 54);
     }
 }
