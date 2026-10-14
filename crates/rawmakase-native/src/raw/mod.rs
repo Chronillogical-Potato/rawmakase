@@ -354,7 +354,7 @@ fn panasonic_sensor(path: &Path) -> Option<[u32; 4]> {
     let [Some(top), Some(left), Some(bottom), Some(right)] = border else {
         return None;
     };
-    (right > left && bottom > top).then_some([left, top, right - left, bottom - top])
+    (right > left && bottom > top).then(|| [left, top, right - left, bottom - top])
 }
 /// The camera's recommended crop from the RAF header directory: tags 0x110 (top, left)
 /// and 0x111 (height, width), big-endian. Lightroom uses it as the default crop.
@@ -628,7 +628,12 @@ mod tests {
         let f = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(f.path(), &rw2).unwrap();
         assert_eq!(super::panasonic_sensor(f.path()), Some([8, 8, 5472, 3648]));
-        // Without every border, or in a TIFF, there is none.
+        // Reversed borders, without every border, or in a TIFF, there is none.
+        let right = rw2.len() - 3 * 12 + 8;
+        let mut reversed = rw2.clone();
+        reversed[right..right + 2].copy_from_slice(&0u16.to_le_bytes());
+        std::fs::write(f.path(), &reversed).unwrap();
+        assert_eq!(super::panasonic_sensor(f.path()), None);
         std::fs::write(f.path(), &rw2[..rw2.len() - 4 * 12]).unwrap();
         assert_eq!(super::panasonic_sensor(f.path()), None);
         rw2[2] = b'*';
