@@ -5,7 +5,10 @@ use crate::xml::{
     self, escape_text,
     ns::{AUX, CRS, DC, LR, PHOTOSHOP, XMP, XMP_MM},
 };
-use crate::{camera_data::Metadata, color::curve::ToneCurve, model::recipe::Recipe};
+use crate::{
+    camera_data::Metadata, color::curve::ToneCurve, model::image_frame::ImageFrame,
+    model::recipe::Recipe,
+};
 use std::fmt::Write;
 
 /// A keyword's path, top first, and which of its names an export writes.
@@ -157,7 +160,9 @@ pub(super) struct Frame<'a> {
     pub(super) crop: Option<[f32; 4]>,
 }
 
-pub(super) fn settings(r: &Recipe, photo: Option<Frame<'_>>) -> Settings {
+/// `r`'s settings as Camera Raw writes them, edited on the photo `shown`, whose camera
+/// orientation turns the crop back to the unrotated frame Lightroom records it on.
+pub(super) fn settings(r: &Recipe, shown: &Metadata, photo: Option<Frame<'_>>) -> Settings {
     let m = photo.map(|p| p.metadata);
     let mut s = Settings(Vec::new());
     s.text("ProcessVersion", "11.0");
@@ -475,7 +480,8 @@ pub(super) fn settings(r: &Recipe, photo: Option<Frame<'_>>) -> Settings {
     // With Constrain Crop, the crop as rendered: Camera Raw renders the stored crop as it
     // is, and Lightroom stores the crop it constrained. Without the photo (a preset),
     // the crop as drawn, which the photo it is applied to constrains again.
-    let crop = photo.and_then(|p| p.crop).unwrap_or(r.crop);
+    let crop = ImageFrame::for_metadata(shown)
+        .rect_to_unrotated(photo.and_then(|p| p.crop).unwrap_or(r.crop));
     for (i, name) in ["Left", "Top", "Right", "Bottom"].iter().enumerate() {
         s.put(&format!("Crop{name}"), crop[i], 1., 6, false);
     }
@@ -642,6 +648,7 @@ pub fn packet(r: &Recipe, m: &Metadata, photo: &Photo) -> String {
         attributes.extend(
             settings(
                 r,
+                m,
                 Some(Frame {
                     metadata: m,
                     crop: photo.crop,
