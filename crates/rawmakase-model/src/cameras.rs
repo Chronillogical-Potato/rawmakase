@@ -217,7 +217,10 @@ pub fn neutral_calibration(make: &str, model: &str, presets: &WhiteBalancePreset
     let Some(unit) = find_in(all(), make, model).and_then(|row| row.unit_calibration) else {
         return [1.; 3];
     };
-    let Some(wb) = presets.get(unit.preset) else {
+    let Some(wb) = presets
+        .get(unit.preset)
+        .and_then(WhiteBalancePresets::valid)
+    else {
         return [1.; 3];
     };
     let reference = unit.reference;

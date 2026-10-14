@@ -162,6 +162,12 @@ mod tests {
             neutral_calibration(&unit("Fujifilm", "X-T5", other)),
             [1.; 3]
         );
+        // Signs that would cancel in the ratios are still invalid.
+        let negative = d65([-681., -302., -484.]);
+        assert_eq!(
+            neutral_calibration(&unit("Fujifilm", "X100F", negative)),
+            [1.; 3]
+        );
         let none = WhiteBalancePresets::default();
         assert_eq!(
             neutral_calibration(&unit("Fujifilm", "X100F", none)),
