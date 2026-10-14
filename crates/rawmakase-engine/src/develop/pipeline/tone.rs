@@ -37,13 +37,8 @@ impl CurveSet {
     /// Curves plus the Shadows/Highlights map of this image (which also carries the
     /// measured Clarity); built also when `local_tone` (masks change Shadows or
     /// Highlights).
-    pub(super) fn for_image(
-        im: Source,
-        r: &Recipe,
-        matrix: [[f32; 3]; 3],
-        local_tone: bool,
-    ) -> Self {
-        let mut lut = Self::with_photo_measures(im, r, matrix);
+    pub(super) fn for_image(im: Source, r: &Recipe, camera: Camera, local_tone: bool) -> Self {
+        let mut lut = Self::with_photo_measures(im, r, camera);
         let small = measured_copy(im);
         lut.local = crate::develop::local_tone::LocalToneMap::build(
             &small,
@@ -52,7 +47,7 @@ impl CurveSet {
             local_tone,
             |p| {
                 crate::develop::scene_tone::luminance(exposure_stage(
-                    scene_color(p, r, &lut, matrix, None),
+                    scene_color(p, r, &lut, camera, None),
                     &lut,
                     None,
                 ))
@@ -68,7 +63,7 @@ impl CurveSet {
                 .par_iter()
                 .map(|p| {
                     crate::develop::scene_tone::luminance(exposure_stage(
-                        scene_color(*p, r, &lut, matrix, None),
+                        scene_color(*p, r, &lut, camera, None),
                         &lut,
                         None,
                     ))
@@ -108,9 +103,9 @@ impl CurveSet {
     }
     /// Curves with the scene tone stage for this image's measures, and Contrast at
     /// its pivot when the recipe measures it.
-    pub(super) fn with_photo_measures(im: Source, r: &Recipe, matrix: [[f32; 3]; 3]) -> Self {
+    pub(super) fn with_photo_measures(im: Source, r: &Recipe, camera: Camera) -> Self {
         let mut lut = Self::new(r);
-        let (measures, haze) = cached_photo_measures(im, r, matrix);
+        let (measures, haze) = cached_photo_measures(im, r, camera);
         let dehazing = haze.as_ref().map(|haze| {
             crate::develop::scene_tone::Dehazing::new(
                 haze.clone(),
@@ -120,7 +115,7 @@ impl CurveSet {
         });
         lut.measure(measures, dehazing, r);
         if measures_contrast_pivot(r) {
-            lut.photo.contrast_pivot = contrast_pivot(im, r, matrix, &lut.measures, haze);
+            lut.photo.contrast_pivot = contrast_pivot(im, r, camera, &lut.measures, haze);
             lut.basic = basic_tone(r, &lut.photo);
         }
         lut
@@ -192,7 +187,7 @@ fn basic_tone(
 fn cached_photo_measures(
     im: Source,
     r: &Recipe,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
 ) -> (
     crate::develop::scene_tone::PhotoMeasures,
     Option<Arc<crate::develop::scene_tone::Haze>>,
@@ -200,11 +195,11 @@ fn cached_photo_measures(
     let needs_haze = crate::develop::scene_tone::needs_haze(r);
     let (Some(copy), Some(cache)) = (im.measured, im.measures) else {
         return (
-            photo_measures(im, r, matrix),
-            needs_haze.then(|| Arc::new(photo_haze(im, r, matrix))),
+            photo_measures(im, r, camera),
+            needs_haze.then(|| Arc::new(photo_haze(im, r, camera))),
         );
     };
-    let key = crate::develop::stage_cache::MeasuresKey::new(copy, im.unretouched, r, matrix);
+    let key = crate::develop::stage_cache::MeasuresKey::new(copy, im.unretouched, r, camera);
     // Not locked while measuring, whose parallel work may run other renders' tasks.
     let cache = || {
         cache
@@ -216,7 +211,7 @@ fn cached_photo_measures(
         Some(measured) => measured,
         None => {
             let measured = Arc::new(crate::develop::scene_tone::Measured::new(photo_measures(
-                im, r, matrix,
+                im, r, camera,
             )));
             cache().insert(
                 key,
@@ -233,7 +228,7 @@ fn cached_photo_measures(
         // Not initialised in place either: a render that waited on it could be the
         // task this measure's parallel work runs. Renders measuring it at the same time
         // compute the same haze; the first one stored is kept.
-        let haze = Arc::new(photo_haze(im, r, matrix));
+        let haze = Arc::new(photo_haze(im, r, camera));
         measured.haze.get_or_init(|| haze).clone()
     });
     (measured.measures, haze)
@@ -244,7 +239,7 @@ fn cached_photo_measures(
 pub(super) fn photo_measures(
     im: Source,
     r: &Recipe,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
 ) -> crate::develop::scene_tone::PhotoMeasures {
     let small = measured_copy(im);
     let base = Recipe {
@@ -252,11 +247,11 @@ pub(super) fn photo_measures(
         ..r.clone()
     };
     let lut = CurveSet::new(&base);
-    let scene = measured_scene(&small, &base, &lut, matrix);
+    let scene = measured_scene(&small, &base, &lut, camera);
     // The copy without retouching, when it differs, for the darkest level.
     let mut unretouched: Vec<f32> = match (im.measured, im.unretouched) {
         (Some(copy), Some(plain)) if !Arc::ptr_eq(copy, plain) => {
-            measured_scene(plain, &base, &lut, matrix)
+            measured_scene(plain, &base, &lut, camera)
                 .into_iter()
                 .map(crate::develop::scene_tone::luminance)
                 .collect()
@@ -276,13 +271,13 @@ pub(super) fn photo_measures(
             .map_or(r.temperature, |[temperature, _]| temperature),
         ..base
     };
-    let shot_matrix = super::profile_matrix(metadata, &as_shot);
+    let shot_camera = super::camera_stage(metadata, &as_shot);
     let camera: Vec<[f32; 3]> = small
         .pixels
         .par_iter()
         .map(|p| {
             exposure_stage(
-                scene_color(*p, &as_shot, &lut, shot_matrix, None),
+                scene_color(*p, &as_shot, &lut, shot_camera, None),
                 &lut,
                 None,
             )
@@ -325,7 +320,7 @@ pub(super) fn photo_measures(
         .map(|c| metadata.wb[c].max(1e-3))
         .fold(0f32, f32::max);
     let white = crate::develop::scene_tone::luminance(exposure_stage(
-        scene_color([clip; 3], &as_shot, &lut, shot_matrix, None),
+        scene_color([clip; 3], &as_shot, &lut, shot_camera, None),
         &lut,
         None,
     ));
@@ -348,14 +343,14 @@ pub(super) fn photo_measures(
 pub(super) fn photo_haze(
     im: Source,
     r: &Recipe,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
 ) -> crate::develop::scene_tone::Haze {
     let small = measured_copy(im);
     let base = Recipe {
         exposure: 0.,
         ..r.clone()
     };
-    let scene = measured_scene(&small, &base, &CurveSet::new(&base), matrix);
+    let scene = measured_scene(&small, &base, &CurveSet::new(&base), camera);
     crate::develop::scene_tone::Haze::of(&scene, small.width as usize, small.height as usize)
 }
 /// The measurement copy `small` at the scene tone stage's input for `base` (the recipe
@@ -364,12 +359,12 @@ fn measured_scene(
     small: &CameraImage,
     base: &Recipe,
     lut: &CurveSet,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
 ) -> Vec<[f32; 3]> {
     small
         .pixels
         .par_iter()
-        .map(|p| exposure_stage(scene_color(*p, base, lut, matrix, None), lut, None))
+        .map(|p| exposure_stage(scene_color(*p, base, lut, camera, None), lut, None))
         .collect()
 }
 /// `pixels` (`width` × `height`) averaged into boxes so the long edge is `edge`.
@@ -435,7 +430,7 @@ fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
 fn contrast_pivot(
     im: Source,
     r: &Recipe,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
     measures: &crate::develop::scene_tone::PhotoMeasures,
     haze: Option<Arc<crate::develop::scene_tone::Haze>>,
 ) -> f32 {
@@ -458,7 +453,7 @@ fn contrast_pivot(
         .enumerate()
         .map(|(i, p)| {
             let pos = [(i % width) as f32, (i / width) as f32];
-            tone_stage(*p, &default, &lut, matrix, pos, None).map(|v| srgb_encode(v.clamp(0., 1.)))
+            tone_stage(*p, &default, &lut, camera, pos, None).map(|v| srgb_encode(v.clamp(0., 1.)))
         })
         .collect();
     let pivot = crate::develop::basic_tone::photo_pivot(&crate::develop::basic_tone::blocks(

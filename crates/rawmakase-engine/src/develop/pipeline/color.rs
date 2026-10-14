@@ -71,7 +71,23 @@ pub(crate) fn hue_weights(hue: f32) -> [f32; 8] {
     }
     weights
 }
-pub(crate) fn profile_matrix(m: &Metadata, r: &Recipe) -> [[f32; 3]; 3] {
+/// What the camera stage does to a camera sample before the profile's tables: each
+/// channel held at most at `clip`, then `matrix`, the profile's (`scene_color`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Camera {
+    pub(crate) matrix: [[f32; 3]; 3],
+    pub(crate) clip: [f32; 3],
+}
+/// No clip: `Camera::clip` for samples kept as they are.
+pub(crate) const UNCLIPPED: f32 = f32::MAX;
+/// The camera stage of `m` rendered with `r`.
+pub(crate) fn camera_stage(m: &Metadata, r: &Recipe) -> Camera {
+    Camera {
+        matrix: profile_matrix(m, r),
+        clip: [UNCLIPPED; 3],
+    }
+}
+fn profile_matrix(m: &Metadata, r: &Recipe) -> [[f32; 3]; 3] {
     r.profile
         .as_ref()
         .map_or(m.matrix, |p| p.camera_matrix(r.temperature))

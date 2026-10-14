@@ -50,7 +50,7 @@ impl ColorSpread {
 
     /// The spread in linear ProPhoto RGB, as `r`'s white balance and profile render it.
     pub fn in_prophoto(&self, m: &Metadata, r: &Recipe) -> Self {
-        let matrix = super::profile_matrix(m, r);
+        let matrix = super::camera_stage(m, r).matrix;
         let a: [[f64; 3]; 3] =
             std::array::from_fn(|i| std::array::from_fn(|j| (matrix[i][j] * r.wb[j]) as f64));
         let mean = std::array::from_fn(|i| (0..3).map(|k| a[i][k] * self.mean[k]).sum());

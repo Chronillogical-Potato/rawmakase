@@ -2,14 +2,7 @@ use super::*;
 use crate::develop::curve::ToneCurve;
 use crate::develop::effects::EffectsRendering;
 fn adjust(p: [f32; 3], m: &Metadata, r: &Recipe) -> [f32; 3] {
-    process_pixel(
-        p,
-        r,
-        &CurveSet::new(r),
-        profile_matrix(m, r),
-        [0., 0.],
-        None,
-    )
+    process_pixel(p, r, &CurveSet::new(r), camera_stage(m, r), [0., 0.], None)
 }
 fn fixture() -> CameraImage {
     let m = Metadata {
@@ -599,8 +592,8 @@ fn temperature_leaves_the_photos_maximum_in_place() -> anyhow::Result<()> {
             temperature,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        CurveSet::with_photo_measures((&im).into(), &r, matrix)
+        let camera = camera_stage(&im.metadata, &r);
+        CurveSet::with_photo_measures((&im).into(), &r, camera)
             .measures
             .max
     };
@@ -622,8 +615,8 @@ fn a_few_dark_pixels_move_the_minimum_but_not_the_dark_level() {
         .map(|i| [0.05 + (i % 128) as f32 / 400.; 3])
         .collect();
     let r = Recipe::default();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, matrix).measures;
+    let camera = camera_stage(&im.metadata, &r);
+    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, camera).measures;
     let plain = measures(&im);
     for (x, y) in [(60, 40), (61, 40), (60, 41), (61, 41)] {
         im.pixels[y * width as usize + x] = [0.001; 3];
@@ -658,14 +651,14 @@ fn scene_stage_recipe() -> Recipe {
 fn the_display_render_replays_the_stages_after_the_scene_stage() {
     let im = fixture();
     let r = scene_stage_recipe();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let camera = camera_stage(&im.metadata, &r);
+    let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, camera);
     tap.output = PixelOutput::SceneOutput;
     for (i, p) in im.pixels.iter().enumerate() {
         let pos = [(i % 12) as f32, (i / 12) as f32];
-        let shown = process_pixel(*p, &r, &lut, matrix, pos, None);
-        let scene = process_pixel(*p, &r, &tap, matrix, pos, None);
+        let shown = process_pixel(*p, &r, &lut, camera, pos, None);
+        let scene = process_pixel(*p, &r, &tap, camera, pos, None);
         assert_eq!(shown, color_stage(profile_stage(scene, &r), &r, &lut, None));
     }
 }
@@ -714,9 +707,9 @@ fn exposure_reveals_retained_highlights() {
             exposure,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-        process_pixel([v; 3], &r, &lut, matrix, [0., 0.], None)
+        let camera = camera_stage(&im.metadata, &r);
+        let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+        process_pixel([v; 3], &r, &lut, camera, [0., 0.], None)
     };
     // At Exposure 0 everything above the sensor's white rolls on to the top; lower
     // Exposure separates the rebuilt levels again. The photo's maximum stays at the
@@ -796,15 +789,15 @@ fn neutral_color_fast_path_matches_general_processing() {
     let fast = CurveSet::new(&recipe);
     let mut general = CurveSet::new(&recipe);
     general.color_adjustments = true;
-    let matrix = profile_matrix(&metadata, &recipe);
+    let camera = camera_stage(&metadata, &recipe);
     for i in 0..4096 {
         let p = [
             (i % 16) as f32 / 8.,
             ((i / 16) % 16) as f32 / 8.,
             (i / 256) as f32 / 8.,
         ];
-        let a = process_pixel(p, &recipe, &fast, matrix, [0., 0.], None);
-        let b = process_pixel(p, &recipe, &general, matrix, [0., 0.], None);
+        let a = process_pixel(p, &recipe, &fast, camera, [0., 0.], None);
+        let b = process_pixel(p, &recipe, &general, camera, [0., 0.], None);
         for c in 0..3 {
             assert!((a[c] - b[c]).abs() < 2e-5, "{p:?}: {a:?} vs {b:?}");
         }
@@ -1471,14 +1464,14 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         shadows: 0.3,
         ..Default::default()
     };
-    let matrix = profile_matrix(&im.metadata, &r);
-    let plain = CurveSet::for_image((&im).into(), &r, matrix, false);
+    let camera = camera_stage(&im.metadata, &r);
+    let plain = CurveSet::for_image((&im).into(), &r, camera, false);
     let pivot = plain.photo.contrast_pivot;
     assert!((pivot - TYPICAL_PIVOT).abs() > 0.01, "{pivot}");
     assert_ne!(plain.measures, Default::default());
     let gpu = pixel_params::pixel_params((&im).into(), &r).unwrap();
     assert_eq!(gpu.get("LOCAL_PIVOT"), [pivot]);
-    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, camera);
     assert_eq!(map_pass.photo, plain.photo);
     assert_eq!(map_pass.measures, plain.measures);
     assert_eq!(
@@ -1497,7 +1490,7 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         untextured: Some(&im),
         ..Source::new(&textured)
     };
-    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    let textured = CurveSet::with_photo_measures(source, &r, camera);
     assert_eq!(textured.photo, plain.photo);
     assert_eq!(textured.measures, plain.measures);
 }

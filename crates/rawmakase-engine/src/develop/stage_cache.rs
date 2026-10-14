@@ -287,13 +287,14 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
 }
 
 /// The photo's measures: the measurement copy they are taken on (whose metadata they
-/// read), the profile matrix and the recipe fields they read.
+/// read), the camera stage and the recipe fields they read.
 #[derive(PartialEq)]
 pub(crate) struct MeasuresKey {
     copy: Same<CameraImage>,
     /// The copy without retouching, which the darkest level is measured on.
     unretouched: Option<Same<CameraImage>>,
     matrix: [[u32; 3]; 3],
+    clip: [u32; 3],
     recipe: Recipe,
 }
 impl MeasuresKey {
@@ -301,12 +302,13 @@ impl MeasuresKey {
         copy: &Arc<CameraImage>,
         unretouched: Option<&Arc<CameraImage>>,
         r: &Recipe,
-        matrix: [[f32; 3]; 3],
+        camera: crate::develop::Camera,
     ) -> Self {
         Self {
             copy: Same(copy.clone()),
             unretouched: unretouched.map(|u| Same(u.clone())),
-            matrix: matrix.map(|row| row.map(f32::to_bits)),
+            matrix: camera.matrix.map(|row| row.map(f32::to_bits)),
+            clip: camera.clip.map(f32::to_bits),
             recipe: stage_recipes(r).measures,
         }
     }

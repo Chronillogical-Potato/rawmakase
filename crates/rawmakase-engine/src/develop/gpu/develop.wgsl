@@ -1015,7 +1015,11 @@ fn scene_color(sample: vec3<f32>) -> vec3<f32> {
         let tint = vec3(p(P_LOCAL_WB + 3u), p(P_LOCAL_WB + 4u), p(P_LOCAL_WB + 5u));
         wb = exp2(delta[L_TEMPERATURE] * temp + delta[L_TINT] * tint);
     }
-    let c = sample * vec3(p(P_WB), p(P_WB + 1u), p(P_WB + 2u)) * wb;
+    // Each channel held at the camera stage's clip; not `min`, which a NaN sample
+    // would take to it.
+    let clip = vec3(p(P_CAMERA_CLIP), p(P_CAMERA_CLIP + 1u), p(P_CAMERA_CLIP + 2u));
+    let held = select(sample, clip, sample > clip);
+    let c = held * vec3(p(P_WB), p(P_WB + 1u), p(P_WB + 2u)) * wb;
     var pro = matrix(P_CAMERA) * c;
     let hue = offset(P_HUE);
     if hue >= 0 {

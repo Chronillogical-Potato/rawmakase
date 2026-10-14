@@ -376,9 +376,9 @@ fn develop_samples_to(
     weights: Option<&MaskWeights>,
     output: PixelOutput,
 ) -> Result<Rendered> {
-    let matrix = profile_matrix(&im.metadata, r);
+    let camera = camera_stage(&im.metadata, r);
     let local_tone = weights.is_some_and(|w| w.uses(&[slot::SHADOWS, slot::HIGHLIGHTS]));
-    let mut lut = CurveSet::for_image(im, r, matrix, local_tone);
+    let mut lut = CurveSet::for_image(im, r, camera, local_tone);
     lut.output = output;
     let math = weights.map(|_| LocalMath::new(&im.metadata, r));
     let mut pixels = vec![[0.; 3]; samples.pixels.len()];
@@ -395,7 +395,7 @@ fn develop_samples_to(
         *out = if pos[0].is_nan() {
             [1.; 3]
         } else {
-            process_pixel(samples.pixels[i], r, &lut, matrix, pos, local)
+            process_pixel(samples.pixels[i], r, &lut, camera, pos, local)
         };
     });
     ensure!(
@@ -419,8 +419,8 @@ pub(super) fn render_region_inner(
     cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Rendered> {
     r.validate()?;
-    let matrix = profile_matrix(&im.metadata, r);
-    let lut = CurveSet::for_image(im, r, matrix, false);
+    let camera = camera_stage(&im.metadata, r);
+    let lut = CurveSet::for_image(im, r, camera, false);
     let [x0, y0, w, h] = region;
     ensure!(
         w > 0
@@ -443,7 +443,7 @@ pub(super) fn render_region_inner(
             Some(w) => w.sample(im, sx, sy, r, spread),
             None => footprint_sample(im, sx, sy, r, spread),
         };
-        process_pixel(p, r, &lut, matrix, [sx, sy], None)
+        process_pixel(p, r, &lut, camera, [sx, sy], None)
     };
     pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
