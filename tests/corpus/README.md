@@ -157,10 +157,27 @@ python3 scripts/corpus/dataset-gate.py report $run/<name>     # --split holdout 
 ```
 
 - **run** renders and scores each set (two at a time) and deletes its renders once scored: the SSD cannot hold them all. It renders with a copy of the build taken when the run starts (`<run>/rawmakase`), so rebuilding meanwhile changes nothing. Scores, a log per set and `run.json` (the build) stay in the run folder; an interrupted run resumes. The validation split takes about 2½ hours on an M1 Pro.
-- **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored: by default the regression rule (no setting or photo worse than the baseline beyond its limit, no more clipping, no photo that stops rendering); `--rule switch` is the scene tone engine's switch rule. Strata with fewer than three photos are inconclusive.
-- **report** says how far a run is from Camera Raw: median ΔE00 by control, stratum and source, the furthest settings, the lightness bias per tone band, and what could not be scored.
+- **accept** applies `gate.py accept` to every set of a split (`--split`, validation by default), which both runs must have scored. Default `regression` protects the baseline; `--rule switch` adds the scene tone engine's improvement rule; `--rule parity` adds absolute per-photo requirements (median ΔE00 ≤ 2, regional mean ≤ 5, clipping disagreement ≤ 0.5%). Every mode checks corresponding spatial/tonal regions against baseline +2 ΔE00 and per-photo clipping against baseline +0.5 percentage points. These are engineering budgets, not a claim of perceptual equivalence. Missing strata, unscored references and strata with fewer than three photos **fail**, including when the same gap exists in both runs.
+- **report** distinguishes case-weighted scores from a deduplicated, equal-photo-weight summary, prints unique photo counts and repeated defaults, and reports errors by control, stratum and source. It is descriptive, never an acceptance verdict.
 - **Default parity:** `gate.py default-parity --survey $RAWMAKASE_DATASET/references/<family>/survey --rawmakase … --data-dir $lib --out <folder>` scores default renders against the survey's Camera Raw renders, leaving holdout photos out.
 - **Baselines** are runs of `main`, named by its commit; record a new one when `main`'s rendering changes. The current one is `main-9ef177b8`, the scene tone engine (#416), recorded with LibRaw from `packaging/native-deps.sh`; `main-418d0ca7` is the engine before it. Judge on validation; score holdout once, at the decision: `run --split holdout` into the same run folder, then `accept --split holdout --exclude $run/holdout-excluded.txt` (holdout photos already looked at). A run folder holds one build with one profile library; another build needs its own.
+
+Metric policy 2 requires new scores for **both** builds. Existing score files lack
+the spatial/tonal measurements and are refused for acceptance/resumption. Use
+new run folders with the original pinned binaries; frozen Adobe references and
+old scores stay unchanged. Retained renders can instead be rescored with
+`gate.py score`. Do not bless an engine snapshot to satisfy Adobe parity.
+
+The dataset's `references --suite stress` creates a separate reference family
+from genuinely clipped, dark or noisy captures, retaining the existing splits,
+license rules and scene deduplication. It does not alter the general suite.
+Generate it only when Photoshop and baseline generation are idle; new reference
+sets then participate in `dataset-gate.py` automatically. Slider variants cannot
+substitute for sensor clipping or capture underexposure. Missing stress strata
+must be supplied with additional captures, not waived by the script.
+
+Synthetic gate regressions run in CI without RAWs or Photoshop:
+`python3 -m unittest discover -s scripts/corpus` (numpy and Pillow required).
 
 ### Testing a rendering-engine change
 

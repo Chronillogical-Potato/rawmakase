@@ -11,6 +11,7 @@ build:
 
 check:
 	python3 scripts/deps.py check
+	python3 -m unittest discover -s scripts/corpus
 	scripts/crate-closures.sh
 	cargo fmt --check
 	cargo clippy --locked --workspace --all-targets -- -D warnings
