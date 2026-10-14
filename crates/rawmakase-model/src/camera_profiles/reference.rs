@@ -96,6 +96,86 @@ mod tests {
         );
     }
     #[test]
+    fn canon_and_fujifilm_units_use_their_own_presets() {
+        use crate::camera_data::WhiteBalancePresets;
+        // Anonymous native presets of separate units, with the CameraCalibration
+        // Adobe DNG Converter 18.7 recorded for each; see data/camera-calibration-facts.json.
+        let unit = |make: &str, model: &str, wb_presets| Metadata {
+            wb_presets,
+            ..camera(make, model)
+        };
+        let daylight = |v| WhiteBalancePresets {
+            daylight: Some(v),
+            ..Default::default()
+        };
+        let d65 = |v| WhiteBalancePresets {
+            d65: Some(v),
+            ..Default::default()
+        };
+        for (m, expected) in [
+            (
+                unit("Canon", "EOS 800D", daylight([1872., 1024., 1649.])),
+                [1.0112, 1., 1.0291],
+            ),
+            (
+                unit("Canon", "EOS 800D", daylight([1876., 1024., 1623.])),
+                [1.0091, 1., 1.0456],
+            ),
+            (
+                unit("Fujifilm", "X-T5", d65([658., 302., 473.])),
+                [0.9347, 1., 1.055],
+            ),
+            (
+                unit("Fujifilm", "X-T5", d65([646., 302., 494.])),
+                [0.952, 1., 1.0101],
+            ),
+            // Lightroom's DNGs of the owner's X100F, and another X100F.
+            (
+                unit("Fujifilm", "X100F", d65([681., 302., 484.])),
+                [0.9883, 1., 1.031],
+            ),
+            (
+                unit("Fujifilm", "X100F", d65([679., 302., 500.])),
+                [0.9912, 1., 0.998],
+            ),
+            // Bayer bodies' doubled multipliers give the same ratios.
+            (
+                unit("Fujifilm", "X-T200", d65([1118., 512., 852.])),
+                [0.9338, 1., 0.9695],
+            ),
+        ] {
+            assert_eq!(neutral_calibration(&m), expected, "{} {}", m.make, m.model);
+        }
+        // Some Canon bodies' reference is their Shade preset, not Daylight.
+        let presets = WhiteBalancePresets {
+            daylight: Some([1827., 1024., 1686.]),
+            shade: Some([2106., 1024., 1464.]),
+            d65: None,
+        };
+        assert_eq!(
+            neutral_calibration(&unit("Canon", "EOS 200D", presets)),
+            [1.0247, 1., 1.026]
+        );
+        // Without the row's preset, identity rather than another unit's correction.
+        let other = daylight([658., 302., 473.]);
+        assert_eq!(
+            neutral_calibration(&unit("Fujifilm", "X-T5", other)),
+            [1.; 3]
+        );
+        let none = WhiteBalancePresets::default();
+        assert_eq!(
+            neutral_calibration(&unit("Fujifilm", "X100F", none)),
+            [1.; 3]
+        );
+        // Adobe calibrates neither Nikon bodies nor these Fujifilm ones.
+        let nikon = daylight([2000., 1024., 1500.]);
+        assert_eq!(neutral_calibration(&unit("Nikon", "Z 6_2", nikon)), [1.; 3]);
+        assert_eq!(
+            neutral_calibration(&unit("Fujifilm", "X-T50", d65([644., 302., 498.]))),
+            [1.; 3]
+        );
+    }
+    #[test]
     fn baseline_covers_measured_cameras() {
         assert_eq!(baseline_exposure(&camera("SONY", "ILCE-7M2")), 0.35);
         assert_eq!(baseline_exposure(&camera("Sony", "ILCE-7M4")), 0.35);

@@ -118,6 +118,11 @@ fn x100f() -> Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
         wb: [2.0198677, 1., 1.8874172],
+        // This unit's stored D65 preset gives the calibration in Lightroom's DNGs.
+        wb_presets: crate::camera_data::WhiteBalancePresets {
+            d65: Some([681., 302., 484.]),
+            ..Default::default()
+        },
         cam_xyz: [
             [1.1434, -0.4948, -0.121],
             [-0.3746, 1.2042, 0.1903],

@@ -57,10 +57,6 @@ pub struct Camera {
     /// stored in its RAW. Only meaningful with the Adobe profile calibration signature.
     #[serde(default)]
     pub unit_calibration: Option<UnitCalibration>,
-    /// Diagonal CameraCalibration, measured in Adobe DNGs, identical for both
-    /// illuminants. Only meaningful with the Adobe profile calibration signature.
-    #[serde(default)]
-    pub neutral_calibration: Option<[f32; 3]>,
     /// Fujifilm only: see [`ExposureShift`].
     #[serde(default)]
     pub fujifilm_exposure_shift: ExposureShift,
@@ -218,11 +214,8 @@ pub fn baseline_exposure(make: &str, model: &str) -> Baseline {
 /// Identity when the row has no reference or the RAW lacks a valid preset; another
 /// unit's correction is never borrowed.
 pub fn neutral_calibration(make: &str, model: &str, presets: &WhiteBalancePresets) -> [f32; 3] {
-    let Some(row) = find_in(all(), make, model) else {
+    let Some(unit) = find_in(all(), make, model).and_then(|row| row.unit_calibration) else {
         return [1.; 3];
-    };
-    let Some(unit) = row.unit_calibration else {
-        return row.neutral_calibration.unwrap_or([1.; 3]);
     };
     let Some(wb) = presets.get(unit.preset) else {
         return [1.; 3];
@@ -329,13 +322,6 @@ mod tests {
             let name = format!("{} {}", c.make, c.model);
             assert!(!c.make.is_empty() && !c.model.is_empty(), "{name}");
             assert!(c.baseline_exposure.abs() <= 3., "{name}");
-            if let Some(v) = c.neutral_calibration {
-                assert!(
-                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.)
-                        && c.unit_calibration.is_none(),
-                    "{name}"
-                );
-            }
             if let Some(u) = c.unit_calibration {
                 assert!(
                     u.reference
@@ -378,7 +364,6 @@ mod tests {
             aliases: vec![],
             baseline_exposure: ev,
             unit_calibration: None,
-            neutral_calibration: None,
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
             source: Source::Fitted,
