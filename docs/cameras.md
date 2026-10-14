@@ -58,6 +58,11 @@ at −0.25, Nikon Coolpix at −0.3, against +0.3 for their makes' larger sensor
 rule from the raw's own metadata did better: within a make, neither white level nor
 black level orders the baselines. The same-make median is the fallback.
 
+The 45 older Canon, Sony and Fujifilm rows added on 2026-10-14 moved the Canon median
+from 0.4 to 0.3 EV; the other makes' medians did not change. Canon bodies still without
+a row are mostly older ones: on Camera Raw 18.7 default renders of one photo each of 24
+such EOS bodies, the median exposure difference went from 0.18 EV too bright to 0.04 EV.
+
 The camera-matching DCPs (Camera Standard and so on) of some Sony bodies carry a
 BaselineExposureOffset of −0.35 EV, which RAWmakase applies with those profiles; Adobe
 Standard DCPs carry none.
@@ -174,18 +179,19 @@ renders of private photos (8 and 4), and the A7R VI, EOS 700D and A7R, read from
 Adobe DNG Converter 18.7's DNG of one private photo each. LibRaw does not identify
 the A7R VI by name yet, but its white level, black level and crop match Adobe's.
 
-The 35 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
+The 45 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
 Fujifilm bodies; see [camera parity](camera-parity.md)) are `adobe-dng` values from
 one test-dataset photo each, at the ISO the row says. Against Camera Raw 18.7 default
-renders of 84 dataset photos of these bodies, the median midtone exposure difference
-went from 0.14 EV to 0.02 EV, and 80 photos are within 0.1 EV (35 before). Of the
-other four, two 80D frames of one shoot were already 0.44 EV brighter than Camera Raw
-and are now 0.58 brighter, the row moving every 80D photo alike, and a 5DS R and a
-Rebel T6 photo at other ISO settings than their rows' samples went from 0.3 EV to
-0.16 EV off, Canon's white level being ISO-dependent.
+renders of 110 photos of these bodies (the dataset's, and 26 rendered for bodies it
+had none of), the median midtone exposure difference went from 0.15 EV to 0.02 EV, and
+103 photos are within 0.1 EV (41 before). Of the other seven, two 80D frames of one
+shoot were already 0.44 EV brighter than Camera Raw and are now 0.58 brighter, the
+row moving every 80D photo alike; a 30D photo is 0.30 EV brighter where another body's
+at the same ISO matches; a 5DS R and a Rebel T6 photo at other ISO settings than their
+rows' samples went from 0.3 EV to 0.16 EV off, Canon's white level being
+ISO-dependent; and two RX1R III frames stay 0.14 EV darker, the row's value being the
+Sony fallback they had.
 
 Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
 fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names
-alike; the Nikon D810, whose only CC0 sample is an sRAW; and bodies with calibration
-evidence whose baseline no Camera Raw render has checked yet (listed in
-[camera parity](camera-parity.md)).
+alike; and the Nikon D810, whose only CC0 sample is an sRAW.

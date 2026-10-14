@@ -76,17 +76,13 @@ Rows are installed when the samples identify one preset. Unresolved, so identity
 - Nikon, Panasonic, Pentax and the Fujifilm GFX 50R, X-E5 and X-T50 get identity
   calibration from Adobe, which RAWmakase matches.
 
-The EOS 30D, 450D, 500D, 5D, 7D Mark II and 1D Mark II N and the Sony ILCE-3000,
-ILCE-7, RX1R III and A1 II have verified references in the facts but no table row:
-a row also holds a baseline exposure, and no Camera Raw render of these bodies has
-checked one yet (see [camera table](cameras.md)).
-
 The rows added on 2026-10-14 were checked against Camera Raw 18.7 default renders
 of the test dataset. As Shot Temperature and Tint of 521 of 539 photos now land
 within Camera Raw's rounding of its displayed values (Temperature to 50 K, Tint to
-1), against 427 before. The rest are Olympus and OM System bodies, two phones, the
-EOS M3 and 1D X Mark III listed above, and two photos within a mired of Camera Raw at
-7900 K and 14 000 K.
+1), against 427 before, and so do all 27 renders made for ten bodies the dataset had
+no render of. The rest are Olympus and OM System bodies, two phones, the EOS M3 and
+1D X Mark III listed above, and two photos within a mired of Camera Raw at 7900 K
+and 14 000 K.
 
 AnalogBalance is a separate per-file factor (XYZ-to-camera = AnalogBalance x
 CameraCalibration x ColorMatrix). DNG Converter writes it for linear DNGs of
