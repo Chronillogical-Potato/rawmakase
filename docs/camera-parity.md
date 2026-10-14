@@ -35,6 +35,10 @@ samples from different units additionally verify different corrections:
 `[.9432, 1, .9994]` and `[.9284, 1, 1.0158]`, from the same model reference
 `[2423, 1024, 1799]`. This independently measured relationship agrees with the
 [RawSpeed calibration investigation](https://github.com/darktable-org/rawspeed/compare/develop...tdonovan4:rawspeed:camera-calibration-matrix).
+Three A7 II samples at ISO 100 and 6400 reproduce converter corrections
+`[1.01, 1, .9707]` and `[1.01, 1, .9579]` from the model reference
+`[2436, 1024, 1456]`. The same conversions record BaselineExposure +0.35;
+the previous fitted +0.30 left the current default render too dark.
 Fresh Camera Raw 18.7 comparisons of these two A7CR samples pass both defaults
 and all eight custom-WB cases (median ΔE00 .45–1.01 for custom WB).
 
@@ -52,8 +56,8 @@ full matrix implementation and are reported as unsupported. Do not flatten them
 into gains or copy another body's values.
 
 `data/camera-calibration-facts.json` records the converter version, public source
-URLs and SHA-256 hashes, and numerical tags for 142 public samples plus four
-anonymous local samples (two A7CR, one A7R IV, one A7R VI). Local entries contain no filenames or paths. CI validates
+URLs and SHA-256 hashes, and numerical tags for 142 public samples plus seven
+anonymous local samples (two A7CR, one A7R IV, one A7R VI, three A7 II). Local entries contain no filenames or paths. CI validates
 all measured tags and checks supported Sony/X100F native calibration against the
 camera table without requiring Adobe software. Other native makes with non-identity
 converter calibration remain reported mismatches. RAWs and

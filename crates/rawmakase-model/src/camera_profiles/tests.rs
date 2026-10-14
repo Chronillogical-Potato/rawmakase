@@ -1,5 +1,49 @@
 use super::*;
 #[test]
+fn a7ii_native_neutral_matches_adobe_as_shot() {
+    // Anonymous native RAW metadata and Adobe DNG Converter 18.7 calibration.
+    // Two daylight presets exercise the per-file correction, not a fixed gain.
+    for (daylight_blue, calibration_blue) in [(1500., 0.9707), (1520., 0.9579)] {
+        let m = Metadata {
+            make: "Sony".into(),
+            model: "ILCE-7M2".into(),
+            sony_daylight_wb: Some([2412., 1024., daylight_blue]),
+            wb: [2.453125, 1., 1.3945312],
+            ..x100f()
+        };
+        let mut p = CameraProfile::camera_matrix_default(&m).unwrap();
+        p.color1 = Some([
+            [0.7491, -0.3027, 0.0351],
+            [-0.4231, 1.1579, 0.3031],
+            [-0.0818, 0.1721, 0.7466],
+        ]);
+        p.color2 = Some([
+            [0.5271, -0.0712, -0.0347],
+            [-0.6153, 1.3653, 0.2763],
+            [-0.1601, 0.2366, 0.7242],
+        ]);
+        p.kelvin1 = 2856.;
+        p.kelvin2 = 6504.;
+        p.calibration_signature = "com.adobe".into();
+        assert_eq!(p.neutral_calibration(&m), [1.01, 1., calibration_blue]);
+        let actual = p.as_shot_white_balance(&m).unwrap();
+        if daylight_blue == 1500. {
+            assert!((actual[0] - 5420.98).abs() < 1., "{actual:?}");
+            assert!((actual[1] - 4.4767).abs() < 0.01, "{actual:?}");
+        }
+        let gains = p.white_balance(actual[0], actual[1], &m).unwrap();
+        assert!(gains.iter().all(|v| (v - 1.).abs() < 0.0005));
+        let mut dng = m.clone();
+        dng.baseline_exposure = Some(0.35);
+        dng.dng_neutral_calibration = Some(crate::camera_data::NeutralCalibration {
+            gains: [1.01, 1., calibration_blue],
+            signature: "com.adobe".into(),
+        });
+        assert_eq!(actual, p.as_shot_white_balance(&dng).unwrap());
+    }
+}
+
+#[test]
 fn a7iv_dng_neutral_solves_adobe_as_shot_and_custom_white_balance() {
     // Public raw.pixls.us A7 IV sample, independently converted with Adobe DNG
     // Converter. These are metadata measurements, not a fit to rendered pixels.

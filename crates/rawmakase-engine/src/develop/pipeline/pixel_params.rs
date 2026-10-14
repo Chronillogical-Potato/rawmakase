@@ -21,6 +21,7 @@ const FIELDS: &[(&str, usize)] = &[
     // black and its blacks curve, or -1 each.
     ("SCENE_WHITE", 1),
     ("SCENE_DEFAULT_BLACK", 1),
+    ("SCENE_SHADOW_BLACK", 2),
     ("SCENE_BLACKS", 1),
     // For masks' Whites and Blacks: their curves (`gpu_mask_table`), or -1; and
     // `GlobalTone::gpu_keys`.
@@ -84,7 +85,7 @@ const FIELDS: &[(&str, usize)] = &[
     // The masks' Contrast pivot.
     ("LOCAL_PIVOT", 1),
     ("LOCAL_FAMILIES", 1),
-    ("LOCAL_KEYS", 2),
+    ("LOCAL_KEYS", 3),
     ("GLOBAL_SH", 2),
 ];
 pub(crate) fn wgsl_prelude() -> String {
@@ -286,6 +287,11 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
     };
     p.set("SCENE_WHITE", &[white]);
     p.set("SCENE_DEFAULT_BLACK", &[default_black]);
+    let shadow_black = match global.shadow_black_samples() {
+        Some((s, rows)) => [p.push(rows.iter().copied()), s],
+        None => [-1., 0.],
+    };
+    p.set("SCENE_SHADOW_BLACK", &shadow_black);
     p.set("SCENE_BLACKS", &[blacks]);
     p.set("SCENE_KEYS", &global.gpu_keys());
     p.set("SCENE_TABLES", &[-1.]);

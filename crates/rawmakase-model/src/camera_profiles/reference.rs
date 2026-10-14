@@ -100,7 +100,7 @@ mod tests {
     }
     #[test]
     fn baseline_covers_measured_cameras() {
-        assert_eq!(baseline_exposure(&camera("SONY", "ILCE-7M2")), 0.3);
+        assert_eq!(baseline_exposure(&camera("SONY", "ILCE-7M2")), 0.35);
         assert_eq!(baseline_exposure(&camera("Sony", "ILCE-7M4")), 0.35);
         assert_eq!(baseline_exposure(&camera("Canon", "EOS R7")), 0.4);
         assert_eq!(baseline_exposure(&camera("Nikon", "Z 30")), 0.35);
