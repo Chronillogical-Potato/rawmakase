@@ -49,8 +49,9 @@ pub(crate) const RENDERED_PIVOT_OFFSET: f32 = 0.035;
 pub(crate) fn rendered_pivot(pivot: f32) -> f32 {
     (pivot + RENDERED_PIVOT_OFFSET).clamp(PIVOT_MIN, PIVOT_MAX)
 }
-/// The bounds of a photo's Contrast pivot.
+/// The lowest a photo's Contrast pivot goes.
 const PIVOT_MIN: f32 = 0.3;
+/// The highest a photo's Contrast pivot goes, a rendered file's too.
 const PIVOT_MAX: f32 = 0.75;
 /// `pixels` (`width` × `height`, encoded) averaged into blocks 48 across, as the
 /// photos [`photo_pivot`] was fitted on were measured.

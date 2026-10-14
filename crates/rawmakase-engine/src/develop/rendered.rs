@@ -16,7 +16,9 @@ const FIRST: f32 = -24.;
 const LAST: f32 = 8.;
 const SAMPLES: usize = 4097;
 
-/// The white curve the default rendering uses.
+/// The white curve the default rendering uses. Its black and dark keys (−12) are
+/// inert: the white curve reads neither, and without Blacks or a black point nothing
+/// else is built from them.
 fn white() -> &'static GlobalTone {
     static WHITE: OnceLock<GlobalTone> = OnceLock::new();
     WHITE.get_or_init(|| GlobalTone::new([0.; 4], 0., 0., -12., -12., false))
@@ -27,6 +29,11 @@ pub(crate) fn default_rendering(s: f32) -> f32 {
     rawmakase_model::camera_profiles::default_tone_at(white().white_curve(s))
 }
 
+/// The log2 scene value of the table's `k`th sample.
+fn log_at(k: usize) -> f32 {
+    FIRST + (LAST - FIRST) * k as f32 / (SAMPLES - 1) as f32
+}
+
 /// `F` tabulated at log2 scene values from `FIRST` to `LAST`, made non-decreasing.
 fn table() -> &'static [f32] {
     static TABLE: OnceLock<Vec<f32>> = OnceLock::new();
@@ -34,8 +41,7 @@ fn table() -> &'static [f32] {
         let mut out = Vec::with_capacity(SAMPLES);
         let mut previous = 0f32;
         for k in 0..SAMPLES {
-            let log = FIRST + (LAST - FIRST) * k as f32 / (SAMPLES - 1) as f32;
-            previous = previous.max(default_rendering(log.exp2()));
+            previous = previous.max(default_rendering(log_at(k).exp2()));
             out.push(previous);
         }
         out
@@ -50,7 +56,6 @@ fn scene_value(y: f32) -> f32 {
     }
     let y = y.min(1.);
     let outputs = table();
-    let log_at = |k: usize| FIRST + (LAST - FIRST) * k as f32 / (SAMPLES - 1) as f32;
     let k = outputs.partition_point(|&v| v < y);
     if k == 0 {
         return log_at(0).exp2() * y / outputs[0].max(f32::MIN_POSITIVE);
