@@ -76,8 +76,13 @@ pipeline (`crates/rawmakase-engine/src/develop/stage_cache.rs`), each keyed by t
   matrix, white balance, Temperature and Tint, the profile and its amount, the
   camera's exposure and Camera Calibration (the measures are taken at Exposure 0);
 - the textured image, when Texture is on;
-- samples: each output pixel's camera value after geometry, lens correction and
-  noise reduction, and its source position.
+- samples: each output pixel's camera value after geometry and lens correction,
+  and its source position.
+
+Color and luminance noise reduction are cached together on the full-resolution
+source, before retouching and the preview pyramid. Changing any active noise
+setting rebuilds that source and invalidates the pyramid and dependent stages;
+panning or tone edits reuse it. Both CPU and GPU sample the same denoised source.
 
 Exposure, curve, HSL, grading and Shadows/Highlights edits therefore rerun
 only the per-pixel stage; Clarity and Texture edits reuse the blurs. Two entries are
