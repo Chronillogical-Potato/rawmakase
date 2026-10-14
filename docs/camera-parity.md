@@ -26,8 +26,8 @@ before applying a proposal. Conflicting samples must be investigated.
 
 Sony calibration is per individual camera unit, not a fixed model gain. The native
 adapter reads `WB_Coeffs[Daylight]` from LibRaw (the RAW's `WB_RGBLevelsDaylight`,
-not LibRaw's matrix-derived `pre_mul`). The model divides its measured
-`sony_daylight_reference` by that per-file preset, normalizing both to green,
+not LibRaw's matrix-derived `pre_mul`). The model divides the row's measured
+`unit_calibration` reference by that per-file preset, normalizing both to green,
 and rounds to the four decimals recorded by DNG Converter. Missing/invalid
 presets retain identity rather than borrowing another unit's correction.
 The 36 public Sony samples reproduce their converter gains exactly. Two A7CR

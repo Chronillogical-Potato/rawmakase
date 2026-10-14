@@ -97,13 +97,13 @@ def audit(tags, rows):
         if any(abs(r / 1024 / (w / wb[1]) - g) > .00005 for r, w, g in zip(reference, wb, actual)):
             return dict(result, status='unsupported', reason='Sony daylight reference does not reproduce DNG calibration')
         result['proposed_reference'] = reference
-        proposed = f'sony_daylight_reference = {json.dumps(reference)}'
+        proposed = 'unit_calibration = { preset = "daylight", reference = ' + json.dumps(reference) + ' }'
     else:
         wb = None
-    if row and 'sony_daylight_reference' in row:
+    if row and 'unit_calibration' in row:
         if wb is None:
             return dict(result, status='unsupported', reason='Sony calibration audit requires native RAW daylight metadata; pass the RAW with --converter')
-        ref = row['sony_daylight_reference']
+        ref = row['unit_calibration']['reference']
         expected = [math.floor((r / ref[1]) / (w / wb[1]) * 10000 + .5) / 10000
                     for r, w in zip(ref, wb)]
     else:

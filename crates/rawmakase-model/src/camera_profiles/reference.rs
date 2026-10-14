@@ -35,7 +35,7 @@ fn fujifilm_shift(m: &Metadata, row: &crate::cameras::Baseline) -> f32 {
     row.dr100_shift.unwrap_or(usual) - shift
 }
 pub fn neutral_calibration(m: &Metadata) -> [f32; 3] {
-    crate::cameras::neutral_calibration(&m.make, &m.model, m.sony_daylight_wb)
+    crate::cameras::neutral_calibration(&m.make, &m.model, &m.wb_presets)
 }
 #[cfg(test)]
 mod tests {

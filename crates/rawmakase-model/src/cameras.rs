@@ -1,5 +1,6 @@
 //! RAWmakase's camera table, `data/cameras.toml`: per-model values that the raw
 //! file does not carry, one row per camera body. See docs/cameras.md.
+use crate::camera_data::{WhiteBalancePreset, WhiteBalancePresets};
 use serde::Deserialize;
 use std::sync::OnceLock;
 
@@ -15,6 +16,17 @@ pub enum Source {
     Fitted,
     /// Measured by hand, as the row's `how` says.
     Measured,
+}
+
+/// Adobe DNG Converter records a diagonal CameraCalibration, equal for both
+/// illuminants, that is this model reference divided by the RAW's own `preset`,
+/// each normalized to green. The preset differs between units of one model, so
+/// the calibration does too; see docs/camera-parity.md.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UnitCalibration {
+    pub preset: WhiteBalancePreset,
+    pub reference: [f32; 3],
 }
 
 /// Whether Camera Raw moves a Fujifilm body's baseline with the raw's exposure
@@ -41,14 +53,14 @@ pub struct Camera {
     pub aliases: Vec<String>,
     /// Exposure Camera Raw adds to an unedited photo with Adobe Standard, in EV.
     pub baseline_exposure: f32,
+    /// Adobe's calibration of an individual camera unit, from the preset that unit
+    /// stored in its RAW. Only meaningful with the Adobe profile calibration signature.
+    #[serde(default)]
+    pub unit_calibration: Option<UnitCalibration>,
     /// Diagonal CameraCalibration, measured in Adobe DNGs, identical for both
     /// illuminants. Only meaningful with the Adobe profile calibration signature.
     #[serde(default)]
     pub neutral_calibration: Option<[f32; 3]>,
-    /// Sony's model reference daylight preset. Divide by the native RAW's own
-    /// daylight preset to obtain its individual-unit calibration.
-    #[serde(default)]
-    pub sony_daylight_reference: Option<[f32; 3]>,
     /// Fujifilm only: see [`ExposureShift`].
     #[serde(default)]
     pub fujifilm_exposure_shift: ExposureShift,
@@ -203,27 +215,30 @@ pub fn baseline_exposure(make: &str, model: &str) -> Baseline {
 }
 
 /// Exact body calibration only: unlike exposure, this must never use a make median.
-pub fn neutral_calibration(make: &str, model: &str, daylight: Option<[f32; 3]>) -> [f32; 3] {
+/// Identity when the row has no reference or the RAW lacks a valid preset; another
+/// unit's correction is never borrowed.
+pub fn neutral_calibration(make: &str, model: &str, presets: &WhiteBalancePresets) -> [f32; 3] {
     let Some(row) = find_in(all(), make, model) else {
         return [1.; 3];
     };
-    if let Some(reference) = row.sony_daylight_reference {
-        let Some(wb) = daylight.filter(|v| v.iter().all(|v| v.is_finite() && *v > 0.)) else {
-            return [1.; 3];
-        };
-        let gains = std::array::from_fn(|c| {
-            let gain = (f64::from(reference[c]) / f64::from(reference[1]))
-                / (f64::from(wb[c]) / f64::from(wb[1]));
-            // DNG Converter records these diagonal coefficients to four decimals.
-            ((gain * 10000.).round() / 10000.) as f32
-        });
-        return if gains.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.) {
-            gains
-        } else {
-            [1.; 3]
-        };
+    let Some(unit) = row.unit_calibration else {
+        return row.neutral_calibration.unwrap_or([1.; 3]);
+    };
+    let Some(wb) = presets.get(unit.preset) else {
+        return [1.; 3];
+    };
+    let reference = unit.reference;
+    let gains = std::array::from_fn(|c| {
+        let gain = (f64::from(reference[c]) / f64::from(reference[1]))
+            / (f64::from(wb[c]) / f64::from(wb[1]));
+        // DNG Converter records these diagonal coefficients to four decimals.
+        ((gain * 10000.).round() / 10000.) as f32
+    });
+    if gains.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.) {
+        gains
+    } else {
+        [1.; 3]
     }
-    row.neutral_calibration.unwrap_or([1.; 3])
 }
 
 fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
@@ -316,18 +331,17 @@ mod tests {
             assert!(c.baseline_exposure.abs() <= 3., "{name}");
             if let Some(v) = c.neutral_calibration {
                 assert!(
-                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.),
+                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 4.)
+                        && c.unit_calibration.is_none(),
                     "{name}"
                 );
             }
-            if let Some(v) = c.sony_daylight_reference {
+            if let Some(u) = c.unit_calibration {
                 assert!(
-                    c.make == "Sony" && c.neutral_calibration.is_none(),
-                    "{name}"
-                );
-                assert!(
-                    v.iter().all(|v| v.is_finite() && *v > 0. && *v < 65536.),
-                    "{name}"
+                    u.reference
+                        .iter()
+                        .all(|v| v.is_finite() && *v > 0. && *v < 65536. && v.fract() == 0.),
+                    "{name}: a reference is the preset's integer multipliers"
                 );
             }
             let d: Vec<&str> = c.checked.split('-').collect();
@@ -363,8 +377,8 @@ mod tests {
             model: model.into(),
             aliases: vec![],
             baseline_exposure: ev,
+            unit_calibration: None,
             neutral_calibration: None,
-            sony_daylight_reference: None,
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
             source: Source::Fitted,

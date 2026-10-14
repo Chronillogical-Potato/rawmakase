@@ -40,7 +40,7 @@ class CalibrationTests(unittest.TestCase):
 
     def test_sony_individual_units_use_their_own_daylight_calibration(self):
         rows = [dict(make='Sony', model='ILCE-7CR',
-                     sony_daylight_reference=[2423., 1024., 1799.])]
+                     unit_calibration=dict(preset='daylight', reference=[2423., 1024., 1799.]))]
         for wb, gains in [([2569., 1024., 1800.], [.9432, 1., .9994]),
                           ([2610., 1024., 1771.], [.9284, 1., 1.0158])]:
             tags = self.tags()
