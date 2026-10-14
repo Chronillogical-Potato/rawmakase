@@ -32,6 +32,9 @@ pub(crate) struct Measured {
     pivots: Kept<f32>,
     /// The Shadows/Highlights map's base by the Exposure it was built at.
     maps: Kept<std::sync::Arc<crate::develop::local_tone::MapBase>>,
+    /// The copy's camera colour (white balance, the profile's matrix and HueSatMap,
+    /// calibration), which the map's base exposes.
+    colors: std::sync::OnceLock<std::sync::Arc<Vec<[f32; 3]>>>,
 }
 impl Measured {
     pub(crate) fn new(measures: PhotoMeasures) -> Self {
@@ -40,7 +43,21 @@ impl Measured {
             haze: Default::default(),
             pivots: Kept::default(),
             maps: Kept::default(),
+            colors: Default::default(),
         }
+    }
+    /// The copy's camera colour, made by `make` unless kept. Not initialised in place: a
+    /// render that waited on it could be the task its parallel work runs; renders
+    /// making it at the same time make the same colours.
+    pub(crate) fn colors(
+        &self,
+        make: impl FnOnce() -> Vec<[f32; 3]>,
+    ) -> std::sync::Arc<Vec<[f32; 3]>> {
+        if let Some(c) = self.colors.get() {
+            return c.clone();
+        }
+        let colors = std::sync::Arc::new(make());
+        self.colors.get_or_init(|| colors).clone()
     }
     /// How many pivots and map bases are kept.
     #[cfg(test)]

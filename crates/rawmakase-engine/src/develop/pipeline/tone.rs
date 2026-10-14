@@ -49,18 +49,27 @@ impl CurveSet {
         // The base reads what the measures read, and Exposure.
         let base =
             crate::develop::local_tone::LocalToneMap::needed(sliders, local_tone).then(|| {
-                let build = || {
-                    crate::develop::local_tone::MapBase::of(&small, |p| {
-                        crate::develop::scene_tone::luminance(exposure_stage(
-                            scene_color(p, r, &lut, matrix, None),
-                            &lut,
-                            None,
-                        ))
-                    })
+                let scene = |color| {
+                    crate::develop::scene_tone::luminance(exposure_stage(color, &lut, None))
                 };
+                let size = [small.width, small.height];
                 match &measured {
-                    Some(m) => m.map_base(r.exposure, build),
-                    None => Arc::new(build()),
+                    // The copy's camera colour reads only what the measures read: kept
+                    // with them, so an Exposure change only exposes it.
+                    Some(m) => m.map_base(r.exposure, || {
+                        let colors = m.colors(|| {
+                            small
+                                .pixels
+                                .par_iter()
+                                .map(|p| scene_color(*p, r, &lut, matrix, None))
+                                .collect()
+                        });
+                        let lum = colors.par_iter().map(|c| scene(*c)).collect();
+                        crate::develop::local_tone::MapBase::new(lum, size)
+                    }),
+                    None => Arc::new(crate::develop::local_tone::MapBase::of(&small, |p| {
+                        scene(scene_color(p, r, &lut, matrix, None))
+                    })),
                 }
             });
         lut.local = base.as_ref().map(|base| {
