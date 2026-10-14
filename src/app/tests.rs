@@ -2906,6 +2906,58 @@ fn copy_settings_copies_the_chosen_groups_and_remembers_them() {
     assert_eq!(editor.document.edit.recipe().exposure, 0.6);
 }
 #[test]
+fn return_confirms_copy_settings_and_escape_cancels_it() {
+    use crate::model::settings_groups::GroupSelection;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.document.metadata = Some(Metadata {
+        wb: [2., 1., 1.8],
+        daylight_wb: [2., 1., 1.8],
+        matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    });
+    editor.document.edit.setup_mut().exposure = 0.6;
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 650.))),
+                events,
+                ..Default::default()
+            },
+            |ui| editor.draw(ui),
+        );
+        output.textures_delta.clear();
+    };
+    // Escape cancels: nothing is copied.
+    editor.open_copy_dialog(settings_transfer::Transfer::Copy);
+    frame(&mut editor, vec![]);
+    frame(&mut editor, vec![key(egui::Key::Escape)]);
+    assert!(editor.modal.is_none());
+    assert!(editor.clipboard.is_none());
+    // Return confirms, even with a checkbox focused, which keeps its state.
+    editor.open_copy_dialog(settings_transfer::Transfer::Copy);
+    let chosen = GroupSelection::default();
+    frame(&mut editor, vec![]);
+    frame(&mut editor, vec![key(egui::Key::Tab)]);
+    assert!(
+        ctx.memory(|m| m.focused().is_some()),
+        "a checkbox has focus"
+    );
+    frame(&mut editor, vec![key(egui::Key::Enter)]);
+    frame(&mut editor, vec![]);
+    assert!(editor.modal.is_none());
+    let clipboard = editor.clipboard.as_ref().expect("settings copied");
+    assert_eq!(clipboard.groups, chosen);
+}
+#[test]
 fn j_toggles_both_clipping_warnings_but_not_while_typing() {
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);

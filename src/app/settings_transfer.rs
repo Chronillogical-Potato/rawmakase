@@ -116,7 +116,12 @@ impl Editor {
         let Some(super::Modal::CopySettings(dialog)) = &mut self.modal else {
             return;
         };
-        let mut choice = None;
+        // Return is the primary button, as in Lightroom; it is taken before the
+        // dialog draws so a focused checkbox or button does not also act on it.
+        // Space still presses the focused one, and an open group list keeps Return.
+        let confirm = !egui::Popup::is_any_open(ctx)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let mut choice = confirm.then_some(CopyChoice::Confirm);
         let response = egui::Modal::new(egui::Id::new("copy-settings"))
             .backdrop_color(Color32::from_black_alpha(140))
             .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
