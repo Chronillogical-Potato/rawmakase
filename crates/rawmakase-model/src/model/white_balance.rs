@@ -106,9 +106,12 @@ impl NamedWhiteBalance {
 /// the ProPhoto gains that reproduce Lightroom Classic 15.6 (Camera Raw 18.7) renders
 /// of synthetic JPEG charts (`scripts/corpus/rendered-white-balance.py`). Past +50
 /// Lightroom keeps warming beyond the Planckian locus, which the drift carries; the
-/// cool side's drift fitted to noise (±1.5) and is 0. Temp −100 with Tint of +25 or
-/// more, and strong cooling with magenta (Temp −50, Tint +50, say), are outside what
-/// was measured; the soft floor in `prophoto_white` keeps them finite.
+/// cool side's drift fitted to noise (±1.5) and is 0. Cooling matches Lightroom on
+/// greys only to about −35: past it Lightroom also lifts red, which gains scaled so
+/// the smallest is 1 miss. The cool magenta corner (Temp −100 with Tint of +25 or
+/// more, Temp −50 with Tint +50, say) is unmeasured; there `prophoto_white` bounds
+/// each channel of the white at 5% of its largest and `rendered_gains` caps each
+/// gain at 64, so recipes stay valid.
 const RENDERED_TEMPERATURE: [[f32; 3]; 27] = [
     [-100., 359.5, 0.],
     [-90., 304.5, 0.],
@@ -168,32 +171,28 @@ fn interpolate<const K: usize>(rows: &[[f32; K]], x: f32) -> [f32; K] {
     std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t)
 }
 
-/// The linear ProPhoto RGB of the DNG temperature/tint white at `mired`, `tint`.
-/// A white outside ProPhoto's gamut (Temp −100 with a positive Tint reaches one's
-/// blue below zero) keeps every channel positive: below `FLOOR` a channel decays
-/// exponentially with the value and slope it has there, so gains stay finite and
-/// strictly ordered instead of flipping sign.
+/// The linear ProPhoto RGB of the DNG temperature/tint white at `mired`, `tint`,
+/// each channel at least 5% of the white's largest. Strong cooling with magenta
+/// takes the white towards or outside ProPhoto's gamut, its blue or red towards 0
+/// or below; that corner is unmeasured, and the bound keeps its gains finite and
+/// positive (and with the 64 cap in [`rendered_gains`], within what a recipe
+/// allows). Every measured white has its smallest channel far above the bound.
 fn prophoto_white(mired: f32, tint: f32) -> [f32; 3] {
-    const FLOOR: f32 = 0.02;
     let [x, y] = crate::camera_profiles::temperature::xy_reciprocal(mired, tint);
-    crate::color::mul(
+    let white = crate::color::mul(
         crate::camera_profiles::XYZ_TO_PRO,
         [x / y, 1., (1. - x - y) / y],
-    )
-    .map(|v| {
-        if v >= FLOOR {
-            v
-        } else {
-            FLOOR * ((v - FLOOR) / FLOOR).exp()
-        }
-    })
+    );
+    let largest = white.into_iter().fold(f32::NEG_INFINITY, f32::max);
+    white.map(|v| v.max(0.05 * largest))
 }
 
 /// The ProPhoto channel gains of a rendered file's Temp and Tint (−100…100), as
 /// Lightroom applies them to the scene its rendering is of: a camera white balance
 /// from the file's D50 white to the white Temp and Tint name, scaled so the smallest
 /// gain is 1 — so the file's white stays white and the photo brightens, as in
-/// Lightroom. Exactly `[1, 1, 1]` at 0, 0.
+/// Lightroom — and each at most 64 (the unmeasured cool magenta corner reaches it).
+/// Exactly `[1, 1, 1]` at 0, 0.
 pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
     let [_, offset, drift] = interpolate(&RENDERED_TEMPERATURE, temperature);
     let [_, tint] = interpolate(&RENDERED_TINT, tint);
@@ -201,7 +200,7 @@ pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
     let target = prophoto_white(200. + offset, drift + tint);
     let gains: [f32; 3] = std::array::from_fn(|c| file[c] / target[c]);
     let least = gains.into_iter().fold(f32::INFINITY, f32::min);
-    gains.map(|g| g / least)
+    gains.map(|g| (g / least).min(64.))
 }
 
 /// The rendered file's Temp and Tint whose [`rendered_gains`] are nearest `gains`
@@ -362,6 +361,32 @@ mod rendered_tests {
             (r.incremental_temperature, r.incremental_tint, r.wb),
             (0., 0., [1.; 3])
         );
+    }
+
+    /// Every Temp and Tint a rendered photo can be given, the cool magenta corner
+    /// outside what was measured among them, keeps a recipe that validates, renders
+    /// and saves.
+    #[test]
+    fn every_rendered_temp_and_tint_gives_a_valid_recipe() {
+        let m = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        for t in (-100..=100).step_by(5) {
+            for n in (-100..=100).step_by(5) {
+                let mut r = Recipe::for_rendered(&m);
+                r.incremental_temperature = t as f32;
+                r.incremental_tint = n as f32;
+                r.update_wb(&m);
+                assert!(
+                    r.wb.iter()
+                        .all(|g| g.is_finite() && (1. ..=64.).contains(g)),
+                    "Temp {t} Tint {n}: {:?}",
+                    r.wb
+                );
+                assert!(r.validate().is_ok(), "Temp {t} Tint {n}: {:?}", r.wb);
+            }
+        }
     }
 
     #[test]
