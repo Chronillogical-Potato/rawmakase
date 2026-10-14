@@ -197,10 +197,20 @@ const PROPHOTO_TO_XYZ: Matrix = [
 /// ProPhoto output is its scene tone stage's. `scene` holds scene values; the sensor
 /// holds them divided by 2^`baseline_exposure`, clipped at its white.
 pub fn write_probe(width: u32, height: u32, scene: &[[f64; 3]], baseline_exposure: f64) -> Vec<u8> {
+    write_probe_black_render(width, height, scene, baseline_exposure, BlackRender::Auto)
+}
+
+pub fn write_probe_black_render(
+    width: u32,
+    height: u32,
+    scene: &[[f64; 3]],
+    baseline_exposure: f64,
+    black_render: BlackRender,
+) -> Vec<u8> {
     let scale = (-baseline_exposure).exp2();
     let sensor: Vec<[f64; 3]> = scene.iter().map(|p| p.map(|v| v * scale)).collect();
     let tiles = tiles(width, height, &sensor);
-    let tags: Vec<(u16, Value)> = vec![
+    let mut tags: Vec<(u16, Value)> = vec![
         (254, Value::Long(vec![0])),
         (256, Value::Long(vec![width])),
         (257, Value::Long(vec![height])),
@@ -236,6 +246,9 @@ pub fn write_probe(width: u32, height: u32, scene: &[[f64; 3]], baseline_exposur
         (50941, Value::Long(vec![3])),
         (50964, srational(&PROPHOTO_TO_XYZ)),
     ];
+    if black_render == BlackRender::None {
+        tags.push((51110, Value::Long(vec![1])));
+    }
     assemble(tags, tiles)
 }
 

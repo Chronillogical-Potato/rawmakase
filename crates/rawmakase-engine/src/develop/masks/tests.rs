@@ -405,6 +405,58 @@ fn full_frame_mask_equals_the_global_slider() {
         assert!(max < 3e-3, "{local:?}: {max}");
     }
 }
+/// Black adaptation follows Shadows only where a mask contributes, including a
+/// mask cancelling a positive global adjustment. Camera Raw full-frame probes
+/// match global Shadows with both Auto and None default-black rendering.
+#[test]
+fn masked_shadows_adapts_black_locally_and_can_cancel_global_shadows() {
+    let im = image(120, 80);
+    let base = Recipe::with_profiles(&im.metadata, &[]);
+    for (global, local) in [(0., 1.), (0.5, -0.5), (0., 0.37)] {
+        let recipe = Recipe {
+            shadows: global,
+            ..base.clone()
+        };
+        let mask = MaskGroup {
+            components: vec![MaskComponent::new(MaskShape::Linear {
+                from: [0.4, 0.],
+                to: [0.6, 0.],
+            })],
+            adjust: LocalAdjust {
+                shadows: local,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let masked = Recipe {
+            masks: vec![mask],
+            ..recipe.clone()
+        };
+        let combined = Recipe {
+            shadows: global + local,
+            ..base.clone()
+        };
+        let a = crate::develop::render(&im, &masked.checked().unwrap(), 0).unwrap();
+        let b = crate::develop::render(&im, &recipe.checked().unwrap(), 0).unwrap();
+        let c = crate::develop::render(&im, &combined.checked().unwrap(), 0).unwrap();
+        for y in 0..80 {
+            for x in [10, 110] {
+                let i = y * 120 + x;
+                // Linear masks are full before `from`, zero after `to`.
+                let expected = if x == 10 { &c } else { &b };
+                let difference = a.pixels[i]
+                    .iter()
+                    .zip(expected.pixels[i])
+                    .map(|(v, w)| (v - w).abs())
+                    .fold(0., f32::max);
+                assert!(
+                    difference < 3e-3,
+                    "global {global}, local {local}, x {x}: {difference}"
+                );
+            }
+        }
+    }
+}
 /// The scene a full-frame mask's Exposure leaves the scene tone stage is the global
 /// Exposure's: only the white point stays the photo's, as in Camera Raw.
 #[test]

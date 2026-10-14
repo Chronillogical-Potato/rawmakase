@@ -27,6 +27,8 @@ mod pipeline;
 pub mod point_color;
 mod preview_renderer;
 mod pyramid;
+mod shadow_context;
+mod shadow_context_data;
 pub mod sharpening;
 pub mod targeted;
 pub mod texture;

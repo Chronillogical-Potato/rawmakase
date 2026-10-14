@@ -384,7 +384,15 @@ fn scene_global(q: vec3<f32>) -> vec3<f32> {
         out = ya + (yb - ya) * (q - lo) / (hi - lo);
     }
     let black = offset(P_SCENE_DEFAULT_BLACK);
-    if black >= 0 {
+    let shadow_black = offset(P_SCENE_SHADOW_BLACK);
+    if shadow_black >= 0 && masked && delta[L_SHADOWS] != 0.0 {
+        let f = clamp(p(P_SCENE_SHADOW_BLACK + 1u) + delta[L_SHADOWS], 0.0, 1.0) * 10.0;
+        let i = min(i32(f), 9);
+        let a = shadow_black + i * i32(SCENE_Y.z);
+        let b = a + i32(SCENE_Y.z);
+        out = mix(vec3(default_black(a, out.x), default_black(a, out.y), default_black(a, out.z)),
+                  vec3(default_black(b, out.x), default_black(b, out.y), default_black(b, out.z)), f - f32(i));
+    } else if black >= 0 {
         out = vec3(default_black(black, out.x), default_black(black, out.y), default_black(black, out.z));
     }
     let blacks = offset(P_SCENE_BLACKS);
@@ -562,7 +570,7 @@ fn local_gain(pos: vec2<f32>, lum: f32) -> f32 {
         let h = p(P_GLOBAL_SH + 1u) + delta[L_HIGHLIGHTS];
         var lift = 0.0;
         if r >= 0 {
-            lift = family(3u, s, 0.0, base - region) + family(4u, s, p(P_LOCAL_KEYS), region);
+            lift = family(3u, s, 0.0, base - region) + family(4u, s, p(P_LOCAL_KEYS + 2u), region);
         }
         return exp2(family(0u, s, p(P_LOCAL_KEYS), base)
             + family(1u, h, p(P_LOCAL_KEYS + 1u), base) + lift + clarity);

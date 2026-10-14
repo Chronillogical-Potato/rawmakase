@@ -26,13 +26,11 @@ linear profile tone curve, so Camera Raw's ProPhoto output is its scene tone sta
   in steps of 12.5. Blacks applies after the white point and Whites, to their output,
   so the table maps the default render's output (log2, -16 to 0 in eighth stops) to
   the Blacks render's, per black key and Blacks.
-- Default black (default_black.bin): Camera Raw's default black adapts to the photo's
-  darkest level. The white ramps (darkest patch 2^-14 of their maximum) show almost
-  none; the black ramps' default renders a much stronger one that depends on the key.
-  The table maps the white ramp's default output at a sensor white of 4 (what the
-  white curves give) to the black ramp's default output at the same scene value
-  (log2, −16 to 0 in eighth stops), per black key, made monotone. Below the darkest
-  patch it is 0: undefined, as no pixel of a photo with that key is darker.
+- Default black (default_black.bin): paired DefaultBlackRender None and Auto
+  renders at absolute scene dark keys −14 to −7. The runtime replaces the black
+  response already present in the white calibration with the photo's response.
+  Render and fit it alone with render-default-black and default-black-table.
+
 - Masks (masks.bin): the ramp at a sensor white of 1 and 4 with a mask covering the
   whole frame, at its Whites and then its Blacks −100 to +100 in steps of 25. A mask's
   Whites and Blacks apply after the global curves, as a fixed function of their
@@ -59,6 +57,7 @@ REL = 2.0 ** np.linspace(-14, 0, 192)
 WHITE_POINTS = np.arange(-1, 5.001, 0.25)            # log2 W*
 SLIDER = np.arange(-100, 100.001, 12.5)
 BLACK_KEYS = np.array([-8.] + list(np.arange(-6.5, -1.999, 0.5)))
+DEFAULT_BLACK_KEYS = np.arange(-14., -6.999, 0.5)
 T = np.arange(-16, 6.0001, 0.125)                     # log2 scene value
 SENSOR = np.arange(-3, 4.001, 0.5)                    # log2 sensor white (white3)
 BELOW = np.arange(0, 5.001, 0.5)                      # stops the maximum is below it
@@ -154,6 +153,7 @@ def render(args):
                                  out=str(d / f'mask{lw}-{kind}{v:+g}.tif')))
     failures = camera_raw.render(jobs, work=d / 'work')
     print(f'{len(jobs)} renders, {len(failures)} failed')
+    render_default_black(args)
 
 
 def white_table(d):
@@ -202,22 +202,50 @@ def blacks_table(d):
 
 
 def default_black_table(d):
-    w = white_ramp(2.0)
-    xw = np.log2(np.array(w.values))
-    yw = w.measure(camera_raw.read_linear(d / 'white+2.00-default.tif'))
-    out = np.zeros((len(BLACK_KEYS), len(Y)), np.float32)
-    for i, key in enumerate(BLACK_KEYS):
+    """None → Auto black response at absolute scene dark keys, including its toe.
+
+    The white tables already contain the response of their darkest patch. The
+    runtime replaces that response by composing these measured transfers; it must
+    not add another black curve on top of the calibration's.
+    """
+    out = np.zeros((len(DEFAULT_BLACK_KEYS), len(Y)), np.float32)
+    for i, key in enumerate(DEFAULT_BLACK_KEYS):
         g = black_ramp(key)
-        yb = g.measure(camera_raw.read_linear(d / f'black{key:+.1f}-default.tif'))
-        # The white curves' output at the black ramp's scene values.
-        ywx = np.interp(np.log2(np.array(g.values)), xw, yw)
-        order = np.argsort(ywx)
-        x = np.log2(np.maximum(ywx[order], 2.0 ** -20))
-        y = np.maximum.accumulate(yb[order])
+        prefix = f'default-black{key:+.1f}'
+        none = g.measure(camera_raw.read_linear(d / f'{prefix}-none.tif'))
+        auto = g.measure(camera_raw.read_linear(d / f'{prefix}-auto.tif'))
+        order = np.argsort(none)
+        x = np.log2(np.maximum(none[order], 2.0 ** -20))
+        y = np.maximum.accumulate(auto[order])
         row = np.interp(Y, x, y, right=1.0)
-        row[Y < x[0]] = 0.
+        below = Y < x[0]
+        row[below] = 2.0 ** (Y[below] - x[0]) * y[0]
         out[i] = row
     return out
+
+
+def render_default_black(args):
+    d = args.dir.resolve()
+    d.mkdir(parents=True, exist_ok=True)
+    jobs = []
+    for key in DEFAULT_BLACK_KEYS:
+        g = black_ramp(key)
+        for name, tag in [('auto', 0), ('none', 1)]:
+            prefix = f'default-black{key:+.1f}-{name}'
+            source = d / f'{prefix}.dng'
+            probe_dng.write(source, g.image(2.0 ** key), baseline_exposure=2, black_render=tag)
+            jobs.append(dict(source=source, settings={}, out=d / f'{prefix}.tif'))
+    failures = camera_raw.render(jobs, work=d / 'default-black-work')
+    if failures:
+        raise RuntimeError(f'{len(failures)} default-black renders failed: {failures}')
+
+
+def default_black_only(args):
+    out = args.out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    table = default_black_table(args.dir.resolve())
+    (out / 'default_black.bin').write_bytes(table.astype('<f4').tobytes())
+    print(f'default black {table.shape} -> {out}')
 
 
 def masks_table(d):
@@ -258,11 +286,12 @@ def tables(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('step', choices=['render', 'tables'])
+    p.add_argument('step', choices=['render', 'tables', 'render-default-black', 'default-black-table'])
     p.add_argument('dir', type=Path, help='folder for the probes and their renders (outside the repository)')
     p.add_argument('--out', type=Path, default=OUT, help='folder for the tables (default: the engine\'s)')
     args = p.parse_args()
-    {'render': render, 'tables': tables}[args.step](args)
+    {'render': render, 'tables': tables, 'render-default-black': render_default_black,
+     'default-black-table': default_black_only}[args.step](args)
 
 
 if __name__ == '__main__':

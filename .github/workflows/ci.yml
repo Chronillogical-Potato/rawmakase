@@ -294,11 +294,14 @@ jobs:
         with:
           ref: ${{ inputs.source-ref || github.sha }}
       - run: python3 scripts/deps.py check
+      - name: Verify generated Shadows calibration
+        run: python3 scripts/corpus/shadow-context.py --check
       - name: Camera calibration and comparison checks
         run: |
           python3 -m venv /tmp/rawmakase-parity-tests
           /tmp/rawmakase-parity-tests/bin/pip install numpy pillow
           /tmp/rawmakase-parity-tests/bin/python -m unittest discover -s scripts/cameras
+          /tmp/rawmakase-parity-tests/bin/python -m unittest discover -s scripts/corpus
 
   crates:
     name: Crates without native libraries

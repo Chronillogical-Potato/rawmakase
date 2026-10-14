@@ -90,9 +90,9 @@ pub(crate) struct LocalToneMap {
     /// Positive Shadows' tables at the slider: of the base level less the regional
     /// level, and of the regional level less the Shadows key.
     pub(crate) lift: Option<[Curve; 2]>,
-    /// Image keys of Shadows and Highlights, for masks that evaluate them at their own
-    /// slider values.
-    pub(crate) keys: [f32; 2],
+    /// Image keys of negative Shadows, Highlights and positive Shadows, for masks
+    /// that evaluate them at their own slider values.
+    pub(crate) keys: [f32; 3],
     /// Clarity's log2 gain on this grid (`clarity.rs`).
     pub(crate) clarity: Option<Vec<f32>>,
     /// Clarity's detail, when masks change Clarity and read it at their own amount.
@@ -230,13 +230,21 @@ impl LocalToneMap {
             .collect();
         let b: Vec<f32> = m.iter().zip(&a).map(|(m, a)| m - a * m).collect();
         let (a, b) = rayon::join(|| mean(&a), || mean(&b));
-        // Masks may evaluate either slider, so both keys are kept. Shadows follows the
-        // photo's mean luminance (fitted on photos), Highlights the middle of its
-        // range (fitted on synthetic scenes; docs/scene-tone-stage.md).
+        // Masks may evaluate either sign. Negative Shadows follows mean luminance;
+        // positive Shadows also measures spatial scene context. Highlights keeps
+        // its range key (docs/scene-tone-stage.md).
         let average = logs.iter().map(|l| l.exp2() as f64).sum::<f64>() / logs.len() as f64;
+        let shadow_key = (average as f32).log2();
+        let lift_key = shadow_key
+            + if sliders.shadows > 0. || local {
+                super::shadow_context::offset(&logs, shadow_key, w, h)
+            } else {
+                0.
+            };
         let keys = [
-            (average as f32).log2(),
+            shadow_key,
             0.5 * percentile(0.75) + 0.5 * percentile(0.01),
+            lift_key,
         ];
         // Clarity's weights were fitted relative to the photo's brightest levels.
         let clarity_key = 0.25 * percentile(0.999) + 0.75 * percentile(0.99);
@@ -266,7 +274,7 @@ impl LocalToneMap {
             .then(|| {
                 Some([
                     Curve::new(&SHADOWS_DETAIL, sliders.shadows, 0.)?,
-                    Curve::new(&SHADOWS_REGION, sliders.shadows, keys[0])?,
+                    Curve::new(&SHADOWS_REGION, sliders.shadows, keys[2])?,
                 ])
             })
             .flatten();
@@ -308,7 +316,7 @@ impl LocalToneMap {
         let lift = self.region.as_ref().map_or(0., |k| {
             let k = self.bilinear(x, y, k);
             family(&SHADOWS_DETAIL, sliders[0], 0., base - k)
-                + family(&SHADOWS_REGION, sliders[0], self.keys[0], k)
+                + family(&SHADOWS_REGION, sliders[0], self.keys[2], k)
         });
         (family(&SHADOWS, sliders[0], self.keys[0], base)
             + family(&HIGHLIGHTS, sliders[1], self.keys[1], base)
