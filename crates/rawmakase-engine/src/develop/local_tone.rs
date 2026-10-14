@@ -77,16 +77,15 @@ impl Family {
 pub(crate) struct LocalToneMap {
     pub(crate) width: usize,
     pub(crate) height: usize,
-    /// Guided-filter coefficients: base = a · log2(Y) + b.
-    pub(crate) a: Vec<f32>,
-    pub(crate) b: Vec<f32>,
+    /// What the map takes from the photo: the guided-filter coefficients (base =
+    /// a · log2(Y) + b) and the regional level.
+    base: std::sync::Arc<MapBase>,
     /// Source image size, to convert sample coordinates.
     pub(crate) scale: [f32; 2],
     pub(crate) shadows: Option<Curve>,
     pub(crate) highlights: Option<Curve>,
-    /// The regional level on this grid, when positive Shadows may read it (the slider or
-    /// masks).
-    pub(crate) region: Option<Vec<f32>>,
+    /// Whether positive Shadows may read the regional level (the slider or masks).
+    regional: bool,
     /// Positive Shadows' tables at the slider: of the base level less the regional
     /// level, and of the regional level less the Shadows key.
     pub(crate) lift: Option<[Curve; 2]>,
@@ -287,6 +286,39 @@ impl MapBase {
         })
     }
 }
+/// A map's grids as the GPU reads them (`develop.wgsl`'s `grid`): the guided filter's
+/// a, then b, then (when positive Shadows reads it) the regional level. They depend
+/// only on the map's base, which renders share while the sliders move, so the device
+/// keeps them per base instead of receiving them with every render.
+#[derive(Clone)]
+pub(crate) struct MapGrid {
+    base: std::sync::Arc<MapBase>,
+    region: bool,
+}
+impl MapGrid {
+    /// Whether `other` holds the same values.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.base, &other.base) && self.region == other.region
+    }
+    /// Cells per grid.
+    pub(crate) fn cells(&self) -> usize {
+        self.base.a.len()
+    }
+    /// Offset of the regional level, if present.
+    pub(crate) fn region_at(&self) -> Option<usize> {
+        self.region.then(|| 2 * self.cells())
+    }
+    /// The values, in order.
+    pub(crate) fn values(&self) -> Vec<f32> {
+        let mut v = Vec::with_capacity(3 * self.cells());
+        v.extend(&self.base.a);
+        v.extend(&self.base.b);
+        if self.region {
+            v.extend(self.base.region());
+        }
+        v
+    }
+}
 /// log2 of a scene luminance, as the map reads it.
 pub(crate) fn level(y: f32) -> f32 {
     y.max(FLOOR).log2()
@@ -312,11 +344,16 @@ impl LocalToneMap {
         sliders: Sliders,
         local: bool,
     ) -> Self {
-        Self::from_base(&MapBase::new(lum, size), source, sliders, local)
+        Self::from_base(
+            &std::sync::Arc::new(MapBase::new(lum, size)),
+            source,
+            sliders,
+            local,
+        )
     }
     /// The map of `base` for a `source`-sized photo at these slider values.
     pub(crate) fn from_base(
-        base: &MapBase,
+        base: &std::sync::Arc<MapBase>,
         source: [u32; 2],
         sliders: Sliders,
         local: bool,
@@ -336,7 +373,10 @@ impl LocalToneMap {
         let clarity = detail
             .filter(|_| sliders.clarity != 0.)
             .map(|d| d.field(sliders.clarity));
-        let region = (sliders.shadows > 0. || local).then(|| base.region().clone());
+        let regional = sliders.shadows > 0. || local;
+        if regional {
+            base.region();
+        }
         let lift = (sliders.shadows > 0.)
             .then(|| {
                 Some([
@@ -348,12 +388,11 @@ impl LocalToneMap {
         Self {
             width: w,
             height: h,
-            a: base.a.clone(),
-            b: base.b.clone(),
+            base: base.clone(),
             scale: [w as f32 / source[0] as f32, h as f32 / source[1] as f32],
             shadows: Curve::new(&SHADOWS, sliders.shadows, keys[0]),
             highlights: Curve::new(&HIGHLIGHTS, sliders.highlights, keys[1]),
-            region,
+            regional,
             lift,
             keys,
             clarity,
@@ -366,7 +405,7 @@ impl LocalToneMap {
         let base = self.base(x, y, lum);
         let mut ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
             + self.highlights.as_ref().map_or(0., |c| c.eval(base));
-        if let (Some([detail, region]), Some(k)) = (&self.lift, &self.region) {
+        if let (Some([detail, region]), Some(k)) = (&self.lift, self.region()) {
             let k = self.bilinear(x, y, k);
             ev += detail.eval(base - k) + region.eval(k);
         }
@@ -380,7 +419,7 @@ impl LocalToneMap {
             Some(d) => d.at(|v| self.bilinear(x, y, v), sliders[2]),
             None => self.clarity(x, y),
         };
-        let lift = self.region.as_ref().map_or(0., |k| {
+        let lift = self.region().map_or(0., |k| {
             let k = self.bilinear(x, y, k);
             family(&SHADOWS_DETAIL, sliders[0], 0., base - k)
                 + family(&SHADOWS_REGION, sliders[0], self.keys[2], k)
@@ -391,8 +430,19 @@ impl LocalToneMap {
             + clarity)
             .exp2()
     }
+    /// The regional level on this grid, when positive Shadows may read it.
+    pub(crate) fn region(&self) -> Option<&[f32]> {
+        self.regional.then(|| self.base.region().as_slice())
+    }
+    /// What the GPU reads of this map's grids (`MapGrid`).
+    pub(crate) fn grid(&self) -> MapGrid {
+        MapGrid {
+            base: self.base.clone(),
+            region: self.regional,
+        }
+    }
     fn base(&self, x: f32, y: f32, lum: f32) -> f32 {
-        self.bilinear(x, y, &self.a) * level(lum) + self.bilinear(x, y, &self.b)
+        self.bilinear(x, y, &self.base.a) * level(lum) + self.bilinear(x, y, &self.base.b)
     }
     /// The measured Clarity's log2 gain at sample position `x`, `y`.
     fn clarity(&self, x: f32, y: f32) -> f32 {
@@ -677,10 +727,10 @@ mod tests {
     fn only_positive_shadows_reads_the_regional_level() {
         let lum = scene(&[[20, 30, 100, 100]]);
         let negative = map(&lum, -0.6, false);
-        assert!(negative.region.is_none() && negative.lift.is_none());
+        assert!(negative.region().is_none() && negative.lift.is_none());
         let positive = map(&lum, 0.6, false);
-        assert!(positive.region.is_some() && positive.lift.is_some());
+        assert!(positive.region().is_some() && positive.lift.is_some());
         // Masks may lift Shadows anywhere, so the level is there for them.
-        assert!(map(&lum, -0.6, true).region.is_some());
+        assert!(map(&lum, -0.6, true).region().is_some());
     }
 }

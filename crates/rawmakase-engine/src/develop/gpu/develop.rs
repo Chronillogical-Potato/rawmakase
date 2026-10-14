@@ -18,13 +18,129 @@ const GROUP: u32 = 256;
 /// rather than NaN, which shader compilers may assume never occurs.
 const OUTSIDE: f32 = -3e38;
 
+/// Which features a develop pipeline is compiled with: `develop.wgsl` tests them as
+/// constants, so a pipeline without one leaves its code out. A shader carrying every
+/// feature runs fewer pixels at a time on small GPUs (an Intel UHD 620 ran it eight at
+/// a time); a pass that needs less of it runs a smaller program.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Variant {
+    /// Mask adjustments.
+    pub(crate) masks: bool,
+    /// The colour mixer, Point Color, a look's RGB table, colour grading and the colour
+    /// controls (`ADJUST`).
+    pub(crate) color: bool,
+    /// The Shadows/Highlights map.
+    pub(crate) local: bool,
+    /// Dehaze.
+    pub(crate) dehaze: bool,
+}
+impl Variant {
+    /// Everything.
+    #[cfg(test)]
+    pub(crate) const FULL: Self = Self {
+        masks: true,
+        color: true,
+        local: true,
+        dehaze: true,
+    };
+    /// The WGSL constants `develop.wgsl` reads.
+    pub(crate) fn constants(self) -> String {
+        format!(
+            "const V_MASKS: bool = {};\nconst V_COLOR: bool = {};\nconst V_LOCAL: bool = {};\nconst V_DEHAZE: bool = {};\n",
+            self.masks, self.color, self.local, self.dehaze
+        )
+    }
+    /// What a pass with `params` needs.
+    fn of(params: &PixelParams) -> Self {
+        let set = |name: &str| params.get(name)[0] != 0.;
+        let at = |name: &str| params.get(name)[0] >= 0.;
+        let masks = !params.weights.is_empty();
+        Self {
+            masks,
+            color: at("MIXER")
+                || at("POINT")
+                || (at("RGB") && params.get("RGB")[5] != 0.)
+                || at("GRADE")
+                || set("ADJUST"),
+            local: set("LOCAL"),
+            // A mask's Dehaze adds to the recipe's.
+            dehaze: set("DEHAZE") || masks,
+        }
+    }
+}
 pub(super) struct Developer {
     pub(super) layout: wgpu::BindGroupLayout,
-    pipeline: wgpu::ComputePipeline,
+    /// Develop pipelines compiled so far, one per variant.
+    pipelines: Vec<(Variant, wgpu::ComputePipeline)>,
+    pipeline_layout: wgpu::PipelineLayout,
+    /// The pass's parameters, tables and mask weights, kept and written in place:
+    /// creating a buffer of them per render took about 25 ms on an Intel UHD 620.
+    inputs: [Option<wgpu::Buffer>; 5],
+    /// The Shadows/Highlights map's grids on the device, most recently used first: one
+    /// per map base, which a slider drag's renders share (`PixelParams::grid`).
+    grids: Vec<(crate::develop::local_tone::MapGrid, wgpu::Buffer)>,
     /// Uploaded sample sets, most recently used first, so switching between Fit and
     /// 100% does not upload again.
     samples: Vec<Uploaded>,
 }
+/// The camera colour (S1: white balance, the profile's matrix and HueSatMap, Camera
+/// Calibration) of one set of samples, for the recipe as it reads it
+/// (`PixelParams::color`): no Basic slider, nor Exposure, changes it, so the develop pass
+/// reads it instead of computing it again while they move.
+pub(super) struct Kept {
+    pixels: wgpu::Buffer,
+    positions: wgpu::Buffer,
+    recipe: crate::model::recipe::Recipe,
+    color: wgpu::Buffer,
+    /// A submitted pass wrote `color` for these samples and `recipe`. Until then it is
+    /// written again: a pass recorded but never submitted (a cancelled render) left it
+    /// as it was. `recipe` is that of the last render of these samples, written or not.
+    written: bool,
+    /// The last recorded pass writes it; marked written once submitted.
+    pending: bool,
+}
+/// What a develop pass does with the kept camera colour of its samples; the value is
+/// the shader's `size.z`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Keep {
+    /// Computes the colour.
+    Run = 0,
+    /// Reads the kept colour.
+    Read = 1,
+    /// Computes the colour and keeps it.
+    Write = 2,
+}
+impl Keep {
+    /// From the samples' entry, when there is one: whether its recipe is this render's,
+    /// and whether a submitted pass wrote it. It is kept from the second render with the
+    /// same recipe, so a white balance drag, where every value is new, does not pay for
+    /// writing it.
+    pub(super) fn step(entry: Option<(bool, bool)>) -> Self {
+        match entry {
+            Some((true, true)) => Self::Read,
+            Some((true, false)) => Self::Write,
+            _ => Self::Run,
+        }
+    }
+}
+/// Sample sets whose camera colour is kept: the Fit and its draft, and a 100% region.
+const KEPT: usize = 3;
+impl Kept {
+    /// Whether a submitted pass wrote it, so later renders read it.
+    #[cfg(test)]
+    pub(super) fn read_once(&self) -> bool {
+        self.written
+    }
+}
+/// Marks the kept colours written once the pass that writes them is submitted.
+pub(super) fn submitted(kept: &mut [Kept]) {
+    for k in kept.iter_mut().filter(|k| k.pending) {
+        k.pending = false;
+        k.written = true;
+    }
+}
+/// Map grids kept: a Fit, its draft and a 100% region share one per map base.
+const GRIDS: usize = 2;
 /// Uploaded sample sets kept, and their device memory budget.
 const UPLOADS: usize = 3;
 const UPLOAD_BUDGET: u64 = 512 << 20;
@@ -37,13 +153,7 @@ struct Uploaded {
 }
 impl Developer {
     pub(super) fn new(device: &wgpu::Device) -> Self {
-        let source =
-            crate::develop::pipeline::pixel_params::wgsl_prelude() + include_str!("develop.wgsl");
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Develop"),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
-        let entries: Vec<_> = (0..7)
+        let entries: Vec<_> = (0..9)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -52,7 +162,7 @@ impl Developer {
                         wgpu::BufferBindingType::Uniform
                     } else {
                         wgpu::BufferBindingType::Storage {
-                            read_only: binding != 2,
+                            read_only: !matches!(binding, 2 | 8),
                         }
                     },
                     has_dynamic_offset: false,
@@ -70,19 +180,102 @@ impl Developer {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
+        Self {
+            layout,
+            pipelines: Vec::new(),
+            pipeline_layout,
+            inputs: Default::default(),
+            grids: Vec::new(),
+            samples: Vec::new(),
+        }
+    }
+    /// Input `slot` (parameters, tables, weights, an empty grid or kept colour), at
+    /// least 16 bytes.
+    fn input_buffer(&mut self, device: &wgpu::Device, slot: usize) -> wgpu::Buffer {
+        self.sized(device, slot, 16)
+    }
+    /// Input `slot` with room for `size` bytes, grown when too small.
+    fn sized(&mut self, device: &wgpu::Device, slot: usize, size: u64) -> wgpu::Buffer {
+        let kept = &mut self.inputs[slot];
+        if kept.as_ref().is_none_or(|b| b.size() < size) {
+            *kept = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(
+                    [
+                        "Develop parameters",
+                        "Develop tables",
+                        "Mask weights",
+                        "No map",
+                        "No kept colour",
+                    ][slot],
+                ),
+                size: size.next_power_of_two(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        kept.clone().expect("created above")
+    }
+    /// Input `slot` (parameters, tables, weights) holding `data`: grown when too small,
+    /// and written through `queue`, which copies it before the passes of the next
+    /// submission and after those of earlier ones. Each develop pass is submitted
+    /// before the next is recorded.
+    fn input(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        slot: usize,
+        data: &[u8],
+    ) -> wgpu::Buffer {
+        let size = (data.len() as u64).next_multiple_of(4).max(16);
+        let buffer = self.sized(device, slot, size);
+        if !data.is_empty() {
+            queue.write_buffer(&buffer, 0, data);
+        }
+        buffer
+    }
+    /// The device's copy of `grid`, uploaded unless kept; without one, an empty buffer.
+    fn grid(
+        &mut self,
+        device: &wgpu::Device,
+        grid: Option<&crate::develop::local_tone::MapGrid>,
+    ) -> wgpu::Buffer {
+        let Some(grid) = grid else {
+            return self.input_buffer(device, 3);
+        };
+        let buffer = match self.grids.iter().position(|(g, _)| g.same(grid)) {
+            Some(i) => self.grids.remove(i).1,
+            None => device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Shadows/Highlights map"),
+                contents: bytemuck::cast_slice(&grid.values()),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        };
+        self.grids.insert(0, (grid.clone(), buffer.clone()));
+        self.grids.truncate(GRIDS);
+        buffer
+    }
+    /// The develop pipeline for `variant`, compiled on first use.
+    fn pipeline(&mut self, device: &wgpu::Device, variant: Variant) -> wgpu::ComputePipeline {
+        if let Some((_, p)) = self.pipelines.iter().find(|(v, _)| *v == variant) {
+            return p.clone();
+        }
+        let source = crate::develop::pipeline::pixel_params::wgsl_prelude()
+            + &variant.constants()
+            + include_str!("develop.wgsl");
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Develop"),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Develop"),
-            layout: Some(&pipeline_layout),
+            layout: Some(&self.pipeline_layout),
             module: &shader,
             entry_point: Some("develop"),
             compilation_options: Default::default(),
             cache: None,
         });
-        Self {
-            layout,
-            pipeline,
-            samples: Vec::new(),
-        }
+        self.pipelines.push((variant, pipeline.clone()));
+        pipeline
     }
 }
 /// Samples made on the device (`resident.rs`), and the develop stage's output.
@@ -184,30 +377,56 @@ impl Processor {
                 (u.pixels.clone(), u.positions.clone(), u.output.clone())
             }
         };
-        let storage = |label, data: &[f32]| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(label),
-                contents: bytemuck::cast_slice(data),
-                usage: wgpu::BufferUsages::STORAGE,
-            })
+        // 1 reads the kept camera colour, 2 computes and keeps it, 0 computes it.
+        let (mode, color) = match &params.color {
+            Some(recipe) if params.weights.is_empty() => {
+                let bytes = n * 12;
+                // The entry for these samples, most recently used first.
+                let entry = self
+                    .kept
+                    .iter()
+                    .position(|k| k.pixels == pixels && k.positions == positions)
+                    .map(|i| self.kept.remove(i))
+                    .filter(|k| k.color.size() >= bytes);
+                let step = Keep::step(entry.as_ref().map(|k| (k.recipe == *recipe, k.written)));
+                let color = match entry {
+                    Some(k) => k.color,
+                    None => device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Kept camera colour"),
+                        size: bytes,
+                        usage: wgpu::BufferUsages::STORAGE,
+                        mapped_at_creation: false,
+                    }),
+                };
+                self.kept.insert(
+                    0,
+                    Kept {
+                        pixels: pixels.clone(),
+                        positions: positions.clone(),
+                        recipe: recipe.clone(),
+                        color: color.clone(),
+                        written: step == Keep::Read,
+                        pending: step == Keep::Write,
+                    },
+                );
+                self.kept.truncate(KEPT);
+                (step as u32, Some(color))
+            }
+            _ => (0, None),
         };
-        let params_buffer = storage("Develop parameters", &params.params);
-        let tables = storage("Develop tables", &params.tables);
-        let weights = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Mask weights"),
-            contents: bytemuck::cast_slice(if params.weights.is_empty() {
-                &[0u32; 4]
-            } else {
-                &params.weights[..]
-            }),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
+        let color = color.unwrap_or_else(|| developer.input_buffer(device, 4));
+        let pipeline = developer.pipeline(device, Variant::of(params));
+        let queue = &self.queue;
+        let params_buffer = developer.input(device, queue, 0, bytemuck::cast_slice(&params.params));
+        let tables = developer.input(device, queue, 1, bytemuck::cast_slice(&params.tables));
+        let weights = developer.input(device, queue, 2, bytemuck::cast_slice(&params.weights));
+        let grid = developer.grid(device, params.grid.as_ref());
         let groups = (n as u32).div_ceil(GROUP);
         let max = device.limits().max_compute_workgroups_per_dimension;
         let (gx, gy) = (groups.min(max), groups.div_ceil(groups.min(max)));
         let size = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Develop size"),
-            contents: bytemuck::cast_slice(&[n as u32, gx, 0, 0]),
+            contents: bytemuck::cast_slice(&[n as u32, gx, mode, 0]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let entries: Vec<_> = [
@@ -218,6 +437,8 @@ impl Processor {
             &tables,
             &size,
             &weights,
+            &grid,
+            &color,
         ]
         .into_iter()
         .enumerate()
@@ -236,7 +457,7 @@ impl Processor {
                 label: Some("Develop pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&developer.pipeline);
+            pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(gx, gy, 1);
         }
@@ -293,6 +514,7 @@ impl Processor {
             if let Some(d) = &mut self.developer {
                 d.samples.clear();
             }
+            self.kept.clear();
             self.release_resident();
             anyhow::bail!("{error}");
         }
@@ -312,6 +534,7 @@ impl Processor {
         let uploaded = &self.developer.as_ref().unwrap().samples[0];
         encoder.copy_buffer_to_buffer(&uploaded.output, 0, &uploaded.staging, 0, n * 12);
         let submission = super::submit(&self.queue, encoder);
+        submitted(&mut self.kept);
         let (tx, rx) = mpsc::sync_channel(1);
         uploaded
             .staging
@@ -339,5 +562,63 @@ impl Processor {
             height: samples.height,
             pixels,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Keep, Variant};
+    use crate::develop::pipeline::pixel_params::PixelParams;
+
+    /// A render reads the kept camera colour only after a submitted pass wrote it for
+    /// the same recipe; a pass recorded but never submitted (a cancelled render) leaves
+    /// it to be written again.
+    #[test]
+    fn the_kept_colour_is_read_only_once_a_submitted_pass_wrote_it() {
+        // (same recipe as the entry, written): new samples, a new white balance, the
+        // second render of a recipe, then the third.
+        assert_eq!(Keep::step(None), Keep::Run);
+        assert_eq!(Keep::step(Some((false, true))), Keep::Run);
+        assert_eq!(Keep::step(Some((true, false))), Keep::Write);
+        assert_eq!(Keep::step(Some((true, true))), Keep::Read);
+    }
+
+    /// Each colour stage on its own compiles the colour code into the pass, a pass
+    /// without any leaves it out, and masks bring Dehaze with them.
+    #[test]
+    fn each_stage_selects_its_variant() {
+        let off = [
+            ("MIXER", &[-1.][..]),
+            ("POINT", &[-1., 0.]),
+            ("RGB", &[-1., 0., 0., 0., 0., 1.]),
+            ("GRADE", &[-1., 0.]),
+            ("ADJUST", &[0.]),
+        ];
+        let variant = |on: &[(&str, &[f32])], masks: bool| {
+            let mut values = off.to_vec();
+            values.extend_from_slice(on);
+            let mut p = PixelParams::with(&values);
+            if masks {
+                p.weights = vec![1];
+            }
+            Variant::of(&p)
+        };
+        let none = variant(&[], false);
+        assert!(!none.color && !none.local && !none.dehaze && !none.masks);
+        // A look's RGB table at zero amount changes nothing.
+        assert!(!variant(&[("RGB", &[0., 0., 0., 0., 0., 0.])], false).color);
+        for on in [
+            ("MIXER", &[0.][..]),
+            ("POINT", &[0., 0.]),
+            ("RGB", &[0., 0., 0., 0., 0., 1.]),
+            ("GRADE", &[0., 0.]),
+            ("ADJUST", &[1.]),
+        ] {
+            assert!(variant(&[on], false).color, "{}", on.0);
+        }
+        assert!(variant(&[("LOCAL", &[1.])], false).local);
+        assert!(variant(&[("DEHAZE", &[0.3, 0.])], false).dehaze);
+        let masked = variant(&[], true);
+        assert!(masked.masks && masked.dehaze);
     }
 }

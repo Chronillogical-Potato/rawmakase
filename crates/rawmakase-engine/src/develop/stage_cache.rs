@@ -129,6 +129,11 @@ struct StageRecipes {
 /// Splits `r` into what each cached stage reads. `Recipe` and `Effects` are taken
 /// apart without `..`, so adding a field to either is a compile error here until it is
 /// placed: a stage that reads a field it does not key on would reuse stale results.
+/// The recipe as the camera colour (S1: white balance, the profile's matrix and
+/// HueSatMap, Camera Calibration) reads it: the measures' fields, which hold them.
+pub(crate) fn color_recipe(r: &Recipe) -> Recipe {
+    stage_recipes(r).measures
+}
 fn stage_recipes(r: &Recipe) -> StageRecipes {
     let Recipe {
         lens_builtin,

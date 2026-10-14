@@ -1079,6 +1079,8 @@ mod tests {
             params: Vec::new(),
             tables: Vec::new(),
             weights: Vec::new(),
+            grid: None,
+            color: None,
         };
         // Over the develop memory budget, then over the device's buffer limits; their
         // size alone, as the region is refused before its pixels are read.

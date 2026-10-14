@@ -987,10 +987,24 @@ fn shaders_are_valid_wgsl() {
         valid::{Capabilities, ValidationFlags, Validator},
     };
     let prelude = crate::develop::pipeline::pixel_params::wgsl_prelude();
-    let modules: [(&str, String, &[&str]); 5] = [
+    // Every develop variant: each leaves out different code.
+    let lean = super::develop::Variant {
+        masks: false,
+        color: false,
+        local: false,
+        dehaze: false,
+    };
+    let modules: [(&str, String, &[&str]); 6] = [
         (
             "develop.wgsl",
-            prelude + include_str!("develop.wgsl"),
+            prelude.clone()
+                + &super::develop::Variant::FULL.constants()
+                + include_str!("develop.wgsl"),
+            &["develop"],
+        ),
+        (
+            "develop.wgsl, lean variant",
+            prelude + &lean.constants() + include_str!("develop.wgsl"),
             &["develop"],
         ),
         (
@@ -1049,4 +1063,100 @@ fn previews_submit_only_once_the_window_surface_is_reconfigured() {
     drop(surface);
     rx.recv_timeout(Duration::from_secs(10)).unwrap();
     preview.join().unwrap();
+}
+
+/// While the Basic sliders move, the Contrast pivot and the Shadows/Highlights map's
+/// base are kept with the photo's measures, the map's grids on the device, and the
+/// develop pass keeps its camera colour: every frame is the one a renderer that
+/// measures and builds everything again presents.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn kept_stages_present_the_frames_of_a_fresh_renderer() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::{PreviewRenderer, quality::Output},
+    };
+    use std::sync::Arc;
+    let (w, h) = (157, 103);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let image = Arc::new(CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let v = 0.2 + 0.25 * (x * 0.17).sin() * (y * 0.11).cos() + 0.15 * (x / w as f32);
+                [v * 1.3, v, v * 0.8]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    let profile = CameraProfile::camera_matrix_default(&metadata)
+        .unwrap()
+        .with_test_tables();
+    let mut recipe = Recipe {
+        profile: Some(Arc::new(profile)),
+        contrast: 0.3,
+        highlights: -0.3,
+        ..Default::default()
+    };
+    let display = super::Display {
+        slot: super::Slot::Whole,
+        clipping: crate::rendered::ClipOverlay::NONE,
+        monitor: None,
+        navigator: None,
+        thumbnail: None,
+        samples: false,
+        drawn: Vec::new(),
+    };
+    let cancel = AtomicBool::new(false);
+    let mut warm = PreviewRenderer::with_gpu();
+    let edits: [&dyn Fn(&mut Recipe); 12] = [
+        &|_| {},
+        &|_| {},
+        &|r| r.contrast = -0.4,
+        &|r| r.whites = 0.3,
+        &|r| r.blacks = -0.2,
+        &|r| r.shadows = 0.4,
+        &|r| r.highlights = -0.6,
+        &|r| r.exposure = 0.5,
+        &|r| r.shadows = -0.3,
+        &|r| r.effects.dehaze = 0.3,
+        &|r| r.wb = [2.2, 1., 1.7],
+        &|r| r.exposure = 0.,
+    ];
+    let frame = |renderer: &mut PreviewRenderer, r: &Recipe| -> Result<Vec<u8>> {
+        let Output::Frame(frame) =
+            renderer.render_to(&image, r, 90, None, &cancel, Some(&display))?
+        else {
+            panic!("{:?}", renderer.fallback_reason());
+        };
+        read_texture(renderer.gpu().unwrap(), &frame.texture)
+    };
+    for edit in edits {
+        edit(&mut recipe);
+        let kept = frame(&mut warm, &recipe)?;
+        let fresh = frame(&mut PreviewRenderer::with_gpu(), &recipe)?;
+        assert!(kept == fresh, "{recipe:?}");
+    }
+    // The camera colour was kept and read, not computed per frame.
+    let gpu = warm.gpu().unwrap();
+    assert!(gpu.kept.iter().any(|k| k.read_once()));
+    Ok(())
 }

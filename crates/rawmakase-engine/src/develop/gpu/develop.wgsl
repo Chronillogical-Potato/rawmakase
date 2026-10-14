@@ -11,6 +11,11 @@
 @group(0) @binding(5) var<uniform> size: vec4<u32>;
 // Mask weights: one byte per mask, four per word, `P_MASK_WORDS` words per pixel.
 @group(0) @binding(6) var<storage, read> weights: array<u32>;
+// The Shadows/Highlights map's grids (`local_tone::MapGrid`), kept on the device per map.
+@group(0) @binding(7) var<storage, read> grid: array<f32>;
+// The camera colour per sample, kept between renders that change only the stages after
+// it: `size.z` 1 reads it, 2 computes and writes it, 0 neither (see `Kept`).
+@group(0) @binding(8) var<storage, read_write> kept: array<f32>;
 
 const TO_2020 = mat3x3<f32>(
     vec3(0.627404, 0.069097, 0.016391),
@@ -57,6 +62,9 @@ var<private> delta: array<f32, 18>;
 var<private> masked: bool;
 fn load_delta(i: u32) {
     masked = false;
+    if !V_MASKS {
+        return;
+    }
     for (var k = 0u; k < LOCAL_LEN; k++) {
         delta[k] = 0.0;
     }
@@ -385,7 +393,7 @@ fn scene_global(q: vec3<f32>) -> vec3<f32> {
     }
     let black = offset(P_SCENE_DEFAULT_BLACK);
     let shadow_black = offset(P_SCENE_SHADOW_BLACK);
-    if shadow_black >= 0 && masked && delta[L_SHADOWS] != 0.0 {
+    if shadow_black >= 0 && (V_MASKS && masked) && delta[L_SHADOWS] != 0.0 {
         let f = clamp(p(P_SCENE_SHADOW_BLACK + 1u) + delta[L_SHADOWS], 0.0, 1.0) * 10.0;
         let i = min(i32(f), 9);
         let a = shadow_black + i * i32(SCENE_Y.z);
@@ -543,9 +551,9 @@ fn local_gain(pos: vec2<f32>, lum: f32) -> f32 {
     let ty = fy - f32(iy);
     var coef = vec2(0.0);
     for (var k = 0u; k < 2u; k++) {
-        let base = offset(P_LOCAL_A + k);
-        let top = table(base + i32(iy * w + ix)) * (1.0 - tx) + table(base + i32(iy * w + jx)) * tx;
-        let bottom = table(base + i32(jy * w + ix)) * (1.0 - tx) + table(base + i32(jy * w + jx)) * tx;
+        let base = u32(offset(P_LOCAL_A + k));
+        let top = grid[base + iy * w + ix] * (1.0 - tx) + grid[base + iy * w + jx] * tx;
+        let bottom = grid[base + jy * w + ix] * (1.0 - tx) + grid[base + jy * w + jx] * tx;
         coef[k] = top * (1.0 - ty) + bottom * ty;
     }
     let base = coef.x * log2(max(lum, LOCAL_FLOOR)) + coef.y;
@@ -561,11 +569,12 @@ fn local_gain(pos: vec2<f32>, lum: f32) -> f32 {
     var region = 0.0;
     let r = offset(P_LOCAL_REGION);
     if r >= 0 {
-        let top = table(r + i32(iy * w + ix)) * (1.0 - tx) + table(r + i32(iy * w + jx)) * tx;
-        let bottom = table(r + i32(jy * w + ix)) * (1.0 - tx) + table(r + i32(jy * w + jx)) * tx;
+        let g = u32(r);
+        let top = grid[g + iy * w + ix] * (1.0 - tx) + grid[g + iy * w + jx] * tx;
+        let bottom = grid[g + jy * w + ix] * (1.0 - tx) + grid[g + jy * w + jx] * tx;
         region = top * (1.0 - ty) + bottom * ty;
     }
-    if masked && (delta[L_SHADOWS] != 0.0 || delta[L_HIGHLIGHTS] != 0.0) {
+    if (V_MASKS && masked) && (delta[L_SHADOWS] != 0.0 || delta[L_HIGHLIGHTS] != 0.0) {
         let s = p(P_GLOBAL_SH) + delta[L_SHADOWS];
         let h = p(P_GLOBAL_SH + 1u) + delta[L_HIGHLIGHTS];
         var lift = 0.0;
@@ -667,7 +676,7 @@ fn reference_curves(rgb: vec3<f32>) -> vec3<f32> {
         let hi = max(max(max(q.x, q.y), q.z), 0.0);
         q = rgb_tone_values(q, lut(basic, 1024u, lo), lut(basic, 1024u, hi), lo, hi);
     }
-    if masked && delta[L_CONTRAST] != 0.0 {
+    if (V_MASKS && masked) && delta[L_CONTRAST] != 0.0 {
         q = clamp(q, vec3(0.0), vec3(1.0));
         let lo = min(min(q.x, q.y), q.z);
         let hi = max(max(max(q.x, q.y), q.z), 0.0);
@@ -1010,7 +1019,7 @@ fn adjust(lab_in: vec3<f32>) -> vec3<f32> {
 // S1: scene_color.
 fn scene_color(sample: vec3<f32>) -> vec3<f32> {
     var wb = vec3(1.0);
-    if masked {
+    if (V_MASKS && masked) {
         let temp = vec3(p(P_LOCAL_WB), p(P_LOCAL_WB + 1u), p(P_LOCAL_WB + 2u));
         let tint = vec3(p(P_LOCAL_WB + 3u), p(P_LOCAL_WB + 4u), p(P_LOCAL_WB + 5u));
         wb = exp2(delta[L_TEMPERATURE] * temp + delta[L_TINT] * tint);
@@ -1026,7 +1035,7 @@ fn scene_color(sample: vec3<f32>) -> vec3<f32> {
 // S2: exposure_stage, returning linear ProPhoto.
 fn exposure_stage(color: vec3<f32>) -> vec3<f32> {
     var wide = TO_2020 * color;
-    if masked {
+    if (V_MASKS && masked) {
         let exposure = exp2(delta[L_EXPOSURE]);
         let tint = exp2(vec3(delta[L_COLOR], delta[L_COLOR + 1u], delta[L_COLOR + 2u]));
         wide = wide * p(P_EXPOSURE) * exposure * tint;
@@ -1038,12 +1047,15 @@ fn exposure_stage(color: vec3<f32>) -> vec3<f32> {
 // S3: scene_stage.
 fn scene_stage(pro_in: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     var pro = pro_in;
-    if p(P_LOCAL) != 0.0 {
+    if V_LOCAL && p(P_LOCAL) != 0.0 {
         pro *= local_gain(pos, dot(pro, vec3(0.2880402, 0.7118741, 0.0000857)));
     }
     var dehaze = p(P_DEHAZE);
-    if masked {
+    if (V_MASKS && masked) {
         dehaze += delta[L_DEHAZE];
+    }
+    if !V_DEHAZE {
+        dehaze = 0.0;
     }
     if dehaze > 0.0 {
         pro = dehaze_positive(pro, dehaze, pos);
@@ -1056,19 +1068,30 @@ fn scene_stage(pro_in: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
         }
     }
     let toned = scene_global(pro);
-    if masked && (delta[L_WHITES] != 0.0 || delta[L_BLACKS] != 0.0) {
+    if (V_MASKS && masked) && (delta[L_WHITES] != 0.0 || delta[L_BLACKS] != 0.0) {
         return scene_mask(toned, delta[L_WHITES], delta[L_BLACKS]);
     }
     return toned;
 }
-fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
+fn process_pixel(i: u32, pos: vec2<f32>) -> vec3<f32> {
     point_selection = -1.0;
-    let scene = scene_stage(exposure_stage(scene_color(sample)), pos);
+    var color: vec3<f32>;
+    if size.z == 1u {
+        color = vec3(kept[i * 3u], kept[i * 3u + 1u], kept[i * 3u + 2u]);
+    } else {
+        color = scene_color(vec3(samples[i * 3u], samples[i * 3u + 1u], samples[i * 3u + 2u]));
+        if size.z == 2u {
+            kept[i * 3u] = color.x;
+            kept[i * 3u + 1u] = color.y;
+            kept[i * 3u + 2u] = color.z;
+        }
+    }
+    let scene = scene_stage(exposure_stage(color), pos);
     // S4: profile_stage.
     var rgb = profile_finish(scene);
     // color_stage
     rgb = reference_curves(rgb);
-    if offset(P_MIXER) >= 0 {
+    if V_COLOR && offset(P_MIXER) >= 0 {
         // Saturation below −50: a fade to the luminance the color has
         // through the other sliders.
         var source = rgb;
@@ -1079,17 +1102,17 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
         rgb = mixer(rgb, offset(P_MIXER));
         rgb = mix(rgb, vec3(y), p(P_SATURATION_GRAY));
     }
-    if offset(P_POINT) >= 0 {
+    if V_COLOR && offset(P_POINT) >= 0 {
         rgb = point_colors(rgb);
     }
-    if offset(P_RGB) >= 0 && p(P_RGB + 5u) != 0.0 {
+    if V_COLOR && offset(P_RGB) >= 0 && p(P_RGB + 5u) != 0.0 {
         rgb = rgb_table(rgb);
     }
-    if offset(P_GRADE) >= 0 {
+    if V_COLOR && offset(P_GRADE) >= 0 {
         rgb = grade(rgb);
     }
     var lab = srgb_to_lab(rgb);
-    if masked && (delta[L_HUE] != 0.0 || delta[L_SATURATION] != 0.0) {
+    if (V_MASKS && masked) && (delta[L_HUE] != 0.0 || delta[L_SATURATION] != 0.0) {
         let angle = radians(delta[L_HUE]);
         let k = max(1.0 + delta[L_SATURATION], 0.0);
         let a = lab.y;
@@ -1097,7 +1120,7 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
         lab.y = (a * cos(angle) - b * sin(angle)) * k;
         lab.z = (a * sin(angle) + b * cos(angle)) * k;
     }
-    if p(P_ADJUST) != 0.0 {
+    if V_COLOR && p(P_ADJUST) != 0.0 {
         lab = adjust(lab);
     } else {
         lab.x = clamp(lab.x, 0.0, 1.0);
@@ -1108,7 +1131,7 @@ fn process_pixel(sample: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
     for (var k = 0; k < 3; k++) {
         out[k] = clamp(srgb_encode(clamp(rgb[k], 0.0, 1.0)), 0.0, 1.0);
     }
-    if point_selection >= 0.0 {
+    if V_COLOR && point_selection >= 0.0 {
         out = visualize(out);
     }
     return out;
@@ -1125,7 +1148,7 @@ fn develop(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_in
     // Positions outside the photo are uploaded as OUTSIDE; Lightroom shows white there.
     if pos.x > OUTSIDE {
         load_delta(i);
-        out = process_pixel(vec3(samples[i * 3u], samples[i * 3u + 1u], samples[i * 3u + 2u]), pos);
+        out = process_pixel(i, pos);
     }
     output[i * 3u] = out.x;
     output[i * 3u + 1u] = out.y;
