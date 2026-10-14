@@ -1,10 +1,18 @@
-"""Fit a rendered file's Temp/Tint tables (model/white_balance.rs: RENDERED_TEMPERATURE,
-RENDERED_TINT) from per-file ProPhoto log2 gains that reproduce Lightroom renders of
-synthetic JPEG charts. Usage: rendered-white-balance.py FITS.json [FITS.json ...]
-Each FITS.json maps a file name ending in `__temp+25.jpg`, `__tint-50.jpg` or
-`__temp+25_tint-50.jpg` to its [r, g, b] log2 gains (smallest 0). Prints both tables
-and the combined model's error on the Temp x Tint files. The renders themselves are
-not part of the repository."""
+"""Measure a rendered file's Temp/Tint tables (model/white_balance.rs: RENDERED_TEMPERATURE,
+RENDERED_TINT) from Lightroom renders of synthetic JPEG charts.
+Usage: rendered-white-balance.py GAINS.json [GAINS.json ...]
+Each GAINS.json maps a file name ending in `__temp+25.jpg`, `__tint-50.jpg` or
+`__temp+25_tint-50.jpg` to its [r, g, b] ProPhoto log2 gains: Lightroom's export over
+the file, each through F⁻¹ (develop::rendered::scene_from_rendered), averaged over the
+chart's greys whose export channels are all between 0.002 and 0.5 (brighter greys reach
+Lightroom's highlight compression). The renders themselves are not part of the
+repository.
+
+Lightroom treats the pseudo-scene as a camera whose RGB is linear ProPhoto, as the DNG
+SDK would: the gains are the file's D50 white Bradford-adapted from the white Temp and
+Tint name to D50, scaled by that white's largest ProPhoto channel. Each file's gains
+therefore give its white; this prints that white as a DNG reciprocal temperature and
+tint, both tables, and the tables' error against every file's gains."""
 import json, re, sys
 from pathlib import Path
 import numpy as np
@@ -12,62 +20,60 @@ ROOT = Path(__file__).resolve().parents[2]
 src = (ROOT / 'crates/rawmakase-model/src/camera_profiles/temperature.rs').read_text()
 T = np.array([[float(v) for v in r] for r in re.findall(r'\[([-\d.]+), ([-\d.]+), ([-\d.]+), ([-\d.]+)\]', src.split('const TABLE')[1].split('= [',1)[1].split('];')[0])])
 XYZ_TO_PRO = np.array([[1.345943, -0.255608, -0.051111], [-0.544599, 1.508167, 0.020535], [0, 0, 1.211813]])
-def xy(mired, tint):  # temperature::xy with the reciprocal given directly (no clamp)
-    r = mired
-    i = next((i for i in range(30) if r < T[i + 1][0]), 29)
-    a, b = T[i], T[i + 1]; f = (b[0] - r) / (b[0] - a[0])
+BRADFORD = np.array([[0.8951, 0.2664, -0.1614], [-0.7502, 1.7135, 0.0367], [0.0389, -0.0685, 1.0296]])
+D50 = np.linalg.solve(XYZ_TO_PRO, np.ones(3))
+def xy(mired, tint):  # temperature::xy_reciprocal
+    i = next((i for i in range(30) if mired < T[i + 1][0]), 29)
+    a, b = T[i], T[i + 1]; f = (b[0] - mired) / (b[0] - a[0])
     d = lambda s: np.array([1, s]) / np.sqrt(1 + s * s)
-    d1, d2 = d(a[3]), d(b[3]); du, dv = d1 * f + d2 * (1 - f); L = np.hypot(du, dv)
+    du, dv = d(a[3]) * f + d(b[3]) * (1 - f); L = np.hypot(du, dv)
     off = tint / -3000.
     u = a[1] * f + b[1] * (1 - f) + off * du / L; v = a[2] * f + b[2] * (1 - f) + off * dv / L
-    den = u - 4 * v + 2; return 1.5 * u / den, v / den
-def neutral(m, t):
-    x, y = xy(m, t); return XYZ_TO_PRO @ np.array([x / y, 1, (1 - x - y) / y])
-REF = neutral(200., 0.)
-def gains(m, t):
-    g = np.log2(REF / neutral(m, t)); return g - g.min()
-def fit_mt(f, tint_fixed=None):
-    f = np.array(f); best = (1e9, 0, 0)
-    ms = np.arange(0, 560, 0.5)
-    ts = [tint_fixed] if tint_fixed is not None else np.arange(-150, 150.5, 0.5)
-    for t in ts:
-        e = [np.abs(gains(m, t) - f).sum() for m in ms]; i = int(np.argmin(e))
-        if e[i] < best[0]: best = (e[i], ms[i], t)
-    return best
-d = {}
-FILES = sys.argv[1:]
-for fn in FILES:
-    for k, v in json.load(open(fn)).items(): d[(fn, k)] = v
-def pick(kind, val):
-    for fn in reversed(FILES):
-        for (f, k), v in d.items():
-            if f == fn and re.search(re.escape(f'__{kind}{val:+d}.jpg') + '$', k): return v
-temp = {}
-for s in (-100, -90, -75, -60, -50, -35, -25, -15, -10, -5, 5, 10, 15, 25, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 90, 100):
-    g = pick('temp', s)
-    if g is None: continue
-    # tint drift is fitted too, then mired refined with it
-    e, m, t = fit_mt(g)
-    temp[s] = (m - 200., t, e)
-tint = {}
-for n in (-100, -75, -50, -35, -25, -10, 10, 25, 35, 50, 75, 100):
-    g = pick('tint', n)
-    if g is None: continue
-    best = min(((np.abs(gains(200., t) - np.array(g)).sum(), t) for t in np.arange(-200, 200.5, 0.25)))
-    tint[n] = (best[1], best[0])
-print('TEMP  s: mired_offset tint_drift resid'); [print(f'{s:+4d}: {m:+7.1f} {t:+6.1f} {e:.3f}') for s, (m, t, e) in sorted(temp.items())]
-print('TINT  n: dng_tint resid'); [print(f'{n:+4d}: {t:+7.2f} {e:.3f}') for n, (t, e) in sorted(tint.items())]
-# validate the grid: combine tables, compare with fitted gains of combo files
-def interp(tab, x):
-    ks = sorted(tab); xs = [0] + ks; 
-    pts = sorted([(0, tab0 := ([0, 0] if isinstance(next(iter(tab.values())), list) else 0))] + [(k, tab[k]) for k in ks])
-    X = [p[0] for p in pts]; Y = np.array([p[1] for p in pts], dtype=float)
-    return np.array([np.interp(x, X, Y[:, j]) for j in range(Y.shape[1])]) if Y.ndim > 1 else np.interp(x, X, Y)
-tt = {s: [m, t] for s, (m, t, e) in temp.items()}; nn = {n: t for n, (t, e) in tint.items()}
-print('GRID check (sum |log2| error, combined model)')
-for (fn, k), g in sorted(d.items()):
-    mm = re.search(r'__temp([-+]\d+)_tint([-+]\d+)\.jpg$', k)
-    if not mm: continue
-    s, n = int(mm.group(1)), int(mm.group(2))
-    mo, drift = interp(tt, s); tn = interp(nn, n)
-    print(f'  {k:34s} {np.abs(gains(200 + mo, drift + tn) - np.array(g)).sum():.3f}')
+    den = u - 4 * v + 2; return np.array([1.5 * u / den, v / den])
+def white_xyz(mired, tint):
+    x, y = xy(mired, tint); return np.array([x / y, 1, (1 - x - y) / y])
+def gains(white):  # white_balance::camera_white_balance, log2
+    cone = BRADFORD @ white; d50 = BRADFORD @ D50
+    adapted = np.linalg.solve(BRADFORD, d50 * d50 / cone)
+    return np.log2((XYZ_TO_PRO @ white).max() * (XYZ_TO_PRO @ adapted))
+def white_of(g):  # the white whose gains have the shape of g
+    cone = BRADFORD @ np.linalg.solve(XYZ_TO_PRO, 2. ** np.asarray(g))
+    return np.linalg.solve(BRADFORD, (BRADFORD @ D50) ** 2 / cone)
+def mired_tint(white):  # nearest DNG reciprocal temperature and tint
+    target = white[:2] / white.sum()
+    err = lambda p: np.sum((xy(*p) - target) ** 2)
+    p = min(((m, t) for m in np.arange(10, 600, 2.) for t in np.arange(-200, 200, 2.)), key=err)
+    p, step = np.array(p, float), np.array([1., 1.])
+    while step.max() > 1e-3:
+        moved = False
+        for i in range(2):
+            for s in (-1, 1):
+                q = p.copy(); q[i] += s * step[i]
+                if err(q) < err(p): p, moved = q, True
+        if not moved: step /= 2
+    return p
+files = {}
+for fn in sys.argv[1:]:
+    files.update(json.load(open(fn)))
+def setting(name, kind):
+    m = re.search(rf'{kind}([-+]\d+)', name); return int(m.group(1)) if m else 0
+measured = {k: (setting(k, 'temp'), setting(k, 'tint'), mired_tint(white_of(g))) for k, g in files.items()}
+d50_mired, d50_tint = mired_tint(D50)
+temp, tint = {0: [(d50_mired, d50_tint)]}, {0: [d50_tint]}
+for s, n, (m, t) in measured.values():
+    if n == 0 and s: temp.setdefault(s, []).append((m, t))
+    if s == 0 and n: tint.setdefault(n, []).append(t)
+temp = {s: (np.mean([m for m, _ in v]), np.mean([t for _, t in v]) - d50_tint) for s, v in temp.items()}
+tint = {n: np.mean(v) for n, v in tint.items()}
+print(f'D50: mired {d50_mired:.2f}, DNG tint {d50_tint:.2f}')
+print('RENDERED_TEMPERATURE [Temp, mired, tint drift]')
+for s in sorted(temp): print(f'    [{s}., {temp[s][0]:.1f}, {temp[s][1] if abs(temp[s][1]) >= 0.2 else 0.:.1f}],')
+print('RENDERED_TINT [Tint, DNG tint]')
+for n in sorted(tint): print(f'    [{n}., {tint[n]:.2f}],')
+def table_gains(s, n):
+    ks = sorted(temp); m = np.interp(s, ks, [temp[k][0] for k in ks]); drift = np.interp(s, ks, [temp[k][1] for k in ks])
+    kn = sorted(tint); t = np.interp(n, kn, [tint[k] for k in kn])
+    return gains(white_xyz(m, t + drift)) - gains(white_xyz(d50_mired, d50_tint))
+print('Tables against each file (largest |log2| error per channel)')
+for k, (s, n, (m, t)) in sorted(measured.items(), key=lambda kv: kv[1][:2]):
+    print(f'  {k:36s} mired {m:6.1f} tint {t:+7.2f}  {np.abs(table_gains(s, n) - np.array(files[k])).max():.3f}')

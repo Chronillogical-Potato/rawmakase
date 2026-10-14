@@ -112,10 +112,11 @@ photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 o
 Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance:
 `model::white_balance::rendered_gains`. Known gaps: Highlights/Shadows on very dark or
 bright files, Saturation, Vibrance, Clarity, Dehaze, fully saturated colours at large
-Exposure, and cooling from about Temp −35, where greys are off too (mean 12.8/20.8/63.4
-/255 at Temp −35/−50/−75: Lightroom also lifts red, which gains normalised so the smallest
-is 1 miss). The cool+magenta corner is unmeasured; there the white is bounded so recipes
-stay valid.
+Exposure, and coloured patches under strong cooling (greys are within 0.6/3.2/3.1/255 on
+average at Temp −35/−50/−75, but colours' 95th percentile is about 30–50/255). Strong
+cooling with strong magenta (Temp −50 with Tint +50, say) is barely measured: there
+Lightroom stays nearer neutral than the tables (greys about 10/255 off), and past it the
+white is bounded so recipes stay valid.
 
 ### Whites and Blacks
 

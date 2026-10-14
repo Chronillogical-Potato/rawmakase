@@ -100,63 +100,59 @@ impl NamedWhiteBalance {
     }
 }
 
-/// Lightroom's Temp for a rendered file (`IncrementalTemperature`, −100…100) as an
-/// offset in reciprocal temperature from 5000 K (200 mired) and a DNG tint drift:
-/// `[Temp, mired offset, tint drift]`. Fitted in the DNG SDK's temperature model to
-/// the ProPhoto gains that reproduce Lightroom Classic 15.6 (Camera Raw 18.7) renders
-/// of synthetic JPEG charts (`scripts/corpus/rendered-white-balance.py`). Past +50
-/// Lightroom keeps warming beyond the Planckian locus, which the drift carries; the
-/// cool side's drift fitted to noise (±1.5) and is 0. Cooling matches Lightroom on
-/// greys only to about −35: past it Lightroom also lifts red, which gains scaled so
-/// the smallest is 1 miss. The cool magenta corner (Temp −100 with Tint of +25 or
-/// more, Temp −50 with Tint +50, say) is unmeasured; there `prophoto_white` bounds
-/// each channel of the white at 5% of its largest and `rendered_gains` caps each
-/// gain at 64, so recipes stay valid.
+/// Lightroom's Temp for a rendered file (`IncrementalTemperature`, −100…100) as the
+/// DNG SDK's reciprocal temperature of the white it names and a drift of its DNG
+/// tint: `[Temp, mired, tint drift]`. Measured on Lightroom Classic 15.6 (Camera Raw
+/// 18.7) renders of synthetic JPEG charts, as the white [`camera_white_balance`] needs
+/// to reproduce them (`scripts/corpus/rendered-white-balance.py`). At 0 it is the
+/// file's D50 white; Temp moves only the temperature, except a drift of a few units of
+/// tint at the coldest Temp.
 const RENDERED_TEMPERATURE: [[f32; 3]; 27] = [
-    [-100., 359.5, 0.],
-    [-90., 304.5, 0.],
-    [-75., 244.5, 0.],
-    [-60., 185.5, 0.],
-    [-50., 146., 0.],
-    [-35., 100., 0.],
-    [-25., 68.5, 0.],
-    [-15., 40., 0.],
-    [-10., 26., 0.],
-    [-5., 13., 0.],
-    [0., 0., 0.],
-    [5., -13., 0.5],
-    [10., -25.5, 0.5],
-    [15., -38.5, 2.],
-    [25., -63., 5.5],
-    [35., -87.5, 10.],
-    [40., -99.5, 13.],
-    [45., -110.5, 15.5],
-    [50., -119.5, 17.5],
-    [55., -133., 21.5],
-    [60., -142.5, 22.],
-    [65., -151.5, 22.],
-    [70., -160., 22.],
-    [75., -168.5, 22.],
-    [80., -177.5, 22.],
-    [90., -193.5, 22.],
-    [100., -200., 22.],
+    [-100., 523.2, -2.3],
+    [-90., 470., -0.7],
+    [-75., 415.6, -0.3],
+    [-60., 367.7, -0.3],
+    [-50., 336.1, 0.],
+    [-35., 291.7, 0.],
+    [-25., 263.8, 0.],
+    [-15., 237.3, 0.],
+    [-10., 224.6, 0.],
+    [-5., 212.1, 0.],
+    [0., 199.9, 0.],
+    [5., 188.1, 0.],
+    [10., 176.6, 0.],
+    [15., 165.3, 0.],
+    [25., 143.7, 0.],
+    [35., 123.3, 0.],
+    [40., 113.5, 0.],
+    [45., 104., 0.],
+    [50., 94.7, 0.],
+    [55., 85.8, 0.],
+    [60., 77.1, 0.],
+    [65., 68.8, 0.],
+    [70., 60.7, 0.],
+    [75., 52.9, 0.],
+    [80., 45.3, 0.],
+    [90., 31.1, 0.],
+    [100., 17.9, 0.],
 ];
-/// Lightroom's Tint for a rendered file (`IncrementalTint`) as a DNG tint at 5000 K,
-/// fitted as [`RENDERED_TEMPERATURE`]: `[Tint, DNG tint]`.
+/// Lightroom's Tint for a rendered file (`IncrementalTint`) as the DNG tint of the
+/// white it names, measured as [`RENDERED_TEMPERATURE`] (Tint moves only the tint):
+/// `[Tint, DNG tint]`.
 const RENDERED_TINT: [[f32; 2]; 13] = [
-    [-100., -166.],
-    [-75., -106.],
-    [-50., -59.],
-    [-35., -36.75],
-    [-25., -24.25],
-    [-10., -8.5],
-    [0., 0.],
-    [10., 8.25],
-    [25., 23.75],
-    [35., 36.],
-    [50., 57.],
-    [75., 99.5],
-    [100., 151.],
+    [-100., -151.11],
+    [-75., -93.38],
+    [-50., -48.06],
+    [-35., -26.39],
+    [-25., -14.05],
+    [-10., 1.35],
+    [0., 9.6],
+    [10., 17.81],
+    [25., 32.83],
+    [35., 44.5],
+    [50., 64.6],
+    [75., 104.74],
+    [100., 154.41],
 ];
 
 /// `rows` (sorted by their first value) at `x`, linearly between rows, clamped to the ends.
@@ -171,36 +167,48 @@ fn interpolate<const K: usize>(rows: &[[f32; K]], x: f32) -> [f32; K] {
     std::array::from_fn(|k| a[k] + (b[k] - a[k]) * t)
 }
 
-/// The linear ProPhoto RGB of the DNG temperature/tint white at `mired`, `tint`,
-/// each channel at least 5% of the white's largest. Strong cooling with magenta
-/// takes the white towards or outside ProPhoto's gamut, its blue or red towards 0
-/// or below; that corner is unmeasured, and the bound keeps its gains finite and
-/// positive (and with the 64 cap in [`rendered_gains`], within what a recipe
-/// allows). Every measured white has its smallest channel far above the bound.
-fn prophoto_white(mired: f32, tint: f32) -> [f32; 3] {
+/// The Bradford cone response matrix, from XYZ.
+const BRADFORD: [[f32; 3]; 3] = [
+    [0.8951, 0.2664, -0.1614],
+    [-0.7502, 1.7135, 0.0367],
+    [0.0389, -0.0685, 1.0296],
+];
+
+/// The ProPhoto channel gains the DNG SDK gives a camera whose RGB is linear ProPhoto
+/// (Lightroom's view of a rendered file's pseudo-scene) under the white at `mired`,
+/// `tint`: the file's D50 white, Bradford-adapted from that white to D50, and scaled
+/// by that white's largest ProPhoto channel, as the SDK normalises a camera neutral.
+/// Strong cooling with magenta takes the white outside real colours; each of its cone
+/// responses is kept at least 4% of the largest, below every measured white's (the
+/// coldest, Temp −100, has 4.7%), so the gains stay finite and positive.
+fn camera_white_balance(mired: f32, tint: f32) -> [f32; 3] {
+    use crate::camera_profiles::XYZ_TO_PRO;
+    use crate::color::{inverse, mul};
     let [x, y] = crate::camera_profiles::temperature::xy_reciprocal(mired, tint);
-    let white = crate::color::mul(
-        crate::camera_profiles::XYZ_TO_PRO,
-        [x / y, 1., (1. - x - y) / y],
-    );
-    let largest = white.into_iter().fold(f32::NEG_INFINITY, f32::max);
-    white.map(|v| v.max(0.05 * largest))
+    let cone = mul(BRADFORD, [x / y, 1., (1. - x - y) / y]);
+    let largest = cone.into_iter().fold(f32::NEG_INFINITY, f32::max);
+    let cone = cone.map(|v| v.max(0.04 * largest));
+    let to_xyz = inverse(BRADFORD);
+    let d50 = mul(BRADFORD, mul(inverse(XYZ_TO_PRO), [1.; 3]));
+    let adapted = mul(to_xyz, std::array::from_fn(|c| d50[c] * d50[c] / cone[c]));
+    let scale = mul(XYZ_TO_PRO, mul(to_xyz, cone))
+        .into_iter()
+        .fold(f32::NEG_INFINITY, f32::max);
+    mul(XYZ_TO_PRO, adapted).map(|v| v * scale)
 }
 
 /// The ProPhoto channel gains of a rendered file's Temp and Tint (−100…100), as
 /// Lightroom applies them to the scene its rendering is of: a camera white balance
-/// from the file's D50 white to the white Temp and Tint name, scaled so the smallest
-/// gain is 1 — so the file's white stays white and the photo brightens, as in
-/// Lightroom — and each at most 64 (the unmeasured cool magenta corner reaches it).
-/// Exactly `[1, 1, 1]` at 0, 0.
+/// from the file's D50 white to the white Temp and Tint name ([`camera_white_balance`]),
+/// which brightens the photo as Lightroom does. Exactly `[1, 1, 1]` at 0, 0.
 pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
-    let [_, offset, drift] = interpolate(&RENDERED_TEMPERATURE, temperature);
-    let [_, tint] = interpolate(&RENDERED_TINT, tint);
-    let file = prophoto_white(200., 0.);
-    let target = prophoto_white(200. + offset, drift + tint);
-    let gains: [f32; 3] = std::array::from_fn(|c| file[c] / target[c]);
-    let least = gains.into_iter().fold(f32::INFINITY, f32::min);
-    gains.map(|g| (g / least).min(64.))
+    let white = |temperature: f32, tint: f32| {
+        let [_, mired, drift] = interpolate(&RENDERED_TEMPERATURE, temperature);
+        let [_, tint] = interpolate(&RENDERED_TINT, tint);
+        camera_white_balance(mired, tint + drift)
+    };
+    let (gains, file) = (white(temperature, tint), white(0., 0.));
+    std::array::from_fn(|c| gains[c] / file[c])
 }
 
 /// The rendered file's Temp and Tint whose [`rendered_gains`] are nearest `gains`
@@ -256,13 +264,6 @@ mod rendered_tests {
     use crate::camera_data::{Metadata, Source};
     use crate::model::recipe::Recipe;
 
-    /// log2 gains, normalised so the smallest channel is 0.
-    fn log2(g: [f32; 3]) -> [f32; 3] {
-        let l = g.map(|v| v.log2());
-        let least = l.into_iter().fold(f32::INFINITY, f32::min);
-        l.map(|v| v - least)
-    }
-
     #[test]
     fn rendered_white_balance_is_neutral_at_zero() {
         assert_eq!(rendered_gains(0., 0.), [1.; 3]);
@@ -270,20 +271,27 @@ mod rendered_tests {
     }
 
     /// Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts: the per-channel
-    /// ProPhoto log2 gains that reproduce its renders of a JPEG at each setting.
+    /// ProPhoto log2 gains of its renders of a JPEG at each setting, measured on the
+    /// charts' unclipped greys as Lightroom's export over the file, each through `F⁻¹`.
     #[test]
     fn rendered_gains_match_lightroom() {
-        let cases: [(f32, f32, [f32; 3], f32); 7] = [
-            (10., 0., [0.236, 0.196, 0.], 0.05),
-            (25., 0., [0.563, 0.465, 0.004], 0.05),
-            (-25., 0., [0.039, 0.138, 0.675], 0.05),
-            (50., 0., [1.024, 0.846, 0.018], 0.05),
-            (0., 25., [0.103, 0., 0.194], 0.05),
-            (0., -50., [0.175, 0.443, 0.009], 0.05),
-            (50., 50., [1.075, 0.640, 0.016], 0.08),
+        let cases: [(f32, f32, [f32; 3], f32); 13] = [
+            (10., 0., [0.236, 0.195, 0.001], 0.02),
+            (25., 0., [0.564, 0.466, 0.004], 0.02),
+            (50., 0., [1.026, 0.849, 0.013], 0.02),
+            (100., 0., [1.603, 1.342, 0.029], 0.03),
+            (-10., 0., [0.005, 0.047, 0.254], 0.02),
+            (-25., 0., [0.035, 0.137, 0.677], 0.02),
+            (-50., 0., [0.170, 0.322, 1.496], 0.03),
+            (-75., 0., [0.510, 0.580, 2.497], 0.05),
+            (0., 25., [0.102, 0., 0.195], 0.02),
+            (0., -50., [0.173, 0.443, 0.006], 0.02),
+            (50., 50., [1.076, 0.641, -0.006], 0.03),
+            (-50., -50., [-0.027, 0.523, 0.738], 0.02),
+            (-25., 25., [0.077, 0.050, 0.913], 0.02),
         ];
         for (t, n, want, tolerance) in cases {
-            let got = log2(rendered_gains(t, n));
+            let got = rendered_gains(t, n).map(f32::log2);
             assert!(
                 (0..3).all(|c| (got[c] - want[c]).abs() <= tolerance),
                 "Temp {t} Tint {n}: {got:?}, Lightroom {want:?}"
@@ -292,16 +300,15 @@ mod rendered_tests {
     }
 
     #[test]
-    fn rendered_gains_stay_finite_with_one_as_the_smallest() {
+    fn rendered_gains_stay_finite_and_positive() {
         let mut previous = f32::NEG_INFINITY;
         for t in (-100..=100).step_by(5) {
             for n in (-100..=100).step_by(25) {
                 let g = rendered_gains(t as f32, n as f32);
                 assert!(
-                    g.iter().all(|v| v.is_finite() && *v >= 1.),
+                    g.iter().all(|v| v.is_finite() && (0.5..=32.).contains(v)),
                     "{t} {n}: {g:?}"
                 );
-                assert_eq!(g.into_iter().fold(f32::INFINITY, f32::min), 1., "{t} {n}");
             }
             // Warmer is always redder against blue.
             let g = rendered_gains(t as f32, 0.);
@@ -378,12 +385,6 @@ mod rendered_tests {
                 r.incremental_temperature = t as f32;
                 r.incremental_tint = n as f32;
                 r.update_wb(&m);
-                assert!(
-                    r.wb.iter()
-                        .all(|g| g.is_finite() && (1. ..=64.).contains(g)),
-                    "Temp {t} Tint {n}: {:?}",
-                    r.wb
-                );
                 assert!(r.validate().is_ok(), "Temp {t} Tint {n}: {:?}", r.wb);
             }
         }
