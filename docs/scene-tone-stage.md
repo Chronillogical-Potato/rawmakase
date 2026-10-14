@@ -103,15 +103,19 @@ white, maximum, Whites level and white point all 1; no black point) followed by 
 default tone curve, both DNG RGBTone — once, when `photo::open_source` opens the file. The
 resulting pseudo-scene renders through the raw path with the Embedded profile, whose tone
 curve is ACR3. `photo_measures` pins a rendered file's sensor white and maximum to 1, so at
-default settings the render is the file (±1/255; finer in 16 bits). S0 runs as for any
-scene.
+default settings the render is the file (±1/255; finer in 16 bits). S0 highlight recovery
+is skipped (`quality::samples::recovered`): a rendered file's bright colours are its
+rendering, not clipping.
 
 Measured against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts and 32
 photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 on greys;
 Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance:
 `model::white_balance::rendered_gains`. Known gaps: Highlights/Shadows on very dark or
-bright files, Saturation, Vibrance, Clarity, Dehaze, strong cooling, and fully saturated
-colours at large Exposure.
+bright files, Saturation, Vibrance, Clarity, Dehaze, fully saturated colours at large
+Exposure, and cooling from about Temp −35, where greys are off too (mean 12.8/20.8/63.4
+/255 at Temp −35/−50/−75: Lightroom also lifts red, which gains normalised so the smallest
+is 1 miss). The cool+magenta corner is unmeasured; there the white is bounded so recipes
+stay valid.
 
 ### Whites and Blacks
 
