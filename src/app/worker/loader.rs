@@ -1,7 +1,7 @@
 use super::latest::Mailbox;
 use super::{Event, Latest, LoadJob, LoadedHeader, Prefetch, TaskKind, send};
 use crate::{
-    camera_data::Decode,
+    camera_data::{CameraImage, Decode},
     decode::{DecodePolicy, FullSize},
     decode_cache::DecodeCache,
     export_settings::ExportOptions,
@@ -10,7 +10,12 @@ use crate::{
 };
 use eframe::egui;
 use std::{
-    sync::{Arc, atomic::Ordering, mpsc::Sender},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+    },
     time::Instant,
 };
 /// The slow second stage of opening a photo, run on its own worker so the
@@ -36,18 +41,65 @@ fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
         ))
     })
 }
-/// Develops a neighbour into the decode cache on two threads, leaving the other
-/// cores to rendering the photo on screen.
-fn prefetcher(cache: DecodeCache) -> Latest<Prefetch> {
+/// A JPEG, PNG or TIFF neighbour opened ahead of time. Rendered files are never
+/// decode-cached (opening one is its whole decode), so the one prefetched is held
+/// here until the next load takes it, whichever photo that load is for.
+#[derive(Clone, Default)]
+pub(super) struct Ahead(Arc<Mutex<Option<Held>>>);
+struct Held {
+    path: PathBuf,
+    /// The file as it was opened; a file replaced since opens afresh.
+    stamp: Stamp,
+    image: CameraImage,
+}
+type Stamp = (std::time::SystemTime, u64);
+fn stamp(path: &Path) -> Option<Stamp> {
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.modified().ok()?, m.len()))
+}
+impl Ahead {
+    fn held(&self) -> std::sync::MutexGuard<'_, Option<Held>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    /// Opens `path` and holds it, dropping what was held first. A cancelled
+    /// prefetch keeps nothing: the photo it was for has been moved past or opened.
+    fn prefetch(&self, path: &Path, cancel: &AtomicBool) {
+        *self.held() = None;
+        let Some(stamp) = stamp(path) else {
+            return;
+        };
+        let Ok(Opened::Rendered(image)) = crate::photo::open_source(path, cancel) else {
+            return;
+        };
+        if !cancel.load(Ordering::Relaxed) {
+            *self.held() = Some(Held {
+                path: path.into(),
+                stamp,
+                image,
+            });
+        }
+    }
+    /// What was prefetched, if it is `path` as the file is now. Empties the slot
+    /// either way, so a prefetch is never held past the next load.
+    fn take(&self, path: &Path) -> Option<CameraImage> {
+        let held = self.held().take()?;
+        (held.path == path && stamp(path) == Some(held.stamp)).then_some(held.image)
+    }
+}
+/// Develops a neighbour on two threads, leaving the other cores to rendering the
+/// photo on screen: a RAW into the decode cache, a JPEG, PNG or TIFF into `ahead`.
+fn prefetcher(cache: DecodeCache, ahead: Ahead) -> Latest<Prefetch> {
     Latest::new(move |job: Prefetch| {
         static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
         let Some(pool) = POOL.get_or_init(|| crate::raw::background_pool(2, "prefetch").ok())
         else {
             return;
         };
-        // A JPEG, PNG or TIFF is never decode-cached: opening it is its whole
-        // decode, so there is nothing to do ahead of time.
-        if job.cancel.load(Ordering::Relaxed) || !crate::storage::is_raw(&job.path) {
+        if job.cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        if !crate::storage::is_raw(&job.path) {
+            pool.install(|| ahead.prefetch(&job.path, &job.cancel));
             return;
         }
         let full = FullSize::with_cache(&job.path, job.demosaic, cache.clone());
@@ -113,13 +165,14 @@ pub(crate) struct Loader {
 }
 impl Loader {
     pub(crate) fn new(tx: Sender<Event>, ctx: egui::Context) -> Self {
-        Self::with_cache(tx, ctx, DecodeCache::default())
+        Self::with_parts(tx, ctx, DecodeCache::default(), Ahead::default())
     }
-    /// A loader whose full-size decodes are kept in `cache`.
-    fn with_cache(tx: Sender<Event>, ctx: egui::Context, cache: DecodeCache) -> Self {
-        let prefetch = prefetcher(cache.clone());
+    /// A loader whose full-size decodes are kept in `cache` and whose prefetched
+    /// rendered files in `ahead`.
+    fn with_parts(tx: Sender<Event>, ctx: egui::Context, cache: DecodeCache, ahead: Ahead) -> Self {
+        let prefetch = prefetcher(cache.clone(), ahead.clone());
         let full = full_loader(tx.clone(), ctx.clone(), prefetch.mailbox());
-        let open = opener(tx, ctx, cache, full.mailbox(), prefetch.mailbox());
+        let open = opener(tx, ctx, cache, ahead, full.mailbox(), prefetch.mailbox());
         Self {
             open,
             full,
@@ -138,6 +191,7 @@ fn opener(
     tx: Sender<Event>,
     ctx: egui::Context,
     cache: DecodeCache,
+    ahead: Ahead,
     full: Mailbox<FullJob>,
     prefetcher: Mailbox<Prefetch>,
 ) -> Latest<LoadJob> {
@@ -146,7 +200,12 @@ fn opener(
         let result = caught(|| -> anyhow::Result<()> {
             let path = job.path.clone();
             let started = Instant::now();
-            let opened = crate::photo::open_source(&path, &job.cancel)?;
+            let prefetched = ahead.take(&path);
+            let was_ahead = prefetched.is_some();
+            let opened = match prefetched {
+                Some(image) => Opened::Rendered(image),
+                None => crate::photo::open_source(&path, &job.cancel)?,
+            };
             let metadata = opened.metadata().clone();
             let (profiles, warnings) = crate::camera_profiles::installed(&metadata);
             // The raw defaults; the catalog's edit replaces them once the header
@@ -187,7 +246,11 @@ fn opener(
                         Event::Ready {
                             id: job.id,
                             full: Arc::new(image),
-                            status: format!("Opened in {:.2}s", started.elapsed().as_secs_f32()),
+                            status: if was_ahead {
+                                "Opened ahead of time".into()
+                            } else {
+                                format!("Opened in {:.2}s", started.elapsed().as_secs_f32())
+                            },
                         },
                     );
                     if let Some(prefetch) = prefetch {
@@ -291,11 +354,16 @@ pub(in crate::app) mod tests {
     /// Loads `path` on a loader whose decode cache is `cache`, returning every
     /// event it sent once its workers have stopped.
     fn load(path: &std::path::Path, cache: &std::path::Path) -> Vec<Event> {
+        load_with(path, cache, Ahead::default())
+    }
+    /// As [`load`], with `ahead` holding what was prefetched.
+    fn load_with(path: &std::path::Path, cache: &std::path::Path, ahead: Ahead) -> Vec<Event> {
         let (tx, rx) = mpsc::channel();
-        let mut loader = Loader::with_cache(
+        let mut loader = Loader::with_parts(
             tx,
             egui::Context::default(),
             DecodeCache::new(cache.into(), u64::MAX),
+            ahead,
         );
         loader.submit(LoadJob {
             id: 7,
@@ -373,6 +441,60 @@ pub(in crate::app) mod tests {
         assert_eq!((full.width, full.height), (40, 30));
         let cached = std::fs::read_dir(&cache).map_or(0, |entries| entries.count());
         assert_eq!(cached, 0, "a rendered file is never decode-cached");
+        Ok(())
+    }
+
+    fn ready(events: &[Event]) -> (&CameraImage, &str) {
+        match events.last() {
+            Some(Event::Ready { full, status, .. }) => (full, status),
+            _ => panic!("{:?}", events.iter().map(name).collect::<Vec<_>>()),
+        }
+    }
+
+    #[test]
+    fn a_prefetched_jpeg_opens_without_decoding_again() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("next.jpg");
+        image::RgbImage::from_pixel(40, 30, image::Rgb([120, 90, 60])).save(&path)?;
+        let ahead = Ahead::default();
+        ahead.prefetch(&path, &AtomicBool::new(false));
+
+        let events = load_with(&path, &dir.path().join("decoded"), ahead.clone());
+
+        let (full, status) = ready(&events);
+        assert_eq!((full.width, full.height), (40, 30));
+        assert!(status.starts_with("Opened ahead of time"), "{status}");
+        assert!(ahead.take(&path).is_none(), "taken, not held twice");
+        Ok(())
+    }
+
+    #[test]
+    fn a_rendered_file_replaced_after_its_prefetch_opens_as_it_is_now() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("next.jpg");
+        image::RgbImage::from_pixel(40, 30, image::Rgb([120, 90, 60])).save(&path)?;
+        let ahead = Ahead::default();
+        ahead.prefetch(&path, &AtomicBool::new(false));
+        image::RgbImage::from_pixel(20, 10, image::Rgb([20, 30, 40])).save(&path)?;
+
+        let events = load_with(&path, &dir.path().join("decoded"), ahead);
+
+        let (full, status) = ready(&events);
+        assert_eq!((full.width, full.height), (20, 10));
+        assert!(status.starts_with("Opened in"), "{status}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_cancelled_prefetch_keeps_nothing() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("next.jpg");
+        image::RgbImage::new(4, 4).save(&path)?;
+        let ahead = Ahead::default();
+
+        ahead.prefetch(&path, &AtomicBool::new(true));
+
+        assert!(ahead.take(&path).is_none());
         Ok(())
     }
 

@@ -1850,6 +1850,29 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     Ok(())
 }
 #[test]
+fn a_rendered_neighbour_is_prefetched_too() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    for name in ["a.jpg", "b.jpg"] {
+        image::RgbImage::new(4, 4).save(dir.path().join(name))?;
+    }
+    let path = dir.path().join("photos.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let library = library::Library::load(&path, ctx)?;
+    let photos: Vec<_> = library.session.photos.iter().map(|p| p.id).collect();
+    let first = *photos
+        .iter()
+        .find(|p| library.navigate(**p, -1).is_none_or(|q| q == **p))
+        .unwrap();
+    let second = library.navigate(first, 1).unwrap();
+    let expected = library.photo(second).unwrap().path.clone();
+    editor.library = Some(Box::new(library));
+    assert_eq!(editor.prefetch_neighbour(first), Some(expected));
+    Ok(())
+}
+#[test]
 fn auto_is_one_undoable_step_that_keeps_edits_made_while_it_ran() {
     let ctx = egui::Context::default();
     let mut editor =

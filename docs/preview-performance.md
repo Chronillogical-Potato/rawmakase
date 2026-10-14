@@ -347,7 +347,9 @@ announcing the full image, which the first render would otherwise do. A later op
 of the same photo reads the cache and skips both the half-size and the full decode.
 After a photo opens, the loader develops the next and previous photos of the folder
 into the cache on a two-thread pool, leaving the other cores to rendering; opening
-another photo cancels the prefetch.
+another photo cancels the prefetch. A JPEG, PNG or TIFF neighbour is never cached:
+the prefetch opens it into memory instead, and the next load takes it if it is that
+file, unchanged in size and modification time, and drops it otherwise.
 
 Entries are keyed by the RAW file's identity (size, modification time and a hash of
 its first 64 KB), the demosaic setting and the running executable's size and time,
