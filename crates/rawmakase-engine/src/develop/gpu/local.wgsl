@@ -70,45 +70,16 @@ fn sample(x_in: f32, y_in: f32) -> vec3<f32> {
     let d = px(y1 * w + x1);
     return (a * (1.0 - fx) + b * fx) * (1.0 - fy) + (c * (1.0 - fx) + d * fx) * fy;
 }
-fn detail_sample(x: f32, y: f32) -> vec3<f32> {
-    let p = sample(x, y);
-    let luma = s(S_NOISE);
-    let chroma = s(S_NOISE + 1u);
-    if luma == 0.0 && chroma == 0.0 {
-        return p;
-    }
-    let center = (p.x + 2.0 * p.y + p.z) / 4.0;
-    var sum = vec3(0.0);
-    var total = 0.0;
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
-            let q = sample(x + f32(dx), y + f32(dy));
-            let lum = (q.x + 2.0 * q.y + q.z) / 4.0;
-            let detail = (s(S_NOISE + 2u) + s(S_NOISE + 3u)) * 0.5;
-            let threshold = 0.0025 * exp2((0.5 - detail) * 4.0);
-            let d = lum - center;
-            let w = 1.0 / (1.0 + d * d / threshold);
-            sum += q * w;
-            total += w;
-        }
-    }
-    let avg = sum / total;
-    let avgl = (avg.x + 2.0 * avg.y + avg.z) / 4.0;
-    return center
-        + (avgl - center) * luma * (1.0 - s(S_NOISE + 4u) * 0.5)
-        + (p - center) * (1.0 - chroma)
-        + (avg - avgl) * chroma * (0.5 + s(S_NOISE + 5u));
-}
 fn footprint_sample(x: f32, y: f32) -> vec3<f32> {
     let spread = s(S_SPREAD);
     if spread == 0.0 {
-        return detail_sample(x, y);
+        return sample(x, y);
     }
     var sum = vec3(0.0);
     for (var k = 0u; k < 4u; k++) {
         let dx = select(-1.0, 1.0, (k & 1u) == 1u);
         let dy = select(-1.0, 1.0, k >= 2u);
-        sum += detail_sample(x + dx * spread, y + dy * spread) * 0.25;
+        sum += sample(x + dx * spread, y + dy * spread) * 0.25;
     }
     return sum;
 }

@@ -54,6 +54,7 @@ pub(super) struct NativeMetadata {
     pub(super) preset_daylight: [f32; 3],
     pub(super) preset_shade: [f32; 3],
     pub(super) preset_d65: [f32; 3],
+    pub(super) preset_fine_weather: [f32; 3],
     pub(super) left_margin: u32,
     pub(super) top_margin: u32,
     pub(super) aspect_left: u32,
@@ -68,7 +69,7 @@ pub(super) struct NativeMetadata {
     /// The DNG version, 0 for a camera's own format.
     pub(super) dng_version: u32,
 }
-const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 620);
+const _: () = assert!(std::mem::size_of::<NativeMetadata>() == 632);
 /// Mirrors `struct Sensor` in `native/raw.cpp`, as [`NativeMetadata`] does `Metadata`;
 /// `native_sensor_layout_matches` compares the sizes.
 #[repr(C)]

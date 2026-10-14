@@ -268,8 +268,12 @@ the GPU, and `CPU` otherwise.
 
 For the same recipes, the stages before the per-pixel stage also run on the device
 when the photo fits its buffer limits (`gpu/resident.rs`): the photo or pyramid level
-is kept there, and regions are sampled there through geometry, lens correction and
-noise reduction. The Shadows/Highlights map (with Clarity's gain) is built on the
+is kept there, and regions are sampled there through geometry and lens correction.
+Color and luminance noise reduction run on the full camera image before retouching
+and before building the preview pyramid. `develop::recipe::Denoise` captures their
+settings and execution together; the retouch cache keys that value and the source
+image identity. Exports run the same stage without the cache, and the GPU samples
+the already denoised image. The Shadows/Highlights map (with Clarity's gain) is built on the
 CPU from the photo's measurement copy, and the scene tone stage reads it
 in `develop.wgsl`. Texture's image is made on the CPU, and a mask's Clarity or
 Texture renders the whole preview on the CPU. A failure in these stages turns off

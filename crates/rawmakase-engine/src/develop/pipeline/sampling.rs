@@ -132,13 +132,13 @@ pub(crate) fn preview_source(im: Source, max: u32) -> CameraImage {
 }
 /// A detail sample averaged over an output pixel's footprint: four taps at ±`spread`
 /// source pixels, which with bilinear sampling approximate a box filter.
-pub(super) fn footprint_sample(im: Source, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
+pub(super) fn footprint_sample(im: Source, x: f32, y: f32, _r: &Recipe, spread: f32) -> [f32; 3] {
     if spread == 0. {
-        return detail_sample(im, x, y, r);
+        return sample(im, x, y);
     }
     let mut sum = [0.; 3];
     for (dx, dy) in [(-1., -1.), (1., -1.), (-1., 1.), (1., 1.)] {
-        let p = detail_sample(im, x + dx * spread, y + dy * spread, r);
+        let p = sample(im, x + dx * spread, y + dy * spread);
         for c in 0..3 {
             sum[c] += p[c] * 0.25;
         }
@@ -150,34 +150,4 @@ pub(super) fn footprint_sample(im: Source, x: f32, y: f32, r: &Recipe, spread: f
 /// single bilinear sample's.
 pub(crate) fn footprint_spread(footprint: f32) -> f32 {
     (footprint * footprint / 12. - 1. / 6.).max(0.).sqrt()
-}
-pub(super) fn detail_sample(im: Source, x: f32, y: f32, r: &Recipe) -> [f32; 3] {
-    let p = sample(im, x, y);
-    // Color noise reduction runs on the camera image (`color_noise`), Luminance here.
-    if r.noise_luma == 0. {
-        return p;
-    }
-    let center = (p[0] + 2. * p[1] + p[2]) / 4.;
-    let mut sum = [0.; 3];
-    let mut total = 0.;
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            let q = sample(im, x + dx as f32, y + dy as f32);
-            let lum = (q[0] + 2. * q[1] + q[2]) / 4.;
-            let detail = (r.effects.luma_detail + r.effects.chroma_detail) * 0.5;
-            let threshold = 0.0025 * 2f32.powf((0.5 - detail) * 4.);
-            let w = 1. / (1. + (lum - center).powi(2) / threshold);
-            for c in 0..3 {
-                sum[c] += q[c] * w;
-            }
-            total += w;
-        }
-    }
-    let avg = sum.map(|v| v / total);
-    let avgl = (avg[0] + 2. * avg[1] + avg[2]) / 4.;
-    std::array::from_fn(|c| {
-        center
-            + (avgl - center) * r.noise_luma * (1. - r.effects.luma_contrast * 0.5)
-            + (p[c] - center)
-    })
 }

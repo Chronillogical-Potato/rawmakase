@@ -461,7 +461,7 @@ mod tests {
             ..Default::default()
         };
         r.effects.clarity = 0.3;
-        let edits: [&dyn Fn(&mut Recipe); 16] = [
+        let edits: [&dyn Fn(&mut Recipe); 20] = [
             &|_| {},
             &|r| r.exposure = 0.5,
             &|r| r.effects.clarity = -0.2,
@@ -469,6 +469,10 @@ mod tests {
             &|r| r.wb[0] = 1.3,
             &|r| r.crop = [0.1, 0., 0.9, 1.],
             &|r| r.noise_luma = 0.4,
+            &|r| r.effects.luma_detail = 0.9,
+            &|r| r.effects.luma_contrast = 0.7,
+            &|r| r.noise_luma = 0.,
+            &|r| r.noise_luma = 0.6,
             &|r| r.contrast = 0.3,
             &|r| r.whites = 0.6,
             &|r| r.blacks = -0.4,

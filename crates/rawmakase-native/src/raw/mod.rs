@@ -98,6 +98,7 @@ impl Raw {
                 daylight: WhiteBalancePresets::valid(m.preset_daylight),
                 shade: WhiteBalancePresets::valid(m.preset_shade),
                 d65: WhiteBalancePresets::valid(m.preset_d65),
+                fine_weather: WhiteBalancePresets::valid(m.preset_fine_weather),
             },
             matrix: std::array::from_fn(|r| std::array::from_fn(|c| m.matrix[r * 3 + c])),
             cam_xyz: std::array::from_fn(|r| std::array::from_fn(|c| m.cam_xyz[r * 3 + c])),

@@ -96,6 +96,27 @@ mod tests {
         );
     }
     #[test]
+    fn olympus_units_use_their_5300k_preset() {
+        use crate::camera_data::WhiteBalancePresets;
+        // Two E-M5 Mark III units: their calibrations differ exactly as their
+        // stored 5300 K presets do (data/camera-calibration-facts.json).
+        let unit = |v| Metadata {
+            wb_presets: WhiteBalancePresets {
+                fine_weather: Some(v),
+                ..Default::default()
+            },
+            ..camera("Olympus", "E-M5 Mark III")
+        };
+        assert_eq!(
+            neutral_calibration(&unit([460., 256., 540.])),
+            [1.0478, 1., 0.8741]
+        );
+        assert_eq!(
+            neutral_calibration(&unit([512., 256., 462.])),
+            [0.9414, 1., 1.0216]
+        );
+    }
+    #[test]
     fn canon_and_fujifilm_units_use_their_own_presets() {
         use crate::camera_data::WhiteBalancePresets;
         // Anonymous native presets of separate units, with the CameraCalibration
@@ -150,7 +171,7 @@ mod tests {
         let presets = WhiteBalancePresets {
             daylight: Some([1827., 1024., 1686.]),
             shade: Some([2106., 1024., 1464.]),
-            d65: None,
+            ..Default::default()
         };
         assert_eq!(
             neutral_calibration(&unit("Canon", "EOS 200D", presets)),
@@ -192,7 +213,8 @@ mod tests {
             baseline_exposure(&camera("Canon", "EOS R1")),
             crate::cameras::baseline_exposure("Canon", "EOS R1").ev
         );
-        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.3);
+        // The Canon median, 0.3 EV with the older bodies' rows.
+        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.2);
     }
     #[test]
     fn canon_highlight_tone_priority_adds_a_stop() {

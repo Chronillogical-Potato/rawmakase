@@ -13,14 +13,14 @@ pub fn recovered(im: &CameraImage, cancel: &AtomicBool) -> Result<Arc<CameraImag
 /// The retouched photo at full resolution, and the image it was retouched from.
 #[derive(Clone)]
 pub(crate) struct Retouched {
-    /// Recovered, with Color noise reduction, red eye corrections and spot removal.
+    /// Recovered, with Color and luminance noise reduction, red eye corrections and spot removal.
     pub(crate) image: Arc<CameraImage>,
     /// `image` without red eye corrections and spot removal, which the photo's darkest
     /// level is measured on (`PhotoMeasures::dark`): a local repair does not move the
     /// whole photo's black. The same image when the recipe has none.
     pub(crate) unretouched: Arc<CameraImage>,
 }
-/// The recovered image with the measured Color noise reduction, then the recipe's red
+/// The recovered image with Color and luminance noise reduction, then the recipe's red
 /// eye corrections and spot removal, so those stay within their shapes: from the
 /// preview's cache, updated where the operations changed, or built at once (exports).
 pub(crate) fn retouched(
@@ -31,7 +31,7 @@ pub(crate) fn retouched(
 ) -> Result<Retouched> {
     let recovered = recovered(im, cancel)?;
     let ops = develop::retouch::Retouching::of(r);
-    let denoise = r.chroma_denoise();
+    let denoise = r.denoise();
     let (base, image) = match cache {
         Some(cache) => {
             let base = cache.denoised(&recovered, denoise, cancel)?;
