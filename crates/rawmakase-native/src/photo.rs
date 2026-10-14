@@ -185,16 +185,17 @@ mod tests {
         assert_eq!(m.baseline_exposure, Some(0.));
         assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
     }
-    /// A DNG's DefaultUserCrop is the crop Camera Raw starts from (its in-camera
-    /// aspect ratio, as Adobe DNG Converter writes it), inside the DefaultCrop frame
-    /// that image space and Lightroom's crop values are relative to.
-    #[test]
-    fn dng_default_user_crop_is_the_starting_crop_inside_the_default_crop() {
-        let chart = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/corpus/charts/synthetic-d65.dng"
+    /// `chart` with the IFD entries `tags` (tag, type, count, data) added, written to
+    /// a closed file.
+    fn chart_with(
+        chart: &str,
+        tags: &[(u16, u16, u32, Vec<u8>)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let path = format!(
+            "{}/../../tests/corpus/charts/{chart}",
+            env!("CARGO_MANIFEST_DIR")
         );
-        let original = std::fs::read(chart).unwrap();
+        let original = std::fs::read(path).unwrap();
         let first = u32::from_le_bytes(original[4..8].try_into().unwrap()) as usize;
         let count = u16::from_le_bytes(original[first..first + 2].try_into().unwrap()) as usize;
         let mut bytes = original.clone();
@@ -204,14 +205,7 @@ mod tests {
             .iter()
             .map(|entry| entry.to_vec())
             .collect();
-        let longs = |v: &[u32]| v.iter().flat_map(|n| n.to_le_bytes()).collect::<Vec<u8>>();
-        // DefaultCropOrigin and DefaultCropSize (LONG), DefaultUserCrop (RATIONAL top,
-        // left, bottom, right, in tenths and quarters).
-        for (tag, kind, count, data) in [
-            (50719u16, 4u16, 2u32, longs(&[10, 10])),
-            (50720, 4, 2, longs(&[900, 700])),
-            (51125, 5, 4, longs(&[1, 10, 1, 4, 9, 10, 3, 4])),
-        ] {
+        for (tag, kind, count, data) in tags {
             let mut entry = tag.to_le_bytes().to_vec();
             entry.extend(kind.to_le_bytes());
             entry.extend(count.to_le_bytes());
@@ -228,8 +222,28 @@ mod tests {
         }
         bytes.extend(0u32.to_le_bytes());
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("user-crop.dng");
+        let path = dir.path().join(chart);
         std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+    fn longs(v: &[u32]) -> Vec<u8> {
+        v.iter().flat_map(|n| n.to_le_bytes()).collect()
+    }
+    /// A DNG's DefaultUserCrop is the crop Camera Raw starts from (its in-camera
+    /// aspect ratio, as Adobe DNG Converter writes it), inside the DefaultCrop frame
+    /// that image space and Lightroom's crop values are relative to.
+    #[test]
+    fn dng_default_user_crop_is_the_starting_crop_inside_the_default_crop() {
+        // DefaultCropOrigin and DefaultCropSize (LONG), DefaultUserCrop (RATIONAL top,
+        // left, bottom, right, in tenths and quarters).
+        let (_dir, path) = chart_with(
+            "synthetic-d65.dng",
+            &[
+                (50719, 4, 2, longs(&[10, 10])),
+                (50720, 4, 2, longs(&[900, 700])),
+                (51125, 5, 4, longs(&[1, 10, 1, 4, 9, 10, 3, 4])),
+            ],
+        );
         let m = super::open(&path).unwrap().metadata;
         let frame = [m.crop_left, m.crop_top, m.crop_width, m.crop_height];
         assert_eq!(frame, [10, 10, 900, 700]);
@@ -239,5 +253,22 @@ mod tests {
         }
         let recipe = rawmakase_model::model::recipe::Recipe::with_profiles(&m, &[]);
         assert_eq!(recipe.crop, crop);
+    }
+    /// A Sony DNG's DefaultCrop is its frame at any ratio, unlike an ARW's default
+    /// crop, which may be the camera's aspect ratio inside the sensor's frame.
+    #[test]
+    fn a_sony_dng_default_crop_is_the_frame() {
+        let (_dir, path) = chart_with(
+            "sony-ilce-7m2-d65.dng",
+            &[
+                (50719, 4, 2, longs(&[20, 100])),
+                (50720, 4, 2, longs(&[900, 500])),
+            ],
+        );
+        let m = super::open(&path).unwrap().metadata;
+        assert_eq!(m.make, "Sony");
+        let frame = [m.crop_left, m.crop_top, m.crop_width, m.crop_height];
+        assert_eq!(frame, [20, 100, 900, 500]);
+        assert_eq!(m.camera_crop, None);
     }
 }
