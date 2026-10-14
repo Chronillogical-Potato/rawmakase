@@ -277,6 +277,9 @@ pub(super) struct Selection {
     prompt: Option<Prompt>,
     worker: worker::Worker,
     pub(super) models: Installer,
+    /// The remote worker to ask instead, when configured; `Default` reads
+    /// nothing until the endpoint is asked for.
+    pub(super) remote: worker::RemoteConfig,
     /// A catalog upgrade under way, and the request it unblocks.
     upgrading: Option<(u64, Request)>,
     upgrade_task: Task,
@@ -380,7 +383,9 @@ impl Editor {
             self.selection.prompt = Some(Prompt::Upgrade(request));
             return;
         }
-        if !self.selection.models.installed() {
+        // Over the remote worker, the models do not have to be here at all.
+        let remote = self.selection.remote.endpoint().is_some();
+        if !remote && !self.selection.models.installed() {
             self.selection.prompt = Some(Prompt::Model(request));
             return;
         }
@@ -393,7 +398,9 @@ impl Editor {
     /// rocket): the clicks make the mask, a new one or the one `request` names.
     pub(super) fn begin_aiming(&mut self, request: Request) {
         self.context.request_repaint();
-        if self.selection_unavailable().is_some() || !self.selection.models.installed() {
+        let remote = self.selection.remote.endpoint().is_some();
+        if self.selection_unavailable().is_some() || (!remote && !self.selection.models.installed())
+        {
             self.request_selection(request);
             return;
         }
@@ -430,7 +437,9 @@ impl Editor {
             feature: feature_of(&b, invert),
             target: Target::Regenerate { mask, component },
         };
-        if self.selection_unavailable().is_some() || !self.selection.models.installed() {
+        let remote = self.selection.remote.endpoint().is_some();
+        if self.selection_unavailable().is_some() || (!remote && !self.selection.models.installed())
+        {
             self.request_selection(request);
             return;
         }
@@ -539,10 +548,18 @@ impl Editor {
         let Some(image) = self.document.full().cloned() else {
             return;
         };
-        let Some(model) = self.selection.models.path() else {
-            self.selection.end_prompting();
-            self.selection.prompt = Some(Prompt::Model(request));
-            return;
+        let endpoint = self.selection.remote.endpoint();
+        let model = if endpoint.is_some() {
+            None
+        } else {
+            match self.selection.models.path() {
+                Some(model) => Some(model),
+                None => {
+                    self.selection.end_prompting();
+                    self.selection.prompt = Some(Prompt::Model(request));
+                    return;
+                }
+            }
         };
         self.context.request_repaint();
         self.status = match &action {
@@ -563,6 +580,7 @@ impl Editor {
                 image,
                 recipe,
                 model,
+                endpoint,
                 action,
             },
             self.tx.clone(),

@@ -11,5 +11,8 @@ publish = false
 # `load-dynamic` links no ONNX Runtime at build time: the library is opened at
 # run time from a path we choose (see `runtime`), so a missing runtime is an
 # error value, not a startup failure. Default features would pull in
-# `download-binaries`-style build scripts; none of them are wanted.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic"] }
+# `download-binaries`-style build scripts; none of them are wanted. The `cuda`
+# and `coreml` features add nothing to link under `load-dynamic`; they compile
+# in the code that registers those providers with whatever runtime library was
+# opened, which fails with a real error when it cannot.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "cuda", "coreml"] }

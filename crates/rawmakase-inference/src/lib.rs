@@ -22,4 +22,4 @@ pub use auto::Proposal;
 pub use error::InferenceError;
 pub use manifest::{ModelFile, ModelSpec, PANOPTIC, PanopticSpec, SUBJECT};
 pub use process::{Coverage, Point, Prompt, RgbImage};
-pub use runtime::{Analysis, Embedding, LoadOptions, RUNTIME_ENV, Session, Subject};
+pub use runtime::{Analysis, Embedding, LoadOptions, Provider, RUNTIME_ENV, Session, Subject};

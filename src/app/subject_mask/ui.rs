@@ -325,10 +325,18 @@ impl Editor {
                 ui.add_space(6.);
                 if !upgraded {
                     self.upgrade_step(ui, request, upgrading);
+                } else if let Some(endpoint) = self.selection.remote.endpoint() {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(110, 200, 130),
+                        format!(
+                            "Selections run on the worker at {endpoint}; nothing has to be \
+                                 downloaded here."
+                        ),
+                    );
                 } else if !model {
                     self.model_step(ui, installing);
                 }
-                if !super::worker::runtime_present() {
+                if self.selection.remote.endpoint().is_none() && !super::worker::runtime_present() {
                     ui.add_space(4.);
                     ui.colored_label(
                         egui::Color32::from_rgb(230, 170, 90),
@@ -453,8 +461,14 @@ impl Editor {
         control_label(ui, "Select", |ui| {
             super::super::widgets::spinner(ui, 14.);
             // No percentage: the runtime reports none for a run.
+            let where_at = self
+                .selection
+                .remote
+                .endpoint()
+                .map(|endpoint| format!(" (on {endpoint})"))
+                .unwrap_or_default();
             ui.label(format!(
-                "Finding the {}…",
+                "Finding the {}…{where_at}",
                 request.feature.name().to_lowercase()
             ))
             .on_hover_text(

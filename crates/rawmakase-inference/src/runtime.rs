@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ort::ep;
+use ort::ep::{self, ExecutionProviderDispatch};
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::{RunOptions, Session as OrtSession};
 use ort::value::TensorRef;
@@ -71,6 +71,42 @@ pub fn runtime_search_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Which hardware the sessions are asked to run on. `Cpu` is the default and the
+/// only thing every platform ships; the others are a request, granted only when
+/// the loaded ONNX Runtime actually registers the provider: a missing CUDA
+/// runtime or CoreML device is an error from [`Subject::load_with`], never a
+/// silent slide back to the CPU.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Provider {
+    #[default]
+    Cpu,
+    /// NVIDIA GPUs through ONNX Runtime's CUDA execution provider.
+    Cuda,
+    /// Apple Silicon through ONNX Runtime's CoreML execution provider.
+    CoreML,
+}
+impl Provider {
+    /// The name ONNX Runtime gives it, for reporting what was registered.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Cuda => "CUDA",
+            Self::CoreML => "CoreML",
+        }
+    }
+    /// The providers to register, fastest first, with the CPU last as the
+    /// fallback for whatever nodes the accelerated one does not take. Only
+    /// `Cpu` is allowed to fail quietly (it cannot).
+    fn providers(self) -> Vec<ExecutionProviderDispatch> {
+        let cpu = ep::CPU::default().with_arena_allocator(false).build();
+        match self {
+            Self::Cpu => vec![cpu],
+            Self::Cuda => vec![ep::CUDA::default().build().error_on_failure(), cpu],
+            Self::CoreML => vec![ep::CoreML::default().build().error_on_failure(), cpu],
+        }
+    }
+}
+
 /// Options for [`Subject::load_with`].
 #[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
@@ -79,6 +115,8 @@ pub struct LoadOptions {
     pub runtime_library: Option<PathBuf>,
     /// Intra-op threads; `None` picks [`default_threads`].
     pub threads: Option<usize>,
+    /// Hardware to ask for; `None` is the same as [`Provider::Cpu`].
+    pub provider: Option<Provider>,
 }
 
 /// Threads for one inference: the available parallelism capped at 8. ONNX
@@ -104,6 +142,7 @@ impl Subject {
         let spec = SUBJECT;
         check_files(dir)?;
         let threads = options.threads.unwrap_or_else(default_threads).max(1);
+        let provider = options.provider.unwrap_or_default();
         // The runtime API panics on internal misuse; a panic must never reach
         // the app from a background job.
         let (encoder, decoder, panoptic) = catch_unwind(AssertUnwindSafe(|| {
@@ -112,17 +151,20 @@ impl Subject {
                     &dir.join(spec.encoder_file),
                     threads,
                     GraphOptimizationLevel::All,
+                    provider,
                 )?,
                 build_session(
                     &dir.join(spec.decoder_file),
                     threads,
                     GraphOptimizationLevel::All,
+                    provider,
                 )?,
                 // The half-precision graph breaks the full fusion pass.
                 build_session(
                     &dir.join(PANOPTIC.file.name),
                     threads,
                     GraphOptimizationLevel::Level1,
+                    provider,
                 )?,
             ))
         }))
@@ -134,6 +176,7 @@ impl Subject {
             decoder,
             panoptic,
             spec,
+            provider,
         })
     }
 }
@@ -162,6 +205,7 @@ pub struct Session {
     decoder: OrtSession,
     panoptic: OrtSession,
     spec: ModelSpec,
+    provider: Provider,
 }
 
 /// What the models made of one photo: reused for every selection on it. Subject and Sky
@@ -212,6 +256,13 @@ struct Decoded {
 impl Session {
     pub fn spec(&self) -> &ModelSpec {
         &self.spec
+    }
+
+    /// The provider the runtime accepted for these sessions. Loading failed
+    /// outright when a requested accelerator could not be registered, so this
+    /// never names hardware the sessions were not built with.
+    pub fn provider(&self) -> Provider {
+        self.provider
     }
 
     /// Runs the image encoder on `image`. This is the expensive step (about a second);
@@ -636,6 +687,7 @@ fn build_session(
     model_path: &Path,
     threads: usize,
     level: GraphOptimizationLevel,
+    provider: Provider,
 ) -> Result<OrtSession, InferenceError> {
     OrtSession::builder()
         .map_err(failed)?
@@ -649,11 +701,15 @@ fn build_session(
         .map_err(failed)?
         .with_memory_pattern(false)
         .map_err(failed)?
-        .with_execution_providers([ep::CPU::default().with_arena_allocator(false).build()])
+        .with_execution_providers(provider.providers())
         .map_err(failed)?
         .commit_from_file(model_path)
         .map_err(|e| {
-            InferenceError::ModelInvalid(format!("cannot load {}: {e}", model_path.display()))
+            InferenceError::ModelInvalid(format!(
+                "cannot load {} on {}: {e}",
+                model_path.display(),
+                provider.name()
+            ))
         })
 }
 

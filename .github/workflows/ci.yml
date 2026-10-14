@@ -91,12 +91,12 @@ jobs:
       # client build without the app's native libraries, wgpu or GUI, and the
       # renderer without the native libraries or GUI; fmt above covers the whole
       # workspace.
-      - name: Check the model, file formats, catalog, renderer, control protocol and client
+      - name: Check the model, file formats, catalog, renderer, control protocol, remote worker and client
         run: |
-          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
+          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-remote -p rawmakase-ctl -- -D warnings
           cargo test --locked -p rawmakase-model --all-features
           cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine
-          cargo test --locked -p rawmakase-protocol -p rawmakase-ctl
+          cargo test --locked -p rawmakase-protocol -p rawmakase-remote -p rawmakase-ctl
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
       - run: cargo clippy --all-targets --locked --no-default-features -- -D warnings

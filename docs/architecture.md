@@ -16,7 +16,11 @@ highlight recovery); `crates/rawmakase-export` develops and writes exports with
 their watermarks over both; `crates/rawmakase-inference` is the one leaf that runs
 the subject selection model through a lazily loaded ONNX Runtime (pixels in,
 coverage out; it knows no other workspace crate, and no value, catalog or
-rendering crate can reach it, so saved masks render without any inference). The app crate re-exports these crates' modules at its
+rendering crate can reach it, so saved masks render without any inference);
+`crates/rawmakase-remote` sits directly on inference alone — the optional
+worker binary that runs the same models on another computer, and the client the
+app uses when configured to, over a bounded TCP protocol that knows no catalog,
+renderer or GUI. The app crate re-exports these crates' modules at its
 root (`crate::model`, `crate::xmp`, `crate::catalog`, `crate::develop`…), so paths
 read the same on either side. The desktop app and CLI compose these APIs;
 parsing, persistence and rendering implementations do not import the desktop UI.

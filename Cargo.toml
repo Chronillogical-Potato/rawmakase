@@ -10,7 +10,7 @@ repository = "https://github.com/pch/rawmakase"
 # The control protocol and its command-line client build on their own, without
 # the app's GUI, GPU or native libraries.
 [workspace]
-members = ["crates/rawmakase-catalog", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-native", "crates/rawmakase-protocol", "tools/rawmakase-ctl"]
+members = ["crates/rawmakase-catalog", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-native", "crates/rawmakase-protocol", "crates/rawmakase-remote", "tools/rawmakase-ctl"]
 
 [dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0" }
@@ -21,6 +21,8 @@ rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0" }
 rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0" }
 rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
+# The optional remote selection worker's client, and the worker binary itself.
+rawmakase-remote = { path = "crates/rawmakase-remote", version = "0.1.0" }
 rawmakase-ctl = { path = "tools/rawmakase-ctl", version = "0.1.0" }
 # Local MCP adapter; no HTTP server or remote authorization stack.
 rmcp = { version = "3.5", default-features = false, features = ["server", "macros", "transport-io"] }
