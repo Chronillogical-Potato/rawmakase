@@ -31,10 +31,11 @@ from pathlib import Path
 IDENTITY = [1., 0., 0., 0., 1., 0., 0., 0., 1.]
 TAGS = ['Make', 'Model', 'DNGVersion', 'CameraCalibration1', 'CameraCalibration2',
         'CameraCalibrationSig', 'ProfileCalibrationSig', 'AnalogBalance']
-# The native maker-note tags LibRaw reads as WB_Coeffs Daylight, Shade and D65.
+# The native maker-note tags LibRaw reads as WB_Coeffs Daylight, Shade, D65 and
+# Fine Weather (Olympus's 5300 K entry).
 NATIVE_TAGS = ['WB_RGBLevelsDaylight', 'WB_RGGBLevelsDaylight', 'WB_RGGBLevelsShade',
-               'WB_GRBLevelsStandard']
-PRESETS = ['daylight', 'shade', 'd65']
+               'WB_GRBLevelsStandard', 'WB_RBLevels5300K', 'WB_GLevel5300K']
+PRESETS = ['daylight', 'shade', 'd65', 'fine-weather']
 TABLE = Path(__file__).resolve().parents[2] / 'data/cameras.toml'
 
 
@@ -64,6 +65,12 @@ def native_presets(native):
         put('daylight', [v[0], v[1], v[3]])
     if len(v := read('WB_RGGBLevelsShade')) == 4:
         put('shade', [v[0], v[1], v[3]])
+    # Olympus: R, B, G, G, or R, B with green in its own tag on older bodies; LibRaw
+    # takes 256 for the E-410 and E-510, which have none.
+    if len(v := read('WB_RBLevels5300K')) == 4:
+        put('fine-weather', [v[0], v[2], v[1]])
+    elif len(v) == 2:
+        put('fine-weather', [v[0], (read('WB_GLevel5300K') or [256.])[0], v[1]])
     # Fujifilm's standard-illuminant table: G, R, B and an EXIF light source per entry.
     v = read('WB_GRBLevelsStandard')
     for i in range(0, len(v) - 3, 4):

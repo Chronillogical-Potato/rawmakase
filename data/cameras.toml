@@ -1200,9 +1200,20 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.25 plus +0.05 fo
 make = "Olympus"
 model = "E-M10 Mark III"
 baseline_exposure = 0.55
+unit_calibration = { preset = "fine-weather", reference = [508, 256, 474] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; Adobe -0.50 at ISO LOW (100), which takes 1 EV off; BaselineExposure -0.50 plus +0.04 for the white level"
+
+[[camera]]
+make = "Olympus"
+model = "E-M10MarkIIIS"
+aliases = ["E-M10 Mark IIIs"]
+baseline_exposure = 0.55
+unit_calibration = { preset = "fine-weather", reference = [508, 256, 474] }
+source = "adobe-dng"
+checked = "2026-10-14"
+sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.50 plus +0.04 for the white level"
 
 [[camera]]
 make = "Olympus"
@@ -1218,6 +1229,7 @@ make = "Olympus"
 model = "E-M1MarkII"
 aliases = ["E-M1 Mark II"]
 baseline_exposure = 0.85
+unit_calibration = { preset = "fine-weather", reference = [490, 256, 446] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.81 plus +0.04 for the white level"
@@ -1227,6 +1239,7 @@ make = "Olympus"
 model = "E-M1MarkIII"
 aliases = ["E-M1 Mark III"]
 baseline_exposure = 0.35
+unit_calibration = { preset = "fine-weather", reference = [482, 256, 472] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.32 plus +0.04 for the white level"
@@ -1235,6 +1248,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.32 plus +0.04 fo
 make = "Olympus"
 model = "E-M1X"
 baseline_exposure = 0.35
+unit_calibration = { preset = "fine-weather", reference = [482, 256, 472] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 1600; BaselineExposure +0.32 plus +0.04 for the white level"
@@ -1244,6 +1258,7 @@ make = "Olympus"
 model = "E-M5MarkIII"
 aliases = ["E-M5 Mark III"]
 baseline_exposure = 0.35
+unit_calibration = { preset = "fine-weather", reference = [482, 256, 472] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.32 plus +0.04 for the white level"
@@ -1260,9 +1275,28 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.32 plus +0.04 fo
 make = "Olympus"
 model = "E-PL10"
 baseline_exposure = 0.55
+unit_calibration = { preset = "fine-weather", reference = [508, 256, 474] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 1000; BaselineExposure +0.50 plus +0.04 for the white level"
+
+[[camera]]
+make = "Olympus"
+model = "E-PL8"
+baseline_exposure = 0.55
+unit_calibration = { preset = "fine-weather", reference = [478, 256, 434] }
+source = "adobe-dng"
+checked = "2026-10-14"
+sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.50 plus +0.04 for the white level"
+
+[[camera]]
+make = "Olympus"
+model = "E-PL9"
+baseline_exposure = 0.55
+unit_calibration = { preset = "fine-weather", reference = [508, 256, 474] }
+source = "adobe-dng"
+checked = "2026-10-14"
+sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.50 plus +0.04 for the white level"
 
 [[camera]]
 make = "Olympus"
@@ -1276,6 +1310,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.64 plus +0.04 fo
 make = "OM Digital"
 model = "OM-1"
 baseline_exposure = 0.4
+unit_calibration = { preset = "fine-weather", reference = [568, 256, 420] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.37 plus +0.04 for the white level"
@@ -1293,6 +1328,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "OM Digital"
 model = "OM-3"
 baseline_exposure = 0.35
+unit_calibration = { preset = "fine-weather", reference = [562, 256, 426] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
@@ -1301,6 +1337,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 make = "OM Digital"
 model = "OM-5"
 baseline_exposure = 0.35
+unit_calibration = { preset = "fine-weather", reference = [482, 256, 472] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.32 plus +0.04 for the white level"
@@ -1310,6 +1347,7 @@ make = "OM Digital"
 model = "OM-5MarkII"
 aliases = ["OM-5 Mark II"]
 baseline_exposure = 0.3
+unit_calibration = { preset = "fine-weather", reference = [480, 256, 484] }
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200"
