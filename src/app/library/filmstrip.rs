@@ -209,11 +209,13 @@ impl Library {
             .inner_margin(egui::Margin::symmetric(inset, 3))
             .show(ui, |ui| {
                 // As tall as the rating and label controls on the right, so
-                // the captions placed before them centre on the same line.
+                // the captions placed before them centre on the same line,
+                // and the cells below keep their size whether a photo is open
+                // and the controls shown or not.
                 ui.allocate_ui_with_layout(
                     Vec2::new(
                         ui.available_width(),
-                        crate::app::photo_metadata::CONTROLS_HEIGHT,
+                        crate::app::photo_metadata::controls_height(ui),
                     ),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {

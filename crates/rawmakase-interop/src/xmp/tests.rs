@@ -38,6 +38,7 @@ fn markers_of_earlier_releases_are_ignored() -> Result<()> {
         r#"c:RAWmakaseWhiteBalanceModel="Original""#,
         r#"c:RAWmakaseWhiteBalanceModel="Unknown""#,
         r#"c:RAWmakasePreset="1""#,
+        r#"c:RAWmakasePreset="2""#,
     ] {
         let attrs = format!("{markers} {plain}");
         let back = parse(Path::new("old.xmp"), &xml(&attrs, ""))?.apply(&fresh, &m, &[], None)?;
@@ -370,6 +371,83 @@ fn lightroom_crops_are_relative_to_the_frame_around_the_camera_crop() -> Result<
     );
     assert!(packet.contains(r#"crs:HasCrop="True""#), "{packet}");
     assert!(packet.contains(r#"crs:CropLeft="0.166667""#), "{packet}");
+    Ok(())
+}
+/// Lightroom records crops on the unrotated frame. A Canon EOS Rebel T6i CR2 held
+/// upright (orientation 5) and shot at 4:3 starts at the 5334 × 4000 middle of its
+/// 6000 × 4000 sensor; Camera Raw writes CropLeft 0.0555, CropRight 0.9445 and
+/// renders it 3:4, so the crop cuts the photo's height, not its width (#483).
+#[test]
+fn lightroom_crops_of_a_photo_held_upright_are_of_the_unrotated_frame() -> Result<()> {
+    let m = Metadata {
+        width: 6024,
+        height: 4022,
+        crop_left: 12,
+        crop_top: 12,
+        crop_width: 6000,
+        crop_height: 4000,
+        flip: 5,
+        camera_crop: Some([333. / 6000., 0., 5667. / 6000., 1.]),
+        wb: [2., 1., 1.5],
+        daylight_wb: [2., 1., 1.5],
+        ..Default::default()
+    };
+    let near = |got: [f32; 4], want: [f32; 4]| {
+        assert!(
+            got.iter().zip(want).all(|(g, w)| (g - w).abs() < 1e-4),
+            "{got:?} != {want:?}"
+        );
+    };
+    let base = Recipe::with_profiles(&m, &[]);
+    near(base.crop, [0., 0.0555, 1., 0.9445]);
+    let apply = |m: &Metadata, attrs: &str| -> Result<Recipe> {
+        parse(Path::new("photo.xmp"), &xml(attrs, ""))?.apply(&base, m, &[], None)
+    };
+    let adobe = r#"c:HasCrop="True" c:CropTop="0" c:CropLeft="0.0555" c:CropBottom="1" c:CropRight="0.9445""#;
+    let r = apply(&m, adobe)?;
+    near(r.crop, [0., 0.0555, 1., 0.9445]);
+    // Written back on the unrotated frame, as Camera Raw wrote it.
+    let photo = write::Photo {
+        settings: true,
+        ..Default::default()
+    };
+    let packet = write::packet(&r, &m, &photo);
+    assert!(packet.contains(r#"crs:CropLeft="0.055500""#), "{packet}");
+    assert!(packet.contains(r#"crs:CropTop="0.000000""#), "{packet}");
+    // One value alone moves only that side of the sensor.
+    near(
+        apply(&m, r#"c:CropTop="0.25""#)?.crop,
+        [0.25, 0.0555, 1., 0.9445],
+    );
+    // A value past the opposite edge is an invalid crop, not a reordered one.
+    assert!(apply(&m, r#"c:CropLeft="0.95""#).is_err());
+    // Turned a quarter clockwise (orientation 6), the sensor's left half is the top.
+    let cw = Metadata {
+        flip: 6,
+        camera_crop: None,
+        ..m.clone()
+    };
+    let left =
+        r#"c:HasCrop="True" c:CropTop="0" c:CropLeft="0" c:CropBottom="1" c:CropRight="0.5""#;
+    let r = apply(&cw, left)?;
+    near(r.crop, [0., 0., 1., 0.5]);
+    assert!(write::packet(&r, &cw, &photo).contains(r#"crs:CropRight="0.500000""#));
+    // A preset RAWmakase wrote before this (marked 1) holds the crop as shown.
+    let legacy = format!(r#"c:RAWmakasePreset="1" {left}"#);
+    near(apply(&cw, &legacy)?.crop, [0., 0., 0.5, 1.]);
+    // Presets written now carry it unrotated, and read back as drawn.
+    let drawn = Recipe {
+        crop: [0., 0., 1., 0.5],
+        ..base.clone()
+    };
+    let preset = crate::xmp::preset_write::preset(
+        &drawn,
+        &cw,
+        &crate::xmp::preset_write::PresetInfo::new("Top", "Mine"),
+        &crate::model::settings_groups::GroupSelection::all(),
+    );
+    let back = parse(Path::new("top.xmp"), &preset)?.apply(&base, &cw, &[], None)?;
+    near(back.crop, drawn.crop);
     Ok(())
 }
 #[test]

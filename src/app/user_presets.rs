@@ -40,12 +40,13 @@ impl Editor {
         self.document.full().is_some() && !self.load.is_running()
     }
     fn create_preset_in(&mut self, user: &UserPresets, form: &PresetForm, groups: &GroupSelection) {
-        if !self.settings_ready() {
+        let shown = self.document.full().map(|im| im.metadata.clone());
+        let (true, Some(shown)) = (self.settings_ready(), shown) else {
             self.status = "Preset not created: no photo is open".into();
             return;
-        }
+        };
         let info = PresetInfo::new(&form.name, &form.group);
-        match user.create(self.document.edit.recipe(), &info, groups) {
+        match user.create(self.document.edit.recipe(), &shown, &info, groups) {
             Ok(_) => {
                 self.status = format!("Preset {} created in {}", info.name, info.group);
                 self.reload_presets(&self.context.clone());
@@ -62,10 +63,16 @@ impl Editor {
                 self.status = "Preset not updated: no photo is open".into();
                 return;
             }
-            PresetAction::Update(i) => library.presets.get(i).map(|p| {
-                user.update(p, self.document.edit.recipe())
-                    .map(|()| format!("Preset {} updated", p.name))
-            }),
+            PresetAction::Update(i) => {
+                library
+                    .presets
+                    .get(i)
+                    .zip(self.document.full())
+                    .map(|(p, im)| {
+                        user.update(p, self.document.edit.recipe(), &im.metadata)
+                            .map(|()| format!("Preset {} updated", p.name))
+                    })
+            }
             PresetAction::Delete(i) => library.presets.get(i).map(|p| {
                 user.delete(p).map(|()| {
                     // A new preset later saved at the same place starts unfavored.
@@ -240,6 +247,7 @@ mod tests {
             let info = PresetInfo::new(name, "Mine");
             let text = crate::xmp::preset_write::preset(
                 &crate::model::recipe::Recipe::default(),
+                &Default::default(),
                 &info,
                 &GroupSelection::all(),
             );

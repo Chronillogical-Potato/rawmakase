@@ -745,7 +745,10 @@ impl Editor {
                         ui.selectable_value(&mut chosen, Some(file.clone()), label);
                     }
                 });
-            reveal_button(ui, &super::theme::Themes::folder());
+        });
+        // On its own row: beside the picker it is wider than the page.
+        form_row(ui, "", |ui| {
+            reveal_button(ui, &super::theme::Themes::folder())
         });
         form_row(ui, "", |ui| {
             hint(
@@ -860,4 +863,47 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
         color,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What a page paints past the right edge it is clipped to: text or
+    /// controls cut off by the window.
+    fn cut_off(tab: Tab) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.onboarding.visible = false;
+        e.preferences.open = true;
+        e.preferences.tab = tab;
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(1600., 1000.),
+            )),
+            ..Default::default()
+        };
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            let mut out = ctx.run_ui(input(), |ui| e.preferences_window(ui.ctx()));
+            out.textures_delta.clear();
+            shapes = out.shapes;
+        }
+        shapes
+            .into_iter()
+            .filter(|s| s.shape.visual_bounding_rect().right() > s.clip_rect.right() + 0.5)
+            .map(|s| match s.shape {
+                egui::Shape::Text(text) => text.galley.text().to_string(),
+                shape => format!("{:?}", shape.visual_bounding_rect()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn no_preferences_page_cuts_off_its_contents() {
+        for tab in Tab::ALL {
+            assert_eq!(cut_off(tab), Vec::<String>::new(), "{}", tab.title());
+        }
+    }
 }
