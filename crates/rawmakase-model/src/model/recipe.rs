@@ -777,6 +777,20 @@ impl Recipe {
             self.wb = shown.wb;
         }
     }
+    /// Between a RAW and a rendered file (JPEG, PNG, TIFF), which keep white balance in
+    /// different terms (Kelvin against relative) and have profiles of their own: this
+    /// recipe takes `own`'s white balance and profile, as Copy, Sync and presets
+    /// apply settings from the other kind of file.
+    pub fn keep_white_balance_and_profile(&mut self, own: &Recipe) {
+        self.temperature = own.temperature;
+        self.tint = own.tint;
+        self.incremental_temperature = own.incremental_temperature;
+        self.incremental_tint = own.incremental_tint;
+        self.wb = own.wb;
+        self.auto_white_balance = own.auto_white_balance;
+        self.profile = own.profile.clone();
+        self.profile_amount = own.profile_amount;
+    }
     /// White balance from `gains` that make a picked colour neutral (the eyedropper's,
     /// Auto's): a RAW's gains, or for a rendered file the nearest Temp and Tint, which
     /// carry its white balance (`white_balance::rendered_white_balance`).

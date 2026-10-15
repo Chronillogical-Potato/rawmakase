@@ -465,14 +465,7 @@ pub fn transfer(
         && (selection.contains(SettingGroup::WhiteBalance)
             || selection.contains(SettingGroup::TreatmentAndProfile));
     if separate {
-        recipe.temperature = to.temperature;
-        recipe.tint = to.tint;
-        recipe.incremental_temperature = to.incremental_temperature;
-        recipe.incremental_tint = to.incremental_tint;
-        recipe.wb = to.wb;
-        recipe.auto_white_balance = to.auto_white_balance;
-        recipe.profile = to.profile.clone();
-        recipe.profile_amount = to.profile_amount;
+        recipe.keep_white_balance_and_profile(to);
         notes.push("White balance and profile apply to RAW and rendered files separately".into());
     }
     // Masks made from a selection are rasters of the photo they were made on: the

@@ -1,5 +1,6 @@
 //! RAWmakase JSON recipes, including migration of earlier pipeline versions.
 use crate::{
+    camera_data::Metadata,
     model::recipe::Recipe,
     model::saved_format::{SCHEMA, migrate_recipe},
     storage::atomic_json,
@@ -17,8 +18,19 @@ struct Preset {
     /// envelope accepts unknown keys in every release).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     masks: Vec<crate::model::masks::MaskGroup>,
+    /// Made on a rendered file (JPEG, PNG, TIFF), whose white balance and profile a
+    /// RAW's don't mix with. Absent in presets made on RAWs, and in every preset from
+    /// before rendered files developed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    rendered: bool,
 }
-pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
+/// A preset file as it loads: its recipe, and whether it was made on a rendered file.
+pub struct LoadedPreset {
+    pub recipe: Recipe,
+    rendered: bool,
+}
+/// Saves `r`, the edit of a photo `m` describes, as a preset.
+pub fn save_preset(path: &Path, r: &Recipe, m: &Metadata) -> Result<()> {
     r.validate()?;
     anyhow::ensure!(
         !r.masks
@@ -40,10 +52,11 @@ pub fn save_preset(path: &Path, r: &Recipe) -> Result<()> {
             pipeline: SCHEMA,
             recipe,
             masks: local.masks,
+            rendered: m.is_rendered(),
         },
     )
 }
-pub fn load_preset(path: &Path) -> Result<Recipe> {
+pub fn load_preset(path: &Path) -> Result<LoadedPreset> {
     let mut v: serde_json::Value = serde_json::from_reader(File::open(path)?)?;
     migrate_recipe(&mut v)?;
     let p: Preset = serde_json::from_value(v)?;
@@ -62,14 +75,22 @@ pub fn load_preset(path: &Path) -> Result<Recipe> {
     );
     recipe.upright.clear_analysis();
     recipe.validate()?;
-    Ok(recipe)
+    Ok(LoadedPreset {
+        recipe,
+        rendered: p.rendered,
+    })
 }
 
 /// `preset` as applied to a photo edited as `photo`: presets never carry spot removal
 /// or red eye, so the photo keeps its own and their panel switches; the preset's masks
-/// replace the photo's only when it has any, as in Lightroom.
-pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
+/// replace the photo's only when it has any, as in Lightroom. Between a RAW and a
+/// rendered file the photo keeps its white balance and profile, as with Copy and Sync.
+pub fn applied_to(preset: LoadedPreset, photo: &Recipe, m: &Metadata) -> Recipe {
     use crate::model::panels::Panel;
+    let LoadedPreset {
+        recipe: mut preset,
+        rendered,
+    } = preset;
     preset.retouch = photo.retouch.clone();
     preset.red_eye = photo.red_eye.clone();
     for panel in [Panel::SpotRemoval, Panel::RedEye] {
@@ -77,6 +98,9 @@ pub fn applied_to(mut preset: Recipe, photo: &Recipe) -> Recipe {
     }
     if preset.masks.is_empty() {
         preset.masks = photo.masks.clone();
+    }
+    if rendered != m.is_rendered() {
+        preset.keep_white_balance_and_profile(photo);
     }
     preset
 }
@@ -103,11 +127,72 @@ mod tests {
         };
         preset.panels.set(Panel::RedEye, PanelState::Off);
         preset.panels.set(Panel::SpotRemoval, PanelState::Off);
-        let applied = applied_to(preset, &photo);
+        let applied = applied_to(
+            LoadedPreset {
+                recipe: preset,
+                rendered: false,
+            },
+            &photo,
+            &Metadata::default(),
+        );
         assert_eq!(applied.exposure, 0.5);
         assert_eq!(applied.red_eye, photo.red_eye);
         assert_eq!(applied.panels.state(Panel::RedEye), PanelState::On);
         assert_eq!(applied.panels.state(Panel::SpotRemoval), PanelState::On);
+    }
+    fn rendered() -> Metadata {
+        Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        }
+    }
+    /// A RAW's preset, from before rendered files developed, leaves a JPEG its white
+    /// balance and profile (a RAW's gains and camera profile would render it wrong)
+    /// and applies the rest.
+    #[test]
+    fn a_raw_preset_leaves_a_rendered_photo_its_white_balance_and_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let text = serde_json::json!({
+            "schema": 11,
+            "pipeline": 11,
+            "recipe": {"exposure": 0.5, "temperature": 3000.0, "wb": [2.0, 1.0, 0.5]},
+        });
+        std::fs::write(&path, text.to_string()).unwrap();
+        let m = rendered();
+        let mut photo = Recipe::for_rendered(&m);
+        photo.incremental_temperature = 20.;
+        let applied = applied_to(load_preset(&path).unwrap(), &photo, &m);
+        assert_eq!(applied.exposure, 0.5);
+        assert_eq!(applied.wb, [1.; 3]);
+        assert_eq!(applied.incremental_temperature, 20.);
+        assert_eq!(applied.temperature, photo.temperature);
+        assert!(applied.profile.is_some_and(|p| p.is_embedded()));
+    }
+    /// A rendered file's preset carries its relative white balance to another
+    /// rendered file, and leaves a RAW its own.
+    #[test]
+    fn a_rendered_preset_keeps_relative_white_balance_to_rendered_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.json");
+        let m = rendered();
+        let mut r = Recipe::for_rendered(&m);
+        r.incremental_temperature = 30.;
+        r.exposure = 0.5;
+        save_preset(&path, &r, &m).unwrap();
+        let other = Recipe::for_rendered(&m);
+        let applied = applied_to(load_preset(&path).unwrap(), &other, &m);
+        assert_eq!(applied.incremental_temperature, 30.);
+        let raw = Recipe {
+            wb: [2., 1., 1.5],
+            temperature: 4000.,
+            ..Default::default()
+        };
+        let applied = applied_to(load_preset(&path).unwrap(), &raw, &Metadata::default());
+        assert_eq!(applied.exposure, 0.5);
+        assert_eq!(applied.incremental_temperature, 0.);
+        assert_eq!((applied.wb, applied.temperature), (raw.wb, raw.temperature));
+        assert_eq!(applied.profile, raw.profile);
     }
     /// A preset is saved as the one engine's version, which releases before it
     /// refuse as newer.
@@ -120,7 +205,7 @@ mod tests {
             exposure: 0.5,
             ..Default::default()
         };
-        save_preset(&path, &r).unwrap();
+        save_preset(&path, &r, &Metadata::default()).unwrap();
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(
@@ -128,7 +213,7 @@ mod tests {
             (&11.into(), &11.into())
         );
         assert!(!reads(&saved, BEFORE_ONE_ENGINE));
-        assert_eq!(load_preset(&path).unwrap().exposure, 0.5);
+        assert_eq!(load_preset(&path).unwrap().recipe.exposure, 0.5);
     }
     /// A preset an earlier release saved loses the settings that chose its engine
     /// and operators, and keeps its sliders and a newer release's setting.
@@ -150,7 +235,7 @@ mod tests {
             },
         });
         std::fs::write(&path, text.to_string()).unwrap();
-        let r = load_preset(&path).unwrap();
+        let r = load_preset(&path).unwrap().recipe;
         assert_eq!((r.exposure, r.effects.clarity), (0.5, 0.3));
         assert_eq!(
             r.unknown,
@@ -177,7 +262,7 @@ mod tests {
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.json");
-        assert!(save_preset(&path, &r).is_err());
+        assert!(save_preset(&path, &r, &Metadata::default()).is_err());
         assert!(!path.exists());
     }
     #[test]

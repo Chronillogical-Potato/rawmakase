@@ -43,9 +43,19 @@ impl Editor {
                 }
                 Event::PresetLoad(p) => {
                     self.activity.finish_dialog();
-                    match crate::presets::load_preset(&p) {
+                    let loaded = crate::presets::load_preset(&p).and_then(|preset| {
+                        let m =
+                            self.document.metadata.as_ref().ok_or_else(|| {
+                                anyhow::anyhow!("Open a photo to apply a preset to")
+                            })?;
+                        Ok(crate::presets::applied_to(
+                            preset,
+                            self.document.edit.recipe(),
+                            m,
+                        ))
+                    });
+                    match loaded {
                         Ok(r) => {
-                            let r = crate::presets::applied_to(r, self.document.edit.recipe());
                             let old = self.document.edit.replace(r);
                             // Before the step is taken, as the Presets panel does.
                             self.ensure_upright();
@@ -140,7 +150,8 @@ impl Editor {
                 Event::Synced(result) => self.synced(*result),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
-                    match crate::presets::save_preset(&p, self.document.edit.recipe()) {
+                    let m = self.document.metadata.clone().unwrap_or_default();
+                    match crate::presets::save_preset(&p, self.document.edit.recipe(), &m) {
                         Ok(()) => self.status = "Preset saved".into(),
                         Err(e) => self.status = e.to_string(),
                     }

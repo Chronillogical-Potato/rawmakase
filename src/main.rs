@@ -341,7 +341,7 @@ fn main() -> Result<()> {
             let t = Instant::now();
             let r = rawmakase::photo::open(&input)?;
             let mut edit = if let Some(p) = recipe {
-                rawmakase::presets::load_preset(&p)?
+                rawmakase::presets::load_preset(&p)?.recipe
             } else {
                 rawmakase::catalog::legacy_sidecar::load(&input)?
                     .map(|s| s.recipe)
@@ -410,7 +410,7 @@ fn main() -> Result<()> {
             }
             if let Some(path) = save_recipe {
                 anyhow::ensure!(!path.exists(), "Recipe output already exists");
-                rawmakase::presets::save_preset(&path, &edit)?;
+                rawmakase::presets::save_preset(&path, &edit, &im.metadata)?;
             }
             if let Some(tap) = tap {
                 let stage = match tap {

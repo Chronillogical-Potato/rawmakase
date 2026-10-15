@@ -21,9 +21,9 @@ fn legacy_sidecar_and_preset_migrate_without_curve_changes() -> Result<()> {
         &preset,
         serde_json::to_vec(&serde_json::json!({"schema":1,"pipeline":1,"recipe":v["recipe"]}))?,
     )?;
-    assert_eq!(load_preset(&preset)?, loaded.recipe);
-    save_preset(&preset, &loaded.recipe)?;
-    assert_eq!(load_preset(&preset)?, loaded.recipe);
+    assert_eq!(load_preset(&preset)?.recipe, loaded.recipe);
+    save_preset(&preset, &loaded.recipe, &Default::default())?;
+    assert_eq!(load_preset(&preset)?.recipe, loaded.recipe);
     Ok(())
 }
 // Unix directory permissions; Windows has no read-only folders in this sense.
