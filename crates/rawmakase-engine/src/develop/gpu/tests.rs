@@ -1160,3 +1160,75 @@ fn kept_stages_present_the_frames_of_a_fresh_renderer() -> Result<()> {
     assert!(gpu.kept.iter().any(|k| k.read_once()));
     Ok(())
 }
+
+/// A develop pass recorded but never submitted, a render cancelled on the way, writes
+/// no kept camera colour, even once a pass over other samples is submitted: the next
+/// render of its samples computes the colour again rather than read what is not there.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn an_unsubmitted_pass_leaves_its_kept_colour_unwritten() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::{
+            pipeline::{Samples, Source, pixel_params::pixel_params},
+            stage_cache::color_recipe,
+        },
+    };
+    use std::sync::Arc;
+    let (w, h) = (24, 16);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [2., 1., 1.5],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| [0.1 + (i % w) as f32 / 60., 0.2, 0.15])
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let samples = |step: usize| {
+        Arc::new(Samples {
+            width: w / step as u32,
+            height: h / step as u32,
+            pixels: image.pixels.iter().step_by(step).copied().collect(),
+            positions: (0..w * h)
+                .step_by(step)
+                .map(|i| [(i % w) as f32, (i / w) as f32])
+                .collect(),
+        })
+    };
+    // A Fit and a 100% region of the same photo.
+    let (fit, region) = (samples(1), samples(2));
+    let recipe = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    let mut params = pixel_params(Source::new(&image), &recipe).expect("supported recipe");
+    params.color = Some(color_recipe(&recipe));
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let expected = gpu.develop(&fit, &params, &cancel)?;
+    // The second render of the recipe would keep the colour, but is cancelled after
+    // recording its pass.
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    gpu.record_develop(Input::Cpu(&fit), &params, &mut encoder);
+    drop(encoder);
+    // Zoomed in, the region renders and submits.
+    gpu.develop(&region, &params, &cancel)?;
+    // Back at Fit.
+    let actual = gpu.develop(&fit, &params, &cancel)?;
+    assert_eq!(actual.pixels, expected.pixels);
+    Ok(())
+}

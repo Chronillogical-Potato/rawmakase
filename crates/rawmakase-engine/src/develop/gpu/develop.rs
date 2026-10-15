@@ -96,7 +96,8 @@ pub(super) struct Kept {
     /// written again: a pass recorded but never submitted (a cancelled render) left it
     /// as it was. `recipe` is that of the last render of these samples, written or not.
     written: bool,
-    /// The last recorded pass writes it; marked written once submitted.
+    /// The pass being recorded writes it; marked written once submitted. Recording the
+    /// next pass clears it: a pass recorded earlier was never submitted.
     pending: bool,
 }
 /// What a develop pass does with the kept camera colour of its samples; the value is
@@ -132,7 +133,8 @@ impl Kept {
         self.written
     }
 }
-/// Marks the kept colours written once the pass that writes them is submitted.
+/// Marks the kept colour written once the pass that writes it is submitted: the last
+/// recorded, as each develop pass is submitted before the next is recorded.
 pub(super) fn submitted(kept: &mut [Kept]) {
     for k in kept.iter_mut().filter(|k| k.pending) {
         k.pending = false;
@@ -377,6 +379,11 @@ impl Processor {
                 (u.pixels.clone(), u.positions.clone(), u.output.clone())
             }
         };
+        // A pass recorded before this one and still pending was never submitted (a
+        // cancelled render): it wrote nothing, so submitting this one does not mark it.
+        for k in &mut self.kept {
+            k.pending = false;
+        }
         // 1 reads the kept camera colour, 2 computes and keeps it, 0 computes it.
         let (mode, color) = match &params.color {
             Some(recipe) if params.weights.is_empty() => {
