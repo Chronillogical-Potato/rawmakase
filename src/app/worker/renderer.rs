@@ -31,11 +31,11 @@ const QUICK: std::time::Duration = std::time::Duration::from_millis(40);
 /// this many pixels.
 const DRAFT_PIXELS: f32 = 1_000_000.;
 
-/// The long edge of a reduced preview of a `width` by `height` photo rendered at
-/// `max_edge`, or None when the render is small enough already.
-fn draft_edge(max_edge: u32, width: u32, height: u32) -> Option<u32> {
+/// The long edge of a reduced preview of a `width` by `height` render (after crop,
+/// as `max_edge` applies to it), or None when the render is small enough already.
+fn draft_edge(width: u32, height: u32) -> Option<u32> {
     let aspect = width.min(height) as f32 / width.max(height).max(1) as f32;
-    let mut edge = max_edge as f32;
+    let mut edge = width.max(height) as f32;
     let mut halved = 0;
     while edge * edge * aspect > DRAFT_PIXELS && halved < 4 {
         edge /= 2.;
@@ -558,9 +558,13 @@ fn render(
                 && fit.as_ref().is_some_and(|s| {
                     Arc::ptr_eq(&s.image, &job.image) && s.max_edge == job.max_edge
                 });
+            let draft = || {
+                let g = develop::Geometry::new(&job.image, &job.recipe, job.max_edge);
+                draft_edge(g.width, g.height)
+            };
             if editing
                 && !*quick_fit
-                && let Some(edge) = draft_edge(job.max_edge, job.image.width, job.image.height)
+                && let Some(edge) = draft()
             {
                 let out = processor.render_to(
                     &job.image,
@@ -659,7 +663,9 @@ mod tests {
     use crate::camera_data::{CameraImage, Metadata};
     use std::sync::{Arc, atomic::AtomicBool};
     fn image() -> Arc<CameraImage> {
-        let (w, h) = (240, 160);
+        image_of(240, 160)
+    }
+    fn image_of(w: u32, h: u32) -> Arc<CameraImage> {
         Arc::new(CameraImage {
             recovered: Default::default(),
             width: w,
@@ -782,31 +788,41 @@ mod tests {
     #[test]
     fn a_reduced_preview_halves_the_edge_to_at_most_a_megapixel() {
         // A 3:2 photo's Fit on a large HiDPI view.
-        assert_eq!(draft_edge(2360, 3000, 2000), Some(1180));
-        assert_eq!(draft_edge(1200, 3000, 2000), None);
+        assert_eq!(draft_edge(2360, 1573), Some(1180));
+        assert_eq!(draft_edge(1200, 800), None);
+        // Cropped square, the same long edge has more pixels.
+        assert_eq!(draft_edge(1200, 1200), Some(600));
         // Four halvings at most.
-        assert_eq!(draft_edge(20000, 3000, 2000), Some(1250));
+        assert_eq!(draft_edge(20000, 13333), Some(1250));
     }
     #[test]
     fn editing_the_whole_photo_shows_a_reduced_preview_first() {
         let (tx, rx) = std::sync::mpsc::channel();
         let worker = renderer(tx, egui::Context::default());
-        let image = image();
+        let image = image_of(1800, 1200);
         let mut recipe = Recipe::default();
         let fit = |id, recipe: &Recipe, edge| {
             run_at(&worker, &rx, Pane::After, id, &image, recipe, None, edge)
         };
         // Opening the photo renders the full Fit directly.
-        assert_eq!(fit(1, &recipe, 1600).len(), 1);
+        assert_eq!(fit(1, &recipe, 1500).len(), 1);
         // Editing it: a reduced preview, then the full Fit (the CPU is never quick).
         recipe.exposure = 0.5;
-        let edited = fit(2, &recipe, 1600);
+        let edited = fit(2, &recipe, 1500);
         assert_eq!(edited.len(), 2);
         assert_eq!(edited[0].0, RenderStage::Draft);
         assert_eq!(edited[1].0, RenderStage::Fit);
         // A view of another size, the window resized say, goes straight to the full render.
         recipe.exposure = 0.7;
-        assert_eq!(fit(3, &recipe, 1500).len(), 1);
+        assert_eq!(fit(3, &recipe, 1100).len(), 1);
+        // At that size the whole photo is under a megapixel: no reduced preview.
+        recipe.exposure = 0.6;
+        assert_eq!(fit(4, &recipe, 1100).len(), 1);
+        // Cropped square, the same long edge renders more than a megapixel.
+        recipe.crop = [1. / 6., 0., 5. / 6., 1.];
+        let cropped = fit(5, &recipe, 1100);
+        assert_eq!(cropped.len(), 2);
+        assert_eq!(cropped[0].0, RenderStage::Draft);
     }
     #[test]
     fn before_renders_beside_the_edit_keep_the_edits_views() {
