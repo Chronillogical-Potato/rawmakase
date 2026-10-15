@@ -863,13 +863,18 @@ impl Editor {
                     action = action.then(library.sidebar(ui));
                 } else {
                     ui.add_space(12.);
-                    ui.label(
-                        egui::RichText::new(
-                            "Create an RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
-                        )
-                        .size(12.)
-                        .color(palette.gray(150)),
-                    );
+                    // On the catalog name's column.
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(10, 0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Create a RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
+                                )
+                                .size(12.)
+                                .color(palette.gray(150)),
+                            );
+                        });
                 }
             });
         action
