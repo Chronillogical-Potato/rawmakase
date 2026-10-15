@@ -2,7 +2,7 @@
 
 */raw·muh·KAH·say/, RAW + omakase*
 
-RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from the cameras LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. JPEG, PNG and TIFF files can be edited too, with the same controls, rendering as Lightroom renders them. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from the cameras LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. JPEG, PNG and TIFF files can be edited too. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
 ![RAWmakase Develop view with presets, the photo, and the Basic and Tone Curve panels](docs/images/screenshot-2026-10-13-1111.png)
 
