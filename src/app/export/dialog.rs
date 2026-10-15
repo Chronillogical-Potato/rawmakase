@@ -281,7 +281,12 @@ impl Editor {
                 .selected_text(s.format.raster().name())
                 .show_ui(ui, |ui| {
                     for format in Format::ALL {
-                        ui.selectable_value(&mut s.format, format, format.raster().name());
+                        if ui
+                            .selectable_label(s.format == format, format.raster().name())
+                            .clicked()
+                        {
+                            s.choose_format(format);
+                        }
                     }
                 });
         });

@@ -259,8 +259,12 @@ pub struct ExportSettings {
     /// Where Sequence starts.
     pub start_number: u32,
     pub uppercase: bool,
+    /// JPEG when the saved format is one only a later release knows; see
+    /// [`LaterFormat`].
     #[serde(deserialize_with = "known_or_default")]
     pub format: Format,
+    #[serde(skip)]
+    pub later_format: LaterFormat,
     pub quality: u8,
     pub resize: bool,
     pub long_edge: u32,
@@ -298,6 +302,7 @@ impl Default for ExportSettings {
             start_number: 1,
             uppercase: false,
             format: Format::Jpeg,
+            later_format: LaterFormat::default(),
             quality: 92,
             resize: false,
             long_edge: 2048,
@@ -314,6 +319,12 @@ impl Default for ExportSettings {
         }
     }
 }
+
+/// The saved format when only a later release knows it. JPEG stands in for
+/// it here, and it is saved back until a format is chosen, so that release
+/// still finds its choice after this one saves the settings.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LaterFormat(Option<serde_json::Value>);
 
 /// A choice a later release added reads as the default, so an older one
 /// keeps the rest of the settings.
@@ -385,10 +396,37 @@ fn known_folder(id: &windows_sys::core::GUID, fallback: &str) -> PathBuf {
 impl ExportSettings {
     /// The last export's choices, if there was one.
     pub fn load() -> Option<Self> {
-        serde_json::from_str(&std::fs::read_to_string(path()).ok()?).ok()
+        Self::load_from(&path())
     }
     pub fn save(&self) -> anyhow::Result<()> {
-        crate::storage::atomic_json(&path(), self)
+        self.save_to(&path())
+    }
+    /// The format the user picks, which replaces one from a later release.
+    pub fn choose_format(&mut self, format: Format) {
+        self.format = format;
+        self.later_format = LaterFormat::default();
+    }
+    fn load_from(path: &Path) -> Option<Self> {
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        let later = saved
+            .get("format")
+            .filter(|format| Format::deserialize(*format).is_err())
+            .cloned();
+        let mut settings = Self::deserialize(saved).ok()?;
+        settings.later_format = LaterFormat(later);
+        Some(settings)
+    }
+    fn save_to(&self, path: &Path) -> anyhow::Result<()> {
+        // Still the stand-in it was read as: the later release's choice.
+        if let LaterFormat(Some(later)) = &self.later_format
+            && self.format == Format::default()
+        {
+            let mut saved = serde_json::to_value(self)?;
+            saved["format"] = later.clone();
+            return crate::storage::atomic_json(path, &saved);
+        }
+        crate::storage::atomic_json(path, self)
     }
     /// The chosen folder, before any subfolder; `None` until a specific
     /// folder is picked.
@@ -585,6 +623,44 @@ mod tests {
         assert_eq!(read.quality, 80);
         let read: ExportSettings = serde_json::from_str(r#"{"format":"Png"}"#).unwrap();
         assert_eq!(read.format, Format::Png);
+    }
+    #[test]
+    fn a_format_from_a_later_release_is_saved_back_until_another_is_chosen() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("export.json");
+        let saved_format = |file: &Path| -> anyhow::Result<serde_json::Value> {
+            let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(file)?)?;
+            Ok(saved["format"].clone())
+        };
+        std::fs::write(&file, r#"{"format":"Webp","folder":"/x"}"#)?;
+        // Exported as JPEG here, and saved again by Export with Previous or a
+        // watermark's rename: the later release still finds its choice.
+        let mut read = ExportSettings::load_from(&file).unwrap();
+        assert_eq!(read.format, Format::Jpeg);
+        read.quality = 70;
+        read.save_to(&file)?;
+        assert_eq!(saved_format(&file)?, "Webp");
+        let read = ExportSettings::load_from(&file).unwrap();
+        assert_eq!((read.format, read.quality), (Format::Jpeg, 70));
+        assert_eq!(read.folder, Some(PathBuf::from("/x")));
+        // A format chosen here replaces it, JPEG too.
+        let mut png = read.clone();
+        png.format = Format::Png;
+        png.save_to(&file)?;
+        assert_eq!(saved_format(&file)?, "Png");
+        std::fs::write(&file, r#"{"format":"Webp"}"#)?;
+        let mut jpeg = ExportSettings::load_from(&file).unwrap();
+        jpeg.choose_format(Format::Jpeg);
+        jpeg.save_to(&file)?;
+        assert_eq!(saved_format(&file)?, "Jpeg");
+        // The formats known here are saved as they were read.
+        for format in Format::ALL {
+            let name = serde_json::to_value(format)?;
+            std::fs::write(&file, format!(r#"{{"format":{name}}}"#))?;
+            ExportSettings::load_from(&file).unwrap().save_to(&file)?;
+            assert_eq!(saved_format(&file)?, name);
+        }
+        Ok(())
     }
     #[test]
     fn every_export_extension_and_mime_type_is_what_it_was() {
