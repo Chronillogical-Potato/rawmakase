@@ -869,9 +869,19 @@ mod tests {
         let sigma = photo(3 << 8 | 255);
         assert_eq!(auto(&sigma), None);
         assert_eq!(lens(&sigma), None);
-        // A file that records its lens keeps the camera's name.
+        // Named so, it matches the same profile, with the same correction, by name.
         let mut named = photo(4 << 8 | 252);
-        named.lens_model = "smc PENTAX-DA 18-55mm F3.5-5.6 AL".into();
+        named.lens_model = lens(&k_x).unwrap();
+        named.lens_profiles = library.for_photo(&named);
+        assert_eq!(auto(&named).as_deref(), Some("da.lcp"));
+        let gain = |m: &Metadata| {
+            m.lens_profiles
+                .auto(m)?
+                .correction(m)
+                .map(|c| c.vignetting_gain(1.))
+        };
+        assert_eq!(gain(&named), gain(&k_x));
+        // A file that records its lens keeps the camera's name.
         assert_eq!(lens(&named), None);
     }
     #[test]
