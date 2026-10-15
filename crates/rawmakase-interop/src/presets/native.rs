@@ -156,7 +156,12 @@ mod tests {
         let text = serde_json::json!({
             "schema": 11,
             "pipeline": 11,
-            "recipe": {"exposure": 0.5, "temperature": 3000.0, "wb": [2.0, 1.0, 0.5]},
+            "recipe": {
+                "exposure": 0.5,
+                "camera_exposure": 0.35,
+                "temperature": 3000.0,
+                "wb": [2.0, 1.0, 0.5],
+            },
         });
         std::fs::write(&path, text.to_string()).unwrap();
         let m = rendered();
@@ -167,6 +172,8 @@ mod tests {
         assert_eq!(applied.wb, [1.; 3]);
         assert_eq!(applied.incremental_temperature, 20.);
         assert_eq!(applied.temperature, photo.temperature);
+        // The RAW camera's baseline exposure is its profile's, not the JPEG's.
+        assert_eq!(applied.camera_exposure, 0.);
         assert!(applied.profile.is_some_and(|p| p.is_embedded()));
     }
     /// A rendered file's preset carries its relative white balance to another
@@ -186,6 +193,7 @@ mod tests {
         let raw = Recipe {
             wb: [2., 1., 1.5],
             temperature: 4000.,
+            camera_exposure: 0.35,
             ..Default::default()
         };
         let applied = applied_to(load_preset(&path).unwrap(), &raw, &Metadata::default());
@@ -193,6 +201,7 @@ mod tests {
         assert_eq!(applied.incremental_temperature, 0.);
         assert_eq!((applied.wb, applied.temperature), (raw.wb, raw.temperature));
         assert_eq!(applied.profile, raw.profile);
+        assert_eq!(applied.camera_exposure, 0.35);
     }
     /// A preset is saved as the one engine's version, which releases before it
     /// refuse as newer.
