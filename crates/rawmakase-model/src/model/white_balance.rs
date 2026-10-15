@@ -264,32 +264,24 @@ pub fn rendered_white_balance(temperature: f32, tint: f32) -> RenderedWhiteBalan
 }
 
 /// The ProPhoto channel gains greys below [`rendered_white_balance`]'s clip get at a
-/// rendered file's Temp and Tint: what the eyedropper's and Auto's gains are matched
-/// against. Exactly `[1, 1, 1]` at 0, 0.
+/// rendered file's Temp and Tint. Exactly `[1, 1, 1]` at 0, 0.
 pub fn rendered_gains(temperature: f32, tint: f32) -> [f32; 3] {
     crate::color::mul(rendered_white_balance(temperature, tint).matrix, [1.; 3])
 }
 
-/// The rendered file's Temp and Tint whose [`rendered_gains`] are nearest `gains`
-/// (least squares in log2, after scaling the smallest to 1), within −100…100: a
-/// coarse grid, then a pattern search to 0.01. Gains no Temp and Tint reach (an
-/// eyedropper's, say) give the nearest that do.
+/// The rendered file's Temp and Tint that render most neutral the colour `gains`
+/// would (the picked colour is `1 / gains`): least squares on the log2 spread of its
+/// channels after [`rendered_white_balance`]'s matrix, whose cross-channel terms a
+/// comparison of gains would miss, within −100…100: a coarse grid, then a pattern
+/// search to 0.01. A colour no Temp and Tint neutralise (an eyedropper's, say) gives
+/// the nearest that do.
 pub fn rendered_controls(gains: [f32; 3]) -> [f32; 2] {
-    let log2 = |g: [f32; 3]| {
-        let l = g.map(|v| {
-            if v.is_finite() {
-                v.max(1e-6).log2()
-            } else {
-                0.
-            }
-        });
-        let least = l.into_iter().fold(f32::INFINITY, f32::min);
-        l.map(|v| v - least)
-    };
-    let target = log2(gains);
+    let sample = gains.map(|g| if g.is_finite() { 1. / g.max(1e-6) } else { 1. });
     let cost = |t: f32, n: f32| {
-        let g = log2(rendered_gains(t, n));
-        (0..3).map(|c| (g[c] - target[c]).powi(2)).sum::<f32>()
+        let l = crate::color::mul(rendered_white_balance(t, n).matrix, sample)
+            .map(|v| v.max(1e-6).log2());
+        let mean = l.iter().sum::<f32>() / 3.;
+        l.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
     };
     let mut best = (cost(0., 0.), 0., 0.);
     for t in (-100..=100).step_by(5) {
@@ -408,15 +400,40 @@ mod rendered_tests {
         }
     }
 
+    /// The gains the eyedropper takes from a grey under the white a Temp and Tint
+    /// name.
+    fn picked_gains(temperature: f32, tint: f32) -> [f32; 3] {
+        let m = rendered_white_balance(temperature, tint).matrix;
+        let sample = crate::color::mul(crate::color::inverse(m), [0.05; 3]);
+        sample.map(|v| sample[1] / v)
+    }
+
     #[test]
-    fn rendered_controls_invert_rendered_gains() {
+    fn rendered_controls_invert_rendered_white_balance() {
         for t in [-90., -50., -20., 0., 15., 40., 80.] {
             for n in [-60., -10., 0., 30., 70.] {
-                let [t2, n2] = rendered_controls(rendered_gains(t, n));
+                let [t2, n2] = rendered_controls(picked_gains(t, n));
                 assert!(
                     (t2 - t).abs() <= 1. && (n2 - n).abs() <= 1.,
                     "{t},{n} -> {t2},{n2}"
                 );
+            }
+        }
+    }
+
+    /// A colour some Temp and Tint render neutral (a grey under that white) is picked
+    /// neutral: the cross-channel terms of the white balance count, not only its row
+    /// sums.
+    #[test]
+    fn rendered_controls_neutralise_a_reachable_pick() {
+        for (t, n) in [(-50., 0.), (40., 0.), (-30., 40.), (60., -50.)] {
+            let gains = picked_gains(t, n);
+            let sample = gains.map(|g| 1. / g);
+            let [t2, n2] = rendered_controls(gains);
+            let got = crate::color::mul(rendered_white_balance(t2, n2).matrix, sample);
+            for c in [0, 2] {
+                let ratio = got[c] / got[1];
+                assert!((ratio - 1.).abs() < 0.005, "{t},{n} -> {t2},{n2}: {got:?}");
             }
         }
     }
