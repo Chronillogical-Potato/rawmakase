@@ -20,6 +20,8 @@ rawmakase-raw = { path = "../rawmakase-raw", version = "0.1.0" }
 anyhow = "1"
 bytemuck = { version = "1.25", features = ["derive"] }
 image.workspace = true
+# JPEG XL, in pure Rust; through its `image` decoder.
+jxl-oxide = { version = "0.12.6", default-features = false, features = ["image", "rayon"] }
 # Colour management of JPEG, PNG and TIFF files, in pure Rust; the version `image` uses.
 moxcms = { version = "0.8.1", features = ["options"] }
 rayon = "1.12"
