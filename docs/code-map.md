@@ -225,7 +225,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [export/encode.rs](../crates/rawmakase-export/src/export/encode.rs) | JPEG, 16-bit TIFF and PNG encoding with the ICC profile, EXIF directories and XMP. |
 | [export/metadata.rs](../crates/rawmakase-export/src/export/metadata.rs), [export/exif.rs](../crates/rawmakase-export/src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as the TIFF block a JPEG's APP1 segment or a PNG's eXIf chunk holds. |
 | [export/job.rs](../crates/rawmakase-export/src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
-| [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
+| [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. A format or setting only a later release knows is saved back untouched. Below the catalog and export, which both use them. |
 
 ## Desktop application
 

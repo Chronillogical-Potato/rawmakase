@@ -287,6 +287,9 @@ pub struct ExportSettings {
     pub watermark_name: String,
     /// Lightroom's After Export.
     pub after_export: AfterExport,
+    /// Settings a later release added; see [`LaterFields`].
+    #[serde(flatten)]
+    pub later_fields: LaterFields,
 }
 impl Default for ExportSettings {
     fn default() -> Self {
@@ -316,6 +319,7 @@ impl Default for ExportSettings {
             watermark: false,
             watermark_name: SIMPLE_COPYRIGHT.into(),
             after_export: AfterExport::Nothing,
+            later_fields: LaterFields::default(),
         }
     }
 }
@@ -325,6 +329,13 @@ impl Default for ExportSettings {
 /// still finds its choice after this one saves the settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LaterFormat(Option<serde_json::Value>);
+
+/// The saved settings only a later release knows, as they were read. They
+/// mean nothing here and are saved back untouched, so that release still finds
+/// them after this one saves the settings.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LaterFields(serde_json::Map<String, serde_json::Value>);
 
 /// A choice a later release added reads as the default, so an older one
 /// keeps the rest of the settings.
@@ -660,6 +671,88 @@ mod tests {
             ExportSettings::load_from(&file).unwrap().save_to(&file)?;
             assert_eq!(saved_format(&file)?, name);
         }
+        Ok(())
+    }
+    #[test]
+    fn settings_a_later_release_added_are_saved_back() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("export.json");
+        let saved = |file: &Path| -> anyhow::Result<serde_json::Value> {
+            Ok(serde_json::from_str(&std::fs::read_to_string(file)?)?)
+        };
+        std::fs::write(
+            &file,
+            r#"{"folder":"/x","quality":80,"sharpen":{"amount":2},"newer_flag":true}"#,
+        )?;
+        let mut read = ExportSettings::load_from(&file).unwrap();
+        assert_eq!(read.folder, Some(PathBuf::from("/x")));
+        assert_eq!(read.quality, 80);
+        // Saved again by an export here: the later release still finds its
+        // settings, and what was changed here is saved.
+        read.quality = 70;
+        read.save_to(&file)?;
+        let written = saved(&file)?;
+        assert_eq!(written["sharpen"], serde_json::json!({"amount": 2}));
+        assert_eq!(written["newer_flag"], true);
+        assert_eq!(written["folder"], "/x");
+        assert_eq!(written["quality"], 70);
+        assert_eq!(ExportSettings::load_from(&file).unwrap(), read);
+        // With a format only that release knows, both are saved back.
+        std::fs::write(&file, r#"{"format":"Webp","newer_flag":true}"#)?;
+        ExportSettings::load_from(&file).unwrap().save_to(&file)?;
+        let written = saved(&file)?;
+        assert_eq!(written["format"], "Webp");
+        assert_eq!(written["newer_flag"], true);
+        Ok(())
+    }
+    #[test]
+    fn settings_this_release_knows_are_saved_as_they_were() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("export.json");
+        let mut known = vec![
+            "destination",
+            "folder",
+            "subfolder",
+            "subfolder_name",
+            "existing",
+            "rename",
+            "custom_text",
+            "naming",
+            "start_number",
+            "uppercase",
+            "format",
+            "quality",
+            "resize",
+            "long_edge",
+            "ppi",
+            "capture",
+            "location",
+            "develop",
+            "descriptive",
+            "include",
+            "remove_location",
+            "watermark",
+            "watermark_name",
+            "after_export",
+        ];
+        known.sort_unstable();
+        let keys = |value: &serde_json::Value| -> Vec<String> {
+            let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+            keys.sort_unstable();
+            keys
+        };
+        assert_eq!(
+            keys(&serde_json::to_value(ExportSettings::default())?),
+            known
+        );
+        std::fs::write(&file, r#"{"quality":80,"folder":"/x"}"#)?;
+        ExportSettings::load_from(&file).unwrap().save_to(&file)?;
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file)?)?;
+        assert_eq!(keys(&saved), known);
+        assert_eq!(
+            (saved["quality"].clone(), saved["folder"].clone()),
+            (80.into(), "/x".into())
+        );
         Ok(())
     }
     #[test]
