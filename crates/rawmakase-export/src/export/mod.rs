@@ -30,7 +30,8 @@ pub struct Embed {
     /// The camera's EXIF, read from the RAW; LibRaw's capture settings stand in
     /// when it could not be read.
     pub camera: Option<crate::exif::CameraExif>,
-    /// Make and model from LibRaw where the camera's EXIF has none.
+    /// Make, model and lens model from LibRaw's metadata where the camera's EXIF
+    /// has none: the camera's information is included.
     pub camera_fallback: bool,
     /// An XMP packet, e.g. the edit as Camera Raw settings.
     pub xmp: Option<String>,

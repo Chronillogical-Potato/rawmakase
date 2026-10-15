@@ -19,8 +19,9 @@ pub(crate) type Chromatic = (f32, [f32; 3]);
 pub struct Entry {
     pub make: String,
     pub lens: Vec<String>,
-    /// The maker's numeric lens ID (`stCamera:LensID`, which for Nikon is the maker
-    /// note's `LensIDNumber`); `None` when the profile writes none.
+    /// The maker's numeric lens ID (`stCamera:LensID`): for Nikon the maker note's
+    /// `LensIDNumber`, for Pentax its two `LensType` bytes, written "4 252" and held
+    /// as LibRaw reads them, 4 << 8 | 252. `None` when the profile writes none.
     pub lens_id: Option<u32>,
     /// The lens's display name (`LensPrettyName`, else `ProfileName`).
     pub name: String,
@@ -78,6 +79,21 @@ fn params(node: roxmltree::Node, prefix: &str) -> Option<[f32; 3]> {
     ])
 }
 
+/// `stCamera:LensID` as one number: Nikon's "138" as it is, Pentax's "4 252" as
+/// LibRaw combines the two bytes. Other forms (Sony's hexadecimal) are left out.
+fn lens_id(v: &str) -> Option<u32> {
+    let mut parts = v.split_whitespace();
+    let first: u32 = parts.next()?.parse().ok()?;
+    match (parts.next(), parts.next()) {
+        (None, _) => Some(first),
+        (Some(second), None) => {
+            let second: u8 = second.parse().ok()?;
+            Some((u8::try_from(first).ok()? as u32) << 8 | second as u32)
+        }
+        _ => None,
+    }
+}
+
 pub fn parse(text: &str) -> Result<Vec<Entry>> {
     ensure!(text.len() <= 16_000_000, "Lens profile too large");
     let doc = roxmltree::Document::parse(text).context("Invalid lens profile XML")?;
@@ -113,7 +129,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
                 .unwrap_or_default(),
             profile_name: attr(d, "ProfileName").unwrap_or_default(),
             lens,
-            lens_id: attr(d, "LensID").and_then(|v| v.trim().parse().ok()),
+            lens_id: attr(d, "LensID").and_then(|v| lens_id(&v)),
             raw: attr(d, "CameraRawProfile").is_some_and(|v| v.eq_ignore_ascii_case("true")),
             prefer_metadata_distortion: attr(d, "PreferMetadataDistort")
                 .is_some_and(|v| v.eq_ignore_ascii_case("true")),

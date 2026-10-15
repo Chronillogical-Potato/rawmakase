@@ -43,7 +43,8 @@ struct Metadata {
     unsigned left_margin, top_margin;
     unsigned aspect_left, aspect_top, aspect_width, aspect_height;
     // The maker's numeric lens ID, the value the lens profiles' stCamera:LensID
-    // holds too (Nikon's LensIDNumber); 0 when the maker notes have none.
+    // holds too (Nikon's LensIDNumber, Pentax's LensType); 0 when the maker notes
+    // have none.
     unsigned lens_id;
     // LibRaw's canonical name for bodies sold under several names (the Panasonic
     // DC-G95 is the DC-G99), which is often the one Adobe's profiles use.
@@ -277,6 +278,11 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         std::snprintf(m->model,64,"%s",d.idata.model);
         std::snprintf(m->lens,128,"%s",d.lens.Lens[0] ? d.lens.Lens : d.lens.makernotes.Lens);
         m->lens_id=d.lens.nikon.LensIDNumber;
+        // Pentax's LensType, its two bytes as one number (4 252 is 0x4fc), as
+        // Adobe's Pentax profiles write it: the only lens identity these bodies record.
+        const auto pentax=d.lens.makernotes.LensID;
+        if (d.idata.maker_index==LIBRAW_CAMERAMAKER_Pentax && pentax!=LIBRAW_LENS_NOT_SET
+            && pentax<=0xffff) m->lens_id=unsigned(pentax);
         std::snprintf(m->normalized_make,64,"%s",d.idata.normalized_make);
         std::snprintf(m->normalized_model,64,"%s",d.idata.normalized_model);
         return h.release();
