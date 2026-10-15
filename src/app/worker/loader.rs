@@ -48,14 +48,10 @@ fn caught(load: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
 pub(super) struct Ahead(Arc<Mutex<Option<Held>>>);
 struct Held {
     path: PathBuf,
-    /// The file as it was opened; a file replaced since opens afresh.
-    stamp: Stamp,
+    /// The file as it was opened (size, time and content); a file replaced since
+    /// opens afresh.
+    identity: crate::storage::Identity,
     image: CameraImage,
-}
-type Stamp = (std::time::SystemTime, u64);
-fn stamp(path: &Path) -> Option<Stamp> {
-    let m = std::fs::metadata(path).ok()?;
-    Some((m.modified().ok()?, m.len()))
 }
 impl Ahead {
     fn held(&self) -> std::sync::MutexGuard<'_, Option<Held>> {
@@ -65,7 +61,7 @@ impl Ahead {
     /// prefetch keeps nothing: the photo it was for has been moved past or opened.
     fn prefetch(&self, path: &Path, cancel: &AtomicBool) {
         *self.held() = None;
-        let Some(stamp) = stamp(path) else {
+        let Ok(identity) = crate::storage::Identity::read(path) else {
             return;
         };
         let Ok(Opened::Rendered(image)) = crate::photo::open_source(path, cancel) else {
@@ -74,7 +70,7 @@ impl Ahead {
         if !cancel.load(Ordering::Relaxed) {
             *self.held() = Some(Held {
                 path: path.into(),
-                stamp,
+                identity,
                 image,
             });
         }
@@ -83,7 +79,8 @@ impl Ahead {
     /// either way, so a prefetch is never held past the next load.
     fn take(&self, path: &Path) -> Option<CameraImage> {
         let held = self.held().take()?;
-        (held.path == path && stamp(path) == Some(held.stamp)).then_some(held.image)
+        (held.path == path && crate::storage::Identity::read(path).ok() == Some(held.identity))
+            .then_some(held.image)
     }
 }
 /// Develops a neighbour on two threads, leaving the other cores to rendering the
@@ -482,6 +479,35 @@ pub(in crate::app) mod tests {
         let (full, status) = ready(&events);
         assert_eq!((full.width, full.height), (20, 10));
         assert!(status.starts_with("Opened in"), "{status}");
+        Ok(())
+    }
+
+    /// Replaced by a file of the same size, its modification time kept (a restore or
+    /// sync can do that): the content tells them apart.
+    #[test]
+    fn a_rendered_file_replaced_with_its_size_and_time_opens_as_it_is_now() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("next.tif");
+        image::RgbImage::from_pixel(40, 30, image::Rgb([200, 0, 0])).save(&path)?;
+        let (len, modified) = {
+            let m = std::fs::metadata(&path)?;
+            (m.len(), m.modified()?)
+        };
+        let ahead = Ahead::default();
+        ahead.prefetch(&path, &AtomicBool::new(false));
+        image::RgbImage::from_pixel(40, 30, image::Rgb([0, 0, 200])).save(&path)?;
+        std::fs::File::options()
+            .write(true)
+            .open(&path)?
+            .set_modified(modified)?;
+        let m = std::fs::metadata(&path)?;
+        assert_eq!(
+            (m.len(), m.modified()?),
+            (len, modified),
+            "same size and time"
+        );
+
+        assert!(ahead.take(&path).is_none());
         Ok(())
     }
 
