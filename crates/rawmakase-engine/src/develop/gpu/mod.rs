@@ -87,6 +87,9 @@ pub struct Processor {
     presenter: Option<present::Presenter>,
     /// The photo and its local-tone and sampling stages on the device.
     resident: Option<resident::Resident>,
+    /// The develop pass's camera colour kept for its samples (see `develop::Kept`), most
+    /// recently used first.
+    kept: Vec<develop::Kept>,
     name: String,
 }
 struct Buffers {
@@ -211,6 +214,7 @@ impl Processor {
             developer: None,
             presenter: None,
             resident: None,
+            kept: Vec::new(),
             name: adapter.name.clone(),
         })
     }

@@ -38,37 +38,49 @@ impl CurveSet {
     /// measured Clarity); built also when `local_tone` (masks change Shadows or
     /// Highlights).
     pub(super) fn for_image(im: Source, r: &Recipe, camera: Camera, local_tone: bool) -> Self {
-        let mut lut = Self::with_photo_measures(im, r, camera);
+        let (mut lut, measured) = Self::measured(im, r, camera);
         let small = measured_copy(im);
-        lut.local = crate::develop::local_tone::LocalToneMap::build(
-            &small,
-            [im.width, im.height],
-            crate::develop::local_tone::Sliders::of(r),
-            local_tone,
-            |p| {
-                crate::develop::scene_tone::luminance(exposure_stage(
-                    scene_color(p, r, &lut, camera, None),
-                    &lut,
-                    None,
-                ))
-            },
-        );
+        let sliders = crate::develop::local_tone::Sliders::of(r);
+        // The base reads what the measures read, and Exposure.
+        let base =
+            crate::develop::local_tone::LocalToneMap::needed(sliders, local_tone).then(|| {
+                let scene = |color| {
+                    crate::develop::scene_tone::luminance(exposure_stage(color, &lut, None))
+                };
+                let size = [small.width, small.height];
+                match &measured {
+                    // The copy's camera colour reads only what the measures read: kept
+                    // with them, so an Exposure change only exposes it.
+                    Some(m) => m.map_base(r.exposure, || {
+                        let colors = m.colors(|| {
+                            small
+                                .pixels
+                                .par_iter()
+                                .map(|p| scene_color(*p, r, &lut, camera, None))
+                                .collect()
+                        });
+                        let lum = colors.par_iter().map(|c| scene(*c)).collect();
+                        crate::develop::local_tone::MapBase::new(lum, size)
+                    }),
+                    None => Arc::new(crate::develop::local_tone::MapBase::of(&small, |p| {
+                        scene(scene_color(p, r, &lut, camera, None))
+                    })),
+                }
+            });
+        lut.local = base.as_ref().map(|base| {
+            crate::develop::local_tone::LocalToneMap::from_base(
+                base,
+                [im.width, im.height],
+                sliders,
+                local_tone,
+            )
+        });
         if (r.shadows > 0. || local_tone)
-            && let Some(map) = &lut.local
+            && let (Some(map), Some(base)) = (&lut.local, &base)
         {
             // The black response follows the median positive-Shadows gain. Masks
             // select this response locally; an unmasked pixel keeps the global key.
-            let levels: Vec<f32> = small
-                .pixels
-                .par_iter()
-                .map(|p| {
-                    crate::develop::scene_tone::luminance(exposure_stage(
-                        scene_color(*p, r, &lut, camera, None),
-                        &lut,
-                        None,
-                    ))
-                })
-                .collect();
+            let levels = base.lum();
             let shift = |shadows: f32| {
                 if shadows <= 0. {
                     return 0.;
@@ -103,9 +115,19 @@ impl CurveSet {
     }
     /// Curves with the scene tone stage for this image's measures, and Contrast at
     /// its pivot when the recipe measures it.
+    #[cfg(test)]
     pub(super) fn with_photo_measures(im: Source, r: &Recipe, camera: Camera) -> Self {
+        Self::measured(im, r, camera).0
+    }
+    /// As [`Self::with_photo_measures`], with the stage cache's entry for the measures
+    /// when there is one.
+    fn measured(
+        im: Source,
+        r: &Recipe,
+        camera: Camera,
+    ) -> (Self, Option<Arc<crate::develop::scene_tone::Measured>>) {
         let mut lut = Self::new(r);
-        let (measures, haze) = cached_photo_measures(im, r, camera);
+        let (measures, haze, measured) = cached_photo_measures(im, r, camera);
         let dehazing = haze.as_ref().map(|haze| {
             crate::develop::scene_tone::Dehazing::new(
                 haze.clone(),
@@ -115,10 +137,15 @@ impl CurveSet {
         });
         lut.measure(measures, dehazing, r);
         if measures_contrast_pivot(r) {
-            lut.photo.contrast_pivot = contrast_pivot(im, r, camera, &lut.measures, haze);
+            // It reads what the measures read, and Dehaze.
+            let measure = || contrast_pivot(im, r, camera, &lut.measures, haze);
+            lut.photo.contrast_pivot = match &measured {
+                Some(m) => m.pivot(r.effects.dehaze, measure),
+                None => measure(),
+            };
             lut.basic = basic_tone(r, &lut.photo);
         }
-        lut
+        (lut, measured)
     }
     /// The scene tone stage for a photo's measures, and its haze as this render removes
     /// it.
@@ -183,7 +210,8 @@ fn basic_tone(
 /// `photo_measures`, and `photo_haze` when the recipe removes haze
 /// (`scene_tone::needs_haze`), through the stage cache when the source has its
 /// measurement copy and the cache: kept per copy, matrix and the recipe fields they
-/// read, so Exposure, tone and Dehaze edits reuse them.
+/// read, so Exposure, tone and Dehaze edits reuse them. With the cache, also its entry,
+/// which keeps what else is measured on the same scene values.
 fn cached_photo_measures(
     im: Source,
     r: &Recipe,
@@ -191,12 +219,14 @@ fn cached_photo_measures(
 ) -> (
     crate::develop::scene_tone::PhotoMeasures,
     Option<Arc<crate::develop::scene_tone::Haze>>,
+    Option<Arc<crate::develop::scene_tone::Measured>>,
 ) {
     let needs_haze = crate::develop::scene_tone::needs_haze(r);
     let (Some(copy), Some(cache)) = (im.measured, im.measures) else {
         return (
             photo_measures(im, r, camera),
             needs_haze.then(|| Arc::new(photo_haze(im, r, camera))),
+            None,
         );
     };
     let key = crate::develop::stage_cache::MeasuresKey::new(copy, im.unretouched, r, camera);
@@ -231,7 +261,7 @@ fn cached_photo_measures(
         let haze = Arc::new(photo_haze(im, r, camera));
         measured.haze.get_or_init(|| haze).clone()
     });
-    (measured.measures, haze)
+    (measured.measures, haze, Some(measured))
 }
 /// What the scene tone stage measures of the photo: its reduced copy at the stage's
 /// input, with the user's Exposure at 0. Reads only the copy (and its metadata), `matrix`

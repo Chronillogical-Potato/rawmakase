@@ -488,6 +488,149 @@ fn stale_preview_results_are_discarded() {
     assert!(e.preview.texture.is_none());
 }
 
+/// A slider moving starts a render on every change. On a slow GPU each render
+/// takes longer than the next change, so cancelling the running one showed
+/// nothing until the drag stopped; it now finishes and shows on the way.
+#[test]
+fn a_render_overtaken_by_an_edit_still_shows_with_its_own_settings() {
+    let ctx = egui::Context::default();
+    let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    // Only the results sent here arrive: the renderer takes a job and holds it.
+    task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let first = e.preview.task.id();
+    let first_recipe = e.effective_recipe();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    // Many changes while the first still renders, as on a slow GPU:
+    // those replaced before the renderer took them are forgotten, not the first.
+    for i in 0..30 {
+        in_edit_frame(&ctx, &mut e, |e| {
+            e.document.edit.recipe_mut().exposure = 0.5 + i as f32 / 100.
+        });
+    }
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
+    let second = e.preview.task.id();
+    assert!(second > first);
+    assert_eq!(e.preview.overtaken.len(), 1);
+    let rendered = |id, status: &str| Event::Rendered {
+        id,
+        pane: worker::Pane::After,
+        preview: worker::Preview::Pixels {
+            image: crate::rendered::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![128; 3],
+            navigator: None,
+        },
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
+        thumbnail: None,
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: status.into(),
+    };
+    e.tx.send(rendered(first, "first")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "first");
+    // Pickers sample it as what it is: the edit before the change.
+    assert_eq!(e.preview.samples_recipe.as_ref(), Some(&first_recipe));
+    assert!(e.preview.task.is_running());
+    e.tx.send(rendered(second, "second")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    assert_eq!(
+        e.preview.samples_recipe.as_ref().map(|r| r.exposure),
+        Some(1.)
+    );
+    assert!(!e.preview.task.is_running());
+    // An earlier frame arriving late never replaces a later one.
+    e.tx.send(rendered(first, "late")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    // A render for anything but an edit, a new view say, cancels what runs.
+    e.schedule();
+    e.tx.send(rendered(second, "cancelled")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    // So does an edit of another document of the same decoded photo.
+    let running = e.preview.task.id();
+    e.document.catalog_photo = Some(PhotoId(7));
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 2.);
+    e.tx.send(rendered(running, "another document")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+}
+
+/// A frame an edit overtook shows on the way, but never becomes the photo's Library
+/// thumbnail: that is cached under the current edit, which it was not rendered with.
+#[test]
+fn only_the_latest_render_becomes_the_library_thumbnail() -> anyhow::Result<()> {
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.RAF"), b"fixture")?;
+    let path = d.path().join("test.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(&photos)?;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
+    let library = library::Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].id;
+    e.library = Some(Box::new(library));
+    e.document.catalog_photo = Some(photo);
+    e.document.path = Some(photos.join("a.RAF"));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let first = e.preview.task.id();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
+    let second = e.preview.task.id();
+    let rendered = |id, status: &str| Event::Rendered {
+        id,
+        pane: worker::Pane::After,
+        preview: worker::Preview::Pixels {
+            image: crate::rendered::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![128; 3],
+            navigator: None,
+        },
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
+        thumbnail: Some(image::RgbImage::new(4, 4)),
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: status.into(),
+    };
+    let cached = |e: &Editor| e.library.as_ref().unwrap().has_edited_thumbnail(photo);
+    e.tx.send(rendered(first, "first")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "first");
+    assert!(!cached(&e));
+    e.tx.send(rendered(second, "second")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    assert!(cached(&e));
+    Ok(())
+}
+
 #[test]
 fn before_and_after_renders_go_to_their_own_side() {
     use worker::Pane;
@@ -4340,7 +4483,7 @@ fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
     editor.point_color_sample_ready(&sampled, Ok([2., 0.6, 0.3]));
     assert_eq!(editor.view.point_color.selected, Some(0));
     // The render scheduled with the swatch shows its range, with no other change.
-    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    let pending = editor.preview.pending.recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
         crate::model::point_color::SwatchView::VisualizeRange
@@ -4439,7 +4582,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.document.edit.setup_mut().effects.monochrome = false;
     // The preview's identity includes it, so a picker never takes it for the photo.
     editor.schedule();
-    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    let pending = editor.preview.pending.recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
         crate::model::point_color::SwatchView::VisualizeRange

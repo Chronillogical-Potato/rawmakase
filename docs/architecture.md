@@ -259,7 +259,11 @@ equivalent performance or numerical precision.
 The per-pixel color and tone stage runs on the GPU for previews
 (`gpu/develop.wgsl`, fed by `pipeline/pixel_params.rs`), on the stage cache's
 samples, for every recipe resolved with a camera profile; unresolved recipes and
-all exports use the CPU stage, which is the reference.
+all exports use the CPU stage, which is the reference. Each pass is compiled for the
+features its parameters use (`gpu::develop::Variant`); the Shadows/Highlights map's
+grids stay on the device per map base, and each sample set's camera colour per the
+recipe fields it reads (`gpu::develop::Kept`), written once a second render with the
+same settings asks for it and read after its pass is submitted.
 When the GPU renders a preview, the developed pixels stay on the device and
 `gpu/present.wgsl` finishes them into a texture that egui draws directly (registered
 as a native texture by the render worker): sharpening, vignettes and grain, the
@@ -292,8 +296,8 @@ Texture renders the whole preview on the CPU. A failure in these stages turns of
 only this path for the session.
 
 Presented textures are kept per view (the whole photo, or a 100% region) and size,
-two of each, so a slider moving at 100% alternates between the reduced preview's and
-the full region's textures without allocating. Each texture carries a generation that
+two of each, so a slider moving alternates between the reduced preview's and the
+full render's textures without allocating. Each texture carries a generation that
 changes whenever it is written; the worker reuses a finished frame when switching
 views only while its texture still holds it.
 
@@ -305,11 +309,16 @@ creates a new backend. GPU execution already submitted cannot be interrupted;
 obsolete results are discarded before they are published. Full-quality CPU stages check cancellation
 within pixel/row/column work. Pending jobs still coalesce in a single-slot mailbox.
 
-There is no separate interactive draft. Fit renders the current pipeline from the
-smallest pyramid level at or above the physical viewport size on every change;
-at 100% a reduced region from the pyramid is published first (as a draft stage),
-then the full-resolution region. The single-slot mailbox and cancellation keep
-continuous editing on the latest change.
+There is no separate draft pipeline. Fit renders the current pipeline from the
+smallest pyramid level at or above the physical viewport size on every change. While
+an edit is slower to present than 40 ms, a reduced render from the pyramid is
+published first as a draft stage: at 100% the region at half resolution or less, and
+for the whole photo at an edge halved until it has at most a megapixel. The
+single-slot mailbox keeps only the latest pending job. An edit of the same document
+and view (`Editor::schedule_edit`, `Task::supersede`) lets the running render finish,
+and its frame shows with the settings it was asked for, so a GPU slower than the
+slider still shows frames during a drag; any other render, and the next view or
+photo, cancels the running ones, and a result older than the one shown is dropped.
 
 ## Live application control
 
