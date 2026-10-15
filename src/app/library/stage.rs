@@ -95,9 +95,10 @@ impl Library {
             return (stand_in, Some(note.into()));
         }
         let edge = (area.width().max(area.height()) * ctx.pixels_per_point()) as u32;
-        // A JPEG, TIFF or PNG has no edit to render: the grid's preview of
-        // it will do. A RAW is rendered, so its current edit always shows.
-        if edge <= GRID_EDGE && !crate::storage::is_raw(&photo.path) && stand_in.is_some() {
+        // A JPEG, TIFF or PNG without an edit looks as its file does: the grid's
+        // preview of it will do. A photo developed is rendered, so its current
+        // edit always shows.
+        if edge <= GRID_EDGE && stand_in.is_some() && !self.develops(photo) {
             return (stand_in, None);
         }
         let stamp = self.edit_stamp(ctx, photo.id);

@@ -14,6 +14,11 @@
 use crate::model::masks::LocalAdjust;
 use crate::{camera_data::Metadata, model::recipe::Recipe};
 
+/// Temp and Tint as log2 channel gains per slider unit (±1 = ±100) where the profile
+/// has no white balance model: a plain warm/cool and green/magenta shift of similar
+/// size.
+const PLAIN_WHITE_BALANCE: [[f32; 3]; 2] = [[0.25, 0., -0.3], [0.12, -0.2, 0.12]];
+
 /// Slots of a [`LocalDelta`].
 pub(crate) mod slot {
     pub(crate) const TEMPERATURE: usize = 0;
@@ -112,8 +117,8 @@ impl LocalMath {
                 [gain(temp), gain(tint)]
             }
             // Without a profile's white balance model: a plain warm/cool and
-            // green/magenta shift of similar size.
-            _ => [[0.25, 0., -0.3], [0.12, -0.2, 0.12]],
+            // green/magenta shift of similar size, per slider unit (±1 = ±100).
+            _ => PLAIN_WHITE_BALANCE,
         };
         Self { white_balance }
     }

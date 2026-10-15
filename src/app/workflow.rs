@@ -97,7 +97,12 @@ impl Editor {
         if let Some(photo) = photo {
             self.request_stand_ins(id, photo, neighbour);
         }
-        self.status = "Reading RAW…".into();
+        self.status = if crate::storage::is_raw(&path) {
+            "Reading RAW…"
+        } else {
+            "Reading photo…"
+        }
+        .into();
         self.loader.submit(LoadJob {
             id,
             path,
@@ -114,7 +119,7 @@ impl Editor {
     /// the filmstrip, or the previous one after stepping back.
     pub(super) fn prefetch_neighbour(&self, id: PhotoId) -> Option<PathBuf> {
         let photo = self.library.as_ref()?.photo(self.neighbour_of(id)?)?;
-        (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
+        photo.path.is_file().then(|| photo.path.clone())
     }
     /// The photo next to `id` in the direction of travel.
     fn neighbour_of(&self, id: PhotoId) -> Option<PhotoId> {

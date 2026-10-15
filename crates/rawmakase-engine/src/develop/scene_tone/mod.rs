@@ -6,7 +6,7 @@ mod haze;
 mod measures;
 pub(crate) use global::{
     GlobalTone, MASK_VALUES, SLIDER_STEP, SLIDERS, T_FIRST, T_SAMPLES, T_STEP, U_FIRST, U_SAMPLES,
-    U_STEP, Y_FIRST, Y_SAMPLES, Y_STEP, gpu_mask_table,
+    U_STEP, Y_FIRST, Y_SAMPLES, Y_STEP, gpu_mask_table, rgb_tone,
 };
 pub(crate) use haze::{Dehazing, Haze};
 pub(crate) use measures::{MAX_EDGE, Measured, PhotoMeasures};

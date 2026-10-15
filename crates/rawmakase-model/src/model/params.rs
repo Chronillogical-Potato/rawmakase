@@ -29,6 +29,9 @@ pub enum ParameterId {
     Saturation,
     Temperature,
     Tint,
+    /// A rendered file's Temp and Tint, relative −100..+100.
+    IncrementalTemperature,
+    IncrementalTint,
     /// The Crop panel's Angle, in degrees.
     Straighten,
     /// Detail: Sharpening.
@@ -182,7 +185,7 @@ const fn percent<Id: Copy>(id: Id, label: &'static str) -> Descriptor<Id> {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 57] = [
+const DESCRIPTORS: [Descriptor; 59] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -220,6 +223,32 @@ const DESCRIPTORS: [Descriptor; 57] = [
         label: "Tint",
         interactive: -TINT_LIMIT..=TINT_LIMIT,
         valid: -TINT_LIMIT..=TINT_LIMIT,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTemperature,
+        label: "Temp",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTint,
+        label: "Tint",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
         tick: Tick::Linear(1.),
         drag_step: None,
         display: Display {
@@ -343,6 +372,15 @@ const DESCRIPTORS: [Descriptor; 57] = [
 ];
 
 impl ParameterId {
+    /// The setting this control moves on photo `m`: a JPEG, PNG or TIFF keeps its
+    /// white balance as relative Temp and Tint, so Temperature and Tint move those.
+    pub fn for_photo(self, m: Option<&crate::camera_data::Metadata>) -> Self {
+        match self {
+            Self::Temperature if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTemperature,
+            Self::Tint if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTint,
+            other => other,
+        }
+    }
     /// The parametric curve's regions, in the order of `Effects::parametric`.
     pub const PARAMETRIC: [Self; 4] = [
         Self::ParametricShadows,
@@ -357,7 +395,7 @@ impl ParameterId {
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
     #[cfg(test)]
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 59] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -371,6 +409,8 @@ impl ParameterId {
         Self::Saturation,
         Self::Temperature,
         Self::Tint,
+        Self::IncrementalTemperature,
+        Self::IncrementalTint,
         Self::Straighten,
         Self::SharpeningAmount,
         Self::SharpeningRadius,
@@ -435,6 +475,8 @@ impl ParameterId {
             Self::Saturation => &mut r.saturation,
             Self::Temperature => &mut r.temperature,
             Self::Tint => &mut r.tint,
+            Self::IncrementalTemperature => &mut r.incremental_temperature,
+            Self::IncrementalTint => &mut r.incremental_tint,
             Self::Straighten => &mut r.straighten,
             Self::SharpeningAmount => &mut r.sharpening,
             Self::SharpeningRadius => &mut r.sharpening_radius,
@@ -671,6 +713,30 @@ impl LocalParameterId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rendered_photo_moves_temp_and_tint_relatively() {
+        let rendered = crate::camera_data::Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let raw = crate::camera_data::Metadata::default();
+        for (id, relative) in [
+            (
+                ParameterId::Temperature,
+                ParameterId::IncrementalTemperature,
+            ),
+            (ParameterId::Tint, ParameterId::IncrementalTint),
+        ] {
+            assert_eq!(id.for_photo(Some(&rendered)), relative);
+            assert_eq!(id.for_photo(Some(&raw)), id);
+            assert_eq!(id.for_photo(None), id);
+        }
+        assert_eq!(
+            ParameterId::Exposure.for_photo(Some(&rendered)),
+            ParameterId::Exposure
+        );
+    }
 
     #[test]
     fn every_parameter_has_its_own_descriptor() {

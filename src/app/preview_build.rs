@@ -18,6 +18,7 @@ use crate::catalog::preview_cache::{PreviewCache, PreviewKind, Stamp};
 use crate::catalog::{CatalogLocation, PhotoId};
 use crate::edits::EditRecord;
 use crate::model::recipe::Recipe;
+use crate::photo::Opened;
 use crate::raw_defaults::DevelopDefaults;
 use anyhow::{Context, ensure};
 use eframe::egui::{self, Color32, Sense, Vec2};
@@ -73,7 +74,7 @@ pub(super) fn identity(
 
 /// Whether a photo has an edit of its own, saved or from Lightroom; the grid
 /// shows the embedded preview of a photo without one.
-fn has_edit(record: &EditRecord) -> bool {
+pub(super) fn has_edit(record: &EditRecord) -> bool {
     record.recipe.is_some() || record.lightroom().is_some()
 }
 
@@ -188,14 +189,17 @@ fn thumbnail(image: &image::RgbImage) -> image::RgbImage {
 /// identity-checked record (a protected or unreadable edit fails, never falling
 /// back to the defaults), Upright completed, then a cancellable render.
 pub(super) fn render(item: &Item, cancel: &AtomicBool) -> anyhow::Result<image::RgbImage> {
-    let raw = crate::photo::open(&item.path)
+    let opened = crate::photo::open_source(&item.path, cancel)
         .with_context(|| format!("{} can't be read", item.path.display()))?;
-    let (profiles, _) = crate::camera_profiles::installed(&raw.metadata);
-    let mut recipe = item_recipe(item, &raw.metadata, &profiles)?;
-    let image = if needs_full(&recipe, &raw.metadata, item.edge) {
-        crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
-    } else {
-        raw.develop(Decode::Half, cancel)?
+    let (profiles, _) = crate::camera_profiles::installed(opened.metadata());
+    let mut recipe = item_recipe(item, opened.metadata(), &profiles)?;
+    let image = match opened {
+        Opened::Raw(raw) if needs_full(&recipe, &raw.metadata, item.edge) => {
+            crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
+        }
+        Opened::Raw(raw) => raw.develop(Decode::Half, cancel)?,
+        // A JPEG, PNG or TIFF opens at full size: there is no smaller decode.
+        Opened::Rendered(image) => image,
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     develop(&mut recipe, &image, item.edge, cancel)
@@ -748,8 +752,8 @@ impl Editor {
         builds.builder(&ctx)
     }
 
-    /// What building `ids` would capture now: an item per available RAW, and how
-    /// many others were skipped.
+    /// What building `ids` would capture now: an item per available RAW or edited
+    /// JPEG, TIFF or PNG, and how many others were skipped.
     fn build_items(
         &self,
         ids: &[PhotoId],
@@ -788,25 +792,28 @@ impl Editor {
             .photo_records(&photo_ids)
             .map_err(|e| format!("The catalog could not be read: {e:#}"))?;
         let edge = self.preview_builds.edge(kind);
-        let items = chosen
-            .into_iter()
-            .zip(records)
-            .map(|((photo, name, path), record)| Item {
+        let mut items = Vec::with_capacity(chosen.len());
+        for ((photo, name, path), record) in chosen.into_iter().zip(records) {
+            let edited = has_edit(&record.edit);
+            // A JPEG, TIFF or PNG without an edit is its own preview.
+            if !edited && !crate::storage::is_raw(&path) {
+                skipped += 1;
+                continue;
+            }
+            items.push(Item {
                 catalog: catalog.clone(),
                 photo,
                 name,
                 identity: identity(&record.edit, &self.raw_defaults, self.demosaic),
-                ticket: has_edit(&record.edit)
-                    .then(|| library.edited_ticket(photo))
-                    .flatten(),
+                ticket: edited.then(|| library.edited_ticket(photo)).flatten(),
                 record: record.edit,
                 path,
                 defaults: self.raw_defaults.clone(),
                 demosaic: self.demosaic.effective(),
                 kind,
                 edge,
-            })
-            .collect();
+            });
+        }
         Ok((items, skipped))
     }
 

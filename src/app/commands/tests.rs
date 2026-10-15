@@ -268,6 +268,29 @@ fn refused_open_does_not_claim_another_photo_opened() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn a_jpeg_opens_in_develop_by_command() -> anyhow::Result<()> {
+    let (mut e, ctx) = editor();
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    image::RgbImage::new(8, 8).save(photos.join("a.jpg"))?;
+    let db = dir.path().join("catalog.rawmakase");
+    crate::catalog::Catalog::create(&db)?.add_folder(&photos)?;
+    e.library = Some(Box::new(super::super::library::Library::load(
+        &db,
+        ctx.clone(),
+    )?));
+    e.module = Module::Library;
+    let id = e.library.as_ref().unwrap().session.photos[0].id;
+    let outcome = e
+        .execute_command(Command::new(Operation::Open(PhotoTarget::Id(id))), &ctx)
+        .map_err(|error| anyhow::anyhow!("{}: {}", error.code, error.message))?;
+    assert!(matches!(outcome, Outcome::Opened { .. }));
+    assert_eq!(e.document.catalog_photo, Some(id));
+    assert!(e.module == Module::Develop);
+    Ok(())
+}
+#[test]
 fn output_job_publishes_the_captured_revision_and_never_clobbers() -> anyhow::Result<()> {
     let (mut e, ctx) = editor();
     let dir = tempfile::tempdir()?;
@@ -811,4 +834,65 @@ fn panel_actions_hide_the_open_modules_panels_and_state_reports_them() {
     e.module = Module::Library;
     assert_eq!(json(e.command_state())["panels"]["right"], "shown");
     assert!(Action::names().contains(&"panels:right"));
+}
+#[test]
+fn temp_and_tint_on_a_rendered_photo_move_its_relative_white_balance() {
+    let (mut e, ctx) = editor();
+    let m = crate::camera_data::Metadata {
+        source: crate::camera_data::Source::Rendered,
+        width: 12,
+        height: 8,
+        ..Default::default()
+    };
+    e.document.metadata = Some(m.clone());
+    *e.document.edit.setup_mut() = crate::model::recipe::Recipe::for_rendered(&m);
+    let run = |e: &mut Editor, operation| e.execute_command(Command::new(operation), &ctx).unwrap();
+    // The socket's value, a dial's turn and a fader's position.
+    run(
+        &mut e,
+        Operation::Set(Param::Setting(ParameterId::Temperature), 30.),
+    );
+    assert_eq!(e.document.edit.recipe().incremental_temperature, 30.);
+    run(
+        &mut e,
+        Operation::Adjust(Param::Setting(ParameterId::Temperature), 2),
+    );
+    assert!(e.document.edit.recipe().incremental_temperature > 30.);
+    run(
+        &mut e,
+        Operation::ControlValue(Param::Setting(ParameterId::Tint), 127),
+    );
+    let r = e.document.edit.recipe();
+    assert_eq!(r.incremental_tint, 100.);
+    assert_eq!((r.temperature, r.tint), (6500., 0.));
+    // Temp and Tint carry a rendered photo's white balance; its gains stay 1.
+    assert_eq!(r.wb, [1.; 3]);
+}
+#[test]
+fn a_cmyk_jpeg_is_not_editable_by_command() -> anyhow::Result<()> {
+    use image::ImageEncoder;
+    let (mut e, ctx) = editor();
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(photos.join("print.jpg"))?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    let db = dir.path().join("catalog.rawmakase");
+    crate::catalog::Catalog::create(&db)?.add_folder(&photos)?;
+    e.library = Some(Box::new(super::super::library::Library::load(
+        &db,
+        ctx.clone(),
+    )?));
+    e.module = Module::Library;
+    let id = e.library.as_ref().unwrap().session.photos[0].id;
+    let error = e
+        .execute_command(Command::new(Operation::Open(PhotoTarget::Id(id))), &ctx)
+        .unwrap_err();
+    assert_eq!(error.code, "not_editable");
+    assert!(error.message.contains("CMYK"), "{}", error.message);
+    assert!(e.module == Module::Library);
+    assert_eq!(e.document.catalog_photo, None);
+    Ok(())
 }

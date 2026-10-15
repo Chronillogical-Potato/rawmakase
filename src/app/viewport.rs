@@ -508,13 +508,10 @@ impl Editor {
         {
             let u = (pos.x - rect.left()) / rect.width();
             let v = (pos.y - rect.top()) / rect.height();
-            self.document.edit.recipe_mut().wb =
-                develop::neutral_pick(&im, self.document.edit.recipe(), u, v);
-            self.document.edit.recipe_mut().auto_white_balance = None;
-            self.document
-                .edit
-                .recipe_mut()
-                .sync_white_balance_controls(&im.metadata);
+            let gains = develop::neutral_pick(&im, self.document.edit.recipe(), u, v);
+            let recipe = self.document.edit.recipe_mut();
+            recipe.pick_white_balance(gains, &im.metadata);
+            recipe.auto_white_balance = None;
             self.view.tool = Tool::None;
         }
         // Point Color's dropper adds a swatch of the color under the pointer and

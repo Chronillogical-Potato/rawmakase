@@ -37,8 +37,22 @@ pub(crate) fn photo_pivot(blocks: &[[f32; 3]]) -> f32 {
         lum[i] + (lum[j] - lum[i]) * (at - i as f32)
     };
     let middle = (percentile(0.01) + percentile(0.99)) / 2.;
-    (PIVOT_FIT[0] + PIVOT_FIT[1] * mean + PIVOT_FIT[2] * middle).clamp(0.3, 0.75)
+    (PIVOT_FIT[0] + PIVOT_FIT[1] * mean + PIVOT_FIT[2] * middle).clamp(PIVOT_MIN, PIVOT_MAX)
 }
+/// How much higher Camera Raw's Contrast pivot sits on a rendered file than
+/// [`photo_pivot`] puts it: fitted on 32 photos saved as JPEG and rendered by
+/// Lightroom Classic 15.6 (Camera Raw 18.7) at Contrast +100 (rms 0.048 → 0.032;
+/// Contrast +100's mean error 4.4 → 3.0 levels). Synthetic scenes disagree (their
+/// error grows 2.5 → 5.4); photos are what people edit.
+pub(crate) const RENDERED_PIVOT_OFFSET: f32 = 0.035;
+/// A rendered file's pivot from the one [`photo_pivot`] measures.
+pub(crate) fn rendered_pivot(pivot: f32) -> f32 {
+    (pivot + RENDERED_PIVOT_OFFSET).clamp(PIVOT_MIN, PIVOT_MAX)
+}
+/// The lowest a photo's Contrast pivot goes.
+const PIVOT_MIN: f32 = 0.3;
+/// The highest a photo's Contrast pivot goes, a rendered file's too.
+const PIVOT_MAX: f32 = 0.75;
 /// `pixels` (`width` × `height`, encoded) averaged into blocks 48 across, as the
 /// photos [`photo_pivot`] was fitted on were measured.
 pub(crate) fn blocks(pixels: &[[f32; 3]], width: usize, height: usize) -> Vec<[f32; 3]> {
@@ -245,5 +259,14 @@ mod tests {
         assert!(photo_pivot(&dark) < photo_pivot(&flat(0.3)) - 0.15);
         assert_eq!(photo_pivot(&[]), TYPICAL_PIVOT);
         assert_eq!(blocks(&vec![[0.5; 3]; 960 * 640], 960, 640).len(), 48 * 32);
+    }
+
+    /// On 32 photos saved as JPEG, Lightroom's Contrast pivot is the raw formula's plus
+    /// 0.035 (rms 0.048 → 0.032), within the same limits.
+    #[test]
+    fn a_rendered_photo_pivots_a_little_higher() {
+        assert!((rendered_pivot(0.5) - 0.535).abs() < 1e-6);
+        assert_eq!(rendered_pivot(0.74), 0.75);
+        assert!((rendered_pivot(0.3) - 0.335).abs() < 1e-6);
     }
 }

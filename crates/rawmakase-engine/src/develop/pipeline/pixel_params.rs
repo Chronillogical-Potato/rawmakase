@@ -1,7 +1,7 @@
 //! The per-pixel stage's inputs, flattened for the GPU port in `gpu/develop.wgsl`.
 //! Recipes with a camera profile are ported (every photo has one once resolved); the
 //! rest return `None` and render on the CPU, which stays the reference.
-use super::{CurveSet, Source, profile_matrix};
+use super::{Camera, CurveSet, Source, camera_stage};
 use crate::develop::local_tone::LocalToneMap;
 use crate::model::recipe::Recipe;
 
@@ -9,6 +9,8 @@ use crate::model::recipe::Recipe;
 /// `P_*` index constants for the shader.
 const FIELDS: &[(&str, usize)] = &[
     ("CAMERA", 9),
+    // `Camera::clip`, each channel's.
+    ("CAMERA_CLIP", 3),
     ("WB", 3),
     ("HUE", 5),
     ("HUE2", 1),
@@ -200,11 +202,11 @@ pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     if !supported(r) {
         return None;
     }
-    let matrix = profile_matrix(&im.metadata, r);
+    let camera = camera_stage(&im.metadata, r);
     fill(
         r,
-        CurveSet::for_image(im, r, matrix, masks_need_map(r)),
-        matrix,
+        CurveSet::for_image(im, r, camera, masks_need_map(r)),
+        camera,
     )
 }
 /// Whether active masks change Shadows or Highlights, which read the map.
@@ -273,7 +275,7 @@ fn set_rgb_table(p: &mut PixelParams, look: Option<&crate::camera_profiles::RgbL
     p.set("RGB_INTO", into.as_flattened());
     p.set("RGB_BACK", back.as_flattened());
 }
-fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams> {
+fn fill(r: &Recipe, lut: CurveSet, camera: Camera) -> Option<PixelParams> {
     let profile = r.profile.as_ref()?;
     let len = FIELDS.iter().map(|f| f.1).sum();
     let mut p = PixelParams {
@@ -283,7 +285,8 @@ fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams>
         grid: None,
         color: None,
     };
-    p.set("CAMERA", matrix.as_flattened());
+    p.set("CAMERA", camera.matrix.as_flattened());
+    p.set("CAMERA_CLIP", &camera.clip);
     p.set("WB", &r.wb);
     let t = profile.gpu_tables(r.temperature);
     p.table("HUE", t.hue.map(|h| h.0));

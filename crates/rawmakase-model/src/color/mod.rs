@@ -10,6 +10,10 @@ pub fn luminance(p: [f32; 3]) -> f32 {
 pub fn mul(m: [[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
     m.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
 }
+/// The matrix product `a · b`.
+pub fn mul_matrix(a: [[f32; 3]; 3], b: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
+}
 pub fn inverse(m: [[f32; 3]; 3]) -> [[f32; 3]; 3] {
     let [a, b, c] = m;
     let cross = |a: [f32; 3], b: [f32; 3]| {

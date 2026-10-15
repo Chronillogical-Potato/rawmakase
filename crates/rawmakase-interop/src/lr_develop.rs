@@ -309,6 +309,7 @@ pub fn convert_develop(
         warnings.push(format!("{asked} isn't imported; rendered with {used}"));
     }
     warnings.extend(recipe.missing_lens_profile(m));
+    warnings.extend(preset.ignored_white_balance(m));
     let local = crate::xmp::local::convert(
         &local_settings,
         crate::model::image_frame::ImageFrame::for_metadata(m),

@@ -283,6 +283,11 @@ impl GlobalTone {
         let (s, t) = bracket(whites, -1., SLIDER_STEP, SLIDERS);
         std::array::from_fn(|k| self.rows[s][k] * (1. - t) + self.rows[s + 1][k] * t)
     }
+    /// The white curve at the recipe's Whites on one value, as [`Self::apply`] reads
+    /// it for each channel it curves.
+    pub(crate) fn white_curve(&self, x: f32) -> f32 {
+        self.white_at(&self.white, x)
+    }
     /// The white curve `curve` at scene value `x`.
     fn white_at(&self, curve: &[f32; U_SAMPLES], x: f32) -> f32 {
         let top = self.top.exp2();
@@ -503,7 +508,7 @@ fn black_correction(key: f32, calibration_key: f32) -> Box<[f32; Y_SAMPLES]> {
 }
 /// DNG RGBTone: `curve` maps the brightest and darkest channel, and the middle one
 /// keeps its relative place between them.
-fn rgb_tone(p: [f32; 3], curve: impl Fn(f32) -> f32) -> [f32; 3] {
+pub(crate) fn rgb_tone(p: [f32; 3], curve: impl Fn(f32) -> f32) -> [f32; 3] {
     let lo = p.into_iter().fold(f32::INFINITY, f32::min);
     let hi = p.into_iter().fold(f32::NEG_INFINITY, f32::max);
     let (a, b) = (curve(lo), curve(hi));

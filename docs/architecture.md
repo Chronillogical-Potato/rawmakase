@@ -36,8 +36,8 @@ files should preserve.
 | --- | --- | --- |
 | `camera_data` | A RAW's metadata, the demosaic and decode choices and the decoded camera-space image, as values with no native code | `camera_data.rs` |
 | `raw` | LibRaw/Little CMS boundary: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails | RAW decoding and native color management |
-| `photo` | Opening a photo: LibRaw's facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
-| `raster` | Opening a JPEG, PNG or TIFF, which RAWmakase shows without developing: decoded upright and converted from its embedded ICC profile to 8-bit sRGB (pure Rust, `moxcms`) | `raster.rs` |
+| `photo` | Opening a photo: `open_source` is the one entry point, sending a RAW to LibRaw and a JPEG, PNG or TIFF to `raster`; a RAW's LibRaw facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
+| `raster` | Opening a JPEG, PNG or TIFF: decoded upright and converted from its embedded ICC profile to 8-bit sRGB for previews, or to linear ProPhoto f32 for Develop (pure Rust, `moxcms`) | `raster.rs` |
 | `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
 | `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
 | `decode` | A photo's full-size image, made one way for Develop, prefetch, Reference View and export: the cache's copy, else a decode with highlights recovered and stored, as a `DecodePolicy` asks | `decode.rs` |
@@ -85,6 +85,18 @@ file per tool, workflow or policy; the Develop adjustment panels currently share
 A panel should call the domain API responsible for an operation, rather than
 implementing file formats, SQL or pixel processing itself. Thumbnail decoding
 belongs to `raw`; library browsing does not call into the preview renderer.
+
+Whether Develop opens a catalog photo has one owner, `app::library::Refusal`:
+`develop_refusal` refuses an offline file, and a JPEG, PNG or TIFF whose header
+`raster::probe` finds Develop can't edit (`raster::Unsupported`, such as a CMYK
+JPEG), before anything opens it. The probe reads the file, so only work on one
+photo uses it (opening it, its dialog, Quick Develop, the context menu,
+automation's `open`); export and preview builds over many photos use
+`availability_refusal` and meet such a file as that photo's failure; `Refusal::opening` turns the same error, should
+opening find it, into the reason the loader reports. Whether the Library shows a photo developed or as its file is
+`Library::develops`: a RAW always, a JPEG, PNG or TIFF once it has an edit, since
+its defaults reproduce the file. Preview builds and stored previews follow the
+same rule from the photo's edit record.
 
 `app::display` installs a paint callback for the macOS surface color declaration;
 `platform::display` owns the AppKit/Metal layer access. The default sRGB mode lets

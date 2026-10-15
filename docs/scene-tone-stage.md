@@ -10,8 +10,8 @@ gates a change to it must pass. Tracking issue: #374 (from #354).
 
 | # | Stage | Domain |
 |---|---|---|
-| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels | camera RGB |
-| S1 | White balance, the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
+| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels (none for rendered files) | camera RGB |
+| S1 | White balance (a rendered file's: a clip and a matrix), the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
 | S2 | Exposure and the DNG exposure ramp (black point) | linear Rec.2020 |
 | S3 | **Scene tone**: Highlights, Shadows, Clarity, Dehaze, the white point and Whites, Blacks | linear ProPhoto, unclamped |
 | S4 | Profile LookTable, enhanced look's HSV table, ProfileToneCurve, look curve | as before |
@@ -94,6 +94,26 @@ alone (identity when W* = 1), with the toe of its black point below about 0.02:
 
 Engine 4 clipped at 1 instead: a probe whose sensor white is at scene 4 rendered
 scene 1.0 at 1.0, where Camera Raw renders 0.69.
+
+### Rendered files
+
+A JPEG, PNG or TIFF is treated as Lightroom treats it: as Camera Raw's default rendering
+of a scene. `develop::rendered` inverts that rendering — the white curve at keys 0 (sensor
+white, maximum, Whites level and white point all 1; no black point) followed by the ACR3
+default tone curve, both DNG RGBTone — once, when `photo::open_source` opens the file. The
+resulting pseudo-scene renders through the raw path with the Embedded profile, whose tone
+curve is ACR3. `photo_measures` pins a rendered file's sensor white and maximum to 1, so at
+default settings the render is the file (±1/255; finer in 16 bits). S0 highlight recovery
+is skipped (`quality::samples::recovered`): a rendered file's bright colours are its
+rendering, not clipping.
+
+Measured against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts and 32
+photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 on greys;
+Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance is a matrix and a clip
+in S1 (`model::white_balance::rendered_white_balance`, see
+[colour pipeline](color-pipeline.md)). Known gaps: Highlights/Shadows on very dark or
+bright files, Saturation, Vibrance, Clarity, Dehaze, fully saturated colours at large
+Exposure, and parts of the cool magenta corner of Temp and Tint.
 
 ### Whites and Blacks
 

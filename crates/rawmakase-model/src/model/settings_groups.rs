@@ -238,6 +238,8 @@ impl SettingGroup {
             WhiteBalance => {
                 to.temperature = from.temperature;
                 to.tint = from.tint;
+                to.incremental_temperature = from.incremental_temperature;
+                to.incremental_tint = from.incremental_tint;
             }
             Exposure => to.exposure = from.exposure,
             Contrast => to.contrast = from.contrast,
@@ -456,6 +458,16 @@ pub fn transfer(
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
+    // RAW and rendered files keep white balance in different terms (Kelvin against
+    // relative) and have profiles of their own: between them, the target keeps its
+    // white balance and profile, and everything else transfers.
+    let separate = source.metadata.is_rendered() != m.is_rendered()
+        && (selection.contains(SettingGroup::WhiteBalance)
+            || selection.contains(SettingGroup::TreatmentAndProfile));
+    if separate {
+        recipe.keep_white_balance_and_profile(to);
+        notes.push("White balance and profile apply to RAW and rendered files separately".into());
+    }
     // Masks made from a selection are rasters of the photo they were made on: the
     // source's do not come along, and the target keeps its own.
     if selection.contains(SettingGroup::Masking) {
@@ -482,6 +494,7 @@ pub fn transfer(
             .recorded(display_axes(&recipe, m));
     }
     if selection.contains(SettingGroup::TreatmentAndProfile)
+        && !separate
         && let Some(profile) = &from.profile
     {
         // A profile file belongs to one photo's camera (or its DNG): use the target's of
@@ -521,7 +534,9 @@ pub fn transfer(
     {
         recipe.use_camera_baseline(m);
     }
-    if selection.contains(SettingGroup::WhiteBalance) {
+    if separate {
+        // The target's own white balance and profile, unchanged.
+    } else if selection.contains(SettingGroup::WhiteBalance) {
         // The same Temperature and Tint mean different gains on another camera.
         recipe.update_wb(m);
         recipe.auto_white_balance = None;
@@ -587,6 +602,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         camera_exposure: _,
         temperature: _,
         tint: _,
+        incremental_temperature: _,
+        incremental_tint: _,
         wb: _,
         auto_white_balance: _,
         contrast: _,
@@ -673,6 +690,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("camera_exposure", Derived),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
+        ("incremental_temperature", Group(WhiteBalance)),
+        ("incremental_tint", Group(WhiteBalance)),
         ("wb", Derived),
         ("auto_white_balance", Derived),
         ("contrast", Group(Contrast)),

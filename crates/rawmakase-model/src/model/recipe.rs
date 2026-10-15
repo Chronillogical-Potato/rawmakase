@@ -1,5 +1,5 @@
 use super::panels::PanelSwitches;
-use crate::model::white_balance::{estimate_temperature, illuminant_camera};
+use crate::model::white_balance::{estimate_temperature, illuminant_camera, rendered_controls};
 use crate::{camera_data::Metadata, color::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,9 @@ pub struct Recipe {
     pub effects: crate::model::effects::Effects,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
+    /// A saved Embedded profile loads with today's tone curve (`CameraProfile::loaded`),
+    /// wherever a recipe is read: sessions, the catalog, History, presets and sidecars.
+    #[serde(deserialize_with = "loaded_profile")]
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
     /// Lightroom's Profile Amount (`crs:Look` `Amount`, 0–2, 1 = 100%): the strength of
     /// a look that supports it. Other profiles render at 100% whatever it is. Omitted
@@ -64,9 +67,17 @@ pub struct Recipe {
     pub camera_exposure: f32,
     pub temperature: f32,
     pub tint: f32,
+    /// A rendered file's Temp and Tint, Lightroom's relative −100..+100 sliders; its
+    /// kelvin `temperature` and `tint` stay 6500 and 0 so older builds still read the
+    /// recipe. Omitted at 0, so RAW recipes save as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_temperature: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_tint: f32,
     pub wb: [f32; 3],
     /// Temperature and Tint that Auto white balance chose, so the WB menu shows Auto
-    /// while the photo still has them.
+    /// while the photo still has them: Kelvin for a RAW, the relative
+    /// `incremental_temperature` and `incremental_tint` for a rendered file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_white_balance: Option<[f32; 2]>,
     pub contrast: f32,
@@ -184,6 +195,8 @@ impl Default for Recipe {
             camera_exposure: 0.,
             temperature: 6500.,
             tint: 0.,
+            incremental_temperature: 0.,
+            incremental_tint: 0.,
             wb: [1.; 3],
             auto_white_balance: None,
             contrast: 0.,
@@ -349,6 +362,23 @@ impl Recipe {
             ..Default::default()
         }
     }
+    /// A rendered file's starting edit, as Lightroom's for JPEG and TIFF: the
+    /// Embedded profile, no baseline exposure, Sharpening and Color noise
+    /// reduction at 0, white balance as shot.
+    pub fn for_rendered(m: &Metadata) -> Self {
+        Self {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(m),
+            )),
+            sharpening: 0.,
+            noise_chroma: 0.,
+            camera_exposure: 0.,
+            temperature: 6500.,
+            tint: 0.,
+            wb: [1.; 3],
+            ..Self::default()
+        }
+    }
     /// Lightroom's Adobe Default: the settings a photo starts from.
     pub fn with_profiles(
         m: &Metadata,
@@ -362,6 +392,9 @@ impl Recipe {
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
         preference: ProfilePreference,
     ) -> Self {
+        if m.is_rendered() {
+            return Self::for_rendered(m);
+        }
         let mut recipe = Self::for_metadata(m);
         let find = |name: &str| {
             profiles
@@ -415,6 +448,10 @@ impl Recipe {
             (TEMPERATURE_MIN..=TEMPERATURE_MAX).contains(&self.temperature)
                 && self.tint.abs() <= TINT_LIMIT,
             "White balance out of bounds"
+        );
+        ensure!(
+            self.incremental_temperature.abs() <= 100. && self.incremental_tint.abs() <= 100.,
+            "Relative white balance out of bounds"
         );
         ensure!(
             self.wb
@@ -658,6 +695,13 @@ impl Recipe {
         self.camera_exposure = crate::camera_profiles::reference::baseline_exposure(m);
     }
     pub fn reset_white_balance(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            self.incremental_temperature = 0.;
+            self.incremental_tint = 0.;
+            self.wb = [1.; 3];
+            self.auto_white_balance = None;
+            return;
+        }
         let values = self
             .color_profile(m)
             .and_then(|p| p.as_shot_white_balance(m))
@@ -668,6 +712,12 @@ impl Recipe {
         self.auto_white_balance = None;
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            // Temp and Tint are a rendered file's white balance (and keep Auto); its
+            // gains stay 1.
+            self.wb = [1.; 3];
+            return;
+        }
         let mut adjusted = m.clone();
         adjusted.wb = std::array::from_fn(|c| m.wb[c] * self.wb[c]);
         // A profile that cannot map gains back (no ColorMatrix1) is also left to the
@@ -727,7 +777,39 @@ impl Recipe {
             self.wb = shown.wb;
         }
     }
+    /// Between a RAW and a rendered file (JPEG, PNG, TIFF), which keep white balance in
+    /// different terms (Kelvin against relative) and have profiles of their own: this
+    /// recipe takes `own`'s white balance and profile, with the profile's baseline
+    /// exposure, as Copy, Sync and presets apply settings from the other kind of file.
+    pub fn keep_white_balance_and_profile(&mut self, own: &Recipe) {
+        self.temperature = own.temperature;
+        self.tint = own.tint;
+        self.incremental_temperature = own.incremental_temperature;
+        self.incremental_tint = own.incremental_tint;
+        self.wb = own.wb;
+        self.auto_white_balance = own.auto_white_balance;
+        self.profile = own.profile.clone();
+        self.profile_amount = own.profile_amount;
+        self.camera_exposure = own.camera_exposure;
+    }
+    /// White balance from `gains` that make a picked colour neutral (the eyedropper's,
+    /// Auto's): a RAW's gains, or for a rendered file the nearest Temp and Tint, which
+    /// carry its white balance (`white_balance::rendered_white_balance`).
+    pub fn pick_white_balance(&mut self, gains: [f32; 3], m: &Metadata) {
+        if m.is_rendered() {
+            [self.incremental_temperature, self.incremental_tint] = rendered_controls(gains);
+            self.wb = [1.; 3];
+            return;
+        }
+        self.wb = gains;
+        self.sync_white_balance_controls(m);
+    }
     pub fn update_wb(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            // Temp and Tint render as `white_balance::rendered_white_balance`.
+            self.wb = [1.; 3];
+            return;
+        }
         if let Some(wb) = self
             .color_profile(m)
             .and_then(|p| p.white_balance(self.temperature, self.tint, m))
@@ -750,6 +832,14 @@ impl Recipe {
 }
 fn is_zero(v: &f32) -> bool {
     *v == 0.
+}
+/// [`Recipe::profile`] as a saved edit stores it, with a stored Embedded profile given
+/// today's tone curve.
+fn loaded_profile<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>, D::Error> {
+    let profile = Option::<crate::camera_profiles::CameraProfile>::deserialize(deserializer)?;
+    Ok(profile.map(|p| std::sync::Arc::new(p.loaded())))
 }
 fn is_one(v: &f32) -> bool {
     *v == 1.
@@ -781,6 +871,57 @@ fn one() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A recipe as JSON whose profile is the Embedded one, edited by `change`.
+    fn saved_embedded(change: impl FnOnce(&mut serde_json::Value)) -> String {
+        let m = Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let r = Recipe {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(&m),
+            )),
+            ..Recipe::default()
+        };
+        let mut v = serde_json::to_value(&r).unwrap();
+        v["profile"]["tone"] = serde_json::json!([[0., 0.], [1., 1.]]);
+        change(&mut v["profile"]);
+        v.to_string()
+    }
+    fn tone_of(json: &str) -> serde_json::Value {
+        let r: Recipe = serde_json::from_str(json).unwrap();
+        serde_json::to_value(r).unwrap()["profile"]["tone"].clone()
+    }
+
+    /// A rendered photo's edit saved while the Embedded profile had no tone curve
+    /// loads with Camera Raw's default tone curve, wherever the edit is read from:
+    /// the Embedded profile's curve comes from the code, not from storage.
+    #[test]
+    fn a_saved_embedded_profile_loads_with_todays_tone_curve() {
+        assert_eq!(
+            tone_of(&saved_embedded(|_| {})),
+            serde_json::to_value(crate::camera_profiles::default_tone()).unwrap()
+        );
+    }
+
+    /// Only the Embedded profile itself: one named so with a colour matrix or a look
+    /// table, or any other profile, keeps the tone curve it was saved with.
+    #[test]
+    fn other_profiles_keep_their_saved_tone_curve() {
+        let identity = serde_json::json!([[0., 0.], [1., 1.]]);
+        let with_color = saved_embedded(|p| {
+            p["color1"] = serde_json::json!([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+        });
+        assert_eq!(tone_of(&with_color), identity);
+        let with_look = saved_embedded(|p| {
+            p["look"] =
+                serde_json::json!({"dims": [1, 1, 1], "data": [[0., 0., 0.]], "srgb": false})
+        });
+        assert_eq!(tone_of(&with_look), identity);
+        let other = saved_embedded(|p| p["name"] = "Adobe Standard".into());
+        assert_eq!(tone_of(&other), identity);
+    }
 
     /// The names a new recipe is saved with; renaming one would lose that setting
     /// from every saved edit. Settings at their defaults beyond these are left out.
@@ -866,6 +1007,7 @@ mod tests {
             "lens_vignetting": 0.5,
             "lens_manual_distortion": 0.25,
             "profile_amount": 0.5,
+            "incremental_temperature": 12.0,
             "auto_white_balance": [5000.0, 10.0],
             "curve_saturation": 0.5,
             "point_colors": [{
@@ -898,5 +1040,24 @@ mod tests {
             (local.retouch.len(), local.red_eye.len(), local.masks.len()),
             (1, 1, 1)
         );
+    }
+
+    #[test]
+    fn a_rendered_photo_starts_from_lightrooms_non_raw_defaults() {
+        use crate::camera_data::Source;
+        let m = Metadata {
+            source: Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        };
+        let r = Recipe::with_profile_preference(&m, &[], ProfilePreference::Camera);
+        assert!(r.profile.as_ref().unwrap().is_embedded());
+        assert_eq!(
+            (r.sharpening, r.noise_chroma, r.camera_exposure),
+            (0., 0., 0.)
+        );
+        assert!(r.validate().is_ok());
+        assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
     }
 }

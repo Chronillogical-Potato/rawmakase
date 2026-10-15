@@ -23,15 +23,15 @@ fn embedded_profile_roundtrip_and_first_pipeline_presets() -> Result<()> {
         ..Recipe::for_metadata(&m)
     };
     assert!(recipe.profile.is_some());
-    save_preset(&path, &recipe)?;
-    assert_eq!(load_preset(&path)?, recipe);
+    save_preset(&path, &recipe, &Default::default())?;
+    assert_eq!(load_preset(&path)?.recipe, recipe);
     let mut legacy = Recipe {
         sharpening: 0.,
         exposure: 0.75,
         ..Default::default()
     };
     legacy.curve.insert([0.3, 0.2]);
-    save_preset(&path, &legacy)?;
+    save_preset(&path, &legacy, &Default::default())?;
     let mut v: serde_json::Value = serde_json::from_reader(File::open(&path)?)?;
     v["schema"] = 2.into();
     v["pipeline"] = 2.into();
@@ -44,7 +44,7 @@ fn embedded_profile_roundtrip_and_first_pipeline_presets() -> Result<()> {
         v["recipe"].as_object_mut().unwrap().remove(key);
     }
     fs::write(&path, serde_json::to_vec(&v)?)?;
-    let loaded = load_preset(&path)?;
+    let loaded = load_preset(&path)?.recipe;
     assert_eq!(loaded.sharpening, 0.);
     assert!(loaded.profile.is_none());
     assert_eq!(loaded, legacy);

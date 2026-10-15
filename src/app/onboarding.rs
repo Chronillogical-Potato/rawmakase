@@ -630,7 +630,7 @@ impl Editor {
             ),
             Some(n) => (
                 format!("No photos in the {} added", count(n, "folder")),
-                "RAWmakase reads RAW, DNG, JPEG and TIFF files. Add a folder that holds \
+                "RAWmakase reads RAW, DNG, JPEG, PNG and TIFF files. Add a folder that holds \
                  some, or find the folder again if it has moved.",
             ),
             None => (

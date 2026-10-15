@@ -17,6 +17,8 @@ fn inputs(kind: AutoKind, r: &Recipe) -> Recipe {
             wb: [1.; 3],
             temperature: 0.,
             tint: 0.,
+            incremental_temperature: 0.,
+            incremental_tint: 0.,
             auto_white_balance: None,
             ..r.clone()
         },
@@ -115,6 +117,9 @@ impl Editor {
                 applied.wb = auto.wb;
                 applied.temperature = auto.temperature;
                 applied.tint = auto.tint;
+                // A JPEG, PNG or TIFF's white balance is relative Temp and Tint.
+                applied.incremental_temperature = auto.incremental_temperature;
+                applied.incremental_tint = auto.incremental_tint;
                 applied.auto_white_balance = auto.auto_white_balance;
             }
         }

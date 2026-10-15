@@ -116,6 +116,18 @@ mod tests {
     }
 
     #[test]
+    fn empty_lightroom_text_is_no_edit() -> Result<()> {
+        let (_d, c, photos) = catalog()?;
+        let id = photos[0].0;
+        assert!(!c.has_edit(id)?);
+        set_lightroom(&c, id, "")?;
+        assert!(!c.has_edit(id)?);
+        set_lightroom(&c, id, "s = { Exposure2012 = 0.5 }")?;
+        assert!(c.has_edit(id)?);
+        Ok(())
+    }
+
+    #[test]
     fn a_saved_edit_comes_first_then_lightroom_then_the_defaults() -> Result<()> {
         let (_d, mut c, photos) = catalog()?;
         let metadata = chart_metadata();

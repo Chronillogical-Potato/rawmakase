@@ -2,14 +2,7 @@ use super::*;
 use crate::develop::curve::ToneCurve;
 use crate::develop::effects::EffectsRendering;
 fn adjust(p: [f32; 3], m: &Metadata, r: &Recipe) -> [f32; 3] {
-    process_pixel(
-        p,
-        r,
-        &CurveSet::new(r),
-        profile_matrix(m, r),
-        [0., 0.],
-        None,
-    )
+    process_pixel(p, r, &CurveSet::new(r), camera_stage(m, r), [0., 0.], None)
 }
 fn fixture() -> CameraImage {
     let m = Metadata {
@@ -32,6 +25,280 @@ fn fixture() -> CameraImage {
         scale_factor: 1.,
         scale_clipped: 0,
     }
+}
+/// A rendered file of one row of 8-bit sRGB pixels as `photo::open_source` gives it:
+/// the pseudo-scene of these sRGB pixels, decoded to linear ProPhoto RGB.
+pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
+    use rawmakase_model::camera_data::Source;
+    use rawmakase_model::camera_profiles::RGB_TO_PRO;
+    let decode = |v: u8| {
+        let v = v as f32 / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let width = srgb.len() as u32;
+    crate::develop::rendered::to_scene(CameraImage {
+        recovered: Default::default(),
+        width,
+        height: 1,
+        pixels: srgb
+            .iter()
+            .map(|p| crate::color::mul(RGB_TO_PRO, p.map(decode)))
+            .collect(),
+        metadata: Metadata {
+            width,
+            height: 1,
+            source: Source::Rendered,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    })
+}
+/// An untouched edit of a rendered file reproduces it (on the CPU): deep shadows, mid
+/// tones, saturated colours and near-white, where highlight recovery and the scene
+/// tone stage's toe and default black would otherwise act.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is() -> anyhow::Result<()> {
+    let mut srgb: Vec<[u8; 3]> = (0..=8).map(|v| [v, v, v]).collect();
+    srgb.extend([
+        [64, 64, 64],
+        [118, 118, 118],
+        [200, 30, 40],
+        [20, 160, 60],
+        [30, 60, 220],
+    ]);
+    srgb.extend((248..=255).map(|v| [v, v, v]));
+    srgb.extend([[255, 250, 240], [255, 255, 200]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    let mut off = Vec::new();
+    for (got, want) in out.rgb8().chunks(3).zip(&srgb) {
+        if (0..3).any(|c| (got[c] as i16 - want[c] as i16).abs() > 1) {
+            off.push((*want, [got[0], got[1], got[2]]));
+        }
+    }
+    assert!(off.is_empty(), "{off:?}");
+    Ok(())
+}
+/// A grey ramp, every 8-bit sRGB level, as a rendered file.
+fn grey_ramp() -> CameraImage {
+    let srgb: Vec<[u8; 3]> = (0..=255u8).map(|v| [v; 3]).collect();
+    rendered_fixture(&srgb)
+}
+fn rendered_levels(im: &CameraImage, r: &Recipe) -> anyhow::Result<Vec<[u8; 3]>> {
+    let out = crate::develop::render(im, &r.checked()?, 0)?;
+    Ok(out.rgb8().chunks(3).map(|p| [p[0], p[1], p[2]]).collect())
+}
+fn near(got: [u8; 3], want: [u8; 3], tolerance: i16) -> bool {
+    (0..3).all(|c| (got[c] as i16 - want[c] as i16).abs() <= tolerance)
+}
+
+/// Lightroom Classic 15.6 (Camera Raw 18.7) renders of a grey JPEG chart: Exposure
+/// brightens and darkens through the default rendering, so mid-tones move more than a
+/// linear gain and white stays white at −1 EV.
+#[test]
+fn exposure_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (exposure, levels) in [
+        (
+            1.,
+            [
+                (48u8, 79u8),
+                (96, 146),
+                (128, 181),
+                (192, 229),
+                (240, 251),
+                (255, 255),
+            ],
+        ),
+        (
+            -1.,
+            [
+                (48, 27),
+                (96, 60),
+                (128, 83),
+                (192, 141),
+                (240, 213),
+                (255, 255),
+            ],
+        ),
+    ] {
+        let r = Recipe {
+            exposure,
+            ..Recipe::for_rendered(&im.metadata)
+        };
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, [want; 3], 2),
+                "Exposure {exposure}: {input} -> {got:?}, Lightroom {want}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lightroom's renders of the same chart at Temp +25, +50 and Tint +25.
+#[test]
+fn white_balance_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (temperature, tint, levels) in [
+        (
+            25.,
+            0.,
+            [
+                (48u8, [70u8, 61, 45]),
+                (96, [132, 117, 92]),
+                (128, [170, 152, 124]),
+            ],
+        ),
+        (
+            50.,
+            0.,
+            [
+                (48, [91, 73, 42]),
+                (96, [165, 136, 87]),
+                (128, [202, 170, 120]),
+            ],
+        ),
+        (
+            0.,
+            25.,
+            [
+                (48, [52, 47, 54]),
+                (96, [102, 95, 106]),
+                (128, [136, 127, 140]),
+            ],
+        ),
+    ] {
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, want, 3),
+                "Temp {temperature} Tint {tint}: {input} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lightroom white-balances a rendered file's colours by a matrix, not channel gains
+/// (sky at Temp −35 is 30 levels redder than gains give), and in the cool magenta
+/// corner takes blue to 0. There red is 5 levels high: the matrix leaves ProPhoto blue
+/// below 0 there, which the tone stage carries and Lightroom's apparently does not.
+#[test]
+fn white_balance_on_a_rendered_files_colours_follows_lightroom() -> anyhow::Result<()> {
+    let (sky, foliage, skin, grey) = (0, 1, 2, 3);
+    let im = rendered_fixture(&[[110, 150, 200], [80, 115, 55], [190, 140, 110], [39; 3]]);
+    for (temperature, tint, levels) in [
+        (
+            -35.,
+            0.,
+            vec![
+                (sky, [112u8, 160, 244]),
+                (foliage, [35, 129, 101]),
+                (skin, [172, 156, 171]),
+            ],
+        ),
+        (
+            75.,
+            0.,
+            vec![(sky, [203, 206, 193]), (foliage, [173, 175, 15])],
+        ),
+        (-75., 75., vec![(grey, [35, 47, 0])]),
+    ] {
+        let tolerance = if tint > 50. { 6 } else { 4 };
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (patch, want) in levels {
+            let got = out[patch];
+            assert!(
+                near(got, want, tolerance),
+                "Temp {temperature} Tint {tint}: patch {patch} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whites and Blacks act on the pseudo-scene as on a raw scene: Whites +50 lifts the
+/// upper tones more than the mid-tones and keeps white white; Blacks −50 darkens shadows.
+#[test]
+fn whites_and_blacks_move_a_rendered_file() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    let base = Recipe::for_rendered(&im.metadata);
+    let whites = rendered_levels(
+        &im,
+        &Recipe {
+            whites: 0.5,
+            ..base.clone()
+        },
+    )?;
+    assert!(
+        whites[192][1] as i16 - 192 > whites[96][1] as i16 - 96,
+        "{:?} {:?}",
+        whites[96],
+        whites[192]
+    );
+    assert_eq!(whites[255], [255; 3]);
+    let blacks = rendered_levels(
+        &im,
+        &Recipe {
+            blacks: -0.5,
+            ..base
+        },
+    )?;
+    assert!(
+        blacks[32][1] < 32 && blacks[255] == [255; 3],
+        "{:?} {:?}",
+        blacks[32],
+        blacks[255]
+    );
+    Ok(())
+}
+/// At a rendered file's defaults the render is the file, finer than 8-bit rounding, so
+/// a 16-bit export reproduces it too.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is_in_16_bits() -> anyhow::Result<()> {
+    let mut srgb: Vec<[u8; 3]> = [0u8, 1, 4, 8, 16, 32, 64, 118, 200, 250, 255]
+        .iter()
+        .map(|&v| [v; 3])
+        .collect();
+    srgb.extend([[200, 30, 40], [20, 160, 60], [30, 60, 220], [255, 250, 240]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    for (got, want) in out.pixels.iter().zip(&srgb) {
+        // Saturated colours get a wider tolerance than greys: the f32 rounding of the
+        // round trip (about 1e-7 relative in ProPhoto, not the inverse table's error) is
+        // amplified by the ProPhoto to sRGB conversion, whose large opposing
+        // coefficients and sRGB's steep slope at dark channels turn it into up to ~3
+        // 16-bit levels. Greys pass through that conversion unamplified.
+        let grey = want[0] == want[1] && want[1] == want[2];
+        let tolerance = if grey { 2. } else { 4. } / 65535.;
+        for c in 0..3 {
+            let want = want[c] as f32 / 255.;
+            assert!((got[c] - want).abs() < tolerance, "{got:?} vs {want}");
+        }
+    }
+    Ok(())
 }
 /// Settings earlier releases saved to choose a rendering engine and its operators are
 /// dropped as they are read: one engine renders every recipe.
@@ -367,8 +634,8 @@ fn temperature_leaves_the_photos_maximum_in_place() -> anyhow::Result<()> {
             temperature,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        CurveSet::with_photo_measures((&im).into(), &r, matrix)
+        let camera = camera_stage(&im.metadata, &r);
+        CurveSet::with_photo_measures((&im).into(), &r, camera)
             .measures
             .max
     };
@@ -390,8 +657,8 @@ fn a_few_dark_pixels_move_the_minimum_but_not_the_dark_level() {
         .map(|i| [0.05 + (i % 128) as f32 / 400.; 3])
         .collect();
     let r = Recipe::default();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, matrix).measures;
+    let camera = camera_stage(&im.metadata, &r);
+    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, camera).measures;
     let plain = measures(&im);
     for (x, y) in [(60, 40), (61, 40), (60, 41), (61, 41)] {
         im.pixels[y * width as usize + x] = [0.001; 3];
@@ -426,14 +693,14 @@ fn scene_stage_recipe() -> Recipe {
 fn the_display_render_replays_the_stages_after_the_scene_stage() {
     let im = fixture();
     let r = scene_stage_recipe();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let camera = camera_stage(&im.metadata, &r);
+    let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, camera);
     tap.output = PixelOutput::SceneOutput;
     for (i, p) in im.pixels.iter().enumerate() {
         let pos = [(i % 12) as f32, (i / 12) as f32];
-        let shown = process_pixel(*p, &r, &lut, matrix, pos, None);
-        let scene = process_pixel(*p, &r, &tap, matrix, pos, None);
+        let shown = process_pixel(*p, &r, &lut, camera, pos, None);
+        let scene = process_pixel(*p, &r, &tap, camera, pos, None);
         assert_eq!(shown, color_stage(profile_stage(scene, &r), &r, &lut, None));
     }
 }
@@ -482,9 +749,9 @@ fn exposure_reveals_retained_highlights() {
             exposure,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-        process_pixel([v; 3], &r, &lut, matrix, [0., 0.], None)
+        let camera = camera_stage(&im.metadata, &r);
+        let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+        process_pixel([v; 3], &r, &lut, camera, [0., 0.], None)
     };
     // At Exposure 0 everything above the sensor's white rolls on to the top; lower
     // Exposure separates the rebuilt levels again. The photo's maximum stays at the
@@ -564,15 +831,15 @@ fn neutral_color_fast_path_matches_general_processing() {
     let fast = CurveSet::new(&recipe);
     let mut general = CurveSet::new(&recipe);
     general.color_adjustments = true;
-    let matrix = profile_matrix(&metadata, &recipe);
+    let camera = camera_stage(&metadata, &recipe);
     for i in 0..4096 {
         let p = [
             (i % 16) as f32 / 8.,
             ((i / 16) % 16) as f32 / 8.,
             (i / 256) as f32 / 8.,
         ];
-        let a = process_pixel(p, &recipe, &fast, matrix, [0., 0.], None);
-        let b = process_pixel(p, &recipe, &general, matrix, [0., 0.], None);
+        let a = process_pixel(p, &recipe, &fast, camera, [0., 0.], None);
+        let b = process_pixel(p, &recipe, &general, camera, [0., 0.], None);
         for c in 0..3 {
             assert!((a[c] - b[c]).abs() < 2e-5, "{p:?}: {a:?} vs {b:?}");
         }
@@ -1239,14 +1506,14 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         shadows: 0.3,
         ..Default::default()
     };
-    let matrix = profile_matrix(&im.metadata, &r);
-    let plain = CurveSet::for_image((&im).into(), &r, matrix, false);
+    let camera = camera_stage(&im.metadata, &r);
+    let plain = CurveSet::for_image((&im).into(), &r, camera, false);
     let pivot = plain.photo.contrast_pivot;
     assert!((pivot - TYPICAL_PIVOT).abs() > 0.01, "{pivot}");
     assert_ne!(plain.measures, Default::default());
     let gpu = pixel_params::pixel_params((&im).into(), &r).unwrap();
     assert_eq!(gpu.get("LOCAL_PIVOT"), [pivot]);
-    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, camera);
     assert_eq!(map_pass.photo, plain.photo);
     assert_eq!(map_pass.measures, plain.measures);
     assert_eq!(
@@ -1265,9 +1532,35 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         untextured: Some(&im),
         ..Source::new(&textured)
     };
-    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    let textured = CurveSet::with_photo_measures(source, &r, camera);
     assert_eq!(textured.photo, plain.photo);
     assert_eq!(textured.measures, plain.measures);
+}
+
+/// A rendered file's Contrast pivots higher than a raw photo's of the same scene, as
+/// Lightroom's does on JPEGs (`basic_tone::RENDERED_PIVOT_OFFSET`).
+#[test]
+fn a_rendered_photos_contrast_pivots_higher_than_a_raws() {
+    use crate::develop::basic_tone::RENDERED_PIVOT_OFFSET;
+    // Dark with a few bright pixels, so neither pivot is at its bounds.
+    let srgb: Vec<[u8; 3]> = (0..96u8)
+        .map(|i| if i % 9 == 0 { [240; 3] } else { [40 + i; 3] })
+        .collect();
+    let rendered = rendered_fixture(&srgb);
+    let mut raw = rendered.clone();
+    raw.metadata.source = rawmakase_model::camera_data::Source::Raw;
+    let r = Recipe {
+        contrast: 0.6,
+        ..Recipe::for_rendered(&rendered.metadata)
+    };
+    let camera = camera_stage(&rendered.metadata, &r);
+    let measures = CurveSet::with_photo_measures((&rendered).into(), &r, camera).measures;
+    let pivot = |im: &CameraImage| tone::contrast_pivot(im.into(), &r, camera, &measures, None);
+    let (rendered, raw) = (pivot(&rendered), pivot(&raw));
+    assert!(
+        (rendered - raw - RENDERED_PIVOT_OFFSET).abs() < 1e-6,
+        "rendered {rendered}, raw {raw}"
+    );
 }
 
 /// A look's parametric curve: a second curve after the user's, as Camera Raw 18.7

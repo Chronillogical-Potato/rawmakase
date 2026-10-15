@@ -460,13 +460,86 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
         .count();
     assert!(changed > with.pixels.len() / 50, "{changed} pixels changed");
     let lifted_recipes = [recipes[1].clone(), recipes[toned].clone()];
-    let cases =
-        (recipes.iter().map(|r| (&image, r))).chain(lifted_recipes.iter().map(|r| (&lifted, r)));
-    for (i, (image, recipe)) in cases.enumerate() {
+    // A rendered file (its pseudo-scene, as `photo::open_source` gives it): its 8-bit
+    // levels and colours as its own samples, and the wide samples above, at its
+    // defaults, with Whites and Blacks, and edited as a photo is.
+    let srgb: Vec<[u8; 3]> = (0..=255u8)
+        .map(|v| [v; 3])
+        .chain((0..256).map(|i| {
+            let w = |k: f32| (wave(i, k) * 255.).round() as u8;
+            [w(0.71), w(0.53), w(0.29)]
+        }))
+        .collect();
+    let rendered = Arc::new(crate::develop::pipeline::rendered_fixture(&srgb));
+    let rendered_samples = Arc::new(Samples {
+        width: srgb.len() as u32,
+        height: 1,
+        pixels: rendered.pixels.clone(),
+        positions: (0..srgb.len()).map(|i| [i as f32, 0.]).collect(),
+    });
+    let untouched = Recipe::for_rendered(&rendered.metadata);
+    let rendered_recipes = [
+        untouched.clone(),
+        Recipe {
+            whites: 0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            blacks: -0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            whites: -0.4,
+            blacks: 0.3,
+            exposure: 0.5,
+            ..untouched.clone()
+        },
+        {
+            let mut r = Recipe {
+                exposure: 1.,
+                whites: 0.3,
+                contrast: 0.5,
+                incremental_temperature: 25.,
+                ..untouched.clone()
+            };
+            r.update_wb(&rendered.metadata);
+            r
+        },
+        // The cool magenta corner, where the camera stage holds blue at 0.
+        Recipe {
+            incremental_temperature: -75.,
+            incremental_tint: 75.,
+            ..untouched
+        },
+    ];
+    let cases = (recipes.iter().map(|r| (&image, r, &samples)))
+        .chain(lifted_recipes.iter().map(|r| (&lifted, r, &samples)))
+        .chain(
+            rendered_recipes
+                .iter()
+                .flat_map(|r| [(&rendered, r, &rendered_samples), (&rendered, r, &samples)]),
+        );
+    for (i, (image, recipe, samples)) in cases.enumerate() {
         let source = Source::new(image);
         let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
-        let expected = develop_samples(source, recipe, &samples, &cancel, None)?;
-        let actual = gpu.develop(&samples, &params, &cancel)?;
+        let expected = develop_samples(source, recipe, samples, &cancel, None)?;
+        let actual = gpu.develop(samples, &params, &cancel)?;
+        // At a rendered file's defaults the GPU reproduces the file, as the CPU does.
+        if std::ptr::eq(samples, &rendered_samples) && std::ptr::eq(recipe, &rendered_recipes[0]) {
+            let off = |pixels: &[[f32; 3]]| -> Vec<_> {
+                (pixels.iter().zip(&srgb))
+                    .filter(|(got, want)| {
+                        (0..3).any(|c| (got[c] * 255. - want[c] as f32).abs() > 1.)
+                    })
+                    .map(|(got, want)| (*want, got.map(|v| v * 255.)))
+                    .collect()
+            };
+            let (cpu, gpu) = (off(&expected.pixels), off(&actual.pixels));
+            assert!(
+                cpu.is_empty() && gpu.is_empty(),
+                "recipe {i}: CPU {cpu:?}, GPU {gpu:?}"
+            );
+        }
         let d: Vec<f32> = actual
             .pixels
             .iter()

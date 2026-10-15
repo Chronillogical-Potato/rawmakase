@@ -162,6 +162,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         wb,
         temperature,
         tint,
+        incremental_temperature,
+        incremental_tint,
         auto_white_balance,
         profile,
         profile_amount,
@@ -274,6 +276,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
             wb: *wb,
             temperature: *temperature,
             tint: *tint,
+            incremental_temperature: *incremental_temperature,
+            incremental_tint: *incremental_tint,
             auto_white_balance: *auto_white_balance,
             profile: profile.clone(),
             profile_amount: *profile_amount,
@@ -289,13 +293,14 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
 }
 
 /// The photo's measures: the measurement copy they are taken on (whose metadata they
-/// read), the profile matrix and the recipe fields they read.
+/// read), the camera stage and the recipe fields they read.
 #[derive(PartialEq)]
 pub(crate) struct MeasuresKey {
     copy: Same<CameraImage>,
     /// The copy without retouching, which the darkest level is measured on.
     unretouched: Option<Same<CameraImage>>,
     matrix: [[u32; 3]; 3],
+    clip: [u32; 3],
     recipe: Recipe,
 }
 impl MeasuresKey {
@@ -303,12 +308,13 @@ impl MeasuresKey {
         copy: &Arc<CameraImage>,
         unretouched: Option<&Arc<CameraImage>>,
         r: &Recipe,
-        matrix: [[f32; 3]; 3],
+        camera: crate::develop::Camera,
     ) -> Self {
         Self {
             copy: Same(copy.clone()),
             unretouched: unretouched.map(|u| Same(u.clone())),
-            matrix: matrix.map(|row| row.map(f32::to_bits)),
+            matrix: camera.matrix.map(|row| row.map(f32::to_bits)),
+            clip: camera.clip.map(f32::to_bits),
             recipe: stage_recipes(r).measures,
         }
     }
@@ -441,10 +447,17 @@ mod tests {
         }
         // (edit, changes the photo's measures)
         let measures = |r: &Recipe| stage_recipes(&base).measures != stage_recipes(r).measures;
-        let cases: [(&str, Recipe, bool); 12] = [
+        let cases: [(&str, Recipe, bool); 14] = [
             ("white balance", edit(&|r| r.wb = [1.2, 1., 0.8]), true),
             ("temperature", edit(&|r| r.temperature = 3000.), true),
             ("tint", edit(&|r| r.tint = 10.), true),
+            // A rendered file's white balance.
+            (
+                "relative temperature",
+                edit(&|r| r.incremental_temperature = 30.),
+                true,
+            ),
+            ("relative tint", edit(&|r| r.incremental_tint = -20.), true),
             ("profile amount", edit(&|r| r.profile_amount = 0.5), true),
             ("camera exposure", edit(&|r| r.camera_exposure = 0.3), true),
             (

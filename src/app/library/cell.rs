@@ -354,10 +354,20 @@ pub(in crate::app) fn photo_menu(
     use crate::app::photo_metadata::{Edit, LABELS};
     use crate::app::widgets::{menu_item, menu_separator, submenu_style};
     let mut action = None;
+    // Why Develop can't open the photo reads its file: once each time the menu opens.
+    let key = response.id.with(("develop-refusal", photo.id, available));
+    if crate::app::widgets::context_clicked(response) {
+        response
+            .ctx
+            .data_mut(|d| d.remove::<Option<super::Refusal>>(key));
+    }
     crate::app::widgets::context_menu(response, |ui| {
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
-        let refusal = super::develop_refusal(photo, available);
+        let refusal = ui.ctx().data_mut(|d| {
+            d.get_temp_mut_or_insert_with(key, || super::develop_refusal(photo, available))
+                .clone()
+        });
         if module == super::Module::Develop {
             if menu_item(ui, "Set as Reference Photo", "", refusal.is_none(), false) {
                 action = Some(PhotoAction::SetReference);

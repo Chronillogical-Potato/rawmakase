@@ -284,6 +284,8 @@ fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
 
 mod latest;
 mod loader;
+#[cfg(test)]
+pub(in crate::app) use loader::tests::cmyk_profile;
 mod reference;
 mod renderer;
 pub(crate) use latest::Latest;

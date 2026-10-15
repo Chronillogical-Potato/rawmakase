@@ -674,6 +674,7 @@ impl Editor {
     ) -> Result<Outcome> {
         match operation {
             Operation::Set(param, value) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(param, Some(value), 0, target, ctx)?
             }
             Operation::Preset(target) => {
@@ -717,6 +718,7 @@ impl Editor {
                 }
             }
             Operation::ControlValue(param, value) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(
                     param,
                     Some(param.control_value(value, target.mask.is_some())),
@@ -727,6 +729,7 @@ impl Editor {
                 ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
             Operation::Adjust(param, ticks) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(param, None, ticks, target, ctx)?;
                 ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
@@ -801,6 +804,16 @@ impl Editor {
             | Operation::Wait(..) => unreachable!(),
         }
         Ok(Outcome::Empty)
+    }
+    /// `param` as the open photo holds it (see `ParameterId::for_photo`): a JPEG,
+    /// PNG or TIFF's Temp and Tint are relative. A mask's are its own.
+    fn for_photo(&self, param: Param, target: &Target) -> Param {
+        match param {
+            Param::Setting(id) if target.mask.is_none() => {
+                Param::Setting(id.for_photo(self.document.metadata.as_ref()))
+            }
+            other => other,
+        }
     }
     fn command_parameter(
         &mut self,

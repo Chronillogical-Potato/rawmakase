@@ -35,8 +35,11 @@ fn relative_paths_child() -> Result<()> {
         exposure: 0.75,
         ..Default::default()
     };
-    presets::save_preset(Path::new("preset.json"), &recipe)?;
-    assert_eq!(presets::load_preset(Path::new("preset.json"))?, recipe);
+    presets::save_preset(Path::new("preset.json"), &recipe, &Default::default())?;
+    assert_eq!(
+        presets::load_preset(Path::new("preset.json"))?.recipe,
+        recipe
+    );
     fs::write("photo.ARW", b"identity fixture")?;
     legacy_sidecar::save(Path::new("photo.ARW"), &recipe, &ExportOptions::default())?;
     assert_eq!(

@@ -172,8 +172,13 @@ fn fit_white_balance(im: &CameraImage, r: &mut Recipe) -> Result<()> {
 }
 
 fn fit_white_balance_to(samples: &[[f32; 3]], m: &Metadata, r: &mut Recipe) -> Result<()> {
-    r.wb = gray_world(samples)?;
-    r.sync_white_balance_controls(m);
+    r.pick_white_balance(gray_world(samples)?, m);
+    if m.is_rendered() {
+        // A rendered file's white balance is relative Temp and Tint; its Kelvin
+        // values stay as they are. The warmer shift was measured on RAWs only.
+        r.auto_white_balance = Some([r.incremental_temperature, r.incremental_tint]);
+        return Ok(());
+    }
     let (lo, hi) = AUTO_TEMPERATURE;
     let mired = (1e6 / r.temperature - WARM_MIRED).max(1e6 / hi);
     r.temperature = (1e6 / mired).clamp(lo, hi);
@@ -456,6 +461,28 @@ mod tests {
         );
         assert!(auto.temperature > gray.temperature, "{}", auto.temperature);
         assert_eq!(auto.auto_white_balance, Some([auto.temperature, auto.tint]));
+    }
+
+    #[test]
+    fn white_balance_of_a_rendered_photo_is_relative() {
+        let mut im = scene([1.2, 1., 0.8], 0.5);
+        im.metadata.source = crate::camera_data::Source::Rendered;
+        let base = Recipe::for_rendered(&im.metadata);
+        let auto = auto_white_balance(&im, &base).unwrap();
+        // Kelvin stays as a rendered file keeps it; the relative controls carry it.
+        assert_eq!((auto.temperature, auto.tint), (base.temperature, base.tint));
+        // A warm cast is cooled.
+        assert!(
+            auto.incremental_temperature < 0.,
+            "{}",
+            auto.incremental_temperature
+        );
+        // Temp and Tint carry it; the gains stay 1.
+        assert_eq!(auto.wb, [1.; 3]);
+        assert_eq!(
+            auto.auto_white_balance,
+            Some([auto.incremental_temperature, auto.incremental_tint])
+        );
     }
 
     #[test]

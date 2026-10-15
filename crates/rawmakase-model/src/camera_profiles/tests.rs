@@ -462,3 +462,43 @@ fn profiles_fit_under_the_names_adobe_uses() {
         "Google Pixel 7 Pro Wide Camera"
     ));
 }
+
+#[test]
+fn the_embedded_profile_renders_with_camera_raws_default_tone_curve() {
+    use crate::camera_data::Source;
+    for m in [
+        Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        },
+        Metadata {
+            source: Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        },
+    ] {
+        let p = CameraProfile::embedded(&m);
+        assert!(p.is_embedded());
+        assert!(p.ensure_camera(&m).is_ok());
+        for v in [
+            [0.0, 0.0, 0.0],
+            [0.18, 0.18, 0.18],
+            [0.9, 0.2, 0.05],
+            [1.0, 1.0, 1.0],
+        ] {
+            // camera_color, as pixel.rs runs S1: the colour is linear ProPhoto as it is.
+            let rgb = p.camera_color(v, p.camera_matrix(6500.), 6500.);
+            let pro = mul(RGB_TO_PRO, rgb);
+            for c in 0..3 {
+                assert!((pro[c] - v[c]).abs() < 1e-5, "{v:?} -> {pro:?}");
+            }
+        }
+        // finish converts to the working RGB, which leaves greys grey.
+        let out = mul(RGB_TO_PRO, p.finish([0.5; 3]));
+        let want = crate::camera_profiles::default_tone_at(0.5);
+        for c in 0..3 {
+            assert!((out[c] - want).abs() < 1e-5, "{out:?} vs {want}");
+        }
+    }
+}

@@ -907,6 +907,82 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     assert_eq!(recipe.exposure, 0.5);
     Ok(())
 }
+/// A rendered file's saved edit belongs to its file as a RAW's does: once the
+/// file is rewritten, opening it again starts from the file, with the saved edit
+/// protected rather than shown or replaced.
+#[test]
+fn an_edited_jpeg_whose_file_changed_reopens_from_the_file() -> anyhow::Result<()> {
+    use worker::LoadedHeader;
+    for (name, source) in [
+        ("photo.ARW", crate::camera_data::Source::Raw),
+        ("photo.jpg", crate::camera_data::Source::Rendered),
+    ] {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join(name);
+        let write = |side: u32| -> anyhow::Result<()> {
+            if source == crate::camera_data::Source::Rendered {
+                image::RgbImage::from_pixel(side, side, image::Rgb([90, 120, 150])).save(&file)?;
+            } else {
+                std::fs::write(&file, vec![7u8; side as usize])?;
+            }
+            Ok(())
+        };
+        write(16)?;
+        let path = dir.path().join("photos.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&path)?;
+        catalog.add_folder(dir.path())?;
+        let id = catalog.photos()?[0].id;
+        let saved = Recipe {
+            exposure: 1.,
+            ..Default::default()
+        };
+        catalog.save_edit(
+            id,
+            &file,
+            &saved,
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )?;
+        drop(catalog);
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+        let open = |editor: &mut Editor| {
+            editor.document.reset(Some(id));
+            let (generation, _) = editor.load.start();
+            editor
+                .tx
+                .send(Event::Header(Box::new(LoadedHeader {
+                    id: generation,
+                    path: file.clone(),
+                    metadata: Metadata {
+                        source,
+                        ..Default::default()
+                    },
+                    recipe: Recipe::default(),
+                    export: Default::default(),
+                    status: "Original".into(),
+                })))
+                .unwrap();
+            editor.events(&ctx);
+        };
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 1., "{name}");
+        assert!(!editor.document.edit.save_state().is_protected(), "{name}");
+
+        write(32)?;
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 0., "{name}");
+        assert!(editor.document.edit.save_state().is_protected(), "{name}");
+        assert!(
+            editor.document.lightroom_notice.contains("Photo changed"),
+            "{name}: {}",
+            editor.document.lightroom_notice
+        );
+    }
+    Ok(())
+}
 #[test]
 fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();
@@ -1914,6 +1990,29 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     // Nothing past the end of the filmstrip.
     editor.document.catalog_photo = Some(middle);
     assert_eq!(editor.prefetch_neighbour(last), None);
+    Ok(())
+}
+#[test]
+fn a_rendered_neighbour_is_prefetched_too() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    for name in ["a.jpg", "b.jpg"] {
+        image::RgbImage::new(4, 4).save(dir.path().join(name))?;
+    }
+    let path = dir.path().join("photos.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let library = library::Library::load(&path, ctx)?;
+    let photos: Vec<_> = library.session.photos.iter().map(|p| p.id).collect();
+    let first = *photos
+        .iter()
+        .find(|p| library.navigate(**p, -1).is_none_or(|q| q == **p))
+        .unwrap();
+    let second = library.navigate(first, 1).unwrap();
+    let expected = library.photo(second).unwrap().path.clone();
+    editor.library = Some(Box::new(library));
+    assert_eq!(editor.prefetch_neighbour(first), Some(expected));
     Ok(())
 }
 #[test]
@@ -6408,6 +6507,215 @@ fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
     // Plain Cmd+C stays the clipboard's: no Copy Settings.
     frame(&mut editor, egui::Event::Copy, egui::Modifiers::COMMAND);
     assert!(editor.modal.is_none());
+}
+/// The accessibility tree of `editor`'s Develop controls in a frame given `events`.
+fn controls_frame(
+    ctx: &egui::Context,
+    editor: &mut Editor,
+    events: Vec<egui::Event>,
+) -> egui::accesskit::TreeUpdate {
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(320., 1600.))),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            let frame = editor.begin_edit_frame();
+            egui::CentralPanel::default().show(ui, |ui| editor.controls(ui));
+            editor.finish_edit_frame(frame, ui.ctx());
+        },
+    );
+    output.textures_delta.clear();
+    output
+        .platform_output
+        .accesskit_update
+        .expect("accessibility is on")
+}
+fn press_and_release(at: Pos2) -> [Vec<egui::Event>; 2] {
+    [true, false].map(|pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    })
+}
+fn centre(node: &egui::accesskit::Node) -> Pos2 {
+    let b = node.bounds().expect("placed");
+    Pos2::new(((b.x0 + b.x1) / 2.) as f32, ((b.y0 + b.y1) / 2.) as f32)
+}
+#[test]
+fn the_basic_panel_offers_relative_white_balance_for_a_jpeg() {
+    use egui::accesskit::Role;
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let m = Metadata {
+        source: crate::camera_data::Source::Rendered,
+        width: 64,
+        height: 48,
+        ..Default::default()
+    };
+    let (profiles, _) = crate::camera_profiles::installed(&m);
+    editor.document.reset(None);
+    let (generation, _) = editor.load.start();
+    for event in [
+        Event::Header(Box::new(worker::LoadedHeader {
+            id: generation,
+            path: "photo.jpg".into(),
+            metadata: m.clone(),
+            recipe: Recipe::for_rendered(&m),
+            export: Default::default(),
+            status: "Original".into(),
+        })),
+        Event::Profiles {
+            id: generation,
+            profiles,
+            errors: Vec::new(),
+        },
+    ] {
+        editor.tx.send(event).unwrap();
+    }
+    editor.events(&ctx);
+    controls_frame(&ctx, &mut editor, vec![]);
+    let update = controls_frame(&ctx, &mut editor, vec![]);
+    let nodes = || update.nodes.iter().map(|(_, node)| node);
+    let combo = |value: &str| {
+        nodes()
+            .find(|n| n.role() == Role::ComboBox && n.value() == Some(value))
+            .cloned()
+            .unwrap_or_else(|| panic!("no {value} menu"))
+    };
+    let white_balance = combo("As Shot");
+    let below = centre(&white_balance).y;
+    // The first slider under the WB menu is relative Temp, then Tint: ±100 each.
+    let mut numbers: Vec<_> = nodes()
+        .filter(|n| n.role() == Role::SpinButton && centre(n).y > below)
+        .collect();
+    numbers.sort_by(|a, b| centre(a).y.total_cmp(&centre(b).y));
+    for number in &numbers[..2] {
+        assert_eq!(
+            (number.min_numeric_value(), number.max_numeric_value()),
+            (Some(-100.), Some(100.))
+        );
+    }
+    // The profile is the file's own; nothing to import.
+    let profile = combo("Embedded");
+    let [down, up] = press_and_release(centre(&profile));
+    controls_frame(&ctx, &mut editor, down);
+    controls_frame(&ctx, &mut editor, up);
+    let menu = controls_frame(&ctx, &mut editor, vec![]);
+    let labels: Vec<String> = menu
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| n.label().or(n.value()).map(String::from))
+        .collect();
+    let count = |labels: &[String], label: &str| labels.iter().filter(|l| *l == label).count();
+    // Open: the menu lists the profile beside the box showing it.
+    assert_eq!(count(&labels, "Embedded"), 2, "{labels:?}");
+    for absent in [
+        "Default (camera matrix)",
+        "Import Adobe profiles for this camera",
+        "Import profiles…",
+        "Import profiles from folder…",
+    ] {
+        assert_eq!(count(&labels, absent), 0, "{absent}: {labels:?}");
+    }
+    // Close it, then open the WB menu: no Kelvin presets.
+    controls_frame(
+        &ctx,
+        &mut editor,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    let [down, up] = press_and_release(centre(&white_balance));
+    controls_frame(&ctx, &mut editor, down);
+    controls_frame(&ctx, &mut editor, up);
+    let menu = controls_frame(&ctx, &mut editor, vec![]);
+    let labels: Vec<String> = menu
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| n.label().or(n.value()).map(String::from))
+        .collect();
+    // The box shows As Shot, and the menu offers it with Auto and Custom.
+    assert_eq!(count(&labels, "As Shot"), 2, "{labels:?}");
+    for offered in ["Auto", "Custom"] {
+        assert_eq!(count(&labels, offered), 1, "{offered}: {labels:?}");
+    }
+    assert_eq!(count(&labels, "Daylight"), 0, "{labels:?}");
+}
+#[test]
+fn opening_a_jpeg_says_it_is_reading_the_photo() -> anyhow::Result<()> {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("photo.jpg");
+    image::RgbImage::new(8, 8).save(&file)?;
+    assert!(editor.load_raw(file, None));
+    assert_eq!(editor.status, "Reading photo…");
+    Ok(())
+}
+#[test]
+fn auto_white_balance_on_a_jpeg_sets_its_relative_temp_and_tint() {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let (width, height) = (64u32, 48u32);
+    let metadata = Metadata {
+        source: crate::camera_data::Source::Rendered,
+        width,
+        height,
+        ..Default::default()
+    };
+    // A warm gradient, which Auto cools.
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.05 + 0.5 * (i % width) as f32 / width as f32;
+                [v * 1.2, v, v * 0.8]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    *editor.document.edit.setup_mut() = Recipe::for_rendered(&metadata);
+    editor.start_auto(worker::AutoKind::WhiteBalance);
+    let start = std::time::Instant::now();
+    while editor.document.auto.is_running() {
+        assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        editor.events(&ctx);
+    }
+    let r = editor.document.edit.recipe();
+    assert!(
+        r.incremental_temperature < 0.,
+        "{}",
+        r.incremental_temperature
+    );
+    assert_eq!((r.temperature, r.tint), (6500., 0.));
+    // The sliders carry it (the gains stay 1), and the WB menu shows Auto.
+    assert_eq!(r.wb, [1.; 3]);
+    assert_eq!(
+        r.auto_white_balance,
+        Some([r.incremental_temperature, r.incremental_tint])
+    );
 }
 #[test]
 fn a_tools_drawer_keeps_the_adjustments_width() {

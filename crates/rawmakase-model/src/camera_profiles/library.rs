@@ -115,6 +115,9 @@ fn installed_in(
     m: &Metadata,
     cameras: &Cameras,
 ) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
+    if m.is_rendered() {
+        return (vec![Arc::new(CameraProfile::embedded(m))], vec![]);
+    }
     let mut profiles = Vec::new();
     let mut errors = Vec::new();
     if let Some(p) = builtin(m) {
@@ -557,5 +560,20 @@ mod tests {
         assert!(import_into(&[source, unsupported], &new_dest).is_err());
         assert!(!new_dest.exists());
         Ok(())
+    }
+    #[test]
+    fn a_rendered_photo_is_offered_only_the_embedded_profile() {
+        let m = Metadata {
+            source: crate::camera_data::Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        };
+        let (profiles, errors) = installed_in(&[], &m, &CAMERAS);
+        assert_eq!(names_all(&profiles), ["Embedded"]);
+        assert!(errors.is_empty());
+    }
+    fn names_all(profiles: &[Arc<CameraProfile>]) -> Vec<&str> {
+        profiles.iter().map(|p| p.name.as_str()).collect()
     }
 }
