@@ -1,5 +1,5 @@
-//! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG
-//! and TIFF files: when a folder is added, for its new photos, and on Read
+//! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG,
+//! TIFF and PNG files: when a folder is added, for its new photos, and on Read
 //! Metadata from Files, for photos already in the catalog. Never at render
 //! time; the catalog stays the source of truth.
 use super::db::{LightroomWrite, Write, sql, sqlite_sql};
@@ -67,7 +67,7 @@ fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
 }
 
 /// The sidecars of `file`, the one used first. A RAW's are digiKam's
-/// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG or TIFF has only
+/// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG, TIFF or PNG has only
 /// "IMG_1234.JPG.xmp", as "IMG_1234.xmp" beside a RAW of the same name is the
 /// RAW's.
 pub fn sidecars(file: &Path) -> Vec<PathBuf> {
@@ -79,7 +79,8 @@ pub fn sidecars(file: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// The XMP inside a JPEG (its standard APP1 packet) or TIFF (tag 700).
+/// The XMP inside a JPEG (its standard APP1 packet), TIFF (tag 700) or PNG
+/// (its XMP text chunk).
 fn embedded(file: &Path) -> Result<Option<String>> {
     match RasterFormat::of(file) {
         Some(RasterFormat::Jpeg) => {
@@ -103,7 +104,7 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             Ok(None)
         }
         Some(RasterFormat::Tiff) => in_tiff(file),
-        Some(RasterFormat::Png) => Ok(None),
+        Some(RasterFormat::Png) => in_png(file),
         // A DNG keeps its XMP in the same TIFF tag.
         None if file
             .extension()
@@ -112,6 +113,45 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             in_tiff(file)
         }
         None => Ok(None),
+    }
+}
+
+/// The XMP in a PNG's "XML:com.adobe.xmp" text chunk, uncompressed as the
+/// XMP standard has it, before or after the image data.
+fn in_png(file: &Path) -> Result<Option<String>> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    const KEYWORD: &[u8] = b"XML:com.adobe.xmp\0";
+    let mut f = std::fs::File::open(file)?;
+    let mut at = 8u64;
+    loop {
+        f.seek(SeekFrom::Start(at))?;
+        let mut header = [0u8; 8];
+        if f.read_exact(&mut header).is_err() {
+            return Ok(None);
+        }
+        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+        match &header[4..] {
+            b"iTXt" if length <= 16_000_000 => {
+                let mut data = vec![0u8; length as usize];
+                f.read_exact(&mut data)?;
+                // Keyword, then compression flag and method, language and
+                // translated keyword, each ended by a NUL, then the text.
+                if let Some([0, _, rest @ ..]) = data.strip_prefix(KEYWORD) {
+                    let mut parts = rest.splitn(3, |b| *b == 0);
+                    if let (Some(_), Some(_), Some(text)) =
+                        (parts.next(), parts.next(), parts.next())
+                    {
+                        return Ok(Some(
+                            String::from_utf8(text.to_vec())
+                                .context("embedded XMP is not valid UTF-8")?,
+                        ));
+                    }
+                }
+            }
+            b"IEND" => return Ok(None),
+            _ => {}
+        }
+        at += 12 + length;
     }
 }
 
@@ -156,7 +196,7 @@ fn decode(bytes: &[u8]) -> Result<String> {
     }
 }
 
-/// The metadata of `file`'s sidecar and, for a JPEG or TIFF, its own XMP:
+/// The metadata of `file`'s sidecar and, for a JPEG, TIFF or PNG, its own XMP:
 /// field by field the sidecar's where it has one, an explicitly empty value
 /// included, else the file's. `None` when neither has any.
 pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {

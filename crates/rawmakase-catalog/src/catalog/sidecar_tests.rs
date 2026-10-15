@@ -307,10 +307,18 @@ fn a_files_own_xmp_is_read_by_its_extension() -> Result<()> {
     for name in ["E.tif", "F.TIF", "G.tiff", "H.TIFF", "I.dng", "J.DNG"] {
         assert_eq!(title_of(name, &tiff)?, set("Inside"), "{name}");
     }
-    // A PNG's own XMP is not read.
     for name in ["K.png", "L.PNG"] {
-        assert_eq!(title_of(name, &png)?, None, "{name}");
+        assert_eq!(title_of(name, &png)?, set("Inside"), "{name}");
     }
+    // A compressed one, which the XMP standard does not allow, is passed over.
+    let mut compressed = png.clone();
+    let flag = compressed
+        .windows(18)
+        .position(|w| w == b"XML:com.adobe.xmp\0")
+        .unwrap()
+        + 18;
+    compressed[flag] = 1;
+    assert_eq!(title_of("K2.png", &compressed)?, None);
     // Nor is a JPEG's or a TIFF's under another extension.
     assert_eq!(title_of("M.webp", &jpeg)?, None);
     assert_eq!(title_of("N.NEF", &tiff)?, None);
