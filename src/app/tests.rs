@@ -495,15 +495,30 @@ fn stale_preview_results_are_discarded() {
 fn a_render_overtaken_by_an_edit_still_shows_with_its_own_settings() {
     let ctx = egui::Context::default();
     let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
-    // Only the results sent here arrive.
+    // Only the results sent here arrive: the renderer takes a job and holds it.
     task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
     e.view.viewport = Vec2::new(40., 40.);
     e.schedule();
     let first = e.preview.task.id();
     let first_recipe = e.effective_recipe();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    // Many changes while the first still renders, as on a slow GPU:
+    // those replaced before the renderer took them are forgotten, not the first.
+    for i in 0..30 {
+        in_edit_frame(&ctx, &mut e, |e| {
+            e.document.edit.recipe_mut().exposure = 0.5 + i as f32 / 100.
+        });
+    }
     in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
     let second = e.preview.task.id();
     assert!(second > first);
+    assert_eq!(e.preview.overtaken.len(), 1);
     let rendered = |id, status: &str| Event::Rendered {
         id,
         pane: worker::Pane::After,

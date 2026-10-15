@@ -155,13 +155,28 @@ impl Renderer {
     pub(in crate::app) fn stop(&mut self) -> crate::app::task::Stopping {
         self.0.stop()
     }
-    pub(crate) fn submit(&self, job: RenderJob) {
+    /// Queues `job` as its pane's latest. Returns the id of the pane's job it replaced,
+    /// which never runs and so never reports.
+    pub(crate) fn submit(&self, job: RenderJob) -> Option<u64> {
         let lane = match job.pane {
             Pane::After => 0,
             Pane::Before => 1,
         };
-        self.0.submit_to(lane, job);
+        self.0.submit_to(lane, job).map(|replaced| replaced.id)
     }
+}
+
+/// A renderer that takes each job, reports its id to `taken` and holds it until
+/// `release` sends or closes, rendering nothing: for tests of what the UI asks for.
+#[cfg(test)]
+pub(in crate::app) fn holding(
+    taken: Sender<u64>,
+    release: std::sync::mpsc::Receiver<()>,
+) -> Renderer {
+    Renderer(Latest::with_lanes(2, move |job: RenderJob| {
+        let _ = taken.send(job.id);
+        let _ = release.recv();
+    }))
 }
 
 /// A CPU-only renderer, for headless tests.

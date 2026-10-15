@@ -291,4 +291,6 @@ pub(crate) use latest::panic_message;
 pub(crate) use loader::Loader;
 pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
 pub(crate) use renderer::Renderer;
+#[cfg(test)]
+pub(super) use renderer::holding;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

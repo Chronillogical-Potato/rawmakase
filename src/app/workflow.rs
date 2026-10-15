@@ -419,7 +419,7 @@ impl Editor {
                     crop: geometry.crop(),
                 },
             );
-            self.renderer.submit(RenderJob {
+            let replaced = self.renderer.submit(RenderJob {
                 pane: super::worker::Pane::After,
                 max_edge,
                 cancel,
@@ -435,6 +435,9 @@ impl Editor {
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),
             });
+            if let Some(replaced) = replaced {
+                self.preview.replaced(replaced);
+            }
         }
         self.schedule_before();
     }

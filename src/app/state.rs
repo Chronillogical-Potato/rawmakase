@@ -178,9 +178,6 @@ impl RenderView {
             && self.max_edge == other.max_edge
     }
 }
-/// Earlier renders kept for an edit's overtaken jobs; the renderer keeps one
-/// pending job, so few ever report.
-const OVERTAKEN: usize = 8;
 pub(super) struct PreviewState {
     pub(super) task: super::task::Task,
     /// The last whole-photo render, always drawn so zooming never shows a gap.
@@ -200,7 +197,9 @@ pub(super) struct PreviewState {
     pub(super) samples_recipe: Option<Recipe>,
     /// What the latest render was asked for, applied to its result when it lands.
     pub(super) pending: Pending,
-    /// Earlier renders an edit let finish (see `Task::supersede`), oldest first.
+    /// Earlier renders an edit let finish (see `Task::supersede`), oldest first: those
+    /// the renderer took, as one it replaced before taking it never reports
+    /// (`replaced`).
     pub(super) overtaken: std::collections::VecDeque<(u64, Pending)>,
     /// The render whose result is shown, so an earlier one landing late is not.
     pub(super) shown: u64,
@@ -446,9 +445,6 @@ impl PreviewState {
         if edit && self.task.is_running() {
             let earlier = std::mem::replace(&mut self.pending, pending);
             self.overtaken.push_back((self.task.id(), earlier));
-            if self.overtaken.len() > OVERTAKEN {
-                self.overtaken.pop_front();
-            }
             self.task.supersede()
         } else {
             self.pending = pending;
@@ -469,6 +465,10 @@ impl PreviewState {
                 .find(|(i, _)| *i == id)
                 .map(|(_, p)| p.clone())
         }
+    }
+    /// Forgets render `id`, which the renderer replaced before taking it.
+    pub(super) fn replaced(&mut self, id: u64) {
+        self.overtaken.retain(|(i, _)| *i != id);
     }
     /// Notes that render `id`'s result is shown: earlier ones no longer are.
     pub(super) fn showing(&mut self, id: u64) {
