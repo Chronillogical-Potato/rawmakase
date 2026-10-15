@@ -17,7 +17,7 @@ rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
 anyhow = "1"
 flate2 = "1"
 getrandom = "0.4"
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+image.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

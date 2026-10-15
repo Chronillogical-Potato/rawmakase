@@ -12,6 +12,11 @@ repository = "https://github.com/pch/rawmakase"
 [workspace]
 members = ["crates/rawmakase-catalog", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-native", "crates/rawmakase-protocol", "crates/rawmakase-remote", "tools/rawmakase-ctl"]
 
+[workspace.dependencies]
+# The rendered formats the app reads and writes (`storage::RasterFormat`): one
+# list for every crate that decodes or encodes them.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+
 [dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0" }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0" }
@@ -42,7 +47,7 @@ rayon = "1.12"
 bytemuck = { version = "1.25", features = ["derive"] }
 pollster = "1"
 wgpu = { version = "30", default-features = false, features = ["wgsl"] }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+image.workspace = true
 tiff = "0.11.3"
 tempfile = "3"
 unicode-normalization = "0.1"

@@ -17,6 +17,7 @@ base64 = "0.23"
 [dev-dependencies]
 # The real-photo test decodes an sRGB JPEG the caller names; the app itself
 # never decodes through this crate.
+# Only JPEG: the worker needs none of the workspace's other formats.
 image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
 # Nothing beyond the above: the tests run the real server and client against a
 # fake engine on a loopback port.
