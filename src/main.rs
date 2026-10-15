@@ -604,8 +604,12 @@ fn save_stage(
     out: rawmakase::rendered::Rendered,
     overwrite: bool,
 ) -> Result<()> {
-    use rawmakase::storage::{Replace, is_raw, write_atomic};
+    use rawmakase::storage::{RasterFormat, Replace, is_raw, write_atomic};
     anyhow::ensure!(!is_raw(output), "A stage tap cannot overwrite a RAW file");
+    anyhow::ensure!(
+        RasterFormat::of(output) == Some(RasterFormat::Tiff),
+        "A stage tap is a TIFF: name the output .tif or .tiff"
+    );
     if output.exists() {
         anyhow::ensure!(
             std::fs::canonicalize(output)? != std::fs::canonicalize(input)?,
@@ -670,5 +674,20 @@ mod tests {
         let written = image::open(&output).unwrap().to_rgb32f();
         assert_eq!(written.dimensions(), (2, 1));
         assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn a_stage_tap_is_only_written_under_a_tiff_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("photo.dng");
+        for name in ["tap.jpg", "tap.png", "tap.exr", "tap"] {
+            let output = dir.path().join(name);
+            let refused = save_stage(&output, &source, tap(), false).unwrap_err();
+            assert!(refused.to_string().contains(".tif"), "{name}: {refused}");
+            assert!(!output.exists(), "{name}");
+        }
+        for name in ["tap.tif", "tap.TIFF"] {
+            save_stage(&dir.path().join(name), &source, tap(), false).unwrap();
+        }
     }
 }
