@@ -204,7 +204,7 @@ const SKIP: [u16; 4] = [
 pub const MAX_VALUE: usize = 4096;
 
 /// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
-/// a JPEG or TIFF, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
+/// a JPEG, TIFF or PNG, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
 /// `None` when the file has none that can be read, e.g. a CR3.
 pub fn read(path: &Path) -> Option<CameraExif> {
     directories(path, |tag| MAIN.contains(&tag))
@@ -228,7 +228,7 @@ pub fn capture_time(path: &Path) -> Option<String> {
     })
 }
 
-/// Camera, lens and exposure settings of a JPEG, TIFF or TIFF-based RAW
+/// Camera, lens and exposure settings of a JPEG, TIFF, PNG or TIFF-based RAW
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
 pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
@@ -351,6 +351,8 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
     } else if head.starts_with(&[0xff, 0xd8]) {
         let length = f.metadata().ok()?.len().min(1 << 16) as usize;
         exif_in_jpeg(&mut File::open(path).ok()?, 0, length)?
+    } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        exif_in_png(&mut File::open(path).ok()?)?
     } else {
         0
     };
@@ -395,6 +397,30 @@ fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<u64> {
         }
     }
     None
+}
+
+/// Offset of the TIFF header inside a PNG's eXIf chunk, found by its chunks'
+/// headers alone, before or after the image data.
+fn exif_in_png(f: &mut File) -> Option<u64> {
+    use std::io::{Seek, SeekFrom};
+    let mut at = 8u64;
+    loop {
+        f.seek(SeekFrom::Start(at)).ok()?;
+        let mut header = [0u8; 8];
+        f.read_exact(&mut header).ok()?;
+        let length = u32::from_be_bytes(header[..4].try_into().ok()?) as u64;
+        match &header[4..] {
+            b"eXIf" => {
+                // Some writers keep JPEG's "Exif" header in the chunk too.
+                let mut signature = [0u8; 6];
+                f.read_exact(&mut signature).ok()?;
+                let skip = if signature == *b"Exif\0\0" { 6 } else { 0 };
+                return Some(at + 8 + skip);
+            }
+            b"IEND" => return None,
+            _ => at += 12 + length,
+        }
+    }
 }
 
 fn fields(
@@ -460,6 +486,51 @@ mod camera_names_tests {
             camera_names(&path),
             Some(("FUJIFILM".into(), "X-T5".into()))
         );
+    }
+
+    /// A PNG of `chunks` (type and data) between its header and end; the
+    /// reader checks no CRCs, so they are left zero.
+    fn png(chunks: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+        let mut p = b"\x89PNG\r\n\x1a\n".to_vec();
+        let ihdr = [0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0];
+        for (kind, data) in [(b"IHDR", &ihdr[..])]
+            .into_iter()
+            .chain(chunks.iter().copied())
+            .chain([(b"IEND", &[][..])])
+        {
+            p.extend((data.len() as u32).to_be_bytes());
+            p.extend(kind);
+            p.extend(data);
+            p.extend([0; 4]);
+        }
+        p
+    }
+
+    #[test]
+    fn a_pngs_exif_is_read_wherever_its_chunk_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let exif = tiff("FUJIFILM", "X-T5");
+        let prefixed = [&b"Exif\0\0"[..], &exif].concat();
+        let idat: &[u8] = &[0; 300];
+        for (name, chunks) in [
+            ("before.png", vec![(b"eXIf", &exif[..]), (b"IDAT", idat)]),
+            ("after.png", vec![(b"IDAT", idat), (b"eXIf", &exif[..])]),
+            (
+                "prefixed.png",
+                vec![(b"eXIf", &prefixed[..]), (b"IDAT", idat)],
+            ),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, png(&chunks)).unwrap();
+            assert_eq!(
+                camera_names(&path),
+                Some(("FUJIFILM".into(), "X-T5".into())),
+                "{name}"
+            );
+        }
+        let path = dir.path().join("none.png");
+        std::fs::write(&path, png(&[(b"IDAT", idat)])).unwrap();
+        assert_eq!(camera_names(&path), None);
     }
 
     #[test]

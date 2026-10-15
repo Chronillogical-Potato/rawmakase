@@ -192,14 +192,13 @@ enum CaptureRead {
 }
 
 /// Whether a capture time can be read from this kind of file at all, so
-/// files that never yield one are not opened on every launch: a PNG rarely
-/// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
+/// files that never yield one are not opened on every launch: the EXIF
+/// reader handles JPEG, TIFF and PNG, TIFF-based RAWs and RAF but not
 /// Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
 fn has_capture_time(path: &Path) -> bool {
     use crate::storage::RasterFormat;
     match RasterFormat::of(path) {
-        Some(RasterFormat::Jpeg | RasterFormat::Tiff) => true,
-        Some(RasterFormat::Png) => false,
+        Some(RasterFormat::Jpeg | RasterFormat::Tiff | RasterFormat::Png) => true,
         None => {
             let extension = path
                 .extension()
@@ -264,16 +263,15 @@ fn raster_dimensions(path: &Path) -> Option<(u32, u32)> {
 mod tests {
     use super::*;
     #[test]
-    fn capture_times_are_read_from_jpegs_tiffs_and_raws_the_exif_reader_handles() {
+    fn capture_times_are_read_from_rendered_files_and_raws_the_exif_reader_handles() {
         for name in [
-            "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.NEF", "A.dng",
-            "A.ARW", "A.raf",
+            "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.png", "A.PNG",
+            "A.NEF", "A.dng", "A.ARW", "A.raf",
         ] {
             assert!(has_capture_time(Path::new(name)), "{name}");
         }
         for name in [
-            "A.png", "A.PNG", "A.CR3", "A.crw", "A.X3F", "A.mrw", "A.webp", "A.heic", "A.xmp", "A",
-            "._A.NEF",
+            "A.CR3", "A.crw", "A.X3F", "A.mrw", "A.webp", "A.heic", "A.xmp", "A", "._A.NEF",
         ] {
             assert!(!has_capture_time(Path::new(name)), "{name}");
         }
