@@ -108,12 +108,15 @@ pub struct Metadata {
     /// Built-in lens correction stored by the camera, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lens: Option<crate::optics::LensCorrection>,
-    /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA".
+    /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA". A file that
+    /// records only `lens_id` takes the name of the imported lens profile that
+    /// identifies it (see `rawmakase_native::photo::open`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
     /// The maker's numeric lens ID from the maker notes (Nikon's `LensIDNumber`,
-    /// which is also the lens profiles' `stCamera:LensID`); 0 when the file records
-    /// none. Cameras that write no lens model leave the ID as the only lens identity.
+    /// Pentax's two `LensType` bytes as 4 << 8 | 252, as the lens profiles'
+    /// `stCamera:LensID` holds them too); 0 when the file records none. Cameras that
+    /// write no lens model leave the ID as the only lens identity.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub lens_id: u32,
     /// Other names, as "Make Model", that Adobe's camera profiles may use for this

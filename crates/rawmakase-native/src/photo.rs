@@ -65,6 +65,12 @@ pub fn open(path: &Path) -> Result<Raw> {
         }
     }
     metadata.lens_profiles = LENS_PROFILES.current().for_photo(metadata);
+    // Pentax bodies record no lens name, only the lens ID: name the lens as the
+    // profile matched by that ID does. Matched first, as the ID only counts for a
+    // file without a lens name.
+    if let Some(lens) = metadata.lens_profiles.lens_by_id(metadata) {
+        metadata.lens_model = lens.to_string();
+    }
     Ok(raw)
 }
 

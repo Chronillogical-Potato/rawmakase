@@ -61,7 +61,8 @@ pub(super) struct NativeMetadata {
     pub(super) aspect_top: u32,
     pub(super) aspect_width: u32,
     pub(super) aspect_height: u32,
-    /// The maker's numeric lens ID (Nikon's `LensIDNumber`); 0 when there is none.
+    /// The maker's numeric lens ID (Nikon's `LensIDNumber`, Pentax's `LensType`); 0
+    /// when there is none.
     pub(super) lens_id: u32,
     /// LibRaw's canonical name for bodies sold under several names.
     pub(super) normalized_make: [c_char; 64],

@@ -55,9 +55,13 @@ fn lens_id_matches(e: &Entry, m: &Metadata) -> bool {
         && maker(&e.make) == maker(&m.make)
 }
 /// The maker's first word, so Adobe's "NIKON CORPORATION" is the "Nikon" a camera
-/// records: lens IDs only compare within one maker.
+/// records: lens IDs only compare within one maker. Ricoh makes Pentax cameras and
+/// profiles their lenses as "RICOH IMAGING COMPANY, LTD.", with Pentax's numbering.
 fn maker(s: &str) -> String {
-    key(s).split(' ').next().unwrap_or("").to_string()
+    match key(s).split(' ').next().unwrap_or("") {
+        "ricoh" => "pentax".to_string(),
+        first => first.to_string(),
+    }
 }
 /// The photo's crop factor, when its 35mm-equivalent focal length is recorded.
 fn crop_factor(m: &Metadata) -> Option<f32> {
@@ -472,6 +476,29 @@ impl PhotoProfiles {
         matching.sort_by_key(|c| c.lens_rank);
         matching.into_iter().find(|c| c.correction(m).is_some())
     }
+    /// The lens of a photo that records only the maker's lens ID, as the imported
+    /// profile identifying it names it (`stCamera:Lens`, the name Camera Raw records
+    /// for the lens); `None` when the file names its lens or no profile identifies
+    /// it. Pentax bodies write no lens name, only the ID.
+    pub fn lens_by_id(&self, m: &Metadata) -> Option<&str> {
+        if !m.lens_model.is_empty() || m.lens_id == 0 {
+            return None;
+        }
+        // A candidate ranks for the lens only when an entry identifies it, which for
+        // a file without a lens name means by an ID no other lens carries.
+        let mut matching: Vec<&Candidate> = self
+            .candidates
+            .iter()
+            .filter(|c| c.lens_rank.is_some())
+            .collect();
+        matching.sort_by_key(|c| c.lens_rank);
+        matching
+            .into_iter()
+            .flat_map(|c| c.profile.usable())
+            .filter(|e| lens_id_matches(e, m))
+            .find_map(|e| e.lens.first())
+            .map(String::as_str)
+    }
 }
 /// Lens profiles imported one by one, so a file that can't be used doesn't
 /// stop the rest.
@@ -545,13 +572,14 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
 pub fn test_profile(make: &str, lens: &str, name: &str, distortion: f32, vignette: f32) -> String {
     test_profile_with_lens_id(make, lens, name, None, distortion, vignette)
 }
-/// `test_profile` with the profile's `stCamera:LensID` (Nikon's `LensIDNumber`) set.
+/// `test_profile` with the profile's `stCamera:LensID` set, as Adobe writes it:
+/// Nikon's `LensIDNumber` ("138") or Pentax's `LensType` bytes ("4 252").
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_profile_with_lens_id(
     make: &str,
     lens: &str,
     name: &str,
-    lens_id: Option<u32>,
+    lens_id: Option<&str>,
     distortion: f32,
     vignette: f32,
 ) -> String {
@@ -693,7 +721,7 @@ mod tests {
             "NIKON CORPORATION",
             "105.0 mm f/2.8",
             "Adobe (Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED)",
-            Some(138),
+            Some("138"),
             -0.28,
             -0.5,
         );
@@ -745,7 +773,7 @@ mod tests {
                 "NIKON CORPORATION",
                 lens,
                 &format!("Adobe (Nikon {lens})"),
-                Some(id),
+                Some(&id.to_string()),
                 -0.1,
                 -0.5,
             )
@@ -758,7 +786,7 @@ mod tests {
             "Canon",
             "50.0 mm f/1.4",
             "Adobe (Canon 50mm f/1.4)",
-            Some(138),
+            Some("138"),
             -0.1,
             -0.5,
         );
@@ -795,6 +823,56 @@ mod tests {
                 .map(|c| c.profile.filename.as_str()),
             Some("micro.lcp")
         );
+    }
+    #[test]
+    fn a_pentax_lens_type_identifies_and_names_the_lens() {
+        // Pentax bodies write no lens model (a K-x DNG among them, issue #501), only
+        // the maker note's two-byte LensType, which LibRaw reads as one number and
+        // Adobe's Pentax profiles write as stCamera:LensID "4 252". Profiles of newer
+        // lenses are made by Ricoh, which makes Pentax cameras.
+        let pentax = |make: &str, lens: &str, id: &str| {
+            test_profile_with_lens_id(make, lens, &format!("Adobe ({lens})"), Some(id), -0.1, -0.5)
+        };
+        let da = pentax("PENTAX", "smc PENTAX-DA 18-55mm F3.5-5.6 AL", "4 252");
+        let hd = pentax(
+            "RICOH IMAGING COMPANY, LTD.",
+            "HD PENTAX-DA 16-85mm F3.5-5.6 ED DC WR",
+            "8 236",
+        );
+        assert_eq!(parse(&da).unwrap()[0].lens_id, Some(4 << 8 | 252));
+        let library = Library::from_texts([("da.lcp", da.as_str()), ("hd.lcp", hd.as_str())]);
+        let photo = |lens_id: u32| {
+            let mut m = Metadata {
+                make: "Pentax".into(),
+                model: "K-x".into(),
+                lens_id,
+                focal: 35.,
+                aperture: 2.,
+                width: 4288,
+                height: 2848,
+                ..Default::default()
+            };
+            m.lens_profiles = library.for_photo(&m);
+            m
+        };
+        let auto = |m: &Metadata| m.lens_profiles.auto(m).map(|c| c.profile.filename.clone());
+        let lens = |m: &Metadata| m.lens_profiles.lens_by_id(m).map(str::to_string);
+        let k_x = photo(4 << 8 | 252);
+        assert_eq!(auto(&k_x).as_deref(), Some("da.lcp"));
+        assert_eq!(
+            lens(&k_x).as_deref(),
+            Some("smc PENTAX-DA 18-55mm F3.5-5.6 AL")
+        );
+        let k_1 = photo(8 << 8 | 236);
+        assert_eq!(auto(&k_1).as_deref(), Some("hd.lcp"));
+        // A lens no imported profile carries stays unnamed.
+        let sigma = photo(3 << 8 | 255);
+        assert_eq!(auto(&sigma), None);
+        assert_eq!(lens(&sigma), None);
+        // A file that records its lens keeps the camera's name.
+        let mut named = photo(4 << 8 | 252);
+        named.lens_model = "smc PENTAX-DA 18-55mm F3.5-5.6 AL".into();
+        assert_eq!(lens(&named), None);
     }
     #[test]
     fn reads_entries_written_as_parse_type_resource() {
