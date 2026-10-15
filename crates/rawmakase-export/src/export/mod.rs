@@ -156,7 +156,7 @@ pub fn stage(
         )?,
         Some(Format::Tiff) => encode::tiff(&mut temp, image, profile, &directories, embed)?,
         Some(Format::Png) => encode::png(&mut temp, image, profile, directories, embed)?,
-        None => bail!("Export extension must be .jpg, .jpeg, .tif, .tiff or .png"),
+        None => bail!("Export extension must be {}", Format::extensions_listed()),
     }
     temp.as_file().sync_all()?;
     Ok(Staged {

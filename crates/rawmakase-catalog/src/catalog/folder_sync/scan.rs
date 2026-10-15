@@ -46,22 +46,11 @@ fn list(directory: &Path) -> Listing {
         }
         if kind.is_dir() {
             directories.push(path);
-        } else if is_photo(&path) {
+        } else if crate::storage::is_photo(&path) {
             files.insert(entry.file_name());
         }
     }
     Listing::Listed { files, directories }
-}
-
-/// A file Add Folder would add.
-fn is_photo(path: &Path) -> bool {
-    crate::storage::is_raw(path)
-        || path.extension().is_some_and(|x| {
-            matches!(
-                x.to_string_lossy().to_ascii_lowercase().as_str(),
-                "jpg" | "jpeg" | "png" | "tif" | "tiff"
-            )
-        })
 }
 
 /// What one unknown file matched.

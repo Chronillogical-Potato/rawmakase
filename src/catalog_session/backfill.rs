@@ -196,14 +196,18 @@ enum CaptureRead {
 /// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
 /// Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
 fn has_capture_time(path: &Path) -> bool {
-    let extension = path
-        .extension()
-        .map(|x| x.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "jpg" | "jpeg" | "tif" | "tiff" => true,
-        "cr3" | "crw" | "x3f" | "mrw" => false,
-        _ => crate::storage::is_raw(path),
+    use crate::storage::RasterFormat;
+    match RasterFormat::of(path) {
+        Some(RasterFormat::Jpeg | RasterFormat::Tiff) => true,
+        Some(RasterFormat::Png) => false,
+        None => {
+            let extension = path
+                .extension()
+                .map(|x| x.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            !matches!(extension.as_str(), "cr3" | "crw" | "x3f" | "mrw")
+                && crate::storage::is_raw(path)
+        }
     }
 }
 

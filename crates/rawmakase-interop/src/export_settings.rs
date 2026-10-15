@@ -1,6 +1,7 @@
 //! The choices of Lightroom's Export dialog: where the file goes, its name, format,
 //! size and metadata. Saved as `export.json` in the data folder, so the next
 //! export (and Export with Previous) starts from them.
+use crate::storage::RasterFormat;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -74,35 +75,41 @@ pub enum Format {
     Png,
 }
 impl Format {
-    /// The extension an export is named with.
-    pub fn extension(self) -> &'static str {
+    /// The formats an export can be written in.
+    pub const ALL: [Self; 3] = [Self::Jpeg, Self::Tiff, Self::Png];
+
+    pub fn raster(self) -> RasterFormat {
         match self {
-            Format::Jpeg => "jpg",
-            Format::Tiff => "tif",
-            Format::Png => "png",
+            Format::Jpeg => RasterFormat::Jpeg,
+            Format::Tiff => RasterFormat::Tiff,
+            Format::Png => RasterFormat::Png,
         }
     }
+    /// The extension an export is named with.
+    pub fn extension(self) -> &'static str {
+        self.raster().extension()
+    }
     pub fn mime_type(self) -> &'static str {
-        match self {
-            Format::Jpeg => "image/jpeg",
-            Format::Tiff => "image/tiff",
-            Format::Png => "image/png",
-        }
+        self.raster().mime_type()
     }
     /// The format `path`'s extension names, in any case: .jpg, .jpeg, .tif,
     /// .tiff or .png.
     pub fn from_path(path: &Path) -> Option<Format> {
-        match path
-            .extension()
-            .and_then(|v| v.to_str())
-            .unwrap_or("")
-            .to_lowercase()
-            .as_str()
-        {
-            "jpg" | "jpeg" => Some(Format::Jpeg),
-            "tif" | "tiff" => Some(Format::Tiff),
-            "png" => Some(Format::Png),
-            _ => None,
+        let raster = RasterFormat::of(path)?;
+        Self::ALL.into_iter().find(|f| f.raster() == raster)
+    }
+    /// Every extension an export can have, as a sentence lists them:
+    /// ".jpg, .jpeg, .tif, .tiff or .png".
+    pub fn extensions_listed() -> String {
+        let extensions: Vec<String> = Self::ALL
+            .into_iter()
+            .flat_map(|f| f.raster().extensions())
+            .map(|e| format!(".{e}"))
+            .collect();
+        match extensions.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+            None => String::new(),
         }
     }
 }
@@ -548,6 +555,26 @@ mod tests {
             assert_eq!(Format::from_path(&path), Some(format));
         }
         assert_eq!(Format::from_path(Path::new("out.webp")), None);
+    }
+    #[test]
+    fn every_export_extension_and_mime_type_is_what_it_was() {
+        for (name, format) in [
+            ("a.jpeg", Format::Jpeg),
+            ("a.JPEG", Format::Jpeg),
+            ("a.tiff", Format::Tiff),
+            ("a.Tiff", Format::Tiff),
+            ("a.png", Format::Png),
+        ] {
+            assert_eq!(Format::from_path(Path::new(name)), Some(format), "{name}");
+        }
+        assert_eq!(
+            Format::ALL.map(Format::mime_type),
+            ["image/jpeg", "image/tiff", "image/png"]
+        );
+        assert_eq!(
+            Format::extensions_listed(),
+            ".jpg, .jpeg, .tif, .tiff or .png"
+        );
     }
     #[test]
     fn rename_templates_name_each_photo_as_lightrooms_do() {

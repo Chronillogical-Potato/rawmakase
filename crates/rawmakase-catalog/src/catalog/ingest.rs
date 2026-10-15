@@ -473,14 +473,7 @@ fn walk_into(p: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
         }
         if t.is_dir() {
             walk_into(&e.path(), files)?
-        } else if crate::storage::is_raw(&e.path())
-            || e.path().extension().is_some_and(|x| {
-                matches!(
-                    x.to_string_lossy().to_ascii_lowercase().as_str(),
-                    "jpg" | "jpeg" | "png" | "tif" | "tiff"
-                )
-            })
-        {
+        } else if crate::storage::is_photo(&e.path()) {
             files.push(e.path());
         }
     }

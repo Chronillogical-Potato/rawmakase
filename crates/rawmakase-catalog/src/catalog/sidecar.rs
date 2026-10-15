@@ -6,6 +6,7 @@ use super::db::{LightroomWrite, Write, sql, sqlite_sql};
 use super::value::{TextOrBlob, row};
 use super::{Catalog, PhotoId};
 use crate::jpeg::{APP1, Segments};
+use crate::storage::RasterFormat;
 use crate::xml::ns::JPEG_HEADER;
 use crate::xmp::descriptive::{self, Read};
 use anyhow::{Context, Result};
@@ -80,12 +81,8 @@ pub fn sidecars(file: &Path) -> Vec<PathBuf> {
 
 /// The XMP inside a JPEG (its standard APP1 packet) or TIFF (tag 700).
 fn embedded(file: &Path) -> Result<Option<String>> {
-    let extension = file
-        .extension()
-        .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "jpg" | "jpeg" => {
+    match RasterFormat::of(file) {
+        Some(RasterFormat::Jpeg) => {
             use std::io::Read as _;
             // Segment by segment up to the image data, not the whole file.
             let Some(mut segments) = Segments::new(std::fs::File::open(file)?)? else {
@@ -105,23 +102,32 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             }
             Ok(None)
         }
+        Some(RasterFormat::Tiff) => in_tiff(file),
+        Some(RasterFormat::Png) => Ok(None),
         // A DNG keeps its XMP in the same TIFF tag.
-        "tif" | "tiff" | "dng" => {
-            let Some(mut t) = crate::tiff::Tiff::open(std::fs::File::open(file)?, 0) else {
-                return Ok(None);
-            };
-            let Some(main) = t.ifd(t.first) else {
-                return Ok(None);
-            };
-            Ok(main
-                .get(&crate::exif::tag::XMP)
-                .and_then(|e| t.raw(e))
-                .map(String::from_utf8)
-                .transpose()
-                .context("embedded XMP is not valid UTF-8")?)
+        None if file
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dng")) =>
+        {
+            in_tiff(file)
         }
-        _ => Ok(None),
+        None => Ok(None),
     }
+}
+
+/// The XMP in a TIFF's tag 700.
+fn in_tiff(file: &Path) -> Result<Option<String>> {
+    let Some(mut t) = crate::tiff::Tiff::open(std::fs::File::open(file)?, 0) else {
+        return Ok(None);
+    };
+    let Some(main) = t.ifd(t.first) else {
+        return Ok(None);
+    };
+    main.get(&crate::exif::tag::XMP)
+        .and_then(|e| t.raw(e))
+        .map(String::from_utf8)
+        .transpose()
+        .context("embedded XMP is not valid UTF-8")
 }
 
 /// A sidecar's text: UTF-8, or UTF-16 by its byte order mark, as XML allows.
