@@ -240,3 +240,79 @@ fn defaults_fill_only_what_neither_file_nor_sidecar_has() -> Result<()> {
     );
     Ok(())
 }
+
+/// A little-endian TIFF whose only directory holds `packet` as its XMP (tag 700).
+fn tiff_with(packet: &str) -> Vec<u8> {
+    let mut tiff = b"II*\0".to_vec();
+    tiff.extend(8u32.to_le_bytes());
+    tiff.extend(1u16.to_le_bytes());
+    tiff.extend(700u16.to_le_bytes());
+    tiff.extend(crate::tiff::kind::BYTE.to_le_bytes());
+    tiff.extend((packet.len() as u32).to_le_bytes());
+    tiff.extend(26u32.to_le_bytes());
+    tiff.extend(0u32.to_le_bytes());
+    tiff.extend(packet.as_bytes());
+    tiff
+}
+/// A tiny PNG with `packet` as its XMP, in an "XML:com.adobe.xmp" iTXt chunk.
+fn png_with(packet: &str) -> Result<Vec<u8>> {
+    use image::ImageEncoder as _;
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(
+        &[0u8; 3],
+        1,
+        1,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    let mut chunk = b"iTXt".to_vec();
+    chunk.extend(b"XML:com.adobe.xmp\0\0\0\0\0");
+    chunk.extend(packet.as_bytes());
+    let crc = !chunk.iter().fold(!0u32, |mut crc, &byte| {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+        crc
+    });
+    let iend = png.len() - 12;
+    let mut out = png[..iend].to_vec();
+    out.extend(((chunk.len() - 4) as u32).to_be_bytes());
+    out.extend(chunk);
+    out.extend(crc.to_be_bytes());
+    out.extend_from_slice(&png[iend..]);
+    Ok(out)
+}
+
+#[test]
+fn a_files_own_xmp_is_read_by_its_extension() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let packet = xmp(r#"dc:title="Inside""#, "");
+    let jpeg = jpeg_with(&packet)?;
+    let tiff = tiff_with(&packet);
+    let png = png_with(&packet)?;
+    let title_of = |name: &str, bytes: &[u8]| -> Result<_> {
+        let file = dir.path().join(name);
+        std::fs::write(&file, bytes)?;
+        let (read, report) = read_file(&file);
+        assert!(report.unreadable.is_empty(), "{name}: {report:?}");
+        Ok(read.and_then(|r| r.title))
+    };
+    for name in ["A.jpg", "B.JPG", "C.jpeg", "D.JPEG"] {
+        assert_eq!(title_of(name, &jpeg)?, set("Inside"), "{name}");
+    }
+    for name in ["E.tif", "F.TIF", "G.tiff", "H.TIFF", "I.dng", "J.DNG"] {
+        assert_eq!(title_of(name, &tiff)?, set("Inside"), "{name}");
+    }
+    // A PNG's own XMP is not read.
+    for name in ["K.png", "L.PNG"] {
+        assert_eq!(title_of(name, &png)?, None, "{name}");
+    }
+    // Nor is a JPEG's or a TIFF's under another extension.
+    assert_eq!(title_of("M.webp", &jpeg)?, None);
+    assert_eq!(title_of("N.NEF", &tiff)?, None);
+    Ok(())
+}

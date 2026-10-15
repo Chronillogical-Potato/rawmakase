@@ -255,3 +255,23 @@ fn raster_dimensions(path: &Path) -> Option<(u32, u32)> {
     });
     Some(if turned { (h, w) } else { (w, h) })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capture_times_are_read_from_jpegs_tiffs_and_raws_the_exif_reader_handles() {
+        for name in [
+            "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.NEF", "A.dng",
+            "A.ARW", "A.raf",
+        ] {
+            assert!(has_capture_time(Path::new(name)), "{name}");
+        }
+        for name in [
+            "A.png", "A.PNG", "A.CR3", "A.crw", "A.X3F", "A.mrw", "A.webp", "A.heic", "A.xmp", "A",
+            "._A.NEF",
+        ] {
+            assert!(!has_capture_time(Path::new(name)), "{name}");
+        }
+    }
+}

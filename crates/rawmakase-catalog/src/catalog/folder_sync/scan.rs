@@ -580,3 +580,57 @@ impl Matching<'_> {
         Ok(Some((identity, found)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn add_folder_and_synchronize_folder_take_the_same_photos() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let photos = [
+            "A.NEF", "b.dng", "C.jpg", "D.JPG", "E.jpeg", "F.JPEG", "G.png", "H.PNG", "I.tif",
+            "J.TIF", "K.tiff", "L.Tiff",
+        ];
+        let others = [
+            "A.NEF.xmp",
+            "C.xmp",
+            "M.heic",
+            "N.webp",
+            "O.avif",
+            "P.jxl",
+            "Q.gif",
+            "R.psd",
+            "S.mov",
+            "T.txt",
+            "noextension",
+            ".U.jpg",
+            "._A.NEF",
+            "._C.jpg",
+        ];
+        for name in photos.iter().chain(&others) {
+            std::fs::write(dir.path().join(name), b"synthetic")?;
+        }
+        std::fs::create_dir(dir.path().join("sub.jpg"))?;
+        std::fs::write(dir.path().join("sub.jpg").join("V.png"), b"synthetic")?;
+        std::fs::create_dir(dir.path().join(".hidden"))?;
+        std::fs::write(dir.path().join(".hidden").join("W.jpg"), b"synthetic")?;
+
+        let expected: HashSet<OsString> = photos.iter().map(OsString::from).collect();
+        let Listing::Listed { files, directories } = list(dir.path()) else {
+            panic!("the folder is there");
+        };
+        assert_eq!(files, expected);
+        assert_eq!(directories, [dir.path().join("sub.jpg")]);
+
+        let mut walked: Vec<_> = crate::catalog::ingest::walk(dir.path())?
+            .into_iter()
+            .map(|p| p.strip_prefix(dir.path()).unwrap().to_path_buf())
+            .collect();
+        walked.sort();
+        let mut expected: Vec<_> = photos.iter().map(PathBuf::from).collect();
+        expected.push(PathBuf::from("sub.jpg").join("V.png"));
+        expected.sort();
+        assert_eq!(walked, expected);
+        Ok(())
+    }
+}
