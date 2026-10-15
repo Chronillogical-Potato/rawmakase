@@ -1,4 +1,4 @@
-//! Atomic JPEG and 16-bit TIFF export with sRGB ICC, the camera's EXIF and the
+//! Atomic JPEG, 16-bit TIFF and PNG export with sRGB ICC, the camera's EXIF and the
 //! edit as Camera Raw XMP, as Lightroom embeds them.
 pub mod assemble;
 pub mod batch;

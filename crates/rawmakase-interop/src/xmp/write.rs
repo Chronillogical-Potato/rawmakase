@@ -56,7 +56,7 @@ pub struct Photo {
     pub lens: bool,
     /// Include the develop settings, not only the descriptive metadata.
     pub settings: bool,
-    /// "image/jpeg" or "image/tiff".
+    /// The export's MIME type: "image/jpeg", "image/tiff" or "image/png".
     pub format: String,
     /// The crop as rendered, `[left, top, right, bottom]`: with Constrain Crop, the
     /// crop constrained to the photo (`develop::rendered_crop`). `None` writes the
