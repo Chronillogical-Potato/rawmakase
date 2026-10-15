@@ -50,6 +50,7 @@ pub(crate) enum Resolution {
 pub(in crate::app) fn reference_loader(
     tx: Sender<Event>,
     ctx: egui::Context,
+    cache: DecodeCache,
 ) -> Latest<ReferenceJob> {
     Latest::new(move |job: ReferenceJob| {
         let ticket = job.ticket;
@@ -60,9 +61,7 @@ pub(in crate::app) fn reference_loader(
             }
         };
         let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            develop(&job, &DecodeCache::default(), |image| {
-                reply(Ok(Box::new(image)))
-            })
+            develop(&job, &cache, |image| reply(Ok(Box::new(image))))
         }));
         match loaded {
             Ok(Ok(())) => {}

@@ -524,6 +524,32 @@ impl Editor {
             });
         }
         gap(ui);
+        group(ui, "Decoded images");
+        let mut cache_size = (self.decode_cache.limit() >> 30) as u32;
+        form_row(ui, "Cache size limit", |ui| {
+            ui.add(
+                egui::DragValue::new(&mut cache_size)
+                    .range(super::session::DECODED_CACHE_SIZE_RANGE)
+                    .suffix(" GiB"),
+            );
+        });
+        if u64::from(cache_size) << 30 != self.decode_cache.limit() {
+            self.decode_cache.set_limit(u64::from(cache_size) << 30);
+            let _ = self.save_session();
+        }
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "Keeps decoded RAWs for faster reopening. Shared by all catalogs; default 4 GiB.",
+            );
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "A smaller limit removes older entries on the next cache write.",
+            );
+        });
+        gap(ui);
         self.folder_locations_block(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
@@ -868,6 +894,24 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_cache_preference_is_loaded_and_saved_with_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let session = crate::app::session::Session {
+            decoded_cache_size_gib: Some(32),
+            ..Default::default()
+        };
+        let mut e = Editor::with_context(&egui::Context::default(), None, session, None);
+        e.session_file = Some(path.clone());
+        assert_eq!(e.decode_cache.limit(), 32 << 30);
+        e.decode_cache.set_limit(1 << 50);
+        e.save_session().unwrap();
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.decoded_cache_size_gib(), 1_048_576);
+    }
 
     /// What a page paints past the right edge it is clipped to: text or
     /// controls cut off by the window.

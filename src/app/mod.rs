@@ -32,6 +32,8 @@ pub(crate) struct Editor {
     tx: Sender<Event>,
     rx: Receiver<Event>,
     loader: worker::Loader,
+    /// Shared size policy for Develop, neighbour prefetch and Reference View.
+    decode_cache: crate::decode_cache::DecodeCache,
     renderer: worker::Renderer,
     /// Develop's Reference View, and the worker developing its photo.
     reference: reference::ReferenceView,
@@ -243,9 +245,12 @@ impl Editor {
         // is missing now (an unplugged drive) is not replaced by it.
         let first_catalog = session.last_path.is_none() && session_file.is_some();
         let (tx, rx) = mpsc::channel();
-        let loader = worker::Loader::new(tx.clone(), ctx.clone());
+        let decode_cache = crate::decode_cache::DecodeCache::default();
+        decode_cache.set_limit(u64::from(session.decoded_cache_size_gib()) << 30);
+        let loader = worker::Loader::new(tx.clone(), ctx.clone(), decode_cache.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
-        let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
+        let reference_loader =
+            worker::reference_loader(tx.clone(), ctx.clone(), decode_cache.clone());
         let standard_preview_size = session.standard_preview_size();
         let discard_one_to_one_after = session.discard_one_to_one_after();
         let stand_ins = stand_in::StandIns::new(
@@ -274,6 +279,7 @@ impl Editor {
             tx,
             rx,
             loader,
+            decode_cache,
             renderer,
             reference: Default::default(),
             reference_loader,
@@ -388,6 +394,7 @@ impl Editor {
                     crop_guides: self.view.crop_guides.to_session(),
                     raw_defaults: self.raw_defaults.settings().clone(),
                     standard_preview_size: Some(self.preview_builds.standard_size),
+                    decoded_cache_size_gib: Some((self.decode_cache.limit() >> 30) as u32),
                     one_to_one_discard_days: Some(
                         self.preview_builds.discard_one_to_one_after.unwrap_or(0),
                     ),

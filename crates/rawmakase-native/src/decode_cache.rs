@@ -16,13 +16,16 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::SystemTime,
 };
 
 const MAGIC: &[u8; 8] = b"RMKDEC\0\x01";
 /// Default size cap of the cache directory.
-const LIMIT: u64 = 4 << 30;
+pub const DEFAULT_LIMIT: u64 = 4 << 30;
 
 /// The per-user cache directory: ~/Library/Caches/RAWmakase on macOS,
 /// %LOCALAPPDATA%\RAWmakase\Cache on Windows and $XDG_CACHE_HOME/rawmakase (default
@@ -48,7 +51,7 @@ pub fn cache_dir() -> PathBuf {
 #[derive(Clone, Debug)]
 pub struct DecodeCache {
     dir: PathBuf,
-    limit: u64,
+    limit: Arc<AtomicU64>,
 }
 #[derive(Serialize, Deserialize, PartialEq)]
 struct Header {
@@ -63,12 +66,24 @@ struct Header {
 }
 impl Default for DecodeCache {
     fn default() -> Self {
-        Self::new(cache_dir().join("decoded"), LIMIT)
+        Self::new(cache_dir().join("decoded"), DEFAULT_LIMIT)
     }
 }
 impl DecodeCache {
     pub fn new(dir: PathBuf, limit: u64) -> Self {
-        Self { dir, limit }
+        Self {
+            dir,
+            limit: Arc::new(AtomicU64::new(limit)),
+        }
+    }
+    /// The size cap in bytes, shared with clones used by existing workers.
+    pub fn limit(&self) -> u64 {
+        self.limit.load(Ordering::Relaxed)
+    }
+    /// Changes the cap for this cache and its clones. The next store trims to
+    /// the new cap; changing it performs no disk I/O on the caller's thread.
+    pub fn set_limit(&self, limit: u64) {
+        self.limit.store(limit, Ordering::Relaxed);
     }
     /// The key of `path` as the current build develops it at full size with `demosaic`.
     pub fn key(path: &Path, demosaic: Demosaic) -> Result<String> {
@@ -233,8 +248,9 @@ impl DecodeCache {
             .collect();
         let mut total: u64 = entries.iter().map(|e| e.1).sum();
         entries.sort();
+        let limit = self.limit();
         for (_, size, path) in entries {
-            if total <= self.limit {
+            if total <= limit {
                 break;
             }
             if fs::remove_file(&path).is_ok() {
@@ -288,6 +304,21 @@ unsafe impl bytemuck::Pod for Change {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn changed_limit_reaches_existing_workers_and_controls_eviction() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().to_path_buf(), 1);
+        let worker = cache.clone();
+        cache.set_limit(1 << 20);
+        worker.store("a", &image(40, 30, 0.2))?;
+        assert!(cache.contains("a"));
+        cache.set_limit(1);
+        worker.store("b", &image(40, 30, 0.4))?;
+        assert!(!cache.contains("a"));
+        assert!(!cache.contains("b"));
+        Ok(())
+    }
+
     fn image(width: u32, height: u32, seed: f32) -> CameraImage {
         let mut im = CameraImage {
             recovered: Default::default(),

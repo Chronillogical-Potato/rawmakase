@@ -624,7 +624,11 @@ mod tests {
         let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/corpus/charts/synthetic-d65.dng");
         let (tx, rx) = std::sync::mpsc::channel();
-        let loader = crate::app::worker::Loader::new(tx, egui::Context::default());
+        let loader = crate::app::worker::Loader::new(
+            tx,
+            egui::Context::default(),
+            crate::decode_cache::DecodeCache::default(),
+        );
         let defaults = Arc::new(crate::raw_defaults::brighter_defaults());
         loader.submit(crate::app::worker::LoadJob {
             id: 1,

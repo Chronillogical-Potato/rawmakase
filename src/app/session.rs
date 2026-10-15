@@ -74,12 +74,20 @@ pub(crate) struct Session {
     /// Preferences > Standard Preview Size, the long edge in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_preview_size: Option<u32>,
+    /// Preferences > Catalog: decoded-image disk cache limit in GiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded_cache_size_gib: Option<u32>,
     /// Preferences > Automatically Discard 1:1 Previews, in days unused; 0 is
     /// Never.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one_to_one_discard_days: Option<u32>,
 }
 impl Session {
+    pub(crate) fn decoded_cache_size_gib(&self) -> u32 {
+        self.decoded_cache_size_gib
+            .filter(|size| DECODED_CACHE_SIZE_RANGE.contains(size))
+            .unwrap_or((crate::decode_cache::DEFAULT_LIMIT >> 30) as u32)
+    }
     /// The Standard Preview Size, or the default when none of the offered
     /// sizes was saved.
     pub(crate) fn standard_preview_size(&self) -> u32 {
@@ -97,6 +105,8 @@ impl Session {
         }
     }
 }
+
+pub(super) const DECODED_CACHE_SIZE_RANGE: std::ops::RangeInclusive<u32> = 1..=1_048_576;
 
 /// The Crop tool's guide overlay, which way round it is and when it shows, by stable
 /// names as [`LibraryLayout`]; a name this version does not know reads as the default.
@@ -140,6 +150,28 @@ pub(crate) fn load_session() -> Session {
 mod raw_defaults_tests {
     use super::Session;
     use crate::raw_defaults::{DefaultChoice, RawDefaults};
+
+    #[test]
+    fn decoded_cache_size_round_trips_and_old_or_invalid_sizes_use_default() {
+        let old: Session = serde_json::from_str(r#"{"last_path":null,"monitor":null}"#).unwrap();
+        assert_eq!(old.decoded_cache_size_gib(), 4);
+        for size in [1, 32, 1024, 1025, 1_048_576] {
+            let session = Session {
+                decoded_cache_size_gib: Some(size),
+                ..Default::default()
+            };
+            let back: Session =
+                serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+            assert_eq!(back.decoded_cache_size_gib(), size);
+        }
+        for size in [0, 1_048_577, u32::MAX] {
+            let session = Session {
+                decoded_cache_size_gib: Some(size),
+                ..Default::default()
+            };
+            assert_eq!(session.decoded_cache_size_gib(), 4);
+        }
+    }
 
     #[test]
     fn raw_defaults_survive_the_session_and_unreadable_ones_reset() {
