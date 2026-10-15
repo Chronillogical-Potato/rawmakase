@@ -438,7 +438,9 @@ mod tests {
     /// with Highlight Tone Priority (record 0x0203) at `htp`, as bodies from the 40D
     /// to the 600D record it: LibRaw reads none of the 60D's and a CameraInfo byte
     /// of the 550D's that says Off when the custom function is on.
-    fn canon_custom_functions_raw(htp: u32) -> tempfile::NamedTempFile {
+    /// Written into a folder of its own: Windows does not let LibRaw open a
+    /// `NamedTempFile` while it is held.
+    fn canon_custom_functions_raw(htp: u32) -> (tempfile::TempDir, std::path::PathBuf) {
         let le = |v: u32, n: usize| v.to_le_bytes()[..n].to_vec();
         // IFD entries (tag, type, count, value) with values of up to four bytes.
         let ifd = |entries: &[(u16, u16, u32, Vec<u8>)]| {
@@ -500,15 +502,17 @@ mod tests {
         let words = custom.len() as u32 / 4;
         put(notes, &ifd(&[(0x0099, 4, words, le(custom_at, 4))]));
         put(custom_at, &custom);
-        let f = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), file).unwrap();
-        f
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("canon.tif");
+        std::fs::write(&path, file).unwrap();
+        (dir, path)
     }
     #[test]
     fn reads_highlight_tone_priority_from_canon_custom_functions() {
         use super::HighlightTonePriority as H;
         let open = |htp| {
-            let raw = super::Raw::open_file(canon_custom_functions_raw(htp).path()).unwrap();
+            let (_dir, path) = canon_custom_functions_raw(htp);
+            let raw = super::Raw::open_file(&path).unwrap();
             assert_eq!(
                 (&*raw.metadata.make, &*raw.metadata.model),
                 ("Canon", "EOS 60D")
