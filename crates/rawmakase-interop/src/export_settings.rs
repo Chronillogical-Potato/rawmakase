@@ -259,6 +259,7 @@ pub struct ExportSettings {
     /// Where Sequence starts.
     pub start_number: u32,
     pub uppercase: bool,
+    #[serde(deserialize_with = "known_or_default")]
     pub format: Format,
     pub quality: u8,
     pub resize: bool,
@@ -312,6 +313,25 @@ impl Default for ExportSettings {
             after_export: AfterExport::Nothing,
         }
     }
+}
+
+/// A choice a later release added reads as the default, so an older one
+/// keeps the rest of the settings.
+fn known_or_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Read<T> {
+        Known(T),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Read::deserialize(d)? {
+        Read::Known(value) => value,
+        Read::Other(_) => T::default(),
+    })
 }
 
 fn path() -> PathBuf {
@@ -555,6 +575,16 @@ mod tests {
             assert_eq!(Format::from_path(&path), Some(format));
         }
         assert_eq!(Format::from_path(Path::new("out.webp")), None);
+    }
+    #[test]
+    fn a_format_from_a_later_release_keeps_the_other_settings() {
+        let saved = r#"{"destination":"Folder","folder":"/exports","format":"Webp","quality":80}"#;
+        let read: ExportSettings = serde_json::from_str(saved).unwrap();
+        assert_eq!(read.format, Format::Jpeg);
+        assert_eq!(read.folder, Some(PathBuf::from("/exports")));
+        assert_eq!(read.quality, 80);
+        let read: ExportSettings = serde_json::from_str(r#"{"format":"Png"}"#).unwrap();
+        assert_eq!(read.format, Format::Png);
     }
     #[test]
     fn every_export_extension_and_mime_type_is_what_it_was() {
