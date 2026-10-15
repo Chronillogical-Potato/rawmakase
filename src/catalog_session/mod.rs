@@ -59,6 +59,9 @@ impl CatalogSession {
         let _ = catalog.backfill_lightroom_snapshots();
         let _ = catalog.backfill_lightroom_info();
         let _ = catalog.backfill_lightroom_metadata();
+        // PNGs whose info earlier releases stored without their EXIF; read by
+        // the photo info backfill.
+        let _ = catalog.reread_png_info_once();
         // Unlike those, a failure here could export keywords Lightroom keeps
         // out, so it is said; it is tried again on the next open.
         let keyword_export = catalog.backfill_keyword_export().err();
@@ -306,6 +309,89 @@ mod tests {
         // Tried once: not read again until asked to retry.
         session.start_capture_times(|_| true);
         assert!(!session.reading_capture_times());
+        Ok(())
+    }
+
+    /// Reads photo info until the reader is done.
+    fn read_photo_info(session: &mut CatalogSession) {
+        let started = std::time::Instant::now();
+        while session.reading_photo_info() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            assert!(session.poll_photo_info().error.is_none());
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn pngs_stored_with_their_size_alone_get_their_camera_once() -> Result<()> {
+        use crate::metadata::PhotoInfo;
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        std::fs::write(
+            folder.join("a.png"),
+            crate::export::exif::camera_png(6, 4, ("SONY", "ILCE-7M4"), "Test lens"),
+        )?;
+        image::RgbImage::new(8, 2).save(folder.join("b.png"))?;
+        image::RgbImage::new(2, 2).save(folder.join("c.jpg"))?;
+        let path = directory.path().join("library.rawmakase");
+        let mut catalog = Catalog::create(&path)?;
+        catalog.add_folder(&folder)?;
+        let id = |name: &str, catalog: &Catalog| -> Result<PhotoId> {
+            Ok(catalog
+                .photos()?
+                .iter()
+                .find(|p| p.filename == name)
+                .unwrap()
+                .id)
+        };
+        let (a, b, c) = (
+            id("a.png", &catalog)?,
+            id("b.png", &catalog)?,
+            id("c.jpg", &catalog)?,
+        );
+        // What releases that read no EXIF from PNGs stored: the size alone.
+        let size = |dimensions| PhotoInfo {
+            dimensions: Some(dimensions),
+            ..PhotoInfo::default()
+        };
+        catalog.fill_photo_info(&[
+            (a, Some(size((6, 4)))),
+            (b, Some(size((8, 2)))),
+            (c, Some(size((2, 2)))),
+        ])?;
+        drop(catalog);
+        let open = || -> Result<CatalogSession> {
+            Ok(CatalogSession::open(&CatalogLocation::from(&path))?.session)
+        };
+
+        // Offline, nothing is read, and they wait for the next open.
+        let mut session = open()?;
+        // JPEGs' EXIF always was read: only the PNGs are read again.
+        let mut listed = session.catalog.photos_to_read_info()?;
+        let mut pngs = [a, b];
+        listed.sort();
+        pngs.sort();
+        assert_eq!(listed, pngs);
+        session.start_photo_info(|_| false);
+        assert!(!session.reading_photo_info());
+        drop(session);
+        let mut session = open()?;
+        session.start_photo_info(|_| true);
+        assert!(session.reading_photo_info());
+        read_photo_info(&mut session);
+        let info = session.catalog.photo_info(a)?.unwrap();
+        assert_eq!(info.camera.as_deref(), Some("SONY ILCE-7M4"));
+        assert_eq!(info.lens.as_deref(), Some("Test lens"));
+        assert_eq!(info.dimensions, Some((6, 4)));
+        assert_eq!(session.catalog.photo_info(b)?, Some(size((8, 2))));
+        // Read once: neither is read again, after reopening either.
+        session.start_photo_info(|_| true);
+        assert!(!session.reading_photo_info());
+        drop(session);
+        let mut session = open()?;
+        session.start_photo_info(|_| true);
+        assert!(!session.reading_photo_info());
         Ok(())
     }
 

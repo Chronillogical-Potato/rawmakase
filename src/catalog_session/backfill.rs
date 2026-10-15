@@ -131,14 +131,16 @@ impl CatalogSession {
             }
         }
     }
-    /// Reads the info of the photos that have none, of those `available` says
-    /// are online; asked while reading, it reads again once done.
+    /// Reads the info of the photos that have none or are to be read again
+    /// (see [`crate::catalog::Catalog::photos_to_read_info`]), of those
+    /// `available` says are online; asked while reading, it reads again once
+    /// done.
     pub(crate) fn start_photo_info(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.info.is_some() {
             self.backfill.info_again = true;
             return;
         }
-        let Ok(missing) = self.catalog.photos_without_info() else {
+        let Ok(missing) = self.catalog.photos_to_read_info() else {
             return;
         };
         let missing: HashSet<PhotoId> = missing.into_iter().collect();

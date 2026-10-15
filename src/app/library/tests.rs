@@ -1582,7 +1582,7 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     let info = library.active_info().unwrap();
     assert_eq!(info.dimensions_text().as_deref(), Some("300 × 200"));
     // Kept: nothing is left to read on the next open.
-    assert!(library.session.catalog.photos_without_info()?.is_empty());
+    assert!(library.session.catalog.photos_to_read_info()?.is_empty());
     Ok(())
 }
 #[test]
