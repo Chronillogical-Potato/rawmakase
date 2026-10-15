@@ -636,6 +636,85 @@ mod tests {
             );
         }
     }
+    /// The Contrast pivot is kept with the measures by Dehaze, and the
+    /// Shadows/Highlights map's base by Exposure: the Basic sliders, Clarity and masks
+    /// reuse them, and every cached render matches a fresh one.
+    #[test]
+    fn the_pivot_and_map_are_kept_until_their_settings_change() {
+        let (w, h) = (300, 200);
+        let mut im = image(w, h, 0.);
+        im.metadata.cam_xyz = [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.52],
+        ];
+        for (i, p) in im.pixels.iter_mut().enumerate() {
+            let (x, y) = ((i as u32 % w) as f32, (i as u32 / w) as f32);
+            let v = 0.02 + 0.6 * (x / w as f32) * (0.6 + 0.4 * (y * 0.05).cos());
+            *p = [v * 1.3, v, v * 0.5 + 0.05 * (x * 0.1).sin().abs()];
+        }
+        let mut base = Recipe {
+            profile: Some(Arc::new(
+                crate::camera_profiles::CameraProfile::creative_for_test(&im.metadata),
+            )),
+            contrast: 0.4,
+            shadows: 0.3,
+            highlights: -0.4,
+            ..Default::default()
+        };
+        base.effects.dehaze = 0.3;
+        // (edit, kept pivots and map bases after it)
+        type Case<'a> = (&'a str, &'a dyn Fn(&mut Recipe), [usize; 2]);
+        let cases: [Case; 9] = [
+            ("contrast", &|r| r.contrast = -0.6, [1, 1]),
+            ("shadows", &|r| r.shadows = 0.7, [1, 1]),
+            ("negative shadows", &|r| r.shadows = -0.5, [1, 1]),
+            ("highlights", &|r| r.highlights = 0.2, [1, 1]),
+            ("whites", &|r| r.whites = 0.5, [1, 1]),
+            ("clarity", &|r| r.effects.clarity = 0.4, [1, 1]),
+            (
+                "mask shadows",
+                &|r| {
+                    let mut mask = crate::model::masks::MaskGroup {
+                        components: vec![crate::model::masks::MaskComponent::new(
+                            crate::model::masks::MaskShape::Linear {
+                                from: [0.2, 0.5],
+                                to: [0.8, 0.5],
+                            },
+                        )],
+                        ..Default::default()
+                    };
+                    mask.adjust.shadows = 0.5;
+                    mask.adjust.clarity = -0.3;
+                    r.masks.push(mask);
+                },
+                [1, 1],
+            ),
+            ("exposure", &|r| r.exposure = 0.6, [1, 2]),
+            ("dehaze", &|r| r.effects.dehaze = 0.7, [2, 1]),
+        ];
+        let cancel = AtomicBool::new(false);
+        for (name, edit, kept) in cases {
+            let mut warm = PreviewRenderer::default();
+            let mut r = base.clone();
+            let check = |warm: &mut PreviewRenderer, r: &Recipe| {
+                for (edge, region) in [(80, None), (0, Some([20, 30, 50, 40])), (150, None)] {
+                    let cached = warm.render(&im, r, edge, region, &cancel).unwrap();
+                    let fresh = PreviewRenderer::default()
+                        .render(&im, r, edge, region, &cancel)
+                        .unwrap();
+                    assert_eq!(cached.pixels, fresh.pixels, "{name} {edge} {region:?}");
+                }
+            };
+            check(&mut warm, &r);
+            edit(&mut r);
+            check(&mut warm, &r);
+            let measures = warm.cache.measures.lock().unwrap();
+            assert_eq!(measures.len(), 1, "{name}");
+            let measured = measures.values().next().unwrap();
+            assert_eq!(measured.kept(), kept, "{name}");
+        }
+    }
     #[test]
     fn mask_shadows_reduce_the_photo_once() {
         use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
@@ -1000,6 +1079,8 @@ mod tests {
             params: Vec::new(),
             tables: Vec::new(),
             weights: Vec::new(),
+            grid: None,
+            color: None,
         };
         // Over the develop memory budget, then over the device's buffer limits; their
         // size alone, as the region is refused before its pixels are read.

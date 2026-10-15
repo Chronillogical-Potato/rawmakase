@@ -58,8 +58,9 @@ impl<T: Send + 'static> Latest<T> {
         self.submit_to(0, job);
     }
     /// Replaces the pending job of `lane`, leaving the other lanes' work queued.
-    pub(crate) fn submit_to(&self, lane: usize, job: T) {
-        self.slot.submit_to(lane, job);
+    /// Returns the job it replaced, which never runs.
+    pub(crate) fn submit_to(&self, lane: usize, job: T) -> Option<T> {
+        self.slot.submit_to(lane, job)
     }
     /// Where another worker submits jobs to this one, which stays owned here.
     pub(crate) fn mailbox(&self) -> Mailbox<T> {
@@ -75,12 +76,13 @@ impl<T> Mailbox<T> {
     }
 }
 impl<T> Slot<T> {
-    fn submit_to(&self, lane: usize, job: T) {
+    fn submit_to(&self, lane: usize, job: T) -> Option<T> {
         let mut jobs = self.jobs.lock().unwrap();
         let last = jobs.len() - 1;
-        jobs[lane.min(last)] = Some(job);
+        let replaced = jobs[lane.min(last)].replace(job);
         drop(jobs);
         self.wake.notify_one();
+        replaced
     }
 }
 /// The message a caught panic carries.
@@ -159,10 +161,11 @@ mod tests {
         });
         worker.submit_to(0, 1);
         assert_eq!(started_rx.recv().unwrap(), 1);
-        // Queued while 1 runs: lane 1's job is not replaced by lane 0's.
-        worker.submit_to(1, 10);
-        worker.submit_to(0, 2);
-        worker.submit_to(0, 3);
+        // Queued while 1 runs: lane 1's job is not replaced by lane 0's, and each
+        // submission returns the job it replaced, never the running one.
+        assert_eq!(worker.submit_to(1, 10), None);
+        assert_eq!(worker.submit_to(0, 2), None);
+        assert_eq!(worker.submit_to(0, 3), Some(2));
         release_tx.send(()).unwrap();
         let next = || {
             started_rx

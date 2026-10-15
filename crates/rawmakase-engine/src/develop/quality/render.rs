@@ -70,6 +70,8 @@ fn render_resident(
     else {
         return Ok(None);
     };
+    // The samples stay on the device, so their camera colour may too.
+    params.color = Some(develop::stage_cache::color_recipe(&base));
     let weights = develop::pipeline::mask_weights(
         &toned,
         &base,
