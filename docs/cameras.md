@@ -146,8 +146,10 @@ Adobe's value also follows some shooting settings, which the rows leave out: Can
 Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO 50,
 Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
 so in `sample`. RAWmakase adds the stop for Highlight Tone Priority itself, reading it
-from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured),
-and follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
+from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured)
+and, for the bodies from the 40D to the 600D, from their custom functions, where LibRaw
+does not read it: their CameraInfo lacks it (60D) or says Off (550D) when it is on, and
+Camera Raw follows the custom function. RAWmakase also follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
 is not handled yet.
 
 After the table, 151 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
@@ -173,10 +175,11 @@ Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
 GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
 and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
-Six rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+Seven rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`), the A7 II and A7CR, fitted to Camera Raw 18.6
-renders of private photos (8 and 4), and the A7R VI, EOS 700D and A7R, read from
-Adobe DNG Converter 18.7's DNG of one private photo each. LibRaw does not identify
+renders of private photos (8 and 4), the A7R VI, EOS 700D and A7R, read from
+Adobe DNG Converter 18.7's DNG of one private photo each, and the EOS 1500D (2000D),
+read from its DNG of one Signature Edits photo. LibRaw does not identify
 the A7R VI by name yet, but its white level, black level and crop match Adobe's.
 
 The 45 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
@@ -184,9 +187,10 @@ Fujifilm bodies; see [camera parity](camera-parity.md)) are `adobe-dng` values f
 one test-dataset photo each, at the ISO the row says. Against Camera Raw 18.7 default
 renders of 110 photos of these bodies (the dataset's, and 26 rendered for bodies it
 had none of), the median midtone exposure difference went from 0.15 EV to 0.02 EV, and
-103 photos are within 0.1 EV (41 before). Of the other seven, two 80D frames of one
+103 photos are within 0.1 EV (41 before). Of the other seven, two 80D sRAW frames of one
 shoot were already 0.44 EV brighter than Camera Raw and are now 0.58 brighter, the
-row moving every 80D photo alike; a 30D photo is 0.30 EV brighter where another body's
+row's white-level term, measured on a full-size raw, not holding for LibRaw's sRAW
+conversion; a 30D photo is 0.30 EV brighter where another body's
 at the same ISO matches; a 5DS R and a Rebel T6 photo at other ISO settings than their
 rows' samples went from 0.3 EV to 0.16 EV off, Canon's white level being
 ISO-dependent; and two RX1R III frames stay 0.14 EV darker, the row's value being the

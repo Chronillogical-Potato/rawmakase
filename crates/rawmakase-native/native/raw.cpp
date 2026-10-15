@@ -153,6 +153,8 @@ struct Handle {
     Raw raw;
     Cancel cancel = nullptr;
     void* context = nullptr;
+    // Highlight Tone Priority as Canon's custom functions record it, -1 without.
+    int custom_htp = -1;
     // LibRaw rejects a second unpack(); the CFA path may unpack before falling back.
     bool unpacked = false;
     // Fills err when it fails.
@@ -169,6 +171,44 @@ struct Handle {
         return rc;
     }
 };
+// Canon's CustomFunctions2 maker note (0x0099), where the bodies from the 40D to the
+// 600D record Highlight Tone Priority (record 0x0203). LibRaw reads it only from
+// CameraInfo, which the 60D's lacks and which says Off on the 550D's when the custom
+// function is on; Camera Raw follows the custom function. The note is groups of
+// records: a 2-byte size, 2 bytes, the group count; per group its number, length
+// (from the length field on) and record count; per record its tag, value count and
+// 4-byte values.
+static void canon_custom_functions(void* p, int tag, int type, int len, unsigned order,
+                                   void* stream, INT64) {
+    if (tag != 0x0099 || (type != 4 && type != 7) || len <= 0) return;
+    const size_t size = size_t(len) * (type == 4 ? 4 : 1);
+    if (size < 8 || size > 4096) return;
+    std::vector<unsigned char> b(size);
+    auto in = static_cast<LibRaw_abstract_datastream*>(stream);
+    if (in->read(b.data(), 1, int(size)) != int(size)) return;
+    auto u32 = [&](size_t at) {
+        unsigned v = 0;
+        for (int i = 0; i < 4; ++i)
+            v |= unsigned(b[at + (order == 0x4949 ? i : 3 - i)]) << (8 * i);
+        return v;
+    };
+    size_t at = 8;
+    for (unsigned g = u32(4); g-- && at + 12 <= size;) {
+        const size_t end = std::min<size_t>(size, at + 4 + size_t(u32(at + 4)));
+        if (end <= at + 12) return;
+        size_t r = at + 12;
+        for (unsigned n = u32(at + 8); n-- && r + 8 <= end;) {
+            const unsigned record = u32(r), values = u32(r + 4);
+            if (record == 0x0203 && values >= 1 && r + 12 <= end) {
+                static_cast<Handle*>(p)->custom_htp = int(u32(r + 8));
+                return;
+            }
+            if (values > (end - r) / 4) return;
+            r += 8 + size_t(values) * 4;
+        }
+        at = end;
+    }
+}
 static int progress(void* p, LibRaw_progress, int, int) {
     auto h = static_cast<Handle*>(p);
     return h->cancel && h->cancel(h->context);
@@ -217,6 +257,7 @@ unsigned ora_metadata_size() { return sizeof(Metadata); }
 void* ora_open(const char* path, Metadata* m, char* err) {
     try {
         auto h = std::make_unique<Handle>();
+        h->raw.set_makernotes_handler(canon_custom_functions, h.get());
         int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
         auto& d = h->raw.imgdata;
@@ -253,6 +294,8 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->aperture=d.other.aperture; m->focal=d.other.focal_len;
         m->focal_35mm=d.lens.FocalLengthIn35mmFormat;
         m->highlight_tone_priority=d.makernotes.canon.HighlightTonePriority;
+        if (d.idata.maker_index==LIBRAW_CAMERAMAKER_Canon && !m->highlight_tone_priority
+            && h->custom_htp==1) m->highlight_tone_priority=1;
         m->fuji_exposure_shift=d.makernotes.fuji.ExpoMidPointShift;
         if (!d.idata.dng_version) {
             for (int c=0; c<3; ++c) {
