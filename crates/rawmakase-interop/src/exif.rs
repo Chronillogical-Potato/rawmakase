@@ -1,8 +1,8 @@
-//! The camera's own EXIF, read from a RAW, JPEG or TIFF: for an export to carry
-//! as Lightroom's do (capture settings, lens, dates, serial numbers and GPS), and
-//! for the catalog's capture time and photo info. Maker notes, thumbnail offsets
-//! and other pointers into the RAW are left out; they would not survive the move
-//! to a new file.
+//! The camera's own EXIF, read from a RAW, JPEG, TIFF or PNG: for an export to
+//! carry as Lightroom's do (capture settings, lens, dates, serial numbers and
+//! GPS), and for the catalog's capture time and photo info. Maker notes,
+//! thumbnail offsets and other pointers into the RAW are left out; they would
+//! not survive the move to a new file.
 use crate::{
     jpeg::{APP1, Segments},
     tiff::{
@@ -264,7 +264,7 @@ pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     (info != Default::default()).then_some(info)
 }
 
-/// The EXIF Make and Model of a JPEG, TIFF or TIFF-based RAW, trimmed, each
+/// The EXIF Make and Model of a JPEG, TIFF, PNG or TIFF-based RAW, trimmed, each
 /// empty when missing; `None` when the file has no EXIF at all.
 pub fn camera_names(path: &Path) -> Option<(String, String)> {
     let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
