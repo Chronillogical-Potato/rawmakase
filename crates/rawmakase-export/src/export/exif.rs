@@ -109,7 +109,7 @@ pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
         exif,
         gps: Vec::new(),
     });
-    let mut out = if jpeg {
+    if jpeg {
         let mut out = vec![0xff, 0xd8, 0xff, 0xe1];
         out.extend(((block.len() + 8) as u16).to_be_bytes());
         out.extend(b"Exif\0\0");
@@ -118,8 +118,5 @@ pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
         out
     } else {
         block
-    };
-    // Real files are never shorter than the header the reader starts with.
-    out.resize(out.len().max(512), 0);
-    out
+    }
 }

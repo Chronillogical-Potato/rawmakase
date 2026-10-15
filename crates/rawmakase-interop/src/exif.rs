@@ -342,13 +342,17 @@ pub fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
 
 fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
     let mut f = File::open(path).ok()?;
-    let mut head = [0u8; 108];
-    f.read_exact(&mut head).ok()?;
+    // Enough to tell the containers apart and find a RAF's preview; a small
+    // PNG or JPEG can be shorter.
+    let mut head = Vec::with_capacity(108);
+    (&mut f).take(108).read_to_end(&mut head).ok()?;
     // Where the TIFF starts, and how long it is when embedded in another
     // container, whose other bytes are not read as part of it.
     let (base, len) = if head.starts_with(b"FUJIFILMCCD-RAW") {
-        let jpeg = u32::from_be_bytes(head[84..88].try_into().ok()?) as u64;
-        let length = u32::from_be_bytes(head[88..92].try_into().ok()?) as usize;
+        // Where its preview JPEG is, and how long.
+        let preview = head.get(84..92)?;
+        let jpeg = u32::from_be_bytes(preview[..4].try_into().ok()?) as u64;
+        let length = u32::from_be_bytes(preview[4..].try_into().ok()?) as usize;
         let (at, len) = exif_in_jpeg(&mut File::open(path).ok()?, jpeg, length)?;
         (jpeg + at, Some(len))
     } else if head.starts_with(&[0xff, 0xd8]) {
@@ -479,8 +483,6 @@ mod camera_names_tests {
     fn tiff(make: &str, model: &str) -> Vec<u8> {
         let mut t = b"II*\0\x08\0\0\0".to_vec();
         t.extend(directory(8, make, model));
-        // Files are read in a 108-byte head, as a real one's is longer.
-        t.resize(t.len().max(108), 0);
         t
     }
 
@@ -601,6 +603,23 @@ mod camera_names_tests {
         let path = dir.path().join("outside.jpg");
         std::fs::write(&path, jpeg).unwrap();
         assert_eq!(camera_names(&path), None);
+    }
+
+    #[test]
+    fn a_tiny_pngs_exif_is_read() {
+        // A directory holding Model alone, its text in the entry itself.
+        let mut exif = b"II*\0\x08\0\0\0\x01\0".to_vec();
+        exif.extend(0x0110_u16.to_le_bytes());
+        exif.extend(2u16.to_le_bytes());
+        exif.extend(4u32.to_le_bytes());
+        exif.extend(b"X-T\0");
+        exif.extend([0; 4]);
+        let file = png(&[(b"eXIf", &exif[..])]);
+        assert!(file.len() < 108);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny.png");
+        std::fs::write(&path, file).unwrap();
+        assert_eq!(camera_names(&path), Some((String::new(), "X-T".into())));
     }
 
     #[test]
