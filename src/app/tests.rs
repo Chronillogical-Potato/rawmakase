@@ -5950,23 +5950,60 @@ fn hiding_develops_right_panel_takes_its_tab_panel_and_rail() {
     assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
 }
 #[test]
-fn a_tool_opened_over_the_presets_ends_a_preset_preview() {
-    // A preset previewed under the pointer, then R: Crop's drawer takes the
-    // Presets tab's place, and the photo must not keep the preview.
+fn a_tools_drawer_takes_the_adjustments_place_beside_the_tabs() {
+    // The rail's first group (Edit and the tools) switches the adjustments
+    // panel; Presets and History keep their panel beside it.
+    use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
+    use super::side_tabs::{edit_id, rail_id};
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.module = Module::Develop;
     e.onboarding.visible = false;
-    panel_frame(&mut e, vec![], FocusedButton::No);
-    e.presets.preview = Some(Recipe {
-        exposure: 1.,
-        ..Default::default()
-    });
-    e.presets.hover = Some((0, std::time::Instant::now()));
+    // Room for the tab panel beside the photo.
+    assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Left)));
+    let tabs_drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    let click = |e: &mut Editor, id: egui::Id| {
+        let at = ctx
+            .read_response(id)
+            .expect("the rail's button")
+            .rect
+            .center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        panel_frame(e, vec![egui::Event::PointerMoved(at)], FocusedButton::No);
+        panel_frame(e, vec![button(true)], FocusedButton::No);
+        panel_frame(e, vec![button(false)], FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    for _ in 0..3 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(tabs_drawn(&ctx));
+    // Crop's drawer leaves the Presets tab open.
     e.view.tool = state::Tool::Crop;
     panel_frame(&mut e, vec![], FocusedButton::No);
-    assert!(e.presets.preview.is_none());
-    assert!(e.presets.hover.is_none());
+    assert!(tabs_drawn(&ctx));
+    // Switching the tab keeps the tool.
+    click(&mut e, rail_id(DevelopTab::History));
+    assert_eq!(e.panels.develop_tab, DevelopTab::History);
+    assert_eq!(e.view.tool, state::Tool::Crop);
+    assert!(tabs_drawn(&ctx));
+    // Edit closes the drawer, the tab panel stays.
+    click(&mut e, edit_id());
+    assert_eq!(e.view.tool, state::Tool::None);
+    assert!(tabs_drawn(&ctx));
+    // Folding the tabs leaves a tool open.
+    e.view.tool = state::Tool::Mask;
+    click(&mut e, rail_id(DevelopTab::History));
+    assert!(!tabs_drawn(&ctx));
+    assert_eq!(e.view.tool, state::Tool::Mask);
 }
 #[test]
 fn hiding_the_presets_ends_a_preset_preview() {
@@ -6679,4 +6716,91 @@ fn auto_white_balance_on_a_jpeg_sets_its_relative_temp_and_tint() {
         r.auto_white_balance,
         Some([r.incremental_temperature, r.incremental_tint])
     );
+}
+#[test]
+fn a_tools_drawer_keeps_the_adjustments_width() {
+    let ctx = egui::Context::default();
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let width = |e: &mut Editor| {
+        for _ in 0..3 {
+            panel_frame(e, vec![], FocusedButton::No);
+        }
+        egui::containers::panel::PanelState::load(&ctx, egui::Id::new("adjustments"))
+            .unwrap()
+            .outer_rect
+            .width()
+    };
+    let edit = width(&mut e);
+    for tool in [
+        state::Tool::Crop,
+        state::Tool::Remove,
+        state::Tool::RedEye,
+        state::Tool::Mask,
+    ] {
+        e.view.tool = tool;
+        assert_eq!(width(&mut e), edit, "{tool:?} widened the panel");
+        e.view.tool = state::Tool::None;
+        assert_eq!(width(&mut e), edit, "after {tool:?}");
+    }
+}
+#[test]
+fn edit_on_the_rail_folds_the_adjustments_and_brings_them_back() {
+    use super::panels::WorkspacePanel;
+    use super::side_tabs::edit_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("adjustments").with("__resize"))
+            .is_some()
+    };
+    let click = |e: &mut Editor| {
+        let at = ctx.read_response(edit_id()).expect("Edit").rect.center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        panel_frame(e, vec![egui::Event::PointerMoved(at)], FocusedButton::No);
+        panel_frame(e, vec![button(true)], FocusedButton::No);
+        panel_frame(e, vec![button(false)], FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(drawn(&ctx));
+    // Edit, already showing, folds the adjustments; the rail stays.
+    click(&mut e);
+    assert!(!drawn(&ctx));
+    assert!(!e.panel_shown(WorkspacePanel::Adjustments));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    // A tool's drawer shows while they are folded.
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(drawn(&ctx));
+    // Closing it folds them again; Edit from it brings the adjustments back.
+    e.view.tool = state::Tool::None;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!drawn(&ctx));
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    click(&mut e);
+    assert_eq!(e.view.tool, state::Tool::None);
+    assert!(drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Adjustments));
+    // Tab leaves the fold alone: it is the rail's.
+    click(&mut e);
+    let tab = || key_down(egui::Key::Tab, egui::Modifiers::NONE);
+    panel_frame(&mut e, tab(), FocusedButton::No);
+    panel_frame(&mut e, tab(), FocusedButton::No);
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    assert!(!e.panel_shown(WorkspacePanel::Adjustments));
 }

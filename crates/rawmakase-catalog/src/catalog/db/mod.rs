@@ -25,7 +25,7 @@ use std::{path::Path, time::Duration};
 pub use sql::assert_shape;
 pub(in crate::catalog) use sql::{Sql, SqliteSql, sql, sqlite_sql};
 
-/// Marks a file as an RAWmakase catalog (`PRAGMA application_id`).
+/// Marks a file as a RAWmakase catalog (`PRAGMA application_id`).
 const APPLICATION_ID: i64 = 0x4f4d4152;
 /// The catalog format version (`PRAGMA user_version`) new catalogs get; older
 /// releases check it too. Version 2 may hold raster mask data, which a release
@@ -78,7 +78,7 @@ impl Db {
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         ensure!(
             db.query_row("PRAGMA application_id", [], |r| r.get::<_, i64>(0))? == APPLICATION_ID,
-            "Not an RAWmakase catalog"
+            "Not a RAWmakase catalog"
         );
         ensure!(
             opens(

@@ -197,8 +197,9 @@ impl Editor {
                 .on_hover_text("Output histogram of the whole photo");
         });
     }
-    /// The open tool's drawer, in Develop's tab panel: Crop's settings, or
-    /// Remove's, Red Eye's or Masking's. Its tools are on the tab rail.
+    /// The open tool's drawer, in place of Develop's adjustments: Crop's
+    /// settings, or Remove's, Red Eye's or Masking's. Its tools are on the
+    /// rail.
     pub(super) fn tool_drawer(&mut self, ui: &mut egui::Ui) {
         let Some(name) = DRAWER_TOOLS
             .iter()
@@ -244,22 +245,25 @@ impl Editor {
         drawer_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
             control_row(ui, "Aspect", |ui| {
-                let swap = 26.;
-                egui::ComboBox::from_id_salt("crop-aspect")
-                    .width(ui.available_width() - swap - 4.)
-                    .selected_text(aspect_name(self.view.aspect))
-                    .show_ui(ui, |ui| {
-                        for (aspect, name) in ASPECTS {
-                            ui.selectable_value(&mut self.view.aspect, aspect, name);
-                        }
-                    });
-                if ui
-                    .add_sized([swap, 20.], egui::Button::new("⇄"))
-                    .on_hover_text("Swap portrait and landscape · X")
-                    .clicked()
-                {
-                    action = Some(CropAction::Swap);
-                }
+                // From the right: the swap button is as wide as its glyph
+                // needs, and the aspects take what it leaves.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_sized([26., 20.], egui::Button::new("⇄"))
+                        .on_hover_text("Swap portrait and landscape · X")
+                        .clicked()
+                    {
+                        action = Some(CropAction::Swap);
+                    }
+                    egui::ComboBox::from_id_salt("crop-aspect")
+                        .width(ui.available_width())
+                        .selected_text(aspect_name(self.view.aspect))
+                        .show_ui(ui, |ui| {
+                            for (aspect, name) in ASPECTS {
+                                ui.selectable_value(&mut self.view.aspect, aspect, name);
+                            }
+                        });
+                });
             });
             setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.);
             control_row(ui, "Straighten", |ui| {
@@ -341,10 +345,13 @@ impl Editor {
             });
             ui.horizontal(|ui| {
                 ui.add_space(label_column(ui));
-                ui.label(
-                    egui::RichText::new("Drag the frame on the photo; changes apply live.")
-                        .size(10.)
-                        .color(palette.gray(125)),
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new("Drag the frame on the photo; changes apply live.")
+                            .size(10.)
+                            .color(palette.gray(125)),
+                    )
+                    .wrap(),
                 );
             });
             ui.horizontal(|ui| {
@@ -1731,9 +1738,9 @@ fn experimental(ui: &mut egui::Ui, note: &str) {
         .on_hover_text(note);
     });
 }
-/// The tools whose drawers open in Develop's tab panel, as the rail lists
-/// them, with their tooltips and the drawer's caption. Red Eye has no
-/// shortcut, as in Lightroom.
+/// The tools whose drawers open in place of Develop's adjustments, as the
+/// rail lists them, with their tooltips and the drawer's caption. Red Eye
+/// has no shortcut, as in Lightroom.
 pub(super) const DRAWER_TOOLS: [(Tool, &str, &str); 4] = [
     (Tool::Crop, "Crop & Straighten · R", "Crop & Straighten"),
     (
@@ -1744,8 +1751,10 @@ pub(super) const DRAWER_TOOLS: [(Tool, &str, &str); 4] = [
     (Tool::RedEye, "Red Eye Correction", "Red Eye"),
     (Tool::Mask, "Masking · Shift+W", "Masking"),
 ];
-/// A tool drawer's contents on the tab panel, at the adjustments sections'
-/// margins.
+/// The slider grid's label column in the tool drawers, wide enough for
+/// their longest captions ("Orientation", "Range High").
+pub(super) const DRAWER_LABEL_COLUMN: f32 = 68.;
+/// A tool drawer's contents, at the adjustments sections' margins.
 fn drawer_frame() -> egui::Frame {
     egui::Frame::new().inner_margin(egui::Margin {
         left: 8,
@@ -1754,7 +1763,7 @@ fn drawer_frame() -> egui::Frame {
         bottom: 12,
     })
 }
-/// Whether `tool` has a drawer in the tab panel.
+/// Whether `tool` has a drawer in place of the adjustments.
 pub(super) fn has_drawer(tool: Tool) -> bool {
     DRAWER_TOOLS.iter().any(|(t, ..)| *t == tool)
 }
