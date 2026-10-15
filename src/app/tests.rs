@@ -569,6 +569,68 @@ fn a_render_overtaken_by_an_edit_still_shows_with_its_own_settings() {
     assert_eq!(e.preview.status, "second");
 }
 
+/// A frame an edit overtook shows on the way, but never becomes the photo's Library
+/// thumbnail: that is cached under the current edit, which it was not rendered with.
+#[test]
+fn only_the_latest_render_becomes_the_library_thumbnail() -> anyhow::Result<()> {
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.RAF"), b"fixture")?;
+    let path = d.path().join("test.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(&photos)?;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
+    let library = library::Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].id;
+    e.library = Some(Box::new(library));
+    e.document.catalog_photo = Some(photo);
+    e.document.path = Some(photos.join("a.RAF"));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let first = e.preview.task.id();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
+    let second = e.preview.task.id();
+    let rendered = |id, status: &str| Event::Rendered {
+        id,
+        pane: worker::Pane::After,
+        preview: worker::Preview::Pixels {
+            image: crate::rendered::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![128; 3],
+            navigator: None,
+        },
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
+        thumbnail: Some(image::RgbImage::new(4, 4)),
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: status.into(),
+    };
+    let cached = |e: &Editor| e.library.as_ref().unwrap().has_edited_thumbnail(photo);
+    e.tx.send(rendered(first, "first")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "first");
+    assert!(!cached(&e));
+    e.tx.send(rendered(second, "second")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    assert!(cached(&e));
+    Ok(())
+}
+
 #[test]
 fn before_and_after_renders_go_to_their_own_side() {
     use worker::Pane;

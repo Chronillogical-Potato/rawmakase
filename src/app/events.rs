@@ -255,7 +255,11 @@ impl Editor {
                     }
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
-                        if let Some(small) = thumbnail {
+                        // The thumbnail is cached under the current edit: an earlier
+                        // render an edit overtook shows, but was not rendered with it.
+                        if let Some(small) = thumbnail
+                            && id == self.preview.task.id()
+                        {
                             self.refresh_library_thumbnail(ctx, small);
                         }
                     }
