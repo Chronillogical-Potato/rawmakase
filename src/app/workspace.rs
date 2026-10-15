@@ -1467,10 +1467,10 @@ impl Editor {
     }
 
     fn develop_side_panels(&mut self, ui: &mut egui::Ui) {
-        // From the window's right edge: the tab rail, the adjustments, then
-        // Presets or History beside the photo.
+        // From the window's right edge: the rail, the adjustments or the
+        // open tool's drawer, then Presets or History beside the photo.
         let tabs = self.develop_rail_edge(ui);
-        if self.panel_shown(WorkspacePanel::Right) {
+        if self.panel_shown(WorkspacePanel::Right) && self.develop_adjustments_shown() {
             self.develop_right_panel(ui);
         }
         self.develop_tab_panel(ui, tabs);
@@ -1527,10 +1527,24 @@ impl Editor {
                 if navigator || histogram {
                     ui.add_space(4.);
                 }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    top(self, ui, false);
-                    ui.add_enabled_ui(enabled, |ui| self.controls(ui));
-                });
+                if super::inspector::has_drawer(self.view.tool) {
+                    // The drawers' labels are short: their controls take the room.
+                    let _labels = super::widgets::LabelColumn::enter(
+                        ui,
+                        super::inspector::DRAWER_LABEL_COLUMN,
+                    );
+                    egui::ScrollArea::vertical()
+                        .id_salt("tool-drawer")
+                        .show(ui, |ui| {
+                            top(self, ui, false);
+                            ui.add_enabled_ui(enabled, |ui| self.tool_drawer(ui));
+                        });
+                } else {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        top(self, ui, false);
+                        ui.add_enabled_ui(enabled, |ui| self.controls(ui));
+                    });
+                }
             });
     }
 
