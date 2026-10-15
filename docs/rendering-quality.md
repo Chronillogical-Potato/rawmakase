@@ -61,6 +61,14 @@ Only smooth, unclipped samples contribute; dark gaps separate areas so an unrela
 bright object cannot provide the reference. The surviving channels stay unchanged;
 only clipped channels are estimated, with the existing blend near saturation.
 Fully clipped pixels and areas without a usable reference keep the neutral fallback.
+Where one channel is clipped, no estimate lowers it below the value the sensor
+recorded, which is only a lower bound on the light: a neighbour ratio or a neutral
+fallback that comes out lower keeps the recorded value. Darkening it rendered bright
+lights duller and darker than Camera Raw (on the test dataset's own-stress sets, the
+highlight-region error fell from about 3–4 to 1.3–1.8 ΔE00). Where two are clipped
+the estimate is kept: Camera Raw renders such a core whiter than the recorded pair
+(a sunset sun with red and blue clipped is yellow-white), and the floor turned it
+magenta.
 This infers missing colour, not missing detail, and is not Adobe's recovery algorithm.
 Cancellation discards the map and recovered image together. Tests cover a wide
 partially clipped area, dark gaps, untouched surviving channels, fully clipped

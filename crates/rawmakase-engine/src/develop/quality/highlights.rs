@@ -199,6 +199,16 @@ pub(super) fn recover_highlights_cancellable(
             } else {
                 neutral
             };
+            // With one channel clipped, its value is a floor: the light was at least
+            // that bright, and the other two hold its colour. With two clipped,
+            // Camera Raw renders the core whiter than the recorded pair (a sunset sun
+            // with red and blue clipped is yellow-white, not magenta), so the estimate
+            // stays as it is.
+            let target = if valid.len() == 2 {
+                target.max(p[c])
+            } else {
+                target
+            };
             p[c] = p[c] * (1. - blend) + target * blend;
         }
     });
