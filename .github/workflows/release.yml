@@ -268,6 +268,47 @@ jobs:
           export CXXFLAGS="-DCMS_NO_REGISTER_KEYWORD"
           cargo build --release --locked --manifest-path release-source/Cargo.toml --target-dir "$GITHUB_WORKSPACE/target"
           python3 packaging/macos/bundle.py target/release/rawmakase dist/RAWmakase.app "$VERSION" "$RUNNER_TEMP/native" --minimum-macos "$MACOSX_DEPLOYMENT_TARGET" --icon-assets compiled-icon/Assets.car
+          # A tar keeps the bundle's symlinks and permissions through the artifact.
+          tar -C dist -cf "$RUNNER_TEMP/RAWmakase.app.tar" RAWmakase.app
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-app-${{ matrix.target }}
+          path: ${{ runner.temp }}/RAWmakase.app.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  # Signing and notarization are their own job, so re-running a failed
+  # notarization does not rebuild the app (about 30 minutes on Intel).
+  macos-sign:
+    name: macOS sign and notarize (${{ matrix.arch }})
+    needs: [prepare, macos]
+    # Each DMG is verified on its own architecture, including running the CLI.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            target: macos-arm64
+          - runner: macos-15-intel
+            arch: x86_64
+            target: macos-amd64
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-app-${{ matrix.target }}
+          path: ${{ runner.temp }}/app
+      - name: Unpack the app
+        run: |
+          mkdir -p dist
+          tar -C dist -xf "$RUNNER_TEMP/app/RAWmakase.app.tar"
       - uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
         with:
           ruby-version: '3.3'
@@ -390,7 +431,7 @@ jobs:
   # the packages install cleanly, all before anything is published.
   package-inputs:
     name: Gather packaging inputs
-    needs: [linux, macos]
+    needs: [linux, macos-sign]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -418,7 +459,7 @@ jobs:
 
   publish:
     name: Publish verified packages
-    needs: [prepare, ci, linux, arch, macos, windows, packages]
+    needs: [prepare, ci, linux, arch, macos-sign, windows, packages]
     if: github.event_name == 'push' || inputs.publish
     runs-on: ubuntu-24.04
     timeout-minutes: 15
