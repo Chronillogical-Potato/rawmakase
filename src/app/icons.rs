@@ -34,6 +34,7 @@ fastframe_icons::icons! {
         Bandage => "bandage",
         MaskTool => "circle-dot-dashed",
         History => "history",
+        Edit => "sliders-horizontal",
         Settings => lucide "settings",
         Close => lucide "x",
         Check => lucide "check",

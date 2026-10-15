@@ -270,7 +270,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [raw_defaults.rs](../src/app/raw_defaults.rs) | Preferences' Raw Defaults block, and keeping the open unedited photo and the Library's previews in step with the defaults. |
 | [onboarding.rs](../src/app/onboarding.rs) | First-run setup: photos added to the default catalog (or a Lightroom catalog imported), then optional Lightroom profiles and presets; and the Library's start while it has no photos or no catalog. |
 | [theme.rs](../src/app/theme.rs), [icons.rs](../src/app/icons.rs) | Interface colors (Lightroom's neutral grays, with fastframe-theme's palettes) and the Lucide icon set. |
-| [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls and export settings. |
+| [inspector.rs](../src/app/inspector.rs) | Histogram, adjustment controls, tool drawers and export settings. |
 | [inspector/lens_profile.rs](../src/app/inspector/lens_profile.rs) | Lens Corrections' Setup, Make, Model and Profile menus over the imported lens profiles. |
 | [color_grading.rs](../src/app/color_grading.rs) | The Color Grading panel: 3-Way and single-wheel views, hue/saturation wheels (Shift constrains, Cmd fine, double-click resets), Luminance, Blending and Balance, over the recipe's grading values. |
 | [targeted_tool.rs](../src/app/targeted_tool.rs) | The Targeted Adjustment Tool over the photo: its drag, the sample off the UI thread, the panels' target buttons and shortcuts. |
@@ -290,7 +290,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [mask_tool.rs](../src/app/mask_tool.rs) | Masking tool (Shift+W): mask list, components, brushes and gradients on the photo, and the local adjustment sliders. |
 | [panels.rs](../src/app/panels.rs) | Which side panels and filmstrip each module shows (Tab, Shift+Tab, F6–F8), and Develop's open tab, kept in the session; a panel being hidden first saves or ends what it was doing. |
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application, the Amount slider and temporary hover previews. |
-| [side_tabs.rs](../src/app/side_tabs.rs) | Develop's tab panel beside the adjustments (Presets, or Snapshots over History, or the open tool's drawer) and the rail that switches and folds it and opens Crop, Remove, Red Eye and Masking. |
+| [side_tabs.rs](../src/app/side_tabs.rs) | Develop's tab panel beside the adjustments (Presets, or Snapshots over History) and the rail that switches the adjustments between Edit (which also folds them) and the Crop, Remove, Red Eye and Masking drawers, then switches and folds the tab panel. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
 | [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset, and Update, Rename and Delete for presets made here (`presets/user.rs`, written by `xmp/preset_write.rs`). |

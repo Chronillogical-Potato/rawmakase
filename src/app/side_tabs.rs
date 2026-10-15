@@ -1,9 +1,9 @@
 //! Develop's tab panel beside the adjustments: Presets, and Snapshots over
-//! History, one at a time, or the open tool's drawer. A slim rail at the
-//! window's right edge switches the tab and, under them, opens Crop, Remove,
-//! Red Eye or Masking; the open tab's button folds the panel and any brings
-//! it back. A window too narrow for it and the photo shows it folded until a
-//! tab or tool is asked for.
+//! History, one at a time. A slim rail at the window's right edge first
+//! switches the adjustments panel between Edit and the Crop, Remove, Red Eye
+//! and Masking drawers, then, under them, switches the tab; the open tab's
+//! button folds the panel and any brings it back. A window too narrow for it
+//! and the photo shows it folded until a tab is asked for.
 use super::Editor;
 use super::icons::{self, Icon};
 use super::inspector::{DRAWER_TOOLS, has_drawer, tool_icon};
@@ -17,9 +17,6 @@ use eframe::egui::{self, Pos2, Rect, Sense, Vec2};
 const RAIL_WIDTH: f32 = 36.;
 /// The tab panel's width until the user drags it.
 const PANEL_WIDTH: f32 = 245.;
-/// The slider grid's label column in the tool drawers, wide enough for
-/// their longest captions ("Orientation", "Range High").
-const DRAWER_LABEL_COLUMN: f32 = 68.;
 /// The photo's narrowest width before the tab panel folds by itself.
 const PHOTO_MIN: f32 = 400.;
 /// The tabs, top to bottom on the rail, with their icons and names.
@@ -33,13 +30,23 @@ enum TabClick {
     /// Show this tab, opening the panel.
     Open(DevelopTab),
     Fold,
-    /// Open or close this tool, its drawer in the panel.
+    /// Show the adjustments, closing the open tool's drawer.
+    Edit,
+    /// Open or close this tool, its drawer in place of the adjustments.
     Tool(Tool),
 }
 
 /// A rail button's id, fixed so tests can find it.
 pub(super) fn rail_id(tab: DevelopTab) -> egui::Id {
     egui::Id::new(("develop-rail", tab))
+}
+/// The rail's Edit button's id.
+pub(super) fn edit_id() -> egui::Id {
+    egui::Id::new("develop-rail-edit")
+}
+/// A tool's rail button's id.
+pub(super) fn tool_id(tool: Tool) -> egui::Id {
+    egui::Id::new(("develop-rail-tool", format!("{tool:?}")))
 }
 /// Whether a tab was asked for while the window had no room for the panel.
 fn peek_id() -> egui::Id {
@@ -53,7 +60,8 @@ fn room_id() -> egui::Id {
 impl Editor {
     /// The rail, drawn first so it takes the window's right edge, outside
     /// the adjustments. The right panel's toggle (F8) hides it, the tab panel
-    /// and the adjustments together; the rail folds the tab panel alone.
+    /// and the adjustments together; the rail folds the adjustments or the
+    /// tab panel alone.
     /// Returns whether the tab panel opens, for [`Self::develop_tab_panel`]
     /// to draw once the adjustments are.
     pub(super) fn develop_rail_edge(&mut self, ui: &mut egui::Ui) -> bool {
@@ -65,7 +73,11 @@ impl Editor {
             egui::containers::panel::PanelState::load(&ctx, egui::Id::new(id))
                 .map_or(default, |state| state.outer_rect.width())
         };
-        let adjustments = width("adjustments", super::workspace::ADJUSTMENTS_DEFAULT);
+        let adjustments = if self.develop_adjustments_shown() {
+            width("adjustments", super::workspace::ADJUSTMENTS_DEFAULT)
+        } else {
+            0.
+        };
         let room = ui.available_width() - RAIL_WIDTH - adjustments - width("presets", PANEL_WIDTH)
             >= PHOTO_MIN;
         ctx.data_mut(|d| d.insert_temp(room_id(), room));
@@ -78,11 +90,26 @@ impl Editor {
             Some(TabClick::Fold) => {
                 self.fold_develop_tabs();
             }
+            Some(TabClick::Edit) => {
+                // From a tool, back to the adjustments; on them, folds them.
+                if has_drawer(self.view.tool) {
+                    self.view.toggle(self.view.tool);
+                    if !self.panel_shown(WorkspacePanel::Adjustments) {
+                        self.change_panels(PanelChange::Toggle(WorkspacePanel::Adjustments));
+                    }
+                } else {
+                    self.change_panels(PanelChange::Toggle(WorkspacePanel::Adjustments));
+                }
+            }
             Some(TabClick::Tool(tool)) => self.view.toggle(tool),
             None => {}
         }
-        // A tool's drawer opens the panel whatever its fold or the room.
-        has_drawer(self.view.tool) || self.develop_tabs_open()
+        self.develop_tabs_open()
+    }
+    /// Whether the adjustments panel shows, under a shown right panel: the
+    /// adjustments unless Edit folded them, or the open tool's drawer.
+    pub(super) fn develop_adjustments_shown(&self) -> bool {
+        self.panel_shown(WorkspacePanel::Adjustments) || has_drawer(self.view.tool)
     }
     /// Whether the tab panel shows its tab: not folded, and with room beside
     /// the photo as last laid out, or asked for in a narrow window.
@@ -95,13 +122,9 @@ impl Editor {
         });
         self.panel_shown(WorkspacePanel::Presets) && (room || peek)
     }
-    /// Opens the tab panel on its tab, in a narrow window too, ending a
-    /// tool whose drawer had its place; false if the layout could not be
-    /// saved.
+    /// Opens the tab panel on its tab, in a narrow window too; false if the
+    /// layout could not be saved.
     fn open_develop_tabs(&mut self) -> bool {
-        if has_drawer(self.view.tool) {
-            self.view.toggle(self.view.tool);
-        }
         let room = self
             .context
             .data(|d| d.get_temp::<bool>(room_id()).unwrap_or(true));
@@ -127,11 +150,11 @@ impl Editor {
             self.change_panels(PanelChange::Toggle(WorkspacePanel::Presets))
         }
     }
-    /// Folds the tab panel if its tab shows, or opens it (in place of a
-    /// tool's drawer too), as its open tab's rail button and the others do:
-    /// for `panels:presets`. False if the layout could not be saved.
+    /// Folds the tab panel if its tab shows, or opens it, as its open tab's
+    /// rail button and the others do: for `panels:presets`. False if the
+    /// layout could not be saved.
     pub(super) fn toggle_develop_tabs(&mut self) -> bool {
-        if self.develop_tabs_open() && !has_drawer(self.view.tool) {
+        if self.develop_tabs_open() {
             self.fold_develop_tabs()
         } else {
             self.open_develop_tabs()
@@ -139,10 +162,10 @@ impl Editor {
     }
     /// The tab panel between the adjustments and the photo, if `open`.
     pub(super) fn develop_tab_panel(&mut self, ui: &mut egui::Ui, open: bool) {
-        // A tab not drawn this frame (folded, too narrow, or a tool's drawer
-        // in its place) lets go of what it was doing: Presets ends a preview
-        // it was showing, History saves a snapshot name being typed.
-        let drawn = (open && !has_drawer(self.view.tool)).then_some(self.panels.develop_tab);
+        // A tab not drawn this frame (folded or too narrow) lets go of what
+        // it was doing: Presets ends a preview it was showing, History saves
+        // a snapshot name being typed.
+        let drawn = open.then_some(self.panels.develop_tab);
         if drawn != Some(DevelopTab::Presets) && self.presets.hover.is_some() {
             self.end_preset_hover();
         }
@@ -162,19 +185,6 @@ impl Editor {
             .frame(egui::Frame::side_top_panel(ui.style()).fill(fill))
             .show(ui, |ui| {
                 let _side = SectionSide::enter(ui, SectionGroup::DevelopLeft);
-                if has_drawer(self.view.tool) {
-                    // The drawers' labels are short: their controls take the room.
-                    let _labels = super::widgets::LabelColumn::enter(ui, DRAWER_LABEL_COLUMN);
-                    let enabled =
-                        self.document.full().is_some() && !self.view.compare.before_only();
-                    egui::ScrollArea::vertical()
-                        .id_salt("tool-drawer")
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.add_enabled_ui(enabled, |ui| self.tool_drawer(ui));
-                        });
-                    return;
-                }
                 match self.panels.develop_tab {
                     DevelopTab::Presets => self.presets_ui(ui),
                     DevelopTab::History => self.history_tab(ui),
@@ -238,9 +248,30 @@ impl Editor {
                         paint(ui.painter(), center, tint);
                         response.clicked()
                     };
+                // Edit and the tools first, each in the adjustments' place.
                 let mut y = 24.;
+                let edit = |p: &egui::Painter, c: Pos2, tint: egui::Color32| {
+                    icons::paint_at(p, Icon::Edit, c, 16., tint)
+                };
+                let editing = !has_drawer(tool) && self.panel_shown(WorkspacePanel::Adjustments);
+                let tip = if editing { "Hide Edit" } else { "Show Edit" };
+                if button(ui, y, edit_id(), editing, true, tip.into(), &edit) {
+                    click = Some(TabClick::Edit);
+                }
+                y += 36.;
+                for (t, tip, _) in DRAWER_TOOLS {
+                    let paint = |p: &egui::Painter, c: Pos2, tint: egui::Color32| {
+                        icons::paint_at(p, tool_icon(t), c, 16., tint)
+                    };
+                    if button(ui, y, tool_id(t), tool == t, photo, tip.to_string(), &paint) {
+                        click = Some(TabClick::Tool(t));
+                    }
+                    y += 36.;
+                }
+                // The tabs after a gap, in the panel beside the adjustments.
+                y += 32.;
                 for (tab, icon, name) in TABS {
-                    let active = open && !has_drawer(tool) && self.panels.develop_tab == tab;
+                    let active = open && self.panels.develop_tab == tab;
                     let tip = if active {
                         format!("Hide {name}")
                     } else {
@@ -255,18 +286,6 @@ impl Editor {
                         } else {
                             TabClick::Open(tab)
                         });
-                    }
-                    y += 36.;
-                }
-                // The tools after a gap, their drawers in the panel.
-                y += 14.;
-                for (t, tip, _) in DRAWER_TOOLS {
-                    let paint = |p: &egui::Painter, c: Pos2, tint: egui::Color32| {
-                        icons::paint_at(p, tool_icon(t), c, 16., tint)
-                    };
-                    let id = egui::Id::new(("develop-rail-tool", tip));
-                    if button(ui, y, id, tool == t, photo, tip.to_string(), &paint) {
-                        click = Some(TabClick::Tool(t));
                     }
                     y += 36.;
                 }
