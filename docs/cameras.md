@@ -149,8 +149,13 @@ so in `sample`. RAWmakase adds the stop for Highlight Tone Priority itself, read
 from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured)
 and, for the bodies from the 40D to the 600D, from their custom functions, where LibRaw
 does not read it: their CameraInfo lacks it (60D) or says Off (550D) when it is on, and
-Camera Raw follows the custom function. RAWmakase also follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
-is not handled yet.
+Camera Raw follows the custom function. RAWmakase also follows Fujifilm's exposure midpoint shift (above),
+and takes the stop off below a row's `lowest_iso`: the Sony A7, A7R, A7R II, A7 III, A7R III,
+A7 IV and A7R IV, whose ISO 50, 64 and 80 are extended settings under a native 100 (Adobe DNG
+Converter 18.7 on 32 dataset photos of these bodies: always exactly 1 EV under the row; the
+A7S III's and HX99's ISO 80 is native and keeps the row). On the 20 such photos with Camera
+Raw default renders, median dE00 went from about 10 to 0.4. Extended low ISO on other makes
+(Olympus ISO LOW) is not handled yet.
 
 After the table, 151 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
 RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
@@ -165,7 +170,7 @@ Camera Raw renders most of those Fujifilm bodies darker than their baseline expl
 for a reason not found yet.
 
 Still about 1 EV off, for the shooting settings above or a decoding problem: the
-Olympus E-M10 Mark III and Sony A7R IV (extended low ISO). LibRaw reads the black level
+Olympus E-M10 Mark III (extended low ISO). LibRaw reads the black level
 of the Canon EOS R6 Mark III and PowerShot V1 as 0 plus small per-channel values instead
 of 512; RAWmakase takes the black from the raw's masked left border when LibRaw's is
 below a quarter of it, which brings both within 0.1 EV. The Leica Q, Ricoh GR III and Sigma fp L

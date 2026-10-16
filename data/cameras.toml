@@ -15,7 +15,8 @@
 # low ISO). RAWmakase moves Fujifilm rows with the raw's exposure midpoint shift
 # (DR200/DR400, extended ISO) unless the row says fujifilm_exposure_shift = "ignored";
 # fujifilm_dr100_shift gives the body's shift at DR100 when it is not the sensor's
-# usual one (-0.72 X-Trans, 0 Bayer).
+# usual one (-0.72 X-Trans, 0 Bayer). lowest_iso is the body's lowest native ISO
+# when extended settings lie below it, where Camera Raw takes 1 EV off (Sony 50-80).
 
 [[camera]]
 make = "Canon"
@@ -1786,6 +1787,7 @@ sample = "raw.pixls.us, 1 photo at ISO 125"
 make = "Sony"
 model = "ILCE-7"
 baseline_exposure = 0.35
+lowest_iso = 100
 unit_calibration = { preset = "daylight", reference = [2436, 1024, 1456] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -1837,6 +1839,7 @@ model = "ILCE-7M3"
 unit_calibration = { preset = "daylight", reference = [2464, 1024, 1508] }
 aliases = ["A7 III"]
 baseline_exposure = 0.35
+lowest_iso = 100
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.35 plus +0.01 for the white level"
@@ -1847,6 +1850,7 @@ model = "ILCE-7M4"
 unit_calibration = { preset = "daylight", reference = [2411, 1024, 1638] }
 aliases = ["A7 IV"]
 baseline_exposure = 0.35
+lowest_iso = 100
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 640"
@@ -1865,6 +1869,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; Adobe's BaselineExposure 0.35 on a 1
 make = "Sony"
 model = "ILCE-7R"
 baseline_exposure = 0.35
+lowest_iso = 100
 unit_calibration = { preset = "daylight", reference = [2464, 1024, 1508] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -1876,6 +1881,7 @@ model = "ILCE-7RM2"
 unit_calibration = { preset = "daylight", reference = [2356, 1024, 1712] }
 aliases = ["A7R II"]
 baseline_exposure = 0.35
+lowest_iso = 100
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35 plus +0.01 for the white level"
@@ -1886,6 +1892,7 @@ model = "ILCE-7RM3"
 unit_calibration = { preset = "daylight", reference = [2464, 1024, 1648] }
 aliases = ["A7R III", "ILCE-7RM3A"]
 baseline_exposure = 0.15
+lowest_iso = 100
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
@@ -1896,6 +1903,7 @@ model = "ILCE-7RM4"
 unit_calibration = { preset = "daylight", reference = [2572, 1024, 1668] }
 aliases = ["A7R IV"]
 baseline_exposure = 0.35
+lowest_iso = 100
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 50; Adobe -0.65 at extended ISO 50, which takes 1 EV off"
