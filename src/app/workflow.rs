@@ -144,6 +144,11 @@ impl Editor {
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.
     pub(super) fn flush(&mut self) -> bool {
+        // A Sync may be writing the open photo: nothing is saved over it until it is
+        // done (see `autosave`).
+        if self.activity.is_syncing() {
+            return false;
+        }
         if !self.commit_library_drafts() {
             return false;
         }
@@ -205,9 +210,13 @@ impl Editor {
         if let Some(completion) = self.autosave.poll() {
             self.background_saved(completion);
         }
+        // A Sync may be writing the open photo (a target, from the Library): what an
+        // analysis landing meanwhile changed is not saved over it. The photo opens
+        // again once the Sync is done, or saves then if it was not a target.
         if !self.document.edit.save_state().ready()
             || self.document.edit.history().in_gesture()
             || self.autosave.busy()
+            || self.activity.is_syncing()
         {
             return;
         }
@@ -245,6 +254,10 @@ impl Editor {
     /// giving up at `until`: a catalog on a stalled network share must not hold up
     /// closing. A save still running then goes on, and the edit stays unsaved.
     pub(super) fn flush_by(&mut self, until: Instant) -> Flushed {
+        // Saved once a Sync, which may be writing the open photo, is done.
+        if self.activity.is_syncing() {
+            return Flushed::Late;
+        }
         if !self.commit_library_drafts() {
             return Flushed::Failed;
         }

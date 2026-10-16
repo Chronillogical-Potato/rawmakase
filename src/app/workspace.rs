@@ -718,6 +718,17 @@ impl Editor {
                 Some(false) => self.open_export_dialog(),
                 None => {}
             }
+            // Lightroom's Sync Settings, from the active photo to the rest of the
+            // selection.
+            let sync = ctx.input_mut(|i| {
+                i.consume_key(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::S,
+                )
+            });
+            if sync && !self.sync_targets().is_empty() {
+                self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
+            }
         }
         // The catalog's sidebar, drawn before the bar, asked for this.
         let mut action = sidebar;
@@ -915,6 +926,31 @@ impl Editor {
                     ui,
                     super::widgets::SectionGroup::LibraryRight,
                 );
+                // Sync Settings at the foot, as in Lightroom: the active photo's
+                // settings onto the rest of the selection.
+                let mut sync = false;
+                if self.library.is_some() {
+                    let targets = self.sync_target_count();
+                    egui::Panel::bottom("library-sync")
+                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                        .show_separator_line(false)
+                        .show(ui, |ui| {
+                            let layout = egui::Layout::right_to_left(egui::Align::Center);
+                            ui.with_layout(layout, |ui| {
+                                sync = super::widgets::action_button(
+                                    ui,
+                                    "Sync Settings…",
+                                    None,
+                                    targets > 0,
+                                )
+                                .on_hover_text(sync_hover(targets))
+                                .clicked();
+                            });
+                        });
+                }
+                if sync {
+                    self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
+                }
                 // The Navigator controls the zoom: Develop's for a RAW in the
                 // Loupe, the same one for other photos. Outside the Loupe it
                 // shows the selected photo, and a zoom chosen there opens it.
@@ -1916,6 +1952,20 @@ fn refuse_close(ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
+}
+
+/// The Library's Sync Settings button's hover, for `targets` photos to sync to.
+fn sync_hover(targets: usize) -> String {
+    let keys = if cfg!(target_os = "macos") {
+        "⇧⌘S"
+    } else {
+        "Ctrl+Shift+S"
+    };
+    if targets == 0 {
+        return format!("Select the photos to sync with the active photo · {keys}");
+    }
+    let photos = super::widgets::plural(targets, "other selected photo", "other selected photos");
+    format!("Sync the active photo's settings to {photos} · {keys}")
 }
 
 #[cfg(test)]

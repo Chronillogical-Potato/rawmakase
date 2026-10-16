@@ -308,15 +308,8 @@ impl Editor {
                 }
                 let changed: Vec<_> = sync.edits.iter().map(|e| e.id).collect();
                 self.refresh_previews(&changed);
-                // A synchronized photo open here opens again with what was written
-                // back (or with no edit at all), so nothing stale is saved over it.
-                if let Some(open) = self.document.catalog_photo
-                    && sync.edits.iter().any(|e| e.id == open)
-                    && let Some(path) = self.document.path.clone()
-                {
-                    self.document.edit.save_state_mut().saved();
-                    self.load_raw(path, Some(open));
-                }
+                // Written back, or with no edit at all.
+                self.reopen_synced(&changed);
                 self.status = format!(
                     "{verb} {} ({})",
                     sync.change.name(),
