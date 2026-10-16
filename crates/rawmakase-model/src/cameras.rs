@@ -69,6 +69,11 @@ pub struct Camera {
     /// (Sony's 50, 64 and 80 under 100): Camera Raw takes a stop off there.
     #[serde(default)]
     pub lowest_iso: Option<f32>,
+    /// Canon only: the baseline of the body's sRAW and mRAW, which LibRaw converts on
+    /// a scale of its own: Adobe's sRAW BaselineExposure plus
+    /// log2(16383 / (1.303 × Adobe's sRAW white level)).
+    #[serde(default)]
+    pub sraw_baseline_exposure: Option<f32>,
     pub source: Source,
     /// When the values were checked (YYYY-MM-DD) and on what.
     pub checked: String,
@@ -206,6 +211,9 @@ pub struct Baseline {
     pub exposure_shift: ExposureShift,
     pub dr100_shift: Option<f32>,
     pub lowest_iso: Option<f32>,
+    /// The baseline of a small raw (sRAW, mRAW): the row's, else the median of the
+    /// make's, else `ev`.
+    pub sraw_ev: f32,
 }
 
 /// Camera Raw's baseline exposure for a camera. A camera without a row takes the
@@ -243,6 +251,8 @@ pub fn neutral_calibration(make: &str, model: &str, presets: &WhiteBalancePreset
 }
 
 fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
+    let same_make = || rows.iter().filter(|c| c.make.eq_ignore_ascii_case(make));
+    let sraw_median = median(same_make().filter_map(|c| c.sraw_baseline_exposure));
     if let Some(c) = find_in(rows, make, model) {
         return Baseline {
             ev: c.baseline_exposure,
@@ -250,27 +260,30 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
             exposure_shift: c.fujifilm_exposure_shift,
             dr100_shift: c.fujifilm_dr100_shift,
             lowest_iso: c.lowest_iso,
+            sraw_ev: c
+                .sraw_baseline_exposure
+                .or(sraw_median)
+                .unwrap_or(c.baseline_exposure),
         };
     }
-    let same_make = rows
-        .iter()
-        .filter(|c| c.make.eq_ignore_ascii_case(make))
-        .map(|c| c.baseline_exposure);
-    if let Some(ev) = median(same_make) {
+    if let Some(ev) = median(same_make().map(|c| c.baseline_exposure)) {
         return Baseline {
             ev,
             origin: BaselineOrigin::MakeMedian,
             exposure_shift: ExposureShift::Followed,
             dr100_shift: None,
             lowest_iso: None,
+            sraw_ev: sraw_median.unwrap_or(ev),
         };
     }
+    let ev = median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.);
     Baseline {
-        ev: median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.),
+        ev,
         origin: BaselineOrigin::TableMedian,
         exposure_shift: ExposureShift::Followed,
         dr100_shift: None,
         lowest_iso: None,
+        sraw_ev: ev,
     }
 }
 
@@ -378,6 +391,7 @@ mod tests {
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
             lowest_iso: None,
+            sraw_baseline_exposure: None,
             source: Source::Fitted,
             checked: "2026-10-05".into(),
             sample: "test".into(),

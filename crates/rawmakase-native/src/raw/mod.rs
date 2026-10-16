@@ -85,6 +85,7 @@ impl Raw {
             xtrans: m.xtrans != 0,
             fuji_dynamic_range: m.fuji_dynamic_range,
             highlight_tone_priority: HighlightTonePriority::from_libraw(m.highlight_tone_priority),
+            sraw: m.sraw != 0,
             // LibRaw leaves -999 when the maker notes have no shift.
             fuji_exposure_shift: (m.fuji_exposure_shift > -100.).then_some(m.fuji_exposure_shift),
             iso: m.iso,

@@ -51,6 +51,8 @@ struct Metadata {
     char normalized_make[64], normalized_model[64];
     // The DNG version, 0 for a camera's own format.
     unsigned dng_version;
+    // A small raw (Canon sRAW and mRAW, Nikon sRAW), which LibRaw converts from YCbCr.
+    int sraw;
 };
 // The unpacked sensor data and the levels development reads with it, for decode
 // fingerprints. data and black point into the handle's buffers: data holds
@@ -289,6 +291,7 @@ void* ora_open(const char* path, Metadata* m, char* err) {
         m->aspect_width=aspect.cwidth; m->aspect_height=aspect.cheight;
         m->flip=d.sizes.flip; m->xtrans=d.idata.filters==9;
         m->dng_version=d.idata.dng_version;
+        m->sraw=h->raw.is_sraw();
         m->fuji_dynamic_range=d.makernotes.fuji.DevelopmentDynamicRange;
         m->iso=d.other.iso_speed; m->shutter=d.other.shutter;
         m->aperture=d.other.aperture; m->focal=d.other.focal_len;

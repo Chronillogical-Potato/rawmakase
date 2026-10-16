@@ -17,6 +17,8 @@
 # fujifilm_dr100_shift gives the body's shift at DR100 when it is not the sensor's
 # usual one (-0.72 X-Trans, 0 Bayer). lowest_iso is the body's lowest native ISO
 # when extended settings lie below it, where Camera Raw takes 1 EV off (Sony 50-80).
+# sraw_baseline_exposure is the value for the body's sRAW and mRAW, which LibRaw
+# converts on a scale of its own (docs/cameras.md).
 
 [[camera]]
 make = "Canon"
@@ -143,6 +145,7 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.25 plus -0.00 fo
 make = "Canon"
 model = "EOS 5D Mark II"
 baseline_exposure = 0.4
+sraw_baseline_exposure = 0.35
 unit_calibration = { preset = "daylight", reference = [2203, 1024, 1697] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -152,6 +155,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.40"
 make = "Canon"
 model = "EOS 5D Mark III"
 baseline_exposure = 0.3
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "daylight", reference = [2052, 1024, 1628] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -161,6 +165,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.25 plus +0.05 fo
 make = "Canon"
 model = "EOS 5D Mark IV"
 baseline_exposure = 0.35
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "shade", reference = [2305, 1024, 1259] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -170,6 +175,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.13 plus +0.23 fo
 make = "Canon"
 model = "EOS 5DS R"
 baseline_exposure = 0.3
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "shade", reference = [2545, 1024, 1485] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -188,6 +194,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.00 plus -0.17 fo
 make = "Canon"
 model = "EOS 60D"
 baseline_exposure = -0.35
+sraw_baseline_exposure = -0.05
 unit_calibration = { preset = "daylight", reference = [2180, 1024, 1579] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -206,6 +213,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.09 plus +0.18 fo
 make = "Canon"
 model = "EOS 6D"
 baseline_exposure = 0.3
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "daylight", reference = [2024, 1024, 1664] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -215,6 +223,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25 plus +0.05 fo
 make = "Canon"
 model = "EOS 6D Mark II"
 baseline_exposure = 0.25
+sraw_baseline_exposure = 0.35
 unit_calibration = { preset = "shade", reference = [2456, 1024, 1446] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -234,6 +243,7 @@ sample = "1 private photo at ISO 100; BaselineExposure -0.09 plus +0.38 for the 
 make = "Canon"
 model = "EOS 70D"
 baseline_exposure = 0.3
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "daylight", reference = [2024, 1024, 1664] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -262,6 +272,7 @@ sample = "raw.pixls.us, 1 photo at ISO 3200; BaselineExposure +0.32 plus +0.22 f
 make = "Canon"
 model = "EOS 7D"
 baseline_exposure = -0.2
+sraw_baseline_exposure = 0.05
 unit_calibration = { preset = "daylight", reference = [2140, 1024, 1547] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -271,6 +282,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.21 plus -0.00 fo
 make = "Canon"
 model = "EOS 7D Mark II"
 baseline_exposure = -0.05
+sraw_baseline_exposure = 0.1
 unit_calibration = { preset = "daylight", reference = [2016, 1024, 1628] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -290,6 +302,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.00 plus +0.48 fo
 make = "Canon"
 model = "EOS 80D"
 baseline_exposure = 0.5
+sraw_baseline_exposure = 0.1
 unit_calibration = { preset = "daylight", reference = [1811, 1024, 1705] }
 source = "adobe-dng"
 checked = "2026-10-14"
@@ -504,6 +517,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25"
 make = "Canon"
 model = "EOS-1D X Mark II"
 baseline_exposure = 0.5
+sraw_baseline_exposure = 0.2
 unit_calibration = { preset = "daylight", reference = [1893, 1024, 1603] }
 source = "adobe-dng"
 checked = "2026-10-14"
