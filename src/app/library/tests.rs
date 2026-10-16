@@ -420,9 +420,17 @@ fn several_folders_show_their_photos_together() -> Result<()> {
         let mut folders: Vec<String> = ids_of(library)
             .iter()
             .map(|id| {
+                // The folders below "photos": the catalog keeps canonical
+                // paths, e.g. /private/var for macOS's /var.
                 let path = &library.photo(*id).unwrap().path;
-                let folder = path.parent().unwrap().strip_prefix(&root).unwrap();
-                folder.to_string_lossy().into_owned()
+                let names: Vec<_> = path
+                    .parent()
+                    .unwrap()
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                let below = names.iter().rposition(|n| n == "photos").unwrap() + 1;
+                names[below..].join("/")
             })
             .collect();
         folders.sort();
