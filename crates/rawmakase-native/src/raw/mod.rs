@@ -10,6 +10,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 mod ffi;
+mod nikon_he;
 use crate::camera_data::{
     CameraImage, Decode, Demosaic, HighlightTonePriority, Metadata, Source, WhiteBalancePresets,
 };
@@ -866,13 +867,52 @@ mod tests {
         (dir, path)
     }
     #[test]
-    fn nikon_high_efficiency_raws_are_refused_on_every_body() {
+    fn nikon_high_efficiency_raws_are_decoded_on_every_body() {
         use crate::camera_data::{Decode, Demosaic};
         use std::sync::atomic::AtomicBool;
-        // JPEG XS: start of codestream, then the capabilities marker.
+        // Zeros after it: without maker notes, LibRaw's open reads a Nikon curve
+        // length from file offset 2120, inside this small file's raw data.
+        let stream = [
+            super::nikon_he::tests::blank_codestream(64, 64),
+            vec![0; 2048],
+        ]
+        .concat();
+        // LibRaw knows the Z 8's High Efficiency raws but cannot decode them, and
+        // reads the Z5_2's as lossless compressed: noise and a warning, not an error
+        // (issue #411).
+        for model in ["NIKON Z5_2", "NIKON Z 8"] {
+            let (_dir, path) = nef(model, &stream);
+            let sensor = super::Raw::open_file(&path).unwrap().sensor().unwrap();
+            let value = super::nikon_he::tests::blank_value().to_le_bytes();
+            let expected: [u8; 32] =
+                <sha2::Sha256 as sha2::Digest>::digest(value.repeat(64 * 64)).into();
+            assert_eq!(sensor.data_sha256, expected, "{model}");
+            for decode in [
+                Decode::Half,
+                Decode::Full(Demosaic::Libraw),
+                Decode::Full(Demosaic::Rawmakase),
+            ] {
+                let raw = super::Raw::open_file(&path).unwrap();
+                let image = raw
+                    .develop(decode, &AtomicBool::new(false))
+                    .unwrap_or_else(|e| panic!("{model}, {decode:?}: {e}"));
+                // The blank codestream is one value throughout.
+                let first = image.pixels[0];
+                assert!(first.iter().all(|&v| v > 0.0), "{model}, {decode:?}");
+                for p in &image.pixels {
+                    for c in 0..3 {
+                        assert!((p[c] - first[c]).abs() <= 1e-4, "{model}, {decode:?}");
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn broken_nikon_high_efficiency_raws_are_errors() {
+        use crate::camera_data::{Decode, Demosaic};
+        use std::sync::atomic::AtomicBool;
+        // JPEG XS's start of codestream and capabilities marker, then noise.
         const JPEG_XS: [u8; 4] = [0xff, 0x10, 0xff, 0x50];
-        // LibRaw knows the Z 8's High Efficiency raws, and reads the Z5_2's as
-        // lossless compressed: noise and a warning, not an error (issue #411).
         for model in ["NIKON Z5_2", "NIKON Z 8"] {
             for decode in [
                 Decode::Half,
@@ -882,6 +922,12 @@ mod tests {
                 let (_dir, path) = nef(model, &JPEG_XS);
                 // Opened, so the embedded preview can stand in.
                 let raw = super::Raw::open_file(&path).unwrap();
+                // LibRaw recycles itself after a failed unpack; trying again
+                // fails the same way.
+                for _ in 0..2 {
+                    let error = raw.sensor().err().expect("unpacked");
+                    assert!(error.to_string().contains("High Efficiency"), "{error}");
+                }
                 let error = raw
                     .develop(decode, &AtomicBool::new(false))
                     .err()

@@ -11,6 +11,9 @@
 //! - `ora_develop` and `ora_cfa_open` report the size whose pixels the matching
 //!   copy function then writes in full: `width × height × 3` floats for
 //!   `ora_copy`, `width × height` for `ora_cfa_copy`.
+//! - `ora_open` keeps the `HighEfficiency` decoder it is given and calls it only from
+//!   the handle's unpack, with the codestream it read and LibRaw's raw buffer, both
+//!   valid for that call.
 //! - `ora_thumbnail` and `ora_sensor` point into the handle's own buffers, valid
 //!   until the next call on that handle; `ora_sensor`'s data holds `height` rows
 //!   of `pitch` values and its black levels `black_size` values.
@@ -103,7 +106,12 @@ unsafe extern "C" {
     fn ora_version() -> *const c_char;
     fn ora_background_thread();
     fn ora_metadata_size() -> u32;
-    fn ora_open(path: *const c_char, m: *mut NativeMetadata, err: *mut c_char) -> *mut c_void;
+    fn ora_open(
+        path: *const c_char,
+        m: *mut NativeMetadata,
+        high_efficiency: HighEfficiency,
+        err: *mut c_char,
+    ) -> *mut c_void;
     fn ora_close(h: *mut c_void);
     fn ora_develop(
         h: *mut c_void,
@@ -162,6 +170,52 @@ fn text(buf: &[c_char]) -> String {
     // SAFETY: every buffer passed here was zero-initialised and is only written by
     // `message` or `snprintf` on the native side, which NUL-terminate within it.
     unsafe { CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned() }
+}
+/// `native/raw.cpp`'s `HighEfficiency`.
+type HighEfficiency =
+    extern "C" fn(*const u8, usize, *mut u16, u32, u32, u32, *mut c_char) -> c_int;
+/// Decodes a Nikon High Efficiency codestream into LibRaw's raw buffer, for LibRaw's
+/// unpack: `data` is `len` bytes, `out` `height` rows of `pitch` values, `width` of
+/// them the image's. Returns nonzero with `err` filled when it fails.
+extern "C" fn high_efficiency(
+    data: *const u8,
+    len: usize,
+    out: *mut u16,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    err: *mut c_char,
+) -> c_int {
+    let result = std::panic::catch_unwind(|| {
+        ensure!(
+            !data.is_null() && !out.is_null() && pitch >= width,
+            "Invalid raw buffer"
+        );
+        // SAFETY: the native side passes its codestream buffer of `len` bytes and
+        // LibRaw's raw buffer, which holds at least `height` rows of `pitch` values
+        // (unpack allocates `raw_height + 8` rows of `raw_pitch`), both live and
+        // otherwise untouched for the length of this call.
+        let (data, out) = unsafe {
+            (
+                std::slice::from_raw_parts(data, len),
+                std::slice::from_raw_parts_mut(out, pitch as usize * height as usize),
+            )
+        };
+        super::nikon_he::decode(data, out, width as usize, height as usize, pitch as usize)
+    });
+    let message = match result {
+        Ok(Ok(())) => return 0,
+        Ok(Err(e)) => format!("Nikon High Efficiency NEF could not be decoded: {e:#}"),
+        Err(_) => "Nikon High Efficiency NEF could not be decoded".to_owned(),
+    };
+    let bytes = &message.as_bytes()[..message.len().min(ERR - 1)];
+    // SAFETY: `err` is the native side's error buffer of `ERR` bytes; at most
+    // `ERR - 1` bytes and a NUL are written.
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr().cast(), err, bytes.len());
+        *err.add(bytes.len()) = 0;
+    }
+    1
 }
 /// LibRaw's progress callback: `ctx` is the `&AtomicBool` `develop` passed.
 extern "C" fn cancelled(ctx: *mut c_void) -> c_int {
@@ -243,8 +297,9 @@ impl Handle {
         // for which all zeros is a valid value; the native side overwrites it.
         let mut m: NativeMetadata = unsafe { std::mem::zeroed() };
         // SAFETY: `path` is NUL-terminated, `m` and `err` are live, writable and
-        // of the sizes the native side expects (`ERR` for `err`).
-        let handle = unsafe { ora_open(path.as_ptr(), &mut m, err.as_mut_ptr()) };
+        // of the sizes the native side expects (`ERR` for `err`); `high_efficiency`
+        // is a function, valid for the program's life.
+        let handle = unsafe { ora_open(path.as_ptr(), &mut m, high_efficiency, err.as_mut_ptr()) };
         ensure!(!handle.is_null(), "{}", text(&err));
         Ok((Self(handle), m))
     }
