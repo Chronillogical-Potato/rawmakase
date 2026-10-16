@@ -14,6 +14,7 @@
 #include <omp.h>
 #endif
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -70,6 +71,11 @@ struct Sensor {
     unsigned char pattern[16*16];
 };
 typedef int (*Cancel)(void*);
+// RAWmakase's decoder of Nikon's High Efficiency raws (nikon_he.rs): the codestream
+// and its length, then the raw buffer's width, height and pitch (in values). Returns
+// nonzero, with err filled, when it fails.
+typedef int (*HighEfficiency)(const unsigned char*, size_t, unsigned short*, unsigned, unsigned,
+                              unsigned, char*);
 }
 
 // LibRaw retains its black subtraction and demosaicing. Only the common scale
@@ -79,7 +85,29 @@ public:
     float decode_gain = 1;
     float scale_factor = 1;
     unsigned scale_clipped = 0;
+    HighEfficiency high_efficiency = nullptr;
+    char high_efficiency_error[512] = {};
     explicit Raw() : LibRaw() {}
+    // Has unpack() decode the raw data with `decode` instead of LibRaw's decoder.
+    void decode_high_efficiency(HighEfficiency decode) {
+        high_efficiency = decode;
+        load_raw = static_cast<void (LibRaw::*)()>(&Raw::high_efficiency_load_raw);
+    }
+    void high_efficiency_load_raw() {
+        auto& unpacker = libraw_internal_data.unpacker_data;
+        auto* input = libraw_internal_data.internal_data.input;
+        const INT64 offset = unpacker.data_offset, size = unpacker.data_size;
+        if (!high_efficiency || !input || offset < 0 || size <= 0 || size > INT_MAX
+            || offset + size > input->size())
+            throw LIBRAW_EXCEPTION_IO_CORRUPT;
+        std::vector<unsigned char> data(static_cast<size_t>(size));
+        if (input->seek(offset, SEEK_SET) || input->read(data.data(), 1, size_t(size)) != int(size))
+            throw LIBRAW_EXCEPTION_IO_EOF;
+        auto& s = imgdata.sizes;
+        if (high_efficiency(data.data(), data.size(), imgdata.rawdata.raw_image, s.raw_width,
+                            s.raw_height, s.raw_pitch / 2, high_efficiency_error))
+            throw LIBRAW_EXCEPTION_DECODE_RAW;
+    }
     void scale_colors_loop(float mul[4]) override {
         const size_t n = size_t(imgdata.sizes.iwidth) * imgdata.sizes.iheight;
         double bound = 1;
@@ -135,10 +163,11 @@ static void correct_black(LibRaw& raw) {
     std::fill(std::begin(col.cblack), std::end(col.cblack), 0u);
 }
 static void message(char* err, const char* text) { std::snprintf(err, 512, "%s", text); }
-// Nikon's High Efficiency raws are JPEG XS, which LibRaw cannot decode. It knows them
-// only on the bodies it lists (the Z 9, Z 8, Z f and Z6_3); on others, such as the
-// Z5_2, it reads them as lossless compressed: noise, with a warning and no error.
-// So any NEF whose data starts with JPEG XS's SOC and CAP markers is refused.
+// Nikon's High Efficiency raws are JPEG XS, which LibRaw cannot decode; RAWmakase
+// decodes them itself. LibRaw knows them only on the bodies it lists (the Z 9, Z 8,
+// Z f and Z6_3); on others, such as the Z5_2, it would read them as lossless
+// compressed: noise, with a warning and no error. So any NEF whose data starts with
+// JPEG XS's SOC and CAP markers is one.
 static bool nikon_high_efficiency(Raw& raw) {
     const char* decoder=raw.unpack_function_name();
     if(!std::strcmp(decoder,"nikon_he_load_raw()")) return true;
@@ -155,6 +184,7 @@ struct Handle {
     Raw raw;
     Cancel cancel = nullptr;
     void* context = nullptr;
+    HighEfficiency high_efficiency = nullptr;
     // Highlight Tone Priority as Canon's custom functions record it, -1 without.
     int custom_htp = -1;
     // The per-channel blacks (LibRaw's order: red, green, blue, second green) and
@@ -167,12 +197,9 @@ struct Handle {
     // Fills err when it fails.
     int unpack(char* err) {
         if(unpacked) return 0;
-        if(nikon_high_efficiency(raw)) {
-            message(err,"Nikon High Efficiency NEF files are not supported yet");
-            return LIBRAW_FILE_UNSUPPORTED;
-        }
+        if(nikon_high_efficiency(raw)) raw.decode_high_efficiency(high_efficiency);
         int rc=raw.unpack();
-        if(rc) message(err,libraw_strerror(rc));
+        if(rc) message(err,raw.high_efficiency_error[0] ? raw.high_efficiency_error : libraw_strerror(rc));
         unpacked = rc==0;
         if(unpacked) { color_data_black_level(); correct_black(raw); }
         return rc;
@@ -307,9 +334,10 @@ void ora_background_thread() {
 }
 // So the Rust side can check its mirror of Metadata has the same layout.
 unsigned ora_metadata_size() { return sizeof(Metadata); }
-void* ora_open(const char* path, Metadata* m, char* err) {
+void* ora_open(const char* path, Metadata* m, HighEfficiency high_efficiency, char* err) {
     try {
         auto h = std::make_unique<Handle>();
+        h->high_efficiency = high_efficiency;
         h->raw.set_makernotes_handler(canon_maker_notes, h.get());
         int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
