@@ -1,6 +1,6 @@
 # Remaining Lightroom parity gaps
 
-Status: 2026-10-05; tone updated 2026-10-09 for the [scene tone stage](scene-tone-stage.md); lens, profile and catalog notes updated 2026-10-03. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`; most of the entries below are mean ΔE00 against Camera Raw 18.7 renders of the synthetic charts. For scale: Lightroom X100F references averaged 0.0090, Sony A7 II Camera Raw references 0.0065. The scene tone stage changed the default render and every tone control, so figures measured before it (dated 2026-10-05 and earlier) may have moved. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
+Status: 2026-10-05; tone research updated 2026-10-16 for the [scene tone stage](scene-tone-stage.md); lens, profile and catalog notes updated 2026-10-03. RAWmakase renders close to Lightroom but not identically. Each item below says what differs and, where measured, by how much. Errors are encoded-sRGB mean absolute error (0–1) against Camera Raw 18.6 or Lightroom Classic 15.5 exports, scored with `scripts/lightroom-scorecard.py`; most of the entries below are mean ΔE00 against Camera Raw 18.7 renders of the synthetic charts. For scale: Lightroom X100F references averaged 0.0090, Sony A7 II Camera Raw references 0.0065. The scene tone stage changed the default render and every tone control, so figures measured before it (dated 2026-10-05 and earlier) may have moved. Details: [tone controls](tone-controls.md), [color mixer and grading](color-mixer.md), [lens corrections](lens-corrections.md), [transform](transform.md).
 
 ## Measured and matched (for reference)
 
@@ -8,13 +8,109 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Tone
 
-- **Scene tone stage**: Exposure, the default white and black point, Whites, Blacks, Shadows, Highlights, Clarity, Texture and Dehaze render on scene values before the profile, fitted on linear-profile Camera Raw 18.7 renders ([scene tone stage](scene-tone-stage.md), [tone controls](tone-controls.md#whites-and-blacks)). How Camera Raw adapts them to each photo stays fitted: keys from the photo's statistics and tables over its measures, not Camera Raw's own rule. Shadows and Highlights on the synthetic chart's flat patches are still far from Camera Raw; Dehaze (a curve per amount, no spatial part) and positive Whites (+100 especially) are fitted but still differ. Whether the stage meets its photo gates is not recorded here.
+- **Scene tone stage**: Exposure, the default white and black point, Whites, Blacks, Shadows, Highlights, Clarity, Texture and Dehaze render on scene values before the profile, fitted on linear-profile Camera Raw 18.7 renders ([scene tone stage](scene-tone-stage.md), [tone controls](tone-controls.md#whites-and-blacks)). How Camera Raw adapts them to each photo stays fitted: keys from the photo's statistics and tables over its measures, not Camera Raw's own rule. Shadows and Highlights on the synthetic chart's flat patches are still far from Camera Raw; Dehaze (a curve per amount, no spatial part) and positive Whites (+100 especially) are fitted but still differ. The Shadows/Highlights investigation below did not produce a candidate that passed its shipping gates.
 - **Contrast** follows Camera Raw's curve, after the profile and so after Whites and Blacks, at a pivot predicted from the photo ([tone controls](tone-controls.md#contrast)); the prediction is within about 0.03 of the pivot that fits each photo best, and its extra error over the default render on photos is 0.003–0.007.
 - **Clarity** of both signs follows a model fitted to Camera Raw's scene-value renders of synthetic scenes ([tone controls](tone-controls.md#clarity)); its residual is not modelled. **Texture** follows a model fitted to Camera Raw on synthetic charts ([tone controls](tone-controls.md#texture)): on the corpus chart its ΔE00 to Camera Raw drops from 2.0–2.2 to 1.5–1.6 at ±100.
 - **Parametric tone curve** renders as Camera Raw 18.7 does on the chart ([tone controls](tone-controls.md#parametric-curve)): the 24 `parametric-*` cases sit at mean ΔE00 0.8–3.0, down from 0.95–7.9, and the looks carrying one at 0.9–1.6, down from 1.7–4.9. With out-of-gamut colors clipped per channel as Camera Raw does ([out-of-gamut colors](color-pipeline.md#out-of-gamut-colors)), the cases sit at 0.48–1.15. A look's own parametric curve is a second curve after the user's, as in Camera Raw (`look-parametric-darks+30`: 0.93, was 1.41); at Amount 200 Camera Raw's look curve does about 1.6 times its effect at 100, where RAWmakase doubles it. **Point curves** match on ramps, but saturated colors under an S master curve still differ (ramp MAE 0.0024, peak 0.11).
 - **Curve Refine Saturation** renders as Camera Raw 18.7 does on the chart ([tone controls](tone-controls.md#refine-saturation)): the `curve-*-refine-saturation-*` cases sit at mean ΔE00 1.1–1.5, against 1.4 for the same S curve at 100. Values above 100 render as 100, as in Camera Raw. It imports, is written back, and has a Refine › Saturation slider (0–100) under the RGB point curve.
 - **Point Curve menu** has Lightroom's Linear, Medium Contrast and Strong Contrast (points from Lightroom Classic's catalog), saved curves and Save…; saved curves live in RAWmakase's data folder, not in Lightroom's Curves folder, and the menu's curve name is not written to XMP ([tone controls](tone-controls.md#point-curve-menu)). Whether Lightroom's built-in choices also reset the colour curves was not checked; here they set the RGB curve only.
 - **Auto** tone is fitted to Lightroom Classic's own Auto values, from 452 Auto Settings steps on 439 catalog photos with every fifth photo held out; each slider is a linear fit of one or two display-encoded percentiles of luminance, of the brightest channel or of chroma, and the held-out error is a median 1 step on Contrast and 0.21 EV on Exposure. Lightroom changed Auto in mid-2019 and the catalog's history shows both versions, so the slopes are fitted on every photo and the levels, Contrast, Vibrance and Saturation on the current Auto alone. The WB menu's Auto white balance is fitted to Lightroom's Auto values (a median of 2.7 mired off on 133 photos); see [tone controls](tone-controls.md#auto).
+
+### Shadows/Highlights research: what did not work (2026-10-16)
+
+**No candidate from this investigation passed the requirements for shipping.**
+The learned operator on `t3code/learned-local-tone` remains unmerged. Its paired
+final-render validation median against main was **1.21 → 1.21 ΔE00** across
+5,222 setting/photo rows; p90 was 5.00 → 5.04. Better Highlights medians did not
+establish a safe Highlights-only release: individual photos and scene probes
+still regressed.
+
+The experiments below used Camera Raw 18.7. Photo decisions used the dataset
+**validation** split; dataset holdout was not rendered or scored. Scene-gain RMS
+in EV, synthetic-probe errors, and final-render ΔE00 are different measurements
+and must not be compared as one score. These results describe particular tested
+implementations, not proofs that every variant of an algorithm must fail.
+
+| Approach | Evidence | Decision |
+| --- | --- | --- |
+| Add Local-Laplacian features to the learned operator | An earlier rendered candidate improved median ΔE00 versus main: Shadows +100, 2.432 → 1.920 (44 photos); Highlights −100, 1.781 → 1.310 (51 photos). But 21 Shadows and 13 Highlights photos had regional regressions greater than 2 ΔE00; clipping and a clipped-spot scene probe also regressed. | Rejected despite better medians. Not evidence for shipping Highlights alone. |
+| Retrain Laplacian features with corrected intrinsic targets and `DefaultBlackRender=None` | On 47 validation photos, direct gain RMS improved from 0.260/0.140 to 0.246/0.130 EV (Shadows/Highlights), but p90 worsened for both. Three of six scene-probe tests failed; the dark-gap Shadows lift was 1.188 EV versus Camera Raw's 0.600 EV. | Rejected before another final-render photo gate. Direct network accuracy did not establish deployed parity. |
+| Median prefilter before the existing Highlights/Shadows base, with frozen network weights | Small-square diagnostics worsened: Shadows RMS 0.274 → 0.291/0.299 EV for the two tested radii; Highlights 0.945 → 1.019/1.137 EV. | Rejected as a drop-in substitution. No native photo gate was run for this variant. |
+| Remove the four per-location coarse features; predict one globally conditioned curve on the guided base | Matched 248 training photos + 64 synthetic scenes, three seeds, same architecture and training schedule. On 47 validation photos, ensemble RMS worsened: Shadows 0.260 → 0.272 EV, Highlights 0.140 → 0.155 EV. Medians and p90 also worsened. At a 0.02 EV per-photo threshold, Shadows had 4 improvements/23 regressions; Highlights 1/14. | Rejected. Retain the local features in this architecture; no deployment or rendered gate for this candidate. |
+| Describe scene context using only minimum/maximum of a 64- or 128-pixel reduced image | Identical source **and decoded-default** extrema at 128 pixels still gave a 0.0225 EV difference in Shadows +100 at the same distant dark luminance. | Insufficient context; no curves fitted to this representation. |
+| Predict gains from reduced-image quantiles with a fixed kernel regressor | Excluding each entire synthetic family during fitting, the 64-pixel model had 0.092/0.529 EV RMS; the 128-pixel model had 0.141/0.441 EV RMS. Unseen brightness depths were particularly poor. | Not accurate enough to advance. This does not rule out every filtered-distribution model. |
+| Add independently measured Shadows and Highlights log gains | Clean LinearRaw probes had interaction residuals of −0.190 EV at (+50, −50) and −0.380 EV at (+100, −100), for the same dark patch. | Addition is not Camera Raw's combined response at the measured boundary. |
+| Compose the two single-slider curves | Re-rendering one control's output through the other missed the original joint result by 0.300–0.670 EV at the tested centers, with default roundtrip error below 0.00051 EV. A separate frozen-context scalar Shadows→Highlights test put 15/72 joint measurements outside conservative monotone endpoint bounds, by up to 0.266 EV. | Neither tested scalar composition explains the joint response. Arbitrary spatial processing order remains unidentified. |
+| Replace addition at (+50, −50) with a shared weighted sum of the two measured single-slider gains | Using saved renders only, coefficients constrained to [0, 2] and excluding each whole synthetic family, 41 eligible scenes improved from 0.162 to 0.049 EV RMS, but maximum error remained 0.102 EV. Every fit put the Shadows coefficient at its zero bound; incomplete coverage and this restricted setting do not establish a general control law. | Insufficient evidence for an engine change. No photo validation or new rendering was performed for this diagnostic. |
+
+**Unconfirmed, rather than disproved:** the LibRaw/Adobe white-level audit found
+camera differences, but did not establish that changing the scene white point
+would improve the observed residuals. The within-Canon comparison did not
+support the proposed causal explanation. No white-level correction was made.
+
+**Useful findings that are not a parity fix:** identical full-resolution RGB
+histograms can produce different broad Shadows responses when texture frequency
+changes. Some spatially processed scene context is therefore missing from a
+plain histogram model. On three clean scenes, common-amplitude scaling plus
+quadratic interpolation over slider directions predicted 152 additional dark
+ROI measurements with 0.00048 EV RMS and 0.00253 EV maximum error. This describes
+slider geometry, **not how to predict the image-dependent curves**; bright
+outputs violated the same simple scaling law. Small spatial variation in the
+joint interaction suggests a shared joint curve plus spatial residuals, but
+that decomposition has not produced a validated photo-quality improvement.
+
+Target construction also needed two correctness repairs: robust monotone
+default-transfer calibration instead of a cumulative maximum over individual
+pixels, and rejection of Adobe Standard references paired with linear-profile
+taps. These trainer repairs are on the research branch (`b26079fd` and
+`6f6e2701`); this findings update does not merge them. Historical
+mismatched-profile gain scores are not evidence. See the stage
+[comparison contract](scene-tone-stage.md#comparison-contract) for the
+measurement boundaries.
+
+The large synthetic render queue was **stopped at the user's request**; its
+combined-control coverage is incomplete. Existing measurements were retained.
+Do not restart that grid or generate more large probe batches as the default
+next step. A further candidate needs a specific hypothesis, a bounded test on
+existing evidence where possible, and a validation/rendering decision before
+expanding data collection. No matched photo-quality comparison against
+darktable, RawTherapee or RapidRAW was performed; studying their mechanisms did
+not establish that RAWmakase renders better or worse than those applications.
+
+**Final stress-data attempt, then stopped.** At the user's request, one final
+bounded test used only existing stress-validation references: 17 distinct
+photos with default, Shadows +50, Highlights −50 and combined renders. TIFF
+hashes and embedded metadata were checked; all used Adobe Standard and differed
+only in those two controls. No new images were rendered. The test compared five
+fixed rules on the same supported pixels, with median coverage of 78.2%:
+
+| Rule for the combined response | Aggregate RMS (EV) | Median photo RMS (EV) | p90 photo RMS (EV) |
+| --- | ---: | ---: | ---: |
+| Add log gains | 0.123 | 0.117 | 0.177 |
+| Add linear-luminance changes | 0.142 | 0.092 | 0.228 |
+| Frozen scalar Shadows → Highlights | 0.147 | 0.132 | 0.215 |
+| Frozen scalar Highlights → Shadows | 0.155 | 0.145 | 0.208 |
+| Probe-derived weighting, 0.85 × Highlights log gain | 0.498 | 0.376 | 0.748 |
+
+The sequential models fitted monotone curves to each photo's **single-control**
+references on one spatial half, then predicted the combined render on the other
+half; combined outputs were never fitted. All rules received Camera Raw's own
+single-control results, not RAWmakase approximations. Predictions were limited
+to measured interpolation support, with all four luminances between 0.003 and
+0.85; excluded dark/clipped pixels are not covered by these scores.
+
+None met the predeclared criterion: median photo RMS at most 0.03 EV, p90 at most
+0.05 EV, median paired error reduction of at least 50% against log addition, and
+at least 50% median pixel coverage. Every alternative also worsened aggregate
+RMS; the linear-change rule improved only 6 of 17 photos despite its lower
+median. The synthetic weighting did not transfer to these photos.
+
+These are **final-output luminance diagnostics**, not intrinsic scene-gain or
+rendered-engine parity scores. Adobe Standard's downstream mapping, color and
+spatial effects prevent treating them as proof of Adobe's internal algorithm.
+The attempt did not identify a defensible predictive mechanism or a new engine
+candidate. Research was stopped as instructed; no further experiment or render
+queue was left running, and dataset holdout remained untouched.
 
 ## Color
 
@@ -85,5 +181,5 @@ These controls were fitted to Camera Raw renders and match within the default-re
 ## Validation still needed
 
 - More cameras, profiles (Adobe Color and other looks), illuminants and clipped highlights.
-- Combinations of sliders: every measurement above varies one slider at a time, and composition order is assumed.
+- Combinations of sliders: Shadows/Highlights probes reject simple gain addition, but a replacement joint operator has not passed photo validation. Other combinations and their processing order still need verification.
 - A repeatable test set that isn't private photos; Piotr plans to design the testing pipeline.
