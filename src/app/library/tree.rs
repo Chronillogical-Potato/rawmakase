@@ -1,3 +1,4 @@
+use super::folder_selection::{Click, FolderSelection};
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::catalog::{Folder, FolderId, RootId};
@@ -55,9 +56,20 @@ impl FolderNode {
             self.ids.extend(&child.ids);
         }
     }
+    /// The keys of this row and the rows unfolded below it, in the order
+    /// they are drawn.
+    pub(super) fn shown_rows<'a>(&'a self, expanded: &HashSet<String>, rows: &mut Vec<&'a str>) {
+        rows.push(&self.key);
+        if expanded.contains(&self.key) {
+            for child in self.children.values() {
+                child.shown_rows(expanded, rows);
+            }
+        }
+    }
 }
 pub(super) enum TreeAction {
-    Select(String, HashSet<FolderId>),
+    /// The folder's key, and how it was clicked.
+    Select(String, Click),
     RelinkRoot(RootId),
     RelinkFolder(FolderId),
     /// Remove from Catalog: the folder's name, it and its subfolders, and
@@ -71,14 +83,14 @@ pub(super) fn folder_tree_row(
     node: &FolderNode,
     depth: usize,
     expanded: &mut HashSet<String>,
-    selected: &str,
+    selected: &FolderSelection,
 ) -> Option<TreeAction> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
     let painter = ui.painter();
-    let active = selected == node.key;
+    let active = selected.contains(&node.key);
     let open = expanded.contains(&node.key);
     if active || response.hovered() {
         painter.rect_filled(
@@ -156,7 +168,8 @@ pub(super) fn folder_tree_row(
                 expanded.insert(node.key.clone());
             }
         } else {
-            action = Some(TreeAction::Select(node.key.clone(), node.ids.clone()));
+            let click = Click::of(ui.input(|i| i.modifiers));
+            action = Some(TreeAction::Select(node.key.clone(), click));
         }
     }
     response.clone().on_hover_text(format!(

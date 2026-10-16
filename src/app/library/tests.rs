@@ -300,7 +300,7 @@ fn tree_locate_action_uses_the_clicked_root() {
             },
             |ui| {
                 let top = ui.cursor().top();
-                action = folder_tree_row(ui, &root, 0, &mut expanded, "");
+                action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default());
                 row = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
             },
         );
@@ -342,6 +342,122 @@ fn tree_locate_action_uses_the_clicked_root() {
     frame(click(at, egui::PointerButton::Primary, true));
     let (action, _, _) = frame(click(at, egui::PointerButton::Primary, false));
     assert!(matches!(action, Some(TreeAction::RelinkRoot(RootId(42)))));
+}
+#[test]
+fn tree_click_modifiers_choose_how_the_folder_is_selected() {
+    use super::folder_selection::Click;
+    let ctx = egui::Context::default();
+    let root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let mut expanded = HashSet::new();
+    let at = egui::pos2(120., 10.);
+    let mut frame = |modifiers: egui::Modifiers, pressed: Option<bool>| {
+        let mut action = None;
+        let events = pressed.map_or_else(Vec::new, |pressed| {
+            vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                },
+            ]
+        });
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default()),
+        );
+        output.textures_delta.clear();
+        action
+    };
+    for (modifiers, expected) in [
+        (egui::Modifiers::NONE, Click::Replace),
+        (egui::Modifiers::COMMAND, Click::Toggle),
+        (egui::Modifiers::SHIFT, Click::Range),
+    ] {
+        frame(modifiers, None);
+        frame(modifiers, Some(true));
+        let action = frame(modifiers, Some(false));
+        assert!(
+            matches!(&action, Some(TreeAction::Select(key, click)) if key == "root:42" && *click == expected),
+            "{modifiers:?}"
+        );
+    }
+}
+#[test]
+fn several_folders_show_their_photos_together() -> Result<()> {
+    use super::folder_selection::Click;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("photos");
+    for sub in ["day1", "day2", "day2/raw", "day3", "day4"] {
+        let folder = root.join(sub);
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(folder.join("image.RAF"), b"synthetic raw")?;
+    }
+    let path = directory.path().join("days.rawmakase");
+    Catalog::create(&path)?.add_folder(&root)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let root_id = library.session.roots[0].0;
+    let key = |sub: &str| format!("root:{root_id}/{sub}");
+    // The rows as the Folders panel shows them, day2 folded.
+    let rows = [
+        format!("root:{root_id}"),
+        key("day1"),
+        key("day2"),
+        key("day3"),
+        key("day4"),
+    ];
+    let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let in_folders = |library: &Library| {
+        let mut folders: Vec<String> = ids_of(library)
+            .iter()
+            .map(|id| {
+                let path = &library.photo(*id).unwrap().path;
+                let folder = path.parent().unwrap().strip_prefix(&root).unwrap();
+                folder.to_string_lossy().into_owned()
+            })
+            .collect();
+        folders.sort();
+        folders
+    };
+    library.click_folder(&key("day1"), Click::Replace, &rows);
+    assert_eq!(in_folders(&library), ["day1"]);
+    // Shift-click: day1 to day3, with day2's subfolder.
+    library.click_folder(&key("day3"), Click::Range, &rows);
+    assert_eq!(in_folders(&library), ["day1", "day2", "day2/raw", "day3"]);
+    assert_eq!(library.source_name(), "3 folders");
+    // The session keeps the folder the range started from.
+    assert_eq!(library.source_key(), key("day1"));
+    // Synchronize Folder needs one folder.
+    assert!(library.selected_sync_scope().is_none());
+    // Cmd-click takes a folder out and adds another.
+    library.click_folder(&key("day2"), Click::Toggle, &rows);
+    library.click_folder(&key("day4"), Click::Toggle, &rows);
+    assert_eq!(in_folders(&library), ["day1", "day3", "day4"]);
+    // Going back to a place shows its folders again.
+    let place = library.place();
+    library.click_folder(&key("day2"), Click::Replace, &rows);
+    assert_eq!(in_folders(&library), ["day2", "day2/raw"]);
+    assert!(library.selected_sync_scope().is_some());
+    library.go_to_place(&place);
+    assert_eq!(in_folders(&library), ["day1", "day3", "day4"]);
+    // A folder and its own subfolder show each photo once.
+    library.click_folder(&key("day2"), Click::Replace, &rows);
+    library.click_folder(&format!("{}/raw", key("day2")), Click::Toggle, &rows);
+    assert_eq!(in_folders(&library), ["day2", "day2/raw"]);
+    // Restoring the session's source shows that folder alone.
+    library.restore_source(&key("day4"), None);
+    assert_eq!(in_folders(&library), ["day4"]);
+    assert_eq!(library.source_name(), "day4");
+    Ok(())
 }
 #[test]
 fn batched_availability_distinguishes_files_directories_and_missing_paths() -> Result<()> {
