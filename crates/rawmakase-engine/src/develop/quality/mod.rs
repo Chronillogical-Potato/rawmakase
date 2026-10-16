@@ -217,6 +217,44 @@ mod tests {
         assert!(recover_highlights(&im).pixels.iter().all(|p| *p == [1.; 3]));
     }
     #[test]
+    fn recovery_never_darkens_a_clipped_channel() {
+        // Neighbours whose ratio puts red at 0.5, under a red the sensor clipped at
+        // 1: the light was at least that bright, so red keeps 1.
+        let mut im = fixture();
+        im.pixels.fill([0.5, 0.4, 0.2]);
+        let i = 40 * 96 + 40;
+        im.pixels[i] = [1., 0.4, 0.2];
+        assert_eq!(recover_highlights(&im).pixels[i], [1., 0.4, 0.2]);
+        // The same where no neighbour is unclipped (the neutral fallback, 0.3).
+        for y in 30..51 {
+            for x in 30..51 {
+                im.pixels[y * 96 + x] = [1., 0.4, 0.2];
+            }
+        }
+        im.pixels
+            .iter_mut()
+            .filter(|p| p[0] < 1.)
+            .for_each(|p| *p = [0.05; 3]);
+        assert_eq!(recover_highlights(&im).pixels[i], [1., 0.4, 0.2]);
+    }
+    #[test]
+    fn the_floor_fades_as_a_second_channel_clips() {
+        // Red clipped over neighbours that put it at 0.5; green rises through the
+        // clip threshold. The floor goes with green's own blend: no jump at 0.97,
+        // and none left once green is clipped too.
+        let red = |g: f32| {
+            let mut im = fixture();
+            im.pixels.fill([0.5, 0.969, 0.4]);
+            let i = 40 * 96 + 40;
+            im.pixels[i] = [1., g, 0.4];
+            recover_highlights(&im).pixels[i][0]
+        };
+        assert_eq!(red(0.96), 1.);
+        assert!((red(0.96999) - red(0.97001)).abs() < 1e-3);
+        assert!((red(0.985) - 0.75).abs() < 0.01, "{}", red(0.985));
+        assert!((red(1.) - 0.5).abs() < 1e-3);
+    }
+    #[test]
     fn wide_partial_highlight_keeps_the_surviving_channels_colour() {
         let mut im = fixture();
         im.pixels.fill([0.8, 0.4, 0.2]);
@@ -266,9 +304,10 @@ mod tests {
         }
         let recovered = recover_highlights(&im);
         // The clipped object's colour is unknown. The separate red object must
-        // not cause its missing channel to be extrapolated to 1.2.
+        // not cause its missing channel to be extrapolated to 1.2; it keeps what
+        // the sensor recorded.
         let p = recovered.pixels[35 * 96 + 60];
-        assert!((p[0] - 0.45).abs() < 1e-5, "{p:?}");
+        assert_eq!(p[0], 1., "{p:?}");
         assert_eq!(p[1..], [0.6, 0.3]);
     }
     #[test]
