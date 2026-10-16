@@ -1,5 +1,6 @@
 //! Minimal bounded TIFF directory reading for RAW containers (ARW, DNG, the TIFF
-//! inside RAF). Reads only the directories and tags it is asked for.
+//! inside RAF) and the EXIF embedded in JPEGs and PNGs. Reads only the
+//! directories and tags it is asked for.
 use std::{
     collections::BTreeMap,
     fs::File,
@@ -46,26 +47,38 @@ impl Entry {
 pub struct Tiff {
     f: File,
     base: u64,
+    /// How many bytes from `base` the TIFF may span; `None` to the file's end.
+    len: Option<u64>,
     pub little: bool,
     pub first: u64,
 }
 impl Tiff {
-    pub fn open(mut f: File, base: u64) -> Option<Self> {
-        let mut h = [0u8; 8];
-        f.seek(SeekFrom::Start(base)).ok()?;
-        f.read_exact(&mut h).ok()?;
+    /// The TIFF at `base`, reaching to the end of the file, as a RAW's or a
+    /// TIFF's own does.
+    pub fn open(f: File, base: u64) -> Option<Self> {
+        Self::start(f, base, None)
+    }
+    /// The TIFF of `len` bytes at `base`, embedded in another file's container
+    /// (a JPEG's APP1 segment, a PNG's eXIf chunk): nothing outside it is read.
+    pub fn open_within(f: File, base: u64, len: u64) -> Option<Self> {
+        Self::start(f, base, Some(len))
+    }
+    fn start(f: File, base: u64, len: Option<u64>) -> Option<Self> {
+        let mut t = Self {
+            f,
+            base,
+            len,
+            little: false,
+            first: 0,
+        };
+        let h = t.bytes(0, 8)?;
         let little = match &h[..4] {
             // Olympus ORF and Panasonic RW2 use their own magic numbers.
             b"II*\0" | b"IIRO" | b"IIRS" | b"IIU\0" => true,
             b"MM\0*" => false,
             _ => return None,
         };
-        let mut t = Self {
-            f,
-            base,
-            little,
-            first: 0,
-        };
+        t.little = little;
         t.first = t.u32(&h[4..8]) as u64;
         Some(t)
     }
@@ -86,7 +99,8 @@ impl Tiff {
         }
     }
     pub(crate) fn bytes(&mut self, offset: u64, len: usize) -> Option<Vec<u8>> {
-        if len > 1 << 20 {
+        let end = offset.checked_add(len as u64)?;
+        if len > 1 << 20 || self.len.is_some_and(|max| end > max) {
             return None;
         }
         let mut b = vec![0; len];

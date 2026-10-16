@@ -22,7 +22,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | Support another XMP setting | [Parser](../crates/rawmakase-interop/src/xmp/parse.rs), [application stages](../crates/rawmakase-interop/src/xmp/apply.rs) | Recipe validation and XMP tests; library discovery stays in presets |
 | Change preset discovery/import | [Preset library](../crates/rawmakase-interop/src/presets/library.rs) | Preset browser UI and shared asset paths |
 | Add DCP support | [DCP reader](../crates/rawmakase-model/src/camera_profiles/dcp.rs), [profile model](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Camera matching, validation, reference rendering |
-| Change JPEG/TIFF output | [Export](../crates/rawmakase-export/src/export/mod.rs), [metadata](../crates/rawmakase-export/src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
+| Change JPEG, TIFF or PNG output | [Export](../crates/rawmakase-export/src/export/mod.rs), [metadata](../crates/rawmakase-export/src/export/metadata.rs) | Export tests; UI captures a recipe before starting |
 | Change native catalog behavior | [Catalog API](../crates/rawmakase-catalog/src/catalog/mod.rs), [schema](../crates/rawmakase-catalog/src/catalog/schema.sql) | Models, catalog tests, library UI |
 | Improve Lightroom import | [Importer](../crates/rawmakase-catalog/src/catalog/lightroom/mod.rs), [Develop translation](../crates/rawmakase-interop/src/lr_develop.rs) | Preservation tests and unsupported-setting reporting |
 | Change autosave or saved formats | [Save policy](../src/edit_session/save_state.rs), [background saver](../src/app/autosave.rs), [legacy sidecars](../crates/rawmakase-catalog/src/catalog/legacy_sidecar.rs), [format migration](../crates/rawmakase-model/src/model/saved_format.rs) | Catalog edits, native presets and persistence tests |
@@ -70,7 +70,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [src/dng.rs](../src/dng.rs) | The rendering hints a DNG carries: embedded camera profile, baseline exposure, default crop, default user crop and opcode lens corrections. |
 | [crates/rawmakase-model/src/tiff.rs](../crates/rawmakase-model/src/tiff.rs) | Minimal bounded TIFF directory reader for RAW containers (ARW, DNG, the TIFF inside RAF), and the TIFF field types. |
 | [crates/rawmakase-interop/src/jpeg.rs](../crates/rawmakase-interop/src/jpeg.rs) | Walks a JPEG's marker segments up to the image data: embedded XMP and EXIF, and where an export inserts its XMP. |
-| [crates/rawmakase-interop/src/exif.rs](../crates/rawmakase-interop/src/exif.rs) | The camera's own EXIF read from a RAW, JPEG or TIFF (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
+| [crates/rawmakase-interop/src/exif.rs](../crates/rawmakase-interop/src/exif.rs) | The camera's own EXIF read from a RAW, JPEG, TIFF or PNG (for exports, capture times and photo info), and the names of the EXIF, TIFF and GPS tags RAWmakase uses; maker notes and offsets into the RAW are left out. |
 | [src/stats.rs](../src/stats.rs) | The opt-in weekly usage report: what it holds, how the install channel and platform are found, and sending it at most once a week ([usage-stats.md](usage-stats.md)). Built only with the default `telemetry` feature. |
 | [crates/rawmakase-model/src/time.rs](../crates/rawmakase-model/src/time.rs) | Calendar dates and ISO weeks from Unix time, without a date library. |
 | [src/updates.rs](../src/updates.rs) | Release checks against GitHub, whether this install may replace itself, and the signed download and install (through fastframe-update). |
@@ -188,6 +188,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | --- | --- |
 | [storage/mod.rs](../crates/rawmakase-model/src/storage/mod.rs) | Shared persistence and path API. |
 | [files.rs](../crates/rawmakase-model/src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
+| [formats.rs](../crates/rawmakase-model/src/storage/formats.rs) | The rendered formats (JPEG, TIFF, PNG) as facts with no codec: extensions, MIME types and names, and `is_photo`, which file Add Folder and Synchronize Folder take. The one place a new format is named. |
 | [model/saved_history.rs](../crates/rawmakase-model/src/model/saved_history.rs) | A Develop History as kept between sessions, as plain values: Develop's History restores from it and the catalog stores it, neither depending on the other. |
 | [model/saved_format.rs](../crates/rawmakase-model/src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration, and the one list of obsolete engine and operator settings every recipe read drops. Recipes keep unknown fields from newer releases. |
 | [bitmaps.rs](../crates/rawmakase-model/src/storage/bitmaps.rs) | Compressed raster data referenced by hash from recipes (future AI masks and patches): catalog `bitmaps` table, sidecar `bitmaps` map. |
@@ -197,7 +198,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | [app/session.rs](../src/app/session.rs) | Last-opened path, monitor profile, raw defaults, the panels each module shows and other preferences. |
 | [catalog_session/mod.rs](../src/catalog_session/mod.rs) | The open catalog and its photos, folders, collections and roots as read, with no window; writes that change those lists (ratings, the Quick Collection, refreshed fields and keywords) keep them in step. The Library shows them. |
 | [catalog_session/descriptive.rs](../src/catalog_session/descriptive.rs) | Descriptive metadata edits, their undo, Read Metadata from Files, collection membership, and virtual copies with their Copy Names, written to the catalog and read back into the session's lists. |
-| [catalog_session/backfill.rs](../src/catalog_session/backfill.rs) | Capture times and photo info read from files added from folders, in the background, saved in the catalog and the session's photos. The Library says which photos are online and re-sorts. |
+| [catalog_session/backfill.rs](../src/catalog_session/backfill.rs) | Capture times and photo info read from files added from folders, in the background, saved in the catalog and the session's photos; also, once, PNGs whose info earlier releases stored without their EXIF (`Catalog::reread_png_info_once`). The Library says which photos are online and re-sorts. |
 | [catalog_session/checksums.rs](../src/catalog_session/checksums.rs) | Every master's file checksum, read in the background: quick hashes first, then full ones, throttled and paused for heavier work. What was read before a structural change (the session's generation, bumped by every reload) is dropped. |
 | [catalog_session/background.rs](../src/catalog_session/background.rs) | Reading many photos' files a batch at a time on a thread, waking whoever shows them after each batch; also used by Read Metadata from Files. |
 | [catalog/mod.rs](../crates/rawmakase-catalog/src/catalog/mod.rs) | Catalog lifecycle, browsing queries (photos, folders, collections, roots), metadata and relinking. |
@@ -222,10 +223,10 @@ recipes and the installed preset collection; they do not own the renderer.
 | [lr_develop.rs](../crates/rawmakase-interop/src/lr_develop.rs) | Parses Lightroom's serialized Lua settings as data, translates supported controls through XMP, and reports unsupported settings. Never executes Lua. |
 | [lightroom/history.rs](../crates/rawmakase-catalog/src/catalog/lightroom/history.rs) | Lightroom's develop history per photo, and its recovery from the preserved .lrcat for catalogs imported before it was kept. |
 | [export/mod.rs](../crates/rawmakase-export/src/export/mod.rs) | Export option validation, original-file protection, overwrite policy and atomic publication. |
-| [export/encode.rs](../crates/rawmakase-export/src/export/encode.rs) | JPEG and 16-bit TIFF encoding with the ICC profile, EXIF directories and XMP. |
-| [export/metadata.rs](../crates/rawmakase-export/src/export/metadata.rs), [export/exif.rs](../crates/rawmakase-export/src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as a JPEG's TIFF block. |
+| [export/encode.rs](../crates/rawmakase-export/src/export/encode.rs) | JPEG, 16-bit TIFF and PNG encoding with the ICC profile, EXIF directories and XMP. |
+| [export/metadata.rs](../crates/rawmakase-export/src/export/metadata.rs), [export/exif.rs](../crates/rawmakase-export/src/export/exif.rs) | The EXIF directories an export writes (the camera's, with the export's size, orientation, resolution and software), as the TIFF block a JPEG's APP1 segment or a PNG's eXIf chunk holds. |
 | [export/job.rs](../crates/rawmakase-export/src/export/job.rs) | One photo's export from start to finish: decode when needed, render, metadata, file. |
-| [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. Below the catalog and export, which both use them. |
+| [export_settings.rs](../crates/rawmakase-interop/src/export_settings.rs) | The Export dialog's choices (destination, name, format, size, metadata), saved as `export.json` for the next export, and a photo's own `ExportOptions`. A format or setting only a later release knows is saved back untouched. Below the catalog and export, which both use them. |
 
 ## Desktop application
 
@@ -368,7 +369,7 @@ What each long-lived worker blocks on, how it stops and whether exit may wait fo
 | Original RAW and Lightroom catalog | User-selected source files; treated as read-only. |
 | Legacy sidecar edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks, or identity-keyed JSON under the data directory's `sidecars/`, saved by releases before 0.1.8. Imported into the catalog when their folder is added and left on disk unchanged. |
 | Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots, red eye corrections and masks are in the `local_edits` table, Develop History in `develop_history`, raster data in `bitmaps`. |
-| Native preset / exported photo | User-selected JSON / JPEG / TIFF destination. |
+| Native preset / exported photo | User-selected JSON / JPEG / TIFF / PNG destination. |
 | Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |
 | Saved point curves | `curves/` in the data directory: one XMP file per curve, named by the curve. |
@@ -391,7 +392,7 @@ sibling `tests.rs`. Keep regressions with the domain that owns the behavior.
 | [catalog/legacy_sidecar/tests.rs](../crates/rawmakase-catalog/src/catalog/legacy_sidecar/tests.rs) | Migration, source identity, conflict protection and fallback persistence. |
 | [catalog/tests.rs](../crates/rawmakase-catalog/src/catalog/tests.rs) | Catalog, import and relinking behavior; preview-cache tests live in its module. |
 | [catalog/locations_tests.rs](../crates/rawmakase-catalog/src/catalog/locations_tests.rs) | One catalog on several computers: adoption, per-computer relinking and clearing, import matching and legacy paths. |
-| [export/tests.rs](../crates/rawmakase-export/src/export/tests.rs) | JPEG/TIFF precision, ICC and EXIF output. |
+| [export/tests.rs](../crates/rawmakase-export/src/export/tests.rs) | JPEG, TIFF and PNG precision, ICC and EXIF output. |
 | [develop/gpu/tests.rs](../crates/rawmakase-engine/src/develop/gpu/tests.rs) | Explicit hardware tests for CPU/GPU agreement, borders, buffer reuse, crop/region handling, effects and fallback. |
 | [tests/color/](../tests/color/main.rs), [tests/corpus/README.md](../tests/corpus/README.md) | The color corpus: synthetic chart DNGs rendered and compared with committed snapshots and Camera Raw renders on every `cargo test`; private photo and Adobe-profile tiers behind `RAWMAKASE_CORPUS`. |
 | [examples/preview_benchmark.rs](../examples/preview_benchmark.rs) | Read-only release benchmark of first Fit, slider Fit, 100% region and export renders on a supplied RAW; checks Fit against the resized export. |

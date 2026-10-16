@@ -131,14 +131,16 @@ impl CatalogSession {
             }
         }
     }
-    /// Reads the info of the photos that have none, of those `available` says
-    /// are online; asked while reading, it reads again once done.
+    /// Reads the info of the photos that have none or are to be read again
+    /// (see [`crate::catalog::Catalog::photos_to_read_info`]), of those
+    /// `available` says are online; asked while reading, it reads again once
+    /// done.
     pub(crate) fn start_photo_info(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.info.is_some() {
             self.backfill.info_again = true;
             return;
         }
-        let Ok(missing) = self.catalog.photos_without_info() else {
+        let Ok(missing) = self.catalog.photos_to_read_info() else {
             return;
         };
         let missing: HashSet<PhotoId> = missing.into_iter().collect();
@@ -192,18 +194,21 @@ enum CaptureRead {
 }
 
 /// Whether a capture time can be read from this kind of file at all, so
-/// files that never yield one are not opened on every launch: a PNG rarely
-/// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
+/// files that never yield one are not opened on every launch: the EXIF
+/// reader handles JPEG, TIFF and PNG, TIFF-based RAWs and RAF but not
 /// Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
 fn has_capture_time(path: &Path) -> bool {
-    let extension = path
-        .extension()
-        .map(|x| x.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "jpg" | "jpeg" | "tif" | "tiff" => true,
-        "cr3" | "crw" | "x3f" | "mrw" => false,
-        _ => crate::storage::is_raw(path),
+    use crate::storage::RasterFormat;
+    match RasterFormat::of(path) {
+        Some(RasterFormat::Jpeg | RasterFormat::Tiff | RasterFormat::Png) => true,
+        None => {
+            let extension = path
+                .extension()
+                .map(|x| x.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            !matches!(extension.as_str(), "cr3" | "crw" | "x3f" | "mrw")
+                && crate::storage::is_raw(path)
+        }
     }
 }
 
@@ -254,4 +259,23 @@ fn raster_dimensions(path: &Path) -> Option<(u32, u32)> {
         matches!(o, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH)
     });
     Some(if turned { (h, w) } else { (w, h) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capture_times_are_read_from_rendered_files_and_raws_the_exif_reader_handles() {
+        for name in [
+            "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.png", "A.PNG",
+            "A.NEF", "A.dng", "A.ARW", "A.raf",
+        ] {
+            assert!(has_capture_time(Path::new(name)), "{name}");
+        }
+        for name in [
+            "A.CR3", "A.crw", "A.X3F", "A.mrw", "A.webp", "A.heic", "A.xmp", "A", "._A.NEF",
+        ] {
+            assert!(!has_capture_time(Path::new(name)), "{name}");
+        }
+    }
 }

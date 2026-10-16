@@ -137,3 +137,43 @@ pub fn parent_dir(path: &Path) -> &Path {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn a_raw_is_known_by_its_extension_in_any_case_unless_hidden() {
+        for name in ["A.NEF", "a.nef", "A.Nef", "dir.x/B.DNG", "C.cr3", "D.X3F"] {
+            assert!(is_raw(Path::new(name)), "{name}");
+        }
+        for name in [
+            "A.jpg",
+            "A.JPEG",
+            "A.png",
+            "A.tif",
+            "A.TIFF",
+            "A.xmp",
+            "A.ori",
+            "A.heic",
+            "A.webp",
+            "NEF",
+            "A.",
+            ".A.NEF",
+            "._A.NEF",
+            "dir/._A.NEF",
+        ] {
+            assert!(!is_raw(Path::new(name)), "{name}");
+        }
+    }
+    #[test]
+    fn every_listed_raw_extension_is_lower_case_and_listed_once() {
+        for ext in RAW_EXTENSIONS {
+            assert_eq!(ext, ext.to_ascii_lowercase());
+            assert_eq!(RAW_EXTENSIONS.iter().filter(|e| **e == ext).count(), 1);
+            assert!(is_raw(Path::new(&format!(
+                "A.{}",
+                ext.to_ascii_uppercase()
+            ))));
+        }
+    }
+}

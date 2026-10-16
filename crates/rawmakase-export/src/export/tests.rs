@@ -415,6 +415,50 @@ fn png_carries_icc_camera_exif_xmp_and_resolution() -> Result<()> {
     Ok(())
 }
 #[test]
+fn a_png_export_is_read_back_with_its_camera_and_capture_time() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.ARW");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 4,
+        height: 2,
+        pixels: vec![[0.5; 3]; 8],
+    };
+    let embed = Embed {
+        camera: Some(crate::exif::CameraExif {
+            main: vec![
+                crate::exif::Field::ascii(0x010f, "SONY"),
+                crate::exif::Field::ascii(0x0110, "ILCE-7M4"),
+            ],
+            exif: vec![
+                crate::exif::Field::ascii(0x9003, "2024:05:04 10:21:33"),
+                crate::exif::Field::ascii(0x9291, "12"),
+            ],
+            gps: Vec::new(),
+        }),
+        ..Default::default()
+    };
+    let png = dir.path().join("out.png");
+    export_with(
+        &png,
+        &source,
+        &image,
+        &Metadata::default(),
+        &ExportOptions::default(),
+        &embed,
+        Replace::NoClobber,
+    )?;
+    assert_eq!(
+        crate::exif::capture_time(&png).as_deref(),
+        Some("2024-05-04T10:21:33.120")
+    );
+    assert_eq!(
+        crate::exif::camera_names(&png),
+        Some(("SONY".into(), "ILCE-7M4".into()))
+    );
+    Ok(())
+}
+#[test]
 fn capture_times_take_lightroom_form_with_three_digit_subseconds() {
     use crate::exif::lightroom_time;
     let t = |date, sub| lightroom_time(date, sub);

@@ -18,7 +18,7 @@ rawmakase-interop = { path = "../rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
 rawmakase-native = { path = "../rawmakase-native", version = "0.1.0" }
 anyhow = "1"
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+image.workspace = true
 # The GUID of ExtendedXMP in JPEG exports is an MD5.
 md-5 = "0.11"
 # Installed fonts for text watermarks are mapped, not read whole.

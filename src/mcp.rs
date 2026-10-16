@@ -431,7 +431,7 @@ impl Server {
             .await
     }
     #[tool(
-        description = "Start exporting the guarded edit to a new JPEG/TIFF file. Returns a job ID; call get_job until status is completed before claiming the file exists. Does not overwrite files."
+        description = "Start exporting the guarded edit to a new JPEG, TIFF or PNG file. Returns a job ID; call get_job until status is completed before claiming the file exists. Does not overwrite files."
     )]
     async fn export_photo(&self, Parameters(p): Parameters<Export>) -> CallToolResult {
         let request = Request::Export {

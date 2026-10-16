@@ -6,11 +6,26 @@
 pub mod fonts;
 mod raster;
 use crate::rendered::Rendered;
+use crate::storage::RasterFormat;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub use crate::export_settings::SIMPLE_COPYRIGHT;
+
+/// The formats a graphic watermark's image can be in.
+pub const IMAGE_FORMATS: [RasterFormat; 2] = [RasterFormat::Png, RasterFormat::Jpeg];
+/// [`IMAGE_FORMATS`] by name: "PNG or JPEG".
+pub fn image_formats_named() -> String {
+    IMAGE_FORMATS.map(RasterFormat::name).join(" or ")
+}
+/// Every extension [`IMAGE_FORMATS`] have, for a file dialog.
+pub fn image_extensions() -> Vec<&'static str> {
+    IMAGE_FORMATS
+        .into_iter()
+        .flat_map(|f| f.extensions().iter().copied())
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Style {
@@ -484,8 +499,9 @@ pub fn save_in(
     };
     if let Some(source) = source {
         ensure!(
-            matches!(extension(source).as_str(), "png" | "jpg" | "jpeg"),
-            "Choose a PNG or JPEG image"
+            RasterFormat::of(source).is_some_and(|f| IMAGE_FORMATS.contains(&f)),
+            "Choose a {} image",
+            image_formats_named()
         );
         decode(source).context("The image can't be read")?;
     }

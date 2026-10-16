@@ -278,15 +278,16 @@ impl Editor {
         form_row(ui, "Image Format", |ui| {
             egui::ComboBox::from_id_salt("export-format")
                 .width(140.)
-                .selected_text(match s.format {
-                    Format::Jpeg => "JPEG",
-                    Format::Tiff => "TIFF",
-                    Format::Png => "PNG",
-                })
+                .selected_text(s.format.raster().name())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut s.format, Format::Jpeg, "JPEG");
-                    ui.selectable_value(&mut s.format, Format::Tiff, "TIFF");
-                    ui.selectable_value(&mut s.format, Format::Png, "PNG");
+                    for format in Format::ALL {
+                        if ui
+                            .selectable_label(s.format == format, format.raster().name())
+                            .clicked()
+                        {
+                            s.choose_format(format);
+                        }
+                    }
                 });
         });
         // One row for either format, so nothing below moves.

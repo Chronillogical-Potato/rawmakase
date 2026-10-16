@@ -168,7 +168,10 @@ impl Editor {
                 let graphic = state.watermark.style == Style::Graphic;
                 let source = state.source.clone().filter(|_| graphic);
                 if graphic && source.is_none() && state.watermark.image.is_none() {
-                    state.notice = Notice::Error("Choose a PNG or JPEG image".into());
+                    state.notice = Notice::Error(format!(
+                        "Choose a {} image",
+                        watermark::image_formats_named()
+                    ));
                     self.exports.watermark_editor = Some(state);
                     return;
                 }
@@ -485,14 +488,17 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().into_owned())
                     .or_else(|| w.image.clone())
-                    .unwrap_or_else(|| "A PNG or JPEG image".into());
+                    .unwrap_or_else(|| format!("A {} image", watermark::image_formats_named()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Choose…").clicked() {
                         let picked = state.picked.clone();
                         let ctx = ctx.clone();
                         std::thread::spawn(move || {
                             if let Some(file) = rfd::FileDialog::new()
-                                .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
+                                .add_filter(
+                                    watermark::image_formats_named(),
+                                    &watermark::image_extensions(),
+                                )
                                 .pick_file()
                                 && let Ok(mut slot) = picked.lock()
                             {

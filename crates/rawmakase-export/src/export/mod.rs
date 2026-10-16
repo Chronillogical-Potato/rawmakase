@@ -1,4 +1,4 @@
-//! Atomic JPEG and 16-bit TIFF export with sRGB ICC, the camera's EXIF and the
+//! Atomic JPEG, 16-bit TIFF and PNG export with sRGB ICC, the camera's EXIF and the
 //! edit as Camera Raw XMP, as Lightroom embeds them.
 pub mod assemble;
 pub mod batch;
@@ -157,7 +157,7 @@ pub fn stage(
         )?,
         Some(Format::Tiff) => encode::tiff(&mut temp, image, profile, &directories, embed)?,
         Some(Format::Png) => encode::png(&mut temp, image, profile, directories, embed)?,
-        None => bail!("Export extension must be .jpg, .jpeg, .tif, .tiff or .png"),
+        None => bail!("Export extension must be {}", Format::extensions_listed()),
     }
     temp.as_file().sync_all()?;
     Ok(Staged {
