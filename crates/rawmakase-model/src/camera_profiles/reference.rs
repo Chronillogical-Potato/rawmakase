@@ -13,7 +13,9 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
         return dng;
     }
     let row = crate::cameras::baseline_exposure(&m.make, &m.model);
-    let mut table = row.ev + fujifilm_shift(m, &row);
+    // LibRaw converts small raws on a scale of their own (see data/cameras.toml).
+    let ev = if m.sraw { row.sraw_ev } else { row.ev };
+    let mut table = ev + fujifilm_shift(m, &row);
     // Below the lowest native ISO the camera exposes more and pulls the raw back.
     if row
         .lowest_iso
@@ -120,6 +122,26 @@ mod tests {
         assert_eq!(baseline_exposure(&at("ILCE-7SM3", 80.)), 0.15);
         // A raw without an ISO keeps the row.
         assert_eq!(baseline_exposure(&at("ILCE-7RM3", 0.)), 0.15);
+    }
+    #[test]
+    fn canon_sraw_takes_its_own_baseline() {
+        // LibRaw converts sRAW and mRAW to 1.30x Adobe's linear values on a 16383
+        // scale, so a row's full-size white-level term does not hold for them.
+        let sraw = |model| Metadata {
+            sraw: true,
+            ..camera("Canon", model)
+        };
+        assert_eq!(baseline_exposure(&camera("Canon", "EOS 80D")), 0.5);
+        assert!(close(baseline_exposure(&sraw("EOS 80D")), 0.1));
+        assert!(close(baseline_exposure(&sraw("EOS 5DS R")), 0.2));
+        // A Canon body without one takes the median of the sRAW values.
+        assert!(close(baseline_exposure(&sraw("EOS 40D")), 0.2));
+        // Highlight Tone Priority adds its stop to the sRAW value too.
+        let htp = Metadata {
+            highlight_tone_priority: HighlightTonePriority::On,
+            ..sraw("EOS 5DS R")
+        };
+        assert!(close(baseline_exposure(&htp), 1.2));
     }
     #[test]
     fn olympus_units_use_their_5300k_preset() {

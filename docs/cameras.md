@@ -195,11 +195,27 @@ had none of), the median midtone exposure difference went from 0.15 EV to 0.02 E
 103 photos are within 0.1 EV (41 before). Of the other seven, two 80D sRAW frames of one
 shoot were already 0.44 EV brighter than Camera Raw and are now 0.58 brighter, the
 row's white-level term, measured on a full-size raw, not holding for LibRaw's sRAW
-conversion; a 30D photo is 0.30 EV brighter where another body's
+conversion (see below); a 30D photo is 0.30 EV brighter where another body's
 at the same ISO matches; a 5DS R and a Rebel T6 photo at other ISO settings than their
 rows' samples went from 0.3 EV to 0.16 EV off, Canon's white level being
 ISO-dependent; and two RX1R III frames stay 0.14 EV darker, the row's value being the
 Sony fallback they had.
+
+### Canon sRAW and mRAW
+
+LibRaw converts Canon's sRAW and mRAW from YCbCr itself, on a 16383 scale with its
+green 1.303 times Adobe's linear values (its stored sRAW white balance, 1336/1024), so
+a row's full-size white-level term does not hold for them. Rows give
+`sraw_baseline_exposure`: Adobe DNG Converter 18.7's sRAW BaselineExposure plus
+log2(16383 / (1.303 × its sRAW white level)). On the dataset's 37 sRAW and mRAW files
+(16 bodies) that value is one per body, the same for sRAW and mRAW and from ISO 100 to
+3200: +0.2 for most, +0.1 for the 80D and 7D Mark II, +0.35 for the 5D Mark II and
+6D Mark II, −0.05 for the 60D. A Canon body without one takes their median, 0.2; the 40D
+(−0.1), 50D (+0.45), 5DS (+0.2) and 1D Mark IV (+0.05) have no full-size row to hold
+theirs yet. Against Camera Raw 18.7 default renders of the 7 such photos the dataset
+has, median dE00 went from 2.6 to 1.1 (the two 80D frames 4.2 and 5.1 to 0.45 and
+1.4); a 5DS R mRAW and a 5D Mark III sRAW at ISO 3200 render 0.4 and 0.2 EV darker
+than Camera Raw, which renders them brighter than Adobe's own DNG of them says.
 
 Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
 fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names
