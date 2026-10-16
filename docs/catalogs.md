@@ -105,6 +105,17 @@ rawmakase Photos.rawmakase
 
 `catalog-info` lists source root IDs and their locations on this computer; `relink-catalog` changes a root's location on this computer only. Synthetic tests exercise exact source preservation, archived bytes, virtual-copy isolation, metadata, collections, keywords, descendant relinking, idempotent folder imports, changed-source protection, malformed/active catalog rejection, rollback and no-overwrite behavior.
 
+## Decoded-image cache
+
+Preferences > Catalog > **Decoded images > Cache size limit** sets how much disk space
+to keep for decoded RAWs, from 1 GiB to 1 PiB (1,048,576 GiB; 4 GiB by default). This cache is
+shared by all catalogs and avoids repeating RAW decoding and highlight recovery
+when reopening a photo; the current edit still needs rendering. Develop, neighbour
+preloading and Reference View share the limit. Changes are saved between launches
+and apply without restarting; lowering the limit removes least recently used
+entries on the next cache write. Rendered Standard and 1:1 previews have separate
+budgets. See [the decode cache](preview-performance.md) for its location and identity.
+
 ## Preview cache
 
 Library thumbnails are generated on demand and stored as JPEG blobs in a separate `~/.local/share/rawmakase/previews.sqlite3` database (`$XDG_DATA_HOME/rawmakase`, or `RAWMAKASE_DATA_DIR` when configured). All catalogs share this disposable cache. A thumbnail from an older preview generation is made again when next shown: JPEG, PNG and TIFF thumbnails made before their ICC profile was honoured are replaced, while RAW thumbnails are kept. Catalog databases continue to hold metadata and edits only, apart from the preserved Lightroom source archive.

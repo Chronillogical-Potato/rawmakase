@@ -161,8 +161,8 @@ pub(crate) struct Loader {
     prefetch: Latest<Prefetch>,
 }
 impl Loader {
-    pub(crate) fn new(tx: Sender<Event>, ctx: egui::Context) -> Self {
-        Self::with_parts(tx, ctx, DecodeCache::default(), Ahead::default())
+    pub(crate) fn new(tx: Sender<Event>, ctx: egui::Context, cache: DecodeCache) -> Self {
+        Self::with_parts(tx, ctx, cache, Ahead::default())
     }
     /// A loader whose full-size decodes are kept in `cache` and whose prefetched
     /// rendered files in `ahead`.

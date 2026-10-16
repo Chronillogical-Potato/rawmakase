@@ -524,6 +524,41 @@ impl Editor {
             });
         }
         gap(ui);
+        group(ui, "Decoded images");
+        let mut cache_size = (self.decode_cache.limit() >> 30) as u32;
+        let mut field = None;
+        form_row(ui, "Cache size limit", |ui| {
+            // A typed size applies once entered, so a cache write while typing
+            // 128 never trims to 1 GiB.
+            field = Some(
+                ui.add(
+                    egui::DragValue::new(&mut cache_size)
+                        .range(super::session::DECODED_CACHE_SIZE_RANGE)
+                        .suffix(" GiB")
+                        .update_while_editing(false),
+                ),
+            );
+        });
+        if u64::from(cache_size) << 30 != self.decode_cache.limit() {
+            self.decode_cache.set_limit(u64::from(cache_size) << 30);
+        }
+        // A drag changes the size every frame; the session is written once it ends.
+        if field.is_some_and(|r| r.drag_stopped() || (r.changed() && !r.dragged())) {
+            let _ = self.save_session();
+        }
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "Keeps decoded RAWs for faster reopening. Shared by all catalogs; default 4 GiB.",
+            );
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "A smaller limit removes older entries on the next cache write.",
+            );
+        });
+        gap(ui);
         self.folder_locations_block(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
@@ -868,6 +903,116 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_cache_preference_is_loaded_and_saved_with_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let session = crate::app::session::Session {
+            decoded_cache_size_gib: Some(32),
+            ..Default::default()
+        };
+        let mut e = Editor::with_context(&egui::Context::default(), None, session, None);
+        e.session_file = Some(path.clone());
+        assert_eq!(e.decode_cache.limit(), 32 << 30);
+        e.decode_cache.set_limit(1 << 50);
+        e.save_session().unwrap();
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.decoded_cache_size_gib(), 1_048_576);
+    }
+
+    #[test]
+    fn a_cache_size_applies_once_entered_and_is_saved_once_a_drag_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.session_file = Some(path.clone());
+        e.onboarding.visible = false;
+        e.preferences.open = true;
+        e.preferences.tab = Tab::Catalog;
+        let frame = |e: &mut Editor, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1600., 1000.),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| e.preferences_window(ui.ctx()));
+            out.textures_delta.clear();
+            out.shapes
+        };
+        let saved = || {
+            std::fs::read(&path).ok().map(|bytes| {
+                serde_json::from_slice::<crate::app::session::Session>(&bytes)
+                    .unwrap()
+                    .decoded_cache_size_gib()
+            })
+        };
+        let mut field = None;
+        for _ in 0..3 {
+            field = frame(&mut e, vec![])
+                .into_iter()
+                .find_map(|s| match s.shape {
+                    egui::Shape::Text(t) if t.galley.text().contains("GiB") => {
+                        Some(t.visual_bounding_rect().center())
+                    }
+                    _ => None,
+                });
+        }
+        let pos = field.expect("the cache size field is shown");
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut e, vec![egui::Event::PointerMoved(pos), button(true)]);
+        frame(&mut e, vec![button(false)]);
+        frame(&mut e, vec![]);
+        // Part way through typing 128, neither 1 GiB nor 12 GiB evicts or is saved.
+        for text in ["1", "2"] {
+            frame(&mut e, vec![egui::Event::Text(text.into())]);
+            assert_eq!(e.decode_cache.limit(), 4 << 30);
+            assert!(saved().is_none_or(|size| size == 4));
+        }
+        frame(&mut e, vec![egui::Event::Text("8".into())]);
+        frame(
+            &mut e,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut e, vec![]);
+        assert_eq!(e.decode_cache.limit(), 128 << 30);
+        assert_eq!(saved(), Some(128));
+        // A drag applies as it goes and is saved when released.
+        frame(&mut e, vec![egui::Event::PointerMoved(pos), button(true)]);
+        for x in 1..=10 {
+            let to = pos + Vec2::new(x as f32 * 5., 0.);
+            frame(&mut e, vec![egui::Event::PointerMoved(to)]);
+        }
+        let dragged = e.decode_cache.limit() >> 30;
+        assert!(dragged > 128);
+        assert_eq!(saved(), Some(128));
+        frame(
+            &mut e,
+            vec![egui::Event::PointerButton {
+                pos: pos + Vec2::new(50., 0.),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(saved(), Some(dragged as u32));
+    }
 
     /// What a page paints past the right edge it is clipped to: text or
     /// controls cut off by the window.

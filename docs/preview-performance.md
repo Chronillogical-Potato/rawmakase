@@ -429,7 +429,10 @@ its first 64 KB), the demosaic setting and the running executable's size and tim
 so a rebuilt or updated app never uses another build's pixels. The cache lives in
 `decoded/` under the per-user cache directory (`~/Library/Caches/RAWmakase` on macOS,
 `$XDG_CACHE_HOME/rawmakase` or `~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR`
-to override), is capped at 4 GB and drops the least recently used entries first.
+to override), defaults to a 4 GiB cap and drops the least recently used entries first.
+Preferences > Catalog > Decoded images sets the cap from 1 GiB to 1 PiB (1,048,576 GiB), saved
+between launches. Changes reach Develop, neighbour prefetch and Reference View
+without restarting; a reduced cap is enforced on the next cache write.
 An entry is the image's size in 32-bit floats: 278 MB for the X100F, 697 MB for the
 A7CR. RAW files, sidecars and catalogs are not touched.
 
