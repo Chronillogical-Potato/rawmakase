@@ -629,9 +629,9 @@ mod tests {
 
     #[test]
     fn white_balance_ignores_colour_invented_by_highlight_recovery() {
-        // A warm left half where every other pixel clipped in red, and a cool right
-        // half. Recovery rebuilds the clipped pixels as warm, below the clipping cutoff,
-        // which would weigh the warm half double.
+        // A warm left half where every other pixel clipped in red and green, and a
+        // cool right half. Recovery rebuilds the clipped pixels as warm, below the
+        // clipping cutoff, which would weigh the warm half double.
         let mut im = scene([1.; 3], 0.5);
         let width = im.width as usize;
         for (i, p) in im.pixels.iter_mut().enumerate() {
@@ -639,7 +639,7 @@ mod tests {
             *p = if x >= width / 2 {
                 [0.4, 0.5, 0.6]
             } else if (x + y) % 2 == 0 {
-                [1., 0.5, 0.4]
+                [1., 1., 0.4]
             } else {
                 [0.6, 0.5, 0.4]
             };

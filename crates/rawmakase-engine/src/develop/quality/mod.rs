@@ -238,6 +238,23 @@ mod tests {
         assert_eq!(recover_highlights(&im).pixels[i], [1., 0.4, 0.2]);
     }
     #[test]
+    fn the_floor_fades_as_a_second_channel_clips() {
+        // Red clipped over neighbours that put it at 0.5; green rises through the
+        // clip threshold. The floor goes with green's own blend: no jump at 0.97,
+        // and none left once green is clipped too.
+        let red = |g: f32| {
+            let mut im = fixture();
+            im.pixels.fill([0.5, 0.969, 0.4]);
+            let i = 40 * 96 + 40;
+            im.pixels[i] = [1., g, 0.4];
+            recover_highlights(&im).pixels[i][0]
+        };
+        assert_eq!(red(0.96), 1.);
+        assert!((red(0.96999) - red(0.97001)).abs() < 1e-3);
+        assert!((red(0.985) - 0.75).abs() < 0.01, "{}", red(0.985));
+        assert!((red(1.) - 0.5).abs() < 1e-3);
+    }
+    #[test]
     fn wide_partial_highlight_keeps_the_surviving_channels_colour() {
         let mut im = fixture();
         im.pixels.fill([0.8, 0.4, 0.2]);

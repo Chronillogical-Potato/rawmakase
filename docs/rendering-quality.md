@@ -68,7 +68,8 @@ lights duller and darker than Camera Raw (on the test dataset's own-stress sets,
 highlight-region error fell from about 3–4 to 1.3–1.8 ΔE00). Where two are clipped
 the estimate is kept: Camera Raw renders such a core whiter than the recorded pair
 (a sunset sun with red and blue clipped is yellow-white), and the floor turned it
-magenta.
+magenta. The floor fades out with the second channel's own recovery blend (0.97 to
+1.0 of its clip), so a gradient into a second clipped channel has no step.
 This infers missing colour, not missing detail, and is not Adobe's recovery algorithm.
 Cancellation discards the map and recovered image together. Tests cover a wide
 partially clipped area, dark gaps, untouched surviving channels, fully clipped
