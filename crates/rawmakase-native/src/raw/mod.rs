@@ -922,6 +922,12 @@ mod tests {
                 let (_dir, path) = nef(model, &JPEG_XS);
                 // Opened, so the embedded preview can stand in.
                 let raw = super::Raw::open_file(&path).unwrap();
+                // LibRaw recycles itself after a failed unpack; trying again
+                // fails the same way.
+                for _ in 0..2 {
+                    let error = raw.sensor().err().expect("unpacked");
+                    assert!(error.to_string().contains("High Efficiency"), "{error}");
+                }
                 let error = raw
                     .develop(decode, &AtomicBool::new(false))
                     .err()

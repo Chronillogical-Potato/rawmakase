@@ -199,6 +199,12 @@ impl Header {
                         flags & 0x3f == 0b01_01_00,
                         "unsupported High Efficiency coding {flags:#04x}"
                     );
+                    // Four fractional bits and 4-bit raw GCLIs, as every sample has:
+                    // with GCLIs of at most 15, the wavelet stays well inside i32.
+                    ensure!(
+                        fq_br == 0x44,
+                        "unsupported High Efficiency precision {fq_br:#04x}"
+                    );
                     header = Some(Header {
                         width,
                         height,
@@ -799,6 +805,8 @@ fn decode_precinct(
                     }
                 }
             }
+            // Magnitudes have 15 bits.
+            ensure!(line.iter().all(|&g| g <= 15), "bad High Efficiency GCLI");
             gclis.push(line);
         }
         bits.align();
@@ -818,7 +826,7 @@ fn decode_precinct(
                 if gcli <= t {
                     continue;
                 }
-                for _ in 0..(gcli - t).min(15) {
+                for _ in 0..gcli - t {
                     let plane = bits.read(group as u32)?;
                     for j in 0..group {
                         v[g * group + j] = v[g * group + j] << 1 | plane >> (group - 1 - j) & 1;
@@ -917,6 +925,11 @@ pub(super) mod tests {
     /// coefficient is zero: each packet marks all of its significance groups
     /// insignificant and codes nothing else.
     fn blank(width: u16, height: u16, vendor: [u8; 13]) -> Vec<u8> {
+        coded(width, height, vendor, None)
+    }
+    /// [`blank`], except that with `first_gcli` the first code group of the first
+    /// band is significant, with that GCLI and nothing after it.
+    fn coded(width: u16, height: u16, vendor: [u8; 13], first_gcli: Option<u32>) -> Vec<u8> {
         let mut s = vec![0xff, 0x10, 0xff, 0x50, 0, 34];
         s.extend(b"CONTACT_INTOPIX_");
         s.extend([0; 16]);
@@ -943,13 +956,26 @@ pub(super) mod tests {
                 bytes: Vec::new(),
                 bits: 0,
             };
-            for packet in &layout.packets {
-                payload.put(0, 56);
-                for band in &layout.bands[packet.bands.clone()] {
+            for (k, packet) in layout.packets.iter().enumerate() {
+                let gcli = first_gcli.filter(|_| p == 0 && k == 0);
+                let gcli_len = gcli.map_or(0, |x| (x as u64 + 1).div_ceil(8));
+                payload.put(gcli_len << 15, 56);
+                for (i, band) in layout.bands[packet.bands.clone()].iter().enumerate() {
                     let groups = band.width.div_ceil(4).div_ceil(8);
-                    payload.put(u64::MAX, groups);
+                    // Set flags mark groups insignificant; the first group's is clear.
+                    let flags = if gcli.is_some() && i == 0 {
+                        (1 << (groups - 1)) - 1
+                    } else {
+                        u64::MAX
+                    };
+                    payload.put(flags, groups);
                 }
                 payload.align();
+                if let Some(x) = gcli {
+                    payload.put(u64::MAX, x as usize);
+                    payload.put(0, 1);
+                    payload.align();
+                }
             }
             let length = payload.bytes.len() as u32;
             s.extend(&length.to_be_bytes()[1..]);
@@ -1009,6 +1035,32 @@ pub(super) mod tests {
         assert_eq!(curve.apply(32767), 10377);
         let header = super::Header::parse(&blank(64, 32, VENDOR)).unwrap();
         assert_eq!(header.transfer_curve().apply(32767), 16383);
+    }
+
+    #[test]
+    fn a_gcli_beyond_15_bits_is_refused() {
+        let (width, height) = (64, 32);
+        let mut out = vec![0u16; width * height];
+        let gcli = |x| coded(width as u16, height as u16, VENDOR, Some(x));
+        // The packet is well formed, so its GCLI is read: 15 is accepted (and the
+        // data it calls for is missing), more is refused before the data is read.
+        let error = super::decode(&gcli(15), &mut out, width, height, width).unwrap_err();
+        assert!(!error.to_string().contains("GCLI"), "{error}");
+        for x in [16, 31] {
+            let error = super::decode(&gcli(x), &mut out, width, height, width).unwrap_err();
+            assert!(error.to_string().contains("GCLI"), "{x}: {error}");
+        }
+    }
+
+    #[test]
+    fn other_precisions_are_refused() {
+        let mut stream = blank(64, 32, VENDOR);
+        // The picture header's Fq and Br byte.
+        assert_eq!(stream[62], 0x44);
+        for value in [0xf4, 0x54, 0x45] {
+            stream[62] = value;
+            assert!(super::Header::parse(&stream).is_err(), "{value:#x}");
+        }
     }
 
     #[test]

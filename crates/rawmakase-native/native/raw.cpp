@@ -170,6 +170,8 @@ static void message(char* err, const char* text) { std::snprintf(err, 512, "%s",
 // JPEG XS's SOC and CAP markers is one.
 static bool nikon_high_efficiency(Raw& raw) {
     const char* decoder=raw.unpack_function_name();
+    // None after a failed unpack, which recycles the decoder.
+    if(!decoder) return false;
     if(!std::strcmp(decoder,"nikon_he_load_raw()")) return true;
     if(std::strcmp(decoder,"nikon_load_raw()")) return false;
     auto* internal=raw.get_internal_data_pointer();
