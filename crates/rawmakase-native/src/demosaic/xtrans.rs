@@ -2,11 +2,13 @@
 //!
 //! X-Trans has no regular two-pixel greens, so one isotropic estimate turns fine
 //! periodic detail (louvres, grilles) into colour moiré. Instead every direction
-//! (horizontal, vertical and both diagonals) gets its own full RGB candidate:
+//! (horizontal, vertical and both diagonals) gets its own full RGB candidate, and an
+//! isotropic one joins them for soft detail where no direction is better:
 //!
 //! 1. Green at red/blue sites by interpolating along the direction between the
 //!    nearest greens, corrected by the same-colour curvature along that line.
-//! 2. Red and blue from the difference to that direction's green, as on Bayer.
+//! 2. Red and blue from the difference to that direction's green, as on Bayer (the
+//!    isotropic candidate uses its gradient-weighted greens from all 8 neighbours).
 //! 3. Per pixel, the candidates are blended by how smooth their colour difference
 //!    (R − G, B − G) is around it. A correct direction leaves neutral detail neutral;
 //!    a wrong one leaves a colour pattern, which scores badly.
@@ -27,6 +29,10 @@ const DIRECTIONS: [(isize, isize); 4] = [(1, 0), (0, 1), (1, 1), (1, -1)];
 /// Floor of the variation measure, in white-normalised units, so that noise on a
 /// flat area does not pick a direction.
 const VARIATION_FLOOR: f32 = 1e-3;
+/// Sharpness of the blend: a candidate twice as rough as the smoothest weighs 1/16.
+const BLEND_POWER: i32 = 4;
+/// Weight of the Hamilton–Adams-style curvature correction of the directional green.
+const CURVATURE: f32 = 0.2;
 
 pub(super) fn demosaic(cfa: &Cfa) -> Vec<[f32; 3]> {
     let w = cfa.width;
@@ -76,11 +82,52 @@ impl Band {
         })
     }
 
-    /// Green at `i` along one direction.
+    /// Green at a red or blue site from the 8 neighbours, each pair weighted by how
+    /// well the greens on its two sides agree (no preferred direction).
+    fn green_isotropic(&self, i: usize) -> f32 {
+        let pw = self.width as isize;
+        let contrast = {
+            let (mut lo, mut hi) = (f32::INFINITY, 0f32);
+            for o in [-pw - 1, -pw, -pw + 1, -1, 1, pw - 1, pw, pw + 1] {
+                let j = (i as isize + o) as usize;
+                if self.colour[j] == 1 {
+                    lo = lo.min(self.raw[j]);
+                    hi = hi.max(self.raw[j]);
+                }
+            }
+            if hi >= lo { hi - lo } else { 0. }
+        };
+        let (mut sum, mut total) = (0., 0.);
+        for (step, diag) in [(1, 1.), (pw, 1.), (pw + 1, 0.7), (pw - 1, 0.7)] {
+            let a = (i as isize + step) as usize;
+            let b = (i as isize - step) as usize;
+            let (ga, gb) = (self.colour[a] == 1, self.colour[b] == 1);
+            match (ga, gb) {
+                (true, true) => {
+                    let weight = diag / ((self.raw[a] - self.raw[b]).abs() + 1e-4);
+                    sum += (self.raw[a] + self.raw[b]) * 0.5 * weight;
+                    total += weight;
+                }
+                (true, false) | (false, true) => {
+                    let v = if ga { self.raw[a] } else { self.raw[b] };
+                    let weight = diag * 0.5 / (contrast + 1e-4);
+                    sum += v * weight;
+                    total += weight;
+                }
+                _ => {}
+            }
+        }
+        if total > 0. { sum / total } else { self.raw[i] }
+    }
+
+    /// Green at `i` along one direction (`step` 0 for no direction).
     fn green(&self, i: usize, step: isize) -> f32 {
         let own = self.colour[i];
         if own == 1 {
             return self.raw[i];
+        }
+        if step == 0 {
+            return self.green_isotropic(i);
         }
         let c = self.raw[i];
         let (fwd, back) = (self.along(i, step, 1), self.along(i, -step, 1));
@@ -93,7 +140,7 @@ impl Band {
         if let (Some((a, ca)), Some((b, cb))) =
             (self.along(i, step, own), self.along(i, -step, own))
         {
-            est += 0.5 * (c - (ca * b + cb * a) / (a + b));
+            est += CURVATURE * (c - (ca * b + cb * a) / (a + b));
         }
         est.clamp(lo, hi).max(0.)
     }
@@ -105,30 +152,37 @@ fn band_candidates(cfa: &Cfa, y0: usize, out: &mut [[f32; 3]]) {
     let rows = out.len() / w;
     let band = Band::new(cfa, y0, rows);
     let (pw, ph) = (band.width, band.height);
-    let candidates = DIRECTIONS.map(|(dx, dy)| {
-        let step = dy * pw as isize + dx;
-        let rgb = candidate(&band, step);
-        let variation = variation(&rgb, pw, ph);
-        (rgb, variation)
-    });
+    let steps = DIRECTIONS
+        .map(|(dx, dy)| dy * pw as isize + dx)
+        .into_iter()
+        .chain([0]);
+    let candidates: Vec<_> = steps
+        .map(|step| {
+            let rgb = candidate(&band, step);
+            let variation = variation(&rgb, pw, ph);
+            (rgb, variation)
+        })
+        .collect();
     for (r, row) in out.chunks_mut(w).enumerate() {
         for (x, px) in row.iter_mut().enumerate() {
             let i = (r + MARGIN) * pw + x + MARGIN;
-            let windows = candidates.each_ref().map(|(_, variation)| {
-                let window: f32 = [-1isize, 0, 1]
-                    .iter()
-                    .flat_map(|dy| [-1isize, 0, 1].map(|dx| dy * pw as isize + dx))
-                    .map(|o| variation[(i as isize + o) as usize])
-                    .sum();
-                window + VARIATION_FLOOR
-            });
+            let windows: Vec<f32> = candidates
+                .iter()
+                .map(|(_, variation)| {
+                    let window: f32 = [-1isize, 0, 1]
+                        .iter()
+                        .flat_map(|dy| [-1isize, 0, 1].map(|dx| dy * pw as isize + dx))
+                        .map(|o| variation[(i as isize + o) as usize])
+                        .sum();
+                    window + VARIATION_FLOOR
+                })
+                .collect();
             // Relative to the smoothest candidate, so the best always weighs 1.
             let best = windows.iter().fold(f32::INFINITY, |a, b| a.min(*b));
             let mut sum = [0f32; 3];
             let mut total = 0.;
             for ((rgb, _), window) in candidates.iter().zip(windows) {
-                let ratio = best / window;
-                let weight = ratio.powi(8);
+                let weight = (best / window).powi(BLEND_POWER);
                 for c in 0..3 {
                     sum[c] += rgb[i][c] * weight;
                 }
