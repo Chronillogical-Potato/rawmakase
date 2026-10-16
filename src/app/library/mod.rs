@@ -39,7 +39,7 @@ pub(crate) struct FolderRemoval {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Place {
     filters: filter::Filters,
-    folder: String,
+    folders: folder_selection::FolderSelection,
     selection: selection::Selection,
 }
 impl Place {
@@ -91,8 +91,8 @@ pub(crate) struct Library {
     sidebar_trees: Option<std::sync::Arc<sidebar::Trees>>,
     /// The source and filter bar; `visible` is their result.
     filters: filter::Filters,
-    /// The folder shown, as a tree key ("" is All Photographs).
-    selected_folder: String,
+    /// The folders shown, as tree keys (none is All Photographs).
+    selected_folders: folder_selection::FolderSelection,
     expanded: HashSet<String>,
     thumb_size: f32,
     /// How grid cells show their photos (J).
@@ -210,7 +210,7 @@ impl Library {
             volumes: Default::default(),
             sidebar_trees: None,
             filters: Default::default(),
-            selected_folder: String::new(),
+            selected_folders: Default::default(),
             expanded: HashSet::new(),
             thumb_size: 190.,
             cell_style: Default::default(),
@@ -313,7 +313,7 @@ impl Library {
                 self.session.collection_photos.clear();
                 self.session.previous_import.clear();
                 self.filters.folder_scope = None;
-                self.selected_folder.clear();
+                self.selected_folders.clear();
                 self.reloaded();
             }
         }
@@ -575,7 +575,7 @@ impl Library {
     pub(in crate::app) fn place(&self) -> Place {
         Place {
             filters: self.filters.clone(),
-            folder: self.selected_folder.clone(),
+            folders: self.selected_folders.clone(),
             selection: self.selection.clone(),
         }
     }
@@ -583,10 +583,13 @@ impl Library {
     /// there, and scrolls to its active photo.
     pub(in crate::app) fn go_to_place(&mut self, place: &Place) {
         self.filters = place.filters.clone();
-        self.selected_folder = place.folder.clone();
+        self.selected_folders = place.folders.clone();
         // The source as the catalog has it now, e.g. after a folder gained
         // subfolders since.
-        if let Some(scope) = self.folder_scope(&place.folder) {
+        if let Some(scope) = self
+            .folders_scope(&place.folders)
+            .filter(|scope| !scope.is_empty())
+        {
             self.filters.folder_scope = Some(scope);
         }
         if let Some(id) = self.filters.collection {
@@ -643,12 +646,13 @@ impl Library {
         self.sync_request.take()
     }
     /// What Synchronize Folder covers for the folder selected in the
-    /// Folders panel, and its name; none for All Photographs or a collection.
+    /// Folders panel, and its name; none for All Photographs, a collection
+    /// or several folders.
     pub(in crate::app) fn selected_sync_scope(
         &self,
     ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
         use crate::catalog::folder_sync::SyncScope;
-        let rest = self.selected_folder.strip_prefix("root:")?;
+        let rest = self.selected_folders.single()?.strip_prefix("root:")?;
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
         let root = root.parse::<i64>().ok().map(RootId)?;
         if relative.is_empty() {
@@ -746,7 +750,7 @@ impl Library {
             .as_ref()
             .is_some_and(|scope| scope.iter().any(|f| folders.contains(f)))
         {
-            self.selected_folder.clear();
+            self.selected_folders.clear();
             self.filters.folder_scope = None;
         }
         for id in &removed.value {
@@ -821,7 +825,7 @@ impl Library {
             self.filters.collection = None;
             self.filters.previous_import = false;
             self.filters.only_missing = false;
-            self.selected_folder.clear();
+            self.selected_folders.clear();
             self.filter();
         }
         self.select(Some(id));
@@ -1036,6 +1040,7 @@ mod descriptive;
 pub(crate) mod filmstrip;
 mod filter;
 mod filter_bar;
+mod folder_selection;
 mod grid;
 mod info;
 mod kinetic;
