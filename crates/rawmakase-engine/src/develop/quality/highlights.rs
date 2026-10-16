@@ -204,7 +204,8 @@ pub(super) fn recover_highlights_cancellable(
             // Camera Raw renders the core whiter than the recorded pair (a sunset sun
             // with red and blue clipped is yellow-white, not magenta), so the estimate
             // stays as it is. The floor fades out as another channel's own blend
-            // comes in, so a gradient into a second clipped channel has no step.
+            // comes in, so the floor adds no step at the cutoff (the estimate's own
+            // switch of reference channels there is unchanged).
             let alone: f32 = (0..3).filter(|d| *d != c).map(|d| 1. - blend[d]).product();
             let target = target + (target.max(p[c]) - target) * alone;
             p[c] = p[c] * (1. - blend[c]) + target * blend[c];
