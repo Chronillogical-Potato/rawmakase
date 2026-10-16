@@ -65,6 +65,10 @@ pub struct Camera {
     /// 0 for Bayer); the GFX bodies record -0.49.
     #[serde(default)]
     pub fujifilm_dr100_shift: Option<f32>,
+    /// The body's lowest native ISO, when it has extended ISO settings below it
+    /// (Sony's 50, 64 and 80 under 100): Camera Raw takes a stop off there.
+    #[serde(default)]
+    pub lowest_iso: Option<f32>,
     pub source: Source,
     /// When the values were checked (YYYY-MM-DD) and on what.
     pub checked: String,
@@ -201,6 +205,7 @@ pub struct Baseline {
     pub origin: BaselineOrigin,
     pub exposure_shift: ExposureShift,
     pub dr100_shift: Option<f32>,
+    pub lowest_iso: Option<f32>,
 }
 
 /// Camera Raw's baseline exposure for a camera. A camera without a row takes the
@@ -244,6 +249,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
             origin: BaselineOrigin::Listed(c.source),
             exposure_shift: c.fujifilm_exposure_shift,
             dr100_shift: c.fujifilm_dr100_shift,
+            lowest_iso: c.lowest_iso,
         };
     }
     let same_make = rows
@@ -256,6 +262,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
             origin: BaselineOrigin::MakeMedian,
             exposure_shift: ExposureShift::Followed,
             dr100_shift: None,
+            lowest_iso: None,
         };
     }
     Baseline {
@@ -263,6 +270,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
         origin: BaselineOrigin::TableMedian,
         exposure_shift: ExposureShift::Followed,
         dr100_shift: None,
+        lowest_iso: None,
     }
 }
 
@@ -369,6 +377,7 @@ mod tests {
             unit_calibration: None,
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
+            lowest_iso: None,
             source: Source::Fitted,
             checked: "2026-10-05".into(),
             sample: "test".into(),

@@ -13,7 +13,14 @@ pub fn baseline_exposure(m: &Metadata) -> f32 {
         return dng;
     }
     let row = crate::cameras::baseline_exposure(&m.make, &m.model);
-    let table = row.ev + fujifilm_shift(m, &row);
+    let mut table = row.ev + fujifilm_shift(m, &row);
+    // Below the lowest native ISO the camera exposes more and pulls the raw back.
+    if row
+        .lowest_iso
+        .is_some_and(|lowest| m.iso > 0. && m.iso < lowest - 1.)
+    {
+        table -= 1.;
+    }
     // Table rows hold for photos without Highlight Tone Priority, which Camera Raw
     // brightens by the stop the camera held back.
     match m.highlight_tone_priority {
@@ -97,6 +104,22 @@ mod tests {
             neutral_calibration(&fujifilm("Unlisted body", true, None)),
             [1.; 3]
         );
+    }
+    #[test]
+    fn sony_extended_low_iso_takes_a_stop_off() {
+        // Adobe DNG Converter 18.7: A7R III at ISO 50 and 80 -0.85, at 100 +0.15;
+        // the A7S III's ISO 80 is native and keeps its row.
+        let at = |model, iso| Metadata {
+            iso,
+            ..camera("Sony", model)
+        };
+        assert_eq!(baseline_exposure(&at("ILCE-7RM3", 100.)), 0.15);
+        assert!(close(baseline_exposure(&at("ILCE-7RM3", 80.)), -0.85));
+        assert!(close(baseline_exposure(&at("ILCE-7RM3", 50.)), -0.85));
+        assert!(close(baseline_exposure(&at("ILCE-7M3", 64.)), -0.65));
+        assert_eq!(baseline_exposure(&at("ILCE-7SM3", 80.)), 0.15);
+        // A raw without an ISO keeps the row.
+        assert_eq!(baseline_exposure(&at("ILCE-7RM3", 0.)), 0.15);
     }
     #[test]
     fn olympus_units_use_their_5300k_preset() {
