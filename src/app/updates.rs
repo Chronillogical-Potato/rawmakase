@@ -300,6 +300,10 @@ impl Editor {
             self.status = "Finish exporting before updating".into();
             return;
         }
+        if self.activity.is_syncing() {
+            self.status = "Wait for Sync Settings to finish before updating".into();
+            return;
+        }
         // Edits are saved before the app quits for the helper.
         if !self.flush() {
             return;

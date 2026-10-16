@@ -1,6 +1,8 @@
-//! Sync Settings: the open photo's settings, by group, onto the other photos selected
-//! with it, as one change that one Undo reverses. Each target's settings are worked
-//! out for its own camera (see `model::settings_groups`), off the UI thread.
+//! Sync Settings: one photo's settings, by group, onto the other photos selected with
+//! it, as one change that one Undo reverses. In Develop the source is the open photo;
+//! in the Library it is the active photo of the selection, as Lightroom's most-selected
+//! photo. Each target's settings are worked out for its own camera (see
+//! `model::settings_groups`), off the UI thread.
 use super::{
     Editor,
     history::{History, Step},
@@ -26,6 +28,16 @@ pub(super) struct SyncTarget {
     pub id: PhotoId,
     pub path: PathBuf,
     pub name: String,
+}
+
+/// Where a Sync's settings come from.
+#[derive(Clone, Debug)]
+pub(super) enum SyncSource {
+    /// The open photo's settings, as Develop shows them.
+    Open(Box<Settings>),
+    /// A photo not open in Develop: its edit as Develop would open it with, worked
+    /// out with the targets'.
+    Photo(SyncTarget),
 }
 
 /// One photo's edit before and after a Sync.
@@ -123,10 +135,11 @@ pub(super) enum SyncSide {
 
 /// The new edits of `targets`, prepared photo by photo and saved in one transaction.
 /// A photo that cannot be prepared (offline, changed since its edit was saved) is
-/// reported and left out; if saving fails, nothing is saved.
+/// reported and left out; if saving fails, nothing is saved. A source whose settings
+/// can't be read changes nothing.
 pub(super) fn synchronize(
     catalog: &mut Catalog,
-    source: &Settings,
+    source: &SyncSource,
     change: &BatchChange,
     targets: &[SyncTarget],
     defaults: &DevelopDefaults,
@@ -139,6 +152,37 @@ pub(super) fn synchronize(
         failed: Vec::new(),
         notes: Vec::new(),
     };
+    let read;
+    let source = match source {
+        SyncSource::Open(settings) => settings.as_ref(),
+        SyncSource::Photo(photo) => match photo_settings(catalog, photo, defaults) {
+            Ok((settings, warnings)) => {
+                result
+                    .notes
+                    .extend(warnings.into_iter().map(|note| SyncNote {
+                        name: photo.name.clone(),
+                        note,
+                    }));
+                read = settings;
+                &read
+            }
+            Err(e) => {
+                result.failed.push(SyncFailure {
+                    name: photo.name.clone(),
+                    reason: format!("its settings can't be read to sync from: {e:#}"),
+                });
+                return result;
+            }
+        },
+    };
+    // Matching to a photo without aperture, shutter speed and ISO means nothing.
+    if *change == BatchChange::MatchTotalExposures && capture_stops(&source.metadata).is_none() {
+        result.failed.push(SyncFailure {
+            name: "Match Total Exposures".into(),
+            reason: "the source photo has no aperture, shutter speed or ISO".into(),
+        });
+        return result;
+    }
     let mut prepared = Vec::new();
     for target in targets {
         match prepare(catalog, source, change, target, defaults, demosaic) {
@@ -214,25 +258,14 @@ fn prepare(
     let (profiles, _) = crate::camera_profiles::installed(&metadata);
     let record = catalog.edit_record(target.id)?;
     let resolved = edits::resolve(&record, &target.path, &metadata, &profiles, defaults)?;
-    let mut starting_warnings = Vec::new();
+    let starting_warnings = starting_warnings(resolved.origin, resolved.warnings);
+    let export = resolved.export;
     let before = match resolved.origin {
         Origin::Saved => EditBefore::Saved(Box::new(resolved.recipe)),
-        // What its starting edit could not bring along is said, as when it is opened.
-        origin => {
-            starting_warnings = match origin {
-                Origin::Lightroom => resolved
-                    .warnings
-                    .into_iter()
-                    .map(|w| format!("Lightroom edit not fully rendered: {w}"))
-                    .collect(),
-                _ => resolved.warnings,
-            };
-            EditBefore::None {
-                starting: Box::new(resolved.recipe),
-            }
-        }
+        _ => EditBefore::None {
+            starting: Box::new(resolved.recipe),
+        },
     };
-    let export = resolved.export;
     let transferred = match change {
         BatchChange::Settings(groups) => settings_groups::transfer(
             Source {
@@ -313,6 +346,43 @@ fn prepare(
         }),
         notes,
     })
+}
+
+/// The settings of `photo`, a photo not open, as Develop would open it with (see
+/// `edits::resolve`), and what its starting edit could not bring along. An edit that
+/// is protected (its file changed) or can't be read is an error, never the defaults.
+fn photo_settings(
+    catalog: &Catalog,
+    photo: &SyncTarget,
+    defaults: &DevelopDefaults,
+) -> Result<(Settings, Vec<String>)> {
+    let opened = crate::photo::open_source(&photo.path, &Default::default())
+        .with_context(|| format!("{} can't be read", photo.name))?;
+    let metadata = opened.metadata().clone();
+    let (profiles, _) = crate::camera_profiles::installed(&metadata);
+    let record = catalog.edit_record(photo.id)?;
+    let resolved = edits::resolve(&record, &photo.path, &metadata, &profiles, defaults)?;
+    let warnings = starting_warnings(resolved.origin, resolved.warnings);
+    Ok((
+        Settings {
+            recipe: resolved.recipe,
+            metadata,
+        },
+        warnings,
+    ))
+}
+
+/// What a photo's starting edit could not bring along, said as when it is opened; a
+/// saved edit has none.
+fn starting_warnings(origin: Origin, warnings: Vec<String>) -> Vec<String> {
+    match origin {
+        Origin::Saved => Vec::new(),
+        Origin::Lightroom => warnings
+            .into_iter()
+            .map(|w| format!("Lightroom edit not fully rendered: {w}"))
+            .collect(),
+        Origin::Defaults => warnings,
+    }
 }
 
 /// How much light a photo's camera settings let in, in stops from f/1, 1 s, ISO 100:
@@ -419,45 +489,90 @@ impl std::fmt::Display for SyncRestoreError {
 }
 
 impl Editor {
-    /// The other photos selected with the open one, which Sync applies to.
-    pub(super) fn sync_targets(&self) -> Vec<SyncTarget> {
-        let (Some(library), Some(open)) = (&self.library, self.document.catalog_photo) else {
-            return Vec::new();
-        };
-        // The open photo's settings are not final until its Lightroom edit is in, or
-        // while an Auto estimate is still to land on them.
-        // A protected edit (its file changed) shows camera defaults, not its settings;
-        // profiles still being imported would resolve differently photo to photo.
-        if self.document.pending_lightroom.is_some()
-            || self.document.metadata.is_none()
-            || self.document.auto.is_running()
-            || self.document.edit.save_state().is_protected()
-            || self.importing.is_some()
-        {
-            return Vec::new();
+    /// The photo Sync takes its settings from: in Develop the open photo, in the
+    /// Library the active one of the selection.
+    fn sync_source_id(&self) -> Option<PhotoId> {
+        match self.module {
+            super::Module::Develop => self.document.catalog_photo,
+            super::Module::Library => self.library.as_ref()?.selected(),
         }
+    }
+    /// The source photo, when its settings can be synchronized now.
+    fn sync_ready_source(&self) -> Option<PhotoId> {
+        let (library, source) = (self.library.as_ref()?, self.sync_source_id()?);
+        // The open photo's settings are not final until its Lightroom edit is in, or
+        // while an Auto estimate is still to land on them. As a target (from the
+        // Library) either would change it, and be saved over what the Sync wrote.
+        let open = self.document.catalog_photo;
+        let open_selected = open.is_some_and(|id| id == source || library.is_selected(id));
+        if open_selected
+            && (self.document.pending_lightroom.is_some() || self.document.auto.is_running())
+        {
+            return None;
+        }
+        // A protected edit (its file changed) shows camera defaults, not its settings.
+        // Another photo's edit is read with the targets', and refused there.
+        if open == Some(source)
+            && (self.document.metadata.is_none() || self.document.edit.save_state().is_protected())
+        {
+            return None;
+        }
+        // Profiles still being imported would resolve differently photo to photo.
         // The open photo may be hidden by the filters and still selected. While Read
         // Metadata from Files runs, which photos have a Lightroom edit can still change.
-        if !library.is_selected(open) || library.rereading() {
-            return Vec::new();
+        if self.importing.is_some() || !library.is_selected(source) || library.rereading() {
+            return None;
         }
+        Some(source)
+    }
+    /// The other photos selected with the source photo, which Sync applies to.
+    pub(super) fn sync_targets(&self) -> Vec<SyncTarget> {
+        let (Some(library), Some(source)) = (&self.library, self.sync_ready_source()) else {
+            return Vec::new();
+        };
         let selected = library.selected_photos();
+        // Looked up once: a selection can hold the whole catalog.
+        let wanted: std::collections::HashSet<PhotoId> = selected.iter().copied().collect();
+        let photos: std::collections::HashMap<PhotoId, &crate::catalog::Photo> = library
+            .session
+            .photos
+            .iter()
+            .filter(|p| wanted.contains(&p.id))
+            .map(|p| (p.id, p))
+            .collect();
         selected
             .into_iter()
-            .filter(|id| *id != open)
-            .filter_map(|id| library.photo(id))
-            .map(|p| SyncTarget {
-                id: p.id,
-                path: p.path.clone(),
-                name: format!("{}{}", p.filename, crate::app::library::copy_suffix(p)),
-            })
+            .filter(|id| *id != source)
+            .filter_map(|id| photos.get(&id).copied())
+            .map(sync_target)
             .collect()
     }
-    /// Synchronizes the open photo's `groups` to the other selected photos, in the
+    /// How many photos Sync would apply to, for a control drawn every frame.
+    pub(super) fn sync_target_count(&self) -> usize {
+        let (Some(library), Some(source)) = (&self.library, self.sync_ready_source()) else {
+            return 0;
+        };
+        let selected = library.selected_photos();
+        selected.len() - usize::from(selected.contains(&source))
+    }
+    /// The source's settings: the open photo's as Develop has them, or another photo
+    /// to read with the targets.
+    fn sync_source(&self) -> Option<SyncSource> {
+        let id = self.sync_source_id()?;
+        if self.document.catalog_photo == Some(id) {
+            return self
+                .current_settings()
+                .map(|s| SyncSource::Open(Box::new(s)));
+        }
+        let photo = self.library.as_ref()?.photo(id)?;
+        Some(SyncSource::Photo(sync_target(photo)))
+    }
+    /// Synchronizes the source photo's `groups` to the other selected photos, in the
     /// background; the result arrives as [`Event::Synced`].
     pub(super) fn start_sync(&mut self, change: BatchChange) {
         // Matching to a photo without aperture, shutter speed and ISO means nothing.
         if change == BatchChange::MatchTotalExposures
+            && self.sync_source_id() == self.document.catalog_photo
             && self
                 .document
                 .metadata
@@ -473,7 +588,7 @@ impl Editor {
         if targets.is_empty() || self.activity.is_busy() || !self.flush() {
             return;
         }
-        let (Some(source), Some(library)) = (self.current_settings(), &self.library) else {
+        let (Some(source), Some(library)) = (self.sync_source(), &self.library) else {
             return;
         };
         let catalog = library.session.catalog.location().clone();
@@ -512,6 +627,17 @@ impl Editor {
             ctx.request_repaint();
         });
     }
+    /// The open photo, when a Sync or its Undo wrote `ids`' edits, opens again with
+    /// what was written, so nothing stale is saved over it.
+    pub(super) fn reopen_synced(&mut self, ids: &[PhotoId]) {
+        if let Some(open) = self.document.catalog_photo
+            && ids.contains(&open)
+            && let Some(path) = self.document.path.clone()
+        {
+            self.document.edit.save_state_mut().saved();
+            self.load_raw(path, Some(open));
+        }
+    }
     /// A finished Sync: one command for Undo, and a status line naming what failed.
     pub(super) fn synced(&mut self, result: SyncResult) {
         self.activity.finish_sync();
@@ -525,6 +651,8 @@ impl Editor {
         }
         let synced: Vec<_> = result.synced.iter().map(|e| e.id).collect();
         self.refresh_previews(&synced);
+        // From the Library, the photo open in Develop can be among them.
+        self.reopen_synced(&synced);
         // The reference photo may be among them.
         self.load_reference();
         if done > 0 {
@@ -550,6 +678,15 @@ impl Editor {
             status.push_str(&format!(" · {}: {}", note.name, note.note));
         }
         self.status = status;
+    }
+}
+
+/// A catalog photo as a Sync names and reads it.
+fn sync_target(p: &crate::catalog::Photo) -> SyncTarget {
+    SyncTarget {
+        id: p.id,
+        path: p.path.clone(),
+        name: format!("{}{}", p.filename, crate::app::library::copy_suffix(p)),
     }
 }
 
@@ -614,7 +751,7 @@ mod tests {
         };
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &jpeg)],
             &DevelopDefaults::default(),
@@ -647,7 +784,7 @@ mod tests {
         let targets: Vec<_> = photos[1..].iter().map(|(id, p)| target(*id, p)).collect();
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source.clone())),
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
@@ -713,7 +850,7 @@ mod tests {
         )?;
         let again = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source.clone())),
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..1],
             &DevelopDefaults::default(),
@@ -727,7 +864,7 @@ mod tests {
         // Settings the photos already have change nothing.
         let again = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::Settings(GroupSelection::default()),
             &targets[..2],
             &DevelopDefaults::default(),
@@ -781,7 +918,7 @@ mod tests {
         } = catalog()?;
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::MatchTotalExposures,
             &[target(photos[1].0, &photos[1].1)],
             &DevelopDefaults::default(),
@@ -793,6 +930,90 @@ mod tests {
             "{:?}",
             result.failed
         );
+        Ok(())
+    }
+
+    /// From the Library the source is a photo not open: its saved edit is what the
+    /// others take, read with them.
+    #[test]
+    fn sync_from_a_photo_not_open_takes_its_saved_edit() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: mut c,
+            photos,
+        } = catalog()?;
+        let (source_id, source_path) = photos[0].clone();
+        let metadata = crate::photo::open(&source_path)?.metadata;
+        let (profiles, _) = crate::camera_profiles::installed(&metadata);
+        let mut edit = Recipe::with_profiles(&metadata, &profiles);
+        edit.exposure = 0.7;
+        c.save_edit(
+            source_id,
+            &source_path,
+            &edit,
+            &ExportOptions::default(),
+            HistoryUpdate::Keep,
+        )?;
+        let result = synchronize(
+            &mut c,
+            &SyncSource::Photo(target(source_id, &source_path)),
+            &BatchChange::Settings(GroupSelection::default()),
+            &[target(photos[1].0, &photos[1].1)],
+            &DevelopDefaults::default(),
+            crate::camera_data::Demosaic::default(),
+        );
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        assert_eq!(result.synced.len(), 1);
+        let saved = c.load_edit(photos[1].0, &photos[1].1)?.unwrap().recipe;
+        assert_eq!(saved.exposure, 0.7);
+        Ok(())
+    }
+
+    /// A source whose edit is protected (its file changed since) gives nothing: the
+    /// camera defaults are not its settings.
+    #[test]
+    fn sync_from_a_protected_photo_changes_nothing() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: mut c,
+            photos,
+        } = catalog()?;
+        let (source_id, source_path) = photos[0].clone();
+        let edit = Recipe {
+            exposure: 0.7,
+            ..Default::default()
+        };
+        c.save_edit(
+            source_id,
+            &source_path,
+            &edit,
+            &ExportOptions::default(),
+            HistoryUpdate::Keep,
+        )?;
+        {
+            use std::io::Write;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&source_path)?
+                .write_all(b"\0")?;
+        }
+        let result = synchronize(
+            &mut c,
+            &SyncSource::Photo(target(source_id, &source_path)),
+            &BatchChange::Settings(GroupSelection::default()),
+            &[target(photos[1].0, &photos[1].1)],
+            &DevelopDefaults::default(),
+            crate::camera_data::Demosaic::default(),
+        );
+        assert!(result.synced.is_empty());
+        assert_eq!(result.failed.len(), 1, "{:?}", result.failed);
+        assert_eq!(result.failed[0].name, "a.dng");
+        assert!(
+            result.failed[0].reason.contains("protected"),
+            "{:?}",
+            result.failed
+        );
+        assert!(c.load_edit(photos[1].0, &photos[1].1)?.is_none());
         Ok(())
     }
 
@@ -832,7 +1053,7 @@ mod tests {
         )?;
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::Settings(GroupSelection::default()),
             &[target(id, &path)],
             &DevelopDefaults::default(),
@@ -866,7 +1087,7 @@ mod tests {
         ];
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::Settings(GroupSelection::default()),
             &targets,
             &DevelopDefaults::default(),
@@ -918,7 +1139,7 @@ mod tests {
         let defaults = crate::raw_defaults::brighter_defaults();
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source.clone())),
             &BatchChange::Settings(clarity),
             &targets,
             &defaults,
@@ -955,7 +1176,7 @@ mod tests {
         );
         let result = synchronize(
             &mut c,
-            &source,
+            &SyncSource::Open(Box::new(source)),
             &BatchChange::Settings(GroupSelection::default()),
             &[target(photos[0].0, &photos[0].1)],
             &missing,

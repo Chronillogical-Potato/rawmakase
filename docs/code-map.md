@@ -263,7 +263,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
 | [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |
-| [sync.rs](../src/app/sync.rs) | Sync Settings: the open photo's chosen groups onto the other selected photos, off the UI thread, saved in one transaction with a History step each, undone as one command. |
+| [sync.rs](../src/app/sync.rs) | Sync Settings: one photo's chosen groups onto the other selected photos (in Develop from the open photo; in the Library from the active photo, its edit resolved through `edits` with the targets'), off the UI thread, saved in one transaction with a History step each, undone as one command; the open photo, when it is a target, opens again. |
 | [export/mod.rs](../src/app/export/mod.rs), [export/dialog.rs](../src/app/export/dialog.rs) | Export dialog, remembered export settings, background exports and their progress. |
 | [stand_in.rs](../src/app/stand_in.rs) | The stored Standard preview Develop shows while a photo opens, read for the photo and its neighbour on a worker each; an offline RAW's, or edited JPEG, PNG or TIFF's, for the Loupe, which zooms into its 1:1 preview (`library/zoom.rs`). |
 | [preview_build.rs](../src/app/preview_build.rs) | Build Standard-Sized Previews: the selection's previews rendered as export renders them, on a background worker, into the preview cache; their identity, progress, Discard and Clear. |
