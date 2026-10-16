@@ -157,6 +157,11 @@ struct Handle {
     void* context = nullptr;
     // Highlight Tone Priority as Canon's custom functions record it, -1 without.
     int custom_htp = -1;
+    // The per-channel blacks (LibRaw's order: red, green, blue, second green) and
+    // the specular white of a ColorData12 record LibRaw reads as ColorData11; 0
+    // without one.
+    unsigned color_data_black[4] = {};
+    unsigned color_data_white = 0;
     // LibRaw rejects a second unpack(); the CFA path may unpack before falling back.
     bool unpacked = false;
     // Fills err when it fails.
@@ -169,8 +174,23 @@ struct Handle {
         int rc=raw.unpack();
         if(rc) message(err,libraw_strerror(rc));
         unpacked = rc==0;
-        if(unpacked) correct_black(raw);
+        if(unpacked) { color_data_black_level(); correct_black(raw); }
         return rc;
+    }
+    // Replaces the black LibRaw read from the wrong offsets of a ColorData12
+    // record (canon_maker_notes) with the record's own. Canon records 14-bit
+    // levels; LibRaw scales them down to the data's depth, as it does for its own.
+    void color_data_black_level() {
+        auto& d=raw.imgdata;
+        auto& col=d.rawdata.color;
+        if(!color_data_black[0] || d.idata.maker_index!=LIBRAW_CAMERAMAKER_Canon
+           || d.idata.dng_version || !d.rawdata.raw_image) return;
+        unsigned shift=0;
+        const unsigned bps=d.color.raw_bps;
+        if(bps>0 && bps<14 && color_data_white > (1u<<bps)-1) shift=14-bps;
+        col.black=0;
+        std::fill(std::begin(col.cblack), std::end(col.cblack), 0u);
+        for(int c=0;c<4;++c) col.cblack[c]=color_data_black[c]>>shift;
     }
 };
 // Canon's CustomFunctions2 maker note (0x0099), where the bodies from the 40D to the
@@ -181,7 +201,7 @@ struct Handle {
 // (from the length field on) and record count; per record its tag, value count and
 // 4-byte values.
 static void canon_custom_functions(void* p, int tag, int type, int len, unsigned order,
-                                   void* stream, INT64) {
+                                   void* stream) {
     if (tag != 0x0099 || (type != 4 && type != 7) || len <= 0) return;
     const size_t size = size_t(len) * (type == 4 ? 4 : 1);
     if (size < 8 || size > 4096) return;
@@ -210,6 +230,37 @@ static void canon_custom_functions(void* p, int tag, int type, int len, unsigned
         }
         at = end;
     }
+}
+// Canon's ColorData (0x4001). The EOS R50 V and PowerShot V1 (version 65), and
+// the EOS R6 Mark III and C50 (66), write the ColorData12 layout of the R1 and
+// R5 Mark II in a record of 3778 words, ColorData11's length, which LibRaw reads
+// with ColorData11's offsets: blacks of 0 to 150 instead of 512 or 2048, a pink
+// cast where the masked border cannot correct it. ColorData12 keeps the blacks
+// (red, green, green, blue) at 0x290 and Normal and Specular White at 0x294.
+static void canon_color_data(void* p, int type, int len, unsigned order, void* stream) {
+    if (type != 3 || len != 3778) return;
+    std::vector<unsigned char> b(size_t(len) * 2);
+    auto in = static_cast<LibRaw_abstract_datastream*>(stream);
+    if (in->read(b.data(), 1, int(b.size())) != int(b.size())) return;
+    auto u16 = [&](size_t word) {
+        const unsigned lo = b[2 * word], hi = b[2 * word + 1];
+        return order == 0x4949 ? lo | hi << 8 : hi | lo << 8;
+    };
+    const unsigned version = u16(0);
+    if (version != 65 && version != 66) return;
+    const unsigned black[4] = {u16(0x290), u16(0x291), u16(0x292), u16(0x293)};
+    const unsigned white = u16(0x295);
+    for (unsigned v : black)
+        if (v == 0 || v >= white) return;
+    auto h = static_cast<Handle*>(p);
+    const int rgbg[4] = {0, 1, 3, 2};
+    for (int c = 0; c < 4; ++c) h->color_data_black[rgbg[c]] = black[c];
+    h->color_data_white = white;
+}
+static void canon_maker_notes(void* p, int tag, int type, int len, unsigned order,
+                              void* stream, INT64) {
+    if (tag == 0x0099) canon_custom_functions(p, tag, type, len, order, stream);
+    else if (tag == 0x4001) canon_color_data(p, type, len, order, stream);
 }
 static int progress(void* p, LibRaw_progress, int, int) {
     auto h = static_cast<Handle*>(p);
@@ -259,7 +310,7 @@ unsigned ora_metadata_size() { return sizeof(Metadata); }
 void* ora_open(const char* path, Metadata* m, char* err) {
     try {
         auto h = std::make_unique<Handle>();
-        h->raw.set_makernotes_handler(canon_custom_functions, h.get());
+        h->raw.set_makernotes_handler(canon_maker_notes, h.get());
         int rc = open_path(h->raw, path);
         if (rc) { message(err, libraw_strerror(rc)); return nullptr; }
         auto& d = h->raw.imgdata;

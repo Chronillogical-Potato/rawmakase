@@ -435,13 +435,14 @@ mod tests {
         assert_eq!(H::from_libraw(2), H::Enhanced);
         assert_eq!(H::from_libraw(-1), H::Off);
     }
-    /// A 64×48 uncompressed Canon TIFF whose maker notes hold only CustomFunctions2
-    /// with Highlight Tone Priority (record 0x0203) at `htp`, as bodies from the 40D
-    /// to the 600D record it: LibRaw reads none of the 60D's and a CameraInfo byte
-    /// of the 550D's that says Off when the custom function is on.
+    /// A 64×48 uncompressed Canon TIFF claiming `model`, whose maker notes hold
+    /// `notes`: (tag, type, count, value) with every value stored after the image.
     /// Written into a folder of its own: Windows does not let LibRaw open a
     /// `NamedTempFile` while it is held.
-    fn canon_custom_functions_raw(htp: u32) -> (tempfile::TempDir, std::path::PathBuf) {
+    fn canon_raw(
+        model: &str,
+        notes: &[(u16, u16, u32, Vec<u8>)],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
         let le = |v: u32, n: usize| v.to_le_bytes()[..n].to_vec();
         // IFD entries (tag, type, count, value) with values of up to four bytes.
         let ifd = |entries: &[(u16, u16, u32, Vec<u8>)]| {
@@ -455,6 +456,54 @@ mod tests {
             b.extend(le(0, 4));
             b
         };
+        let (make, model_at, exif, notes_at, image) = (192, 200, 300, 400, 1024);
+        let (width, height) = (64u32, 48u32);
+        let size = width * height * 2;
+        let mut file = vec![0u8; (image + size) as usize];
+        let mut entries = Vec::new();
+        for (tag, kind, count, value) in notes {
+            entries.push((*tag, *kind, *count, le(file.len() as u32, 4)));
+            file.extend(value);
+        }
+        let mut put = |at: u32, bytes: &[u8]| {
+            file[at as usize..at as usize + bytes.len()].copy_from_slice(bytes)
+        };
+        let model = format!("{model}\0");
+        put(0, b"II*\0\x08\0\0\0");
+        put(make, b"Canon\0");
+        put(model_at, model.as_bytes());
+        put(
+            8,
+            &ifd(&[
+                (0x0100, 4, 1, le(width, 4)),
+                (0x0101, 4, 1, le(height, 4)),
+                (0x0102, 3, 1, le(16, 2)),
+                (0x0103, 3, 1, le(1, 2)),
+                (0x0106, 3, 1, le(32803, 2)),
+                (0x010f, 2, 6, le(make, 4)),
+                (0x0110, 2, model.len() as u32, le(model_at, 4)),
+                (0x0111, 4, 1, le(image, 4)),
+                (0x0115, 3, 1, le(1, 2)),
+                (0x0116, 4, 1, le(height, 4)),
+                (0x0117, 4, 1, le(size, 4)),
+                (0x828d, 3, 2, [le(2, 2), le(2, 2)].concat()),
+                (0x828e, 1, 4, vec![0, 1, 1, 2]),
+                (0x8769, 4, 1, le(exif, 4)),
+            ]),
+        );
+        put(exif, &ifd(&[(0x927c, 7, 18, le(notes_at, 4))]));
+        put(notes_at, &ifd(&entries));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("canon.tif");
+        std::fs::write(&path, file).unwrap();
+        (dir, path)
+    }
+    /// A Canon EOS 60D TIFF whose maker notes hold only CustomFunctions2 with
+    /// Highlight Tone Priority (record 0x0203) at `htp`, as bodies from the 40D
+    /// to the 600D record it: LibRaw reads none of the 60D's and a CameraInfo byte
+    /// of the 550D's that says Off when the custom function is on.
+    fn canon_custom_functions_raw(htp: u32) -> (tempfile::TempDir, std::path::PathBuf) {
+        let le = |v: u32, n: usize| v.to_le_bytes()[..n].to_vec();
         let records = [(0x0201, 0), (0x0202, 0), (0x0203, htp)];
         let mut group = [2, 8 + 12 * records.len() as u32, records.len() as u32]
             .iter()
@@ -470,43 +519,56 @@ mod tests {
         custom.extend(le(0, 2));
         custom.extend(le(1, 4));
         custom.extend(group);
-        let (make, model, exif, notes, custom_at, image) = (192, 200, 300, 400, 500, 1024);
-        let (width, height) = (64u32, 48u32);
-        let size = width * height * 2;
-        let mut file = vec![0u8; (image + size) as usize];
-        let mut put = |at: u32, bytes: &[u8]| {
-            file[at as usize..at as usize + bytes.len()].copy_from_slice(bytes)
-        };
-        put(0, b"II*\0\x08\0\0\0");
-        put(make, b"Canon\0");
-        put(model, b"Canon EOS 60D\0");
-        put(
-            8,
-            &ifd(&[
-                (0x0100, 4, 1, le(width, 4)),
-                (0x0101, 4, 1, le(height, 4)),
-                (0x0102, 3, 1, le(16, 2)),
-                (0x0103, 3, 1, le(1, 2)),
-                (0x0106, 3, 1, le(32803, 2)),
-                (0x010f, 2, 6, le(make, 4)),
-                (0x0110, 2, 14, le(model, 4)),
-                (0x0111, 4, 1, le(image, 4)),
-                (0x0115, 3, 1, le(1, 2)),
-                (0x0116, 4, 1, le(height, 4)),
-                (0x0117, 4, 1, le(size, 4)),
-                (0x828d, 3, 2, [le(2, 2), le(2, 2)].concat()),
-                (0x828e, 1, 4, vec![0, 1, 1, 2]),
-                (0x8769, 4, 1, le(exif, 4)),
-            ]),
-        );
-        put(exif, &ifd(&[(0x927c, 7, 18, le(notes, 4))]));
         let words = custom.len() as u32 / 4;
-        put(notes, &ifd(&[(0x0099, 4, words, le(custom_at, 4))]));
-        put(custom_at, &custom);
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("canon.tif");
-        std::fs::write(&path, file).unwrap();
-        (dir, path)
+        canon_raw("Canon EOS 60D", &[(0x0099, 4, words, custom)])
+    }
+    /// A Canon TIFF claiming `model` whose ColorData (0x4001) is 3778 words of
+    /// `version`, with the per-channel blacks (red, green, green, blue) where
+    /// ColorData11 has them and where ColorData12 does.
+    fn canon_color_data_raw(
+        model: &str,
+        version: u16,
+        black11: [u16; 4],
+        black12: [u16; 4],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let mut words = vec![0u16; 3778];
+        words[0] = version;
+        words[0x69..0x6d].copy_from_slice(&[2320, 1024, 1024, 1454]);
+        words[0x27c..0x280].copy_from_slice(&black11);
+        words[0x280..0x282].copy_from_slice(&[164, 172]);
+        words[0x290..0x294].copy_from_slice(&black12);
+        words[0x294..0x296].copy_from_slice(&[13200, 13995]);
+        let bytes = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        canon_raw(model, &[(0x4001, 3, 3778, bytes)])
+    }
+    #[test]
+    fn reads_black_from_canon_color_data_12_of_3778_words() {
+        let black = |model, version, black11, black12| {
+            let (_dir, path) = canon_color_data_raw(model, version, black11, black12);
+            super::Raw::open_file(&path)
+                .unwrap()
+                .sensor()
+                .unwrap()
+                .black
+        };
+        // The EOS R6 Mark III (version 66) and R50 V (65) write ColorData12 in a
+        // record as long as ColorData11; LibRaw reads it as ColorData11 and gets
+        // the small values there (pink renders when the masked border cannot
+        // correct them). Channels are LibRaw's: red, green, blue, second green.
+        let garbage = [0, 58, 113, 145];
+        assert_eq!(
+            black("Canon EOS R6 Mark III", 66, garbage, [512; 4]),
+            [512; 4]
+        );
+        assert_eq!(
+            black("Canon EOS R50 V", 65, garbage, [2044, 2047, 2046, 2043]),
+            [2044, 2047, 2043, 2046]
+        );
+        // ColorData11 itself (the R6 Mark II's version 48) keeps LibRaw's reading.
+        assert_eq!(
+            black("Canon EOS R6 Mark II", 48, [511, 512, 513, 514], [0; 4]),
+            [511, 512, 514, 513]
+        );
     }
     #[test]
     fn reads_highlight_tone_priority_from_canon_custom_functions() {
