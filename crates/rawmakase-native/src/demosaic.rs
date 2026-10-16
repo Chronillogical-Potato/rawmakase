@@ -12,6 +12,8 @@
 //!    the nearest same-colour samples, which keeps edges aligned across channels.
 use rayon::prelude::*;
 
+mod xtrans;
+
 /// Side of the colour pattern: a common multiple of the 2, 6 and 16 pixel periods.
 pub(crate) const PATTERN: usize = 48;
 
@@ -56,12 +58,11 @@ impl Cfa<'_> {
 }
 
 pub(crate) fn demosaic(cfa: &Cfa) -> Vec<[f32; 3]> {
-    let green = if cfa.is_bayer() {
-        green_bayer(cfa)
+    if cfa.is_bayer() {
+        colour_difference(cfa, &green_bayer(cfa))
     } else {
-        green_general(cfa)
-    };
-    colour_difference(cfa, &green)
+        xtrans::demosaic(cfa)
+    }
 }
 
 fn green_bayer(cfa: &Cfa) -> Vec<f32> {
@@ -94,71 +95,6 @@ fn green_bayer(cfa: &Cfa) -> Vec<f32> {
         }
     });
     g
-}
-
-fn green_general(cfa: &Cfa) -> Vec<f32> {
-    let (w, h) = (cfa.width, cfa.height);
-    let mut g = vec![0f32; w * h];
-    g.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
-        let yi = y as isize;
-        for (x, out) in row.iter_mut().enumerate() {
-            let xi = x as isize;
-            if cfa.color(x, y) == 1 {
-                *out = cfa.at(xi, yi);
-                continue;
-            }
-            // Greens among the 8 neighbours, weighted by how well each agrees with the
-            // green on the opposite side (a directional gradient test).
-            let mut sum = 0.;
-            let mut total = 0.;
-            for (dx, dy) in [(1, 0), (0, 1), (1, 1), (1, -1)] {
-                let a = (xi + dx, yi + dy);
-                let b = (xi - dx, yi - dy);
-                let ga = cfa.color_at(a.0, a.1) == 1;
-                let gb = cfa.color_at(b.0, b.1) == 1;
-                let diag = if dx != 0 && dy != 0 { 0.7 } else { 1. };
-                match (ga, gb) {
-                    (true, true) => {
-                        let (va, vb) = (cfa.at(a.0, a.1), cfa.at(b.0, b.1));
-                        let wgt = diag / ((va - vb).abs() + 1e-4);
-                        sum += (va + vb) * 0.5 * wgt;
-                        total += wgt;
-                    }
-                    (true, false) | (false, true) => {
-                        let v = if ga {
-                            cfa.at(a.0, a.1)
-                        } else {
-                            cfa.at(b.0, b.1)
-                        };
-                        let wgt = diag * 0.5 / (local_contrast(cfa, xi, yi) + 1e-4);
-                        sum += v * wgt;
-                        total += wgt;
-                    }
-                    _ => {}
-                }
-            }
-            *out = if total > 0. {
-                sum / total
-            } else {
-                cfa.at(xi, yi)
-            };
-        }
-    });
-    g
-}
-fn local_contrast(cfa: &Cfa, x: isize, y: isize) -> f32 {
-    let mut lo = f32::INFINITY;
-    let mut hi = 0f32;
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            if cfa.color_at(x + dx, y + dy) == 1 {
-                let v = cfa.at(x + dx, y + dy);
-                lo = lo.min(v);
-                hi = hi.max(v);
-            }
-        }
-    }
-    if hi >= lo { hi - lo } else { 0. }
 }
 
 fn colour_difference(cfa: &Cfa, green: &[f32]) -> Vec<[f32; 3]> {
@@ -287,6 +223,54 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn fine_neutral_stripes_stay_neutral_on_xtrans() {
+        let pattern = xtrans_pattern();
+        let (w, h) = (96, 96);
+        // Louvres about as fine as the sensor grid, horizontal and diagonal.
+        let stripes: [fn(usize, usize) -> f32; 2] = [
+            |_, y| [0.8, 0.2, 0.2][y % 3],
+            |x, y| [0.8, 0.2, 0.2][(x + y) % 3],
+        ];
+        for stripe in stripes {
+            let data = mosaic(&pattern, w, h, |x, y| [stripe(x, y); 3]);
+            let cfa = Cfa {
+                data: &data,
+                width: w,
+                height: h,
+                pattern: &pattern,
+            };
+            let out = demosaic(&cfa);
+            let mut worst = 0f32;
+            for y in 12..h - 12 {
+                for x in 12..w - 12 {
+                    let p = out[y * w + x];
+                    worst = worst.max((p[0] - p[1]).abs()).max((p[2] - p[1]).abs());
+                }
+            }
+            assert!(worst < 0.08, "colour cast {worst}");
+        }
+    }
+    #[test]
+    fn extreme_samples_do_not_make_non_finite_pixels() {
+        let pattern = xtrans_pattern();
+        let (w, h) = (32, 40);
+        let data = mosaic(&pattern, w, h, |x, y| {
+            let v = if (x * 7 + y * 13) % 5 == 0 {
+                65535.
+            } else {
+                0.
+            };
+            [v; 3]
+        });
+        let cfa = Cfa {
+            data: &data,
+            width: w,
+            height: h,
+            pattern: &pattern,
+        };
+        assert!(demosaic(&cfa).iter().flatten().all(|v| v.is_finite()));
     }
     #[test]
     fn recognises_bayer_and_xtrans() {

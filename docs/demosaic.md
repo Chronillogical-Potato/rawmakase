@@ -2,10 +2,12 @@
 
 By default RAWmakase demosaics full-size images itself (`crates/rawmakase-native/src/demosaic.rs`). LibRaw only unpacks the sensor data (`ora_cfa_open` / `ora_cfa_copy` in `crates/rawmakase-native/native/raw.cpp`), and still provides metadata, white balance, crops and previews. Black levels (including per-position patterns), white level and camera white balance are applied in RAWmakase. The colour pattern comes from LibRaw's `COLOR()` as a 48×48 tile, which covers Bayer and X-Trans periods.
 
-The algorithm uses the same two passes for both sensor types:
+Bayer uses two passes:
 
-1. **Green** at red and blue sites. On Bayer it blends Hamilton–Adams horizontal and vertical estimates by inverse gradient, clamped to the neighbouring greens. On X-Trans it weights the green neighbours by how well opposite neighbours agree.
+1. **Green** at red and blue sites, blending Hamilton–Adams horizontal and vertical estimates by inverse gradient, clamped to the neighbouring greens.
 2. **Red and blue** from the difference to green of the nearest same-colour samples (radius 1, else 2), weighted by inverse distance.
+
+X-Trans (`crates/rawmakase-native/src/demosaic/xtrans.rs`) builds one full RGB candidate per direction (horizontal, vertical, both diagonals): green interpolated along that line between the nearest greens with a same-colour curvature correction, red and blue from their difference to that green along the same line. Each pixel then blends the four candidates by how smooth their R − G and B − G is in the surrounding 3×3, so a wrong direction, which leaves a colour pattern, gets almost no weight. A single isotropic estimate turned fine periodic detail such as louvres and grilles into green and magenta moiré (X100F DSCF8231, DSCF8232); LibRaw's Markesteijn did not. Bands of 128 rows with a mirrored margin keep the working set small.
 
 Borders are mirrored, which keeps the Bayer colour parity. Half-size drafts and files that aren't single-channel Bayer or X-Trans (e.g. Foveon, linear DNG) still use LibRaw.
 
