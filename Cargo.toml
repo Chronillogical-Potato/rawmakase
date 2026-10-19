@@ -149,3 +149,10 @@ lto = "thin"
 
 [profile.dev]
 opt-level = 1
+
+# Dependencies keep line tables for backtraces but not the full debug info a
+# debugger needs to step through them: a workspace test build's target shrinks
+# from 31 to 20 GB, with no slower build. The workspace crates keep full debug
+# info.
+[profile.dev.package."*"]
+debug = "line-tables-only"
