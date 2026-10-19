@@ -14,7 +14,8 @@ release:
   checksums: SHA256SUMS
 version_file: Cargo.toml
 # Host libraries the Linux build links against; packaging/linux/bundle.py
-# bundles the imaging libraries and leaves these to the distribution.
+# bundles the imaging libraries and leaves these to the distribution. The
+# DEB, RPM and AppImage all use the host's copies.
 libraries:
   libgomp.so.1: {deb: libgomp1, rpm: libgomp}
   libz.so.1: {deb: zlib1g, rpm: zlib}
@@ -101,7 +102,7 @@ targets:
     platform: linux
     arch: amd64
     libc: glibc
-    formats: [deb, rpm]
+    formats: [deb, rpm, appimage]
     input:
       local: dist/rawmakase-@VERSION@-x86_64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-x86_64-linux.tar.gz
@@ -117,6 +118,11 @@ targets:
         - src: '@PAYLOAD@/usr/share/'
           dst: /usr/share/
           type: tree
+        # The AppImage runtime native-packages appends (type2-runtime
+        # 20251108 in 0.10.0) carries this licence; only the AppImage ships it.
+        - src: packaging/linux/AppImage-runtime-LICENSE
+          dst: /usr/share/licenses/rawmakase/AppImage-runtime-LICENSE
+          packager: appimage
       # Loaded at runtime by the windowing and GPU stack, so not found by
       # inspecting the binary.
       overrides:
@@ -169,7 +175,7 @@ targets:
     platform: linux
     arch: arm64
     libc: glibc
-    formats: [deb, rpm]
+    formats: [deb, rpm, appimage]
     input:
       local: dist/rawmakase-@VERSION@-aarch64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-aarch64-linux.tar.gz
@@ -185,6 +191,11 @@ targets:
         - src: '@PAYLOAD@/usr/share/'
           dst: /usr/share/
           type: tree
+        # The AppImage runtime native-packages appends (type2-runtime
+        # 20251108 in 0.10.0) carries this licence; only the AppImage ships it.
+        - src: packaging/linux/AppImage-runtime-LICENSE
+          dst: /usr/share/licenses/rawmakase/AppImage-runtime-LICENSE
+          packager: appimage
       # Loaded at runtime by the windowing and GPU stack, so not found by
       # inspecting the binary.
       overrides:

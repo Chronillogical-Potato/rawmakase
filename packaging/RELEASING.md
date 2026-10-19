@@ -23,10 +23,11 @@ notarization must pass before anything is published. No AUR pushes occur.
 The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
 not need Homebrew. The Linux tarball contains the same `/usr` layout, including
 private libraries; run the extracted `usr/bin/rawmakase` or install the whole
-tree under `/usr`. Do not copy just its executable. The AppImage packs that
-same payload (`packaging/linux/appimage.py`) with a pinned appimagetool and
-runtime. Linux still needs system Vulkan/graphics drivers, window-system
-libraries and a working file-dialog portal.
+tree under `/usr`. Do not copy just its executable (a symlink to
+`usr/bin/rawmakase` works). The AppImage packs that same payload, built by
+native-packages with its pinned type2-runtime; its `AppRun` links to
+`usr/bin/rawmakase`. Linux still needs system Vulkan/graphics drivers,
+window-system libraries and a working file-dialog portal.
 
 Each Windows architecture's installer and archive hold the same folder: `rawmakase.exe`, with
 LibRaw, Little CMS and the C runtime linked in statically (so no Visual C++
@@ -218,10 +219,15 @@ Packaging uses pinned `native-packages` 0.10.0, configured in
 arm64 runners; `packaging/linux/bundle.py` stages each with its private
 libraries. The release then calls `.github/workflows/packaging.yml`, which runs
 native-packages' shared packaging workflow on those archives and both DMGs: it
-installs the nFPM version `tool.nfpm` names, builds the DEB and RPM for each
-architecture (mapping each host library to its distribution package) and
-renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
-checksums. The release carries the resulting `rawmakase.rb` cask.
+installs the nFPM version `tool.nfpm` names, builds the DEB, RPM and AppImage
+for each architecture (mapping each host library to its distribution package)
+and renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
+checksums. The release carries the resulting `rawmakase.rb` cask. The
+AppImage holds the same `contents` as the DEB and RPM plus the runtime's
+licence (`packaging/linux/AppImage-runtime-LICENSE`, for the runtime that
+native-packages version pins; check it when upgrading).
+`packaging/linux/verify-appimage.sh` checks its layout on each architecture
+and, for a release, runs it.
 
 ### Homebrew tap
 

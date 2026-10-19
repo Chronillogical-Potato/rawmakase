@@ -166,8 +166,8 @@ jobs:
           path: ${{ runner.temp }}/windows-packages/packages/${{ matrix.target }}/inno/*.exe
           if-no-files-found: error
 
-  # native-packages' shared workflow installs nfpm and builds the DEB and RPM
-  # packages and the Homebrew cask. Pull requests package the published v0.1.8
+  # native-packages' shared workflow installs nfpm and builds the DEB, RPM and
+  # AppImage packages and the Homebrew cask. Pull requests package the published v0.1.8
   # x86_64 archive, the last release before aarch64 builds; a release packages
   # its own archives for both architectures.
   packages:
@@ -206,3 +206,39 @@ jobs:
           mkdir packages
           cp "native-packages/packages/$TARGET/deb/"*.deb "native-packages/packages/$TARGET/rpm/"*.rpm packages/
           docker run --rm -v "$PWD/packages:/packages:ro" -v "$PWD/packaging/linux:/checks:ro" "$IMAGE" bash /checks/verify.sh
+
+  # The AppImage on each architecture: its name, layout and licences, then, for
+  # a release, starting it. The published 0.1.8 archive pull requests package
+  # predates the launcher that resolves AppRun's symlink, so it is not run.
+  appimage:
+    name: AppImage (${{ matrix.platform.target }})
+    needs: packages
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.version != '' && '[{"runner":"ubuntu-24.04","target":"linux-amd64","arch":"x86_64"},{"runner":"ubuntu-24.04-arm","target":"linux-arm64","arch":"aarch64"}]' || '[{"runner":"ubuntu-24.04","target":"linux-amd64","arch":"x86_64"}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: native-packages
+          path: native-packages
+      - name: Check and run the AppImage
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          TARGET: ${{ matrix.platform.target }}
+          ARCH: ${{ matrix.platform.arch }}
+        run: |
+          version=${RELEASE_VERSION:-0.1.8}
+          run=()
+          if [[ -n "$RELEASE_VERSION" ]]; then
+            # The host libraries the binary links; Vulkan and the window system load later.
+            sudo apt-get update
+            sudo apt-get install -y libgomp1 zlib1g
+            run=(--run)
+          fi
+          bash packaging/linux/verify-appimage.sh "native-packages/packages/$TARGET/appimage/rawmakase-$version-$ARCH.AppImage" "$version" "${run[@]}"
