@@ -114,6 +114,14 @@
   areas were reviewed, which were skipped and why, any reviewer that failed or
   timed out, and any checks that couldn't run here, such as ones that need the
   private corpus.
+- Don't push, open or update a pull request, or merge until the reviewer has
+  approved the latest revision. Approval means no unresolved findings: each is
+  either fixed or declined with a concrete reason. After any fix, ask for
+  another round on the new revision; an earlier approval doesn't cover later
+  changes. When the author and reviewer disagree about whether a finding is
+  worth fixing or just a nitpick, the user who requested the change decides.
+- Docs-only commits and release commits skip review and local checks; see
+  "Before every push".
 
 ## Addressing code review comments
 
@@ -143,6 +151,12 @@ cargo test --workspace --locked
 
 A `v*` tag builds and publishes a release, so the same applies before tagging.
 
+Docs-only commits and `Release x.y.z` commits that change no code are the
+exception: push them straight to `main` without a pull request, subagent
+review or local checks, and don't wait for CI. Add `[skip ci]` to docs-only
+commit subjects, but never to a release commit: GitHub applies it to the tag
+push too, which would skip the release workflow.
+
 ## Releases
 
 Follow [the release guide](packaging/RELEASING.md#writing-release-notes).
@@ -168,8 +182,9 @@ No reference project or previous release style is required.
 
 1. Bump the version in `Cargo.toml`, `Cargo.lock`, `packaging/macos/Info.plist` and
    both `packaging/arch/*/PKGBUILD` files (see the previous `Release x.y.z` commit).
-2. Write and review the notes, run the required checks, and commit as
-   `Release x.y.z`, with a short summary of what changed.
+2. Write and review the notes, and commit as `Release x.y.z`, with a short
+   summary of what changed. Run the required checks only if the commit changes
+   code.
 3. Push `main`, verify the release commit is on `origin/main`, then create
    and push its annotated tag `vx.y.z`.
 4. Wait for every build, signing/notarization, installation check and publication.
