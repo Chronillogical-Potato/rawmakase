@@ -366,7 +366,8 @@ impl Heif {
                         .map(|(kind, body)| property(kind, body).unwrap_or(Property::Other(kind)))
                         .collect()
                 }
-                b"ipma" => self.associations = associations(Bytes(body))?,
+                // One per version and flags, so there may be several.
+                b"ipma" => self.associations.extend(associations(Bytes(body))?),
                 _ => {}
             }
         }
@@ -758,6 +759,20 @@ mod tests {
         }
         let meta = [vec![0; 4], bx(b"iloc", &iloc)].concat();
         [bx(b"ftyp", b"avif\0\0\0\0avif"), bx(b"meta", &meta)].concat()
+    }
+
+    #[test]
+    fn associations_from_every_ipma_box_are_kept() {
+        let ispe = bx(b"ispe", &[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2]);
+        let ipco = bx(b"ipco", &[ispe, bx(b"irot", &[1])].concat());
+        // Version 0 for item 1, version 1 (32-bit item IDs) for item 2.
+        let first = bx(b"ipma", &[0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1]);
+        let second = bx(b"ipma", &[1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 1, 2]);
+        let meta = [vec![0; 4], bx(b"iprp", &[ipco, first, second].concat())].concat();
+        let file = [bx(b"ftyp", b"avif\0\0\0\0avif"), bx(b"meta", &meta)].concat();
+        let heif = Heif::read(&mut Cursor::new(&file)).unwrap();
+        assert_eq!(heif.properties(1), [&Property::Size(1, 2)]);
+        assert_eq!(heif.properties(2), [&Property::Rotation(1)]);
     }
 
     #[test]
