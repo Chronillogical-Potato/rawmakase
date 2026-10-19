@@ -162,7 +162,7 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
         pixels
             .par_iter_mut()
             .for_each(|p| *p = tone_map(p.map(|v| v * white)));
-        return linear_pro_photo_to_srgb(&pixels, width, height);
+        return Ok(linear_pro_photo_to_srgb(&pixels, width, height));
     }
     let transform = profile.and_then(|profile| ToSrgb::new(&profile, decoder.color_type()));
     let mut image = DynamicImage::from_decoder(decoder).map_err(read_error(path))?;
@@ -322,32 +322,18 @@ fn tone_map(rgb: [f32; 3]) -> [f32; 3] {
 }
 
 /// Linear ProPhoto pixels of a `width` × `height` image in 8-bit sRGB.
-fn linear_pro_photo_to_srgb(pixels: &[[f32; 3]], width: u32, height: u32) -> Result<RgbImage> {
-    let transform = linear_pro_photo()
-        .create_transform_f32(
-            Layout::Rgb,
-            &ColorProfile::new_srgb(),
-            Layout::Rgb,
-            TransformOptions::default(),
-        )
-        .map_err(|e| anyhow!("Could not convert the image to sRGB: {e}"))?;
+/// Converted here rather than by moxcms, whose f32 conversion to sRGB on ARM
+/// (NEON) darkens red by about 1.5%.
+fn linear_pro_photo_to_srgb(pixels: &[[f32; 3]], width: u32, height: u32) -> RgbImage {
+    use rawmakase_model::{camera_profiles::PRO_TO_RGB, color};
     let mut out = RgbImage::new(width, height);
-    if out.is_empty() {
-        return Ok(out);
-    }
-    pixels
-        .par_chunks(width as usize)
-        .zip(out.par_chunks_mut(width as usize * 3))
-        .try_for_each(|(from, to)| {
-            let mut row = vec![0f32; to.len()];
-            transform.transform(bytemuck::cast_slice(from), &mut row)?;
-            for (to, v) in to.iter_mut().zip(row) {
-                *to = (v.clamp(0., 1.) * 255.).round() as u8;
-            }
-            Ok(())
-        })
-        .map_err(|e: moxcms::CmsError| anyhow!("Could not convert the image to sRGB: {e}"))?;
-    Ok(out)
+    out.par_chunks_mut(3).zip(pixels).for_each(|(to, from)| {
+        let rgb = color::mul(PRO_TO_RGB, *from);
+        for (to, v) in to.iter_mut().zip(rgb) {
+            *to = (color::srgb_encode(v.clamp(0., 1.)) * 255.).round() as u8;
+        }
+    });
+    out
 }
 
 /// ProPhoto's primaries with no gamma: an empty curve is the identity in ICC.
