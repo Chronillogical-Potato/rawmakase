@@ -1035,6 +1035,20 @@ mod tests {
         assert!(decode(&fixture("tiled.avif")).is_err());
     }
 
+    /// An image sequence is refused whichever of its brands says so, not
+    /// only the major one.
+    #[test]
+    fn an_avif_listing_the_sequence_brand_is_refused_as_animated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sequence.avif");
+        let mut bytes = std::fs::read(fixture("rotated.avif")).unwrap();
+        // Major brand avif; compatible avif, mif1, avis (in miaf's place), MA1A.
+        let at = bytes.windows(4).position(|w| w == b"miaf").unwrap();
+        bytes[at..at + 4].copy_from_slice(b"avis");
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(super::probe(&path).unwrap_err().0, "animated");
+    }
+
     /// A file cut short says what it is and what is wrong with it, once.
     #[test]
     fn a_truncated_file_says_what_is_wrong_once() {

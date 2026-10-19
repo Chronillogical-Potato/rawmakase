@@ -118,7 +118,7 @@ impl AvifFile {
             Some(Unsupported("tiled AVIF".into()))
         } else if nclx.is_some_and(|n| matches!(n.transfer, 16 | 18)) {
             Some(Unsupported("HDR".into()))
-        } else if heif.brands.first() == Some(b"avis") {
+        } else if heif.brands.contains(b"avis") {
             Some(Unsupported("animated".into()))
         } else {
             None
