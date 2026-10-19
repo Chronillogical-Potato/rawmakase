@@ -14,9 +14,12 @@ def run(*args):
     return subprocess.check_output(args, text=True)
 
 
+# Resolve symlinks first: the AppImage's AppRun, or a link from another bin
+# directory, points at this script from outside the payload.
 LAUNCHER = """#!/bin/sh
 set -eu
-base=$(CDPATH= cd -- "$(dirname -- "$0")/../lib/rawmakase" && pwd)
+self=$(readlink -f -- "$0")
+base=$(CDPATH= cd -- "$(dirname -- "$self")/../lib/rawmakase" && pwd)
 exec "$base/rawmakase" "$@"
 """
 
