@@ -290,6 +290,51 @@ fn a_jpeg_opens_in_develop_by_command() -> anyhow::Result<()> {
     assert!(e.module == Module::Develop);
     Ok(())
 }
+/// Next and Previous in Develop pass over a photo Develop can't edit, as the
+/// arrow keys do.
+#[test]
+fn navigating_develop_by_command_steps_past_a_photo_it_cannot_edit() -> anyhow::Result<()> {
+    use image::ImageEncoder;
+    let (mut e, ctx) = editor();
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    image::RgbImage::new(8, 8).save(photos.join("a.jpg"))?;
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(photos.join("b.jpg"))?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    image::RgbImage::new(8, 8).save(photos.join("c.jpg"))?;
+    let db = dir.path().join("catalog.rawmakase");
+    crate::catalog::Catalog::create(&db)?.add_folder(&photos)?;
+    e.library = Some(Box::new(super::super::library::Library::load(
+        &db,
+        ctx.clone(),
+    )?));
+    e.module = Module::Library;
+    let library = e.library.as_ref().unwrap();
+    let id = |name: &str| {
+        library
+            .session
+            .photos
+            .iter()
+            .find(|p| p.filename == name)
+            .map(|p| p.id)
+            .unwrap()
+    };
+    let (a, b, c) = (id("a.jpg"), id("b.jpg"), id("c.jpg"));
+    assert_eq!(library.navigate(a, 1), Some(b));
+    let run = |e: &mut Editor, operation| {
+        e.execute_command(Command::new(operation), &ctx)
+            .map_err(|error| anyhow::anyhow!("{}: {}", error.code, error.message))
+    };
+    run(&mut e, Operation::Open(PhotoTarget::Id(a)))?;
+    run(&mut e, Operation::Navigate(1))?;
+    assert_eq!(e.document.catalog_photo, Some(c));
+    run(&mut e, Operation::Navigate(-1))?;
+    assert_eq!(e.document.catalog_photo, Some(a));
+    Ok(())
+}
 #[test]
 fn output_job_publishes_the_captured_revision_and_never_clobbers() -> anyhow::Result<()> {
     let (mut e, ctx) = editor();

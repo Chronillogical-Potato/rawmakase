@@ -1058,7 +1058,13 @@ impl Editor {
             self.document.catalog_photo
         };
         let next = current
-            .and_then(|id| library.navigate(id, step))
+            .and_then(|id| {
+                if self.module == Module::Library {
+                    library.navigate(id, step)
+                } else {
+                    self.develop_step(id, step)
+                }
+            })
             .ok_or_else(|| Error::new("end_of_list", "No next photo in this direction"))?;
         if self.module == Module::Library {
             self.library

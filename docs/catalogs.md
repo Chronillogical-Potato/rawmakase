@@ -21,7 +21,7 @@ The selected photo has clickable stars, Pick/Reject/Unflag controls and a color-
 | Backtick | Toggle pick / unflag |
 | 6 / 7 / 8 / 9 | Toggle Red / Yellow / Green / Blue |
 | Shift + rating, flag or color key | Apply and advance in the current filtered order |
-| Left / Right | Previous / next photo |
+| Left / Right | Previous / next photo; in Develop, past photos it can't open |
 | Z | Toggle Fit / 100% zoom in Develop |
 
 Purple and **No label** are available in the menu. Repeating a color shortcut clears that same label; ratings set an explicit number, with 0 clearing them. Clicking the currently selected star clears the rating. Shortcuts are suppressed while editing text or numbers, during dialogs and during export; modified system shortcuts such as Command+X are not intercepted. `1` now means one star, replacing its previous zoom shortcut.
