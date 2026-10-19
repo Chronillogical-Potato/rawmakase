@@ -70,11 +70,16 @@ Optional monitor ICC conversion maps encoded sRGB bytes to device RGB
 (`color_management::display_transform`), relative colorimetric with black-point
 compensation, in pure Rust: profiles are read with moxcms; a matrix/TRC monitor
 profile is applied by its colorants and tone curves (inverted exactly, so a raised
-black stays right), a LUT-based one through moxcms's transform from sRGB, its
-perceptual tables standing in for colorimetric ones it lacks, as ICC asks.
+black stays right). So is a LUT-based profile whose lut8/lut16 tables connect
+through XYZ, such as DisplayCAL's default "XYZ LUT + matrix" profiles, evaluated
+as Little CMS does: the table's matrix, input curves, tetrahedral CLUT and output
+curves. moxcms ignores that matrix and miscolours such profiles (green, in issue
+548). Any other LUT-based profile goes through moxcms's transform from sRGB. Its
+perceptual tables stand in for colorimetric ones it lacks, as ICC asks.
 Black-point compensation scales XYZ per channel so sRGB's black lands on the
 monitor's (Adobe's published method); the monitor's black is its device black
-through the colorimetric transform, and none for a LUT profile with only
+through the colorimetric transform (the A2B tables when the profile has A2B1/B2A1
+or matrix/TRC tags, as in Little CMS), and none for a LUT profile with only
 perceptual tables (whose black is the reference medium's). A profile that cannot
 be read or used is an error and leaves the pixels as they were.
 
@@ -87,7 +92,9 @@ everywhere, or within Little CMS's own rounding where its 8-bit result is more t
 one from its floating-point result. Synthetic LUT profiles with raised blacks miss
 that in 0.01–0.05% of the grid, saturated shadows where moxcms's resampling of the
 profile's table differs by up to 6.5 code values (Little CMS's own 8-bit result is up
-to 7 from its floating-point one there). `color_management`'s tests hold the
+to 7 from its floating-point one there). Synthetic DisplayCAL-style profiles (XYZ
+lut16 tables with a matrix or a CLUT, matrix/TRC tags, raised blacks) agree with
+Little CMS's 8-bit result within one code value everywhere. `color_management`'s tests hold the
 committed fixtures (`crates/rawmakase-decode/tests/data/monitor`) to this; an
 ignored test runs the dense grid over a folder of profiles and Little CMS results.
 Choosing this manual override on macOS leaves the Metal surface unmanaged to
