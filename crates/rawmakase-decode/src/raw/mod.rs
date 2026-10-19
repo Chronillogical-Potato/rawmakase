@@ -150,6 +150,8 @@ pub(crate) struct Header {
     pub dng_version: u32,
     /// Black and white known on opening; see `Metadata::levels`.
     pub levels: Option<[u32; 3]>,
+    /// A linear raw DNG's AnalogBalance relative to green; 1 otherwise.
+    pub analog_balance: [f32; 3],
 }
 impl Raw {
     /// The photo's facts as RAWmakase's decoders read them. What the file says
@@ -209,6 +211,7 @@ impl Raw {
             adobe_names,
             baseline_exposure: None,
             dng_neutral_calibration: None,
+            dng_analog_balance: (h.analog_balance != [1.; 3]).then_some(h.analog_balance),
             dng_matrix_profile_signature: None,
             source: Source::Raw,
             lens_profiles: Default::default(),

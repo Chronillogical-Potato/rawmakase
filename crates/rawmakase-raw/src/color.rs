@@ -18,9 +18,13 @@ const XYZ_RGB: [[f64; 3]; 3] = [
 /// Without a matrix the daylight multipliers are neutral (1), so a file
 /// without white balance as shot is never balanced by zeros, and the
 /// camera-to-sRGB matrix is the identity (as LibRaw's), so the camera's
-/// colours pass through rather than to black.
+/// colours pass through rather than to black. A linear raw DNG takes no
+/// table matrix: its RGB is whatever its writer made (a phone's processing,
+/// or an image Lightroom stored as a DNG under the camera's name), which
+/// only the file's matrix describes, where the table's is the sensor's.
 pub(crate) fn apply(info: &mut RawInfo) {
-    let table = crate::facts::matrix(&info.make, &info.model);
+    let linear = matches!(&info.plan, crate::variant::Plan::Dng(p) if p.samples > 1);
+    let table = crate::facts::matrix(&info.make, &info.model).filter(|_| !linear);
     // A DNG whose white balance is a chromaticity, of a camera Adobe gives
     // its own matrix: the neutral through that matrix.
     if let (Some(m), Some([x, y])) = (table, info.as_shot_xy) {
@@ -39,6 +43,9 @@ pub(crate) fn apply(info: &mut RawInfo) {
     }
     match info.file_matrix.or(table).and_then(|m| from_cam_xyz(&m)) {
         Some((rgb_cam, pre_mul)) => {
+            // Daylight's multipliers are of the samples, AnalogBalance's
+            // gains included.
+            let pre_mul: [f32; 3] = std::array::from_fn(|c| pre_mul[c] / info.analog_balance[c]);
             info.rgb_cam = rgb_cam;
             info.pre_mul = [pre_mul[0], pre_mul[1], pre_mul[2], pre_mul[1]];
         }

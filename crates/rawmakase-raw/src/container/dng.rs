@@ -1,7 +1,9 @@
 //! Adobe DNG (DNG Specification 1.7): the raw image directory, its tiles or
 //! strips and their compression, the CFA layout, levels and linearization, the
 //! active area and default crop, the colour tags, and the data opcodes of
-//! OpcodeList1 and 2 (`opcodes`).
+//! OpcodeList1 and 2 (`opcodes`). The raw image is a CFA mosaic of one sample
+//! per pixel, or linear raw (demosaiced camera RGB, as phones' computational
+//! DNGs and Adobe DNG Converter's linear DNGs store it) of three, interleaved.
 use super::tiff::{Ifd, NAME_MAX, TEXT_MAX, TiffFile};
 use crate::codec::{bits::Msb, dct, ljpeg};
 use crate::error::{Error, Result, corrupt};
@@ -17,14 +19,17 @@ use opcodes::Opcode;
 /// Where a DNG's raw image is and how it is coded.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DngPlan {
-    /// The levels: BlackLevelRepeatDim (rows, columns), BlackLevel,
-    /// BlackLevelDeltaH and DeltaV (per column and row of the active area),
-    /// and WhiteLevel.
+    /// The levels: BlackLevelRepeatDim (rows, columns), BlackLevel (per
+    /// row, column and sample of the pattern), BlackLevelDeltaH and DeltaV
+    /// (per column and row of the active area), and WhiteLevel (per sample;
+    /// empty when the file has none).
     pub black_dim: Option<[u32; 2]>,
     pub black: Vec<f64>,
     pub black_delta_h: Vec<f64>,
     pub black_delta_v: Vec<f64>,
-    pub white: Option<u32>,
+    pub white: Vec<u32>,
+    /// Samples per pixel: 1 for a CFA, 3 for linear raw.
+    pub samples: u32,
     pub width: u32,
     pub height: u32,
     pub bps: u32,
@@ -66,17 +71,34 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     let ifd = &t.ifds[raw];
     let photometric = t.int(ifd, 262).unwrap_or(0);
     let samples = t.int(ifd, 277).unwrap_or(1);
-    if photometric != 32803 || samples != 1 {
-        return Err(Error::Unsupported("DNG linear raw".into()));
+    // Linear raw develops as camera RGB: three samples, interleaved
+    // (PlanarConfiguration 1). One sample is a monochrome sensor's.
+    let linear = photometric == 34892;
+    match (linear, samples) {
+        (false, 1) => {}
+        (true, 3) if t.int(ifd, 284).unwrap_or(1) == 1 => {}
+        (true, 3) => return Err(Error::Unsupported("DNG linear raw in planes".into())),
+        (true, 1) => return Err(Error::Unsupported("monochrome DNG".into())),
+        (true, n) => {
+            return Err(Error::Unsupported(format!("DNG linear raw of {n} samples")));
+        }
+        (false, n) => return Err(Error::Unsupported(format!("DNG CFA of {n} samples"))),
     }
     let width = t.int(ifd, 256).ok_or_else(|| corrupt("DNG width"))?;
     let height = t.int(ifd, 257).ok_or_else(|| corrupt("DNG height"))?;
-    crate::io::samples(width, height, 1)?;
+    crate::io::samples(width, height, samples)?;
     let bps = t.int(ifd, 258).unwrap_or(1);
     let compression = t.int(ifd, 259).unwrap_or(1);
     let sample_format = t.int(ifd, 339).unwrap_or(1);
     let predictor = t.int(ifd, 317).unwrap_or(1);
-    let (tile, tiles) = layout(&t, ifd, width, height)?;
+    // Floating-point levels are read on the integer scale of the mosaics
+    // measured; linear raw's (1.0 white by default) are of no file we have.
+    if linear && sample_format == 3 {
+        return Err(Error::Unsupported(
+            "DNG linear raw of floating-point samples".into(),
+        ));
+    }
+    let (tile, tiles) = layout(&t, ifd, width, height, samples)?;
     let variant = match (compression, sample_format) {
         (1, 1) => Variant::DngUncompressed,
         (7, 1) => Variant::DngLosslessJpeg,
@@ -85,7 +107,7 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
         (9, _) => Variant::DngVc5,
         _ => return Err(Error::Unsupported(format!("DNG compression {compression}"))),
     };
-    let cfa = cfa(&t, ifd)?;
+    let cfa = if linear { None } else { Some(cfa(&t, ifd)?) };
     // A table maps 16-bit stored values: 65536 entries at most.
     let curve = t
         .ints(ifd, 50712, 1 << 16)
@@ -105,7 +127,7 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     info.width = active[3] - left;
     info.height = active[2] - top;
     // CFAPattern starts at the active area's corner, the visible area's.
-    info.cfa = Some(cfa);
+    info.cfa = cfa;
     let origin = t.reals(ifd, 50719, 2).filter(|v| v.len() == 2);
     let size = t.reals(ifd, 50720, 2).filter(|v| v.len() == 2);
     // The default crop in sensor coordinates, starting on even rows and
@@ -232,6 +254,18 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
         [matrix(50721), matrix(50722)],
         [t.int(ifd0, 50778), t.int(ifd0, 50779)],
     );
+    // Linear raw's samples carry AnalogBalance, gains its writer applied
+    // (Adobe DNG Converter's for cameras that white balance small RAWs,
+    // Apple's): XYZ to the samples is AnalogBalance × ColorMatrix, and
+    // AsShotNeutral is of the samples with them. (A mosaic's is left as it
+    // was: `docs/camera-parity.md`.)
+    if linear
+        && let Some(ab) = t
+            .reals(ifd0, 50727, 3)
+            .filter(|a| a.len() == 3 && a.iter().all(|v| v.is_finite() && *v > 0.))
+    {
+        info.analog_balance = std::array::from_fn(|c| (ab[c] / ab[1]) as f32);
+    }
     super::tiff_exif::read(&t, &mut info);
     if let Some(notes) = crate::vendor::pentax::dng_notes(&t) {
         info.lens_id = notes.lens_id;
@@ -291,13 +325,14 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     let black = reals(50714, 16 * 16 * 4);
     let black_delta_h = reals(50715, width as usize);
     let black_delta_v = reals(50716, height as usize);
-    let white = t.int(ifd, 50717);
+    let white = t.ints(ifd, 50717, samples as usize).unwrap_or_default();
     info.plan = Plan::Dng(DngPlan {
         black_dim,
         black,
         black_delta_h,
         black_delta_v,
         white,
+        samples,
         width,
         height,
         bps,
@@ -444,7 +479,13 @@ fn list(t: &TiffFile, ifd: &Ifd, tag: u16) -> Vec<Opcode> {
 /// Each tile's (offset, length) in the file.
 type Tiles = Vec<(u64, u64)>;
 
-fn layout(t: &TiffFile, ifd: &Ifd, width: u32, height: u32) -> Result<([u32; 2], Tiles)> {
+fn layout(
+    t: &TiffFile,
+    ifd: &Ifd,
+    width: u32,
+    height: u32,
+    samples: u32,
+) -> Result<([u32; 2], Tiles)> {
     let base = t.base;
     if let (Some(tw), Some(th)) = (t.int(ifd, 322), t.int(ifd, 323)) {
         let offsets = t
@@ -454,7 +495,7 @@ fn layout(t: &TiffFile, ifd: &Ifd, width: u32, height: u32) -> Result<([u32; 2],
             .pieces(ifd, 325)
             .ok_or_else(|| corrupt("DNG tile counts"))?;
         // A tile is at most the image's size limit (and is decoded whole).
-        crate::io::samples(tw, th, 1)?;
+        crate::io::samples(tw, th, samples)?;
         if offsets.len() != counts.len() {
             return Err(corrupt("DNG tiles"));
         }
@@ -526,8 +567,11 @@ pub(crate) fn decode(
     cancel: &AtomicBool,
 ) -> Result<Sensor> {
     let (width, height) = (plan.width as usize, plan.height as usize);
-    let mut data = vec![0u16; crate::io::samples(plan.width, plan.height, 1)?];
+    let spp = plan.samples as usize;
+    let mut data = vec![0u16; crate::io::samples(plan.width, plan.height, plan.samples)?];
     let [tw, th] = [plan.tile[0] as usize, plan.tile[1] as usize];
+    // A tile row's samples, and the image's.
+    let (tile_row, image_row) = (tw * spp, width * spp);
     let across = width.div_ceil(tw);
     let file = Bytes::new(
         bytes,
@@ -549,20 +593,20 @@ pub(crate) fn decode(
         }
         let (tx, ty) = ((i % across) * tw, (i / across) * th);
         let tile = file.slice(offset, len)?;
-        // The tile's samples in raster order, `tw` per row.
+        // The tile's samples in raster order, `tile_row` per row.
         let float = plan.sample_format == 3;
         let samples: &[u16] = match plan.compression {
             1 if float => {
-                floats(tile, plan.bps, tw * th, plan.little, &mut decoded)?;
+                floats(tile, plan.bps, tile_row * th, plan.little, &mut decoded)?;
                 &decoded
             }
             1 => {
-                unpack(tile, plan.bps, tw, th, plan.little, &mut decoded)?;
+                unpack(tile, plan.bps, tile_row, th, plan.little, &mut decoded)?;
                 &decoded
             }
             8 => {
                 let bytes_per = (plan.bps as usize).div_ceil(8);
-                let limit = tw * th * bytes_per;
+                let limit = tile_row * th * bytes_per;
                 let mut bytes =
                     miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(tile, limit)
                         .map_err(|_| corrupt("DNG Deflate tile"))?;
@@ -572,15 +616,16 @@ pub(crate) fn decode(
                     unpredict_float(&mut bytes, tw, bytes_per, plan.predictor)?;
                     floats(&bytes, plan.bps, tw * th, false, &mut decoded)?;
                 } else if float {
-                    floats(&bytes, plan.bps, tw * th, plan.little, &mut decoded)?;
+                    floats(&bytes, plan.bps, tile_row * th, plan.little, &mut decoded)?;
                 } else {
-                    unpack(&bytes, plan.bps, tw, th, plan.little, &mut decoded)?;
+                    unpack(&bytes, plan.bps, tile_row, th, plan.little, &mut decoded)?;
                     if plan.predictor == 2 {
-                        // Differences wrap at the samples' precision.
+                        // Differences of the pixel before's same sample,
+                        // wrapping at the samples' precision.
                         let mask = ((1u32 << plan.bps.clamp(1, 16)) - 1) as u16;
-                        for row in decoded.chunks_mut(tw) {
-                            for i in 1..row.len() {
-                                row[i] = row[i].wrapping_add(row[i - 1]) & mask;
+                        for row in decoded.chunks_mut(tile_row) {
+                            for i in spp..row.len() {
+                                row[i] = row[i].wrapping_add(row[i - spp]) & mask;
                             }
                         }
                     }
@@ -600,12 +645,12 @@ pub(crate) fn decode(
             c => return Err(Error::Unsupported(format!("DNG compression {c}"))),
         };
         for (k, &v) in samples.iter().enumerate() {
-            let (y, x) = (ty + k / tw, tx + k % tw);
-            if k / tw >= th {
+            let (y, x) = (ty + k / tile_row, tx * spp + k % tile_row);
+            if k / tile_row >= th {
                 break;
             }
-            if y < height && x < width {
-                data[y * width + x] = v;
+            if y < height && x < image_row {
+                data[y * image_row + x] = v;
             }
         }
     }
@@ -616,6 +661,7 @@ pub(crate) fn decode(
         origin: [0, 0],
         width,
         height,
+        planes: spp,
     };
     opcodes::apply(&plan.opcodes[0], &mut stored, cancel)?;
     if !plan.curve.is_empty() {
@@ -626,11 +672,10 @@ pub(crate) fn decode(
     }
     let [left, top] = info.margins;
     let area = [left, top, info.width, info.height];
-    let white = plan
-        .white
-        .unwrap_or_else(|| ((1u64 << plan.bps.min(16)) - 1) as u32);
-    if !whole_levels(plan) || !plan.opcodes[1].is_empty() {
-        linearize(&mut data, plan, area, white, cancel)?;
+    let whites = whites(plan);
+    let rgb_black = rgb_black(plan, &whites);
+    if !whole_levels(plan) || !plan.opcodes[1].is_empty() || (spp > 1 && rgb_black.is_none()) {
+        linearize(&mut data, plan, area, &whites, cancel)?;
         // OpcodeList2 works on the linear values of the active area.
         let mut active = opcodes::Image {
             data: &mut data,
@@ -638,17 +683,18 @@ pub(crate) fn decode(
             origin: [left as usize, top as usize],
             width: info.width as usize,
             height: info.height as usize,
+            planes: spp,
         };
         opcodes::apply(&plan.opcodes[1], &mut active, cancel)?;
-        // The black pattern, applied, is zeros.
+        // The black pattern, applied, is zeros; linear raw has none.
         let pattern = match plan.black_dim {
-            Some([rows, cols]) => (rows, cols, vec![0; (rows * cols) as usize]),
-            None => (0, 0, Vec::new()),
+            Some([rows, cols]) if spp == 1 => (rows, cols, vec![0; (rows * cols) as usize]),
+            _ => (0, 0, Vec::new()),
         };
         return Ok(Sensor {
             width: plan.width,
             height: plan.height,
-            channels: 1,
+            channels: plan.samples,
             data,
             area,
             black: [0; 4],
@@ -657,18 +703,57 @@ pub(crate) fn decode(
             linear_white: [0; 4],
         });
     }
-    let (black, pattern) = crate::levels::dng_black(plan.black_dim, &plan.black);
+    let (black, pattern) = match rgb_black {
+        Some([r, g, b]) => ([r, g, b, g], (0, 0, Vec::new())),
+        None => crate::levels::dng_black(plan.black_dim, &plan.black),
+    };
     Ok(Sensor {
         width: plan.width,
         height: plan.height,
-        channels: 1,
+        channels: plan.samples,
         data,
         area,
         black,
         black_pattern: pattern,
-        white,
+        white: whites[0],
         linear_white: [0; 4],
     })
+}
+
+/// Each sample's WhiteLevel: the file's (its last value for samples it
+/// gives none), else the bit depth's largest value.
+fn whites(plan: &DngPlan) -> Vec<u32> {
+    let depth = ((1u64 << plan.bps.min(16)) - 1) as u32;
+    (0..plan.samples.max(1) as usize)
+        .map(|s| {
+            plan.white
+                .get(s)
+                .or(plan.white.last())
+                .copied()
+                .unwrap_or(depth)
+        })
+        .collect()
+}
+
+/// Linear raw's whole levels as the sensor data keeps them: a black per
+/// sample, the same at every position of BlackLevel's pattern, under one
+/// white for all three. `None` for a CFA, and for levels that must be
+/// applied to the samples instead (`linearize`).
+fn rgb_black(plan: &DngPlan, whites: &[u32]) -> Option<[u32; 3]> {
+    if plan.samples != 3 || whites.iter().any(|&w| w != whites[0]) {
+        return None;
+    }
+    let [rows, cols] = plan.black_dim.unwrap_or([1, 1]);
+    let value = |i: usize| plan.black.get(i).copied().unwrap_or(0.).max(0.);
+    let mut black = [0; 3];
+    for (s, b) in black.iter_mut().enumerate() {
+        let first = value(s);
+        if (0..(rows * cols) as usize).any(|p| value(p * 3 + s) != first) {
+            return None;
+        }
+        *b = first as u32;
+    }
+    Some(black)
 }
 
 /// The white level of linear reference values: 1.0 as 16-bit samples.
@@ -690,39 +775,42 @@ fn whole_levels(plan: &DngPlan) -> bool {
 
 /// Maps the samples (after the LinearizationTable) to linear reference
 /// values as DNG's processing model has it (DNG Specification 1.7.1.0,
-/// "Mapping Raw Values to Linear Reference Values"): each pixel's black,
-/// BlackLevel's pattern (from the active area's top-left corner) plus its
-/// column's BlackLevelDeltaH and its row's BlackLevelDeltaV, is subtracted,
-/// and the result scaled by 1 / (WhiteLevel − the largest black), clipped to
-/// 0–1 and stored as 0–65535. `area` is the active area (left, top, width,
-/// height); the deltas are zero outside it.
+/// "Mapping Raw Values to Linear Reference Values"): each sample's black,
+/// BlackLevel's pattern (from the active area's top-left corner, a value
+/// per sample of a pixel) plus its column's BlackLevelDeltaH and its row's
+/// BlackLevelDeltaV, is subtracted, and the result scaled by 1 /
+/// (the sample's WhiteLevel − its largest black), clipped to 0–1 and stored
+/// as 0–65535. `area` is the active area (left, top, width, height); the
+/// deltas are zero outside it.
 fn linearize(
     data: &mut [u16],
     plan: &DngPlan,
     area: [u32; 4],
-    white: u32,
+    whites: &[u32],
     cancel: &AtomicBool,
 ) -> Result<()> {
+    let spp = whites.len();
     let [rows, cols] = plan.black_dim.unwrap_or([1, 1]).map(|v| v as usize);
-    let pattern: Vec<f64> = (0..rows * cols)
+    let pattern: Vec<f64> = (0..rows * cols * spp)
         .map(|i| plan.black.get(i).copied().unwrap_or(0.).max(0.))
         .collect();
-    let max = |v: &[f64]| {
-        v.iter()
-            .copied()
-            .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))))
+    let max = |v: &mut dyn Iterator<Item = f64>| {
+        v.fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))))
     };
-    let largest = max(&pattern).unwrap_or(0.)
-        + max(&plan.black_delta_h).unwrap_or(0.)
-        + max(&plan.black_delta_v).unwrap_or(0.);
-    let range = f64::from(white) - largest;
-    if range.is_nan() || range <= 0. {
-        return Err(corrupt("DNG white level below its black level"));
+    let deltas = max(&mut plan.black_delta_h.iter().copied()).unwrap_or(0.)
+        + max(&mut plan.black_delta_v.iter().copied()).unwrap_or(0.);
+    let mut scale = Vec::with_capacity(spp);
+    for (s, &white) in whites.iter().enumerate() {
+        let largest = max(&mut pattern.iter().copied().skip(s).step_by(spp)).unwrap_or(0.);
+        let range = f64::from(white) - largest - deltas;
+        if range.is_nan() || range <= 0. {
+            return Err(corrupt("DNG white level below its black level"));
+        }
+        scale.push(f64::from(LINEAR_WHITE) / range);
     }
-    let scale = f64::from(LINEAR_WHITE) / range;
     let [left, top, w, h] = area.map(|v| v as usize);
     let width = plan.width as usize;
-    for (y, row) in data.chunks_mut(width).enumerate() {
+    for (y, row) in data.chunks_mut(width * spp).enumerate() {
         if y % 64 == 0 && cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
@@ -732,16 +820,19 @@ fn linearize(
         } else {
             0.
         };
-        let pattern_row = &pattern[(y + rows - top % rows) % rows * cols..][..cols];
-        for (x, v) in row.iter_mut().enumerate() {
+        let pattern_row = &pattern[(y + rows - top % rows) % rows * cols * spp..][..cols * spp];
+        for (x, pixel) in row.chunks_exact_mut(spp).enumerate() {
             let dh = if inside(x, left, w) {
                 plan.black_delta_h.get(x - left).copied().unwrap_or(0.)
             } else {
                 0.
             };
-            let black = pattern_row[(x + cols - left % cols) % cols] + dh + dv;
-            let linear = (f64::from(*v) - black) * scale;
-            *v = linear.round().clamp(0., f64::from(LINEAR_WHITE)) as u16;
+            let at = (x + cols - left % cols) % cols * spp;
+            for (s, v) in pixel.iter_mut().enumerate() {
+                let black = pattern_row[at + s] + dh + dv;
+                let linear = (f64::from(*v) - black) * scale[s];
+                *v = linear.round().clamp(0., f64::from(LINEAR_WHITE)) as u16;
+            }
         }
     }
     Ok(())
@@ -893,10 +984,16 @@ pub(crate) mod tests {
 
     /// A little-endian DNG of `width × height` 16-bit samples (zeros) in one
     /// strip, its raw IFD0 holding `extra` entries (tag, type, count, value
-    /// bytes) too; values over four bytes are stored after the image.
+    /// bytes) too; values over four bytes are stored after the image. The
+    /// strip holds SamplesPerPixel's samples a pixel when `extra` sets it.
     pub(crate) fn dng(width: u32, height: u32, extra: &[Entry]) -> Vec<u8> {
         let le32 = |v: u32| v.to_le_bytes().to_vec();
         let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let spp = extra
+            .iter()
+            .find(|e| e.0 == 277)
+            .map_or(1, |e| u32::from(u16::from_le_bytes([e.3[0], e.3[1]])));
+        let strip = width * height * spp * 2;
         let mut entries: Vec<Entry> = vec![
             (254, 4, 1, le32(0)),
             (256, 4, 1, le32(width)),
@@ -906,7 +1003,7 @@ pub(crate) mod tests {
             (262, 3, 1, le16(32803)),
             (277, 3, 1, le16(1)),
             (278, 4, 1, le32(height)),
-            (279, 4, 1, le32(width * height * 2)),
+            (279, 4, 1, le32(strip)),
             (33421, 3, 2, [le16(2), le16(2)].concat()),
             (33422, 1, 4, vec![0, 1, 1, 2]),
             (50706, 1, 4, vec![1, 4, 0, 0]),
@@ -916,7 +1013,7 @@ pub(crate) mod tests {
         let ifd_at = 8u32;
         let ifd_len = 2 + 12 * (entries.len() as u32 + 1) + 4;
         let image_at = ifd_at + ifd_len;
-        let mut values_at = image_at + width * height * 2;
+        let mut values_at = image_at + strip;
         let mut f = b"II*\0".to_vec();
         f.extend(le32(ifd_at));
         f.extend(le16(entries.len() as u16 + 1));
@@ -940,7 +1037,7 @@ pub(crate) mod tests {
             put(&mut f, *tag, *kind, *count, v);
         }
         f.extend(le32(0));
-        f.resize((image_at + width * height * 2) as usize, 0);
+        f.resize((image_at + strip) as usize, 0);
         f.extend(values);
         f
     }
@@ -1081,6 +1178,190 @@ pub(crate) mod tests {
         // A list that does not parse is not applied.
         let f = dng(2, 1, &[(51008, 7, 6, list1[..6].to_vec())]);
         assert_eq!(decode(&with_samples(f, &[0, 1])).data, [0, 1]);
+    }
+
+    /// A linear raw DNG's entries: three samples a pixel, interleaved.
+    fn linear_raw() -> Vec<Entry> {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        vec![(262, 3, 1, le16(34892)), (277, 3, 1, le16(3))]
+    }
+
+    /// Linear raw (Apple's ProRAW, Samsung's and Adobe DNG Converter's
+    /// linear DNGs) opens without a CFA and decodes to three interleaved
+    /// samples a pixel, its BlackLevel a value per sample, kept as the
+    /// red, green and blue blacks.
+    #[test]
+    fn linear_raw_decodes_to_rgb() {
+        let le16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let mut extra = linear_raw();
+        extra.extend([
+            (50714, 3, 3, le16s(&[10, 20, 30])),
+            (50717, 3, 3, le16s(&[4095, 4095, 4095])),
+        ]);
+        let f = dng(2, 1, &extra);
+        let info = crate::open(&f).unwrap();
+        assert!(info.cfa.is_none());
+        let s = decode(&with_samples(f, &[1, 2, 3, 4, 5, 6]));
+        assert_eq!((s.channels, s.data), (3, vec![1, 2, 3, 4, 5, 6]));
+        assert_eq!((s.black, s.white), ([10, 20, 30, 20], 4095));
+        assert_eq!(s.area, [0, 0, 2, 1]);
+    }
+
+    /// A black pattern that differs by position (Samsung's 2 × 2 of three
+    /// samples each) and whites that differ by sample are applied to the
+    /// samples: each sample less its pattern position's black, over its own
+    /// white less its largest black.
+    #[test]
+    fn linear_raw_levels_apply_per_sample() {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let le16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let mut extra = linear_raw();
+        extra.extend([
+            (50713, 3, 2, [le16(1), le16(2)].concat()),
+            // Column 0: 0, 0, 0; column 1: 10, 0, 100.
+            (50714, 3, 6, le16s(&[0, 0, 0, 10, 0, 100])),
+            (50717, 3, 3, le16s(&[1010, 1000, 2100])),
+        ]);
+        let f = dng(2, 1, &extra);
+        let s = decode(&with_samples(f, &[505, 500, 1100, 510, 1000, 2100]));
+        assert_eq!(s.channels, 3);
+        // Red: (505 − 0) / 1000, (510 − 10) / 1000; green over 1000; blue
+        // (1100 − 0) / 2000, (2100 − 100) / 2000.
+        assert_eq!(s.data, [33095, 32768, 36044, 32768, 65535, 65535]);
+        assert_eq!((s.black, s.white), ([0; 4], 65535));
+        assert_eq!(s.black_pattern, (0, 0, vec![]));
+    }
+
+    /// OpcodeList2's opcodes on linear raw work on the planes their area
+    /// names: a gain of 2 on blue (plane 2) leaves red and green.
+    #[test]
+    fn linear_raw_opcodes_apply_to_their_planes() {
+        use super::opcodes::tests::{doubles, floats, list, longs};
+        let le16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        // GainMap over the whole 2 × 1 image, plane 2 of 1, one point.
+        let mut gains = longs(&[0, 0, 1, 2, 2, 1, 1, 1, 1, 1]);
+        gains.extend(doubles(&[1., 1., 0., 0.]));
+        gains.extend(longs(&[1]));
+        gains.extend(floats(&[2.]));
+        let list2 = list(&[(9, 1, gains)]);
+        let mut extra = linear_raw();
+        extra.extend([
+            (50717, 3, 3, le16s(&[1000, 1000, 1000])),
+            (51009, 7, list2.len() as u32, list2),
+        ]);
+        let f = dng(2, 1, &extra);
+        let s = decode(&with_samples(f, &[100, 200, 300, 400, 500, 600]));
+        // As linear values (white 1000): v × 65.535, blue doubled.
+        assert_eq!(s.data, [6554, 13107, 39322, 26214, 32768, 65535]);
+    }
+
+    /// Linear raw is in its writer's RGB, which only the file's ColorMatrix
+    /// describes: a DNG Lightroom made of a rendered image under a camera's
+    /// make and model keeps its own matrix and as-shot white, where a CFA
+    /// DNG of that camera takes the camera's matrix from the table.
+    #[test]
+    fn linear_raw_keeps_the_file_s_matrix() {
+        let text = |s: &str| {
+            let mut v = s.as_bytes().to_vec();
+            v.push(0);
+            (v.len() as u32, v)
+        };
+        let ([make_n, model_n], [make, model]) = {
+            let (a, b) = (text("Canon"), text("Canon EOS 5D Mark IV"));
+            ([a.0, b.0], [a.1, b.1])
+        };
+        // An sRGB-like matrix (XYZ to camera) and D50 as shot.
+        let matrix = rationals(&[13458, -2556, -510, -5444, 15081, 205, 0, 0, 12120], 10000);
+        let entries = |linear: bool| {
+            let mut e = vec![
+                (271, 2, make_n, make.clone()),
+                (272, 2, model_n, model.clone()),
+                (50721, 10, 9, matrix.clone()),
+                (50729, 5, 2, rationals(&[3457, 3585], 10000)),
+            ];
+            if linear {
+                e.extend(linear_raw());
+            }
+            e
+        };
+        let file = [
+            [1.3458f32, -0.2556, -0.051],
+            [-0.5444, 1.5081, 0.0205],
+            [0., 0., 1.212],
+        ];
+        let cfa = crate::open(&dng(2, 2, &entries(false))).unwrap();
+        assert_ne!(cfa.cam_xyz, file, "the camera has a table matrix");
+        let info = crate::open(&dng(2, 2, &entries(true))).unwrap();
+        assert_eq!(info.cam_xyz, file);
+        // The white through the file's matrix: neutral, as the image is.
+        for m in &info.cam_mul[..3] {
+            assert!((m - 1.).abs() < 1e-3, "{:?}", info.cam_mul);
+        }
+    }
+
+    /// Linear raw's AnalogBalance (relative to green) is reported, and the
+    /// white balance is of the samples with it: as shot from AsShotNeutral
+    /// as it is; daylight's through AnalogBalance × ColorMatrix, so under an
+    /// identity matrix ½, 1, 2 for gains 2, 1, ½. The matrix stays
+    /// ColorMatrix.
+    #[test]
+    fn linear_raw_reports_analog_balance() {
+        let identity = rationals(&[1, 0, 0, 0, 1, 0, 0, 0, 1], 1);
+        let mut extra = linear_raw();
+        extra.extend([
+            (50721, 10, 9, identity),
+            (50727, 5, 3, rationals(&[8, 4, 2], 2)),
+            (50728, 5, 3, rationals(&[1, 1, 1], 1)),
+        ]);
+        let info = crate::open(&dng(2, 1, &extra)).unwrap();
+        assert_eq!(info.analog_balance, [2., 1., 0.5]);
+        assert_eq!(info.cam_mul, [1.; 4]);
+        assert_eq!(info.cam_xyz, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+        let mut without = extra.clone();
+        without.retain(|e| e.0 != 50727);
+        let plain = crate::open(&dng(2, 1, &without)).unwrap();
+        for c in 0..3 {
+            let ratio = info.pre_mul[c] / plain.pre_mul[c];
+            assert!((ratio - [0.5, 1., 2.][c]).abs() < 1e-5, "{c}: {ratio}");
+        }
+        // A CFA's AnalogBalance is left as it was.
+        let info = crate::open(&dng(2, 2, &extra[2..])).unwrap();
+        assert_eq!((info.analog_balance, info.cam_mul), ([1.; 3], [1.; 4]));
+    }
+
+    /// Linear raw of one sample (monochrome sensors), in separate planes or
+    /// of floating-point samples is refused, with a message that says which;
+    /// so is a linear raw tile beyond the size limit in its three samples.
+    #[test]
+    fn linear_raw_floats_and_huge_tiles_are_refused() {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let le32 = |v: u32| v.to_le_bytes().to_vec();
+        let mut float = linear_raw();
+        float.extend([(258, 3, 1, le16(32)), (339, 3, 1, le16(3))]);
+        let error = crate::open(&dng(1, 1, &float)).unwrap_err().to_string();
+        assert!(error.contains("floating-point"), "{error}");
+        // 30,000 × 30,000 is under the limit as one sample, not as three.
+        let mut tiled = linear_raw();
+        tiled.extend([
+            (322, 4, 1, le32(30_000)),
+            (323, 4, 1, le32(30_000)),
+            (324, 4, 1, le32(8)),
+            (325, 4, 1, le32(8)),
+        ]);
+        assert!(crate::open(&dng(1, 1, &tiled)).is_err());
+        assert!(crate::open(&dng(1, 1, &tiled[2..])).is_ok());
+    }
+
+    /// Linear raw of one sample (monochrome sensors) or in separate planes
+    /// is refused, with a message that says which.
+    #[test]
+    fn unsupported_linear_raw_is_named() {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let error = |extra: &[Entry]| crate::open(&dng(2, 1, extra)).unwrap_err().to_string();
+        assert!(error(&[(262, 3, 1, le16(34892))]).contains("monochrome"));
+        let mut planar = linear_raw();
+        planar.push((284, 3, 1, le16(2)));
+        assert!(error(&planar).contains("planes"));
     }
 
     /// The matrix at D65: a D65 calibration's, else interpolated in inverse

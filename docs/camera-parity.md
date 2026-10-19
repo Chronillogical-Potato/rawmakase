@@ -102,8 +102,9 @@ AnalogBalance is a separate per-file factor (XYZ-to-camera = AnalogBalance x
 CameraCalibration x ColorMatrix). DNG Converter writes it for linear DNGs of
 in-camera white-balanced modes (Canon sRAW and mRAW, Nikon small RAW, Sony's
 non-mosaic modes), and their CameraCalibration matches mosaic RAWs of the same
-unit, so the audit records it apart. RAWmakase opens native sRAW files but not
-linear DNGs, so it never applies an AnalogBalance.
+unit, so the audit records it apart. For linear DNGs, RAWmakase applies
+AnalogBalance where a white is set by temperature ([RAW
+decoding](raw-decoding.md)); a mosaic DNG's AnalogBalance is not applied.
 
 Off-diagonal CameraCalibration and different matrices for the two illuminants,
 which phone DNGs carry, are not applied; such DNGs keep identity. Do not flatten

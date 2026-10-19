@@ -76,7 +76,7 @@ impl Own {
         })
     }
     /// The visible area of sensor data that is not a mosaic (small RAWs'
-    /// RGB), developed: each channel (raw − black) / (white − black), white
+    /// RGB, linear raw DNGs), developed: each channel (raw − black) / (white − black), white
     /// balanced by `wb` unless the camera stored it balanced. `None` for a
     /// mosaic.
     pub(super) fn rgb(&self, wb: [f32; 3], cancel: &AtomicBool) -> Result<Option<Developed>> {
@@ -286,6 +286,7 @@ fn header(i: &RawInfo) -> Header {
         lens_id: i.lens_id,
         dng_version: i.dng_version,
         levels: i.levels,
+        analog_balance: i.analog_balance,
     }
 }
 

@@ -28,7 +28,7 @@ Patch files hold the mean encoded-sRGB value (16-bit) of each patch, one case pe
 - `synthetic-d65-matrix-only`: the same scene with color matrices only, as some third-party DNGs are.
 - `<camera>-d65`: one chart per camera in `cameras.json`, claiming that camera's make and model with its LibRaw matrix. With the camera's Adobe Standard DCP (private tier) this tests the per-camera profile path without a photo from that camera.
 
-Mosaic charts are used because RAWmakase rejects three-channel `LinearRaw` DNGs. Flat patch interiors demosaic exactly.
+The charts are mosaics; flat patch interiors demosaic exactly.
 
 ## Tests
 

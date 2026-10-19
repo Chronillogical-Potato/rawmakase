@@ -17,7 +17,9 @@
 //! ScalePerRow/Column. Warps and TrimBounds change the image's geometry and
 //! are skipped, as are opcodes of a later DNG version than 1.7.1 and unknown
 //! ones, and gain maps whose every gain is 1. A list that does not parse is
-//! not applied at all.
+//! not applied at all. The bad pixel opcodes, which interpolate in a Bayer
+//! mosaic, apply only to an image of one plane (a CFA's); the others to the
+//! planes their area names, a linear raw image's red, green and blue.
 //!
 //! Sources: the DNG Specification 1.7.1.0; our own measurements on the test
 //! dataset's DNGs (where each list's coordinates start).
@@ -281,25 +283,30 @@ fn opcode(id: u32, data: &[u8]) -> Option<Option<Opcode>> {
     Some(Some(op))
 }
 
-/// The image a list modifies: `width × height` samples of one plane, from
-/// `origin` (column, row) in `data`, rows `stride` samples apart.
+/// The image a list modifies: `width × height` pixels of `planes` samples
+/// each (interleaved), from `origin` (column, row) in `data`, rows `stride`
+/// pixels apart.
 pub(crate) struct Image<'a> {
     pub data: &'a mut [u16],
     pub stride: usize,
     pub origin: [usize; 2],
     pub width: usize,
     pub height: usize,
+    pub planes: usize,
 }
 
 impl Image<'_> {
-    fn index(&self, row: usize, col: usize) -> usize {
-        (self.origin[1] + row) * self.stride + self.origin[0] + col
+    fn index(&self, row: usize, col: usize, plane: usize) -> usize {
+        ((self.origin[1] + row) * self.stride + self.origin[0] + col) * self.planes + plane
     }
-    fn get(&self, row: usize, col: usize) -> u16 {
-        self.data.get(self.index(row, col)).copied().unwrap_or(0)
+    fn get(&self, row: usize, col: usize, plane: usize) -> u16 {
+        self.data
+            .get(self.index(row, col, plane))
+            .copied()
+            .unwrap_or(0)
     }
-    fn set(&mut self, row: usize, col: usize, v: u16) {
-        let i = self.index(row, col);
+    fn set(&mut self, row: usize, col: usize, plane: usize, v: u16) {
+        let i = self.index(row, col, plane);
         if let Some(d) = self.data.get_mut(i) {
             *d = v;
         }
@@ -308,19 +315,22 @@ impl Image<'_> {
     fn fits(&self) -> bool {
         let end = (self.origin[1] + self.height)
             .checked_mul(self.stride)
-            .is_some_and(|rows| rows <= self.data.len());
+            .and_then(|pixels| pixels.checked_mul(self.planes))
+            .is_some_and(|samples| samples <= self.data.len());
         end && self.origin[0] + self.width <= self.stride
     }
 }
 
 /// Applies `ops` to `image`, in order.
 pub(crate) fn apply(ops: &[Opcode], image: &mut Image, cancel: &AtomicBool) -> Result<()> {
-    if !image.fits() || image.width == 0 || image.height == 0 {
+    if !image.fits() || image.width == 0 || image.height == 0 || image.planes == 0 {
         return Ok(());
     }
     for op in ops {
         match op {
             Opcode::FixVignetteRadial { k, centre } => vignette(image, k, *centre, cancel)?,
+            Opcode::FixBadPixelsConstant { .. } | Opcode::FixBadPixelsList { .. }
+                if image.planes > 1 => {}
             Opcode::FixBadPixelsConstant { constant, phase } => {
                 let mut bad = Mask::new(image.width, image.height)?;
                 for row in 0..image.height {
@@ -328,7 +338,7 @@ pub(crate) fn apply(ops: &[Opcode], image: &mut Image, cancel: &AtomicBool) -> R
                         return Err(Error::Cancelled);
                     }
                     for col in 0..image.width {
-                        if u32::from(image.get(row, col)) == *constant {
+                        if u32::from(image.get(row, col, 0)) == *constant {
                             bad.set(row, col);
                         }
                     }
@@ -349,12 +359,12 @@ pub(crate) fn apply(ops: &[Opcode], image: &mut Image, cancel: &AtomicBool) -> R
             }
             Opcode::MapTable { area, table } => {
                 let last = table.len() - 1;
-                map(image, area, cancel, |_, _, v| {
+                map(image, area, cancel, |_, _, _, v| {
                     table[usize::from(v).min(last)]
                 })?;
             }
             Opcode::MapPolynomial { area, coefficients } => {
-                map(image, area, cancel, |_, _, v| {
+                map(image, area, cancel, |_, _, _, v| {
                     let x = f64::from(v) / 65535.;
                     let y = coefficients.iter().rev().fold(0., |acc, c| acc * x + c);
                     level(y)
@@ -362,8 +372,8 @@ pub(crate) fn apply(ops: &[Opcode], image: &mut Image, cancel: &AtomicBool) -> R
             }
             Opcode::GainMap { area, map: gains } => {
                 let (w, h) = (image.width as f64, image.height as f64);
-                map(image, area, cancel, |row, col, v| {
-                    let g = gains.gain(row as f64 / h, col as f64 / w);
+                map(image, area, cancel, |row, col, plane, v| {
+                    let g = gains.gain(row as f64 / h, col as f64 / w, plane);
                     level(f64::from(v) / 65535. * f64::from(g))
                 })?;
             }
@@ -375,7 +385,7 @@ pub(crate) fn apply(ops: &[Opcode], image: &mut Image, cancel: &AtomicBool) -> R
             } => {
                 let (top, left) = (area.top as usize, area.left as usize);
                 let (rp, cp) = (area.row_pitch as usize, area.col_pitch as usize);
-                map(image, area, cancel, |row, col, v| {
+                map(image, area, cancel, |row, col, _, v| {
                     let i = if *rows {
                         (row - top) / rp
                     } else {
@@ -407,9 +417,12 @@ fn level(v: f64) -> u16 {
 }
 
 impl GainMap {
-    /// The gain at (`v`, `h`), fractions of the image's height and width:
-    /// bilinear between the map's points, the edge points' outside them.
-    fn gain(&self, v: f64, h: f64) -> f32 {
+    /// The gain at (`v`, `h`), fractions of the image's height and width,
+    /// for the area's `plane`th plane: bilinear between the map's points,
+    /// the edge points' outside them. A map of fewer planes than its area
+    /// gives the rest its last plane's gains, as the specification says.
+    fn gain(&self, v: f64, h: f64, plane: usize) -> f32 {
+        let plane = plane.min(self.planes.saturating_sub(1));
         let at = |x: f64, axis: usize| {
             let n = self.points[axis];
             let f = ((x - self.origin[axis]) / self.spacing[axis]).clamp(0., (n - 1) as f64);
@@ -420,7 +433,7 @@ impl GainMap {
         let (c0, c1, th) = at(h, 1);
         let g = |r: usize, c: usize| {
             self.gains
-                .get((r * self.points[1] + c) * self.planes)
+                .get((r * self.points[1] + c) * self.planes + plane)
                 .copied()
                 .unwrap_or(1.)
         };
@@ -430,18 +443,16 @@ impl GainMap {
     }
 }
 
-/// Maps every sample of `area` (clipped to the image) by `f(row, column,
-/// value)`. The image has one plane: an area starting at a later plane
-/// modifies nothing.
+/// Maps every sample of `area` (clipped to the image and its planes) by
+/// `f(row, column, plane, value)`, `plane` counted from the area's first.
 fn map(
     image: &mut Image,
     area: &Area,
     cancel: &AtomicBool,
-    f: impl Fn(usize, usize, u16) -> u16,
+    f: impl Fn(usize, usize, usize, u16) -> u16,
 ) -> Result<()> {
-    if area.plane != 0 {
-        return Ok(());
-    }
+    let first = area.plane as usize;
+    let planes = first..(first + area.planes as usize).min(image.planes);
     let bottom = (area.bottom as usize).min(image.height);
     let right = (area.right as usize).min(image.width);
     let rows = (area.top as usize..bottom).step_by(area.row_pitch as usize);
@@ -450,8 +461,10 @@ fn map(
             return Err(Error::Cancelled);
         }
         for col in (area.left as usize..right).step_by(area.col_pitch as usize) {
-            let v = image.get(row, col);
-            image.set(row, col, f(row, col, v));
+            for plane in planes.clone() {
+                let v = image.get(row, col, plane);
+                image.set(row, col, plane, f(row, col, plane - first, v));
+            }
         }
     }
     Ok(())
@@ -473,11 +486,11 @@ fn vignette(image: &mut Image, k: &[f64; 5], centre: [f64; 2], cancel: &AtomicBo
         bottom: image.height as u32,
         right: image.width as u32,
         plane: 0,
-        planes: 1,
+        planes: image.planes as u32,
         row_pitch: 1,
         col_pitch: 1,
     };
-    map(image, &area, cancel, |row, col, v| {
+    map(image, &area, cancel, |row, col, _, v| {
         let (dx, dy) = (col as f64 - cx, row as f64 - cy);
         let r2 = (dx * dx + dy * dy) / m2;
         let g = 1. + r2 * (k[0] + r2 * (k[1] + r2 * (k[2] + r2 * (k[3] + r2 * k[4]))));
@@ -603,7 +616,7 @@ fn patch(image: &mut Image, bad: &Mask, phase: u32, cancel: &AtomicBool) -> Resu
     let (w, h) = (image.width as isize, image.height as isize);
     let good = |image: &Image, r: isize, c: isize| -> Option<u32> {
         (r >= 0 && c >= 0 && r < h && c < w && !bad.get(r as usize, c as usize))
-            .then(|| u32::from(image.get(r as usize, c as usize)))
+            .then(|| u32::from(image.get(r as usize, c as usize, 0)))
     };
     const DIAGONAL: [(isize, isize); 4] = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
     const NEAR: [(isize, isize); 4] = [(-2, 0), (2, 0), (0, -2), (0, 2)];
@@ -655,7 +668,7 @@ fn patch(image: &mut Image, bad: &Mask, phase: u32, cancel: &AtomicBool) -> Resu
             if !values.is_empty() {
                 let n = values.len() as u32;
                 let sum: u32 = values.iter().sum();
-                image.set(row, col, ((sum + n / 2) / n) as u16);
+                image.set(row, col, 0, ((sum + n / 2) / n) as u16);
             }
         }
     }
@@ -708,6 +721,7 @@ pub(crate) mod tests {
             origin: [0, 0],
             width,
             height,
+            planes: 1,
         };
         apply(&ops, &mut image, &AtomicBool::new(false)).unwrap();
     }
@@ -869,6 +883,7 @@ pub(crate) mod tests {
             origin: [0, 0],
             width: 1024,
             height: 1024,
+            planes: 1,
         };
         let cancelled = AtomicBool::new(true);
         assert_eq!(apply(&ops, &mut image, &cancelled), Err(Error::Cancelled));
@@ -943,6 +958,7 @@ pub(crate) mod tests {
             origin: [0, 0],
             width: 4,
             height: 4,
+            planes: 1,
         };
         let cancelled = AtomicBool::new(true);
         assert_eq!(apply(&ops, &mut image, &cancelled), Err(Error::Cancelled));

@@ -151,6 +151,11 @@ pub struct Metadata {
     pub baseline_exposure: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dng_neutral_calibration: Option<NeutralCalibration>,
+    /// A linear raw DNG's AnalogBalance relative to green, when not 1: gains
+    /// its writer applied to the samples, which `wb` is of. A white set by
+    /// temperature is the profile's camera neutral times these gains.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dng_analog_balance: Option<[f32; 3]>,
     /// Signature of a DNG's matrix-only profile, retained when no forward profile parses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dng_matrix_profile_signature: Option<String>,

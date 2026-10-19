@@ -144,6 +144,33 @@ column's and row's deltas) is subtracted, the result scaled by 1 / (white −
 the largest black) and clipped to 0–65535, with black 0 and white 65535.
 LibRaw truncated fractional blacks and ignored the deltas.
 
+Linear raw DNGs (PhotometricInterpretation LinearRaw: demosaiced camera RGB,
+as Apple's ProRAW, Samsung's phones, Adobe DNG Converter, Lightroom (of
+rendered images), Topaz, Sigma, Light and film scanners write them) decode to three
+interleaved samples a pixel and develop as RGB, like small RAWs, without a
+demosaic. Each code above reads them a pixel's three samples at a time (a
+horizontal difference is the pixel before's same sample). BlackLevel holds a
+value per sample at each position of its pattern and WhiteLevel one per
+sample; a black the same at every position under one white stays the
+sensor's red, green and blue blacks, other levels (Samsung's 2 × 2 patterns,
+whites that differ) are applied to the samples as above, per sample, each
+over its own white less its largest black. Opcodes work on the planes their
+area names. A linear raw DNG's colour is its own: its RGB is whatever its
+writer made of the sensor's (a phone's processing; Lightroom stores rendered
+images as DNGs under the camera's name), so it takes the file's ColorMatrix,
+never the camera's row. AnalogBalance, gains the writer applied to the
+samples (Adobe DNG Converter's for cameras that white balance their small
+RAWs, Apple's), is reported with the header (relative to green): the
+as-shot and daylight white balance are of the samples with it, as
+development reads them, and a white set by temperature is the profile's
+camera neutral times it (XYZ to the samples is AnalogBalance ×
+ColorMatrix). Linear raw of one sample (monochrome sensors and scanners),
+in separate planes or of floating-point samples, Adobe's lossy linear DNGs
+(compression 34892, baseline JPEG of three components) and JPEG XL (52546)
+tiles are `Unsupported`; Apple's and Samsung's
+ProfileGainTableMap, a local tone map Camera Raw applies after the profile,
+is not applied.
+
 DNG colour: a camera Adobe knows has Adobe's matrix (`data/raw-matrices.toml`;
 Adobe DNG Converter rewrites such DNGs with its own matrices, so its D65
 ColorMatrix for a DNG the camera wrote is the row). Otherwise the file's

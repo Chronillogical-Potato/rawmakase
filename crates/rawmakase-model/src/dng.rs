@@ -53,7 +53,6 @@ pub fn read(path: &Path) -> Option<Dng> {
             .and_then(|v| v.first().copied())
             .filter(|v| v.is_finite() && v.abs() <= 5.),
         profile: profile_tags(&mut t, &ifd0),
-        neutral_calibration: neutral_calibration(&mut t, &ifd0),
         profile_calibration_signature: ifd0
             .get(&50932)
             .and_then(|entry| String::from_utf8(t.raw(entry)?).ok())
@@ -70,12 +69,20 @@ pub fn read(path: &Path) -> Option<Dng> {
         }
     }
     // Strips or tiles, and NewSubfileType 0 (the main image) when recorded.
-    let raw = candidates.into_iter().find(|ifd| {
+    let at = candidates.iter().position(|ifd| {
         (ifd.contains_key(&273) || ifd.contains_key(&324))
             && ifd
                 .get(&254)
                 .is_none_or(|e| t.numbers(e).is_some_and(|v| v.first() == Some(&0.)))
     })?;
+    // Linear raw's AnalogBalance is the decoder's, applied apart
+    // (`Metadata::dng_analog_balance`); a mosaic's keeps its calibration out.
+    let linear = candidates[at]
+        .get(&262)
+        .and_then(|e| t.numbers(e))
+        .is_some_and(|v| v.first() == Some(&34892.));
+    dng.neutral_calibration = neutral_calibration(&mut t, &candidates[0], linear);
+    let raw = candidates.swap_remove(at);
     let pair = |t: &mut Tiff, tag| -> Option<[u32; 2]> {
         let v = t.numbers(raw.get(&tag)?)?;
         (v.len() == 2 && v.iter().all(|x| x.is_finite() && *x >= 0.))
@@ -120,6 +127,7 @@ pub fn read(path: &Path) -> Option<Dng> {
 fn neutral_calibration(
     t: &mut Tiff,
     ifd: &BTreeMap<u16, Entry>,
+    linear: bool,
 ) -> Option<crate::camera_data::NeutralCalibration> {
     // Absence means no per-file correction. The DNG discriminator still prevents
     // falling back to a native camera's calibration.
@@ -133,7 +141,11 @@ fn neutral_calibration(
     };
     let a = numbers(50723, &identity)?;
     let b = numbers(50724, &identity)?;
-    let analog = numbers(50727, &[1.; 3])?;
+    let analog = if linear {
+        vec![1.; 3]
+    } else {
+        numbers(50727, &[1.; 3])?
+    };
     let gains = constant_diagonal(&a, &b, &analog)?;
     let signature = match ifd.get(&50931) {
         Some(entry) => String::from_utf8(t.raw(entry)?)
@@ -297,35 +309,45 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
         };
-        let entries = [
-            (273u16, 4u16, 1u32, 0u32.to_le_bytes().to_vec()),
-            (50706, 1, 4, vec![1, 4, 0, 0]),
-            (50723, 10, 9, rationals(&matrix)),
-            (50724, 10, 9, rationals(&matrix)),
-            (50727, 10, 3, rationals(&[1.; 3])),
-            (50931, 2, 10, b"com.adobe\0".to_vec()),
-        ];
-        let mut bytes = b"II*\0\x08\0\0\0".to_vec();
-        bytes.extend((entries.len() as u16).to_le_bytes());
-        let mut data: Vec<u8> = Vec::new();
-        for (tag, kind, count, value) in &entries {
-            bytes.extend(tag.to_le_bytes());
-            bytes.extend(kind.to_le_bytes());
-            bytes.extend(count.to_le_bytes());
-            if value.len() <= 4 {
-                bytes.extend(value);
-            } else {
-                bytes.extend(((8 + 2 + entries.len() * 12 + 4 + data.len()) as u32).to_le_bytes());
-                data.extend(value);
+        let file = |analog: [f32; 3], photometric: u16| {
+            let entries = [
+                (262u16, 3u16, 1u32, photometric.to_le_bytes().to_vec()),
+                (273, 4, 1, 0u32.to_le_bytes().to_vec()),
+                (50706, 1, 4, vec![1, 4, 0, 0]),
+                (50723, 10, 9, rationals(&matrix)),
+                (50724, 10, 9, rationals(&matrix)),
+                (50727, 10, 3, rationals(&analog)),
+                (50931, 2, 10, b"com.adobe\0".to_vec()),
+            ];
+            let mut bytes = b"II*\0\x08\0\0\0".to_vec();
+            bytes.extend((entries.len() as u16).to_le_bytes());
+            let mut data: Vec<u8> = Vec::new();
+            for (tag, kind, count, value) in &entries {
+                bytes.extend(tag.to_le_bytes());
+                bytes.extend(kind.to_le_bytes());
+                bytes.extend(count.to_le_bytes());
+                if value.len() <= 4 {
+                    bytes.extend(value.iter().copied().chain([0; 4]).take(4));
+                } else {
+                    let at = 8 + 2 + entries.len() * 12 + 4 + data.len();
+                    bytes.extend((at as u32).to_le_bytes());
+                    data.extend(value);
+                }
             }
-        }
-        bytes.extend(0u32.to_le_bytes());
-        bytes.extend(data);
-        let f = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), bytes).unwrap();
-        let calibration = read(f.path()).unwrap().neutral_calibration.unwrap();
+            bytes.extend(0u32.to_le_bytes());
+            bytes.extend(data);
+            let f = tempfile::NamedTempFile::new().unwrap();
+            std::fs::write(f.path(), bytes).unwrap();
+            read(f.path()).unwrap().neutral_calibration
+        };
+        let calibration = file([1.; 3], 32803).unwrap();
         assert_eq!(calibration.gains, [0.9817, 1., 0.9687]);
         assert_eq!(calibration.signature, "com.adobe");
+        // A mosaic's AnalogBalance keeps its calibration out; linear raw's is
+        // applied apart, so its calibration stays.
+        assert!(file([1., 2., 1.], 32803).is_none());
+        let linear = file([1., 2., 1.], 34892).unwrap();
+        assert_eq!(linear.gains, [0.9817, 1., 0.9687]);
         let mut other = matrix;
         other[0] = 0.99;
         assert!(constant_diagonal(&matrix, &other, &[1.; 3]).is_none());
