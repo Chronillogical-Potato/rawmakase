@@ -105,6 +105,11 @@ pub struct Metadata {
     /// converts to camera RGB on a scale of its own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sraw: bool,
+    /// A monochrome DNG (monochrome sensors, film scanners): developed as grey,
+    /// R = G = B, through a neutral camera matrix. It has no white balance, so
+    /// Temp and Tint do not apply (`Recipe::update_wb`), as in Lightroom.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub monochrome: bool,
     /// Fujifilm's exposure midpoint shift in EV (maker note ExpoMidPointShift): about
     /// −0.7 at DR100, a stop lower for each DR step up, a stop higher at extended
     /// low ISO. `None` when the raw has none.

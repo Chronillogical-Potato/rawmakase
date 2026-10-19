@@ -105,6 +105,10 @@ pub(crate) struct LocalMath {
 }
 impl LocalMath {
     pub(crate) fn new(m: &Metadata, r: &Recipe) -> Self {
+        // A monochrome photo has no white balance, locally either.
+        if m.monochrome {
+            return Self::default();
+        }
         let wb = |temperature: f32, tint: f32| {
             r.color_profile(m)
                 .and_then(|p| p.white_balance(temperature, tint, m))
@@ -188,6 +192,19 @@ mod tests {
         assert!(g[2] > 1. && g[0] < 1.);
         let luma = 0.2627 * g[0] + 0.678 * g[1] + 0.0593 * g[2];
         assert!((luma - 1.).abs() < 1e-4);
+    }
+    /// A mask's Temp and Tint leave a monochrome photo's grey, which has no
+    /// white balance; a colour photo's they change.
+    #[test]
+    fn local_white_balance_leaves_monochrome_photos_grey() {
+        let mut d = [0.; LEN];
+        d[slot::TEMPERATURE] = 0.5;
+        d[slot::TINT] = -0.3;
+        let mut m = Metadata::default();
+        let r = Recipe::default();
+        assert_ne!(LocalMath::new(&m, &r).white_balance_gain(&d), [1.; 3]);
+        m.monochrome = true;
+        assert_eq!(LocalMath::new(&m, &r).white_balance_gain(&d), [1.; 3]);
     }
     #[test]
     fn local_tone_is_the_global_curve_and_hue_rotates() {

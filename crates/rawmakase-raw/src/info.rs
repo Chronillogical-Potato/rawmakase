@@ -58,6 +58,10 @@ pub struct RawInfo {
     /// Specification, "Mapping Camera Color Space to CIE XYZ Space"). 1
     /// otherwise.
     pub analog_balance: [f32; 3],
+    /// A monochrome DNG (linear raw of one sample: monochrome sensors, film
+    /// scanners): its one sample is every channel's, and its colour neutral
+    /// (`color::apply`).
+    pub monochrome: bool,
     pub fuji_dynamic_range: u32,
     /// Fujifilm's exposure midpoint shift in EV, -999 when there is none.
     pub fuji_exposure_shift: f32,
@@ -186,6 +190,7 @@ pub(crate) fn base(variant: Variant) -> RawInfo {
         sraw: false,
         balanced: false,
         analog_balance: [1.; 3],
+        monochrome: false,
         fuji_dynamic_range: 0xffff,
         fuji_exposure_shift: -999.,
         iso: 0.,

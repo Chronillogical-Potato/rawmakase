@@ -590,108 +590,118 @@ impl Editor {
                 shot.reset_white_balance(m);
                 (shot.temperature, shot.tint)
             });
-            control_row(ui, "WB", |ui| {
-                // A rendered file's white balance is relative Temp and Tint, which
-                // Auto records too; As Shot is 0 and 0.
-                let (current, as_shot) = if rendered {
-                    (
-                        (r.incremental_temperature, r.incremental_tint),
-                        Some((0., 0.)),
-                    )
-                } else {
-                    ((r.temperature, r.tint), as_shot)
-                };
-                let near =
-                    |(t, n): (f32, f32)| (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5;
-                let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
-                    "Auto"
-                } else if as_shot.is_some_and(near) {
-                    "As Shot"
-                } else if rendered {
-                    "Custom"
-                } else {
-                    NamedWhiteBalance::ALL
-                        .into_iter()
-                        .find(|w| near((w.values().temperature, w.values().tint)))
-                        .map_or("Custom", NamedWhiteBalance::name)
-                };
-                // The selector sits at the row's far left, so the menu lines up
-                // with Profile's.
-                let rect = Rect::from_center_size(
-                    Pos2::new(
-                        ui.max_rect().left() - label_column(ui) - 5. + 13.,
-                        ui.max_rect().center().y,
-                    ),
-                    Vec2::new(26., 20.),
-                );
-                let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
-                let picking = view.is(Tool::WhiteBalance);
-                if picking || response.hovered() {
-                    ui.painter()
-                        .rect_filled(rect, 3., palette.gray(if picking { 72 } else { 50 }));
-                }
-                eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
-                if response
-                    .on_hover_text("White balance selector (W): click a neutral area of the photo")
-                    .clicked()
-                {
-                    view.toggle(Tool::WhiteBalance);
-                }
-                egui::ComboBox::from_id_salt("white-balance")
-                    .width(ui.available_width())
-                    .selected_text(selected)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(selected == "As Shot", "As Shot")
-                            .clicked()
-                            && let Some(m) = &metadata
-                        {
-                            r.wb = [1.; 3];
-                            r.reset_white_balance(m);
-                        }
-                        if ui
-                            .add_enabled(
-                                auto_ready,
-                                egui::Button::selectable(selected == "Auto", "Auto"),
-                            )
-                            .on_hover_text("Make the photo's near-neutral areas neutral")
-                            .clicked()
-                        {
-                            auto_request = Some(AutoKind::WhiteBalance);
-                        }
-                        // Kelvin presets are for RAW files, as in Lightroom.
-                        let named = if rendered {
-                            &[][..]
-                        } else {
-                            &NamedWhiteBalance::ALL[..]
-                        };
-                        for &named in named {
+            let photo = metadata.as_ref();
+            // A monochrome photo has no white balance: Lightroom disables it.
+            let monochrome = photo.is_some_and(|m| m.monochrome);
+            ui.add_enabled_ui(!monochrome, |ui| {
+                control_row(ui, "WB", |ui| {
+                    // A rendered file's white balance is relative Temp and Tint, which
+                    // Auto records too; As Shot is 0 and 0.
+                    let (current, as_shot) = if rendered {
+                        (
+                            (r.incremental_temperature, r.incremental_tint),
+                            Some((0., 0.)),
+                        )
+                    } else {
+                        ((r.temperature, r.tint), as_shot)
+                    };
+                    let near = |(t, n): (f32, f32)| {
+                        (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5
+                    };
+                    let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
+                        "Auto"
+                    } else if as_shot.is_some_and(near) {
+                        "As Shot"
+                    } else if rendered {
+                        "Custom"
+                    } else {
+                        NamedWhiteBalance::ALL
+                            .into_iter()
+                            .find(|w| near((w.values().temperature, w.values().tint)))
+                            .map_or("Custom", NamedWhiteBalance::name)
+                    };
+                    // The selector sits at the row's far left, so the menu lines up
+                    // with Profile's.
+                    let rect = Rect::from_center_size(
+                        Pos2::new(
+                            ui.max_rect().left() - label_column(ui) - 5. + 13.,
+                            ui.max_rect().center().y,
+                        ),
+                        Vec2::new(26., 20.),
+                    );
+                    let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
+                    let picking = view.is(Tool::WhiteBalance);
+                    if picking || response.hovered() {
+                        ui.painter().rect_filled(
+                            rect,
+                            3.,
+                            palette.gray(if picking { 72 } else { 50 }),
+                        );
+                    }
+                    eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
+                    if response
+                        .on_hover_text(
+                            "White balance selector (W): click a neutral area of the photo",
+                        )
+                        .clicked()
+                    {
+                        view.toggle(Tool::WhiteBalance);
+                    }
+                    egui::ComboBox::from_id_salt("white-balance")
+                        .width(ui.available_width())
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
                             if ui
-                                .selectable_label(selected == named.name(), named.name())
+                                .selectable_label(selected == "As Shot", "As Shot")
                                 .clicked()
                                 && let Some(m) = &metadata
                             {
-                                let values = named.values();
-                                r.temperature = values.temperature;
-                                r.tint = values.tint;
-                                r.update_wb(m);
-                                r.auto_white_balance = None;
+                                r.wb = [1.; 3];
+                                r.reset_white_balance(m);
                             }
-                        }
-                        ui.add_enabled(
-                            false,
-                            egui::Button::selectable(selected == "Custom", "Custom"),
-                        );
-                    });
+                            if ui
+                                .add_enabled(
+                                    auto_ready,
+                                    egui::Button::selectable(selected == "Auto", "Auto"),
+                                )
+                                .on_hover_text("Make the photo's near-neutral areas neutral")
+                                .clicked()
+                            {
+                                auto_request = Some(AutoKind::WhiteBalance);
+                            }
+                            // Kelvin presets are for RAW files, as in Lightroom.
+                            let named = if rendered {
+                                &[][..]
+                            } else {
+                                &NamedWhiteBalance::ALL[..]
+                            };
+                            for &named in named {
+                                if ui
+                                    .selectable_label(selected == named.name(), named.name())
+                                    .clicked()
+                                    && let Some(m) = &metadata
+                                {
+                                    let values = named.values();
+                                    r.temperature = values.temperature;
+                                    r.tint = values.tint;
+                                    r.update_wb(m);
+                                    r.auto_white_balance = None;
+                                }
+                            }
+                            ui.add_enabled(
+                                false,
+                                egui::Button::selectable(selected == "Custom", "Custom"),
+                            );
+                        });
+                });
+                if rendered {
+                    setting_control(ui, r, ParameterId::IncrementalTemperature, 0., photo);
+                    setting_control(ui, r, ParameterId::IncrementalTint, 0., photo);
+                } else {
+                    setting_control(ui, r, ParameterId::Temperature, 6500., photo);
+                    setting_control(ui, r, ParameterId::Tint, 0., photo);
+                }
             });
-            let photo = metadata.as_ref();
-            if rendered {
-                setting_control(ui, r, ParameterId::IncrementalTemperature, 0., photo);
-                setting_control(ui, r, ParameterId::IncrementalTint, 0., photo);
-            } else {
-                setting_control(ui, r, ParameterId::Temperature, 6500., photo);
-                setting_control(ui, r, ParameterId::Tint, 0., photo);
-            }
             subheading(ui, "Tone");
             for id in [
                 ParameterId::Exposure,

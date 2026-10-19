@@ -77,13 +77,24 @@ impl Own {
     }
     /// The visible area of sensor data that is not a mosaic (small RAWs'
     /// RGB, linear raw DNGs), developed: each channel (raw − black) / (white − black), white
-    /// balanced by `wb` unless the camera stored it balanced. `None` for a
+    /// balanced by `wb` unless the camera stored it balanced. A monochrome
+    /// DNG's one sample is every channel's, not white balanced. `None` for a
     /// mosaic.
     pub(super) fn rgb(&self, wb: [f32; 3], cancel: &AtomicBool) -> Result<Option<Developed>> {
         if self.info.cfa.is_some() {
             return Ok(None);
         }
         let s = self.decode(cancel)?;
+        if self.info.monochrome {
+            ensure!(
+                s.channels == 1 && s.white > s.black.iter().copied().min().unwrap_or(0),
+                "Monochrome sensor data of {} samples a pixel",
+                s.channels
+            );
+            let [_, _, w, h] = s.area;
+            let grey = visible(&s, |_, _| 0);
+            return Ok(Some((w, h, grey.into_iter().map(|v| [v; 3]).collect())));
+        }
         ensure!(
             s.channels >= 3,
             "Sensor data that is neither a mosaic nor RGB"
@@ -109,29 +120,8 @@ impl Own {
         if s.channels != 1 || s.white <= s.black.iter().copied().min().unwrap_or(0) {
             return Ok(None);
         }
-        let [left, top, w, h] = s.area.map(|v| v as usize);
-        let (rows, cols, ref values) = s.black_pattern;
-        let pattern_black = |y: usize, x: usize| {
-            if rows > 0 && cols > 0 {
-                values
-                    .get((y % rows as usize) * cols as usize + x % cols as usize)
-                    .copied()
-                    .unwrap_or(0)
-            } else {
-                0
-            }
-        };
-        let white = s.white as f32;
-        let mut data = vec![0f32; w * h];
-        for y in 0..h {
-            let src = &s.data[(y + top) * s.width as usize + left..][..w];
-            for (x, (dst, &v)) in data[y * w..(y + 1) * w].iter_mut().zip(src).enumerate() {
-                let k = usize::from(cfa.color(y, x)).min(3);
-                let mut black = s.black[k] as f32;
-                black += pattern_black(y, x) as f32;
-                *dst = ((f32::from(v) - black) / (white - black).max(1.)).max(0.);
-            }
-        }
+        let [_, _, w, h] = s.area.map(|v| v as usize);
+        let data = visible(&s, |y, x| usize::from(cfa.color(y, x)).min(3));
         if let Some(turn) = self.info.super_ccd {
             return turned(turn, &cfa, &data, [w, h], cancel).map(Some);
         }
@@ -150,6 +140,35 @@ impl Own {
             data,
         }))
     }
+}
+
+/// The visible area of one-sample sensor data `s` as development reads it:
+/// (raw − black) / (white − black), at least 0, each sample's black that of
+/// channel `channel(y, x)` plus its position's in the black pattern.
+fn visible(s: &rawmakase_raw::Sensor, channel: impl Fn(usize, usize) -> usize) -> Vec<f32> {
+    let [left, top, w, h] = s.area.map(|v| v as usize);
+    let (rows, cols, ref values) = s.black_pattern;
+    let pattern_black = |y: usize, x: usize| {
+        if rows > 0 && cols > 0 {
+            values
+                .get((y % rows as usize) * cols as usize + x % cols as usize)
+                .copied()
+                .unwrap_or(0)
+        } else {
+            0
+        }
+    };
+    let white = s.white as f32;
+    let mut data = vec![0f32; w * h];
+    for y in 0..h {
+        let src = &s.data[(y + top) * s.width as usize + left..][..w];
+        for (x, (dst, &v)) in data[y * w..(y + 1) * w].iter_mut().zip(src).enumerate() {
+            let mut black = s.black[channel(y, x)] as f32;
+            black += pattern_black(y, x) as f32;
+            *dst = ((f32::from(v) - black) / (white - black).max(1.)).max(0.);
+        }
+    }
+    data
 }
 
 /// A Super CCD's stored mosaic `data` (`size` = stored width and height,
@@ -287,6 +306,7 @@ fn header(i: &RawInfo) -> Header {
         dng_version: i.dng_version,
         levels: i.levels,
         analog_balance: i.analog_balance,
+        monochrome: i.monochrome,
     }
 }
 

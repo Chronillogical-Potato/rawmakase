@@ -164,8 +164,20 @@ RAWs, Apple's), is reported with the header (relative to green): the
 as-shot and daylight white balance are of the samples with it, as
 development reads them, and a white set by temperature is the profile's
 camera neutral times it (XYZ to the samples is AnalogBalance ×
-ColorMatrix). Linear raw of one sample (monochrome sensors and scanners),
-in separate planes or of floating-point samples, Adobe's lossy linear DNGs
+ColorMatrix). Linear raw of one sample (monochrome sensors and film
+scanners: Leica's Monochroms, Pentax's K-3 Mark III Monochrome, Plustek's
+scans) is a monochrome image: it decodes as a mosaic of one colour would,
+levels and opcodes as such, and develops as grey, its sample every
+channel's, without white balance. Its colour is neutral whatever the file
+or the camera table says (such files have no ColorMatrix, or one of a
+single row): camera RGB is linear sRGB, so the camera matrix maps grey to
+grey, there are no white balance multipliers, and `Metadata::monochrome`
+tells the edit that Temp and Tint do not apply (`Recipe::update_wb` keeps
+the gains at 1, masks' Temp and Tint do nothing, rendering ignores gains a
+preset or another photo's edit brought, and Develop disables White
+Balance), as Lightroom does. Like small RAWs they develop at full size in
+both modes. Linear raw in separate planes or of floating-point samples,
+Adobe's lossy linear DNGs
 (compression 34892, baseline JPEG of three components) and JPEG XL (52546)
 tiles are `Unsupported`; Apple's and Samsung's
 ProfileGainTableMap, a local tone map Camera Raw applies after the profile,

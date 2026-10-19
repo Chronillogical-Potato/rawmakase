@@ -201,6 +201,118 @@ mod tests {
         }
     }
 
+    /// A little-endian monochrome DNG (linear raw of one sample, a Leica M
+    /// Monochrom's levels) of `samples`, `width` a row, written to a closed file.
+    fn monochrome_dng(width: u32, samples: &[u16]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let height = samples.len() as u32 / width;
+        let short = |v: u16| v.to_le_bytes().to_vec();
+        let long = |v: u32| v.to_le_bytes().to_vec();
+        let mut entries: Vec<(u16, u16, u32, Vec<u8>)> = vec![
+            (254, 4, 1, long(0)),
+            (256, 4, 1, long(width)),
+            (257, 4, 1, long(height)),
+            (258, 3, 1, short(16)),
+            (259, 3, 1, short(1)),
+            (262, 3, 1, short(34892)),
+            (271, 2, 6, b"Leica\0".to_vec()),
+            (272, 2, 12, b"M Monochrom\0".to_vec()),
+            (273, 4, 1, Vec::new()),
+            (277, 3, 1, short(1)),
+            (278, 4, 1, long(height)),
+            (279, 4, 1, long(samples.len() as u32 * 2)),
+            (50706, 1, 4, vec![1, 4, 0, 0]),
+            (50714, 3, 1, short(220)),
+            (50717, 3, 1, short(16383)),
+        ];
+        let ifd_len = 2 + 12 * entries.len() + 4;
+        let mut data_at = 8 + ifd_len;
+        let mut data = Vec::new();
+        for (tag, _, _, value) in &mut entries {
+            if *tag == 273 {
+                *value = long((data_at + data.len()) as u32);
+                data.extend(samples.iter().flat_map(|v| v.to_le_bytes()));
+            }
+        }
+        let mut bytes = b"II*\0".to_vec();
+        bytes.extend(long(8));
+        bytes.extend(short(entries.len() as u16));
+        let mut values: Vec<u8> = Vec::new();
+        data_at += data.len();
+        for (tag, kind, count, value) in &entries {
+            bytes.extend(short(*tag));
+            bytes.extend(short(*kind));
+            bytes.extend(long(*count));
+            if value.len() <= 4 {
+                bytes.extend(value.iter().copied().chain([0; 4]).take(4));
+            } else {
+                bytes.extend(long((data_at + values.len()) as u32));
+                values.extend(value);
+            }
+        }
+        bytes.extend(long(0));
+        bytes.extend(data);
+        bytes.extend(values);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("monochrome.dng");
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    /// A monochrome DNG develops as grey, its one sample every channel's, and
+    /// renders grey whatever the white balance: through the default profile
+    /// and RAWmakase Color, with Temp and Tint changed (which leave its gains
+    /// at 1, as it has no white balance), an eyedropper's pick, and gains an
+    /// edit of another photo brought.
+    #[test]
+    fn monochrome_dngs_develop_and_render_grey() {
+        use rawmakase_model::model::recipe::Recipe;
+        let (_dir, path) = monochrome_dng(4, &[220, 2236, 8301, 16383, 1000, 4000, 12000, 300]);
+        let raw = super::open(&path).unwrap();
+        let m = raw.metadata.clone();
+        assert!(m.monochrome);
+        assert_eq!((m.wb, m.daylight_wb), ([1.; 3], [1.; 3]));
+        let im = raw
+            .develop(
+                rawmakase_model::camera_data::Decode::Half,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .unwrap();
+        assert_eq!((im.width, im.height), (4, 2));
+        for (p, v) in im
+            .pixels
+            .iter()
+            .zip([220, 2236, 8301, 16383, 1000, 4000, 12000, 300])
+        {
+            let want = (v as f32 - 220.) / (16383. - 220.);
+            assert_eq!(*p, [want; 3]);
+        }
+        let color = std::sync::Arc::new(crate::camera_profiles::open::color(&m).unwrap());
+        for profiles in [vec![], vec![color]] {
+            let start = Recipe::with_profiles(&m, &profiles);
+            let mut warmer = start.clone();
+            warmer.temperature = 3000.;
+            warmer.tint = 40.;
+            warmer.update_wb(&m);
+            assert_eq!(warmer.wb, [1.; 3]);
+            let mut picked = start.clone();
+            picked.pick_white_balance([1.5, 1., 0.6], &m);
+            assert_eq!(picked.wb, [1.; 3]);
+            let mut synced = start.clone();
+            synced.wb = [1.5, 1., 0.6];
+            for r in [start, warmer, picked, synced] {
+                let out = rawmakase_engine::develop::render(&im, &r.checked().unwrap(), 0).unwrap();
+                for p in &out.pixels {
+                    assert!(
+                        (p[0] - p[1]).abs() < 1e-3 && (p[2] - p[1]).abs() < 1e-3,
+                        "{p:?} with {:?}",
+                        r.wb
+                    );
+                }
+                assert!(out.pixels.iter().any(|p| p[1] > 0.5));
+            }
+        }
+    }
+
     #[test]
     fn dng_without_baseline_exposure_uses_the_dng_default() {
         let chart = concat!(
