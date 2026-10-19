@@ -156,6 +156,10 @@ struct Location {
     extents: Vec<(u64, u64)>,
 }
 
+/// An item's properties, as 1-based indexes into `Heif::properties`, and
+/// whether each is essential.
+type Association = (u32, Vec<(u16, bool)>);
+
 /// What a HEIF (AVIF) file's `ftyp` and `meta` say.
 #[derive(Clone, Debug, Default)]
 pub struct Heif {
@@ -165,8 +169,7 @@ pub struct Heif {
     pub items: Vec<Item>,
     locations: Vec<Location>,
     properties: Vec<Property>,
-    /// Each item's properties, as 1-based indexes into `properties`.
-    associations: Vec<(u32, Vec<u16>)>,
+    associations: Vec<Association>,
     /// (kind, from, to).
     references: Vec<([u8; 4], u32, u32)>,
 }
@@ -278,8 +281,23 @@ impl Heif {
             .iter()
             .filter(|(item, _)| *item == id)
             .flat_map(|(_, indexes)| indexes.iter())
-            .filter_map(|i| self.properties.get((*i as usize).checked_sub(1)?))
+            .filter_map(|(i, _)| self.properties.get((*i as usize).checked_sub(1)?))
             .collect()
+    }
+
+    /// An essential property of item `id` that is not read here, which a
+    /// reader must understand to show the item, e.g. `clap` (a crop).
+    pub fn unread_essential(&self, id: u32) -> Option<[u8; 4]> {
+        self.associations
+            .iter()
+            .filter(|(item, _)| *item == id)
+            .flat_map(|(_, indexes)| indexes.iter())
+            .filter(|(_, essential)| *essential)
+            .filter_map(|(i, _)| self.properties.get((*i as usize).checked_sub(1)?))
+            .find_map(|p| match p {
+                Property::Other(kind) => Some(*kind),
+                _ => None,
+            })
     }
 
     /// Where item `id`'s data is in the file, when in one piece there.
@@ -448,7 +466,7 @@ fn locations(mut b: Bytes) -> Option<Vec<Location>> {
     Some(out)
 }
 
-fn associations(mut b: Bytes) -> Option<Vec<(u32, Vec<u16>)>> {
+fn associations(mut b: Bytes) -> Option<Vec<Association>> {
     let version = b.u8()?;
     let flags = b.take(3)?[2];
     let count = b.u32()?;
@@ -464,9 +482,11 @@ fn associations(mut b: Bytes) -> Option<Vec<(u32, Vec<u16>)>> {
         for _ in 0..n {
             // The top bit says whether the property is essential.
             indexes.push(if flags & 1 == 1 {
-                b.u16()? & 0x7fff
+                let i = b.u16()?;
+                (i & 0x7fff, i & 0x8000 != 0)
             } else {
-                (b.u8()? & 0x7f) as u16
+                let i = b.u8()?;
+                ((i & 0x7f) as u16, i & 0x80 != 0)
             });
         }
         out.push((id, indexes));
@@ -621,6 +641,15 @@ mod tests {
             heif.data(&mut fixture("rotated.avif"), heif.primary)
                 .is_some_and(|d| !d.is_empty())
         );
+    }
+
+    #[test]
+    fn an_essential_property_it_does_not_read_is_named() {
+        let cropped = Heif::read(&mut fixture("cropped.avif")).unwrap();
+        assert_eq!(cropped.unread_essential(cropped.primary), Some(*b"clap"));
+        // irot is essential too, and read.
+        let rotated = Heif::read(&mut fixture("rotated.avif")).unwrap();
+        assert_eq!(rotated.unread_essential(rotated.primary), None);
     }
 
     #[test]

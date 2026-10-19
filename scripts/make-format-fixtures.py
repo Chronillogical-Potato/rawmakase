@@ -56,6 +56,7 @@ def main(out: Path):
         # AVIF
         run("avifenc", "--lossless", "--irot", "1", src, out / "rotated.avif")
         run("avifenc", "--lossless", "--irot", "1", "--imir", "0", src, out / "rotated-mirrored.avif")
+        run("avifenc", "--lossless", "--crop", "2,2,8,8", src, out / "cropped.avif")
         run("avifenc", "--lossless", "--cicp", "12/13/0", src, out / "p3.avif")
         run("avifenc", "-d", "10", "--cicp", "9/16/9", src, out / "pq.avif")
         run("avifenc", "-d", "10", "--cicp", "9/18/9", src, out / "hlg.avif")

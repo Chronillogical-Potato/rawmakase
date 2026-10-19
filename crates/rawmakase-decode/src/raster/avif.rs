@@ -70,6 +70,10 @@ impl AvifFile {
         if !tiled && &primary.kind != b"av01" {
             bail!("The AVIF image is not AV1");
         }
+        if let Some(kind) = heif.unread_essential(heif.primary) {
+            let kind = String::from_utf8_lossy(&kind);
+            bail!("The AVIF image needs `{kind}`, which RAWmakase can't read");
+        }
         let props = heif.properties(heif.primary);
         let (width, height) = props
             .iter()

@@ -859,6 +859,15 @@ mod tests {
         assert_eq!(super::dimensions(&path), Some((1, 2)));
     }
 
+    /// An AVIF whose image needs a property RAWmakase does not read (a crop,
+    /// here) is not shown wrongly: it can't be opened.
+    #[test]
+    fn an_avif_needing_a_property_it_does_not_read_is_not_opened() {
+        let error = decode(&fixture("cropped.avif")).unwrap_err().to_string();
+        assert!(error.contains("clap"), "{error}");
+        assert_eq!(super::dimensions(&fixture("cropped.avif")), None);
+    }
+
     /// The size and the refusal come from an AVIF's header: its AV1 data is
     /// read only to decode it.
     #[test]
