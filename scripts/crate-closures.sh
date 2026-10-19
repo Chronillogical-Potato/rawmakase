@@ -30,6 +30,9 @@ check() {
     # Every platform's dependencies, not only this machine's.
     found=$(cargo tree --locked -p "$crate" --all-features --target all -e normal,build \
         --prefix none --format '{p}' | sort -u | grep -E "$forbidden" || true)
+    if [ -n "${3:-}" ]; then
+        found=$(echo "$found" | grep -Ev "^($3) " || true)
+    fi
     if [ -n "$found" ]; then
         echo "$crate must not depend on:" >&2
         echo "$found" | sed 's/^/    /' >&2
@@ -40,8 +43,33 @@ for crate in rawmakase-tiff rawmakase-model rawmakase-interop rawmakase-catalog 
     check "$crate" "$leaf"
 done
 check rawmakase-engine "rawmakase|rawmakase-catalog|rawmakase-export|$gui|$native|$inference"
-# The decoding boundary is Rust alone: nothing in it is built from C.
-check rawmakase-decode "rawmakase|rawmakase-catalog|rawmakase-export|cc|cmake|pkg-config|$gui|$c_imaging|$inference"
+# The decoding boundary is Rust alone: nothing in it is built from C. rav1d (the
+# AV1 decoder for AVIF) lists cc and nasm-rs as build dependencies but uses them
+# only for its asm features, which stay off, so they may come in through rav1d
+# and nothing else. Cargo merges features across the build, so no crate of the
+# workspace may turn asm on. Drop the exception once rav1d makes them optional,
+# or the AV1 decoder needs no build script.
+rav1d_build='cc|nasm-rs'
+check rawmakase-decode "rawmakase|rawmakase-catalog|rawmakase-export|cc|nasm.*|cmake|pkg-config|$gui|$c_imaging|$inference" "$rav1d_build"
+decode_tree=$(cargo tree --locked -p rawmakase-decode --all-features --target all -e normal,build \
+    --prefix none --format '{p}')
+for dep in cc nasm-rs; do
+    grep -q "^$dep " <<<"$decode_tree" || continue
+    others=$(cargo tree --locked -p rawmakase-decode --all-features --target all -e normal,build \
+        -i "$dep" --depth 1 --prefix none --format '{p}' | tail -n +2 | grep -v '^rav1d ' || true)
+    if [ -n "$others" ]; then
+        echo "rawmakase-decode may reach $dep only through rav1d, not:" >&2
+        echo "$others" | sed 's/^/    /' >&2
+        status=1
+    fi
+done
+asm=$(cargo tree --locked --workspace --all-features --target all -e features -i rav1d \
+    --prefix none | grep '^rav1d feature "asm' | sed 's/ (\*)$//' | sort -u || true)
+if [ -n "$asm" ]; then
+    echo "rav1d must be built without assembly:" >&2
+    echo "$asm" | sed 's/^/    /' >&2
+    status=1
+fi
 check rawmakase-export "rawmakase|eframe|winit|egui-wgpu|egui-winit|egui_extras|$c_imaging|$inference"
 # Inference itself is a leaf: it takes pixels and returns coverage, and knows no
 # workspace crate, window, GPU or imaging library.
