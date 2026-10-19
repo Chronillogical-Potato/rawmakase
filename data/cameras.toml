@@ -1027,6 +1027,14 @@ sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure -0.25"
 
 [[camera]]
 make = "Leica"
+model = "C-Lux"
+baseline_exposure = 0.1
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure +0.10"
+
+[[camera]]
+make = "Leica"
 model = "D-Lux 7"
 baseline_exposure = 0.25
 source = "adobe-dng"
@@ -1051,6 +1059,22 @@ sample = "raw.pixls.us, 1 photo at ISO 280"
 
 [[camera]]
 make = "Nikon"
+model = "COOLPIX B700"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25"
+
+[[camera]]
+make = "Nikon"
+model = "COOLPIX P1000"
+baseline_exposure = -0.3
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.30"
+
+[[camera]]
+make = "Nikon"
 model = "COOLPIX P1100"
 baseline_exposure = -0.3
 source = "adobe-dng"
@@ -1064,6 +1088,46 @@ baseline_exposure = -0.3
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
+
+[[camera]]
+make = "Nikon"
+model = "D300"
+baseline_exposure = 0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 2 photos at ISO 200; BaselineExposure +0.50 (at ISO 160, Lo 0.3, Adobe takes log2(200/160) off)"
+
+[[camera]]
+make = "Nikon"
+model = "D3000"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 200; BaselineExposure +0.00"
+
+[[camera]]
+make = "Nikon"
+model = "D3100"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 200, 400, 800; BaselineExposure +0.00"
+
+[[camera]]
+make = "Nikon"
+model = "D3200"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 400; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
+model = "D3300"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100; BaselineExposure +0.35"
 
 [[camera]]
 make = "Nikon"
@@ -1083,6 +1147,14 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.20"
 
 [[camera]]
 make = "Nikon"
+model = "D4"
+baseline_exposure = 0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 100; BaselineExposure +0.25"
+
+[[camera]]
+make = "Nikon"
 model = "D5"
 baseline_exposure = 0.35
 source = "adobe-dng"
@@ -1096,6 +1168,38 @@ baseline_exposure = 0.2
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35; Adobe's value 0.45 left the Camera Raw 18.7 render -0.17 EV away, so fitted to it"
+
+[[camera]]
+make = "Nikon"
+model = "D5100"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 400; BaselineExposure +0.00"
+
+[[camera]]
+make = "Nikon"
+model = "D5200"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 200, 800; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
+model = "D5300"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 250; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
+model = "D5500"
+baseline_exposure = 0.2
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 800; BaselineExposure +0.20"
 
 [[camera]]
 make = "Nikon"
@@ -1115,11 +1219,51 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.25"
 
 [[camera]]
 make = "Nikon"
+model = "D60"
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 100; BaselineExposure -0.50"
+
+[[camera]]
+make = "Nikon"
+model = "D600"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 200, 250; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
 model = "D610"
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
+model = "D700"
+baseline_exposure = 0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 200, 250, 1600; BaselineExposure +0.50"
+
+[[camera]]
+make = "Nikon"
+model = "D7000"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100; BaselineExposure +0.00"
+
+[[camera]]
+make = "Nikon"
+model = "D7100"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 160; BaselineExposure +0.35"
 
 [[camera]]
 make = "Nikon"
@@ -1155,11 +1299,43 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.20"
 
 [[camera]]
 make = "Nikon"
+model = "D80"
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 200, 250; BaselineExposure -0.50"
+
+[[camera]]
+make = "Nikon"
+model = "D800"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100, 200; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
+model = "D810"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 64, 100; BaselineExposure +0.35"
+
+[[camera]]
+make = "Nikon"
 model = "D850"
 baseline_exposure = 0.2
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 64; BaselineExposure +0.35; Adobe's value 0.45 left the Camera Raw 18.7 render -0.19 EV away, so fitted to it"
+
+[[camera]]
+make = "Nikon"
+model = "D90"
+baseline_exposure = 0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 200, 250, 640; BaselineExposure +0.25"
 
 [[camera]]
 make = "Nikon"
@@ -1392,6 +1568,22 @@ checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure +0.64; Adobe's value 0.7 left the Camera Raw 18.7 render -0.11 EV away, so fitted to it"
 
 [[camera]]
+make = "Olympus"
+model = "TG-5"
+baseline_exposure = 0.1
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.10"
+
+[[camera]]
+make = "Olympus"
+model = "TG-6"
+baseline_exposure = -0.2
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.20"
+
+[[camera]]
 make = "OM Digital"
 model = "OM-1"
 baseline_exposure = 0.35
@@ -1447,7 +1639,26 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.22"
 
 [[camera]]
 make = "Panasonic"
+model = "DC-FZ1000M2"
+aliases = ["DC-FZ10002"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 3 photos at ISO 250, 320; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-FZ80"
+aliases = ["DC-FZ82"]
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 6 photos at ISO 80; BaselineExposure -0.50"
+
+[[camera]]
+make = "Panasonic"
 model = "DC-G100"
+aliases = ["DC-G100D", "DC-G110"]
 baseline_exposure = 0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1472,6 +1683,7 @@ sample = "raw.pixls.us, 1 photo at ISO 200"
 [[camera]]
 make = "Panasonic"
 model = "DC-G95"
+aliases = ["DC-G91", "DC-G95D", "DC-G97"]
 baseline_exposure = 0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1484,6 +1696,24 @@ baseline_exposure = 0
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-GF10"
+aliases = ["DC-GX880"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 6 photos at ISO 200, 1250; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-GF9"
+aliases = ["DC-GX800", "DC-GX850"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 6 photos at ISO 200, 2000; BaselineExposure +0.00"
 
 [[camera]]
 make = "Panasonic"
@@ -1528,6 +1758,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 [[camera]]
 make = "Panasonic"
 model = "DC-GX9"
+aliases = ["DC-GX7MK3"]
 baseline_exposure = 0.25
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1564,6 +1795,14 @@ baseline_exposure = -0.15
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.15"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-S1M2ES"
+baseline_exposure = 0.05
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.05"
 
 [[camera]]
 make = "Panasonic"
@@ -1616,11 +1855,99 @@ sample = "raw.pixls.us, 1 photo at ISO 200; BaselineExposure -0.05"
 [[camera]]
 make = "Panasonic"
 model = "DC-TZ202"
-aliases = ["DC-TZ200", "DC-ZS200"]
+aliases = ["DC-TZ200", "DC-ZS200", "DC-TZ200D", "DC-ZS200D"]
 baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-ZS70"
+aliases = ["DC-TZ90", "DC-TZ91"]
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 4 photos at ISO 80, 100, 125, 160; BaselineExposure -0.50"
+
+[[camera]]
+make = "Panasonic"
+model = "DC-ZS80"
+aliases = ["DC-TZ95", "DC-TZ95D", "DC-TZ96"]
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 5 photos at ISO 80; BaselineExposure -0.50"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-FZ2500"
+aliases = ["DMC-FZ2000"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 6 photos at ISO 80, 125; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-G7"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 100; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-G8"
+aliases = ["DMC-G80", "DMC-G81", "DMC-G85"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 9 photos at ISO 200, 250, 320, 400; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-GF8"
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 3 photos at ISO 200; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-GX85"
+aliases = ["DMC-GX7MK2", "DMC-GX80"]
+baseline_exposure = 0
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 9 photos at ISO 200, 2500, 3200; BaselineExposure +0.00"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-LX9"
+aliases = ["DMC-LX10", "DMC-LX15"]
+baseline_exposure = 0.1
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 6 photos at ISO 125, 160; BaselineExposure +0.10"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-ZS100"
+aliases = ["DMC-TX1", "DMC-TZ100", "DMC-TZ101", "DMC-TZ110"]
+baseline_exposure = 0.1
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 13 photos at ISO 125, 200, 400, 640, 800; BaselineExposure +0.10"
+
+[[camera]]
+make = "Panasonic"
+model = "DMC-ZS60"
+aliases = ["DMC-TZ80", "DMC-TZ81"]
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 7 photos at ISO 80, 400, 1600; BaselineExposure -0.50"
 
 [[camera]]
 make = "Pentax"
@@ -1629,6 +1956,14 @@ baseline_exposure = -0.5
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.50"
+
+[[camera]]
+make = "Pentax"
+model = "K-1"
+baseline_exposure = -0.5
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 2 photos at ISO 160; BaselineExposure -0.50"
 
 [[camera]]
 make = "Pentax"
@@ -1672,12 +2007,60 @@ sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure +0.50"
 
 [[camera]]
 make = "Sony"
+model = "DSC-HX95"
+baseline_exposure = -0.4
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.40"
+
+[[camera]]
+make = "Sony"
 model = "DSC-HX99"
 baseline_exposure = -0.4
 unit_calibration = { preset = "daylight", reference = [1876, 1024, 2156] }
 source = "adobe-dng"
 checked = "2026-10-14"
 sample = "raw.pixls.us, 1 photo at ISO 80; BaselineExposure -0.40"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX0"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX0M2"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 400; BaselineExposure -0.25"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX100"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 125; BaselineExposure -0.25"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX100M2"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 3 photos at ISO 160; BaselineExposure -0.25"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX100M5"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 125; BaselineExposure -0.25"
 
 [[camera]]
 make = "Sony"
@@ -1705,6 +2088,22 @@ baseline_exposure = -0.4
 source = "fitted"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25; Adobe's value -0.25 left the Camera Raw 18.7 render -0.20 EV away, so fitted to it"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX100M7A"
+baseline_exposure = -0.25
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.25"
+
+[[camera]]
+make = "Sony"
+model = "DSC-RX10M3"
+baseline_exposure = -0.15
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure -0.15"
 
 [[camera]]
 make = "Sony"
@@ -1822,7 +2221,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100; BaselineExposure +0.35"
 make = "Sony"
 model = "ILCE-6400"
 unit_calibration = { preset = "daylight", reference = [2600, 1024, 1816] }
-aliases = ["A6400"]
+aliases = ["A6400", "ILCE-6400A"]
 baseline_exposure = 0.35
 source = "adobe-dng"
 checked = "2026-10-05"
@@ -1976,7 +2375,7 @@ sample = "raw.pixls.us, 1 photo at ISO 100"
 make = "Sony"
 model = "ILCE-7RM4"
 unit_calibration = { preset = "daylight", reference = [2572, 1024, 1668] }
-aliases = ["A7R IV"]
+aliases = ["A7R IV", "ILCE-7RM4A"]
 baseline_exposure = 0.35
 lowest_iso = 100
 source = "adobe-dng"
@@ -2088,6 +2487,14 @@ baseline_exposure = 0.1
 source = "adobe-dng"
 checked = "2026-10-05"
 sample = "raw.pixls.us, 1 photo at ISO 125"
+
+[[camera]]
+make = "Sony"
+model = "SLT-A33"
+baseline_exposure = 0.35
+source = "adobe-dng"
+checked = "2026-10-19"
+sample = "Signature Edits free RAWs, 1 photo at ISO 100; BaselineExposure +0.35"
 
 [[camera]]
 make = "Sony"
