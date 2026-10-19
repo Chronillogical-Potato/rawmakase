@@ -26,6 +26,46 @@ def corners(w=16, h=12):
     return im
 
 
+def split_extent(src: Path, dst: Path, kind: bytes):
+    """`src` with the data of its `kind` item in two iloc extents, as some
+    writers store it. Handles avifenc's iloc: version 0, 4-byte offsets and
+    lengths, no base offsets, item data after the meta box."""
+    d = src.read_bytes()
+    be = lambda b: int.from_bytes(b, "big")
+    top, at = {}, 0
+    while at < len(d):
+        top[d[at + 4:at + 8]] = (at, be(d[at:at + 4]))
+        at += be(d[at:at + 4])
+    meta_at, meta_len = top[b"meta"]
+    children, at = {}, meta_at + 12
+    while at < meta_at + meta_len:
+        children[d[at + 4:at + 8]] = (at, be(d[at:at + 4]))
+        at += be(d[at:at + 4])
+    iinf = d[slice(children[b"iinf"][0], sum(children[b"iinf"]))]
+    entry = iinf.index(kind) - 4  # infe v2: ID, protection index, then type
+    item = be(iinf[entry:entry + 2])
+    iloc_at, iloc_len = children[b"iloc"]
+    iloc = d[iloc_at + 8:iloc_at + iloc_len]
+    assert iloc[0] == 0 and iloc[4:6] == b"\x44\x00", "avifenc's iloc layout"
+    body, at = bytearray(iloc[:8]), 8
+    for _ in range(be(iloc[6:8])):
+        id, count = be(iloc[at:at + 2]), be(iloc[at + 4:at + 6])
+        extents = [(be(iloc[e:e + 4]), be(iloc[e + 4:e + 8]))
+                   for e in range(at + 6, at + 6 + 8 * count, 8)]
+        at += 6 + 8 * count
+        if id == item:
+            (offset, length), = extents
+            extents = [(offset, length // 2), (offset + length // 2, length - length // 2)]
+        body += id.to_bytes(2, "big") + b"\0\0" + len(extents).to_bytes(2, "big")
+        for offset, length in extents:
+            body += (offset + 8).to_bytes(4, "big") + length.to_bytes(4, "big")
+    assert len(body) == len(iloc) + 8
+    iloc = (len(body) + 8).to_bytes(4, "big") + b"iloc" + body
+    meta = d[meta_at:iloc_at] + iloc + d[iloc_at + iloc_len:meta_at + meta_len]
+    meta = (meta_len + 8).to_bytes(4, "big") + meta[4:]
+    dst.write_bytes(d[:meta_at] + meta + d[meta_at + meta_len:])
+
+
 def exif(orientation=None):
     e = Image.Exif()
     e[0x010F] = "Fixture"
@@ -70,6 +110,7 @@ def main(out: Path):
         corners(15, 11).save(odd)
         run("avifenc", "-y", "420", "-q", "100", odd, out / "odd-420.avif")
         run("avifenc", "--lossless", "--exif", tiff_exif, "--xmp", xmp, src, out / "metadata.avif")
+        split_extent(out / "metadata.avif", out / "split-exif.avif", b"Exif")
         run("avifenc", "--lossless", "-d", "10", src, out / "ten-bit.avif")
 
         # JPEG XL

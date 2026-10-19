@@ -370,16 +370,13 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
         let (at, len) = exif_in_webp(&mut File::open(path).ok()?)?;
         (at, Some(len))
     } else if head.get(4..8) == Some(b"ftyp") && has_heif_brand(&head) {
-        let (at, len) = exif_in_heif(&mut File::open(path).ok()?)?;
-        (at, Some(len))
+        // Its Exif item may be stored in pieces, so the TIFF is read from the
+        // joined item in memory.
+        return exif_in_memory(exif_in_heif(&mut f)?, keep_main);
     } else if head.starts_with(&crate::isobmff::JXL_CONTAINER) {
         // Its Exif box may be brotli-compressed ("brob"), so the TIFF is read
         // from the box's body in memory.
-        let body = crate::isobmff::jxl_metadata(&mut f, *b"Exif")?;
-        let len = body.len() as u64;
-        let mut body = std::io::Cursor::new(body);
-        let (at, len) = after_offset(&mut body, 0, len)?;
-        return camera_exif(Tiff::open_within(body, at, len)?, keep_main);
+        return exif_in_memory(crate::isobmff::jxl_metadata(&mut f, *b"Exif")?, keep_main);
     } else {
         (0, None)
     };
@@ -443,16 +440,24 @@ fn exif_in_webp(f: &mut File) -> Option<(u64, u64)> {
     tiff_after_header(f, chunk.start, chunk.start.checked_add(chunk.size)?)
 }
 
-/// Offset of the TIFF header in an AVIF's Exif item, which starts with the
-/// 4-byte offset to it, and the length of the TIFF the item holds.
-fn exif_in_heif(f: &mut File) -> Option<(u64, u64)> {
+/// An AVIF's Exif item, up to 16 MiB: the 4-byte offset to the TIFF header,
+/// then the TIFF.
+fn exif_in_heif(f: &mut File) -> Option<Vec<u8>> {
     let heif = crate::isobmff::Heif::read(f)?;
     let id = heif
         .describing(*b"cdsc", heif.primary)
         .into_iter()
         .find(|id| heif.item(*id).is_some_and(|i| &i.kind == b"Exif"))?;
-    let (start, len) = heif.extent(id)?;
-    after_offset(f, start, len)
+    heif.data_up_to(f, id, 16 << 20)
+}
+
+/// The directories of the TIFF in `body`, an Exif item or box: the
+/// big-endian u32 offset to the TIFF header, then the TIFF.
+fn exif_in_memory(body: Vec<u8>, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
+    let len = body.len() as u64;
+    let mut body = std::io::Cursor::new(body);
+    let (at, len) = after_offset(&mut body, 0, len)?;
+    camera_exif(Tiff::open_within(body, at, len)?, keep_main)
 }
 
 /// The TIFF header of the `len` bytes at `start`, after the big-endian u32
@@ -745,10 +750,11 @@ mod container_tests {
     #[test]
     fn webp_avif_and_jxl_exif_is_read() {
         // metadata-brob.jxl has its Exif box brotli-compressed, as cjxl
-        // writes by default.
+        // writes by default; split-exif.avif has its Exif item in two pieces.
         for name in [
             "metadata.webp",
             "metadata.avif",
+            "split-exif.avif",
             "metadata.jxl",
             "metadata-brob.jxl",
         ] {

@@ -20,4 +20,4 @@ message). No camera data or photos.
 (top-left, top-right, bottom-left, bottom-right) on grey. Metadata fixtures carry Make
 "Fixture", Model "Synthetic 1", DateTimeOriginal 2024:05:04 10:21:33 and the XMP title
 "Fixture title". Orientation fixtures: AVIF `irot`/`imir`, WebP and JXL EXIF Orientation 6.
-`pq.*` use the PQ transfer (HDR), `animated.*` have two frames, `tiled.avif` is a 2×2 grid of 64×64 cells (MIAF forbids smaller tiles). `cropped.avif` has a clean aperture (`clap`), an essential property RAWmakase does not read.
+`pq.*` use the PQ transfer (HDR), `animated.*` have two frames, `tiled.avif` is a 2×2 grid of 64×64 cells (MIAF forbids smaller tiles). `cropped.avif` has a clean aperture (`clap`), an essential property RAWmakase does not read. `split-exif.avif` is `metadata.avif` with its Exif item stored in two `iloc` extents.
