@@ -176,7 +176,7 @@ fn cicp_profile(primaries: u16, transfer: u16) -> Option<ColorProfile> {
 fn matrix(code: u8) -> YuvStandardMatrix {
     match code {
         1 => YuvStandardMatrix::Bt709,
-        9 | 10 => YuvStandardMatrix::Bt2020,
+        9 => YuvStandardMatrix::Bt2020,
         7 => YuvStandardMatrix::Smpte240,
         4 => YuvStandardMatrix::Fcc,
         // 5, 6 and unspecified (2): BT.601, as libavif assumes.
@@ -217,6 +217,12 @@ fn to_rgb(picture: &av1::Picture, nclx: Option<Nclx>) -> Result<Vec<u8>> {
         Some(n) => (u8::try_from(n.matrix).unwrap_or(2), n.full_range),
         None => (picture.matrix(), picture.full_range()),
     };
+    // BT.2020 constant luminance (10) and chroma-derived constant luminance
+    // (13) need a reconstruction no matrix gives.
+    anyhow::ensure!(
+        !matches!(code, 10 | 13),
+        "AVIF images in constant luminance can't be read"
+    );
     // Identity (GBR): the planes are green, blue and red.
     if code == 0 {
         return identity(picture);

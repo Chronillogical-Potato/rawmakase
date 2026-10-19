@@ -1053,6 +1053,21 @@ mod tests {
         );
     }
 
+    /// BT.2020 constant luminance is not the BT.2020 matrix, and isn't
+    /// converted: the image can't be opened rather than shown in wrong colours.
+    #[test]
+    fn an_avif_in_constant_luminance_is_not_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("constant-luminance.avif");
+        let mut bytes = std::fs::read(fixture("p3.avif")).unwrap();
+        // nclx: primaries 12, transfer 13, matrix 0 becomes 10.
+        let at = bytes.windows(4).position(|w| w == b"nclx").unwrap() + 8;
+        bytes[at..at + 2].copy_from_slice(&10u16.to_be_bytes());
+        std::fs::write(&path, bytes).unwrap();
+        let error = decode(&path).unwrap_err().to_string();
+        assert!(error.contains("constant luminance"), "{error}");
+    }
+
     /// An image sequence is refused whichever of its brands says so, not
     /// only the major one.
     #[test]
