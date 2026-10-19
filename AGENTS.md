@@ -70,6 +70,51 @@
   questions, verification gaps and a brief assessment against the intended
   outcome. If no actionable defects are found, say so and state coverage limits.
 
+## Code review with subagents
+
+- Use subagents when a change spans several risk areas or is too large to
+  review carefully in one pass. Review small, single-concern diffs directly.
+- Reviewers must come from a different model provider than the author:
+  Claude-written changes are reviewed by Codex, and Codex-written changes by
+  Claude. Pick the most capable model available from that provider. In T3,
+  look up the current models with `orchestrator_capabilities` and start the
+  reviewer with `delegate_task`; native subagent tools usually can only start
+  agents from the same provider. If no other provider is available, say so in
+  the report. Only then fall back to a fresh agent from the same provider, and
+  label its review as a weaker substitute, not an independent one.
+- Give each reviewer a self-contained brief: the base revision and exact diff
+  range, the intended behavior, the docs and modules that matter, and the
+  "Code review" rules above. Don't pass along the author's own assessment as
+  fact. Reviewers should test the claims, not inherit them.
+- Split the work by risk area, not by file. Examples: XMP and settings
+  compatibility, session and history consistency, job inputs and cache
+  identity, worker lifecycle and shutdown, save before navigation, rendering
+  parity, and architecture boundaries. Only start an area the diff actually
+  touches, and tell each reviewer to follow callers and error paths outside
+  the diff.
+- Reviewers only read. They don't edit, commit, push, use `git stash`, or
+  re-bless references. If a reviewer has to build or run code, give it its own
+  worktree. Running several Cargo builds in one checkout makes them wait on
+  each other's lock. One agent runs the CI checks. Dataset and Camera Raw
+  parity runs follow `tests/corpus/README.md` and never run at the same time
+  as each other.
+- Ask each reviewer to report findings in a fixed structure: severity,
+  file:line, triggering scenario, consequence, evidence or a reproduction,
+  and whether it's confirmed, a potential risk or pre-existing. A reviewer
+  with nothing to report should say so and state what it covered.
+- Subagent findings are claims, not results. Before reporting a finding, the
+  orchestrator re-reads the cited code and checks that the triggering scenario
+  actually holds. Merge duplicates, keep design preferences out of the defect
+  list, and list every rejected finding in the report with the concrete reason
+  it was rejected.
+- For follow-up rounds, start a new task each time. Give it the original brief,
+  earlier findings, the responses to them and any open objections, so settled
+  points aren't argued again.
+- The final report follows the "Code review" format. It also lists which risk
+  areas were reviewed, which were skipped and why, any reviewer that failed or
+  timed out, and any checks that couldn't run here, such as ones that need the
+  private corpus.
+
 ## Addressing code review comments
 
 - Evaluate each comment against the code, intended behavior and evidence. Do not
