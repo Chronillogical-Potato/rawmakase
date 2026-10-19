@@ -15,9 +15,11 @@ pub(in crate::app) struct State {
     pub generation: u64,
     pub revision: u64,
     pub loaded: bool,
-    /// The photo Develop could not open, the reason in `message`: it will not
-    /// load, so a client waiting for `loaded` stops.
+    /// The photo Develop could not open: it will not load, so a client waiting
+    /// for `loaded` stops.
     pub open_failed: Option<PhotoId>,
+    /// Why it could not be opened, kept while `message` moves on.
+    pub open_error: Option<String>,
     pub busy: bool,
     pub modal: bool,
     pub black_and_white: bool,

@@ -183,7 +183,8 @@ impl Desktop {
                     state["photo_id"] = Value::Null;
                     state["loaded"] = false.into();
                     state["open_failed"] = 18.into();
-                    state["message"] = "Could not read the AVIF file".into();
+                    state["message"] = "Previews built".into();
+                    state["open_error"] = "Could not read the AVIF file".into();
                 }
                 if request["cmd"] == "state" && loading {
                     state["photo_id"] = Value::Null;
@@ -283,6 +284,10 @@ fn tools_forward_guards_preserve_errors_and_return_preview_pixels() {
     assert_eq!(failed["result"]["isError"], true, "{failed}");
     assert_eq!(
         failed["result"]["structuredContent"]["code"], "open_failed",
+        "{failed}"
+    );
+    assert_eq!(
+        failed["result"]["structuredContent"]["error"], "Could not read the AVIF file",
         "{failed}"
     );
     assert!(started.elapsed() < Duration::from_secs(10));

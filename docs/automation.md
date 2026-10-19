@@ -88,8 +88,8 @@ does. They need no photo. `state.panels` reports each panel of the open module a
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.
 `open_failed` names the photo Develop could not open (a cut-short or
-unreadable file), with the reason in `message`; `open` and MCP `open_photo`
-stop waiting for it with that error.
+unreadable file), with the reason in `open_error`, which stays while `message`
+moves on; `open` and MCP `open_photo` stop waiting for it with that error.
 Prefer the explicit `export` command for unattended output.
 
 ## Guard the target

@@ -188,7 +188,7 @@ impl Editor {
         );
         ui.painter()
             .rect_filled(badge, 15., Color32::from_black_alpha(170));
-        if self.document.failed {
+        if self.document.failed.is_some() {
             ui.painter().text(
                 badge.center(),
                 egui::Align2::CENTER_CENTER,

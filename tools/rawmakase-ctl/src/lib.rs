@@ -470,7 +470,7 @@ fn opened(state: &Value, id: Option<i64>) -> Result<bool, String> {
     if failed.is_some() && (id.is_none() || failed == id) {
         return Err(format!(
             "the photo could not be opened: {}",
-            state["message"].as_str().unwrap_or_default()
+            state["open_error"].as_str().unwrap_or_default()
         ));
     }
     Ok(state["loaded"] == true && (id.is_none() || state["photo_id"].as_i64() == id))
@@ -670,7 +670,7 @@ mod tests {
             Ok(false)
         );
         let failed = json!({"loaded": false, "photo_id": null, "open_failed": 4,
-            "message": "Could not read the AVIF file"});
+            "message": "Previews built", "open_error": "Could not read the AVIF file"});
         assert_eq!(
             opened(&failed, Some(4)),
             Err("the photo could not be opened: Could not read the AVIF file".into())

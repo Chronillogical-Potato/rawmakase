@@ -312,7 +312,7 @@ impl Server {
                 }
                 if state["loaded"] == true && state["photo_id"].as_i64() == Some(p.id) { return result(reply); }
                 if state["open_failed"].as_i64() == Some(p.id) {
-                    return error("open_failed", state["message"].as_str().unwrap_or("The photo could not be opened"));
+                    return error("open_failed", state["open_error"].as_str().unwrap_or("The photo could not be opened"));
                 }
                 if Instant::now() >= deadline { return error("not_ready", "Opening started but decoding has not completed; inspect state before editing"); }
             }

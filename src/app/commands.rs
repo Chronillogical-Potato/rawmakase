@@ -383,6 +383,9 @@ impl Editor {
             revision: self.automation.revision,
             loaded: develop && self.document.full().is_some() && !self.load.is_running(),
             open_failed: self.open_failed(),
+            open_error: self
+                .open_failed()
+                .and_then(|_| self.document.failed.clone()),
             busy: self.activity.is_busy(),
             modal: self.command_modal(),
             black_and_white: develop && recipe.effects.monochrome,
@@ -430,9 +433,11 @@ impl Editor {
     }
     /// The photo Develop shows as one it could not open.
     pub(super) fn open_failed(&self) -> Option<crate::catalog::PhotoId> {
-        (self.module == Module::Develop && self.document.failed && !self.load.is_running())
-            .then_some(self.document.catalog_photo)
-            .flatten()
+        (self.module == Module::Develop
+            && self.document.failed.is_some()
+            && !self.load.is_running())
+        .then_some(self.document.catalog_photo)
+        .flatten()
     }
     pub(super) fn command_modal(&self) -> bool {
         self.preferences.open

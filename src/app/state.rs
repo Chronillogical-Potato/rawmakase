@@ -23,9 +23,8 @@ pub(super) struct Document {
     pub(super) pending_treatment: Option<PendingTreatment>,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<PhotoId>,
-    /// Opening the photo failed: no image is coming, and the status line says
-    /// why.
-    pub(super) failed: bool,
+    /// Why opening the photo failed: no image is coming.
+    pub(super) failed: Option<String>,
     pub(super) lightroom_notice: String,
     /// Lightroom's history for the open catalog photo, oldest first.
     pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
