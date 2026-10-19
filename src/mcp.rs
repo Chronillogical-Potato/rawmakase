@@ -290,7 +290,7 @@ impl Server {
         self.send(request, None).await
     }
     #[tool(
-        description = "Open a catalog photo in Develop and wait up to 30 seconds for decoding. Fails if another photo replaces it. Opening may save the previous edit."
+        description = "Open a catalog photo in Develop and wait up to 30 seconds for decoding. Fails if another photo replaces it or it can't be opened. Opening may save the previous edit."
     )]
     async fn open_photo(
         &self,
@@ -311,6 +311,9 @@ impl Server {
                     return error("stale_target", "Another document replaced the requested photo; read state");
                 }
                 if state["loaded"] == true && state["photo_id"].as_i64() == Some(p.id) { return result(reply); }
+                if state["open_failed"].as_i64() == Some(p.id) {
+                    return error("open_failed", state["open_error"].as_str().unwrap_or("The photo could not be opened"));
+                }
                 if Instant::now() >= deadline { return error("not_ready", "Opening started but decoding has not completed; inspect state before editing"); }
             }
         }).await
@@ -393,7 +396,7 @@ impl Server {
         self.send(request, Some(p.target)).await
     }
     #[tool(
-        description = "Build previews of the selected photos (the Library selection, or in Develop the Filmstrip's) in the background: Standard-Sized Previews, which Develop shows while each photo opens, or 1:1 previews, which let an offline photo be zoomed to 100% in the Loupe. Returns how many were queued and skipped (offline or not RAW); queueing is not completion: get_state's building_previews shows progress."
+        description = "Build previews of the selected photos (the Library selection, or in Develop the Filmstrip's) in the background: Standard-Sized Previews, which Develop shows while each photo opens, or 1:1 previews, which let an offline photo be zoomed to 100% in the Loupe. Returns how many were queued and skipped (offline, not editable, or an unedited JPEG, PNG, TIFF, WebP, AVIF or JPEG XL, which is its own preview); queueing is not completion: get_state's building_previews shows progress."
     )]
     async fn build_previews(&self, Parameters(p): Parameters<BuildPreviews>) -> CallToolResult {
         use rawmakase_protocol::request::PreviewKind;

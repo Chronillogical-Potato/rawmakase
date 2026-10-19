@@ -133,7 +133,8 @@ impl Editor {
         }
     }
     /// Before the first image arrives: the Library preview of the photo being
-    /// opened with a spinner, or a hint when nothing is open.
+    /// opened with a spinner, or without one if it could not be opened, or a
+    /// hint when nothing is open.
     fn loading_placeholder(&self, ui: &mut egui::Ui, area: Rect) {
         let palette = theme::palette(ui.ctx());
         // A photo counts as opening until its first render arrives, even after
@@ -187,6 +188,16 @@ impl Editor {
         );
         ui.painter()
             .rect_filled(badge, 15., Color32::from_black_alpha(170));
+        if self.document.failed.is_some() {
+            ui.painter().text(
+                badge.center(),
+                egui::Align2::CENTER_CENTER,
+                "Couldn't open this photo",
+                egui::FontId::proportional(12.),
+                palette.gray(225),
+            );
+            return;
+        }
         let spinner =
             Rect::from_center_size(badge.left_center() + Vec2::new(20., 0.), Vec2::splat(14.));
         super::widgets::paint_spinner(ui, spinner, None);

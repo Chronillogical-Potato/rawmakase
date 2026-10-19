@@ -284,6 +284,7 @@ impl Editor {
                     task: TaskKind::Load,
                     error,
                 } if id == self.load.id() => {
+                    self.document.failed = Some(error.clone());
                     self.status = error;
                     self.load.finish(id);
                     // No render is coming to take over from the stored preview.

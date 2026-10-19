@@ -520,10 +520,32 @@ impl Editor {
         self.preview.stand_in = None;
     }
     pub(super) fn navigate(&mut self, delta: isize) {
-        if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo)
-            && let Some(next) = l.navigate(id, delta as i32)
+        if let Some(id) = self.document.catalog_photo
+            && let Some(next) = self.develop_step(id, delta as i32)
         {
             self.develop_catalog_photo(next);
+        }
+    }
+    /// The photo `step` photos from `id` in the filmstrip that Develop can
+    /// open, passing over the ones it can't (offline, HDR, animated, CMYK):
+    /// stopping on them would leave every photo beyond out of reach of the
+    /// arrow keys. With none in that direction, the first one, so opening it
+    /// says why it can't be.
+    pub(super) fn develop_step(&self, id: PhotoId, step: i32) -> Option<PhotoId> {
+        let library = self.library.as_ref()?;
+        let first = library.navigate(id, step)?;
+        let mut at = first;
+        loop {
+            let photo = library.photo(at)?;
+            if at == id
+                || crate::app::library::develop_refusal(photo, photo.path.is_file()).is_none()
+            {
+                return Some(at);
+            }
+            match library.navigate(at, step) {
+                Some(next) if next != at => at = next,
+                _ => return Some(first),
+            }
         }
     }
 }

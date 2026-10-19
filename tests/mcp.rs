@@ -155,6 +155,8 @@ impl Desktop {
         let thread = std::thread::spawn(move || {
             let mut preview = None;
             let mut loading = false;
+            // Photo 18 can't be opened.
+            let mut failed = false;
             while !end.load(Ordering::Relaxed) {
                 let (mut stream, _) = match listener.accept() {
                     Ok(pair) => pair,
@@ -177,6 +179,13 @@ impl Desktop {
                 seen.lock().unwrap().push(request.clone());
                 let stale = request.get("target").is_some_and(|t| t["revision"] != 7);
                 let mut state = json!({"mode":"develop","photo_id":17,"generation":3,"revision":7,"loaded":true,"values":{"exposure":0.5}});
+                if request["cmd"] == "state" && failed {
+                    state["photo_id"] = Value::Null;
+                    state["loaded"] = false.into();
+                    state["open_failed"] = 18.into();
+                    state["message"] = "Previews built".into();
+                    state["open_error"] = "Could not read the AVIF file".into();
+                }
                 if request["cmd"] == "state" && loading {
                     state["photo_id"] = Value::Null;
                     state["loaded"] = false.into();
@@ -199,6 +208,10 @@ impl Desktop {
                         "job" => {
                             reply["result"] =
                                 json!({"job_id":1,"status":"completed","revision":7,"path":preview})
+                        }
+                        "open" if request["id"] == 18 => {
+                            failed = true;
+                            reply["result"] = json!({"opened":{"id":18}});
                         }
                         "open" => {
                             loading = true;
@@ -264,6 +277,20 @@ fn tools_forward_guards_preserve_errors_and_return_preview_pixels() {
         !Path::new(path).exists(),
         "preview temporary files must be cleaned up"
     );
+    // A photo that can't be opened fails at once, with the reason, rather than
+    // after 30 s of waiting for it to load.
+    let started = std::time::Instant::now();
+    let failed = client.tool("open_photo", json!({"id":18}));
+    assert_eq!(failed["result"]["isError"], true, "{failed}");
+    assert_eq!(
+        failed["result"]["structuredContent"]["code"], "open_failed",
+        "{failed}"
+    );
+    assert_eq!(
+        failed["result"]["structuredContent"]["error"], "Could not read the AVIF file",
+        "{failed}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
     let requests = desktop.requests.lock().unwrap();
     let curve = requests.iter().find(|r| r["cmd"] == "curve").unwrap();
     assert_eq!(curve["target"]["revision"], 7);

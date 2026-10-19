@@ -6941,3 +6941,53 @@ fn edit_on_the_rail_folds_the_adjustments_and_brings_them_back() {
     assert!(e.panel_shown(WorkspacePanel::Right));
     assert!(!e.panel_shown(WorkspacePanel::Adjustments));
 }
+
+/// The texts one frame of `editor` paints.
+fn painted_texts(editor: &mut Editor, ctx: &egui::Context) -> Vec<String> {
+    fn collect(shape: &egui::Shape, texts: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => texts.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, texts)),
+            _ => {}
+        }
+    }
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| editor.draw(ui));
+    output.textures_delta.clear();
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+/// A photo whose opening failed is not shown as still loading: no image is
+/// coming, and the status line says why.
+#[test]
+fn a_photo_that_failed_to_open_is_not_shown_loading() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+    editor.onboarding.visible = false;
+    editor.module = Module::Develop;
+    editor.document.reset(Some(PhotoId(1)));
+    let (load_id, _) = editor.load.start();
+    assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
+    editor
+        .tx
+        .send(Event::Failed {
+            id: load_id,
+            task: worker::TaskKind::Load,
+            error: "Could not read the WebP file: An expected chunk was missing".into(),
+        })
+        .unwrap();
+    editor.events(&ctx);
+    let texts = painted_texts(&mut editor, &ctx);
+    assert!(!texts.contains(&"Loading photo…".to_string()), "{texts:?}");
+    assert!(
+        texts.contains(&"Couldn't open this photo".to_string()),
+        "{texts:?}"
+    );
+    // Opening it again shows it loading again.
+    editor.document.reset(Some(PhotoId(1)));
+    editor.load.start();
+    assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
+}

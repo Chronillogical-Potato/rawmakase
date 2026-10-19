@@ -106,6 +106,77 @@ fn an_unsupported_jpeg_says_why_in_develop() -> Result<()> {
     Ok(())
 }
 
+/// A folder of a.jpg, b.jpg (CMYK, which Develop can't edit) and c.jpg, in a
+/// catalog loaded into an editor showing the Library; and the three photos.
+fn editor_with_a_cmyk_jpeg_between(
+    directory: &std::path::Path,
+) -> Result<(crate::app::Editor, [PhotoId; 3])> {
+    use image::ImageEncoder;
+    let folder = directory.join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(folder.join("b.jpg"))?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    image::RgbImage::new(8, 8).save(folder.join("c.jpg"))?;
+    let path = directory.join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let id = |name: &str| {
+        library
+            .session
+            .photos
+            .iter()
+            .find(|p| p.filename == name)
+            .map(|p| p.id)
+            .unwrap()
+    };
+    let ids = [id("a.jpg"), id("b.jpg"), id("c.jpg")];
+    assert_eq!(library.navigate(ids[0], 1), Some(ids[1]));
+    assert_eq!(library.navigate(ids[1], 1), Some(ids[2]));
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.module = Module::Library;
+    Ok((editor, ids))
+}
+
+/// Stepping through Develop passes over a photo it can't edit, which would
+/// otherwise leave every photo beyond out of reach of the arrow keys.
+#[test]
+fn develop_steps_past_a_photo_it_cannot_edit() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (mut editor, [a, _, c]) = editor_with_a_cmyk_jpeg_between(directory.path())?;
+    editor.develop_catalog_photo(a);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    editor.navigate(1);
+    assert!(editor.module == Module::Develop);
+    assert_eq!(editor.document.catalog_photo, Some(c));
+    assert!(editor.not_editable.is_none());
+    editor.navigate(-1);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    assert!(editor.not_editable.is_none());
+    Ok(())
+}
+
+/// With nothing Develop can edit in that direction, the next photo's refusal
+/// is said, as for a click on it, and the open photo stays.
+#[test]
+fn develop_says_why_when_only_photos_it_cannot_edit_follow() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (mut editor, [a, b, c]) = editor_with_a_cmyk_jpeg_between(directory.path())?;
+    std::fs::remove_file(directory.path().join("photos/c.jpg"))?;
+    editor.develop_catalog_photo(a);
+    editor.navigate(1);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    let (title, reason) = editor.not_editable.clone().expect("the dialog");
+    assert_eq!(title, "b.jpg can't be opened in Develop");
+    assert_eq!(reason, "RAWmakase can't edit CMYK images");
+    let _ = (b, c);
+    Ok(())
+}
+
 /// The Loupe shows an edited JPEG through Develop's pipeline, with its edit; an
 /// unedited one keeps its own, quicker preview, which looks the same.
 #[test]
