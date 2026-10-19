@@ -359,49 +359,22 @@ where
 fn path() -> PathBuf {
     crate::storage::data_dir().join("export.json")
 }
-#[cfg(not(windows))]
+/// The desktop's own Desktop and Pictures folders: on Linux those named in
+/// user-dirs.dirs (in the desktop's language, or moved by the user), on
+/// Windows those the shell reports (OneDrive backup moves them), and on macOS
+/// those in the home folder. Without one, the folder of that name at home.
 fn desktop() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Desktop")
+    user_folder(directories::UserDirs::desktop_dir, "Desktop")
 }
-#[cfg(not(windows))]
 fn pictures() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Pictures")
+    user_folder(directories::UserDirs::picture_dir, "Pictures")
 }
-/// Windows can move Desktop and Pictures (OneDrive backup does), so they are
-/// asked for rather than assumed under the profile folder.
-#[cfg(windows)]
-fn desktop() -> PathBuf {
-    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Desktop, "Desktop")
-}
-#[cfg(windows)]
-fn pictures() -> PathBuf {
-    known_folder(
-        &windows_sys::Win32::UI::Shell::FOLDERID_Pictures,
-        "Pictures",
-    )
-}
-#[cfg(windows)]
-fn known_folder(id: &windows_sys::core::GUID, fallback: &str) -> PathBuf {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::{System::Com::CoTaskMemFree, UI::Shell::SHGetKnownFolderPath};
-    let mut raw: windows_sys::core::PWSTR = std::ptr::null_mut();
-    // SAFETY: on success `raw` is a NUL-terminated string the shell allocated;
-    // it is read up to the NUL and then freed, as the API requires either way.
-    let found = unsafe {
-        let found = (SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut raw) >= 0
-            && !raw.is_null())
-        .then(|| {
-            let len = (0..).take_while(|&i| *raw.add(i) != 0).count();
-            PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(
-                raw, len,
-            )))
-        });
-        CoTaskMemFree(raw as *const _);
-        found
-    };
-    found.unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default()).join(fallback)
-    })
+fn user_folder(folder: fn(&directories::UserDirs) -> Option<&Path>, name: &str) -> PathBuf {
+    let dirs = directories::UserDirs::new();
+    match &dirs {
+        Some(dirs) => folder(dirs).map_or_else(|| dirs.home_dir().join(name), Path::to_path_buf),
+        None => PathBuf::from(name),
+    }
 }
 
 impl ExportSettings {
@@ -597,6 +570,57 @@ pub fn unique(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The Desktop and Pictures destinations, printed for
+    /// [`desktop_and_pictures_are_the_xdg_user_folders`], which runs this
+    /// test in its own process with its own home and configuration.
+    #[test]
+    #[ignore = "run by desktop_and_pictures_are_the_xdg_user_folders"]
+    fn print_desktop_and_pictures() {
+        println!("desktop={}", desktop().display());
+        println!("pictures={}", pictures().display());
+    }
+    /// A desktop in another language, or one the user moved, names its
+    /// folders in user-dirs.dirs; without that file they are under home.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_and_pictures_are_the_xdg_user_folders() -> anyhow::Result<()> {
+        let home = tempfile::tempdir()?;
+        let config = home.path().join("config");
+        let folders = |config: &Path| -> anyhow::Result<(String, String)> {
+            let out = std::process::Command::new(std::env::current_exe()?)
+                .args([
+                    "--exact",
+                    "export_settings::tests::print_desktop_and_pictures",
+                ])
+                .args(["--ignored", "--nocapture", "--test-threads=1"])
+                .env("HOME", home.path())
+                .env("XDG_CONFIG_HOME", config)
+                .output()?;
+            let out = String::from_utf8(out.stdout)?;
+            let value = |key: &str| {
+                out.lines()
+                    .find_map(|line| line.split_once(key).map(|(_, value)| value))
+                    .map(str::to_owned)
+                    .unwrap_or_default()
+            };
+            Ok((value("desktop="), value("pictures=")))
+        };
+        let under_home = |name: &str| home.path().join(name).display().to_string();
+        assert_eq!(
+            folders(&config)?,
+            (under_home("Desktop"), under_home("Pictures"))
+        );
+        std::fs::create_dir_all(&config)?;
+        std::fs::write(
+            config.join("user-dirs.dirs"),
+            "XDG_DESKTOP_DIR=\"$HOME/Pulpit\"\nXDG_PICTURES_DIR=\"/srv/photos\"\n",
+        )?;
+        assert_eq!(
+            folders(&config)?,
+            (under_home("Pulpit"), "/srv/photos".into())
+        );
+        Ok(())
+    }
     #[test]
     fn target_follows_destination_subfolder_and_naming() {
         let source = Path::new("/photos/2026/DSC0001.ARW");

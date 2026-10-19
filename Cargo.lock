@@ -3447,6 +3447,7 @@ name = "rawmakase-interop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "directories",
  "rawmakase-model",
  "rayon",
  "roxmltree 0.21.1",
@@ -3454,7 +3455,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "unicode-normalization",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
