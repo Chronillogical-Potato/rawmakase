@@ -38,6 +38,10 @@ class ConfigurationTests(unittest.TestCase):
         for name, target in linux.items():
             with self.subTest(name):
                 self.assertIn("appimage", target["formats"])
+                arch = {"amd64": "x86_64", "arm64": "aarch64"}[target["arch"]]
+                # Each architecture's updates find only that architecture's file.
+                self.assertEqual(target["appimage"]["update_information"],
+                                 f"gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-{arch}.AppImage.zsync")
                 licences = [item for item in target["nfpm"]["contents"]
                             if item["src"] == "packaging/linux/AppImage-runtime-LICENSE"]
                 # nFPM skips contents for another packager, so the DEB and RPM
@@ -73,14 +77,20 @@ class VerifyScriptTests(unittest.TestCase):
             path.chmod(0o755)
         (self.contents / "AppRun").symlink_to("usr/bin/rawmakase")
         self.image = self.root / "rawmakase-1.2.3-x86_64.AppImage"
+        self.update = "gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-x86_64.AppImage.zsync"
         self.image.write_text(
             "#!/bin/sh\n"
             'if [ "$1" = --appimage-extract ]; then cp -a "$CONTENTS" squashfs-root; exit; fi\n'
+            'if [ "$1" = --appimage-updateinformation ]; then echo "$UPDATE"; exit; fi\n'
             'exec "$CONTENTS/AppRun" "$@"\n')
 
     def verify(self, *arguments, image=None):
-        environment = dict(os.environ, CONTENTS=str(self.contents))
-        return subprocess.run(["bash", str(VERIFY), str(image or self.image), *arguments],
+        image = image or self.image
+        zsync = image.with_name(image.name + ".zsync")
+        if not zsync.exists():
+            zsync.write_text("zsync: 0.6.2\n")
+        environment = dict(os.environ, CONTENTS=str(self.contents), UPDATE=self.update)
+        return subprocess.run(["bash", str(VERIFY), str(image), *arguments],
                               env=environment, capture_output=True, text=True)
 
     def test_complete_appimage_passes_and_runs(self):
@@ -93,6 +103,16 @@ class VerifyScriptTests(unittest.TestCase):
         result = self.verify("1.2.3")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("AppImage-runtime-LICENSE", result.stderr)
+
+    def test_update_information_must_name_this_architecture(self):
+        self.update = self.update.replace("x86_64", "aarch64")
+        self.assertNotEqual(self.verify("1.2.3").returncode, 0)
+
+    def test_zsync_file_is_required(self):
+        self.image.with_name(self.image.name + ".zsync").write_text("")
+        result = self.verify("1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(".zsync", result.stderr)
 
     def test_apprun_must_be_the_launcher(self):
         (self.contents / "AppRun").unlink()

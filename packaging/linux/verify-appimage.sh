@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Check an AppImage native-packages built, on its own architecture: its name,
-# layout and licences, and with --run, that it starts and reports VERSION.
+# layout, licences and update information, and with --run, that it starts
+# and reports VERSION.
 set -euo pipefail
 usage='usage: verify-appimage.sh APPIMAGE VERSION [--run]'
 image=$(readlink -f -- "${1:?$usage}")
@@ -9,6 +10,7 @@ run="${3:-}"
 # The documented download names; never rename them.
 name=$(basename -- "$image")
 [[ "$name" =~ ^rawmakase-${version//./\\.}-(x86_64|aarch64)\.AppImage$ ]] || { echo "Unexpected AppImage name: $name" >&2; exit 1; }
+arch=${BASH_REMATCH[1]}
 chmod +x "$image"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -23,6 +25,10 @@ for file in rawmakase.desktop rawmakase.svg usr/bin/rawmakase usr/lib/rawmakase/
 done
 test "$(sha256sum < "$root/rawmakase.desktop")" = "$(sha256sum < "$root/usr/share/applications/rawmakase.desktop")"
 test -x "$root/usr/lib/rawmakase/rawmakase"
+# Where AppImageUpdate looks for the next release; native-packages has
+# already checked that the .zsync file describes this AppImage.
+test "$("$image" --appimage-updateinformation)" = "gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-$arch.AppImage.zsync"
+test -s "$image.zsync" || { echo "Missing $name.zsync" >&2; exit 1; }
 if [[ "$run" = --run ]]; then
   expected="rawmakase $version"
   # Without FUSE: once extracted by the runtime, and once as extracted here.

@@ -103,6 +103,11 @@ targets:
     arch: amd64
     libc: glibc
     formats: [deb, rpm, appimage]
+    # AppImageUpdate and similar tools fetch the newest stable release's
+    # .zsync file, published beside the AppImage. The app itself only points
+    # AppImage users at the release page.
+    appimage:
+      update_information: gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-x86_64.AppImage.zsync
     input:
       local: dist/rawmakase-@VERSION@-x86_64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-x86_64-linux.tar.gz
@@ -176,6 +181,11 @@ targets:
     arch: arm64
     libc: glibc
     formats: [deb, rpm, appimage]
+    # AppImageUpdate and similar tools fetch the newest stable release's
+    # .zsync file, published beside the AppImage. The app itself only points
+    # AppImage users at the release page.
+    appimage:
+      update_information: gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-aarch64.AppImage.zsync
     input:
       local: dist/rawmakase-@VERSION@-aarch64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-aarch64-linux.tar.gz

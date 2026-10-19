@@ -484,7 +484,7 @@ jobs:
       - name: Add the DEB, RPM and AppImage packages and the Homebrew cask
         run: |
           cp native-packages/packages/*/deb/*.deb native-packages/packages/*/rpm/*.rpm \
-            native-packages/packages/*/appimage/*.AppImage \
+            native-packages/packages/*/appimage/*.AppImage native-packages/packages/*/appimage/*.AppImage.zsync \
             native-packages/recipes/homebrew/rawmakase.rb dist/
       - name: Final checksums
         working-directory: dist
