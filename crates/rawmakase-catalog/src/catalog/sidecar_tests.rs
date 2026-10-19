@@ -337,7 +337,14 @@ fn formats_fixture(name: &str, dir: &Path) -> Result<PathBuf> {
 #[test]
 fn webp_avif_and_jxl_files_own_xmp_is_read() -> Result<()> {
     let dir = tempfile::tempdir()?;
-    for name in ["metadata.webp", "metadata.avif", "metadata.jxl"] {
+    // metadata-brob.jxl has its "xml " box brotli-compressed, as cjxl writes
+    // by default.
+    for name in [
+        "metadata.webp",
+        "metadata.avif",
+        "metadata.jxl",
+        "metadata-brob.jxl",
+    ] {
         let file = formats_fixture(name, dir.path())?;
         let (read, report) = read_file(&file);
         assert!(report.unreadable.is_empty(), "{name}: {report:?}");

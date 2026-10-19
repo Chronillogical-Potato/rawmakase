@@ -74,6 +74,8 @@ def main(out: Path):
         jpeg = tmp / "meta.jpg"
         corners().save(jpeg, quality=95, exif=exif(), xmp=XMP)
         run("cjxl", jpeg, out / "metadata.jxl", "--compress_boxes=0")
+        # cjxl's default: the Exif and XMP boxes brotli-compressed ("brob").
+        run("cjxl", jpeg, out / "metadata-brob.jxl", "--compress_boxes=1")
         rotated_jpeg = tmp / "rotated.jpg"
         corners().save(rotated_jpeg, quality=95, exif=exif(orientation=6))
         run("cjxl", rotated_jpeg, out / "exif-rotated.jxl", "--compress_boxes=0")

@@ -10,7 +10,11 @@ use crate::{
         kind::{ASCII, IFD, LONG, RATIONAL, SHORT, SRATIONAL},
     },
 };
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    fs::File,
+    io::{Read, Seek},
+    path::Path,
+};
 use tag::*;
 
 /// The tags RAWmakase reads or writes, by their EXIF names: of the main
@@ -369,16 +373,30 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
         let (at, len) = exif_in_heif(&mut File::open(path).ok()?)?;
         (at, Some(len))
     } else if head.starts_with(&crate::isobmff::JXL_CONTAINER) {
-        let (at, len) = exif_in_jxl(&mut File::open(path).ok()?)?;
-        (at, Some(len))
+        // Its Exif box may be brotli-compressed ("brob"), so the TIFF is read
+        // from the box's body in memory.
+        let body = crate::isobmff::jxl_metadata(&mut f, *b"Exif")?;
+        let len = body.len() as u64;
+        let mut body = std::io::Cursor::new(body);
+        let (at, len) = after_offset(&mut body, 0, len)?;
+        return camera_exif(Tiff::open_within(body, at, len)?, keep_main);
     } else {
         (0, None)
     };
     let f = File::open(path).ok()?;
-    let mut t = match len {
+    let t = match len {
         Some(len) => Tiff::open_within(f, base, len)?,
         None => Tiff::open(f, base)?,
     };
+    camera_exif(t, keep_main)
+}
+
+/// The main, EXIF and GPS directories' fields of `t`, keeping the main
+/// directory's tags `keep_main` accepts.
+fn camera_exif<R: Read + Seek>(
+    mut t: Tiff<R>,
+    keep_main: impl Fn(u16) -> bool,
+) -> Option<CameraExif> {
     let main = t.ifd(t.first)?;
     let mut out = CameraExif {
         main: fields(&mut t, &main, keep_main),
@@ -437,22 +455,11 @@ fn exif_in_heif(f: &mut File) -> Option<(u64, u64)> {
     after_offset(f, start, len)
 }
 
-/// Offset of the TIFF header in a JPEG XL container's Exif box (also with a
-/// 4-byte offset first), and the length of the TIFF the box holds.
-/// Brotli-compressed ("brob") boxes are not read.
-fn exif_in_jxl(f: &mut File) -> Option<(u64, u64)> {
-    let len = crate::isobmff::file_len(f)?;
-    let exif = crate::isobmff::boxes(f, 0, len)
-        .into_iter()
-        .find(|b| &b.kind == b"Exif")?;
-    after_offset(f, exif.start, exif.size)
-}
-
 /// The TIFF header of the `len` bytes at `start`, after the big-endian u32
 /// offset they begin with, and the bytes left to the TIFF from there; `None`
 /// when the offset leaves them.
-fn after_offset(f: &mut File, start: u64, len: u64) -> Option<(u64, u64)> {
-    use std::io::{Seek, SeekFrom};
+fn after_offset<R: Read + Seek>(f: &mut R, start: u64, len: u64) -> Option<(u64, u64)> {
+    use std::io::SeekFrom;
     if len < 4 {
         return None;
     }
@@ -469,8 +476,8 @@ fn after_offset(f: &mut File, start: u64, len: u64) -> Option<(u64, u64)> {
 /// which the TIFF may not leave; `None` when `at` is not before `end` by at
 /// least a TIFF header. The "Exif" header is looked for only if a TIFF header
 /// still fits after it.
-fn tiff_after_header(f: &mut File, at: u64, end: u64) -> Option<(u64, u64)> {
-    use std::io::{Seek, SeekFrom};
+fn tiff_after_header<R: Read + Seek>(f: &mut R, at: u64, end: u64) -> Option<(u64, u64)> {
+    use std::io::SeekFrom;
     if at >= end {
         return None;
     }
@@ -493,7 +500,7 @@ fn tiff_after_header(f: &mut File, at: u64, end: u64) -> Option<(u64, u64)> {
 /// JPEG, and the length of the TIFF the segment holds. Only the first `length`
 /// bytes, at most 64 KB, are read.
 fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<(u64, u64)> {
-    use std::io::{Cursor, Seek, SeekFrom};
+    use std::io::{Cursor, SeekFrom};
     f.seek(SeekFrom::Start(jpeg)).ok()?;
     let mut head = vec![0u8; length.min(1 << 16)];
     f.read_exact(&mut head).ok()?;
@@ -514,7 +521,7 @@ fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<(u64, u64)> {
 /// TIFF the chunk holds, found by its chunks' headers alone, before or after
 /// the image data. A chunk said to run past the file's end is not read.
 fn exif_in_png(f: &mut File) -> Option<(u64, u64)> {
-    use std::io::{Seek, SeekFrom};
+    use std::io::SeekFrom;
     let size = f.metadata().ok()?.len();
     let mut at = 8u64;
     loop {
@@ -543,8 +550,8 @@ fn exif_in_png(f: &mut File) -> Option<(u64, u64)> {
     }
 }
 
-fn fields(
-    t: &mut Tiff,
+fn fields<R: Read + Seek>(
+    t: &mut Tiff<R>,
     ifd: &std::collections::BTreeMap<u16, Entry>,
     keep: impl Fn(u16) -> bool,
 ) -> Vec<Field> {
@@ -737,7 +744,14 @@ mod container_tests {
     }
     #[test]
     fn webp_avif_and_jxl_exif_is_read() {
-        for name in ["metadata.webp", "metadata.avif", "metadata.jxl"] {
+        // metadata-brob.jxl has its Exif box brotli-compressed, as cjxl
+        // writes by default.
+        for name in [
+            "metadata.webp",
+            "metadata.avif",
+            "metadata.jxl",
+            "metadata-brob.jxl",
+        ] {
             let path = fixture(name);
             assert_eq!(
                 super::capture_time(&path).as_deref(),

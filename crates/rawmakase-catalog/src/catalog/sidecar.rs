@@ -1,8 +1,7 @@
 //! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG,
-//! TIFF, PNG, WebP, AVIF and JPEG XL files (a JPEG XL's compressed "brob"
-//! boxes are not read): when a folder is added, for its new photos, and on Read
-//! Metadata from Files, for photos already in the catalog. Never at render
-//! time; the catalog stays the source of truth.
+//! TIFF, PNG, WebP, AVIF and JPEG XL files: when a folder is added, for its
+//! new photos, and on Read Metadata from Files, for photos already in the
+//! catalog. Never at render time; the catalog stays the source of truth.
 use super::db::{LightroomWrite, Write, sql, sqlite_sql};
 use super::value::{TextOrBlob, row};
 use super::{Catalog, PhotoId};
@@ -83,7 +82,7 @@ pub fn sidecars(file: &Path) -> Vec<PathBuf> {
 
 /// The XMP inside a JPEG (its standard APP1 packet), TIFF (tag 700), PNG (its
 /// XMP text chunk), WebP ("XMP " chunk), AVIF (its XMP item) or JPEG XL ("xml "
-/// box; compressed "brob" boxes are not read).
+/// box, or "brob" box compressing one).
 fn embedded(file: &Path) -> Result<Option<String>> {
     match RasterFormat::of(file) {
         Some(RasterFormat::Jpeg) => {
@@ -153,20 +152,11 @@ fn in_heif(file: &Path) -> Result<Option<String>> {
     }
 }
 
-/// The XMP in a JPEG XL container's "xml " box; brotli-compressed ("brob")
-/// boxes are not read.
+/// The XMP in a JPEG XL container's "xml " box, brotli-compressed ("brob")
+/// or not.
 fn in_jxl(file: &Path) -> Result<Option<String>> {
     let mut f = std::fs::File::open(file)?;
-    let Some(len) = isobmff::file_len(&mut f) else {
-        return Ok(None);
-    };
-    match isobmff::boxes(&mut f, 0, len)
-        .into_iter()
-        .find(|b| &b.kind == b"xml ")
-    {
-        Some(b) => text(isobmff::read_body(&mut f, &b)),
-        None => Ok(None),
-    }
+    text(isobmff::jxl_metadata(&mut f, *b"xml "))
 }
 
 /// Embedded XMP bytes as text; malformed containers (`None`) have none.

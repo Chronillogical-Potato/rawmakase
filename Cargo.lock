@@ -3765,6 +3765,7 @@ name = "rawmakase-interop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "brotli-decompressor",
  "directories",
  "rawmakase-model",
  "rayon",

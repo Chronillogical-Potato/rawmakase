@@ -77,6 +77,35 @@ pub fn read_body<R: Read + Seek>(r: &mut R, b: &BoxHeader) -> Option<Vec<u8>> {
     Some(body)
 }
 
+/// The body of a JPEG XL container's first `kind` box ("Exif", "xml "), or of
+/// a "brob" box holding that kind brotli-compressed, as cjxl writes them by
+/// default; `None` when there is neither, or the body, compressed or not, is
+/// over 16 MiB.
+pub fn jxl_metadata<R: Read + Seek>(r: &mut R, kind: [u8; 4]) -> Option<Vec<u8>> {
+    let len = file_len(r)?;
+    for b in boxes(r, 0, len) {
+        if b.kind == kind {
+            return read_body(r, &b);
+        }
+        if &b.kind != b"brob" || b.size < 4 || b.size > MAX_BODY {
+            continue;
+        }
+        r.seek(SeekFrom::Start(b.start)).ok()?;
+        let mut inner = [0u8; 4];
+        r.read_exact(&mut inner).ok()?;
+        if inner == kind {
+            let compressed = (&mut *r).take(b.size - 4);
+            let mut body = Vec::new();
+            brotli_decompressor::Decompressor::new(compressed, 4096)
+                .take(MAX_BODY + 1)
+                .read_to_end(&mut body)
+                .ok()?;
+            return (body.len() as u64 <= MAX_BODY).then_some(body);
+        }
+    }
+    None
+}
+
 /// An item of a HEIF file, e.g. the AV1 image ("av01"), a grid ("grid"),
 /// its EXIF ("Exif") or XMP ("mime", content type "application/rdf+xml").
 #[derive(Clone, Debug, PartialEq)]
@@ -521,6 +550,43 @@ mod tests {
         b.extend(kind);
         b.extend(body);
         b
+    }
+
+    #[test]
+    fn a_jpeg_xl_metadata_box_is_read_plain_or_brotli_compressed() {
+        let mut plain = fixture("metadata.jxl");
+        let mut compressed = fixture("metadata-brob.jxl");
+        for kind in [*b"Exif", *b"xml "] {
+            let expected = jxl_metadata(&mut plain, kind).unwrap();
+            assert_eq!(jxl_metadata(&mut compressed, kind), Some(expected));
+        }
+        assert_eq!(jxl_metadata(&mut compressed, *b"jumb"), None);
+    }
+
+    #[test]
+    fn a_compressed_jpeg_xl_box_unpacking_to_over_16_mib_is_not_read() {
+        // Brotli streams of 16 MiB and of 16 MiB + 1 zero bytes.
+        let at_limit = [
+            0xcf, 0xff, 0xff, 0x7f, 0xf8, 0x27, 0x00, 0xe2, 0xb1, 0x40, 0x20, 0xf7, 0xfe, 0x7f,
+        ];
+        let over = [
+            0xcf, 0xff, 0xff, 0x7f, 0xf8, 0x27, 0x00, 0xe2, 0xb1, 0x40, 0x20, 0xf7, 0xfe, 0x1f,
+            0x00, 0x00, 0x01, 0x00, 0x03,
+        ];
+        let file = |stream: &[u8]| {
+            let body = [b"xml ".as_slice(), stream].concat();
+            [JXL_CONTAINER.to_vec(), bx(b"brob", &body)].concat()
+        };
+        let read = jxl_metadata(&mut Cursor::new(file(&at_limit)), *b"xml ").unwrap();
+        assert_eq!(read.len(), 16 << 20);
+        assert_eq!(jxl_metadata(&mut Cursor::new(file(&over)), *b"xml "), None);
+    }
+
+    #[test]
+    fn a_corrupt_compressed_jpeg_xl_box_is_not_read() {
+        let body = [b"Exif".as_slice(), &[0xff; 32]].concat();
+        let file = [JXL_CONTAINER.to_vec(), bx(b"brob", &body)].concat();
+        assert_eq!(jxl_metadata(&mut Cursor::new(file), *b"Exif"), None);
     }
 
     #[test]
