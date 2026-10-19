@@ -1408,17 +1408,13 @@ impl Editor {
             .frame(status_frame(ui, PHOTO_MARGIN as i8))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let display = if self.view.monitor.is_some() {
-                        if cfg!(target_os = "macos") {
-                            "Display: custom ICC (manual monitor conversion)"
-                        } else {
-                            "Display: custom ICC (disable compositor ICC conversion)"
-                        }
-                    } else if cfg!(target_os = "macos") {
-                        "Display: sRGB (managed by macOS)"
-                    } else {
-                        "Display: sRGB (compositor may manage the monitor)"
-                    };
+                    let display = format!(
+                        "Display: {}",
+                        super::monitor::describe(
+                            &self.view.monitor,
+                            self.view.system_display.display()
+                        )
+                    );
                     status_text(
                         ui,
                         self.document
@@ -1427,7 +1423,7 @@ impl Editor {
                             .message()
                             .unwrap_or(&self.status),
                         self.message_detail(&self.status),
-                        Some(display),
+                        Some(&display),
                     );
                     if !self.preview.status.is_empty() {
                         ui.separator();

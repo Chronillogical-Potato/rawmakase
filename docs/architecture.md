@@ -66,7 +66,7 @@ files should preserve.
 | `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), the background reads that fill in capture times and photo info for photos added from folders, and the throttled checksum reader, whose results a structural generation guards. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs`, `checksums.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
-| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager and the browser | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs` |
+| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager, the browser, and the display's color management (macOS surface tagging, the Windows display profile) | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs`, `display.rs` |
 | `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 
@@ -100,11 +100,16 @@ opening find it, into the reason the loader reports. Whether the Library shows a
 its defaults reproduce the file. Preview builds and stored previews follow the
 same rule from the photo's edit record.
 
-`app::display` installs a paint callback for the macOS surface color declaration;
-`platform::display` owns the AppKit/Metal layer access. The default sRGB mode lets
-the compositor match the current display. Manual monitor conversion keeps its
-existing device-RGB output and bypasses compositor conversion. Neither mode
-changes the renderer's output color space or export profiles.
+`app::monitor` owns the Monitor profile choice (System, sRGB or a chosen ICC
+profile) and resolves it, with what `platform::display` reports about the
+window's display, into the profile each render job captures. `app::display`
+installs a paint callback for the macOS surface color declaration;
+`platform::display` owns the AppKit/Metal layer access and the Windows display
+profile and advanced-color queries. Following the system lets macOS's
+compositor match the display, and on Windows converts to the display's assigned
+profile unless Windows manages color itself. sRGB and a chosen profile output
+device RGB and bypass compositor conversion. No mode changes the renderer's
+output color space or export profiles.
 
 Each load/render task owns its generation, cancellation token and lifecycle.
 The single-slot mailbox replaces pending work. The app discards obsolete results,

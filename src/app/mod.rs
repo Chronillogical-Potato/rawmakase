@@ -267,7 +267,10 @@ impl Editor {
                 ..Default::default()
             },
             view: ViewState {
-                monitor: session.monitor,
+                monitor: monitor::MonitorProfile::from_session(
+                    session.monitor,
+                    session.monitor_srgb,
+                ),
                 crop_guides: crop_tool::CropGuides::from_session(&session.crop_guides),
                 ..Default::default()
             },
@@ -372,7 +375,8 @@ impl Editor {
                 path,
                 &crate::app::session::Session {
                     last_path: self.session_path(),
-                    monitor: self.view.monitor.clone(),
+                    monitor: self.view.monitor.session_path(),
+                    monitor_srgb: self.view.monitor.session_srgb(),
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
                     pinned: self.pinned.clone(),
@@ -503,7 +507,16 @@ impl eframe::App for Editor {
         #[cfg(windows)]
         crate::platform::taskbar_icon(frame);
         self.draw(ui);
-        display::paint(ui, frame, self.view.monitor.is_some());
+        if self.view.monitor.follows_system() {
+            if self.view.system_display.update(frame) {
+                self.schedule();
+            }
+            // Recheck for a newly assigned profile while nothing else repaints.
+            if cfg!(windows) {
+                ui.ctx().request_repaint_after(monitor::RECHECK);
+            }
+        }
+        display::paint(ui, frame, self.view.monitor.device_rgb());
     }
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         workspace::clipboard_shortcut_keys(ctx, raw_input);
@@ -808,6 +821,7 @@ mod history_panel;
 mod inspector;
 pub(crate) mod library;
 mod mask_tool;
+mod monitor;
 mod navigator;
 mod onboarding;
 mod overlay;

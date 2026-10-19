@@ -360,7 +360,7 @@ impl Editor {
             max_edge: super::workflow::render_edges(&zoom, viewport, &geometry).max_edge,
             image,
             recipe,
-            monitor: self.view.monitor.clone(),
+            monitor: self.view.display_profile(),
             clipping: self.view.clipping.overlay(),
         };
         if self.preview.before.submitted.as_ref() == Some(&job) {

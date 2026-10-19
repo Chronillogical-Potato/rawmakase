@@ -445,7 +445,7 @@ impl Editor {
                 image,
                 recipe,
                 region,
-                monitor: self.view.monitor.clone(),
+                monitor: self.view.display_profile(),
                 clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail,

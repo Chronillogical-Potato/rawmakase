@@ -58,8 +58,19 @@ Clipping is judged on the rendered encoded-sRGB values (0–1), before any monit
 
 Develop's RGB readout under the histogram (and the White Balance loupe) reads these rendered values, never the screen, and shows them as Lightroom does in Melissa RGB: linear sRGB to ProPhoto primaries (the D65-to-D50 matrix the camera profiles use), then the sRGB tone curve.
 
-On macOS, the default display mode explicitly tags the Metal surface as sRGB so
+Preferences > Monitor profile follows the system by default, as Lightroom does.
+On macOS that explicitly tags the Metal surface as sRGB so
 Core Animation matches it to the current monitor, including wide-gamut displays.
+On Windows it converts to the ICC profile Windows assigns to the display the
+window is on (`GetICMProfileW` on that display, checked again when the window
+reaches another display and every two seconds), unless the display is in
+advanced color (automatic color management or HDR), where Windows converts sRGB
+itself. Without that conversion, Windows shows sRGB pixels as device RGB, which
+looks oversaturated on a wide-gamut display (issue 550). Linux has no system
+profile yet and shows sRGB as it is. "Use sRGB" shows sRGB pixels as device RGB
+on every platform, for a display set to sRGB; it is saved as `monitor_srgb`
+beside no profile, which versions before it read as their own "Use sRGB". A
+session from before it with no profile follows the system.
 `app::display` schedules this declaration in the paint callback, after wgpu can
 reconfigure the surface; `platform::display` finds the current Metal layer and
 sets its color space. This works around wgpu-hal 30.0.1 leaving sRGB surfaces
@@ -90,13 +101,13 @@ profile's table differs by up to 6.5 code values (Little CMS's own 8-bit result 
 to 7 from its floating-point one there). `color_management`'s tests hold the
 committed fixtures (`crates/rawmakase-decode/tests/data/monitor`) to this; an
 ignored test runs the dense grid over a folder of profiles and Little CMS results.
-Choosing this manual override on macOS leaves the Metal surface unmanaged to
-avoid applying a second conversion; choosing Use sRGB restores system color
-management. Failure of the manual transform still shows the sRGB bytes with a
+Choosing this manual override, or sRGB, on macOS leaves the Metal surface
+unmanaged to avoid applying a second conversion; choosing the system profile
+restores system color management. Failure of the manual transform still shows the sRGB bytes with a
 visible error, but on macOS the surface stays unmanaged while a custom profile
 is selected, so that fallback is not matched to the display and can look
-oversaturated on wide-gamut monitors. Automatic monitor-profile discovery for
-manual conversion and HDR output are outside this release. Native tests check
+oversaturated on wide-gamut monitors. The Linux display profile (colord, X11's
+`_ICC_PROFILE`) and HDR output are outside this release. Native tests check
 the actual Metal layer tag, surface reset/replacement and switching manual
 conversion on and off; a test proves an sRGB-profile round trip within one
 byte. Visual matching with other applications still requires
