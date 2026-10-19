@@ -12,6 +12,14 @@ const XYZ_RGB: [[f64; 3]; 3] = [
     [0.0193339, 0.1191920, 0.9503041],
 ];
 
+/// XYZ to linear sRGB, the inverse of [`XYZ_RGB`] to seven places: the
+/// XYZ-to-camera matrix of a camera whose RGB is linear sRGB.
+const RGB_XYZ: [[f32; 3]; 3] = [
+    [3.2404542, -1.5371385, -0.4985314],
+    [-0.969266, 1.8760108, 0.041556],
+    [0.0556434, -0.2040259, 1.0572252],
+];
+
 /// The camera's colour in `info`: its XYZ matrix from the table of Adobe's,
 /// else (a DNG's) the file's; the camera-to-sRGB matrix and the daylight
 /// multipliers from the file's matrix when it has one, else the table's.
@@ -22,7 +30,18 @@ const XYZ_RGB: [[f64; 3]; 3] = [
 /// table matrix: its RGB is whatever its writer made (a phone's processing,
 /// or an image Lightroom stored as a DNG under the camera's name), which
 /// only the file's matrix describes, where the table's is the sensor's.
+/// A monochrome DNG's one sample is every channel's, so its colour is
+/// neutral whatever the file or the table says: camera RGB is linear sRGB
+/// (R = G = B is D65's white), with no white balance, as the DNG
+/// Specification gives a single colour plane neither.
 pub(crate) fn apply(info: &mut RawInfo) {
+    if info.monochrome {
+        info.cam_xyz = RGB_XYZ;
+        info.rgb_cam = std::array::from_fn(|i| std::array::from_fn(|j| f32::from(i == j)));
+        info.pre_mul = [1.; 4];
+        info.cam_mul = [1.; 4];
+        return;
+    }
     let linear = matches!(&info.plan, crate::variant::Plan::Dng(p) if p.samples > 1);
     let table = crate::facts::matrix(&info.make, &info.model).filter(|_| !linear);
     // A DNG whose white balance is a chromaticity, of a camera Adobe gives

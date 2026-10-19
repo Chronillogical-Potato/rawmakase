@@ -655,7 +655,8 @@ impl Recipe {
             .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
     }
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
-    /// and the default profile.
+    /// and the default profile. A monochrome photo renders without white balance
+    /// gains, whatever an edit from another photo or a preset gave it.
     pub fn resolved(&self, m: &Metadata) -> std::borrow::Cow<'_, Self> {
         let mut r = match self.as_rendered() {
             std::borrow::Cow::Borrowed(r) => r.with_profile_adjustments(),
@@ -663,6 +664,9 @@ impl Recipe {
                 std::borrow::Cow::Owned(r.with_profile_adjustments().into_owned())
             }
         };
+        if m.monochrome && r.wb != [1.; 3] {
+            r.to_mut().wb = [1.; 3];
+        }
         // A Lens Corrections panel switched off also turns off built-in data that is
         // off by default (Sony's), which Enable Profile Corrections turned on; what a
         // camera always applies (Fuji, DNG) stays, as the panel bypass leaves it.
@@ -712,9 +716,9 @@ impl Recipe {
         self.auto_white_balance = None;
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
-        if m.is_rendered() {
+        if m.is_rendered() || m.monochrome {
             // Temp and Tint are a rendered file's white balance (and keep Auto); its
-            // gains stay 1.
+            // gains stay 1, as a monochrome photo's, which has none.
             self.wb = [1.; 3];
             return;
         }
@@ -801,12 +805,18 @@ impl Recipe {
             self.wb = [1.; 3];
             return;
         }
+        if m.monochrome {
+            // Grey has no white balance to pick.
+            self.wb = [1.; 3];
+            return;
+        }
         self.wb = gains;
         self.sync_white_balance_controls(m);
     }
     pub fn update_wb(&mut self, m: &Metadata) {
-        if m.is_rendered() {
-            // Temp and Tint render as `white_balance::rendered_white_balance`.
+        if m.is_rendered() || m.monochrome {
+            // Temp and Tint render as `white_balance::rendered_white_balance`; a
+            // monochrome photo has no white balance (Lightroom disables it).
             self.wb = [1.; 3];
             return;
         }

@@ -152,6 +152,7 @@ pub(crate) struct Header {
     pub levels: Option<[u32; 3]>,
     /// A linear raw DNG's AnalogBalance relative to green; 1 otherwise.
     pub analog_balance: [f32; 3],
+    pub monochrome: bool,
 }
 impl Raw {
     /// The photo's facts as RAWmakase's decoders read them. What the file says
@@ -188,6 +189,7 @@ impl Raw {
             fuji_dynamic_range: h.fuji_dynamic_range,
             highlight_tone_priority: HighlightTonePriority::from_libraw(h.highlight_tone_priority),
             sraw: h.sraw,
+            monochrome: h.monochrome,
             // -999 when the maker notes have no shift.
             fuji_exposure_shift: (h.fuji_exposure_shift > -100.).then_some(h.fuji_exposure_shift),
             iso: h.iso,

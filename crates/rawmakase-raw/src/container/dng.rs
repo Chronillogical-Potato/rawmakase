@@ -72,13 +72,13 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     let photometric = t.int(ifd, 262).unwrap_or(0);
     let samples = t.int(ifd, 277).unwrap_or(1);
     // Linear raw develops as camera RGB: three samples, interleaved
-    // (PlanarConfiguration 1). One sample is a monochrome sensor's.
+    // (PlanarConfiguration 1). One sample is a monochrome sensor's (or a
+    // film scanner's), which develops as grey.
     let linear = photometric == 34892;
     match (linear, samples) {
-        (false, 1) => {}
+        (_, 1) => {}
         (true, 3) if t.int(ifd, 284).unwrap_or(1) == 1 => {}
         (true, 3) => return Err(Error::Unsupported("DNG linear raw in planes".into())),
-        (true, 1) => return Err(Error::Unsupported("monochrome DNG".into())),
         (true, n) => {
             return Err(Error::Unsupported(format!("DNG linear raw of {n} samples")));
         }
@@ -128,6 +128,7 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     info.height = active[2] - top;
     // CFAPattern starts at the active area's corner, the visible area's.
     info.cfa = cfa;
+    info.monochrome = linear && samples == 1;
     let origin = t.reals(ifd, 50719, 2).filter(|v| v.len() == 2);
     let size = t.reals(ifd, 50720, 2).filter(|v| v.len() == 2);
     // The default crop in sensor coordinates, starting on even rows and
@@ -1329,9 +1330,9 @@ pub(crate) mod tests {
         assert_eq!((info.analog_balance, info.cam_mul), ([1.; 3], [1.; 4]));
     }
 
-    /// Linear raw of one sample (monochrome sensors), in separate planes or
-    /// of floating-point samples is refused, with a message that says which;
-    /// so is a linear raw tile beyond the size limit in its three samples.
+    /// Linear raw in separate planes or of floating-point samples is
+    /// refused, with a message that says which; so is a linear raw tile
+    /// beyond the size limit in its three samples.
     #[test]
     fn linear_raw_floats_and_huge_tiles_are_refused() {
         let le16 = |v: u16| v.to_le_bytes().to_vec();
@@ -1352,13 +1353,55 @@ pub(crate) mod tests {
         assert!(crate::open(&dng(1, 1, &tiled[2..])).is_ok());
     }
 
-    /// Linear raw of one sample (monochrome sensors) or in separate planes
-    /// is refused, with a message that says which.
+    /// Linear raw of one sample (monochrome sensors, film scanners) opens
+    /// without a CFA as a monochrome image of one sample a pixel, its levels
+    /// kept as the sensor's. Its colour is neutral whatever the file or the
+    /// camera table says: camera RGB is linear sRGB (an identity to sRGB,
+    /// daylight 1) and it has no white balance as shot.
+    #[test]
+    fn monochrome_linear_raw_opens_as_one_neutral_sample() {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let text = |s: &str| {
+            let mut v = s.as_bytes().to_vec();
+            v.push(0);
+            (v.len() as u32, v)
+        };
+        let (make_n, make) = text("Canon");
+        let (model_n, model) = text("Canon EOS 5D Mark IV");
+        let extra = [
+            (262, 3, 1, le16(34892)),
+            (271, 2, make_n, make),
+            (272, 2, model_n, model),
+            (50714, 3, 1, le16(220)),
+            (50717, 3, 1, le16(16383)),
+            (50721, 10, 9, rationals(&[2, 0, 0, 0, 1, 0, 0, 0, 1], 1)),
+            (50728, 5, 3, rationals(&[1, 2, 4], 4)),
+        ];
+        let f = dng(2, 1, &extra);
+        let info = crate::open(&f).unwrap();
+        assert!(info.monochrome && info.cfa.is_none());
+        assert_eq!(info.cam_mul, [1.; 4]);
+        assert_eq!(info.pre_mul, [1.; 4]);
+        assert_eq!(info.rgb_cam, [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+        // XYZ to camera is XYZ to linear sRGB: D65's white is R = G = B = 1.
+        let d65 = [0.95047f32, 1., 1.08883];
+        for row in info.cam_xyz {
+            let v: f32 = row.iter().zip(d65).map(|(a, b)| a * b).sum();
+            assert!((v - 1.).abs() < 1e-4, "{:?}", info.cam_xyz);
+        }
+        let s = decode(&with_samples(f, &[220, 8301]));
+        assert_eq!((s.channels, s.data), (1, vec![220, 8301]));
+        assert_eq!((s.black, s.white), ([220; 4], 16383));
+        // A CFA DNG of one sample is still a mosaic.
+        assert!(!crate::open(&dng(2, 2, &extra[1..])).unwrap().monochrome);
+    }
+
+    /// Linear raw in separate planes is refused, with a message that says
+    /// so.
     #[test]
     fn unsupported_linear_raw_is_named() {
         let le16 = |v: u16| v.to_le_bytes().to_vec();
         let error = |extra: &[Entry]| crate::open(&dng(2, 1, extra)).unwrap_err().to_string();
-        assert!(error(&[(262, 3, 1, le16(34892))]).contains("monochrome"));
         let mut planar = linear_raw();
         planar.push((284, 3, 1, le16(2)));
         assert!(error(&planar).contains("planes"));
