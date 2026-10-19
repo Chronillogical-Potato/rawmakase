@@ -3,7 +3,7 @@ name = "rawmakase-catalog"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "RAWmakase's catalog: photos, folders, collections and edits in SQLite, Lightroom import, and which edit a photo develops with, without LibRaw, the renderer or the GUI"
+description = "RAWmakase's catalog: photos, folders, collections and edits in SQLite, Lightroom import, and which edit a photo develops with, without the RAW decoders, the renderer or the GUI"
 license = "MIT"
 publish = false
 

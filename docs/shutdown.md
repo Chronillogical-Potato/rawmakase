@@ -39,9 +39,17 @@ changes what one waits on, updates its row here.
 Each worker the exit hook waits for keeps its `JoinHandle`, and hands it over as a
 `task::Stopping` when asked to stop.
 
+Workers that read or decode photos behind the user's back start from
+`raw::spawn_background` or `raw::background_pool` (`crates/rawmakase-decode`):
+their threads run at a lower scheduling priority (Linux and Windows), and parallel
+work they start runs on a pool of two background threads, never the shared pool.
+That pool belongs to the worker: dropping it, when the worker's work returns, lets
+its threads end on their own; nothing joins them, so a pool never blocks the thread
+that drops it.
+
 | Worker | Where | Blocks on | Stop | Join |
 | --- | --- | --- | --- | --- |
-| Develop loader, with its full-size loader and prefetcher | `app/worker/loader.rs` | A job; file I/O, LibRaw decodes and JPEG, PNG or TIFF decodes (cancellable between rows); decode cache reads and writes | All three `Latest`s stopped, between jobs; the load `Task`'s cancel within one; `prefetch_cancel` for a prefetch | Yes, all three, after cancelling the load and the prefetch |
+| Develop loader, with its full-size loader and prefetcher | `app/worker/loader.rs` | A job; file I/O, RAW decodes and JPEG, PNG or TIFF decodes (cancellable between rows); decode cache reads and writes | All three `Latest`s stopped, between jobs; the load `Task`'s cancel within one; `prefetch_cancel` for a prefetch | Yes, all three, after cancelling the load and the prefetch |
 | Preview renderer | `app/worker/renderer.rs` | A job; CPU and GPU renders, up to 10 s per GPU submission; the egui renderer lock, briefly | `Latest` stopped; the After and Before render `Task`s | Yes, before the painter and device are dropped |
 | Reference View loader | `app/worker/reference.rs` | A job; file I/O and decodes | `Latest` stopped; the reference `Task` | Yes |
 | Autosave | `app/autosave.rs` | The job channel; one SQLite commit | Its job sender dropped | Yes, after the save at exit and dropping the job sender, which lets a save in flight finish |

@@ -1,6 +1,6 @@
 //! What a camera captured, as values: a RAW's metadata as RAWmakase keeps it,
 //! the demosaic and decode choices, and the decoded camera-space image. Reading
-//! them through LibRaw is [`crate::raw`]'s; nothing here needs native code.
+//! them from a file is the RAW decoders'; nothing here needs native code.
 use serde::{Deserialize, Serialize};
 
 /// A DNG's illuminant-independent diagonal camera calibration. The signature
@@ -11,7 +11,7 @@ pub struct NeutralCalibration {
     pub signature: String,
 }
 
-/// What kind of file a photo's pixels come from: a camera RAW (LibRaw), or a
+/// What kind of file a photo's pixels come from: a camera RAW, or a
 /// rendered JPEG, PNG or TIFF decoded through its colour profile. A rendered file's
 /// develop [`CameraImage`] holds its pseudo-scene: linear ProPhoto values whose
 /// Camera Raw default rendering is the file (see `develop::rendered`), not the
@@ -101,8 +101,8 @@ pub struct Metadata {
     /// Canon Highlight Tone Priority, from the maker notes; `Off` for other makes.
     #[serde(default)]
     pub highlight_tone_priority: HighlightTonePriority,
-    /// A Canon sRAW or mRAW (or Nikon sRAW): stored as YCbCr, which LibRaw converts
-    /// to camera RGB on a scale of its own.
+    /// A Canon sRAW or mRAW (or Nikon sRAW): stored as YCbCr, which the decoder
+    /// converts to camera RGB on a scale of its own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sraw: bool,
     /// Fujifilm's exposure midpoint shift in EV (maker note ExpoMidPointShift): about
@@ -132,7 +132,7 @@ pub struct Metadata {
     pub lens: Option<crate::optics::LensCorrection>,
     /// Lens model as recorded by the camera, e.g. "FE 55mm F1.8 ZA". A file that
     /// records only `lens_id` takes the name of the imported lens profile that
-    /// identifies it (see `rawmakase_native::photo::open`).
+    /// identifies it (see `rawmakase_decode::photo::open`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub lens_model: String,
     /// The maker's numeric lens ID from the maker notes (Nikon's `LensIDNumber`,
@@ -158,6 +158,13 @@ pub struct Metadata {
     /// metadata keeps its saved form; metadata from earlier releases reads as Raw.
     #[serde(default, skip_serializing_if = "Source::is_raw")]
     pub source: Source,
+    /// The sensor data's mean black, white and maximum (the samples' bit depth's)
+    /// where the decoder knows them on opening (Canon's mosaics, whose white
+    /// Adobe takes by ISO speed): the camera exposure follows the white as
+    /// Adobe's BaselineExposure does (`camera_profiles::reference`). Read again
+    /// on open, not saved.
+    #[serde(skip)]
+    pub levels: Option<[u32; 3]>,
     /// Imported Adobe lens profiles that fit this camera, Enable Profile Corrections'
     /// choices; rebuilt on open.
     #[serde(skip)]
@@ -213,46 +220,34 @@ impl HighlightTonePriority {
         }
     }
 }
-/// Which demosaic full-size development uses: the app's preference (Preferences >
-/// Performance), passed to each job that decodes.
+/// Which demosaic full-size development uses, passed to each job that decodes.
+/// RAWmakase's own is the only one; the preference RAWmakase once offered
+/// (LibRaw's AHD and Markesteijn, saved as `"Libraw"`) reads as it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Demosaic {
-    /// RAWmakase's own demosaic of LibRaw-unpacked data (`crate::demosaic`): about
-    /// 2–5× faster, with equal or better detail against Adobe renders.
+    /// RAWmakase's own demosaic of the unpacked sensor data (`crate::demosaic`).
     #[default]
+    #[serde(alias = "Libraw")]
     Rawmakase,
-    /// LibRaw's AHD (Bayer) and 1-pass Markesteijn (X-Trans).
-    Libraw,
-}
-impl Demosaic {
-    /// This preference, unless RAWMAKASE_LIBRAW_DEMOSAIC=1 forces LibRaw for the
-    /// whole run; the variable is read once.
-    pub fn effective(self) -> Self {
-        static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let forced = *FORCED.get_or_init(|| {
-            std::env::var_os("RAWMAKASE_LIBRAW_DEMOSAIC").is_some_and(|v| v != "0")
-        });
-        if forced { Self::Libraw } else { self }
-    }
 }
 /// What [`Raw::develop`] makes of the sensor data. A job captures it when it is
 /// created and keys its decode-cache entry with the same value, so a preference
 /// changed while the job runs can never file one demosaic under another's key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Decode {
-    /// A half-size draft from LibRaw's fast half-size path, whatever the demosaic.
+    /// A half-size draft: each pixel a 2 × 2 block of the mosaic.
     Half,
     /// Every pixel, demosaiced this way.
     Full(Demosaic),
 }
 impl Decode {
-    /// Full size, with `preferred` unless the environment forces LibRaw.
+    /// Full size, with `preferred`.
     pub fn full(preferred: Demosaic) -> Self {
-        Self::Full(preferred.effective())
+        Self::Full(preferred)
     }
 }
 impl crate::metadata::PhotoInfo {
-    /// From a RAW's metadata, as LibRaw reads it.
+    /// From a RAW's metadata, as the decoder reads it.
     pub fn from_metadata(m: &Metadata) -> Self {
         let positive = |v: f32| (v > 0.).then_some(v as f64);
         let text = |t: &str| (!t.trim().is_empty()).then(|| t.trim().to_string());

@@ -1,4 +1,4 @@
-//! Opening a photo reads LibRaw's facts, then what the file says beyond them: a
+//! Opening a photo reads the RAW decoder's facts, then what the file says beyond them: a
 //! DNG's embedded profile, baseline exposure and default crop, and the lens
 //! tables a camera embeds. Moving that interpretation between modules must not
 //! change what an opened photo holds, so this pins a digest of every corpus chart

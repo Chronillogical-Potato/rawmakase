@@ -229,7 +229,7 @@ fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
         return None;
     }
     Some(if crate::storage::is_raw(path) {
-        // A RAW LibRaw cannot open now (still copying, a network error) is
+        // A RAW that cannot be opened now (still copying, a network error) is
         // tried again later.
         Some(PhotoInfo::from_metadata(
             &crate::photo::open(path).ok()?.metadata,

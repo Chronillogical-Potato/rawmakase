@@ -409,6 +409,62 @@ fn discarding_drops_rows_and_requests_of_every_kind() {
     );
 }
 
+/// A preview stored before RAWmakase developed photos with its own decoders
+/// (LibRaw's decoding: an identity that named no decoder) is not used: the
+/// lookup misses its row, so the preview is built again.
+#[test]
+fn previews_developed_by_an_earlier_decoder_are_refused() {
+    let defaults = DevelopDefaults::default();
+    // The identity as releases before the switch computed it.
+    let earlier = |record: &EditRecord| {
+        let mut h = DefaultHasher::new();
+        "preview-identity-1".hash(&mut h);
+        record.recipe.hash(&mut h);
+        record.local.hash(&mut h);
+        record.lightroom().hash(&mut h);
+        if record.recipe.is_none() && record.lightroom().is_none() {
+            format!("{defaults:?}").hash(&mut h);
+            rawmakase_export::build_info::SOFTWARE.hash(&mut h);
+        }
+        "Rawmakase".hash(&mut h);
+        format!("{:016x}", h.finish())
+    };
+    let saved = EditRecord {
+        recipe: Some("{\"exposure\":1}".into()),
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let photo = dir.path().join("photo.ARW");
+    std::fs::write(&photo, b"raw").unwrap();
+    let stamp = crate::catalog::preview_cache::Stamp::read(&photo).unwrap();
+    let mut cache = PreviewCache::open(&dir.path().join("previews.db")).unwrap();
+    let image = image::RgbImage::from_pixel(64, 32, image::Rgb([200, 120, 60]));
+    for record in [EditRecord::default(), saved] {
+        let old = earlier(&record);
+        assert_ne!(old, identity(&record, &defaults, Demosaic::Rawmakase));
+        cache
+            .store_sized(&photo, &old, PreviewKind::Standard, &stamp, 1024, &image)
+            .unwrap();
+        assert!(
+            cache
+                .sized_fresh(&photo, &old, PreviewKind::Standard, 1024)
+                .unwrap()
+        );
+        let now = identity(&record, &defaults, Demosaic::Rawmakase);
+        assert!(
+            !cache
+                .sized_fresh(&photo, &now, PreviewKind::Standard, 1024)
+                .unwrap()
+        );
+        assert!(
+            cache
+                .load_sized(&photo, &now, PreviewKind::Standard)
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
 #[test]
 fn identity_follows_the_edit_the_defaults_and_the_demosaic() {
     let defaults = DevelopDefaults::default();
@@ -419,7 +475,6 @@ fn identity_follows_the_edit_the_defaults_and_the_demosaic() {
     };
     let base = identity(&none, &defaults, Demosaic::Rawmakase);
     assert_eq!(base, identity(&none, &defaults, Demosaic::Rawmakase));
-    assert_ne!(base, identity(&none, &defaults, Demosaic::Libraw));
     assert_ne!(base, identity(&saved, &defaults, Demosaic::Rawmakase));
     let local = EditRecord {
         local: Some("[]".into()),

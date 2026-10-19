@@ -123,7 +123,7 @@ Keep the model and renderer usable without inference installed:
 - **Proposed `crates/rawmakase-inference`:** a small concrete ONNX integration with
   model manifest, tensor preprocessing/postprocessing and inference session. It
   accepts owned RGB input and returns coverage or a typed error. Depends on the
-  model crate and runtime, never the app, catalog, GUI, LibRaw or rendering engine.
+  model crate and runtime, never the app, catalog, GUI, RAW decoders or rendering engine.
 - **App:** model installation I/O, worker scheduling, status and guarded application
   through the edit session. Compose decode, engine input rendering and inference
   here. Start with one model implementation, not a generic plugin framework.

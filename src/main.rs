@@ -116,11 +116,36 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
+    /// Print each file's develop fingerprint as a line of JSON: the image each
+    /// decode mode (full, half) makes, hashed, for decoder regression checks.
+    DecodeDump {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+        /// Also write each full decode that is not a mosaic here, as raw floats.
+        #[arg(long)]
+        floats: Option<PathBuf>,
+    },
+    /// Print each file's half-size check as a line of JSON: RAWmakase's
+    /// half-size decode against its full decode reduced (colour, detail) and
+    /// its time over the full develop's.
+    HalfCheck {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+        /// The files' reference as JSON (`{"ratio":…,"de_mean":…,"de_p95":…,
+        /// "detail":…}`): LibRaw's half-size decode, recorded, which
+        /// scripts/corpus/dataset-half.py passes. Without one, absolute limits.
+        #[arg(long, value_parser = parse_reference)]
+        reference: Option<rawmakase::half_check::Reference>,
+    },
     Benchmark {
         input: PathBuf,
         #[arg(long, default_value_t = 20)]
         iterations: usize,
     },
+}
+/// A half-size check's `--reference`.
+fn parse_reference(json: &str) -> Result<rawmakase::half_check::Reference, String> {
+    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 /// A stage `render --tap` writes.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -259,7 +284,7 @@ fn main() -> Result<()> {
                 errors
             );
             println!(
-                "LibRaw {}\n{}",
+                "{}\n{}",
                 raw::version(),
                 serde_json::to_string_pretty(&r.metadata)?
             );
@@ -458,11 +483,21 @@ fn main() -> Result<()> {
             );
         }
         Some(Command::Fingerprint { files }) => {
-            // One file at a time: LibRaw opening files side by side can give one
-            // of them different white balance multipliers (issue #420).
             for path in &files {
                 let line = serde_json::to_string(&rawmakase::fingerprint::fingerprint(path))?;
                 println!("{line}");
+            }
+        }
+        Some(Command::DecodeDump { files, floats }) => {
+            for path in &files {
+                let dump = rawmakase::decode_dump::dump(path, floats.as_deref());
+                println!("{}", serde_json::to_string(&dump)?);
+            }
+        }
+        Some(Command::HalfCheck { files, reference }) => {
+            for path in &files {
+                let check = rawmakase::half_check::check(path, reference);
+                println!("{}", serde_json::to_string(&check)?);
             }
         }
         Some(Command::Benchmark { input, iterations }) => {

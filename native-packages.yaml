@@ -14,9 +14,13 @@ release:
   checksums: SHA256SUMS
 version_file: Cargo.toml
 # Host libraries the Linux build links against; packaging/linux/bundle.py
-# bundles the imaging libraries and leaves these to the distribution. The
-# DEB, RPM and AppImage all use the host's copies.
+# leaves these to the distribution. The DEB, RPM and AppImage all use the
+# host's copies.
 libraries:
+  # Current builds link no OpenMP; the packaging rehearsal still packages the
+  # published v0.1.8 Linux archive (.github/workflows/packaging.yml), whose
+  # binary needs libgomp, and native-packages maps only libraries listed here.
+  # Remove with that fixture.
   libgomp.so.1: {deb: libgomp1, rpm: libgomp}
   libz.so.1: {deb: zlib1g, rpm: zlib}
   libvulkan.so.1: {deb: libvulkan1, rpm: vulkan-loader}
@@ -136,7 +140,6 @@ targets:
             - libc6 (>= 2.39)
             - libstdc++6 (>= 14)
             - libgcc-s1
-            - libgomp1
             - zlib1g
             - libvulkan1
             - libxkbcommon0
@@ -159,7 +162,6 @@ targets:
             - glibc >= 2.39
             - libstdc++ >= 14
             - libgcc
-            - libgomp
             - zlib
             - vulkan-loader
             - libxkbcommon
@@ -214,7 +216,6 @@ targets:
             - libc6 (>= 2.39)
             - libstdc++6 (>= 14)
             - libgcc-s1
-            - libgomp1
             - zlib1g
             - libvulkan1
             - libxkbcommon0
@@ -237,7 +238,6 @@ targets:
             - glibc >= 2.39
             - libstdc++ >= 14
             - libgcc
-            - libgomp
             - zlib
             - vulkan-loader
             - libxkbcommon

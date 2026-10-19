@@ -178,7 +178,7 @@ impl Editor {
             path: source.path,
             edit: source.edit,
             cancel,
-            demosaic: self.demosaic.effective(),
+            demosaic: self.demosaic,
         });
     }
     /// Develops the reference photo again even when its edit and file are as they

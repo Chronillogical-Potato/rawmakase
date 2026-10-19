@@ -43,8 +43,8 @@ unit_calibration = { preset = "daylight", reference = [1893, 1024, 1697] }
 | Fujifilm | `d65` | `WB_GRBLevelsStandard`, the entry for light source 21 | `WB_Coeffs[D65]` |
 | Olympus, OM System | `fine-weather` | `WB_RBLevels5300K` | `WB_Coeffs[FineWeather]` |
 
-The native adapter exports these presets for every native RAW, not LibRaw's
-matrix-derived `pre_mul`; `cameras::neutral_calibration` applies the row. A
+The native adapter exports these presets for every native RAW, not a
+matrix-derived `pre_mul` (LibRaw's); `cameras::neutral_calibration` applies the row. A
 missing or invalid preset, or a camera without a row, keeps identity rather than
 borrowing another unit's correction, and there is no make-wide fallback.
 

@@ -20,24 +20,25 @@ notarization must pass before anything is published. No AUR pushes occur.
 | Windows ARM64 installer | `rawmakase-vVERSION-aarch64-pc-windows-msvc-setup.exe` | Windows 11 on ARM64; per-user install, no administrator rights |
 | Windows ARM64 archive | `rawmakase-vVERSION-aarch64-pc-windows-msvc.zip` | Windows 11 on ARM64 |
 
-The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
-not need Homebrew. The Linux tarball contains the same `/usr` layout, including
-private libraries; run the extracted `usr/bin/rawmakase` or install the whole
-tree under `/usr`. Do not copy just its executable (a symlink to
-`usr/bin/rawmakase` works). The AppImage packs that same payload, built by
-native-packages with its pinned type2-runtime; its `AppRun` links to
-`usr/bin/rawmakase`. Linux still needs system Vulkan/graphics drivers,
-window-system libraries and a working file-dialog portal.
+The Mac, DEB and RPM packages contain one private library, ONNX Runtime for
+the selection masks; RAW decoding needs none. Mac users do not need Homebrew.
+The Linux tarball contains the same `/usr` layout, including that library; run
+the extracted `usr/bin/rawmakase` or install the whole tree under `/usr`. Do
+not copy just its executable (a symlink to `usr/bin/rawmakase` works). The
+AppImage packs that same payload, built by native-packages with its pinned
+type2-runtime; its `AppRun` links to `usr/bin/rawmakase`. Linux still needs
+system Vulkan/graphics drivers, window-system libraries and a working
+file-dialog portal.
 
 Each Windows architecture's installer and archive hold the same folder: `rawmakase.exe`, with
-LibRaw, Little CMS and the C runtime linked in statically (so no Visual C++
-Redistributable is needed), and the licenses. Neither is code-signed yet, so SmartScreen warns on first run;
+the C runtime linked in statically (so no Visual C++ Redistributable is
+needed), ONNX Runtime and the licenses. Neither is code-signed yet, so SmartScreen warns on first run;
 signing can be added later as an `after_package` hook on the `windows-amd64`
 and `windows-arm64` targets, before checksums are recorded. Both installers
 share one `AppId`, so installing either replaces the other.
 
-The current local `packaging/macos/app.sh` remains a development helper using
-Homebrew dependencies. It does not produce the standalone release app.
+The current local `packaging/macos/app.sh` remains a development helper. It
+does not produce the standalone release app.
 
 ## Apple credentials
 
@@ -169,47 +170,33 @@ gh release edit vX.Y.Z --notes-file packaging/release-notes/vX.Y.Z.md
 
 ## Dependency maintenance
 
-`packaging/native-deps.sh` pins Little CMS 2.19.1 and a LibRaw master commit
-(newer than 0.22.2, for the Sony A7 V) by SHA-256 and builds them into a
-private prefix. A git archive has no configure script, so the build runs
-`autoreconf` and needs autoconf, automake and libtool; move back to a release
-tarball once LibRaw publishes one with those cameras. Update versions and
-hashes together after testing, including the decode fingerprints over the test
-dataset (`scripts/corpus/dataset-fingerprints.py check`, then `record` with the
-update as the reason, committed with it). Keep JPEG/zlib support enabled so compressed DNG decoding is retained.
-The app's native wrapper retains OpenMP acceleration.
-Release builds define `CMS_NO_REGISTER_KEYWORD` for compatibility between the
-Little CMS headers and the wrapper's C++17 compiler.
+RAWmakase builds no native library of its own: RAW decoding and colour
+management are Rust. A change to the RAW decoders is checked with the decode
+fingerprints over the test dataset (`scripts/corpus/dataset-fingerprints.py
+check`; a deliberate change is recorded as a new baseline in a commit that
+says why).
 
-Mac bundling follows transitive dependencies, rewrites library paths, preserves
-native notices and Homebrew source/version metadata, and fails on unresolved
-paths or conflicting library names. JPEG and OpenMP come from the runner's
-Homebrew installation; they are recorded in the app's license directory.
+Mac bundling follows any non-system library dependency, rewrites library
+paths, preserves notices and Homebrew source/version metadata, and fails on
+unresolved paths or conflicting library names; today the executable has none.
+`packaging/macos/verify.sh` accepts no bundled library but ONNX Runtime.
 The layered Liquid Glass icon is compiled once with Xcode 26.3 on macOS 26;
 its asset runtime crashes on the macOS 15 runners. Both Mac builds download
 that `Assets.car` and pass it to `bundle.py --icon-assets`. The executables and
 libraries still build on macOS 15, and each app keeps the flat icon for older
 systems. The finished DMG check requires both icons and the layered icon's
 Info.plist entry before accepting the package.
-Linux bundles imaging dependencies, preserves their notices, and leaves core
-OS/C++/OpenMP/zlib libraries to the host. The native source archives and build
-script are published alongside packages; application source is also attached.
+Linux bundles any library outside the host's core OS/C++/zlib/graphics set
+with its notice (today none but ONNX Runtime). Application source is attached
+to the release.
 
-Windows builds with MSVC. `packaging/windows/deps.ps1` builds the same LibRaw
-and Little CMS versions (plus libjpeg-turbo, zlib and JasPer, which LibRaw
-needs) as static libraries with vcpkg, pinned to one vcpkg commit; update that
-commit when the versions above change. vcpkg's own LibRaw port follows releases
-only, so LibRaw comes from the overlay port in `packaging/windows/vcpkg-ports/libraw`
-(vcpkg's port, MIT, with the commit and SHA-512 of the git archive changed);
-delete the overlay once vcpkg's port reaches a release with the same cameras. `build.rs` finds them through vcpkg's
-pkg-config files. Windows builds link the C runtime statically
-(`.cargo/config.toml`) and compile the wrapper without OpenMP, so
-`rawmakase.exe` imports only Windows' own DLLs: the updater runs a copy of it
-alone as its helper. `packaging/windows/stage.ps1` copies the executable and
-licenses and fails if the executable imports any other DLL. `deps.ps1`, `stage.ps1`
-and `setup.ps1` build natively for the runner's architecture: x64 on `windows-2025`, ARM64 on
-`windows-11-arm`. On ARM64, ring assembles with clang, so `deps.ps1` puts LLVM on
-PATH. The `windows-amd64` and `windows-arm64` targets in `native-packages.yaml` run
+Windows builds with MSVC. Windows builds link the C runtime statically
+(`.cargo/config.toml`), so `rawmakase.exe` imports only Windows' own DLLs: the
+updater runs a copy of it alone as its helper. `packaging/windows/stage.ps1`
+copies the executable and licenses and fails if the executable imports any
+other DLL. `toolchain.ps1`, `stage.ps1` and `setup.ps1` run natively for the
+runner's architecture: x64 on `windows-2025`, ARM64 on `windows-11-arm`. On
+ARM64, ring assembles with clang, so `toolchain.ps1` puts LLVM on PATH. The `windows-amd64` and `windows-arm64` targets in `native-packages.yaml` run
 `packaging/windows/setup.ps1`, which compiles `packaging/windows/rawmakase.iss`
 with Inno Setup. Never change that script's `AppId`: it is how Windows tells an
 update from a second installation.

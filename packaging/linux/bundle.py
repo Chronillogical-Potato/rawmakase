@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stage private imaging libraries without replacing system libraries."""
+"""Stage the portable payload: the executable, its notices and any private
+library it needs, without replacing system libraries."""
 import argparse
 import json
 import platform
@@ -35,7 +36,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("native_prefix", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     stage = args.output.resolve()
@@ -46,7 +46,7 @@ def main():
     shutil.copy2(args.binary, executable)
     executable.chmod(0o755)
     licenses = stage / "usr/share/licenses/rawmakase"
-    shutil.copytree(args.native_prefix / "notices", licenses)
+    licenses.mkdir(parents=True)
     for source, target in [(root / "LICENSE", licenses / "LICENSE"),
                            (root / "licenses/Adobe-DNG-SDK.txt", licenses / "Adobe-DNG-SDK.txt"),
                            (root / "licenses/Hack-MIT-BitstreamVera.txt", licenses / "Hack-MIT-BitstreamVera.txt"),
@@ -60,7 +60,7 @@ def main():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
     # These are supplied by the supported distribution, including its GPU stack.
-    host = re.compile(r"^(lib(c|m|dl|pthread|rt|resolv|util|gcc_s|stdc\+\+|gomp|z|"
+    host = re.compile(r"^(lib(c|m|dl|pthread|rt|resolv|util|gcc_s|stdc\+\+|z|"
                       r"vulkan|xkbcommon|xkbcommon-x11|wayland-client|wayland-cursor|wayland-egl|"
                       r"X11|X11-xcb|xcb|Xcursor|Xi|Xrandr|EGL|GL)\.so[.\d]*|ld-linux.*)$")
     listing = run("ldd", str(args.binary))
@@ -77,21 +77,20 @@ def main():
         destination = private / name
         shutil.copy2(source, destination)
         destination.chmod(0o755)
-        if not Path(source).resolve().is_relative_to(args.native_prefix.resolve()):
-            # Preserve Ubuntu's copyright/source reference for bundled JPEG etc.
-            # ldd may name /lib paths on merged-/usr systems while dpkg records
-            # their canonical /usr/lib paths (or the reverse).
-            owner = None
-            for candidate in dict.fromkeys([str(Path(source).resolve()), source]):
-                query = subprocess.run(["dpkg-query", "-S", candidate], text=True, capture_output=True)
-                if query.returncode == 0:
-                    owner = query.stdout.split(": ", 1)[0].split(":", 1)[0]
-                    break
-            if not owner:
-                raise RuntimeError(f"Cannot find distribution notices for {source}")
-            copyright_file = Path("/usr/share/doc") / owner / "copyright"
-            shutil.copy2(copyright_file, licenses / (owner + "-copyright"))
-            records.append({"library": name, "package": run("dpkg-query", "-W", "-f=${Package} ${Version}", owner)})
+        # Preserve Ubuntu's copyright/source reference for a bundled library.
+        # ldd may name /lib paths on merged-/usr systems while dpkg records
+        # their canonical /usr/lib paths (or the reverse).
+        owner = None
+        for candidate in dict.fromkeys([str(Path(source).resolve()), source]):
+            query = subprocess.run(["dpkg-query", "-S", candidate], text=True, capture_output=True)
+            if query.returncode == 0:
+                owner = query.stdout.split(": ", 1)[0].split(":", 1)[0]
+                break
+        if not owner:
+            raise RuntimeError(f"Cannot find distribution notices for {source}")
+        copyright_file = Path("/usr/share/doc") / owner / "copyright"
+        shutil.copy2(copyright_file, licenses / (owner + "-copyright"))
+        records.append({"library": name, "package": run("dpkg-query", "-W", "-f=${Package} ${Version}", owner)})
     (licenses / "ubuntu-libraries.json").write_text(json.dumps(records, indent=2) + "\n")
     # The ONNX Runtime that runs the subject selection model, opened lazily from
     # beside the executable; the app starts without it.

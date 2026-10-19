@@ -2,7 +2,7 @@
 
 */raw·muh·KAH·say/, RAW + omakase*
 
-RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from the cameras LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG, 16-bit TIFF or PNG. JPEG, PNG and TIFF files can be edited too. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It develops RAW, JPEG, PNG and TIFF files with a Lightroom-style set of controls and exports JPEG, 16-bit TIFF or PNG. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
 ![RAWmakase Develop view with presets, the photo, and the Basic and Tone Curve panels](docs/images/screenshot-2026-10-13-1111.png)
 
@@ -80,7 +80,7 @@ Download the package for your architecture (`amd64`/`x86_64` or `arm64`/`aarch64
 | Fedora 43+ | `.rpm` | `sudo dnf install ./rawmakase-<version>-1.x86_64.rpm` |
 | Arch Linux (x86_64) | `.pkg.tar.zst` | `sudo pacman -U ./rawmakase-<version>-1-x86_64.pkg.tar.zst` |
 
-DEB/RPM packages include LibRaw and Little CMS. Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
+Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
 
 **AUR publication is paused.** Install the Arch package directly, or (on Arch Linux ARM too) download and extract `rawmakase-<version>-arch-recipe.tar.gz` into an empty folder and build as a normal user:
 
@@ -110,10 +110,10 @@ Each new packaged release includes `SHA256SUMS`. After downloading it beside you
 
 ### From source (Linux and macOS)
 
-You need Rust 1.98 or newer, a C++17 compiler with OpenMP, pkg-config, LibRaw 0.22 or newer, and Little CMS 2.
+You need Rust 1.98 or newer and a C compiler (a few Rust crates, such as the catalog's bundled SQLite, compile C); no RAW or colour-management library is needed.
 
-- Arch Linux: `sudo pacman -S rust base-devel pkgconf libraw lcms2`
-- macOS: `brew install pkg-config libraw little-cms2 libomp`. Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon); `LIBOMP_PREFIX` points the build at a non-Homebrew OpenMP.
+- Arch Linux: `sudo pacman -S rust base-devel`
+- macOS: the Xcode command-line tools (`xcode-select --install`). Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon).
 
 ```sh
 make                                  # cargo build --release --locked
@@ -219,6 +219,6 @@ Application CI runs `make check`, a release build, an Arch package build and a `
 
 ## License
 
-RAWmakase is released under the [MIT License](LICENSE). The DNG default tone curve and temperature table come from the Adobe DNG SDK, under the license in [licenses/Adobe-DNG-SDK.txt](licenses/Adobe-DNG-SDK.txt). The interface font, Inter, is under the SIL Open Font License ([licenses/Inter-OFL.txt](licenses/Inter-OFL.txt)), and the icons are Lucide's, under the ISC License ([licenses/Lucide-ISC.txt](licenses/Lucide-ISC.txt)). egui's bundled fallback fonts are compiled into the binary as well: Hack ([licenses/Hack-MIT-BitstreamVera.txt](licenses/Hack-MIT-BitstreamVera.txt)), Noto Emoji ([licenses/NotoEmoji-OFL.txt](licenses/NotoEmoji-OFL.txt)), Ubuntu Light ([licenses/Ubuntu-UFL.txt](licenses/Ubuntu-UFL.txt)) and the emoji icon font ([licenses/emoji-icon-font-MIT.txt](licenses/emoji-icon-font-MIT.txt)). LibRaw, Little CMS and the Rust dependencies keep their own licenses; see [dependencies](docs/dependencies.md).
+RAWmakase is released under the [MIT License](LICENSE). The DNG default tone curve and temperature table come from the Adobe DNG SDK, under the license in [licenses/Adobe-DNG-SDK.txt](licenses/Adobe-DNG-SDK.txt). The interface font, Inter, is under the SIL Open Font License ([licenses/Inter-OFL.txt](licenses/Inter-OFL.txt)), and the icons are Lucide's, under the ISC License ([licenses/Lucide-ISC.txt](licenses/Lucide-ISC.txt)). egui's bundled fallback fonts are compiled into the binary as well: Hack ([licenses/Hack-MIT-BitstreamVera.txt](licenses/Hack-MIT-BitstreamVera.txt)), Noto Emoji ([licenses/NotoEmoji-OFL.txt](licenses/NotoEmoji-OFL.txt)), Ubuntu Light ([licenses/Ubuntu-UFL.txt](licenses/Ubuntu-UFL.txt)) and the emoji icon font ([licenses/emoji-icon-font-MIT.txt](licenses/emoji-icon-font-MIT.txt)). The Rust dependencies and ONNX Runtime keep their own licenses; see [dependencies](docs/dependencies.md).
 
 Adobe, Lightroom and Camera Raw are trademarks of Adobe Inc. RAWmakase is not affiliated with or endorsed by Adobe.

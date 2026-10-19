@@ -212,7 +212,7 @@ fn photos_match_accepted_renders() {
     for raw in &raws {
         *legacy_names.entry(legacy_of(raw)).or_default() += 1;
     }
-    // One photo at a time (LibRaw develops with its own threads).
+    // One photo at a time (the decoders develop with their own threads).
     raws.iter().for_each(|raw| {
         let relative = raw
             .strip_prefix(corpus.join("raws"))
@@ -432,7 +432,7 @@ fn photos_camera_raw_parity_does_not_regress() {
         .ok()
         .map(|b| serde_json::from_slice(&b).expect("baseline"))
         .unwrap_or_default();
-    // One photo at a time (LibRaw develops with its own threads), cases in parallel.
+    // One photo at a time (the decoders develop with their own threads), cases in parallel.
     let results: Vec<(String, Result<Comparison, String>, String)> = by_raw
         .iter()
         .flat_map(|(raw, references)| {

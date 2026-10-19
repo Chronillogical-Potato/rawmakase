@@ -2,7 +2,7 @@
 
 Every recipe, whichever release saved it, renders with the one current engine: the stages, camera profiles and preview behavior in [rendering-quality.md](rendering-quality.md), the [scene tone stage](scene-tone-stage.md), and the measured controls in [tone controls](tone-controls.md), [color mixer](color-mixer.md), [lens corrections](lens-corrections.md) and [transform](transform.md). Earlier engines and their per-control operators are no longer rendered, and edits saved with them render differently now. The settings that chose them (`model::saved_format::OBSOLETE_SETTINGS`) are dropped when a recipe is read; slider values and other unknown settings are kept. Recipes are saved as schema/pipeline 11, which releases before the one engine refuse.
 
-Without an imported or bundled camera profile, the photo renders like a DNG that carries only a ColorMatrix: LibRaw's XYZ-to-camera matrix (the same Adobe-derived coefficients) becomes a forward matrix adapted to D50, the ACR 3 default tone curve is applied with hue-preserving RGB tone, and white balance temperature/tint are solved through that matrix. The camera exposure baseline applies whether or not a profile is present. On DSCF7853 (X100F) against Lightroom's Adobe Standard export this changed the out-of-the-box result (measured before the scene tone stage) from engine 3's −1.1 EV / MAE 0.140 (LibRaw's sRGB matrix and a generic scene shoulder) to −0.01 EV / MAE 0.030, the same as with the imported Adobe Standard DCP.
+Without an imported or bundled camera profile, the photo renders like a DNG that carries only a ColorMatrix: the decoder's XYZ-to-camera matrix (Adobe's) becomes a forward matrix adapted to D50, the ACR 3 default tone curve is applied with hue-preserving RGB tone, and white balance temperature/tint are solved through that matrix. The camera exposure baseline applies whether or not a profile is present. On DSCF7853 (X100F) against Lightroom's Adobe Standard export this changed the out-of-the-box result (measured before the scene tone stage) from engine 3's −1.1 EV / MAE 0.140 (LibRaw's sRGB matrix and a generic scene shoulder) to −0.01 EV / MAE 0.030, the same as with the imported Adobe Standard DCP.
 
 The native development boundary, white balance, out-of-gamut and display sections below still apply. The numbered [Rust pipeline](#rust-pipeline) and the saved-version notes at the end are the historical pipeline-1 contract, kept as a record; that pipeline is no longer rendered.
 
@@ -10,7 +10,7 @@ The native development boundary, white balance, out-of-gamut and display section
 
 Develop edits a JPEG, PNG or TIFF from its own pixels, as Lightroom does, through the same engine as a RAW.
 
-- **Input space.** `raster::open` decodes the file upright and converts it through its embedded ICC profile (sRGB when it has none) to linear ProPhoto RGB (D50), f32, in a `CameraImage` marked `Source::Rendered`, with identity white balance and matrix. RGB and grey profiles are read; CMYK and other colour spaces are refused: `raster::probe` reads only the header and profile, so the Library greys out Open in Develop and says "RAWmakase can't edit CMYK images" before anything is decoded. There is no LibRaw, half-size stage or decode cache: the file opens at full size at once.
+- **Input space.** `raster::open` decodes the file upright and converts it through its embedded ICC profile (sRGB when it has none) to linear ProPhoto RGB (D50), f32, in a `CameraImage` marked `Source::Rendered`, with identity white balance and matrix. RGB and grey profiles are read; CMYK and other colour spaces are refused: `raster::probe` reads only the header and profile, so the Library greys out Open in Develop and says "RAWmakase can't edit CMYK images" before anything is decoded. There is no RAW decoding, half-size stage or decode cache: the file opens at full size at once.
 - **Embedded profile.** The only profile a rendered file has, named as Lightroom names it. Its forward matrix maps ProPhoto to itself and its tone curve is ACR3, Camera Raw's default; it has no hue or look tables, baseline exposure or default black. `Recipe::for_rendered` gives the defaults: no sharpening or colour noise reduction, Kelvin 6500 K and 0, unit gains. A saved Embedded profile gets this tone curve when the recipe loads.
 - **Identity contract.** The file is converted to a pseudo-scene once, when it opens: the inverse of Camera Raw's default rendering (`develop::rendered`, `photo::open_source`; [scene tone stage](scene-tone-stage.md#rendered-files)). At the defaults the render reproduces the file within ±1/255 (finer in 16 bits), on the CPU and the GPU. Exposure and the tone sliders act on that scene as they do on a RAW's, so Lightroom's highlight roll-off applies. Because an unedited file renders as it is, the Library and Loupe show it from the file, and develop only an edited one; preview builds skip unedited ones.
 - **White balance of rendered files.** Temp and Tint are Lightroom's relative values, −100 to 100, saved as `incremental_temperature` and `incremental_tint` (Lightroom's `IncrementalTemperature` and `IncrementalTint`). `model::white_balance::rendered_white_balance` reads them as the DNG SDK would with a camera whose RGB is linear ProPhoto and no forward matrix: measured tables (`RENDERED_TEMPERATURE`, `RENDERED_TINT`) name a white as a DNG reciprocal temperature and tint (`xy_reciprocal`), with the file's D50 white (199.9 mired, tint +9.6) at 0 and 0; Temp moves only the temperature and Tint only the tint, and the two combine. The white balance is a 3×3 matrix, not channel gains: Bradford adaptation from that white to D50 (each cone's scaling held to 0.1–10, as the SDK's `MapWhiteMatrix` holds it), normalised as the SDK normalises a camera neutral, so warming and cooling both brighten the photo as in Lightroom; before it each channel is held at the white in camera RGB, which in the cool magenta corner (strong cooling with strong magenta, where the white's ProPhoto blue is negative) takes blue to 0, as Lightroom does. Where that clip sits against the scene (four times the camera white) is measured, not the SDK's. The pipeline's camera stage applies both (`develop::camera_stage`, on the CPU and the GPU), and a rendered file's `wb` gains stay 1: Temp and Tint are its white balance. Against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts, greys are within about 2/255 on average (mostly within 1) from Temp −35 to +100 and Tint −75 to +75, alone and combined, and 3–7 at Temp −50 to −100 and Tint +100; colours' 95th percentile is a median 8/255 over the white balance files (24 with channel gains), and on 32 photos at Temp +35 the mean is 1.1/255 (3.1 with gains; `scripts/corpus/rendered-white-balance.py`). Known gaps: in the cool magenta corner red is a few levels high, as the matrix leaves ProPhoto blue below 0, which the tone stage carries; at Temp −50 with Tint +50 greys are about 10/255 off; and at Temp −25 with Tint +100, where the white's blue cone is about 0, Lightroom warms the photo instead (about 40/255 off). `Recipe::pick_white_balance` turns the eyedropper's and Auto's gains into the nearest Temp and Tint (`rendered_controls`: the pair whose matrix renders the picked colour most neutral, cross-channel terms included). Kelvin `temperature` and `tint` stay 6500 and 0, so releases without relative white balance still read the recipe. The WB menu offers As Shot (0 and 0), Auto and Custom, and MIDI and the control socket move the same relative values (`ParameterId::for_photo`); Lightroom's Kelvin presets are for RAW files. The eyedropper's and Auto's gains (Auto is gray world, without the warmer shift measured on RAWs) become the nearest relative Temp and Tint, so the next slider move does not jump; Auto records that pair in `auto_white_balance` to show Auto in the menu. Between a RAW and a rendered file, Copy and Sync keep the target's white balance and profile.
@@ -19,15 +19,7 @@ Develop edits a JPEG, PNG or TIFF from its own pixels, as Lightroom does, throug
 
 ## Native development boundary
 
-The system LibRaw 0.22.2 implementation was inspected against its [versioned source](https://github.com/LibRaw/LibRaw/tree/0.22.2/src/postprocessing). A small C++ subclass overrides only `scale_colors_loop`; LibRaw still performs decoder-specific black subtraction, scaling bookkeeping and demosaicing. `highlight=1`, camera WB, `output_color=0`, linear gamma and disabled automatic brightness/max adjustment prevent ordinary output RGB conversion and exposure normalization from consuming the editing range. Orientation is handled by Rust exactly once.
-
-Before integer scaling, the shim measures an upper bound across all four camera planes and the proposed scale multipliers. It multiplies all scales by `min(1, 60000 / bound)` before delegating to LibRaw. This retains approximately 0.13 stop below the integer ceiling. The result is converted to camera RGB floats using the inverse common factor and the normalized green WB scale. Values above one are retained. Black subtraction is delegated once; the shim does not repeat it.
-
-The bound intentionally uses values before any residual subtraction, making it conservative for nonnegative black levels. Camera-specific decode artifacts, negative black offsets, unavailable camera matrices, or unsupported sensor layouts still require additional validation. Only three-color Bayer/X-Trans development is accepted, plus Canon and Nikon sRAW/mRAW (YCbCr, which LibRaw converts to camera RGB and develops without demosaicing). Nikon's High Efficiency and High Efficiency★ NEFs (JPEG XS, which LibRaw cannot decode) are decoded by RAWmakase's own decoder (`raw/nikon_he.rs`) inside LibRaw's unpack on every body, including those LibRaw would otherwise read as lossless compressed noise; it reproduces Adobe DNG Converter's raw values exactly on the test dataset's samples, and a codestream it cannot decode is an error rather than noise. Source dimensions are checked before copying the native image into a Rust-owned buffer.
-
-Tests feed the actual override synthetic 14-bit ramps at WB ratios 1, 2.5, 8 and 16. No scale-stage pixels reach 65535, and reconstruction error remains below WB / 59000. The two real fixtures also produce zero scale-stage saturation and camera values above one. This proves the integer bridge's tested bounds; it does not prove that clipped sensor information or every demosaicing artifact can be recovered.
-
-Full development uses LibRaw quality 3 (AHD for conventional Bayer and the three-pass X-Trans branch). The optional CLI `--fast` path uses half-size/quality 0. The application shows the embedded JPEG during full development instead of developing twice. LibRaw owns one job context and is limited to four OpenMP threads; Rust processing uses at most eight Rayon threads in the application. Loading and rendering never call LibRaw from the Rayon pool.
+RAW files are decoded by RAWmakase's own decoders (`crates/rawmakase-raw`, see [RAW decoding](raw-decoding.md)) and developed in `rawmakase-decode`'s `raw` module: each sample of the visible area becomes (raw − black) / (white − black) in floating point, with the decoder's per-channel black and black pattern, then is white balanced by the as-shot multipliers and demosaiced ([demosaicing](demosaic.md)); nothing is scaled to integers, so nothing saturates before the renderer, and values above one are kept. Half-size drafts are 2 × 2 blocks of the mosaic. Small RAWs (Canon sRAW and mRAW, Nikon's and Sony's) are converted to camera RGB by the decoder and develop without demosaicing, at full size in both modes. Only three-colour Bayer and X-Trans mosaics and those small RAWs develop; any other file fails with an error that names what it is. Orientation is handled by Rust exactly once. LibRaw, which developed photos before, is linked only as the oracle of the decoder-comparison commands until it is removed.
 
 ## White balance
 
@@ -40,14 +32,14 @@ The neutral picker samples a 5 × 5 region in camera space via the same inverse 
 Historical: pipeline version 1, no longer rendered.
 
 1. Cache demosaiced as-shot camera RGB (`CameraImage`, f32). Keep metadata, source orientation, default inset and development diagnostics with it.
-2. Apply relative WB. Use the LibRaw camera-to-linear-sRGB matrix, then a fixed linear-sRGB-to-Rec.2020 matrix. Exposure multiplies by `2^EV`. Negative matrix results and values above one survive this boundary.
+2. Apply relative WB. Use the decoder's camera-to-linear-sRGB matrix, then a fixed linear-sRGB-to-Rec.2020 matrix. Exposure multiplies by `2^EV`. Negative matrix results and values above one survive this boundary.
 3. Basic edge-aware luma/chroma averaging uses a 3 × 3 camera-space neighborhood at original-image scale. The implementation performs this before WB/color conversion. Fit previews omit it; full exports and 100% regions include it.
 4. Shadows/highlights/whites/blacks modify luminance with smooth range weights. Version 1 uses global mappings, not spatial/local contrast operators.
 5. A luminance-preserving `Y (2.2Y + 0.05) / (Y (2.2Y + 0.6) + 0.1)` tone mapper brings scene luminance into display range. Tone-mapped linear sRGB is transformed to Oklab for saturation, vibrance, smoothly overlapping hue bands and grading. Near the normalized sensor ceiling, chroma is reduced to suppress false clipped-channel colors. This is neutralization, not highlight reconstruction.
 6. Bring out-of-sRGB colors into sRGB ([out-of-gamut colors](#out-of-gamut-colors)). Apply the sRGB transfer function, then levels, contrast and an editable shape-preserving cubic master curve in encoded output space. Output is bounded to [0,1].
 7. Geometry uses one inverse map: camera default inset, metadata orientation plus quarter-turn, flips, straighten with an inscribed auto-fit, and normalized crop in the oriented/straightened canvas. Rendering samples through this map; global color operators remain shared between full frames and tiles.
 8. Resized exports first render the full edited image, then area-average output samples and apply output sharpening. Full-size exports and 100% region rendering apply identical 3 × 3 sharpening with matching boundary halos. The region/full-frame equivalence test includes denoise, sharpening and rotated geometry.
-9. Quantize to 8-bit JPEG or PNG, or 16-bit TIFF, at export. Embed an sRGB profile generated by Little CMS, plus camera make/model, orientation 1, ISO, exposure, aperture and focal length. Old thumbnails and maker-note offsets are not copied.
+9. Quantize to 8-bit JPEG or PNG, or 16-bit TIFF, at export. Embed RAWmakase's sRGB profile (`assets/srgb.icc`, the one exports have always carried, first written by Little CMS 2.19), plus camera make/model, orientation 1, ISO, exposure, aperture and focal length. Old thumbnails and maker-note offsets are not copied.
 
 The fit preview area-averages camera data to a maximum 1600-pixel edge before the shared color operations, trading exact spatial/nonlinear equivalence for responsive interaction. It omits detail processing. The histogram describes the whole photo, as that preview, also at 100%; clipping overlays describe what is shown: that preview or the visible 100% region. Fit and export can differ at fine edges; use 100% for detail decisions.
 
@@ -73,8 +65,30 @@ sets its color space. This works around wgpu-hal 30.0.1 leaving sRGB surfaces
 untagged ([upstream fix](https://github.com/gfx-rs/wgpu/pull/10286)). No additional
 gamma or pixel conversion is applied by this workaround.
 
-Optional monitor ICC conversion maps encoded sRGB bytes to device RGB through
-Little CMS with relative-colorimetric intent and black-point compensation.
+Optional monitor ICC conversion maps encoded sRGB bytes to device RGB
+(`color_management::display_transform`), relative colorimetric with black-point
+compensation, in pure Rust: profiles are read with moxcms; a matrix/TRC monitor
+profile is applied by its colorants and tone curves (inverted exactly, so a raised
+black stays right), a LUT-based one through moxcms's transform from sRGB, its
+perceptual tables standing in for colorimetric ones it lacks, as ICC asks.
+Black-point compensation scales XYZ per channel so sRGB's black lands on the
+monitor's (Adobe's published method); the monitor's black is its device black
+through the colorimetric transform, and none for a LUT profile with only
+perceptual tables (whose black is the reference medium's). A profile that cannot
+be read or used is an error and leaves the pixels as they were.
+
+Measured against Little CMS 2.19, which RAWmakase used before (relative
+colorimetric, black-point compensation, 8-bit), over the dense grid 0, 5 … 255 in
+each channel. The goal, agreement with its 8-bit result within one code value
+everywhere, is not met in full: matrix/TRC profiles (synthetic Display P3, Adobe RGB and a raised
+black, and this machine's four monitor profiles) agree within one code value
+everywhere, or within Little CMS's own rounding where its 8-bit result is more than
+one from its floating-point result. Synthetic LUT profiles with raised blacks miss
+that in 0.01–0.05% of the grid, saturated shadows where moxcms's resampling of the
+profile's table differs by up to 6.5 code values (Little CMS's own 8-bit result is up
+to 7 from its floating-point one there). `color_management`'s tests hold the
+committed fixtures (`crates/rawmakase-decode/tests/data/monitor`) to this; an
+ignored test runs the dense grid over a folder of profiles and Little CMS results.
 Choosing this manual override on macOS leaves the Metal surface unmanaged to
 avoid applying a second conversion; choosing Use sRGB restores system color
 management. Failure of the manual transform still shows the sRGB bytes with a
@@ -83,12 +97,12 @@ is selected, so that fallback is not matched to the display and can look
 oversaturated on wide-gamut monitors. Automatic monitor-profile discovery for
 manual conversion and HDR output are outside this release. Native tests check
 the actual Metal layer tag, surface reset/replacement and switching manual
-conversion on and off; the Little CMS test proves an sRGB-profile round trip
-within one byte. Visual matching with other applications still requires
+conversion on and off; a test proves an sRGB-profile round trip within one
+byte. Visual matching with other applications still requires
 validation on the chosen display.
 
 ## Invalidation and ownership
 
-WB/tone/color/crop changes reuse the as-shot development. A single replaceable pending render request coalesces slider activity; results carry generation IDs and obsolete results are discarded. Full-resolution loading is serialized and cancelable through LibRaw's progress callback. Thumbnails are limited to 32 neighbors. Export holds an immutable recipe and the active development; navigation waits for it to finish. No texture contains a full 24 MP image just to display a fit preview.
+WB/tone/color/crop changes reuse the as-shot development. A single replaceable pending render request coalesces slider activity; results carry generation IDs and obsolete results are discarded. Full-resolution loading is serialized and cancelable inside the decoders' loops. Thumbnails are limited to 32 neighbors. Export holds an immutable recipe and the active development; navigation waits for it to finish. No texture contains a full 24 MP image just to display a fit preview.
 
 Historical (pipeline 2): sidecars recorded schema 2 and pipeline 2. Version 1 curves load with their original linear interpolation; editing a curve switches it to smooth interpolation. Unknown versions and changed source identities are preserved and disable autosave for that photo. Legacy sidecars and presets migrate on save; their curve shape remains unchanged until edited.

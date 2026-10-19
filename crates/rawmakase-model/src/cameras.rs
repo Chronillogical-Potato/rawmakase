@@ -69,11 +69,17 @@ pub struct Camera {
     /// (Sony's 50, 64 and 80 under 100): Camera Raw takes a stop off there.
     #[serde(default)]
     pub lowest_iso: Option<f32>,
-    /// Canon only: the baseline of the body's sRAW and mRAW, which LibRaw converts on
-    /// a scale of its own: Adobe's sRAW BaselineExposure plus
-    /// log2(16383 / (1.303 × Adobe's sRAW white level)).
+    /// Canon only: the baseline of the body's sRAW and mRAW, Adobe's small RAW
+    /// BaselineExposure, which differs from the body's.
     #[serde(default)]
     pub sraw_baseline_exposure: Option<f32>,
+    /// The black and white level of the sample `baseline_exposure` was read
+    /// from, as Adobe wrote them, and its samples' maximum: a body whose white
+    /// Adobe takes by ISO speed (Canon) moves its BaselineExposure with the
+    /// white, so a photo of other levels gets the difference
+    /// (`camera_profiles::reference`).
+    #[serde(default)]
+    pub levels: Option<[f32; 3]>,
     pub source: Source,
     /// When the values were checked (YYYY-MM-DD) and on what.
     pub checked: String,
@@ -214,6 +220,9 @@ pub struct Baseline {
     /// The baseline of a small raw (sRAW, mRAW): the row's, else the median of the
     /// make's, else `ev`.
     pub sraw_ev: f32,
+    /// The black, white and samples' maximum `ev` holds at, for a row that
+    /// says them.
+    pub levels: Option<[f32; 3]>,
 }
 
 /// Camera Raw's baseline exposure for a camera. A camera without a row takes the
@@ -264,6 +273,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
                 .sraw_baseline_exposure
                 .or(sraw_median)
                 .unwrap_or(c.baseline_exposure),
+            levels: c.levels,
         };
     }
     if let Some(ev) = median(same_make().map(|c| c.baseline_exposure)) {
@@ -274,6 +284,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
             dr100_shift: None,
             lowest_iso: None,
             sraw_ev: sraw_median.unwrap_or(ev),
+            levels: None,
         };
     }
     let ev = median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.);
@@ -284,6 +295,7 @@ fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
         dr100_shift: None,
         lowest_iso: None,
         sraw_ev: ev,
+        levels: None,
     }
 }
 
@@ -392,6 +404,7 @@ mod tests {
             fujifilm_dr100_shift: None,
             lowest_iso: None,
             sraw_baseline_exposure: None,
+            levels: None,
             source: Source::Fitted,
             checked: "2026-10-05".into(),
             sample: "test".into(),

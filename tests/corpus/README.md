@@ -35,7 +35,7 @@ Mosaic charts are used because RAWmakase rejects three-channel `LinearRaw` DNGs.
 `cargo test --test color` runs in CI and takes seconds:
 
 - `charts_match_their_generator`: the committed charts are exactly what the generator writes.
-- `charts_decode_to_their_camera_values`: LibRaw returns the patch values that were written.
+- `charts_decode_to_their_camera_values`: the decoder returns the patch values that were written.
 - `colors_match_snapshots`: every chart and case against the snapshots. Fails on any patch moving more than ΔE00 0.5, or a case's mean moving more than 0.1, and names the patches with their lightness, chroma and hue change.
 - `exports_match_the_render`: 16-bit TIFF and JPEG exports carry the render's colors.
 - `preview_size_matches_full_size`: a downscaled render keeps the colors of the full render.
@@ -109,7 +109,9 @@ A classified copy of the whole raw.pixls.us archive, for choosing test photos by
 
 ### Decode fingerprints
 
-`rawmakase fingerprint <files…>` prints one JSON line per file with what opening and unpacking it yields, read as development reads it: the file's SHA-256, the step that failed and its error, or make and model, visible and raw size, the visible area's origin, crop, orientation, as-shot and daylight white balance, camera matrix, black levels per channel and their pattern, white levels, CFA pattern (`g` is LibRaw's second green) and a SHA-256 of the unpacked raw data in the visible area (LibRaw leaves the borders of some files unwritten). Nothing is demosaiced, so the values are LibRaw's and RAWmakase's opening code's alone.
+`rawmakase fingerprint <files…>` prints one JSON line per file (format version 2) with what opening and unpacking it yields, read as development reads it: the file's SHA-256, the step that failed and its error, and three sections. `header` is what opening says before any sensor data is read: the decoder's own facts (the visible area's margins, its default and aspect-ratio crops in raw coordinates, the canonical make and model, the DNG version) and the photo's `Metadata` after `photo::open`, every field as it is saved (sizes, crops, orientation, white balance and presets, matrices, exposure, lens, Highlight Tone Priority, Fujifilm facts, small-RAW flag, Adobe names). `preview` is the embedded JPEG thumbnails use (size and SHA-256), or why there is none. `sensor` is what unpacking yields: the hashed area's origin and size, black levels per channel and their pattern, white levels, CFA pattern (`g` is the second green) and a SHA-256 of the unpacked raw data in the visible area (not the borders). Nothing is demosaiced, so the values are the decoder's and RAWmakase's opening code's alone.
+
+`rawmakase decode-dump <files…>` prints, per file, what each decode mode makes of it as the renderer receives it, with no decode cache: for the full and the half-size decode, the size, scale factor and integer-clipped count, a SHA-256 of the pixels (f32) and of the image's metadata, and per-channel means; `--floats <dir>` also writes each full decode that is not a mosaic (small RAWs, converted from YCbCr in floating point) as raw floats. `scripts/corpus/dataset-develop.py` records and checks these for the whole dataset as `dataset-fingerprints.py` does below (baselines in `$RAWMAKASE_DATASET/baselines/develop/`, local only, as the hashes depend on the platform's floating point). What the half-size drafts are is checked by `rawmakase half-check` and `scripts/corpus/dataset-half.py`: each half-size decode against the same build's full decode reduced to its size (blocks of 16 half-size pixels, CIEDE2000 mean and 95th percentile; luminance Laplacian energy ratio) and its half-size time against its full develop time (fastest of three runs each, in the same check), all held to the file's reference: colour at most 0.1 above it, the detail ratio's distance from 1 at most 0.1 above its, the time at most 1.1 × its half ÷ full ratio × the full time + 20 ms. The references were recorded once with the last build that linked LibRaw (`dataset/pixls-half.json` for the CC0 files, `$RAWMAKASE_DATASET/baselines/half/` for the others): LibRaw's ratio, and LibRaw's half judged with RAWmakase's matrix, or RAWmakase's own measures where LibRaw's half is not a draft of the same samples (`measured`, `why`). Files without one are held to absolute limits (colour mean 0.3, p95 1, detail 0.8 to 1.25, time ratio 1); X-Trans files and small RAWs take a time ratio of 1. One file at a time, by default three files per make and format (`--per-group 0` for every file); it exits 1 when a file fails a gate.
 
 `scripts/corpus/dataset-fingerprints.py` runs it on every file of the dataset (2,944 files, 56 GB: about 4½ minutes from the USB SSD on an M1 Pro) and compares the result with the baselines:
 
@@ -123,9 +125,9 @@ python3 scripts/corpus/dataset-fingerprints.py record --reason "…"   # write t
 
 The report lists files that start or stop opening and every changed field, grouped by make and format, and fails on files missing from the dataset, files whose bytes changed, files without a baseline and batches that crashed (whose files are then run one by one, so a crash is pinned to its file). `--public` names only raw.pixls.us CC0 files and counts the rest; `--report` writes the report as JSON.
 
-- **Baselines:** the raw.pixls.us CC0 files' are committed in `dataset/pixls-decode.json`; every other file's stay in `$RAWMAKASE_DATASET/baselines/decode/<source>.json` on the dataset's machine. Record a baseline only in a commit that says why it changed, never just to make the check pass.
-- **When:** on every LibRaw update (`packaging/native-deps.sh`), and before releases.
-- **Same build, same machine:** a baseline records the LibRaw version, the commit `native-deps.sh` pins, the platform and the RAWmakase commit, and `check` notes when they differ. LibRaw decodes some formats with floating-point steps, and white balance is computed in floating point, so compare builds linked against `native-deps.sh`'s LibRaw on the platform that recorded the baseline (macOS arm64).
+- **Baselines:** the raw.pixls.us CC0 files' are committed in `dataset/pixls-decode.json`; every other file's stay in `$RAWMAKASE_DATASET/baselines/decode/<source>.json` on the dataset's machine. They are RAWmakase's own decoders' since LibRaw was removed (recorded once at that commit; how they depart from LibRaw is in [RAW decoding](../../docs/raw-decoding.md#departures-from-libraw)). A difference is either a regression to fix or a change made on purpose; record a baseline only in a commit that says why it changed, never just to make the check pass.
+- **When:** on every change to the RAW decoders (`crates/rawmakase-raw`, the `raw` adapter, `data/raw-*.toml`), and before releases.
+- **Same build, same machine:** a baseline records the decoder version, the platform and the RAWmakase commit, and `check` notes when they differ. White balance is computed in floating point, so compare on the platform that recorded the baseline (macOS arm64).
 
 ### Render snapshots
 
@@ -181,7 +183,7 @@ Synthetic gate regressions run in CI without RAWs or Photoshop:
 
 ### Testing a rendering-engine change
 
-On the machine with the dataset, from the branch's checkout, built against `packaging/native-deps.sh`'s LibRaw (`PKG_CONFIG_PATH=<its prefix>/lib/pkgconfig cargo build --release`; `otool -L target/release/rawmakase` names that prefix, not Homebrew's LibRaw):
+On the machine with the dataset, from the branch's checkout, built with `cargo build --release`:
 
 | Step | Command | Time | Expect |
 |---|---|---|---|

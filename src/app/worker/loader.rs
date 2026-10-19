@@ -287,7 +287,7 @@ fn opener(
             let full_size = FullSize::with_cache(&path, job.demosaic, cache.clone());
             if let Some(image) = full_size.cached(&raw.metadata) {
                 // Closed before the photo is ready: Windows refuses to rename or
-                // replace a file LibRaw still has open.
+                // replace a file that is still open.
                 drop(raw);
                 send(
                     &tx,

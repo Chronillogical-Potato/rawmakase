@@ -4,8 +4,8 @@
 Runs `rawmakase fingerprint` on the dataset's RAW files and compares what
 opening and unpacking each one yields (whether it opens, sizes, crop,
 orientation, levels, CFA, white balance, matrix and a checksum of the unpacked
-data) with a recorded baseline. Run it on every LibRaw update and before
-releases.
+data) with a recorded baseline. Run it on every change to the RAW decoders and
+before releases.
 
   check    fingerprint the files and report every difference from the baselines,
            grouped by make and format; exits 1 when anything changed
@@ -23,7 +23,7 @@ fingerprinted; --manifest takes the files of a `dataset.py manifest` output.
 Run from the repository root with a release build (--rawmakase):
 
   python3 scripts/corpus/dataset-fingerprints.py check
-  python3 scripts/corpus/dataset-fingerprints.py record --reason "LibRaw 0.23"
+  python3 scripts/corpus/dataset-fingerprints.py record --reason "Nikon HE decoder"
 
 Exit status: 0 no difference, 1 differences, 2 the run could not be made
 (no dataset, no baseline, files missing).
@@ -34,7 +34,6 @@ import datetime
 import json
 import os
 import platform
-import re
 import sqlite3
 import subprocess
 import sys
@@ -45,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COMMITTED = ROOT / 'tests/corpus/dataset/pixls-decode.json'
 PUBLIC_LICENSE = 'CC0-1.0'
 # Facts about the run rather than the file, kept out of the comparison.
-NOT_COMPARED = {'path', 'libraw'}
+NOT_COMPARED = {'path', 'libraw', 'decoder'}
 BATCH = 32
 # A file takes seconds; a batch that runs this long has hung.
 BATCH_TIMEOUT = 900
@@ -104,8 +103,9 @@ def load_samples(dataset, manifest):
 def run(rawmakase, files, timeout):
     """One JSON object per file, in order; None when the process failed or its
     output does not match the files."""
+    command = [str(rawmakase), 'fingerprint', *map(str, files)]
     try:
-        p = subprocess.run([str(rawmakase), 'fingerprint', *map(str, files)], capture_output=True,
+        p = subprocess.run(command, capture_output=True,
                            text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, f'timed out after {timeout} s'
@@ -188,13 +188,9 @@ def recorded_by(results, reason):
     commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     dirty = subprocess.run(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=ROOT,
                            capture_output=True, text=True).stdout.strip()
-    libraw = sorted({r.get('libraw') for r in results.values() if r.get('libraw')})
-    # LibRaw's version string does not name a master commit; this is the one
-    # packaging/native-deps.sh builds, which the build is expected to link.
-    pinned = re.search(r'^libraw=(\w+)', (ROOT / 'packaging/native-deps.sh').read_text(), re.M)
+    decoder = sorted({r.get('decoder') for r in results.values() if r.get('decoder')})
     return {'reason': reason, 'date': datetime.date.today().isoformat(),
-            'rawmakase': commit + ('-dirty' if dirty else ''), 'libraw': ', '.join(libraw),
-            'libraw_pinned': pinned[1] if pinned else None,
+            'rawmakase': commit + ('-dirty' if dirty else ''), 'decoder': ', '.join(decoder),
             'platform': f'{platform.system()} {platform.machine()}'}
 
 
@@ -211,9 +207,23 @@ def record(args, samples, results):
         print(f'{len(files)} files recorded in {path} ({len(merged)} in all)')
 
 
+def flatten(fingerprint, prefix=''):
+    """A fingerprint's fields by dotted name (`header.metadata.wb`); lists are values."""
+    out = {}
+    for k, v in fingerprint.items():
+        if not prefix and k in NOT_COMPARED:
+            continue
+        if isinstance(v, dict):
+            out.update(flatten(v, f'{prefix}{k}.'))
+        else:
+            out[prefix + k] = v
+    return out
+
+
 def compare(old, new):
     """The changed fields: name, before, after."""
-    keys = sorted((old.keys() | new.keys()) - NOT_COMPARED)
+    old, new = flatten(old), flatten(new)
+    keys = sorted(old.keys() | new.keys())
     return [(k, old.get(k), new.get(k)) for k in keys if old.get(k) != new.get(k)]
 
 
@@ -230,7 +240,7 @@ def check(args, samples, results, problems):
             raise Setup(f'No baseline at {path}: record one with `record --reason …`')
         baselines[path] = loaded[1]
         here = recorded_by(results, None)
-        for key in ('libraw', 'libraw_pinned', 'platform'):
+        for key in ('decoder', 'platform'):
             if loaded[0].get(key) != here[key]:
                 notes.append(f'{path.name} was recorded with {key} {loaded[0].get(key)}; this run has {here[key]}')
     # Every change, by (make, format): (kind, sample, detail).

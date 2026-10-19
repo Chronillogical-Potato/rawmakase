@@ -5,7 +5,6 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
-use crate::camera_data::Demosaic;
 use crate::catalog::CatalogLocation;
 use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
@@ -351,7 +350,7 @@ impl Editor {
             ui.add_space(8.);
             self.update_status(ui);
         });
-        form_row(ui, "LibRaw", |ui| {
+        form_row(ui, "RAW decoder", |ui| {
             value(ui, &crate::raw::version());
         });
         form_row(ui, "Updates", |ui| self.automatic_updates_checkbox(ui));
@@ -673,47 +672,6 @@ impl Editor {
     }
 
     fn performance_page(&mut self, ui: &mut egui::Ui) {
-        group(ui, "Demosaic");
-        let current = self.demosaic.effective();
-        let mut picked = None;
-        for (choice, label, note) in [
-            (
-                Demosaic::Rawmakase,
-                "RAWmakase",
-                "Faster, with equal or better detail.",
-            ),
-            (
-                Demosaic::Libraw,
-                "LibRaw",
-                "AHD for Bayer sensors, Markesteijn for X-Trans.",
-            ),
-        ] {
-            form_row(
-                ui,
-                if choice == Demosaic::Rawmakase {
-                    "Engine"
-                } else {
-                    ""
-                },
-                |ui| {
-                    if ui.radio(current == choice, label).clicked() && current != choice {
-                        picked = Some(choice);
-                    }
-                    hint(ui, note);
-                },
-            );
-        }
-        if let Some(choice) = picked {
-            self.demosaic = choice;
-            let _ = self.save_session();
-            // Takes effect on the next full-size decode, so the open photo is
-            // reopened.
-            if let Some(path) = self.document.path.clone() {
-                let photo = self.document.catalog_photo;
-                self.open_raw(path, photo);
-            }
-        }
-        gap(ui);
         group(ui, "Decoded photo cache");
         let (entries, size) = self.preferences.usage.decode_cache;
         let dir = decode_cache_dir();

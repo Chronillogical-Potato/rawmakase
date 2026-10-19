@@ -52,8 +52,9 @@ const THUMBNAIL_EDGE: u32 = 640;
 
 /// What a stored preview's pixels depend on that is known without opening the
 /// photo: its saved edit, else its Lightroom edit, else the raw defaults and the
-/// release that resolves them; and the demosaic. The build and Develop's lookup
-/// both name rows by it. Whether the file changed is the row's `Stamp`'s to say.
+/// release that resolves them; the demosaic and the RAW decoder
+/// (`raw::developed`). The build and Develop's lookup both name rows by it.
+/// Whether the file changed is the row's `Stamp`'s to say.
 pub(super) fn identity(
     record: &EditRecord,
     defaults: &DevelopDefaults,
@@ -68,7 +69,8 @@ pub(super) fn identity(
         format!("{defaults:?}").hash(&mut h);
         rawmakase_export::build_info::SOFTWARE.hash(&mut h);
     }
-    format!("{:?}", demosaic.effective()).hash(&mut h);
+    format!("{:?}", demosaic).hash(&mut h);
+    crate::raw::developed().hash(&mut h);
     format!("{:016x}", h.finish())
 }
 
@@ -809,7 +811,7 @@ impl Editor {
                 record: record.edit,
                 path,
                 defaults: self.raw_defaults.clone(),
-                demosaic: self.demosaic.effective(),
+                demosaic: self.demosaic,
                 kind,
                 edge,
             });

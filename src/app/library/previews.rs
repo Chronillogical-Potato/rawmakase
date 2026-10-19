@@ -115,7 +115,8 @@ impl EditSource {
             None => Recipe::with_profiles(m, &profiles),
         })
     }
-    /// Identifies this edit in the preview cache.
+    /// Identifies this edit, developed by this build's RAW decoder
+    /// (`raw::developed`), in the preview cache.
     pub(crate) fn tag(&self) -> String {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -124,6 +125,7 @@ impl EditSource {
             Self::Lightroom(text) => ("lightroom", text).hash(&mut h),
             Self::Defaults(defaults) => ("defaults", format!("{defaults:?}")).hash(&mut h),
         }
+        crate::raw::developed().hash(&mut h);
         format!("edit-{:016x}", h.finish())
     }
 }

@@ -272,12 +272,12 @@ by the full-resolution local-tone blurs on the CPU (see the next section).
 
 The render worker used to read every GPU result back with a blocking wait, sharpen
 and apply grain and vignettes on the CPU, convert to 8 bits, apply the monitor
-profile with a new lcms transform, draw the clipping overlay and compute the
+profile with a new colour transform, draw the clipping overlay and compute the
 histogram; the UI thread then built an egui image, reduced it for the Navigator and
 uploaded it again. The GPU stage now runs on eframe's own wgpu device, and
 `gpu/present.wgsl` finishes the developed pixels on the device into a texture the
 viewport draws: sharpening, vignettes and grain, the clipping overlay, the monitor
-profile (a lattice sampled from lcms once per profile) and 8-bit encoding, with the
+profile (a lattice sampled once per profile) and 8-bit encoding, with the
 histogram counted in the same pass and the Navigator copy reduced on the GPU. Only
 the histogram (3 KB) and, for catalog photos, the library thumbnail come back.
 When the GPU does not render a recipe, the worker prepares the display bytes,
@@ -413,7 +413,7 @@ Clarity drags.
 ## Decode cache and prefetch
 
 Opening a photo stores the developed camera image, exactly as decoded, in a disk
-cache (`crates/rawmakase-native/src/decode_cache.rs`), together with the pixels highlight recovery changed
+cache (`crates/rawmakase-decode/src/decode_cache.rs`), together with the pixels highlight recovery changed
 (0.7% of pixels on DSCF7853, 46 pixels on the A7CR file), so the recovered image is
 restored without recomputing it. The loader recovers highlights itself before
 announcing the full image, which the first render would otherwise do. A later open
@@ -447,6 +447,14 @@ machine:
 Through the real loader, in a folder of three X100F photos: the first open showed
 the half-size image at 166 ms and the full image at 884 ms; reopening it showed the
 full image at 140 ms, and the two prefetched neighbours opened in 190 and 300 ms.
+
+## Decoder speed — 2026-10-18
+
+RAWmakase's own decoders against LibRaw, measured at the switch to them on 45
+dataset files (three per format), the median of RAWmakase's time over LibRaw's:
+0.79 to open and decode, 0.80 to open and develop at full and half size. No
+format is slower beyond noise; the largest gains are compressed RAF (0.25),
+IIQ and 3FR (0.45) and PEF (0.53).
 
 ## Stored Standard previews — 2026-10-08
 
@@ -542,7 +550,7 @@ crops, regions, spatial effects, cancellation and fallback. The neutral-color CP
 fast path is also checked against its general processing path.
 
 Full-quality rendering still takes seconds on this photograph. The GPU work does
-not accelerate LibRaw decoding or the complete color pipeline. High-resolution
+not accelerate RAW decoding or the complete color pipeline. High-resolution
 color processing, local effects and memory transfers remain targets for future
 profiling. Cancellation now interrupts recovery, local-tone and sharpening CPU
 work; an already-submitted GPU command must finish, after which a stale result is

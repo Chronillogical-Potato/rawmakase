@@ -7,7 +7,7 @@ from the list, so no new dependency appears unnoticed, and on a listed edge the
 code no longer has, so a removed dependency cannot quietly come back. It also
 fails on a cycle, and on a module reaching, through any chain, one that
 `scripts/deps-closures.txt` says it never may (the edit's values never reach
-LibRaw or the renderer). The target layering is in docs/architecture.md.
+the RAW decoders or the renderer). The target layering is in docs/architecture.md.
 
     python3 scripts/deps.py check    # what CI runs
     python3 scripts/deps.py report   # every edge with its sites, and the cycles

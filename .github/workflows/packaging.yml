@@ -55,7 +55,7 @@ jobs:
         run: |
           GOBIN="$RUNNER_TEMP/tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11
           "$RUNNER_TEMP/tools/actionlint"
-          shellcheck packaging/*.sh packaging/macos/*.sh packaging/linux/*.sh
+          shellcheck packaging/macos/*.sh packaging/linux/*.sh
           ruby -c packaging/macos/dmg.rb
           ruby -c packaging/macos/signing-diagnostics.rb
           python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
@@ -125,16 +125,8 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-      # The same vcpkg cache as the CI job (see ci.yml).
-      - id: image
-        shell: bash
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ hashFiles('packaging/windows/deps.ps1', 'packaging/windows/vcpkg-ports/**') }}
-      - name: LibRaw and Little CMS
-        run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
+      - name: Build tools
+        run: packaging/windows/toolchain.ps1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -142,7 +134,7 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           cargo build --release --locked
-          packaging/windows/stage.ps1 target\release\rawmakase.exe "$env:RUNNER_TEMP\deps" dist\windows
+          packaging/windows/stage.ps1 target\release\rawmakase.exe dist\windows
       - uses: ruby/setup-ruby@651ff0d62c5c79bed6d53ec518387aae20e72c1a # v1
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -238,7 +230,7 @@ jobs:
           if [[ -n "$RELEASE_VERSION" ]]; then
             # The host libraries the binary links; Vulkan and the window system load later.
             sudo apt-get update
-            sudo apt-get install -y libgomp1 zlib1g
+            sudo apt-get install -y zlib1g
             run=(--run)
           fi
           bash packaging/linux/verify-appimage.sh "native-packages/packages/$TARGET/appimage/rawmakase-$version-$ARCH.AppImage" "$version" "${run[@]}"

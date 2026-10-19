@@ -3338,12 +3338,12 @@ dependencies = [
  "pollster 1.0.1",
  "rawmakase-catalog",
  "rawmakase-ctl",
+ "rawmakase-decode",
  "rawmakase-engine",
  "rawmakase-export",
  "rawmakase-inference",
  "rawmakase-interop",
  "rawmakase-model",
- "rawmakase-native",
  "rawmakase-protocol",
  "rawmakase-remote",
  "rayon",
@@ -3396,6 +3396,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rawmakase-decode"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "image",
+ "libc",
+ "moxcms",
+ "rawmakase-engine",
+ "rawmakase-interop",
+ "rawmakase-model",
+ "rawmakase-raw",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rawmakase-engine"
 version = "0.1.0"
 dependencies = [
@@ -3422,10 +3443,10 @@ dependencies = [
  "memmap2",
  "png 0.18.1",
  "rawmakase-catalog",
+ "rawmakase-decode",
  "rawmakase-engine",
  "rawmakase-interop",
  "rawmakase-model",
- "rawmakase-native",
  "roxmltree 0.21.1",
  "serde",
  "serde_json",
@@ -3464,6 +3485,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "rawmakase-protocol",
+ "rawmakase-tiff",
  "rayon",
  "roxmltree 0.21.1",
  "serde",
@@ -3475,31 +3497,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "rawmakase-native"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cc",
- "image",
- "moxcms",
- "pkg-config",
- "rawmakase-engine",
- "rawmakase-interop",
- "rawmakase-model",
- "rayon",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
 name = "rawmakase-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "rawmakase-raw"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.9.1",
+ "rawmakase-tiff",
+ "rayon",
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -3512,6 +3525,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "rawmakase-tiff"
+version = "0.1.0"
 
 [[package]]
 name = "rawpointer"

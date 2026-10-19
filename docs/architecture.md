@@ -3,14 +3,15 @@
 RAWmakase is the app crate with explicit domain modules, on top of
 `crates/rawmakase-model`: what an edit is, as values (the recipe and its settings,
 camera and lens profiles, colour primitives, DNG hints, output buffers, storage helpers), which
-Cargo builds without LibRaw, the renderer, wgpu or the GUI, and
+Cargo builds without the RAW decoders, the renderer, wgpu or the GUI, and
 `crates/rawmakase-interop`: the file formats and presets over it (XMP, Lightroom's
 Develop settings, presets, raw defaults, EXIF and JPEG, export settings),
 built the same way, and `crates/rawmakase-catalog`: the SQLite catalog, Lightroom
 catalog import and which edit a photo develops with. Above the model,
 `crates/rawmakase-engine` is the renderer (`develop`, CPU and the GPU preview port),
-built without LibRaw, the catalog or the GUI; `crates/rawmakase-native` is the only
-crate that compiles and links LibRaw and Little CMS (`raw`, `demosaic`, `photo`,
+built without the RAW decoders, the catalog or the GUI; `crates/rawmakase-decode` is the only
+crate that reaches RAWmakase's own RAW decoders (`crates/rawmakase-raw`) and does
+colour management (`raw`, `demosaic`, `photo`,
 and the full-size decode in `decode` and `decode_cache`, which uses the engine's
 highlight recovery); `crates/rawmakase-export` develops and writes exports with
 their watermarks over both; `crates/rawmakase-inference` is the one leaf that runs
@@ -35,11 +36,12 @@ files should preserve.
 | Module | Owns | Main extension points |
 | --- | --- | --- |
 | `camera_data` | A RAW's metadata, the demosaic and decode choices and the decoded camera-space image, as values with no native code | `camera_data.rs` |
-| `raw` | LibRaw/Little CMS boundary: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails | RAW decoding and native color management |
-| `photo` | Opening a photo: `open_source` is the one entry point, sending a RAW to LibRaw and a JPEG, PNG or TIFF to `raster`; a RAW's LibRaw facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
+| `raw` | RAW files: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails, with RAWmakase's own decoders (`crates/rawmakase-raw`, see [RAW decoding](raw-decoding.md)) | RAW decoding |
+| `color_management` | The sRGB profile exports embed and the transform of 8-bit sRGB to a monitor profile, in pure Rust (moxcms reads the profiles) | `color_management.rs` |
+| `photo` | Opening a photo: `open_source` is the one entry point, sending a RAW to `raw` and a JPEG, PNG or TIFF to `raster`; a RAW's decoder facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
 | `raster` | Opening a JPEG, PNG or TIFF: decoded upright and converted from its embedded ICC profile to 8-bit sRGB for previews, or to linear ProPhoto f32 for Develop (pure Rust, `moxcms`) | `raster.rs` |
 | `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
-| `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
+| `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them (`crates/rawmakase-tiff`, a leaf crate with no RAW knowledge, re-exported as `model::tiff`) | `dng.rs`, `rawmakase-tiff/src/lib.rs` |
 | `decode` | A photo's full-size image, made one way for Develop, prefetch, Reference View and export: the cache's copy, else a decode with highlights recovered and stored, as a `DecodePolicy` asks | `decode.rs` |
 | `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build; the app shares one live size policy across Develop, prefetch and Reference View, persisted in its session | `decode_cache.rs` |
 | `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
@@ -125,13 +127,15 @@ inject a temporary file, without changing the process-wide environment.
   fails on a new one or on a cycle; add a line only when the new dependency
   points down the intended layering. `scripts/deps-closures.txt` lists what some
   modules must never reach, even through others: the edit session never reaches
-  LibRaw, the renderer or the app, and the renderer never reaches the app or
+  the RAW decoders, the renderer or the app, and the renderer never reaches the app or
   export. The check prints the chain that breaks a rule.
 - The model, file formats, catalog and control protocol are crates, so Cargo
   rules out a dependency back on the app. `scripts/crate-closures.sh` (CI and
   `make check`) fails when one of them gains the app, a GPU or GUI crate, or a
-  LibRaw or Little CMS binding; CI also builds and tests them on a machine
-  without LibRaw or Little CMS. The catalog's bundled SQLite is intended.
+  C RAW library or Little CMS binding, and when any workspace crate depends on
+  one or a build script links one (`rawmakase-decode` has no build script). The
+  whole workspace is Rust apart from the catalog's bundled SQLite, which is
+  intended.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate
@@ -267,7 +271,7 @@ same settings asks for it and read after its pass is submitted.
 When the GPU renders a preview, the developed pixels stay on the device and
 `gpu/present.wgsl` finishes them into a texture that egui draws directly (registered
 as a native texture by the render worker): sharpening, vignettes and grain, the
-clipping overlay, the monitor profile (a 52³ lattice sampled from lcms once per
+clipping overlay, the monitor profile (a 52³ lattice sampled from `color_management` once per
 profile, interpolated trilinearly) and 8-bit encoding, in the CPU reference's order.
 The histogram is counted in the same pass and the Navigator copy is reduced on the
 GPU; only the histogram (3 KB) and, for catalog photos, a 640-pixel library

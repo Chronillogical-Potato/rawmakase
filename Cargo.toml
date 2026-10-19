@@ -10,7 +10,7 @@ repository = "https://github.com/pch/rawmakase"
 # The control protocol and its command-line client build on their own, without
 # the app's GUI, GPU or native libraries.
 [workspace]
-members = ["crates/rawmakase-catalog", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-native", "crates/rawmakase-protocol", "crates/rawmakase-remote", "tools/rawmakase-ctl"]
+members = ["crates/rawmakase-catalog", "crates/rawmakase-decode", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-protocol", "crates/rawmakase-raw", "crates/rawmakase-remote", "crates/rawmakase-tiff", "tools/rawmakase-ctl"]
 
 [workspace.dependencies]
 # The rendered formats the app reads and writes (`storage::RasterFormat`): one
@@ -19,12 +19,12 @@ image = { version = "0.25.10", default-features = false, features = ["jpeg", "pn
 
 [dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0" }
+rawmakase-decode = { path = "crates/rawmakase-decode", version = "0.1.0" }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0" }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0" }
 rawmakase-inference = { path = "crates/rawmakase-inference", version = "0.1.0" }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0" }
-rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0" }
 rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
 # The optional remote selection worker's client, and the worker binary itself.
 rawmakase-remote = { path = "crates/rawmakase-remote", version = "0.1.0" }
@@ -110,11 +110,11 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 # The model's fixtures, for the app's tests.
 [dev-dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0", features = ["test-support"] }
+rawmakase-decode = { path = "crates/rawmakase-decode", version = "0.1.0", features = ["test-support"] }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0", features = ["test-support"] }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0", features = ["test-support"] }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0", features = ["test-support"] }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["test-support"] }
-rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0", features = ["test-support"] }
 # Tests set up and inspect catalog files directly; the app itself reaches
 # the catalog's database only through rawmakase-catalog.
 rusqlite = { version = "0.40.2", features = ["bundled"] }

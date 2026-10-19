@@ -507,7 +507,6 @@ impl Library {
         // The file and the demosaic too: a RAW replaced in place, or decoded another
         // way, is developed again.
         let file = crate::storage::Stamp::read(&photo.path).ok();
-        let demosaic = demosaic.effective();
         Some(Ok(DevelopSource {
             path: photo.path.clone(),
             tag: format!("{}-{file:?}-{demosaic:?}", edit.tag()),

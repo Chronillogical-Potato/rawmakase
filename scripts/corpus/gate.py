@@ -397,10 +397,9 @@ def render_env(args, out):
         raise ValueError('Pass --data-dir (or set RAWMAKASE_DATA_DIR): the library with the Adobe profiles')
     library = Path(env['RAWMAKASE_DATA_DIR']) / 'camera-profiles'
     # Nothing else decides how a render is made: no profiles or other assets from
-    # the user's data folder ($XDG_DATA_HOME/rawmakase), and the default demosaic.
+    # the user's data folder ($XDG_DATA_HOME/rawmakase).
     (out / 'empty-data-home').mkdir(parents=True, exist_ok=True)
     env['XDG_DATA_HOME'] = str(out / 'empty-data-home')
-    env.pop('RAWMAKASE_LIBRAW_DEMOSAIC', None)
     return env, library
 
 

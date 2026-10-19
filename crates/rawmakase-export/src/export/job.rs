@@ -125,7 +125,7 @@ pub fn prepare(
     cancelled()?;
     progress(0.85);
     let file = file.filter(|_| policy.reads_file());
-    // LibRaw's capture settings stand in for EXIF that could not be read.
+    // The decoder's capture settings stand in for EXIF that could not be read.
     let libraw = file
         .is_none()
         .then(|| exif::CameraExif::from_libraw(&image.metadata));

@@ -148,7 +148,8 @@ pub fn copyright(values: &Values, file: Option<&CameraExif>) -> Option<String> {
 }
 
 /// Decides every tag of an export. `file` is the source's EXIF when it could
-/// be read; `libraw` stands in for the camera info when it could not.
+/// be read; `libraw`, the decoder's capture settings, stands in for the camera
+/// info when it could not.
 pub fn assemble(
     policy: Policy,
     file: Option<&CameraExif>,

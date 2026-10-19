@@ -165,7 +165,7 @@ impl CameraExif {
             .and_then(Field::text)
             .filter(|s| !s.is_empty())
     }
-    /// Capture settings LibRaw reports, for a RAW whose EXIF could not be read.
+    /// Capture settings the RAW decoder reports, for a RAW whose EXIF could not be read.
     pub fn from_libraw(m: &crate::camera_data::Metadata) -> Self {
         let rational =
             |tag, v: f32| Field::rational(tag, (v.max(0.) * 1_000_000.).round() as u32, 1_000_000);

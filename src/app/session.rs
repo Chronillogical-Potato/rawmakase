@@ -151,6 +151,35 @@ mod raw_defaults_tests {
     use super::Session;
     use crate::raw_defaults::{DefaultChoice, RawDefaults};
 
+    /// A session saved while RAWmakase offered LibRaw's demosaic reads as
+    /// RAWmakase's, and keeps every other preference: an unreadable session
+    /// would reset them all.
+    #[test]
+    fn a_session_that_chose_libraws_demosaic_keeps_its_preferences() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        std::fs::write(
+            &path,
+            r#"{"last_path":"/photos/a.ARW","monitor":null,"demosaic":"Libraw",
+                "onboarding_done":true,"auto_advance":true,"theme":"nord.toml",
+                "skipped_version":"1.2.3","decoded_cache_size_gib":16}"#,
+        )
+        .unwrap();
+        let session: Session = crate::storage::read_json_or_default(&path);
+        assert_eq!(session.demosaic, crate::camera_data::Demosaic::Rawmakase);
+        assert_eq!(
+            session.last_path.as_deref(),
+            Some(std::path::Path::new("/photos/a.ARW"))
+        );
+        assert!(session.onboarding_done && session.auto_advance);
+        assert_eq!(session.theme.as_deref(), Some("nord.toml"));
+        assert_eq!(session.skipped_version.as_deref(), Some("1.2.3"));
+        assert_eq!(session.decoded_cache_size_gib(), 16);
+        // Saved again, it is RAWmakase's.
+        let saved = serde_json::to_value(&session).unwrap();
+        assert_eq!(saved["demosaic"], "Rawmakase");
+    }
+
     #[test]
     fn decoded_cache_size_round_trips_and_old_or_invalid_sizes_use_default() {
         let old: Session = serde_json::from_str(r#"{"last_path":null,"monitor":null}"#).unwrap();

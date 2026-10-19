@@ -3,7 +3,7 @@ name = "rawmakase-engine"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "RAWmakase's renderer: developing a decoded image with a recipe on the CPU, and the GPU preview port, without LibRaw, the catalog or the GUI"
+description = "RAWmakase's renderer: developing a decoded image with a recipe on the CPU, and the GPU preview port, without the RAW decoders, the catalog or the GUI"
 license = "MIT"
 publish = false
 
