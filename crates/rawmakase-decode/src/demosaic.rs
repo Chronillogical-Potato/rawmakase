@@ -303,6 +303,59 @@ mod tests {
         }
     }
     #[test]
+    fn a_fine_mesh_stays_neutral_on_xtrans() {
+        // Slats about 3 pixels apart crossed by rods about 4 pixels apart, like the
+        // mesh on X100F DSCF8231's tower, area-sampled as a lens would. With an
+        // isotropic candidate its smooth but wrong colour won the blend: green and
+        // magenta bands six pixels or more across.
+        let pattern = xtrans_pattern();
+        let (w, h) = (192, 192);
+        let scene = |x: f32, y: f32| {
+            if (x / 4.1).fract() < 0.3 {
+                0.04
+            } else if ((y + 0.01 * x) / 3.05).fract() < 0.5 {
+                0.12
+            } else {
+                0.05
+            }
+        };
+        let data = mosaic(&pattern, w, h, |x, y| {
+            let mut sum = 0.;
+            for sy in 0..4 {
+                for sx in 0..4 {
+                    let (fx, fy) = ((sx as f32 + 0.5) / 4., (sy as f32 + 0.5) / 4.);
+                    sum += scene(x as f32 + fx, y as f32 + fy);
+                }
+            }
+            [sum / 16.; 3]
+        });
+        let cfa = Cfa {
+            data: &data,
+            width: w,
+            height: h,
+            pattern: &pattern,
+        };
+        let out = demosaic(&cfa);
+        // The colour of 6 × 6 blocks, where moiré shows as bands.
+        let mut casts = Vec::new();
+        for by in (12..h - 18).step_by(6) {
+            for bx in (12..w - 18).step_by(6) {
+                let mut c = [0f32; 2];
+                for y in by..by + 6 {
+                    for x in bx..bx + 6 {
+                        let p = out[y * w + x];
+                        c[0] += p[0] - p[1];
+                        c[1] += p[2] - p[1];
+                    }
+                }
+                casts.push((c[0] / 36.).abs().max((c[1] / 36.).abs()));
+            }
+        }
+        let mean = casts.iter().sum::<f32>() / casts.len() as f32;
+        // 0.0064 with the isotropic candidate, 0.0036 without.
+        assert!(mean < 0.005, "colour bands: mean {mean}");
+    }
+    #[test]
     fn extreme_samples_do_not_make_non_finite_pixels() {
         let pattern = xtrans_pattern();
         let (w, h) = (32, 40);

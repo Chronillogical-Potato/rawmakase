@@ -1,14 +1,13 @@
 //! X-Trans demosaicing by directional candidates.
 //!
 //! X-Trans has no regular two-pixel greens, so one isotropic estimate turns fine
-//! periodic detail (louvres, grilles) into colour moiré. Instead every direction
-//! (horizontal, vertical and both diagonals) gets its own full RGB candidate, and an
-//! isotropic one joins them for soft detail where no direction is better:
+//! periodic detail (louvres, grilles, meshes) into colour moiré. Instead every
+//! direction (horizontal, vertical and both diagonals) gets its own full RGB
+//! candidate:
 //!
 //! 1. Green at red/blue sites by interpolating along the direction between the
 //!    nearest greens, corrected by the same-colour curvature along that line.
-//! 2. Red and blue from the difference to that direction's green, as on Bayer (the
-//!    isotropic candidate uses its gradient-weighted greens from all 8 neighbours).
+//! 2. Red and blue from the difference to that direction's green, as on Bayer.
 //! 3. Per pixel, the candidates are blended by how smooth their colour difference
 //!    (R − G, B − G) is around it. A correct direction leaves neutral detail neutral;
 //!    a wrong one leaves a colour pattern, which scores badly.
@@ -26,8 +25,11 @@ const MARGIN: usize = 10;
 const REACH: isize = 4;
 /// Horizontal, vertical and the two diagonals as (dx, dy).
 const DIRECTIONS: [(isize, isize); 4] = [(1, 0), (0, 1), (1, 1), (1, -1)];
-/// The directional candidates and the isotropic one.
-const CANDIDATES: usize = DIRECTIONS.len() + 1;
+/// One candidate per direction. An isotropic candidate (greens from all eight
+/// neighbours, #523) is not among them: on fine two-dimensional detail such as a
+/// mesh its colour is smooth but wrong, so it won the blend and brought the moiré
+/// back (X100F DSCF8231's tower).
+const CANDIDATES: usize = DIRECTIONS.len();
 /// Floor of the variation measure, in white-normalised units, so that noise on a
 /// flat area does not pick a direction.
 const VARIATION_FLOOR: f32 = 1e-3;
@@ -84,52 +86,11 @@ impl Band {
         })
     }
 
-    /// Green at a red or blue site from the 8 neighbours, each pair weighted by how
-    /// well the greens on its two sides agree (no preferred direction).
-    fn green_isotropic(&self, i: usize) -> f32 {
-        let pw = self.width as isize;
-        let contrast = {
-            let (mut lo, mut hi) = (f32::INFINITY, 0f32);
-            for o in [-pw - 1, -pw, -pw + 1, -1, 1, pw - 1, pw, pw + 1] {
-                let j = (i as isize + o) as usize;
-                if self.colour[j] == 1 {
-                    lo = lo.min(self.raw[j]);
-                    hi = hi.max(self.raw[j]);
-                }
-            }
-            if hi >= lo { hi - lo } else { 0. }
-        };
-        let (mut sum, mut total) = (0., 0.);
-        for (step, diag) in [(1, 1.), (pw, 1.), (pw + 1, 0.7), (pw - 1, 0.7)] {
-            let a = (i as isize + step) as usize;
-            let b = (i as isize - step) as usize;
-            let (ga, gb) = (self.colour[a] == 1, self.colour[b] == 1);
-            match (ga, gb) {
-                (true, true) => {
-                    let weight = diag / ((self.raw[a] - self.raw[b]).abs() + 1e-4);
-                    sum += (self.raw[a] + self.raw[b]) * 0.5 * weight;
-                    total += weight;
-                }
-                (true, false) | (false, true) => {
-                    let v = if ga { self.raw[a] } else { self.raw[b] };
-                    let weight = diag * 0.5 / (contrast + 1e-4);
-                    sum += v * weight;
-                    total += weight;
-                }
-                _ => {}
-            }
-        }
-        if total > 0. { sum / total } else { self.raw[i] }
-    }
-
-    /// Green at `i` along one direction (`step` 0 for no direction).
+    /// Green at `i` along one direction.
     fn green(&self, i: usize, step: isize) -> f32 {
         let own = self.colour[i];
         if own == 1 {
             return self.raw[i];
-        }
-        if step == 0 {
-            return self.green_isotropic(i);
         }
         let c = self.raw[i];
         let (fwd, back) = (self.along(i, step, 1), self.along(i, -step, 1));
@@ -154,10 +115,7 @@ fn band_candidates(cfa: &Cfa, y0: usize, out: &mut [[f32; 3]]) {
     let rows = out.len() / w;
     let band = Band::new(cfa, y0, rows);
     let (pw, ph) = (band.width, band.height);
-    let steps = DIRECTIONS
-        .map(|(dx, dy)| dy * pw as isize + dx)
-        .into_iter()
-        .chain([0]);
+    let steps = DIRECTIONS.map(|(dx, dy)| dy * pw as isize + dx).into_iter();
     let candidates: Vec<_> = steps
         .map(|step| {
             let rgb = candidate(&band, step);
