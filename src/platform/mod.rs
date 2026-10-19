@@ -59,15 +59,6 @@ pub(crate) fn wayland() -> bool {
     wayland_in(|name| std::env::var_os(name))
 }
 
-/// Whether files dragged from another app can be dropped onto the window.
-/// winit 0.30 (eframe 0.36's) only takes drops on X11, macOS and Windows.
-pub(crate) fn accepts_dropped_files() -> bool {
-    #[cfg(target_os = "linux")]
-    return !wayland();
-    #[cfg(not(target_os = "linux"))]
-    return true;
-}
-
 #[cfg(any(target_os = "linux", feature = "telemetry"))]
 fn wayland_in(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     let set = |name| var(name).is_some_and(|value| !value.is_empty());
