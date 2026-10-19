@@ -478,6 +478,7 @@ mod tests {
             width: w as usize,
             height: h as usize,
             pattern: &cfa.pattern,
+            white: wb,
         });
         let cancel = AtomicBool::new(false);
         let full = open()

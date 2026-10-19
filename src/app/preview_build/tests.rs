@@ -411,13 +411,15 @@ fn discarding_drops_rows_and_requests_of_every_kind() {
 }
 
 /// A preview stored before RAWmakase developed photos with its own decoders
-/// (LibRaw's decoding: an identity that named no decoder) is not used: the
-/// lookup misses its row, so the preview is built again.
+/// (LibRaw's decoding: an identity that named no decoder), or by an earlier
+/// version of them (`raw::developed`), is not used: the lookup misses its row,
+/// so the preview is built again.
 #[test]
 fn previews_developed_by_an_earlier_decoder_are_refused() {
     let defaults = DevelopDefaults::default();
-    // The identity as releases before the switch computed it.
-    let earlier = |record: &EditRecord| {
+    // The identity as earlier releases computed it: before the switch without a
+    // decoder, after it with the decoder they named.
+    let earlier = |record: &EditRecord, decoder: Option<&str>| {
         let mut h = DefaultHasher::new();
         "preview-identity-1".hash(&mut h);
         record.recipe.hash(&mut h);
@@ -428,6 +430,9 @@ fn previews_developed_by_an_earlier_decoder_are_refused() {
             rawmakase_export::build_info::SOFTWARE.hash(&mut h);
         }
         "Rawmakase".hash(&mut h);
+        if let Some(decoder) = decoder {
+            decoder.to_string().hash(&mut h);
+        }
         format!("{:016x}", h.finish())
     };
     let saved = EditRecord {
@@ -440,8 +445,12 @@ fn previews_developed_by_an_earlier_decoder_are_refused() {
     let stamp = crate::catalog::preview_cache::Stamp::read(&photo).unwrap();
     let mut cache = PreviewCache::open(&dir.path().join("previews.db")).unwrap();
     let image = image::RgbImage::from_pixel(64, 32, image::Rgb([200, 120, 60]));
-    for record in [EditRecord::default(), saved] {
-        let old = earlier(&record);
+    let decoders = [None, Some("rawmakase-raw 1")];
+    for (record, decoder) in [EditRecord::default(), saved]
+        .into_iter()
+        .flat_map(|record| decoders.map(|decoder| (record.clone(), decoder)))
+    {
+        let old = earlier(&record, decoder);
         assert_ne!(old, identity(&record, &defaults, Demosaic::Rawmakase));
         cache
             .store_sized(&photo, &old, PreviewKind::Standard, &stamp, 1024, &image)

@@ -600,15 +600,20 @@ fn read_texture(gpu: &Processor, texture: &wgpu::Texture) -> Result<Vec<u8>> {
 /// 100% region.
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
-#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn presented_previews_match_the_cpu_render() -> Result<()> {
+    check_presented_previews(157, 103, false)?;
+    // Exact half-size CA sampling, without the geometry/spatial-effects stack.
+    check_presented_previews(156, 104, true)
+}
+
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn check_presented_previews(w: u32, h: u32, ca_only: bool) -> Result<()> {
     use crate::{
         camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
         develop::{PreviewRenderer, quality::Output},
     };
     use std::sync::Arc;
-    let (w, h) = (157, 103);
     let radial = |values: Vec<f32>| crate::optics::Radial {
         knots: (0..values.len())
             .map(|i| i as f32 / (values.len() - 1) as f32)
@@ -618,6 +623,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let metadata = Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
+        xtrans: true,
         width: w,
         height: h,
         lens: Some(crate::optics::LensCorrection {
@@ -648,7 +654,23 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         pixels: (0..w * h)
             .map(|i| {
                 let (x, y) = ((i % w) as f32, (i / w) as f32);
-                let v = 0.25 + 0.2 * (x * 0.21).sin() * (y * 0.13).cos() + 0.1 * (x * 0.9).sin();
+                // A finite constant-colour strip exercises one-sided coherence
+                // at its boundary, alongside the varied surrounding texture.
+                if (32..68).contains(&(i / w)) {
+                    let period = if ca_only && y >= 50. { 3.8 } else { 3.03 };
+                    let phase = if ca_only {
+                        std::f32::consts::FRAC_PI_4
+                    } else {
+                        0.
+                    };
+                    let v = 0.1 + 0.06 * (std::f32::consts::TAU * x / period + phase).sin();
+                    return [1.08 * v, v, 0.92 * v];
+                }
+                // Fine stripes exercise the CPU/GPU CA chromaticity safeguard too.
+                let v = 0.3
+                    + 0.15 * (x * 0.21).sin() * (y * 0.13).cos()
+                    + 0.08 * (x * 0.9).sin()
+                    + 0.06 * (std::f32::consts::TAU * x / 3.03).sin();
                 [v * 1.3, v, v * 0.8 + x / w as f32 * 0.3]
             })
             .collect(),
@@ -697,6 +719,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     // data, where the manual gain alone makes the lens stage.
     for (spatial, clipping, ca, (style, vignette), lens_alone) in [
         (false, shadows, 0, (HighlightPriority, 0.), false),
+        (false, none, 1, (HighlightPriority, 0.), false),
         (true, none, 0, (HighlightPriority, -0.3), false),
         (true, both, 0, (ColorPriority, -0.6), false),
         (true, highlights, 0, (PaintOverlay, -0.5), false),
@@ -705,6 +728,9 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         (true, none, 0, (PaintOverlay, 0.7), false),
         (true, none, 0, (ColorPriority, 0.), true),
     ] {
+        if ca_only != (!spatial && ca == 1) {
+            continue;
+        }
         let mut recipe = base.clone();
         if spatial {
             recipe.effects.grain = 0.4;
@@ -738,7 +764,15 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.lens_builtin = false;
             recipe.effects.lens_vignette = -0.6;
         }
-        for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
+        for (max_edge, region) in [
+            (78, None),
+            (60, None),
+            (0, None),
+            (0, Some([10, 7, 50, 40])),
+        ] {
+            if max_edge == 78 && !ca_only {
+                continue;
+            }
             let display = super::Display {
                 slot: if region.is_some() {
                     super::Slot::Region
@@ -796,7 +830,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .max()
                 .unwrap();
             let label = format!(
-                "spatial={spatial} clipping={clipping:?} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
+                "{w}x{h} spatial={spatial} clipping={clipping:?} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
             );
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(

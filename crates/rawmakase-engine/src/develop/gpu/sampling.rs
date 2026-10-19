@@ -55,6 +55,8 @@ slots! {
     COUNT: 1,
     // `ManualDistortion`: k (0 when off) and the frame's axes.
     MANUAL: 3,
+    // Protect reconstructed X-Trans stripe colour during CA remapping.
+    XTRANS: 1,
 }
 
 /// `S_*` offset constants for `local.wgsl`.
@@ -105,8 +107,9 @@ mod tests {
                 ("VIGNETTING_AMOUNT", 49),
                 ("COUNT", 50),
                 ("MANUAL", 51),
+                ("XTRANS", 54),
             ]
         );
-        assert_eq!(HEADER, 54);
+        assert_eq!(HEADER, 55);
     }
 }
