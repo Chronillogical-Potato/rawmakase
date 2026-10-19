@@ -1058,9 +1058,7 @@ mod tests {
     #[test]
     fn hdr_previews_show_reference_white_as_white() {
         // The fixtures' grey is code value 128/255: 95 nits in PQ, and in HLG
-        // 5% of its nominal 1,000-nit peak; their white is the top code. The
-        // yuv crate's NEON conversion rounds a 10-bit AVIF a code value off
-        // the scalar and x86 ones, which PQ's steep curve turns into 4 here.
+        // 5% of its nominal 1,000-nit peak; their white is the top code.
         for (name, grey) in [
             ("pq.avif", 183),
             ("pq.jxl", 183),
@@ -1071,7 +1069,7 @@ mod tests {
             let (w, h) = image.dimensions();
             let centre = image.get_pixel(w / 2, h / 2).0;
             assert!(
-                centre.iter().all(|v| v.abs_diff(grey) <= 4),
+                centre.iter().all(|v| v.abs_diff(grey) <= 3),
                 "{name}: {centre:?}"
             );
             let white = corners(&image)[3];
