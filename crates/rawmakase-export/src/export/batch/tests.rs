@@ -307,6 +307,39 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
     Ok(())
 }
 
+/// Issue 546: exFAT on macOS refuses both an exclusive rename and a hard link.
+/// Runs on the folder RAWMAKASE_TEST_EXFAT names, on such a volume; without it
+/// there is nothing to test against. To make one on macOS:
+/// `mkfile -n 64m x.img; hdiutil attach -imagekey diskimage-class=CRawDiskImage
+/// -nomount x.img`, then `newfs_exfat /dev/rdiskN` and `mount -t exfat
+/// /dev/diskN <folder>`.
+#[test]
+fn a_volume_without_exclusive_rename_takes_exports_without_replacing_files() -> Result<()> {
+    let Some(volume) = std::env::var_os("RAWMAKASE_TEST_EXFAT") else {
+        eprintln!("RAWMAKASE_TEST_EXFAT unset: skipped");
+        return Ok(());
+    };
+    let f = fixture(&["a.dng", "b.dng"])?;
+    let out = tempfile::tempdir_in(volume)?;
+    std::fs::write(out.path().join("a.tif"), b"previous")?;
+    let batch = f.batch(f.batch_photos()?, settings(out.path()));
+    // Appears after planning, before the photo is written.
+    std::fs::write(out.path().join("b.tif"), b"late")?;
+    let outcomes = run_all(&batch);
+    assert_eq!(exported(&outcomes[0]), out.path().join("a-2.tif"));
+    assert_eq!(exported(&outcomes[1]), out.path().join("b-2.tif"));
+    assert_eq!(std::fs::read(out.path().join("a.tif"))?, b"previous");
+    assert_eq!(std::fs::read(out.path().join("b.tif"))?, b"late");
+    assert!(!pixels(&out.path().join("a-2.tif")).is_empty());
+    // Without the "._" files macOS keeps beside each file there.
+    let files: Vec<_> = listing(out.path())
+        .into_iter()
+        .filter(|n| !n.starts_with("._"))
+        .collect();
+    assert_eq!(files, ["a-2.tif", "a.tif", "b-2.tif", "b.tif"]);
+    Ok(())
+}
+
 #[test]
 fn a_file_that_appears_during_the_export_gets_the_batchs_answer() -> Result<()> {
     let f = fixture(&["a.dng"])?;

@@ -199,7 +199,7 @@ recipes and the installed preset collection; they do not own the renderer.
 | File | Responsibility |
 | --- | --- |
 | [storage/mod.rs](../crates/rawmakase-model/src/storage/mod.rs) | Shared persistence and path API. |
-| [files.rs](../crates/rawmakase-model/src/storage/files.rs) | Application/asset directories, atomic JSON writes, relative parent paths and RAW enumeration. |
+| [files.rs](../crates/rawmakase-model/src/storage/files.rs) | Application/asset directories, atomic JSON writes, publishing a file without replacing another (also on exFAT, which has no exclusive rename or hard links), relative parent paths and RAW enumeration. |
 | [formats.rs](../crates/rawmakase-model/src/storage/formats.rs) | The rendered formats (JPEG, TIFF, PNG, WebP, AVIF, JPEG XL) as facts with no codec: extensions, MIME types and names, and `is_photo`, which file Add Folder and Synchronize Folder take. The one place a new format is named. |
 | [model/saved_history.rs](../crates/rawmakase-model/src/model/saved_history.rs) | A Develop History as kept between sessions, as plain values: Develop's History restores from it and the catalog stores it, neither depending on the other. |
 | [model/saved_format.rs](../crates/rawmakase-model/src/model/saved_format.rs) | Saved schema/pipeline versions, envelope validation and legacy recipe migration, and the one list of obsolete engine and operator settings every recipe read drops. Recipes keep unknown fields from newer releases. |

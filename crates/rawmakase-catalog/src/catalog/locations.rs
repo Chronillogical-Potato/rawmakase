@@ -58,7 +58,7 @@ impl Computer {
                 let temp = tempfile::NamedTempFile::new_in(dir)?;
                 std::fs::write(temp.path(), &id)?;
                 // Another process may have made one meanwhile: theirs stays.
-                match temp.persist_noclobber(&file) {
+                match crate::storage::persist_noclobber(temp, &file) {
                     Ok(_) => id,
                     Err(_) => read(&file).context("Unreadable computer id")?,
                 }

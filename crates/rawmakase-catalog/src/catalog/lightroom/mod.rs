@@ -142,8 +142,7 @@ pub(in crate::catalog) fn import_archiving_up_to(
         "Imported catalog failed integrity check"
     );
     drop(catalog);
-    // hard_link gives atomic no-clobber publication on the destination filesystem.
-    std::fs::hard_link(&working, destination)
+    crate::storage::rename_noclobber(&working, destination)
         .context("Publish imported catalog without overwriting")?;
     Ok(destination.into())
 }
