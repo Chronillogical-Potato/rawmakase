@@ -14,6 +14,23 @@ def run(*args):
     return subprocess.check_output(args, text=True)
 
 
+# Resolve symlinks first: the AppImage's AppRun, or a link from another bin
+# directory, points at this script from outside the payload.
+LAUNCHER = """#!/bin/sh
+set -eu
+self=$(readlink -f -- "$0")
+base=$(CDPATH= cd -- "$(dirname -- "$self")/../lib/rawmakase" && pwd)
+exec "$base/rawmakase" "$@"
+"""
+
+
+def write_launcher(path):
+    """Write usr/bin/rawmakase, which runs the private executable beside its libraries."""
+    path.parent.mkdir(parents=True)
+    path.write_text(LAUNCHER)
+    path.chmod(0o755)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -84,9 +101,7 @@ def main():
     for path in private.iterdir():
         subprocess.run(["patchelf", "--set-rpath", "$ORIGIN", str(path)], check=True)
     launcher = stage / "usr/bin/rawmakase"
-    launcher.parent.mkdir(parents=True)
-    launcher.write_text('#!/bin/sh\nset -eu\nbase=$(CDPATH= cd -- "$(dirname -- "$0")/../lib/rawmakase" && pwd)\nexec "$base/rawmakase" "$@"\n')
-    launcher.chmod(0o755)
+    write_launcher(launcher)
     # Verify without the build-time library path.
     import os
     env = dict(os.environ)

@@ -63,4 +63,5 @@ end
 
 NativePackages::MacosSigning.prepend(SigningDiagnostics)
 NativePackages::MacosSigning.prepend(NotaryRetry)
-load Gem.bin_path("native-packages", "native-packages", "0.7.0")
+# Run the executable of the same gem version the library above came from.
+load Gem.bin_path("native-packages", "native-packages", NativePackages::VERSION)

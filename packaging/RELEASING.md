@@ -14,7 +14,7 @@ notarization must pass before anything is published. No AUR pushes occur.
 | Fedora x86_64 and aarch64 | `.rpm` | Fedora 43+ |
 | Arch x86_64 | `.pkg.tar.zst` | Current Arch system dependencies |
 | Linux archive | `rawmakase-VERSION-x86_64-linux.tar.gz`, `rawmakase-VERSION-aarch64-linux.tar.gz` | Same system baseline as DEB/RPM; not a universal static binary |
-| Linux AppImage | `rawmakase-VERSION-x86_64.AppImage`, `rawmakase-VERSION-aarch64.AppImage` | Same payload and system baseline as the archive; does not extend support to older distributions |
+| Linux AppImage | `rawmakase-VERSION-x86_64.AppImage`, `rawmakase-VERSION-aarch64.AppImage` | Same payload and system baseline as the archive; does not extend support to older distributions. Each has a `.zsync` file beside it for AppImage updaters |
 | Windows x86_64 installer | `rawmakase-vVERSION-x86_64-pc-windows-msvc-setup.exe` | Windows 10+; per-user install, no administrator rights |
 | Windows x86_64 archive | `rawmakase-vVERSION-x86_64-pc-windows-msvc.zip` | Windows 10+ |
 | Windows ARM64 installer | `rawmakase-vVERSION-aarch64-pc-windows-msvc-setup.exe` | Windows 11 on ARM64; per-user install, no administrator rights |
@@ -23,10 +23,11 @@ notarization must pass before anything is published. No AUR pushes occur.
 The Mac, DEB and RPM packages contain private imaging libraries. Mac users do
 not need Homebrew. The Linux tarball contains the same `/usr` layout, including
 private libraries; run the extracted `usr/bin/rawmakase` or install the whole
-tree under `/usr`. Do not copy just its executable. The AppImage packs that
-same payload (`packaging/linux/appimage.py`) with a pinned appimagetool and
-runtime. Linux still needs system Vulkan/graphics drivers, window-system
-libraries and a working file-dialog portal.
+tree under `/usr`. Do not copy just its executable (a symlink to
+`usr/bin/rawmakase` works). The AppImage packs that same payload, built by
+native-packages with its pinned type2-runtime; its `AppRun` links to
+`usr/bin/rawmakase`. Linux still needs system Vulkan/graphics drivers,
+window-system libraries and a working file-dialog portal.
 
 Each Windows architecture's installer and archive hold the same folder: `rawmakase.exe`, with
 LibRaw, Little CMS and the C runtime linked in statically (so no Visual C++
@@ -49,7 +50,7 @@ Set these **repository Actions secrets**:
 - `APPLE_TEAM_ID`: that developer team's ID.
 - `APPLE_APP_PASSWORD`: the Apple Account app-specific password.
 
-The release step explicitly requires all six. `native-packages` 0.7.0 signs
+The release step explicitly requires all six. `native-packages` 0.10.0 signs
 nested code and the app in a temporary keychain, creates and signs the DMG,
 submits it with `notarytool`, waits for acceptance, and staples the ticket.
 This runs in its own job, after the job that builds the app, which passes the
@@ -213,15 +214,24 @@ PATH. The `windows-amd64` and `windows-arm64` targets in `native-packages.yaml` 
 with Inno Setup. Never change that script's `AppId`: it is how Windows tells an
 update from a second installation.
 
-Packaging uses pinned `native-packages` 0.7.0, configured in
+Packaging uses pinned `native-packages` 0.10.0, configured in
 `native-packages.yaml`. The Linux archives are built natively on x86_64 and
 arm64 runners; `packaging/linux/bundle.py` stages each with its private
 libraries. The release then calls `.github/workflows/packaging.yml`, which runs
 native-packages' shared packaging workflow on those archives and both DMGs: it
-installs the nFPM version `tool.nfpm` names, builds the DEB and RPM for each
-architecture (mapping each host library to its distribution package) and
-renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
-checksums. The release carries the resulting `rawmakase.rb` cask.
+installs the nFPM version `tool.nfpm` names, builds the DEB, RPM and AppImage
+for each architecture (mapping each host library to its distribution package)
+and renders `packaging/homebrew/rawmakase.rb.in` with the notarized DMGs'
+checksums. The release carries the resulting `rawmakase.rb` cask. The
+AppImage holds the same `contents` as the DEB and RPM plus the runtime's
+licence (`packaging/linux/AppImage-runtime-LICENSE`, for the runtime that
+native-packages version pins; check it when upgrading).
+`packaging/linux/verify-appimage.sh` checks its layout on each architecture
+and, for a release, runs it. Each AppImage embeds
+`gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-ARCH.AppImage.zsync`, so
+AppImage updaters fetch the newest stable release's `.zsync` file, which the
+release publishes beside it. Never rename either file. The app's own updater
+still only points AppImage users at the release page.
 
 ### Homebrew tap
 

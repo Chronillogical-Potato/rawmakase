@@ -79,7 +79,7 @@ jobs:
       source-ref: ${{ needs.prepare.outputs.sha }}
 
   linux:
-    name: Linux archive and AppImage (${{ matrix.arch }})
+    name: Linux archive (${{ matrix.arch }})
     needs: prepare
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -111,7 +111,7 @@ jobs:
       - name: Build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool pkg-config libjpeg-dev zlib1g-dev patchelf libvulkan1 libxkbcommon-dev libwayland-dev desktop-file-utils
+          sudo apt-get install -y build-essential autoconf automake libtool pkg-config libjpeg-dev zlib1g-dev patchelf libvulkan1 libxkbcommon-dev libwayland-dev
           rustup toolchain install 1.98.1 --profile minimal
           rustup default 1.98.1
           toolchain_bin=$(dirname "$(rustup which --toolchain 1.98.1 rustc)")
@@ -133,8 +133,6 @@ jobs:
             cp packaging/native-deps.sh "$RUNNER_TEMP/native-sources/build/"
             tar -C "$RUNNER_TEMP/native-sources" -czf "dist/upload/rawmakase-$VERSION-native-sources.tar.gz" .
           fi
-      - name: Package and verify AppImage
-        run: python3 packaging/linux/appimage.py dist/linux-root "dist/upload/rawmakase-$VERSION-$ARCH.AppImage" "$ARCH" "$VERSION"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.target }}
@@ -325,7 +323,7 @@ jobs:
           for key in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
             test -n "${!key}" || { echo "Missing repository secret: $key" >&2; exit 1; }
           done
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           # The cask is rendered later, once both DMGs exist.
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
@@ -406,7 +404,7 @@ jobs:
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --yes --no-progress
           }
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
           native-packages build --version $env:VERSION --target ${{ matrix.target }} --defer-recipes --output "$env:RUNNER_TEMP\windows-packages"
           New-Item -ItemType Directory dist\upload | Out-Null
@@ -426,9 +424,9 @@ jobs:
           path: dist/upload/*
           if-no-files-found: error
 
-  # native-packages' shared workflow turns the Linux archives into DEB and RPM
-  # packages and renders the Homebrew cask from the notarized DMGs, then checks
-  # the packages install cleanly, all before anything is published.
+  # native-packages' shared workflow turns the Linux archives into DEB, RPM and
+  # AppImage packages and renders the Homebrew cask from the notarized DMGs,
+  # then checks the packages install and run, all before anything is published.
   package-inputs:
     name: Gather packaging inputs
     needs: [linux, macos-sign]
@@ -483,8 +481,11 @@ jobs:
         with:
           name: native-packages
           path: native-packages
-      - name: Add the DEB and RPM packages and the Homebrew cask
-        run: cp native-packages/packages/*/deb/*.deb native-packages/packages/*/rpm/*.rpm native-packages/recipes/homebrew/rawmakase.rb dist/
+      - name: Add the DEB, RPM and AppImage packages and the Homebrew cask
+        run: |
+          cp native-packages/packages/*/deb/*.deb native-packages/packages/*/rpm/*.rpm \
+            native-packages/packages/*/appimage/*.AppImage native-packages/packages/*/appimage/*.AppImage.zsync \
+            native-packages/recipes/homebrew/rawmakase.rb dist/
       - name: Final checksums
         working-directory: dist
         run: sha256sum -- * > SHA256SUMS
@@ -500,7 +501,7 @@ jobs:
       # checksums.txt and its Ed25519 signature, which the app's updater
       # verifies against assets/update-public-key.hex before installing.
       - name: Sign update manifest
-        uses: crmne/native-packages/.github/actions/sign-release@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
+        uses: crmne/native-packages/.github/actions/sign-release@226fb48cb375c7cb309a3e642c7228a6e00e9ebf # v0.10.0
         with:
           directory: dist
           public-key: release-source/assets/update-public-key.hex
@@ -508,7 +509,7 @@ jobs:
         env:
           RAWMAKASE_UPDATE_SIGNING_KEY: ${{ secrets.RAWMAKASE_UPDATE_SIGNING_KEY }}
       - name: Attest packages
-        uses: crmne/native-packages/.github/actions/attest@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
+        uses: crmne/native-packages/.github/actions/attest@226fb48cb375c7cb309a3e642c7228a6e00e9ebf # v0.10.0
         with:
           subject-path: dist/*
       # Preserve the exact bytes prepared for upload, including the signed
