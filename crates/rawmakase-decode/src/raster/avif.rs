@@ -100,14 +100,17 @@ impl AvifFile {
             }),
             _ => None,
         });
-        let rotation = props.iter().find_map(|p| match p {
-            Property::Rotation(r) => Some(*r),
-            _ => None,
-        });
-        let mirror = props.iter().find_map(|p| match p {
-            Property::Mirror(m) => Some(*m),
-            _ => None,
-        });
+        // Applied in the order they are associated; a turn after a mirror is
+        // the opposite turn before it.
+        let (mut rotation, mut mirror) = (0, None);
+        for p in &props {
+            match p {
+                Property::Rotation(r) if mirror.is_some() => rotation = r.wrapping_neg() & 3,
+                Property::Rotation(r) => rotation = *r,
+                Property::Mirror(m) => mirror = Some(*m),
+                _ => {}
+            }
+        }
         // av1C's third byte: seq_tier_0, then high_bitdepth.
         let deep = props.iter().any(|p| match p {
             Property::Depth(d) => d.iter().any(|b| *b > 8),
@@ -130,7 +133,7 @@ impl AvifFile {
             source: (!tiled).then_some((file, heif)),
             icc,
             nclx,
-            orientation: orientation(rotation.unwrap_or(0), mirror),
+            orientation: orientation(rotation, mirror),
             refused,
         })
     }

@@ -1035,6 +1035,24 @@ mod tests {
         assert!(decode(&fixture("tiled.avif")).is_err());
     }
 
+    /// `imir` associated before `irot` mirrors first, then turns, as libheif
+    /// shows it.
+    #[test]
+    fn an_avif_mirrored_before_its_rotation_is_turned_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mirrored-first.avif");
+        let mut bytes = std::fs::read(fixture("rotated-mirrored.avif")).unwrap();
+        // The primary item's last two associations: irot (5), imir (6), both
+        // essential.
+        let at = bytes.windows(2).rposition(|w| w == [0x85, 0x86]).unwrap();
+        bytes[at..at + 2].copy_from_slice(&[0x86, 0x85]);
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(
+            corners(&decode(&path).unwrap()),
+            [[255, 255, 255], [0, 255, 0], [0, 0, 255], [255, 0, 0]]
+        );
+    }
+
     /// An image sequence is refused whichever of its brands says so, not
     /// only the major one.
     #[test]
