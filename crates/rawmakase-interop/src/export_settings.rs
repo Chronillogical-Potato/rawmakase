@@ -373,7 +373,9 @@ fn user_folder(folder: fn(&directories::UserDirs) -> Option<&Path>, name: &str) 
     let dirs = directories::UserDirs::new();
     match &dirs {
         Some(dirs) => folder(dirs).map_or_else(|| dirs.home_dir().join(name), Path::to_path_buf),
-        None => PathBuf::from(name),
+        // UserDirs needs the profile folder from the shell on Windows; the
+        // environment may still name it.
+        None => std::env::home_dir().unwrap_or_default().join(name),
     }
 }
 
