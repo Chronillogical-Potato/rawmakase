@@ -142,7 +142,8 @@ pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
 /// The image at `path` decoded, turned upright and converted from its embedded
 /// ICC profile to 8-bit sRGB; refused above 150 MP. A file without a profile,
 /// or with one that cannot be read or does not describe its pixels (RGB, or
-/// grey for a grey image), is taken to be sRGB already.
+/// grey for a grey image), is taken to be sRGB already. An HDR (PQ or HLG)
+/// file is tone mapped: its reference white shown as white.
 pub fn decode(path: &Path) -> Result<RgbImage> {
     let Prepared {
         decoder,
@@ -150,6 +151,17 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
         profile,
         ..
     } = prepare(path)?;
+    if let Some((profile, white)) = profile.as_ref().and_then(|p| Some((p, hdr_white(p)?))) {
+        let linear = to_linear(profile, decoder.color_type())?;
+        let mut image = DynamicImage::from_decoder(decoder)?;
+        image.apply_orientation(orientation);
+        let (width, height) = (image.width(), image.height());
+        let mut pixels = linear.apply(image, &AtomicBool::new(false))?;
+        pixels
+            .par_iter_mut()
+            .for_each(|p| *p = tone_map(p.map(|v| v * white)));
+        return linear_pro_photo_to_srgb(&pixels, width, height);
+    }
     let transform = profile.and_then(|profile| ToSrgb::new(&profile, decoder.color_type()));
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
@@ -263,6 +275,70 @@ fn layout(
     }
 }
 
+/// How many times HDR reference white (203 nits, ITU-R BT.2408) the linear
+/// 1.0 of an HDR profile is: PQ's 10,000 nits, or HLG's nominal 1,000-nit
+/// peak. `None` for a profile that isn't HDR.
+fn hdr_white(profile: &ColorProfile) -> Option<f32> {
+    use moxcms::TransferCharacteristics::{Hlg, Smpte2084};
+    match profile.cicp?.transfer_characteristics {
+        Smpte2084 => Some(10_000. / 203.),
+        Hlg => Some(1_000. / 203.),
+        _ => None,
+    }
+}
+
+/// Light of an HDR image relative to its reference white, brought into the
+/// 0–1 of SDR for a preview: kept below `KNEE` and rolled off smoothly into
+/// white above it, by the brightest channel, so hues stay.
+fn tone_map(rgb: [f32; 3]) -> [f32; 3] {
+    const KNEE: f32 = 0.8;
+    let peak = rgb[0].max(rgb[1]).max(rgb[2]);
+    if peak <= KNEE {
+        return rgb;
+    }
+    let over = (peak - KNEE) / (1. - KNEE);
+    let mapped = KNEE + (1. - KNEE) * (1. - (-over).exp());
+    rgb.map(|v| v * mapped / peak)
+}
+
+/// Linear ProPhoto pixels of a `width` × `height` image in 8-bit sRGB.
+fn linear_pro_photo_to_srgb(pixels: &[[f32; 3]], width: u32, height: u32) -> Result<RgbImage> {
+    let transform = linear_pro_photo()
+        .create_transform_f32(
+            Layout::Rgb,
+            &ColorProfile::new_srgb(),
+            Layout::Rgb,
+            TransformOptions::default(),
+        )
+        .map_err(|e| anyhow!("Could not convert the image to sRGB: {e}"))?;
+    let mut out = RgbImage::new(width, height);
+    if out.is_empty() {
+        return Ok(out);
+    }
+    pixels
+        .par_chunks(width as usize)
+        .zip(out.par_chunks_mut(width as usize * 3))
+        .try_for_each(|(from, to)| {
+            let mut row = vec![0f32; to.len()];
+            transform.transform(bytemuck::cast_slice(from), &mut row)?;
+            for (to, v) in to.iter_mut().zip(row) {
+                *to = (v.clamp(0., 1.) * 255.).round() as u8;
+            }
+            Ok(())
+        })
+        .map_err(|e: moxcms::CmsError| anyhow!("Could not convert the image to sRGB: {e}"))?;
+    Ok(out)
+}
+
+/// ProPhoto's primaries with no gamma: an empty curve is the identity in ICC.
+fn linear_pro_photo() -> ColorProfile {
+    let mut linear_pro = ColorProfile::new_pro_photo_rgb();
+    linear_pro.red_trc = Some(ToneReprCurve::Lut(vec![]));
+    linear_pro.green_trc = Some(ToneReprCurve::Lut(vec![]));
+    linear_pro.blue_trc = Some(ToneReprCurve::Lut(vec![]));
+    linear_pro
+}
+
 /// A conversion from a file's profile to linear ProPhoto, in f32.
 struct ToLinear {
     transform: std::sync::Arc<moxcms::TransformF32Executor>,
@@ -274,11 +350,7 @@ struct ToLinear {
 /// pixels (a grey one on a colour image) or that has no transform is taken to be
 /// sRGB. Any other colour space is [`Unsupported`].
 fn to_linear(profile: &ColorProfile, color: image::ColorType) -> Result<ToLinear> {
-    // An empty curve is the identity in ICC: ProPhoto's primaries, no gamma.
-    let mut linear_pro = ColorProfile::new_pro_photo_rgb();
-    linear_pro.red_trc = Some(ToneReprCurve::Lut(vec![]));
-    linear_pro.green_trc = Some(ToneReprCurve::Lut(vec![]));
-    linear_pro.blue_trc = Some(ToneReprCurve::Lut(vec![]));
+    let linear_pro = linear_pro_photo();
     let build = |profile: &ColorProfile, layout| {
         profile.create_transform_f32(
             layout,
@@ -933,6 +1005,33 @@ mod tests {
         assert!(decode(&fixture("pq.avif")).is_ok());
         assert!(decode(&fixture("animated.avif")).is_ok());
         assert!(decode(&fixture("tiled.avif")).is_err());
+    }
+
+    /// An HDR file's preview shows HDR reference white (203 nits, ITU-R
+    /// BT.2408) as white, rather than at the 2% of PQ's 10,000 nits it is,
+    /// which looked nearly black; brighter light rolls off into white. HLG
+    /// files are refused by Develop as PQ ones are.
+    #[test]
+    fn hdr_previews_show_reference_white_as_white() {
+        // The fixtures' grey is code value 128/255: 95 nits in PQ, and in HLG
+        // 5% of its nominal 1,000-nit peak; their white is the top code.
+        for (name, grey) in [
+            ("pq.avif", 183),
+            ("pq.jxl", 183),
+            ("hlg.avif", 138),
+            ("hlg.jxl", 138),
+        ] {
+            let image = decode(&fixture(name)).unwrap();
+            let (w, h) = image.dimensions();
+            let centre = image.get_pixel(w / 2, h / 2).0;
+            assert!(
+                centre.iter().all(|v| v.abs_diff(grey) <= 3),
+                "{name}: {centre:?}"
+            );
+            let white = corners(&image)[3];
+            assert!(white.iter().all(|v| *v >= 250), "{name}: {white:?}");
+            assert_eq!(super::probe(&fixture(name)).unwrap_err().0, "HDR", "{name}");
+        }
     }
 
     #[test]

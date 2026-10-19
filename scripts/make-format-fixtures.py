@@ -58,6 +58,7 @@ def main(out: Path):
         run("avifenc", "--lossless", "--irot", "1", "--imir", "0", src, out / "rotated-mirrored.avif")
         run("avifenc", "--lossless", "--cicp", "12/13/0", src, out / "p3.avif")
         run("avifenc", "-d", "10", "--cicp", "9/16/9", src, out / "pq.avif")
+        run("avifenc", "-d", "10", "--cicp", "9/18/9", src, out / "hlg.avif")
         big = tmp / "big.png"
         corners(128, 128).save(big)  # MIAF: grid cells are at least 64x64
         run("avifenc", "--lossless", "--grid", "2x2", big, out / "tiled.avif")
@@ -86,6 +87,7 @@ def main(out: Path):
         Image.open(src).convert("RGB").save(sixteen)  # 8-bit source; cjxl stores 16 with -x
         run("cjxl", sixteen, out / "sixteen-bit.jxl", "-d", "0", "--override_bitdepth=16")
         run("cjxl", src, out / "pq.jxl", "-d", "1", "-x", "color_space=RGB_D65_202_Rel_PeQ")
+        run("cjxl", src, out / "hlg.jxl", "-d", "1", "-x", "color_space=RGB_D65_202_Rel_HLG")
 
         # WebP
         corners().save(out / "metadata.webp", lossless=True, exif=exif().tobytes(), xmp=XMP)
