@@ -35,7 +35,7 @@ tiff = "0.11.3"
 unicode-normalization = "0.1"
 # Inter and the installed-font directories for text watermarks. It is built for
 # egui and brings egui along, though nothing here draws with it.
-fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
 
 [dev-dependencies]
 rawmakase-catalog = { path = "../rawmakase-catalog", version = "0.1.0", features = ["test-support"] }

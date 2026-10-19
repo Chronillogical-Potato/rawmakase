@@ -155,8 +155,9 @@ impl Editor {
         install_fonts(&cc.egui_ctx, &text);
         icons::install(&cc.egui_ctx);
         // The desktop's text size (Omarchy's, GNOME's Large Text) zooms the
-        // interface, now and when it changes.
-        crate::platform::text_scale::follow(&cc.egui_ctx);
+        // interface, now and when it changes. The whole interface zooms rather
+        // than only its fonts, so panels sized for their labels grow with them.
+        follow_text_scale(&cc.egui_ctx);
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
@@ -868,6 +869,21 @@ mod updates;
 mod user_presets;
 
 mod events;
+
+/// Zooms the interface to the desktop's text size, read through the portal
+/// under Wayland (1 elsewhere), and follows its changes on fastframe-text's
+/// watch thread, which lives as long as the process.
+fn follow_text_scale(ctx: &egui::Context) {
+    let scale = fastframe_text::text_scale();
+    ctx.set_zoom_factor(scale);
+    let watched = ctx.clone();
+    match fastframe_text::watch::watch_text_scale(scale, move |scale| {
+        watched.set_zoom_factor(scale);
+    }) {
+        Ok(()) | Err(fastframe_text::watch::WatchError::Unsupported) => {}
+        Err(error) => eprintln!("RAWmakase: not following the desktop's text size: {error}"),
+    }
+}
 
 /// Inter, with tabular figures so values keep their width as they change,
 /// and an installed face for every script and symbol it lacks (fastframe-fonts),
