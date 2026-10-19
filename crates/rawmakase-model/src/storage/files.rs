@@ -2,10 +2,10 @@ use anyhow::Result;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fs,
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, PersistError};
 
 /// Per-user data: ~/Library/Application Support/RAWmakase on macOS,
 /// %APPDATA%\RAWmakase on Windows, and $XDG_DATA_HOME/rawmakase (default
@@ -59,10 +59,99 @@ pub fn stage(
 pub fn persist(staged: NamedTempFile, path: &Path, replace: Replace) -> Result<()> {
     match replace {
         Replace::Overwrite => staged.persist(path),
-        Replace::NoClobber => staged.persist_noclobber(path),
+        Replace::NoClobber => persist_noclobber(staged, path),
     }
     .map_err(|e| e.error)?;
     sync_dir(parent_dir(path))
+}
+/// [`NamedTempFile::persist_noclobber`], also on drives that support neither
+/// an exclusive rename nor hard links: exFAT on macOS refuses both with
+/// ENOTSUP. There the staged file is copied into a file created only if no
+/// file had the name, so it is never replaced; but a crash while copying
+/// leaves that file partly written.
+pub fn persist_noclobber(staged: NamedTempFile, path: &Path) -> Result<fs::File, PersistError> {
+    or_claim(staged.persist_noclobber(path), path)
+}
+/// Moves `from` to `to` unless a file has that name, as [`persist_noclobber`].
+pub fn rename_noclobber(from: &Path, to: &Path) -> io::Result<()> {
+    match fs::hard_link(from, to) {
+        Ok(()) => {}
+        Err(e) if unsupported(&e) => drop(claim(from, to)?),
+        Err(e) => return Err(e),
+    }
+    // `to` is in place; a leftover `from` is only clutter.
+    let _ = fs::remove_file(from);
+    Ok(())
+}
+/// `attempt`, or when the volume could not make it, the same by [`claim`].
+fn or_claim(
+    attempt: Result<fs::File, PersistError>,
+    path: &Path,
+) -> Result<fs::File, PersistError> {
+    match attempt {
+        // Dropping the staged file deletes it.
+        Err(e) if unsupported(&e.error) => {
+            claim(e.file.path(), path).map_err(|error| PersistError {
+                error,
+                file: e.file,
+            })
+        }
+        attempt => attempt,
+    }
+}
+/// A copy of `from` at `to`, made only if no file had that name. Renaming
+/// over an empty file made first would replace whatever another writer put
+/// there meanwhile.
+fn claim(from: &Path, to: &Path) -> io::Result<fs::File> {
+    let mut source = fs::File::open(from)?;
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(to)?;
+    match io::copy(&mut source, &mut file).and_then(|_| file.sync_all()) {
+        Ok(()) => Ok(file),
+        Err(e) => {
+            remove_if_still(file, to);
+            Err(e)
+        }
+    }
+}
+/// Deletes `path` if it is still `file`, rather than one another writer put
+/// in its place. Nothing deletes a path only if it is a given file, so a
+/// writer replacing it between the check and the deletion still loses its
+/// file; keeping ours instead would leave a truncated photo under the name
+/// whenever a drive fills up or is unplugged mid-copy.
+fn remove_if_still(file: fs::File, path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let same = match (file.metadata(), fs::symlink_metadata(path)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+            _ => false,
+        };
+        if !same {
+            return;
+        }
+    }
+    drop(file);
+    let _ = fs::remove_file(path);
+}
+/// Whether `e` says the volume cannot do what was asked, rather than that it
+/// failed.
+fn unsupported(e: &io::Error) -> bool {
+    // macOS's ENOTSUP has no ErrorKind of its own.
+    #[cfg(unix)]
+    if e.raw_os_error() == Some(libc::ENOTSUP) {
+        return true;
+    }
+    // ERROR_INVALID_FUNCTION and ERROR_NOT_SUPPORTED: what Windows answers
+    // a hard link with on FAT and exFAT.
+    #[cfg(windows)]
+    if matches!(e.raw_os_error(), Some(1 | 50)) {
+        return true;
+    }
+    e.kind() == io::ErrorKind::Unsupported
 }
 pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     fs::create_dir_all(parent_dir(path))?;
@@ -164,6 +253,114 @@ mod tests {
         ] {
             assert!(!is_raw(Path::new(name)), "{name}");
         }
+    }
+    /// A volume that, like exFAT on macOS, can neither rename exclusively nor
+    /// link: the publish it refuses.
+    #[cfg(unix)]
+    fn refused(file: NamedTempFile) -> Result<fs::File, PersistError> {
+        Err(PersistError {
+            error: io::Error::from_raw_os_error(libc::ENOTSUP),
+            file,
+        })
+    }
+    #[cfg(unix)]
+    fn staged(dir: &Path, bytes: &[u8]) -> NamedTempFile {
+        stage(dir, |f| Ok(f.write_all(bytes)?)).unwrap()
+    }
+    #[cfg(unix)]
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            // Without the "._" files macOS keeps beside each file on exFAT.
+            .filter(|n| !n.starts_with("._"))
+            .collect();
+        names.sort();
+        names
+    }
+    #[test]
+    #[cfg(unix)]
+    fn a_volume_without_exclusive_rename_still_gets_a_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.jpg");
+        or_claim(refused(staged(dir.path(), b"photo")), &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"photo");
+        assert_eq!(names(dir.path()), ["out.jpg"]);
+    }
+    #[test]
+    #[cfg(unix)]
+    fn a_volume_without_exclusive_rename_never_replaces_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.jpg");
+        fs::write(&path, b"previous").unwrap();
+        let e = or_claim(refused(staged(dir.path(), b"photo")), &path).unwrap_err();
+        assert_eq!(e.error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&path).unwrap(), b"previous");
+        // The staged file comes back whole, for a caller to publish elsewhere.
+        assert_eq!(fs::read(e.file.path()).unwrap(), b"photo");
+        let other = dir.path().join("out-2.jpg");
+        persist_noclobber(e.file, &other).unwrap();
+        assert_eq!(fs::read(&other).unwrap(), b"photo");
+        assert_eq!(names(dir.path()), ["out-2.jpg", "out.jpg"]);
+    }
+    #[test]
+    #[cfg(unix)]
+    fn a_failure_other_than_unsupported_is_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.jpg");
+        let attempt = Err(PersistError {
+            error: io::Error::from(io::ErrorKind::PermissionDenied),
+            file: staged(dir.path(), b"photo"),
+        });
+        let e = or_claim(attempt, &path).unwrap_err();
+        assert_eq!(e.error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!path.exists());
+    }
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_claim_leaves_no_file_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.jpg");
+        let missing = dir.path().join("gone");
+        let e = claim(&missing, &path).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::NotFound);
+        assert!(names(dir.path()).is_empty());
+    }
+    #[test]
+    #[cfg(unix)]
+    fn a_failed_claim_never_deletes_what_another_writer_put_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("out.jpg");
+        let ours = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        // Another writer replaces the claimed file before ours is cleaned up.
+        let theirs = dir.path().join("theirs");
+        fs::write(&theirs, b"theirs").unwrap();
+        fs::rename(&theirs, &path).unwrap();
+        remove_if_still(ours, &path);
+        assert_eq!(fs::read(&path).unwrap(), b"theirs");
+        // Our own file, still in place, goes.
+        fs::remove_file(&path).unwrap();
+        let ours = fs::File::create(&path).unwrap();
+        remove_if_still(ours, &path);
+        assert!(!path.exists());
+    }
+    #[test]
+    fn a_path_is_moved_only_to_a_free_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("from"), dir.path().join("to"));
+        fs::write(&from, b"new").unwrap();
+        fs::write(&to, b"previous").unwrap();
+        let e = rename_noclobber(&from, &to).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&to).unwrap(), b"previous");
+        fs::remove_file(&to).unwrap();
+        rename_noclobber(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"new");
+        assert!(!from.exists());
     }
     #[test]
     fn every_listed_raw_extension_is_lower_case_and_listed_once() {

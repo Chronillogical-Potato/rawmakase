@@ -62,7 +62,7 @@ impl Catalog {
         std::fs::create_dir_all(parent)?;
         let file = tempfile::NamedTempFile::new_in(parent)?;
         Db::create(file.path())?;
-        file.persist_noclobber(path)?;
+        crate::storage::persist_noclobber(file, path)?;
         Self::open(path)
     }
     /// Opens a catalog on this computer.

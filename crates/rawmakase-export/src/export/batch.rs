@@ -595,7 +595,7 @@ fn commit(
         };
         let appeared = match found {
             Some(existing) => existing,
-            None => match staged.persist_noclobber(&target) {
+            None => match crate::storage::persist_noclobber(staged, &target) {
                 Ok(_) => {
                     crate::storage::sync_dir(crate::storage::parent_dir(&target))?;
                     return Ok((target, None));
