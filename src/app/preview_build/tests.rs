@@ -1007,3 +1007,24 @@ fn a_jpeg_preview_renders_from_the_file() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// The skipped photos are not only the non-RAW ones: an HDR or CMYK file
+/// Develop can't open, and a rendered file without an edit, which is its own
+/// preview, are skipped too.
+#[test]
+fn the_status_says_what_skipped_photos_were() {
+    assert_eq!(
+        queued_message(Queued {
+            queued: 2,
+            skipped: 3
+        }),
+        "Building 2 previews · 3 skipped (offline, not editable, or an unedited file that is its own preview)"
+    );
+    assert_eq!(
+        queued_message(Queued {
+            queued: 1,
+            skipped: 0
+        }),
+        "Building 1 preview"
+    );
+}

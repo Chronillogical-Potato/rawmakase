@@ -693,7 +693,8 @@ enum Files {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct Queued {
     pub queued: usize,
-    /// Offline photos and files Develop can't open.
+    /// Offline photos, files Develop can't open, and JPEG, PNG, TIFF, WebP,
+    /// AVIF or JPEG XL files without an edit, which are their own previews.
     pub skipped: usize,
 }
 
@@ -755,7 +756,7 @@ impl Editor {
     }
 
     /// What building `ids` would capture now: an item per available RAW or edited
-    /// JPEG, TIFF or PNG, and how many others were skipped.
+    /// JPEG, PNG, TIFF, WebP, AVIF or JPEG XL, and how many others were skipped.
     fn build_items(
         &self,
         ids: &[PhotoId],
@@ -797,7 +798,8 @@ impl Editor {
         let mut items = Vec::with_capacity(chosen.len());
         for ((photo, name, path), record) in chosen.into_iter().zip(records) {
             let edited = has_edit(&record.edit);
-            // A JPEG, TIFF or PNG without an edit is its own preview.
+            // A JPEG, PNG, TIFF, WebP, AVIF or JPEG XL without an edit is its own
+            // preview.
             if !edited && !crate::storage::is_raw(&path) {
                 skipped += 1;
                 continue;
@@ -1085,7 +1087,8 @@ impl Editor {
     }
 }
 
-/// "Building 12 previews · 3 skipped (offline or not RAW)".
+/// "Building 12 previews · 3 skipped (offline, not editable, or an unedited
+/// file that is its own preview)".
 pub(super) fn queued_message(queued: Queued) -> String {
     let mut line = match queued.queued {
         0 => "No previews to build".to_string(),
@@ -1093,7 +1096,7 @@ pub(super) fn queued_message(queued: Queued) -> String {
     };
     if queued.skipped > 0 {
         line.push_str(&format!(
-            " · {} skipped (offline or not a RAW file)",
+            " · {} skipped (offline, not editable, or an unedited file that is its own preview)",
             queued.skipped
         ));
     }
