@@ -40,8 +40,8 @@ pub(super) struct AvifFile {
     refused: Option<Unsupported>,
 }
 
-/// `irot` (anticlockwise quarter turns) then `imir` (0: left and right swap,
-/// 1: top and bottom) as the orientation `image` applies (a clockwise turn,
+/// `irot` (anticlockwise quarter turns) then `imir` (0: top and bottom swap,
+/// 1: left and right) as the orientation `image` applies (a clockwise turn,
 /// then a horizontal flip).
 pub(super) fn orientation(rotation: u8, mirror: Option<u8>) -> Orientation {
     use Orientation::*;
@@ -50,9 +50,9 @@ pub(super) fn orientation(rotation: u8, mirror: Option<u8>) -> Orientation {
         (1, None) => Rotate270,
         (2, None) => Rotate180,
         (3, None) => Rotate90,
-        (0, Some(0)) | (2, Some(1)) => FlipHorizontal,
+        (0, Some(1)) | (2, Some(0)) => FlipHorizontal,
         (0, Some(_)) | (2, Some(_)) => FlipVertical,
-        (1, Some(0)) | (3, Some(1)) => Rotate270FlipH,
+        (1, Some(1)) | (3, Some(0)) => Rotate270FlipH,
         (1 | 3, Some(_)) => Rotate90FlipH,
         _ => unreachable!("a rotation is masked to 0..=3"),
     }
@@ -393,13 +393,14 @@ mod tests {
         assert_eq!(o(1, None), Rotate270);
         assert_eq!(o(2, None), Rotate180);
         assert_eq!(o(3, None), Rotate90);
-        assert_eq!(o(0, Some(0)), FlipHorizontal);
-        assert_eq!(o(0, Some(1)), FlipVertical);
-        assert_eq!(o(1, Some(0)), Rotate270FlipH);
-        assert_eq!(o(1, Some(1)), Rotate90FlipH);
-        assert_eq!(o(2, Some(0)), FlipVertical);
-        assert_eq!(o(3, Some(0)), Rotate90FlipH);
-        assert_eq!(o(3, Some(1)), Rotate270FlipH);
+        assert_eq!(o(0, Some(0)), FlipVertical);
+        assert_eq!(o(0, Some(1)), FlipHorizontal);
+        assert_eq!(o(1, Some(0)), Rotate90FlipH);
+        assert_eq!(o(1, Some(1)), Rotate270FlipH);
+        assert_eq!(o(2, Some(0)), FlipHorizontal);
+        assert_eq!(o(2, Some(1)), FlipVertical);
+        assert_eq!(o(3, Some(0)), Rotate270FlipH);
+        assert_eq!(o(3, Some(1)), Rotate90FlipH);
     }
 
     #[test]

@@ -128,8 +128,8 @@ pub enum Property {
     Depth(Vec<u8>),
     /// `irot`: anticlockwise quarter turns, 0–3.
     Rotation(u8),
-    /// `imir`: 0 mirrors about the vertical axis (left and right swap), 1
-    /// about the horizontal one.
+    /// `imir`: 0 swaps the top and bottom, 1 the left and right (ISO/IEC
+    /// 23008-12:2022).
     Mirror(u8),
     /// `auxC`: an auxiliary image's type, e.g. alpha.
     Auxiliary(String),

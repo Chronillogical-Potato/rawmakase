@@ -956,11 +956,11 @@ mod tests {
             corners(&rotated),
             [[0, 255, 0], [255, 255, 255], [255, 0, 0], [0, 0, 255]]
         );
-        // Then mirrored left to right.
+        // Then imir 0: top and bottom swap, as libheif shows it.
         let mirrored = decode(&fixture("rotated-mirrored.avif")).unwrap();
         assert_eq!(
             corners(&mirrored),
-            [[255, 255, 255], [0, 255, 0], [0, 0, 255], [255, 0, 0]]
+            [[255, 0, 0], [0, 0, 255], [0, 255, 0], [255, 255, 255]]
         );
     }
 
