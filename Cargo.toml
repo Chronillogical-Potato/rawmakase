@@ -58,7 +58,7 @@ memmap2 = "0.9"
 # Glyph outlines for text watermarks (also behind egui's text).
 skrifa = "0.48"
 clap = { version = "4", features = ["derive"] }
-eframe = { version = "=0.36.2", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
+eframe = { version = "=0.36.1", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 # eframe's windowing, to run its event loop (see app::run).
 winit = { version = "0.30", default-features = false }
 # eframe reports a failure to open the window through log (see app::run).
@@ -69,14 +69,14 @@ rfd = "0.17.2"
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # Shared egui app foundation (github.com/crmne/fastframe). Not on crates.io
 # yet: pin a tag and update it deliberately.
-fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
+fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
 # The SVG loader behind the icons, at eframe's egui version.
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
-fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+fastframe-titlebar = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
+fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.12.1", version = "0.12.1" }
 
 # The terminal a release build's command-line output goes to, and the
 # Desktop and Pictures export folders.
@@ -131,6 +131,23 @@ winresource = "0.1"
 fn_params_excessive_bools = "warn"
 large_enum_variant = "warn"
 redundant_clone = "warn"
+
+# crmne's egui and winit forks, which fastframe's apps build against: fixes
+# waiting for upstream releases (fastframe README, "egui and winit forks"),
+# among them file drops on Wayland. Move egui and winit together, to the
+# revisions fastframe's README lists.
+[patch.crates-io]
+ecolor = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+eframe = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui-wgpu = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui-winit = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui_extras = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+egui_glow = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+emath = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+epaint = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "ba6790fe7cf46e58e8d27ce1524cbfdee745e938" }
+winit = { git = "https://github.com/crmne/winit", rev = "ed7caa9023f10b397f5b6ec8284a840cbd8a6f65" }
 
 [profile.release]
 lto = "thin"

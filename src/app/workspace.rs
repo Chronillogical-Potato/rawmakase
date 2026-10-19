@@ -541,13 +541,15 @@ impl Editor {
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
-                title_bar_drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
+                // The bar is the title bar on macOS: its empty space moves the
+                // window, and a double click does what System Settings says.
+                fastframe_titlebar::drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
                 // Beside the sidebar, which holds the traffic lights, its
                 // toggle, the catalog menu, Preferences and the shortcuts.
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
                     if !sidebar {
-                        ui.add_space(fastframe_macos::traffic_light_inset(ui.ctx()));
+                        ui.add_space(fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
                     }
                     // The panel toggles: none in the setup view, which has no panels.
                     let toggles = !self.onboarding.visible;
@@ -822,13 +824,13 @@ impl Editor {
                     Vec2::new(ui.available_width(), BAR_HEIGHT),
                     egui::Sense::hover(),
                 );
-                title_bar_drag(ui, row.expand2(Vec2::new(8., 0.)));
+                fastframe_titlebar::drag(ui, row.expand2(Vec2::new(8., 0.)));
                 ui.scope_builder(
                     egui::UiBuilder::new()
                         .max_rect(row)
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     |ui| {
-                        ui.add_space(10. + fastframe_macos::traffic_light_inset(ui.ctx()));
+                        ui.add_space(10. + fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
                         self.panel_toggle(ui, WorkspacePanel::Left);
                     },
                 );
@@ -1895,36 +1897,6 @@ pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
 
-/// The bar's empty space moves the window, and a double click does what
-/// System Settings says, as a title bar does. Controls drawn later take their
-/// own clicks. Only macOS hides the system title bar.
-fn title_bar_drag(ui: &mut egui::Ui, bar: egui::Rect) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let response = ui.interact(
-        bar,
-        ui.id().with("title-bar"),
-        egui::Sense::click_and_drag(),
-    );
-    let ctx = ui.ctx();
-    if response.double_clicked() {
-        match fastframe_macos::double_click_action() {
-            fastframe_macos::DoubleClick::Minimize => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            fastframe_macos::DoubleClick::Zoom => {
-                let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-            }
-            // AppKit fills the screen itself, from the drag started below.
-            fastframe_macos::DoubleClick::Fill | fastframe_macos::DoubleClick::Nothing => {}
-        }
-    } else if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
-        // AppKit only starts a drag during the original mouse-down.
-        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-    }
-}
 /// A status line showing `text`, with `detail` (a Library summary's items)
 /// or else `hover` on hover.
 fn status_text(ui: &mut egui::Ui, text: &str, detail: Option<&str>, hover: Option<&str>) {
