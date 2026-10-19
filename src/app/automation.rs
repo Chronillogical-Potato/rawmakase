@@ -223,9 +223,15 @@ impl Editor {
                 let develop = self.module == Module::Develop && self.document.metadata.is_some();
                 let photo = develop.then_some(self.document.catalog_photo).flatten();
                 let loaded = develop && self.document.full().is_some() && !self.load.is_running();
+                // So does its opening failing: it won't load, and the state
+                // says it isn't loaded.
+                let failed = self.module == Module::Develop
+                    && self.document.catalog_photo == Some(id)
+                    && self.document.failed
+                    && !self.load.is_running();
                 // Another photo replacing it ends the wait too: the client reads
                 // the state and sees it is stale.
-                photo.is_some_and(|p| p != id) || (loaded && photo == Some(id))
+                photo.is_some_and(|p| p != id) || (loaded && photo == Some(id)) || failed
             }
             commands::Until::Job(id) => self.automation.job_finished(id),
         }

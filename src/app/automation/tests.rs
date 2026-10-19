@@ -557,6 +557,36 @@ mod integration_tests {
         e.control_commands(&ctx);
         assert_eq!(answer.try_recv().unwrap().unwrap().status, "timed_out");
     }
+    /// A photo that could not be opened ends a wait for it: it will not load,
+    /// and the state says it isn't loaded.
+    #[test]
+    fn a_wait_for_a_photo_that_failed_to_open_is_answered() {
+        use std::time::Duration;
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        let (tx, rx) = mpsc::sync_channel(4);
+        e.controls = Hub::new(Settings::default(), rx);
+        e.module = Module::Develop;
+        let photo = crate::catalog::PhotoId(1);
+        e.document.reset(Some(photo));
+        let (load, _) = e.load.start();
+        let (pending, answer) = socket::test_request(vec![Msg::Command(Command::new(
+            commands::Operation::Wait(commands::Until::Loaded(photo), Duration::from_secs(30)),
+        ))]);
+        tx.send(Msg::Request(pending)).unwrap();
+        e.control_commands(&ctx);
+        assert!(answer.try_recv().is_err(), "answered while loading");
+        e.tx.send(crate::app::worker::Event::Failed {
+            id: load,
+            task: crate::app::worker::TaskKind::Load,
+            error: "Could not read the AVIF file".into(),
+        })
+        .unwrap();
+        e.events(&ctx);
+        e.control_commands(&ctx);
+        let reply = answer.try_recv().expect("answered").unwrap();
+        assert_eq!(reply.status, "applied");
+    }
 }
 
 #[test]

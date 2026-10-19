@@ -286,6 +286,7 @@ impl Editor {
                 } if id == self.load.id() => {
                     self.status = error;
                     self.load.finish(id);
+                    self.document.failed = true;
                     // No render is coming to take over from the stored preview.
                     self.preview.stand_in = None;
                 }
