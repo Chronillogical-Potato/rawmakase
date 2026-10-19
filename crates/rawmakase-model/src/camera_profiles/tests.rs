@@ -502,3 +502,32 @@ fn the_embedded_profile_renders_with_camera_raws_default_tone_curve() {
         }
     }
 }
+
+#[test]
+fn linear_dng_analog_balance_scales_the_camera_neutral() {
+    // Samples stored with AnalogBalance 2, 1, ½ (and `wb` of them): a white
+    // set by temperature balances them as the profile's neutral times those
+    // gains, and the as-shot temperature is the same as without them.
+    let plain = Metadata {
+        dng_analog_balance: None,
+        ..x100f()
+    };
+    let p = CameraProfile::camera_matrix_default(&plain).unwrap();
+    let gains = [2., 1., 0.5];
+    let stored = Metadata {
+        wb: std::array::from_fn(|c| plain.wb[c] / gains[c]),
+        dng_analog_balance: Some(gains),
+        ..plain.clone()
+    };
+    let as_shot = p.as_shot_white_balance(&plain).unwrap();
+    let with = p.as_shot_white_balance(&stored).unwrap();
+    assert!((as_shot[0] - with[0]).abs() < 1. && (as_shot[1] - with[1]).abs() < 0.01);
+    // The balanced samples are the same: stored samples (plain ones times the
+    // gains) times their `wb` (plain over the gains) are the plain ones times
+    // theirs, so the white's gains on top must be the same too.
+    let a = p.white_balance(5500., 0., &plain).unwrap();
+    let b = p.white_balance(5500., 0., &stored).unwrap();
+    for c in 0..3 {
+        assert!((a[c] - b[c]).abs() < 1e-4, "{a:?} {b:?}");
+    }
+}

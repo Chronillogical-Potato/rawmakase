@@ -52,6 +52,12 @@ pub struct RawInfo {
     /// developed without the as-shot multipliers, which Adobe DNG Converter
     /// writes as their AnalogBalance, with an AsShotNeutral of 1, 1, 1.
     pub balanced: bool,
+    /// A linear raw DNG's AnalogBalance relative to green: gains its writer
+    /// applied to the samples. `cam_mul` and `pre_mul` are of the samples
+    /// with them; XYZ to the samples is these gains times `cam_xyz` (DNG
+    /// Specification, "Mapping Camera Color Space to CIE XYZ Space"). 1
+    /// otherwise.
+    pub analog_balance: [f32; 3],
     pub fuji_dynamic_range: u32,
     /// Fujifilm's exposure midpoint shift in EV, -999 when there is none.
     pub fuji_exposure_shift: f32,
@@ -179,6 +185,7 @@ pub(crate) fn base(variant: Variant) -> RawInfo {
         dng_version: 0,
         sraw: false,
         balanced: false,
+        analog_balance: [1.; 3],
         fuji_dynamic_range: 0xffff,
         fuji_exposure_shift: -999.,
         iso: 0.,

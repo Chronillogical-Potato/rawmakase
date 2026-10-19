@@ -425,7 +425,16 @@ impl CameraProfile {
         }
         .into())
     }
+    /// The per-channel gains from the profile's camera neutral to the
+    /// samples': the DNG's diagonal CameraCalibration when it is the
+    /// profile's, Adobe's reference calibration, and a linear raw DNG's
+    /// AnalogBalance, whatever the profile.
     fn neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
+        let analog = m.dng_analog_balance.unwrap_or([1.; 3]);
+        let calibration = self.camera_calibration(m);
+        std::array::from_fn(|c| calibration[c] * analog[c])
+    }
+    fn camera_calibration(&self, m: &Metadata) -> [f32; 3] {
         if m.baseline_exposure.is_some() {
             m.dng_neutral_calibration
                 .as_ref()
