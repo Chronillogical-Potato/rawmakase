@@ -106,6 +106,7 @@ fn channel() -> &'static str {
     }
     match crate::updates::installation() {
         Ok(installation) => match installation.kind {
+            Kind::AppImage => "linux-appimage",
             Kind::MacBundle => "macos-dmg",
             Kind::WindowsInstaller => "windows-installer",
             Kind::Portable if cfg!(windows) => "windows-zip",

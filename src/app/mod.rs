@@ -498,7 +498,7 @@ impl eframe::App for Editor {
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // AppKit moves the traffic lights back during layout passes.
-        fastframe_macos::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
+        fastframe_titlebar::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
         #[cfg(windows)]
         crate::platform::taskbar_icon(frame);
         self.draw(ui);
@@ -507,7 +507,7 @@ impl eframe::App for Editor {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         workspace::clipboard_shortcut_keys(ctx, raw_input);
     }
-    // fastframe-macos turns on eframe's glow feature, which adds the context.
+    // fastframe-titlebar turns on eframe's glow feature, which adds the context.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.exit();
     }
@@ -573,7 +573,7 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),
-        // fastframe-macos turns on eframe's glow renderer too; previews
+        // fastframe-titlebar turns on eframe's glow renderer too; previews
         // share the UI's wgpu device.
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: wgpu_options(),
