@@ -80,7 +80,8 @@ fn open_decoder(path: &Path) -> Result<(Box<dyn ImageDecoder>, Option<Unsupporte
             Box::new(
                 image::ImageReader::open(path)?
                     .with_guessed_format()?
-                    .into_decoder()?,
+                    .into_decoder()
+                    .map_err(read_error(path))?,
             ),
             animated.then(|| Unsupported("animated".into())),
         ),
@@ -98,7 +99,8 @@ fn open_decoder(path: &Path) -> Result<(Box<dyn ImageDecoder>, Option<Unsupporte
             Box::new(
                 image::ImageReader::open(path)?
                     .with_guessed_format()?
-                    .into_decoder()?,
+                    .into_decoder()
+                    .map_err(read_error(path))?,
             ),
             None,
         ),
@@ -153,7 +155,7 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
     } = prepare(path)?;
     if let Some((profile, white)) = profile.as_ref().and_then(|p| Some((p, hdr_white(p)?))) {
         let linear = to_linear(profile, decoder.color_type())?;
-        let mut image = DynamicImage::from_decoder(decoder)?;
+        let mut image = DynamicImage::from_decoder(decoder).map_err(read_error(path))?;
         image.apply_orientation(orientation);
         let (width, height) = (image.width(), image.height());
         let mut pixels = linear.apply(image, &AtomicBool::new(false))?;
@@ -163,7 +165,7 @@ pub fn decode(path: &Path) -> Result<RgbImage> {
         return linear_pro_photo_to_srgb(&pixels, width, height);
     }
     let transform = profile.and_then(|profile| ToSrgb::new(&profile, decoder.color_type()));
-    let mut image = DynamicImage::from_decoder(decoder)?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(read_error(path))?;
     image.apply_orientation(orientation);
     match transform {
         Some(transform) => transform.apply(image),
@@ -193,7 +195,7 @@ pub(crate) fn open(path: &Path, cancel: &AtomicBool) -> Result<CameraImage> {
     }
     let profile = profile.unwrap_or_else(ColorProfile::new_srgb);
     let linear = to_linear(&profile, decoder.color_type())?;
-    let mut image = DynamicImage::from_decoder(decoder)?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(read_error(path))?;
     image.apply_orientation(orientation);
     let (width, height) = (image.width(), image.height());
     let pixels = linear.apply(image, cancel)?;
@@ -272,6 +274,24 @@ fn layout(
         DataColorSpace::Gray => Ok(None),
         DataColorSpace::Cmyk => Err(Unsupported("CMYK".into())),
         other => Err(Unsupported(format!("{other:?}"))),
+    }
+}
+
+/// What decoding the file at `path` failed with, as "Could not read the WebP
+/// file: …", its cause said once: `image`'s own message repeats its cause,
+/// which a whole error chain then shows twice.
+fn read_error(path: &Path) -> impl Fn(image::ImageError) -> anyhow::Error + '_ {
+    move |e| match &e {
+        image::ImageError::Decoding(decoding) => {
+            let mut cause: &dyn std::error::Error = decoding;
+            while let Some(inner) = cause.source() {
+                cause = inner;
+            }
+            let name = rawmakase_model::storage::RasterFormat::of(path)
+                .map_or("image", |format| format.name());
+            anyhow!("Could not read the {name} file: {cause}")
+        }
+        _ => e.into(),
     }
 }
 
@@ -1005,6 +1025,30 @@ mod tests {
         assert!(decode(&fixture("pq.avif")).is_ok());
         assert!(decode(&fixture("animated.avif")).is_ok());
         assert!(decode(&fixture("tiled.avif")).is_err());
+    }
+
+    /// A file cut short says what it is and what is wrong with it, once.
+    #[test]
+    fn a_truncated_file_says_what_is_wrong_once() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, message) in [
+            (
+                "metadata.jxl",
+                "Could not read the JPEG XL file: reader ended before parsing first frame",
+            ),
+            (
+                "metadata.webp",
+                "Could not read the WebP file: An expected chunk was missing",
+            ),
+        ] {
+            let bytes = std::fs::read(fixture(name)).unwrap();
+            let path = dir.path().join(name);
+            std::fs::write(&path, &bytes[..bytes.len() / 3]).unwrap();
+            assert_eq!(format!("{:#}", decode(&path).unwrap_err()), message);
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let opened = super::open(&path, &cancel).err().unwrap();
+            assert_eq!(format!("{opened:#}"), message);
+        }
     }
 
     /// An HDR file's preview shows HDR reference white (203 nits, ITU-R
