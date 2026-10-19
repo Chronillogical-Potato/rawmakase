@@ -222,6 +222,12 @@ impl ToSrgb {
         let srgb = ColorProfile::new_srgb();
         let options = TransformOptions::default();
         Some(if deep {
+            // moxcms's fixed-point 16-bit conversion on ARM clips matrix
+            // coefficients above 2, darkening red from ProPhoto (moxcms#202).
+            let options = TransformOptions {
+                prefer_fixed_point: false,
+                ..options
+            };
             let t = profile.create_transform_16bit(layout, &srgb, Layout::Rgb, options);
             Self::Sixteen(t.ok()?, layout)
         } else {
@@ -357,6 +363,22 @@ mod tests {
         let image = decode(&path).unwrap();
         let expected = p3_as_srgb(samples.map(|v| v as f64 / 257.));
         assert_near(*image.get_pixel(0, 0), expected, 0.5);
+    }
+
+    /// ProPhoto to sRGB needs a matrix coefficient above 2, which moxcms's
+    /// fixed-point 16-bit conversion on ARM clips, darkening red.
+    #[test]
+    fn a_sixteen_bit_pro_photo_grey_stays_grey() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pro-photo-16.png");
+        let bytes: Vec<u8> = [41_943u16; 3]
+            .iter()
+            .flat_map(|v| v.to_ne_bytes())
+            .collect();
+        let pro_photo = moxcms::ColorProfile::new_pro_photo_rgb().encode().unwrap();
+        png(&path, &bytes, ExtendedColorType::Rgb16, Some(pro_photo));
+        let image = decode(&path).unwrap();
+        assert_near(*image.get_pixel(0, 0), [178.; 3], 0.5);
     }
 
     #[test]
