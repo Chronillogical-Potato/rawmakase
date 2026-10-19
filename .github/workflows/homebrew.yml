@@ -48,7 +48,7 @@ jobs:
           ruby-version: '3.3'
       - name: Prepare and verify the published cask
         run: |
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           native-packages validate
           # Recipe-only preparation downloads and checks both published DMGs.
           native-packages prepare "${RELEASE_TAG#v}" --output dist/homebrew-recipes

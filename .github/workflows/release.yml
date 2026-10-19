@@ -325,7 +325,7 @@ jobs:
           for key in APPLE_CERTIFICATE_P12 APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
             test -n "${!key}" || { echo "Missing repository secret: $key" >&2; exit 1; }
           done
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           # The cask is rendered later, once both DMGs exist.
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
@@ -406,7 +406,7 @@ jobs:
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --yes --no-progress
           }
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           $env:SOURCE_DATE_EPOCH = git show -s --format=%ct HEAD
           native-packages build --version $env:VERSION --target ${{ matrix.target }} --defer-recipes --output "$env:RUNNER_TEMP\windows-packages"
           New-Item -ItemType Directory dist\upload | Out-Null
@@ -500,7 +500,7 @@ jobs:
       # checksums.txt and its Ed25519 signature, which the app's updater
       # verifies against assets/update-public-key.hex before installing.
       - name: Sign update manifest
-        uses: crmne/native-packages/.github/actions/sign-release@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
+        uses: crmne/native-packages/.github/actions/sign-release@226fb48cb375c7cb309a3e642c7228a6e00e9ebf # v0.10.0
         with:
           directory: dist
           public-key: release-source/assets/update-public-key.hex
@@ -508,7 +508,7 @@ jobs:
         env:
           RAWMAKASE_UPDATE_SIGNING_KEY: ${{ secrets.RAWMAKASE_UPDATE_SIGNING_KEY }}
       - name: Attest packages
-        uses: crmne/native-packages/.github/actions/attest@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
+        uses: crmne/native-packages/.github/actions/attest@226fb48cb375c7cb309a3e642c7228a6e00e9ebf # v0.10.0
         with:
           subject-path: dist/*
       # Preserve the exact bytes prepared for upload, including the signed

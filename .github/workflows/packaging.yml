@@ -61,7 +61,7 @@ jobs:
           python3 -m py_compile packaging/macos/*.py packaging/linux/*.py
           python3 -m unittest discover -s packaging/macos -p 'test_*.py'
           python3 -m unittest discover -s packaging -p 'test_*.py'
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           native-packages validate
       - name: Parse the Windows packaging scripts
         shell: pwsh
@@ -87,7 +87,7 @@ jobs:
           ruby-version: '3.3'
       - name: Check the macOS packaging tools
         run: |
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           native-packages doctor --target macos-arm64 --target macos-amd64 --defer-recipes
 
   # The release's Windows job, from this checkout: MSVC build, the Inno Setup
@@ -152,7 +152,7 @@ jobs:
           if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --yes --no-progress
           }
-          gem install native-packages --version 0.7.0 --no-document
+          gem install native-packages --version 0.10.0 --no-document
           native-packages doctor --target ${{ matrix.target }} --defer-recipes
           $version = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'rawmakase').version
           "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -173,7 +173,7 @@ jobs:
   packages:
     permissions:
       contents: write
-    uses: crmne/native-packages/.github/workflows/package.yml@83bd46c245488c2b8f1b9d74569e16cf6a449e8f # v0.9.0
+    uses: crmne/native-packages/.github/workflows/package.yml@226fb48cb375c7cb309a3e642c7228a6e00e9ebf # v0.10.0
     with:
       targets: ${{ inputs.version != '' && 'linux-amd64,linux-arm64' || 'linux-amd64' }}
       version: ${{ inputs.version || 'v0.1.8' }}

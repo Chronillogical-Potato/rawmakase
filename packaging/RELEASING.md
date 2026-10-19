@@ -49,7 +49,7 @@ Set these **repository Actions secrets**:
 - `APPLE_TEAM_ID`: that developer team's ID.
 - `APPLE_APP_PASSWORD`: the Apple Account app-specific password.
 
-The release step explicitly requires all six. `native-packages` 0.7.0 signs
+The release step explicitly requires all six. `native-packages` 0.10.0 signs
 nested code and the app in a temporary keychain, creates and signs the DMG,
 submits it with `notarytool`, waits for acceptance, and staples the ticket.
 This runs in its own job, after the job that builds the app, which passes the
@@ -213,7 +213,7 @@ PATH. The `windows-amd64` and `windows-arm64` targets in `native-packages.yaml` 
 with Inno Setup. Never change that script's `AppId`: it is how Windows tells an
 update from a second installation.
 
-Packaging uses pinned `native-packages` 0.7.0, configured in
+Packaging uses pinned `native-packages` 0.10.0, configured in
 `native-packages.yaml`. The Linux archives are built natively on x86_64 and
 arm64 runners; `packaging/linux/bundle.py` stages each with its private
 libraries. The release then calls `.github/workflows/packaging.yml`, which runs
