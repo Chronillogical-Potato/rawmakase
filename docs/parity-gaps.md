@@ -112,6 +112,51 @@ The attempt did not identify a defensible predictive mechanism or a new engine
 candidate. Research was stopped as instructed; no further experiment or render
 queue was left running, and dataset holdout remained untouched.
 
+### Detail kept and range-aware Highlights (2026-10-19)
+
+Started from two reported photos: Highlights −100 flattens an overcast sky
+that Camera Raw keeps cloudy, and Shadows +100 leaves dark foliage flat and
+dark. None of the candidates below passed the validation gate against
+`main-a8c5d6d7-metric2`; none was merged.
+
+- **What the photos showed.** In Camera Raw the Shadows lift is nearly constant
+  within a dark area: dark areas keep 101% of their local contrast on the
+  dataset's 80 train photos, against 77% in RAWmakase. Positive Shadows' detail
+  table gives pixels darker than their region extra lift, and in foliage every
+  darker leaf counts. In the sky, the negative-Highlights row above 5 stops over
+  the key had been flattened by `monotone` (its decreasing, unsampled tail), so
+  1 EV of sky became about 0.1 EV.
+- **Not the cause:** the default black. Camera Raw and RAWmakase subtract the
+  same black, by output level, under Shadows +100 and at default.
+- **Train-split refits.** Linear-profile Camera Raw renders of the train split
+  (80 usable photos; DNG-native files cannot take the linear profile) were
+  fitted with `scene-tone-local.py`'s target construction and cross-validated
+  by photo.
+  - Positive Shadows' detail table read from a guided base at ε 2 instead of
+    0.5, both tables refitted: held-out scene-gain RMS at +100 0.244 EV against
+    0.275 for main's tables, and detail kept 85% against 77%. The train photos
+    have no regional level below about 4 stops under the key, so the darkest
+    regions are extrapolation in either direction.
+  - Negative Highlights interpolated between rows fitted at a photo range
+    (p99.9 less the key) of 4 and 9 stops: Camera Raw pulls the brightest areas
+    of a wide-range photo much harder than a narrow-range one. Held-out
+    bright-area RMS at −100 fell by about 11% against main's table. A fixed
+    hold above 5 stops helped narrow-range photos and broke wide-range ones.
+    A term keyed to the photo's top, or to distance below white, added nothing.
+- **Validation gate** (19 sets: Highlights, Shadows, mixed, A7R VI tone; photos
+  counted once). Range-aware Highlights alone: −100 median −0.12 ΔE00, 11 photos
+  better and 4 worse by more than 0.3; −50 4 better, none worse. It still fails:
+  about 10 photos regress regionally by more than 2 ΔE00 (low-key scenes with a
+  mid-bright area, which it pulls harder than Camera Raw), clipping rises on two
+  stress photos, and two strata's medians worsen. The Shadows refit was neutral
+  on validation (+100: 15 better, 10 worse, mean +0.06), with and without the
+  scene-context offset, which was calibrated for main's tables; its train
+  improvement did not carry over to rendered validation photos.
+
+Next step, if resumed: a Highlights pull that is also limited by absolute
+brightness or area, fitted on train photos that include low-key scenes with
+mid-bright areas; the current train split has too few of them.
+
 ## Color
 
 - **Saturation** −100 renders Camera Raw's exact luminance gray ([saturation](color-mixer.md#saturation)): 0.65 mean ΔE00 on the chart, down from 3.97. Between −50 and +100 it is the photo-measured tables (chart: −50 1.21, +50 1.39, +100 2.93); Camera Raw's own blend toward luminance fits the chart better but was worse on real photos. **Vibrance** follows Camera Raw's chart measurements beyond ±50 ([vibrance](color-mixer.md#vibrance)): −100 at 0.83 and +100 at 1.00 on the chart, down from 3.90 and 1.54; up to ±50 it is the photo-measured tables.
