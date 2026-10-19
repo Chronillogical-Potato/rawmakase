@@ -32,8 +32,9 @@ pub(super) struct AvifFile {
     height: u32,
     /// More than 8 bits per sample, from `pixi` or `av1C`.
     deep: bool,
-    /// The primary item's AV1 data; empty for a tiled image, which is not read.
-    obu: Vec<u8>,
+    /// The file and its boxes, to read the primary item's AV1 data from when
+    /// decoding; `None` for a tiled image, which is not read.
+    source: Option<(std::fs::File, Heif)>,
     icc: Option<Vec<u8>>,
     nclx: Option<Nclx>,
     orientation: Orientation,
@@ -118,19 +119,11 @@ impl AvifFile {
         } else {
             None
         };
-        // `prepare` refuses a file above 150 MP from its size before decoding;
-        // its data is not read either. Otherwise at most 256 MiB is.
-        let obu = if tiled || (width as u64) * (height as u64) > 150_000_000 {
-            Vec::new()
-        } else {
-            heif.data(&mut file, heif.primary)
-                .ok_or_else(|| anyhow!("The AVIF image data is missing or cut off"))?
-        };
         Ok(Self {
             width,
             height,
             deep,
-            obu,
+            source: (!tiled).then_some((file, heif)),
             icc,
             nclx,
             orientation: orientation(rotation.unwrap_or(0), mirror),
@@ -359,10 +352,15 @@ impl ImageDecoder for AvifFile {
                 e.to_string(),
             ))
         };
-        if self.obu.is_empty() {
+        let Some((mut file, heif)) = self.source else {
             return Err(failed(anyhow!("Tiled AVIF images can't be read")));
-        }
-        let picture = av1::decode(&self.obu).map_err(failed)?;
+        };
+        // At most 256 MiB; `prepare` refuses a file above 150 MP from its size
+        // before this.
+        let obu = heif
+            .data(&mut file, heif.primary)
+            .ok_or_else(|| failed(anyhow!("The AVIF image data is missing or cut off")))?;
+        let picture = av1::decode(&obu).map_err(failed)?;
         if (picture.width(), picture.height()) != (self.width, self.height)
             || (picture.depth() > 8) != self.deep
         {

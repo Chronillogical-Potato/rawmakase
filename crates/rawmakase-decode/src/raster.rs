@@ -859,6 +859,19 @@ mod tests {
         assert_eq!(super::dimensions(&path), Some((1, 2)));
     }
 
+    /// The size and the refusal come from an AVIF's header: its AV1 data is
+    /// read only to decode it.
+    #[test]
+    fn an_avif_header_is_read_without_its_image_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cut.avif");
+        let bytes = std::fs::read(fixture("rotated.avif")).unwrap();
+        std::fs::write(&path, &bytes[..bytes.len() - 20]).unwrap();
+        assert_eq!(super::dimensions(&path), Some((12, 16)));
+        assert!(super::probe(&path).is_ok());
+        assert!(decode(&path).is_err());
+    }
+
     #[test]
     fn a_file_opens_by_its_content_whatever_its_extension() {
         let dir = tempfile::tempdir().unwrap();
