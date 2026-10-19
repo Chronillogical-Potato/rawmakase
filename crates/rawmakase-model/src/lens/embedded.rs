@@ -125,7 +125,7 @@ fn sony(t: &mut Tiff) -> Option<LensCorrection> {
         ])
     });
     Some(LensCorrection {
-        source: "Sony built-in".into(),
+        source: LensCorrection::SONY_BUILTIN.into(),
         // Not yet compared with Lightroom, which may apply its own profile instead.
         default_on: false,
         vignetting,

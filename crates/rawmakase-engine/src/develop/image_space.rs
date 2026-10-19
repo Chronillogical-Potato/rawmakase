@@ -44,9 +44,28 @@ impl<'a> LensMap<'a> {
             chromatic,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
-            fill: lens.fill_scale_with(r.lens_distortion),
+            fill: Self::fill(im, lens, r.lens_distortion),
             amount: r.lens_distortion,
         })
+    }
+    /// The scale that keeps corrected samples inside the decoded image. Sony's built-in
+    /// correction is the camera's own, which zooms by no more than its table does: the
+    /// camera's JPEG samples the sensor beyond its aspect-ratio crop (the ZV-1's 16:9 of
+    /// 3:2), so only the photo's edge, the crop's when there is one, has to stay inside.
+    /// Any other correction keeps the whole frame's corners inside, as Lightroom's
+    /// profiles do.
+    fn fill(im: &CameraImage, lens: &crate::optics::LensCorrection, amount: f32) -> f32 {
+        let m = &im.metadata;
+        let sony = lens.source == crate::optics::LensCorrection::SONY_BUILTIN;
+        if !(sony && m.make.eq_ignore_ascii_case("sony")) {
+            return lens.fill_scale_with(amount);
+        }
+        let inset = ImageFrame::new(im).inset;
+        let [l, t, rt, b] = m.camera_crop.unwrap_or([0., 0., 1., 1.]);
+        let (w, h) = (im.width as f32, im.height as f32);
+        let x = |v: f32| (inset[0] + v * inset[2]) * w;
+        let y = |v: f32| (inset[1] + v * inset[3]) * h;
+        lens.fill_scale_within(amount, [w, h], [x(l), y(t), x(rt), y(b)])
     }
     /// Offset from the centre, scaled by the fill, and the per-channel radial scale.
     pub(crate) fn scales(&self, x: f32, y: f32) -> ([f32; 2], [f32; 3]) {
@@ -231,5 +250,44 @@ mod tests {
             let [bx, by] = map.inverse(fx, fy);
             assert!((bx - x).abs() < 1e-2 && (by - y).abs() < 1e-2, "{x} {y}");
         }
+    }
+    #[test]
+    fn sony_builtin_fill_follows_the_cameras_crop_of_a_wider_sensor() {
+        // A 16:9 camera crop of a 3:2 frame: the built-in correction may sample the
+        // sensor beyond the crop, so it zooms less than for the whole frame.
+        let correction = crate::optics::LensCorrection {
+            source: crate::optics::LensCorrection::SONY_BUILTIN.into(),
+            distortion: Some(crate::optics::Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 1.08],
+            }),
+            ..Default::default()
+        };
+        let mut im = image(0);
+        im.metadata.crop_left = 0;
+        im.metadata.crop_top = 0;
+        im.metadata.crop_width = 300;
+        im.metadata.crop_height = 200;
+        im.metadata.make = "SONY".into();
+        im.metadata.lens = Some(correction.clone());
+        let r = Recipe::default();
+        let whole = correction.fill_scale_with(1.);
+        let uncropped = LensMap::new(&im, &r).unwrap().fill;
+        assert!(
+            uncropped >= whole && uncropped < whole + 0.01,
+            "{whole} {uncropped}"
+        );
+        im.metadata.camera_crop = Some([0., 0.0625, 1., 0.9375]);
+        let cropped = LensMap::new(&im, &r).unwrap().fill;
+        assert!(cropped > uncropped + 0.001, "{uncropped} {cropped}");
+        // Not Sony's, or a Sony DNG's opcodes: the whole frame's corners.
+        im.metadata.make = "FUJIFILM".into();
+        assert_eq!(LensMap::new(&im, &r).unwrap().fill, whole);
+        im.metadata.make = "SONY".into();
+        im.metadata.lens = Some(crate::optics::LensCorrection {
+            source: "DNG opcodes".into(),
+            ..correction
+        });
+        assert_eq!(LensMap::new(&im, &r).unwrap().fill, whole);
     }
 }

@@ -70,6 +70,9 @@ pub static NO_CORRECTION: LensCorrection = LensCorrection {
     chromatic: None,
 };
 impl LensCorrection {
+    /// The `source` of the correction read from a Sony file's own tables (a DNG's
+    /// opcodes are another source, with Lightroom's framing).
+    pub const SONY_BUILTIN: &'static str = "Sony built-in";
     pub fn is_empty(&self) -> bool {
         self.vignetting.is_none() && self.distortion.is_none() && self.chromatic.is_none()
     }
@@ -131,6 +134,53 @@ impl LensCorrection {
             .fold(1f32, f32::max);
         1. / widest
     }
+    /// As `fill_scale_with`, for a photo that is only the rectangle `crop` (`[left, top,
+    /// right, bottom]`, in pixels) of the decoded image of `size`: the scale keeps every
+    /// corrected sample of the crop's edge inside the decoded image, which can reach
+    /// beyond the crop (a camera's aspect-ratio crop of a wider sensor). Never below
+    /// the scale for the whole image.
+    pub fn fill_scale_within(&self, amount: f32, size: [f32; 2], crop: [f32; 4]) -> f32 {
+        let whole = self.fill_scale_with(amount);
+        if whole >= 1. {
+            return whole;
+        }
+        let [w, h] = size;
+        let half = w.hypot(h) * 0.5;
+        let [left, top, right, bottom] = crop.map(|v| v.max(0.));
+        let (x0, x1) = (left - w * 0.5, right.min(w) - w * 0.5);
+        let (y0, y1) = (top - h * 0.5, bottom.min(h) - h * 0.5);
+        let inside = |dx: f32, dy: f32, fill: f32| {
+            let s = self
+                .radial_scale_with(dx.hypot(dy) * fill / half, amount)
+                .into_iter()
+                .fold(0f32, f32::max);
+            dx.abs() * fill * s <= w * 0.5 && dy.abs() * fill * s <= h * 0.5
+        };
+        // About one sample per pixel along the edge, so no extremum between samples
+        // leaves the image by more than a fraction of a pixel.
+        let steps = (w.max(h).ceil() as usize).clamp(64, 8192);
+        let mut fill = 1f32;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let (x, y) = (x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+            for (dx, dy) in [(x, y0), (x, y1), (x0, y), (x1, y)] {
+                if inside(dx, dy, fill) {
+                    continue;
+                }
+                let (mut lo, mut hi) = (whole, fill);
+                for _ in 0..24 {
+                    let mid = (lo + hi) * 0.5;
+                    if inside(dx, dy, mid) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                fill = lo;
+            }
+        }
+        fill
+    }
 }
 
 #[cfg(test)]
@@ -156,5 +206,64 @@ mod tests {
         assert!(s < 1. && s > 0.97);
         assert!(c.radial_scale(s)[1] * s <= 1.0001);
         assert_eq!(LensCorrection::default().fill_scale(), 1.);
+    }
+    #[test]
+    fn fill_within_a_crop_of_a_wider_sensor_is_looser_and_still_inside() {
+        let c = LensCorrection {
+            distortion: Radial::new(vec![0., 1.], vec![1., 1.08]),
+            ..Default::default()
+        };
+        let size = [6000., 4000.];
+        // A 16:9 crop of the 3:2 image.
+        let crop = [0., 437.5, 6000., 3812.5];
+        let whole = c.fill_scale_with(1.);
+        let within = c.fill_scale_within(1., size, crop);
+        assert!(within > whole + 0.005 && within <= 1., "{whole} {within}");
+        let half = 6000f32.hypot(4000.) * 0.5;
+        for (x, y) in [
+            (3000f32, 1562.5f32),
+            (3000., 0.),
+            (0., 1562.5),
+            (1500., 1562.5),
+        ] {
+            let s = c.radial_scale_with(x.hypot(y) * within / half, 1.)[1];
+            assert!(
+                x * within * s <= 3000.01 && y * within * s <= 2000.01,
+                "{x} {y}"
+            );
+        }
+        // The whole image is never tighter than its own scale; no distortion needs none.
+        let all = c.fill_scale_within(1., size, [0., 0., 6000., 4000.]);
+        assert!(all >= whole && all < whole + 0.01, "{whole} {all}");
+        assert_eq!(
+            LensCorrection::default().fill_scale_within(1., size, crop),
+            1.
+        );
+    }
+    #[test]
+    fn fill_within_leaves_no_edge_pixel_outside_between_samples() {
+        // A table with bumps, the kind Sony's signed values give.
+        let c = LensCorrection {
+            distortion: Radial::new(
+                (0..11).map(|i| i as f32 / 10.).collect(),
+                vec![
+                    1.08, 1.06, 1.04, 1.02, 1.02, 1.02, 1.02, 1.02, 1.02, 1.03, 0.99,
+                ],
+            ),
+            ..Default::default()
+        };
+        let (w, h) = (6000f32, 4000f32);
+        let fill = c.fill_scale_within(1., [w, h], [0., 0., w, h]);
+        let half = w.hypot(h) * 0.5;
+        let mut worst = 0f32;
+        for i in 0..6000 {
+            for (px, py) in [(i as f32 + 0.5, 0.5), (i as f32 + 0.5, h - 0.5)] {
+                let (dx, dy) = (px - w * 0.5, py - h * 0.5);
+                let s = c.radial_scale_with(dx.hypot(dy) * fill / half, 1.)[1];
+                worst = worst.max((dx * fill * s).abs() - w * 0.5);
+                worst = worst.max((dy * fill * s).abs() - h * 0.5);
+            }
+        }
+        assert!(worst < 0.5, "{worst}");
     }
 }
