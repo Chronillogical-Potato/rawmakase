@@ -586,6 +586,12 @@ mod integration_tests {
         e.control_commands(&ctx);
         let reply = answer.try_recv().expect("answered").unwrap();
         assert_eq!(reply.status, "applied");
+        // The state says which photo failed, so a client stops waiting.
+        assert_eq!(reply.state.open_failed, Some(photo));
+        assert!(!reply.state.loaded);
+        e.document.reset(Some(photo));
+        e.load.start();
+        assert_eq!(e.command_state().open_failed, None);
     }
 }
 

@@ -225,10 +225,7 @@ impl Editor {
                 let loaded = develop && self.document.full().is_some() && !self.load.is_running();
                 // So does its opening failing: it won't load, and the state
                 // says it isn't loaded.
-                let failed = self.module == Module::Develop
-                    && self.document.catalog_photo == Some(id)
-                    && self.document.failed
-                    && !self.load.is_running();
+                let failed = self.open_failed() == Some(id);
                 // Another photo replacing it ends the wait too: the client reads
                 // the state and sees it is stale.
                 photo.is_some_and(|p| p != id) || (loaded && photo == Some(id)) || failed

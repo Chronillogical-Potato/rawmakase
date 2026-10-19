@@ -290,7 +290,7 @@ impl Server {
         self.send(request, None).await
     }
     #[tool(
-        description = "Open a catalog photo in Develop and wait up to 30 seconds for decoding. Fails if another photo replaces it. Opening may save the previous edit."
+        description = "Open a catalog photo in Develop and wait up to 30 seconds for decoding. Fails if another photo replaces it or it can't be opened. Opening may save the previous edit."
     )]
     async fn open_photo(
         &self,
@@ -311,6 +311,9 @@ impl Server {
                     return error("stale_target", "Another document replaced the requested photo; read state");
                 }
                 if state["loaded"] == true && state["photo_id"].as_i64() == Some(p.id) { return result(reply); }
+                if state["open_failed"].as_i64() == Some(p.id) {
+                    return error("open_failed", state["message"].as_str().unwrap_or("The photo could not be opened"));
+                }
                 if Instant::now() >= deadline { return error("not_ready", "Opening started but decoding has not completed; inspect state before editing"); }
             }
         }).await

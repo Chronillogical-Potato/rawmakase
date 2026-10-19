@@ -463,12 +463,26 @@ fn commands(command: &Command) -> Result<Vec<Request>, String> {
     })
 }
 
-/// Waits until photo `id` is loaded in Develop, ready for edits.
+/// Whether `state` has photo `id` (any photo, without one) loaded in Develop;
+/// an error once it could not be opened.
+fn opened(state: &Value, id: Option<i64>) -> Result<bool, String> {
+    let failed = state["open_failed"].as_i64();
+    if failed.is_some() && (id.is_none() || failed == id) {
+        return Err(format!(
+            "the photo could not be opened: {}",
+            state["message"].as_str().unwrap_or_default()
+        ));
+    }
+    Ok(state["loaded"] == true && (id.is_none() || state["photo_id"].as_i64() == id))
+}
+
+/// Waits until photo `id` is loaded in Develop, ready for edits, or could not
+/// be opened.
 fn wait_loaded(connection: &Connection, id: Option<i64>, seconds: u64) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_secs(seconds);
     loop {
         let state = connection.ask(to_json(&Request::State)?)?;
-        if state["loaded"] == true && (id.is_none() || state["photo_id"].as_i64() == id) {
+        if opened(&state, id)? {
             return Ok(state);
         }
         if Instant::now() > deadline {
@@ -644,6 +658,26 @@ mod tests {
             let cli = Cli::try_parse_from(args).unwrap();
             assert_eq!(requests(&cli.command).unwrap()[0]["cmd"], cmd);
         }
+    }
+
+    #[test]
+    fn waiting_ends_when_the_photo_loads_or_fails_to_open() {
+        let loaded = json!({"loaded": true, "photo_id": 4});
+        assert_eq!(opened(&loaded, Some(4)), Ok(true));
+        assert_eq!(opened(&loaded, None), Ok(true));
+        assert_eq!(
+            opened(&json!({"loaded": false, "photo_id": 4}), Some(4)),
+            Ok(false)
+        );
+        let failed = json!({"loaded": false, "photo_id": null, "open_failed": 4,
+            "message": "Could not read the AVIF file"});
+        assert_eq!(
+            opened(&failed, Some(4)),
+            Err("the photo could not be opened: Could not read the AVIF file".into())
+        );
+        assert!(opened(&failed, None).is_err());
+        // Another photo's failure is not this one's.
+        assert_eq!(opened(&failed, Some(5)), Ok(false));
     }
 
     #[test]
