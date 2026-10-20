@@ -106,6 +106,33 @@ fn a_case_only_rename_works_on_apfs() {
     assert_eq!(entry(&lower).unwrap().id, id);
 }
 
+#[cfg(target_vendor = "apple")]
+#[test]
+fn a_normalisation_only_rename_works_on_apfs() {
+    let d = dir();
+    let (nfc, nfd) = (
+        d.path().join("caf\u{e9}.NEF"),
+        d.path().join("cafe\u{301}.NEF"),
+    );
+    fs::write(&nfc, b"r").unwrap();
+    let id = entry(&nfc).unwrap().id;
+    rename_exclusive(&nfc, &nfd).unwrap();
+    assert_eq!(
+        list(d.path()).unwrap(),
+        vec![OsString::from("cafe\u{301}.NEF")]
+    );
+    assert_eq!(entry(&nfd).unwrap().id, id);
+}
+
+#[test]
+fn a_volume_says_whether_a_rename_can_change_only_a_names_spelling() {
+    // Temporary folders are on APFS on macOS; elsewhere it isn't known, and
+    // no volume is taken to.
+    let d = dir();
+    let facts = volume_facts(d.path()).unwrap();
+    assert_eq!(facts.renames_spelling, cfg!(target_vendor = "apple"));
+}
+
 #[test]
 fn file_ids_tell_files_apart_and_hard_links_are_counted() {
     let d = dir();

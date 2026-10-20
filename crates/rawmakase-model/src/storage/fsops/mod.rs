@@ -292,6 +292,11 @@ pub struct VolumeFacts {
     /// system, which may be one), where locks are unreliable.
     pub local: bool,
     pub read_only: bool,
+    /// Whether an exclusive rename can change only a name's case or Unicode
+    /// form (`ROUND.NEF` to `round.NEF`) on it, as APFS's can. Elsewhere it
+    /// isn't known (a volume may find the name taken, or do nothing), and
+    /// it is `false`.
+    pub renames_spelling: bool,
 }
 
 /// The facts of the volume `path` is on.
