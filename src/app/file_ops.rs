@@ -24,11 +24,14 @@
 use super::{Editor, widgets};
 #[cfg(test)]
 use crate::catalog::file_ops::Summary;
+#[cfg(test)]
+use crate::catalog::file_ops::TrashReceipt;
 use crate::catalog::file_ops::{
-    self, BatchId, FileOp, ItemResult, Outcome, Plan, Trash, TrashError, TrashReceipt, Unfinished,
+    self, BatchId, FileOp, ItemResult, Outcome, Plan, Trash, TrashError, Unfinished,
 };
 use crate::catalog::{CatalogLocation, PhotoId};
 use eframe::egui;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,10 +41,12 @@ use std::time::{Duration, Instant};
 mod dialogs;
 use dialogs::{Choosing, Naming};
 
-/// The Trash file operations get before the app has the system's: it
-/// takes nothing, so Move to Trash leaves every file where it is.
+/// A Trash that takes nothing, for tests whose operations have no file to
+/// trash.
+#[cfg(test)]
 pub(super) struct Unavailable;
 
+#[cfg(test)]
 impl Trash for Unavailable {
     fn trash(&self, _: &Path) -> Result<TrashReceipt, TrashError> {
         Err(TrashError::Unsupported)
@@ -181,7 +186,7 @@ impl Default for FileOps {
     fn default() -> Self {
         Self {
             state: State::Idle,
-            trash: Arc::new(Unavailable),
+            trash: Arc::new(crate::platform::trash::SystemTrash),
             pending_recovery: None,
             reopen: None,
             #[cfg(test)]

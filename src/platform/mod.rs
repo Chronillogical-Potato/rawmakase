@@ -3,13 +3,6 @@ pub(crate) mod display;
 pub(crate) mod network;
 pub(crate) mod quit;
 pub(crate) mod reveal;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "file operations take it with Move to Trash (#556)"
-    )
-)]
 pub(crate) mod trash;
 pub(crate) mod volume;
 pub(crate) mod web;
