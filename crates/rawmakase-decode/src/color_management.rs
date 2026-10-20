@@ -5,18 +5,26 @@
 //!
 //! Profiles are read with `moxcms`. A matrix/TRC monitor profile is applied
 //! here, by its colorants and tone curves (the curves inverted exactly, which
-//! keeps raised blacks right); a LUT-based profile through moxcms's transform
-//! from sRGB, its colorimetric tables standing in for the perceptual ones
-//! when it has none, as ICC asks. Black-point compensation follows Adobe's
-//! published method: XYZ is scaled per channel so sRGB's black lands on the
-//! monitor's, white staying white. The monitor's black is its device black
-//! through the profile's colorimetric transform (matrix or A2B1); a LUT
-//! profile with only perceptual tables, whose black already is the
-//! reference medium's, gets none. Measured against Little CMS 2.19 over a
-//! dense grid: within one code value wherever Little CMS's own 8-bit result
-//! is within one of its floating-point result (`docs/color-pipeline.md`).
+//! keeps raised blacks right), and so is a LUT-based one whose lut8/lut16
+//! tables connect through XYZ, such as DisplayCAL's "XYZ LUT + matrix"
+//! profiles, evaluated as Little CMS does (moxcms ignores those tables'
+//! matrix and miscolours them, issue 548); any other LUT-based profile goes
+//! through moxcms's transform from sRGB. Its colorimetric tables fall back to
+//! the perceptual ones when it has none, as ICC asks. Black-point
+//! compensation follows Adobe's published method: XYZ is scaled per channel
+//! so sRGB's black lands on the monitor's, white staying white. The
+//! monitor's black is its device black through the profile's colorimetric
+//! transform (matrix, or the A2B tables of a profile with A2B1/B2A1 or
+//! matrix/TRC tags); a LUT profile with only perceptual tables, whose black
+//! already is the reference medium's, gets none. Measured against Little CMS
+//! 2.19 over a dense grid: within one code value wherever Little CMS's own
+//! 8-bit result is within one of its floating-point result
+//! (`docs/color-pipeline.md`).
 use anyhow::{Context, Result, bail, ensure};
-use moxcms::{ColorProfile, Layout, RenderingIntent, ToneReprCurve, TransformOptions};
+use moxcms::{
+    ColorProfile, DataColorSpace, Layout, LutDataType, LutStore, LutWarehouse, RenderingIntent,
+    ToneReprCurve, TransformOptions,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -66,6 +74,9 @@ type Mat3 = [[f64; 3]; 3];
 /// The PCS white, D50.
 const D50: [f64; 3] = [0.9642, 1.0, 0.8249];
 
+/// XYZ in a lut8/lut16 table, whose 0–1 stands for 0–1.99997 (0x8000 is 1.0).
+const LUT_XYZ: f64 = 65535. / 32768.;
+
 /// sRGB to a monitor, built from its profile.
 struct Transform {
     srgb: Curves,
@@ -81,6 +92,8 @@ struct Transform {
 enum Monitor {
     /// XYZ to the monitor's linear RGB, and its tone curves.
     Matrix { from_xyz: Mat3, curves: Curves },
+    /// A lut8/lut16 table from XYZ to the monitor's RGB.
+    XyzLut(Table),
     /// moxcms's transform from sRGB.
     Lut(Arc<moxcms::TransformF32Executor>),
 }
@@ -89,16 +102,17 @@ impl Transform {
     fn new(bytes: &[u8]) -> Result<Self> {
         let srgb = ColorProfile::new_from_slice(srgb_profile()).map_err(error)?;
         let mut dst = ColorProfile::new_from_slice(bytes).map_err(error)?;
-        ensure!(
-            dst.color_space == moxcms::DataColorSpace::Rgb,
-            "Not an RGB profile"
-        );
+        ensure!(dst.color_space == DataColorSpace::Rgb, "Not an RGB profile");
         let to_xyz = colorants(&srgb);
         let from_xyz = invert(to_xyz).context("Singular sRGB colorants")?;
         let srgb_curves = Curves::of(&srgb)?;
         let colorimetric =
             dst.lut_b_to_a_colorimetric.is_some() || dst.lut_a_to_b_colorimetric.is_some();
         let perceptual = dst.lut_b_to_a_perceptual.is_some();
+        // Little CMS takes a LUT profile's black from its A2B tables also
+        // when only its matrix/TRC tags are colorimetric (DisplayCAL's "XYZ
+        // LUT + matrix" profiles).
+        let colorimetric_black = colorimetric || dst.is_matrix_shaper();
         let (monitor, black) = if !colorimetric && !perceptual {
             // Matrix/TRC.
             let m = colorants(&dst);
@@ -129,13 +143,27 @@ impl Transform {
                 barycentric_weight_scale: moxcms::BarycentricWeightScale::High,
                 ..Default::default()
             };
-            let forward = srgb
-                .create_transform_f32(Layout::Rgb, &dst, Layout::Rgb, options)
-                .map_err(error)?;
-            // The device black through the colorimetric table, to linear sRGB
-            // and on to XYZ; with only perceptual tables, whose black is the
-            // reference medium's, none.
-            let black = if colorimetric {
+            // lut8/lut16 tables on an XYZ PCS are applied here.
+            let xyz = dst.pcs == DataColorSpace::Xyz;
+            let xyz_table = |t: Option<&LutWarehouse>| match t {
+                Some(LutWarehouse::Lut(t)) if xyz => Some(t.clone()),
+                _ => None,
+            };
+            let monitor = match xyz_table(dst.lut_b_to_a_colorimetric.as_ref()) {
+                Some(t) => Monitor::XyzLut(Table::of(&t, true)?),
+                None => Monitor::Lut(
+                    srgb.create_transform_f32(Layout::Rgb, &dst, Layout::Rgb, options)
+                        .map_err(error)?,
+                ),
+            };
+            // The device black through the colorimetric table, to XYZ (through
+            // linear sRGB when moxcms applies it); with only perceptual
+            // tables, whose black is the reference medium's, none.
+            let black = if !colorimetric_black {
+                [0.; 3]
+            } else if let Some(t) = xyz_table(dst.lut_a_to_b_colorimetric.as_ref()) {
+                Table::of(&t, false)?.apply([0.; 3]).map(|v| v * LUT_XYZ)
+            } else {
                 let mut linear = srgb.clone();
                 let one = ToneReprCurve::Parametric(vec![1.0]);
                 linear.red_trc = Some(one.clone());
@@ -147,10 +175,8 @@ impl Transform {
                 let mut rgb = [0f32; 3];
                 back.transform(&[0., 0., 0.], &mut rgb).map_err(error)?;
                 mul(to_xyz, rgb.map(f64::from))
-            } else {
-                [0.; 3]
             };
-            (Monitor::Lut(forward), black)
+            (monitor, black)
         };
         ensure!(
             black.iter().all(|v| v.is_finite() && *v >= 0.) && black[1] < 0.5,
@@ -186,6 +212,14 @@ impl Transform {
                     let rgb = mul(*from_xyz, compensated(p));
                     for c in 0..3 {
                         p[c] = quantize(inverse[c].apply(rgb[c]));
+                    }
+                }
+            }
+            Monitor::XyzLut(table) => {
+                for p in data.as_chunks_mut::<3>().0 {
+                    let rgb = table.apply(compensated(p).map(|v| v / LUT_XYZ));
+                    for c in 0..3 {
+                        p[c] = quantize(rgb[c]);
                     }
                 }
             }
@@ -249,6 +283,119 @@ fn invert(m: Mat3) -> Option<Mat3> {
             c(0, 0, 1, 1) / det,
         ],
     ])
+}
+
+/// A lut8/lut16 table (`mft1`/`mft2`) of three channels in and out, as
+/// Little CMS evaluates one: the matrix (on an XYZ input only, as ICC asks),
+/// the input curves, the CLUT by tetrahedral interpolation, the output
+/// curves; every value 0–1, clamped before each curve and the CLUT.
+struct Table {
+    matrix: Option<Mat3>,
+    input: [Vec<f64>; 3],
+    grid: usize,
+    clut: Vec<f64>,
+    output: [Vec<f64>; 3],
+}
+
+impl Table {
+    fn of(t: &LutDataType, xyz_input: bool) -> Result<Self> {
+        ensure!(
+            t.num_input_channels == 3 && t.num_output_channels == 3,
+            "Not a three-channel table"
+        );
+        let grid = usize::from(t.num_clut_grid_points);
+        ensure!(grid >= 2, "Too few CLUT grid points");
+        let values = |s: &LutStore| -> Vec<f64> {
+            match s {
+                LutStore::Store8(v) => v.iter().map(|v| f64::from(*v) / 255.).collect(),
+                LutStore::Store16(v) => v.iter().map(|v| f64::from(*v) / 65535.).collect(),
+            }
+        };
+        let curves = |s: &LutStore, n: u16| -> Result<[Vec<f64>; 3]> {
+            let v = values(s);
+            let n = usize::from(n);
+            ensure!(n >= 2 && v.len() == 3 * n, "Malformed table curves");
+            Ok(std::array::from_fn(|c| v[c * n..(c + 1) * n].to_vec()))
+        };
+        let clut = values(&t.clut_table);
+        ensure!(clut.len() == grid.pow(3) * 3, "Malformed CLUT");
+        Ok(Self {
+            matrix: xyz_input.then_some(t.matrix.v),
+            input: curves(&t.input_table, t.num_input_table_entries)?,
+            grid,
+            clut,
+            output: curves(&t.output_table, t.num_output_table_entries)?,
+        })
+    }
+
+    fn apply(&self, v: [f64; 3]) -> [f64; 3] {
+        let v = self.matrix.map_or(v, |m| mul(m, v));
+        let v: [f64; 3] = std::array::from_fn(|c| table_curve(&self.input[c], v[c]));
+        let v = self.clut(v);
+        std::array::from_fn(|c| table_curve(&self.output[c], v[c]))
+    }
+
+    fn clut(&self, v: [f64; 3]) -> [f64; 3] {
+        let n = self.grid;
+        let cell = v.map(|v| {
+            let p = v.clamp(0., 1.) * (n - 1) as f64;
+            let i = (p.floor() as usize).min(n - 2);
+            (i, p - i as f64)
+        });
+        let node = |a: usize, b: usize, c: usize| -> [f64; 3] {
+            let i = (((cell[0].0 + a) * n + cell[1].0 + b) * n + cell[2].0 + c) * 3;
+            [self.clut[i], self.clut[i + 1], self.clut[i + 2]]
+        };
+        let (x, y, z) = (cell[0].1, cell[1].1, cell[2].1);
+        let c0 = node(0, 0, 0);
+        let d = |a: [f64; 3], b: [f64; 3]| -> [f64; 3] { std::array::from_fn(|c| a[c] - b[c]) };
+        let (c1, c2, c3) = if x >= y && y >= z {
+            (
+                d(node(1, 0, 0), c0),
+                d(node(1, 1, 0), node(1, 0, 0)),
+                d(node(1, 1, 1), node(1, 1, 0)),
+            )
+        } else if x >= z && z >= y {
+            (
+                d(node(1, 0, 0), c0),
+                d(node(1, 1, 1), node(1, 0, 1)),
+                d(node(1, 0, 1), node(1, 0, 0)),
+            )
+        } else if z >= x && x >= y {
+            (
+                d(node(1, 0, 1), node(0, 0, 1)),
+                d(node(1, 1, 1), node(1, 0, 1)),
+                d(node(0, 0, 1), c0),
+            )
+        } else if y >= x && x >= z {
+            (
+                d(node(1, 1, 0), node(0, 1, 0)),
+                d(node(0, 1, 0), c0),
+                d(node(1, 1, 1), node(1, 1, 0)),
+            )
+        } else if y >= z && z >= x {
+            (
+                d(node(1, 1, 1), node(0, 1, 1)),
+                d(node(0, 1, 0), c0),
+                d(node(0, 1, 1), node(0, 1, 0)),
+            )
+        } else {
+            (
+                d(node(1, 1, 1), node(0, 1, 1)),
+                d(node(0, 1, 1), node(0, 0, 1)),
+                d(node(0, 0, 1), c0),
+            )
+        };
+        std::array::from_fn(|c| c0[c] + c1[c] * x + c2[c] * y + c3[c] * z)
+    }
+}
+
+/// A table's curve at `x` (clamped to 0–1), interpolated linearly.
+fn table_curve(t: &[f64], x: f64) -> f64 {
+    let p = x.clamp(0., 1.) * (t.len() - 1) as f64;
+    let i = (p.floor() as usize).min(t.len() - 2);
+    let f = p - i as f64;
+    t[i] * (1. - f) + t[i + 1] * f
 }
 
 /// A profile's red, green and blue tone curves (device value to linear).
@@ -542,5 +689,193 @@ mod tests {
         let mut rgb = grid();
         assert!(super::display_transform(&dir.path().join("missing.icc"), &mut rgb).is_err());
         assert!(super::display_transform(&fixture("display-p3-v4.icc"), &mut [0u8; 4]).is_err());
+    }
+
+    /// A version 2 display profile with an XYZ PCS and `tags`, written here
+    /// so tests need no third-party profile.
+    fn icc_v2(tags: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+        let table = 4 + 12 * tags.len();
+        let mut body = Vec::new();
+        let mut entries = Vec::new();
+        for (sig, data) in tags {
+            while body.len() % 4 != 0 {
+                body.push(0);
+            }
+            entries.extend_from_slice(*sig);
+            entries.extend(((128 + table + body.len()) as u32).to_be_bytes());
+            entries.extend((data.len() as u32).to_be_bytes());
+            body.extend(data);
+        }
+        let mut p = vec![0u8; 128];
+        let size = (128 + table + body.len()) as u32;
+        p[..4].copy_from_slice(&size.to_be_bytes());
+        p[8..12].copy_from_slice(&[2, 0x20, 0, 0]);
+        p[12..16].copy_from_slice(b"mntr");
+        p[16..20].copy_from_slice(b"RGB ");
+        p[20..24].copy_from_slice(b"XYZ ");
+        p[36..40].copy_from_slice(b"acsp");
+        p[68..80].copy_from_slice(&xyz_tag(super::D50)[8..]);
+        p.extend((tags.len() as u32).to_be_bytes());
+        p.extend(entries);
+        p.extend(body);
+        p
+    }
+
+    fn s15(v: f64) -> [u8; 4] {
+        ((v * 65536.).round() as i32).to_be_bytes()
+    }
+
+    fn u16s(values: impl IntoIterator<Item = f64>) -> Vec<u8> {
+        values
+            .into_iter()
+            .flat_map(|v| ((v.clamp(0., 1.) * 65535.).round() as u16).to_be_bytes())
+            .collect()
+    }
+
+    fn xyz_tag(v: [f64; 3]) -> Vec<u8> {
+        let mut t = b"XYZ \0\0\0\0".to_vec();
+        t.extend(v.iter().flat_map(|c| s15(*c)));
+        t
+    }
+
+    fn curv_tag(n: usize, f: impl Fn(f64) -> f64) -> Vec<u8> {
+        let mut t = b"curv\0\0\0\0".to_vec();
+        t.extend((n as u32).to_be_bytes());
+        t.extend(u16s((0..n).map(|i| f(i as f64 / (n - 1) as f64))));
+        t
+    }
+
+    /// A lut16Type (`mft2`) with three inputs and outputs: `matrix`, input
+    /// curves of `inputs` entries, a CLUT of `grid` points per side, output
+    /// curves of `outputs` entries.
+    fn mft2(
+        matrix: super::Mat3,
+        inputs: usize,
+        input: impl Fn(f64) -> f64,
+        grid: usize,
+        clut: impl Fn([f64; 3]) -> [f64; 3],
+        outputs: usize,
+        output: impl Fn(f64) -> f64,
+    ) -> Vec<u8> {
+        let mut t = b"mft2\0\0\0\0".to_vec();
+        t.extend([3, 3, grid as u8, 0]);
+        t.extend(matrix.iter().flatten().flat_map(|v| s15(*v)));
+        t.extend((inputs as u16).to_be_bytes());
+        t.extend((outputs as u16).to_be_bytes());
+        let step = |n: usize| move |i: usize| i as f64 / (n - 1) as f64;
+        for _ in 0..3 {
+            t.extend(u16s((0..inputs).map(step(inputs)).map(&input)));
+        }
+        for i in 0..grid.pow(3) {
+            let at = [i / (grid * grid), i / grid % grid, i % grid].map(step(grid));
+            t.extend(u16s(clut(at)));
+        }
+        for _ in 0..3 {
+            t.extend(u16s((0..outputs).map(step(outputs)).map(&output)));
+        }
+        t
+    }
+
+    /// DisplayCAL's default profile type, "XYZ LUT + matrix" (issue 548): a
+    /// matrix/TRC profile whose lut16 A2B and B2A tables, on an XYZ PCS,
+    /// describe the same monitor. sRGB through it must land where it does
+    /// through the matrix/TRC tags alone, which the tests above hold to
+    /// Little CMS. Two layouts: a B2A whose matrix takes XYZ to linear RGB
+    /// (what ICC applies to an XYZ input before the input curves), and a
+    /// B2A whose CLUT does, with colorimetric tables and a raised black.
+    #[test]
+    fn xyz_lut_display_profiles_render_like_their_matrix() {
+        // Wide-gamut colorants (D50) and an sRGB-like curve.
+        let m: super::Mat3 = [
+            [0.5151, 0.2920, 0.1571],
+            [0.2412, 0.6922, 0.0666],
+            [-0.0011, 0.0419, 0.7841],
+        ];
+        let m_inv = super::invert(m).unwrap();
+        let identity = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        // XYZ in a lut16 table: 1.0 is 0x8000.
+        let k = 65535. / 32768.;
+        let srgb = |v: f64| {
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let srgb_inverse = |y: f64| {
+            if y <= 0.0031308 {
+                y * 12.92
+            } else {
+                1.055 * y.powf(1. / 2.4) - 0.055
+            }
+        };
+        let dir = tempfile::tempdir().unwrap();
+        for (name, black, matrix_b2a) in [("matrix-b2a", 0.002, true), ("clut-b2a", 0.003, false)] {
+            let trc = move |v: f64| black + (1. - black) * srgb(v);
+            let trc_inverse = move |y: f64| srgb_inverse(((y - black) / (1. - black)).max(0.));
+            let a2b = mft2(
+                identity,
+                4096,
+                trc,
+                17,
+                |rgb| super::mul(m, rgb).map(|v| v / k),
+                2,
+                |v| v,
+            );
+            let b2a = if matrix_b2a {
+                let to_rgb = m_inv.map(|row| row.map(|v| v * k));
+                mft2(to_rgb, 2, |v| v, 2, |rgb| rgb, 4096, trc_inverse)
+            } else {
+                // Linear RGB over the whole XYZ cube, offset and scaled into
+                // the CLUT's 0–1 and back by the output curves, so that
+                // interpolation is exact.
+                let lo = m_inv.iter().flatten().map(|v| v.min(0.) * k).sum::<f64>();
+                let hi = m_inv.iter().flatten().map(|v| v.max(0.) * k).sum::<f64>();
+                mft2(
+                    identity,
+                    2,
+                    |v| v,
+                    17,
+                    |xyz| super::mul(m_inv, xyz.map(|v| v * k)).map(|v| (v - lo) / (hi - lo)),
+                    4096,
+                    move |v| trc_inverse((lo + v * (hi - lo)).clamp(0., 1.)),
+                )
+            };
+            let mut tags = vec![
+                (b"wtpt", xyz_tag(super::D50)),
+                (b"rXYZ", xyz_tag([m[0][0], m[1][0], m[2][0]])),
+                (b"gXYZ", xyz_tag([m[0][1], m[1][1], m[2][1]])),
+                (b"bXYZ", xyz_tag([m[0][2], m[1][2], m[2][2]])),
+                (b"rTRC", curv_tag(4096, trc)),
+                (b"gTRC", curv_tag(4096, trc)),
+                (b"bTRC", curv_tag(4096, trc)),
+            ];
+            let matrix = dir.path().join(format!("{name}-matrix.icc"));
+            std::fs::write(&matrix, icc_v2(&tags)).unwrap();
+            if matrix_b2a {
+                tags.extend([(b"A2B0", a2b), (b"B2A0", b2a)]);
+            } else {
+                tags.extend([
+                    (b"A2B0", a2b.clone()),
+                    (b"B2A0", b2a.clone()),
+                    (b"A2B1", a2b),
+                    (b"B2A1", b2a),
+                ]);
+            }
+            let lut = dir.path().join(format!("{name}.icc"));
+            std::fs::write(&lut, icc_v2(&tags)).unwrap();
+
+            let mut expected = grid();
+            super::display_transform(&matrix, &mut expected).unwrap();
+            let mut rgb = grid();
+            super::display_transform(&lut, &mut rgb).unwrap();
+            let worst = rgb
+                .iter()
+                .zip(&expected)
+                .map(|(a, b)| (i16::from(*a) - i16::from(*b)).abs())
+                .max()
+                .unwrap();
+            assert!(worst <= 1, "{name}: up to {worst} code values off");
+        }
     }
 }
