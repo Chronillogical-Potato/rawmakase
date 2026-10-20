@@ -1,6 +1,7 @@
-//! Renaming a folder (Rename Folder…): one exclusive rename of its
-//! directory, and the catalog's folders of the whole subtree re-keyed to
-//! the new logical path, `folder_paths` and the legacy
+//! Renaming a folder (Rename Folder…) or moving it into another folder of
+//! its root (Move Folder…): the same change with another destination. One
+//! exclusive rename of its directory on its volume, and the catalog's
+//! folders of the whole subtree re-keyed to the new logical path, `folder_paths` and the legacy
 //! `folders.relative_path` alike. Photos keep their rows: their folders
 //! keep their ids, so their paths follow.
 //!
@@ -226,6 +227,42 @@ pub(super) fn rename(
     let to = join(&parent, name);
     if to == f.logical {
         return Err(refuse("It has that name already."));
+    }
+    plan_to(catalog, &located, folder, &to)
+}
+
+/// Plans moving catalog folder `folder` into logical folder `parent` of
+/// `root`, which must be its own root, on this computer. The destination
+/// may be a folder the catalog has no folder of its own for, as for New
+/// Folder Inside.
+pub(super) fn relocate(
+    catalog: &Catalog,
+    folder: FolderId,
+    root: RootId,
+    parent: &str,
+) -> Result<TreeMove, FileOpError> {
+    let refuse = |why: &str| FileOpError::Destination(why.to_string());
+    let located = catalog.db.snapshot(|s| catalog.locate_folders(s))?;
+    let f = located
+        .get(&folder)
+        .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
+    if f.logical.is_empty() {
+        return Err(refuse(ROOT));
+    }
+    if root != f.root {
+        return Err(refuse(
+            "Folders can't be moved to another root folder yet. Move it in Finder, then add or locate the folder again.",
+        ));
+    }
+    if below_caseless(parent, &f.logical) {
+        return Err(refuse(
+            "A folder can't be moved into itself or a folder inside it.",
+        ));
+    }
+    let name = names(&f.logical).last().unwrap_or_default();
+    let to = join(parent, name);
+    if caseless(OsStr::new(&to)) == caseless(OsStr::new(&f.logical)) {
+        return Err(refuse("It is in that folder already."));
     }
     plan_to(catalog, &located, folder, &to)
 }

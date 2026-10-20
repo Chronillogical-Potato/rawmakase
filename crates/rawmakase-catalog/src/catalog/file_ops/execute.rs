@@ -72,7 +72,8 @@ pub(super) fn execute_with(
         | Kind::TrashPhotos
         | Kind::CreateFolder
         | Kind::RenamePhotos
-        | Kind::RenameFolder => {
+        | Kind::RenameFolder
+        | Kind::MoveFolder => {
             let lock = super::lock::acquire(catalog)?;
             super::recover::prune(catalog)?;
             let recovery = super::recover::run(catalog, disk)?;
@@ -127,8 +128,8 @@ pub(super) fn execute_with(
                 Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
                     run.files(catalog, &item)
                 }
-                // A folder rename has no photo items.
-                Kind::RenameFolder => Ok(()),
+                // A folder rename or move has no photo items.
+                Kind::RenameFolder | Kind::MoveFolder => Ok(()),
             }
         };
         // A catalog that can't be written stops the run; what was
@@ -824,7 +825,9 @@ pub(super) fn complete(
                 None => Some("it may be in the Trash".into()),
             },
             Kind::MovePhotos | Kind::RenamePhotos => moved(w, folders, disk, pre, item)?,
-            Kind::CreateFolder | Kind::RenameFolder => Some("not a photo operation".into()),
+            Kind::CreateFolder | Kind::RenameFolder | Kind::MoveFolder => {
+                Some("not a photo operation".into())
+            }
         },
     };
     let state = match reason {

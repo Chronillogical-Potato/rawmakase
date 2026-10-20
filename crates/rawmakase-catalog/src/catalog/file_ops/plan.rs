@@ -91,6 +91,14 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             let tree = super::tree::rename(catalog, folder, &name)?;
             return tree_plan(catalog, Kind::RenameFolder, tree);
         }
+        FileOp::MoveFolder {
+            folder,
+            root,
+            parent,
+        } => {
+            let tree = super::tree::relocate(catalog, folder, root, &parent)?;
+            return tree_plan(catalog, Kind::MoveFolder, tree);
+        }
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
     let mut skipped = Vec::new();
@@ -147,7 +155,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             let mut files = Files::new(catalog, &folders);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
-        Kind::RenameFolder => Vec::new(),
+        Kind::RenameFolder | Kind::MoveFolder => Vec::new(),
     };
     let mut summary = summarize(&items, &by_id, computers > 1);
     if kind == Kind::RenamePhotos {
