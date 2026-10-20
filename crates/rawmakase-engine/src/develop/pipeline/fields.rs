@@ -90,12 +90,216 @@ impl<'a> LensWarp<'a> {
         let p = if scale[0] == scale[1] && scale[2] == scale[1] {
             footprint_sample(im, gx, gy, r, spread)
         } else {
-            std::array::from_fn(|c| {
+            let samples = std::array::from_fn(|c| {
                 let [sx, sy] = at(c);
-                footprint_sample(im, sx, sy, r, spread)[c]
-            })
+                footprint_sample(im, sx, sy, r, spread)
+            });
+            if im.metadata.xtrans {
+                stripe_ca_sample(im, gx, gy, samples)
+            } else {
+                [samples[0][0], samples[1][1], samples[2][2]]
+            }
         };
         let gain = self.vignetting.as_ref().map_or(1., |v| v.gain(gx, gy));
         p.map(|v| v * gain)
+    }
+}
+
+/// CA remapping must not turn reconstructed, constant-colour fine detail back
+/// into coloured stripes. A low source chromaticity variation relative to the
+/// colour introduced by remapping identifies that case. Require repeated fine
+/// luminance extrema as well, so isolated edges retain their CA correction.
+/// `gpu/local.wgsl` mirrors this calculation.
+fn stripe_ca_sample(im: Source, x: f32, y: f32, samples: [[f32; 3]; 3]) -> [f32; 3] {
+    let p = [samples[0][0], samples[1][1], samples[2][2]];
+    let luma = |p: [f32; 3]| (p[0] + 2. * p[1] + p[2]) * 0.25;
+    let chroma = |p: [f32; 3]| {
+        let l = luma(p).max(1e-8);
+        [(p[0] - p[1]) / l, (p[2] - p[1]) / l]
+    };
+    let base = chroma(samples[1]);
+    let distance = |p: [f32; 3]| {
+        let c = chroma(p);
+        (c[0] - base[0]).powi(2) + (c[1] - base[1]).powi(2)
+    };
+    let introduced = distance(p);
+    let variation = distance(samples[0]).max(distance(samples[2]));
+    if introduced < 1e-8 || variation >= 0.16 * introduced {
+        return p;
+    }
+    let periodic = |x: f32, y: f32, dx: i32, dy: i32| {
+        let mut low = [f32::INFINITY; 2];
+        let mut high = [f32::NEG_INFINITY; 2];
+        let values: [f32; 7] = std::array::from_fn(|i| {
+            let k = i as i32 - 3;
+            let xx = (x.round_ties_even() as i32 + k * dx).clamp(0, im.width as i32 - 1);
+            let yy = (y.round_ties_even() as i32 + k * dy).clamp(0, im.height as i32 - 1);
+            let p = im.px(yy as usize * im.width as usize + xx as usize);
+            let colour = chroma(p);
+            for c in 0..2 {
+                low[c] = low[c].min(colour[c]);
+                high[c] = high[c].max(colour[c]);
+            }
+            luma(p).max(0.).sqrt()
+        });
+        let lo = values.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let mut previous = 0f32;
+        let mut turns = 0;
+        for pair in values.windows(2) {
+            let d = pair[1] - pair[0];
+            if d.abs() > (hi - lo) * 0.05 {
+                turns += usize::from(d * previous < 0.);
+                previous = d;
+            }
+        }
+        // A pair of close interpolation positions can have similar colour by
+        // chance in noise. Require coherence over the whole seven-pixel line:
+        // full below a 2% chromaticity span, none above 5%.
+        let span = (high[0] - low[0]).powi(2) + (high[1] - low[1]).powi(2);
+        let colour = ((0.0025 - span) / 0.0021).clamp(0., 1.);
+        if colour == 0. {
+            return (0., false);
+        }
+        // Two reversals cover a four-pixel period at every phase; the
+        // five-line coherence check below still rejects random extrema.
+        if turns < 2 {
+            return (0., colour == 1.);
+        }
+        // Random luminance noise also has many extrema. Slats stay in phase on
+        // neighbouring lines; noise does not. Compare the variance of their
+        // average with their individual variances, removing each line's DC.
+        let variance = |line: &[f32; 7]| {
+            let mean = line.iter().sum::<f32>() / 7.;
+            line.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / 7.
+        };
+        let line = |across: i32| {
+            std::array::from_fn(|i| {
+                let k = i as i32 - 3;
+                let xx = (x.round_ties_even() as i32 + k * dx + across * dy)
+                    .clamp(0, im.width as i32 - 1);
+                let yy = (y.round_ties_even() as i32 + k * dy + across * dx)
+                    .clamp(0, im.height as i32 - 1);
+                luma(im.px(yy as usize * im.width as usize + xx as usize))
+                    .max(0.)
+                    .sqrt()
+            })
+        };
+        let centre_variance = variance(&values);
+        let agreement = |lines: [[f32; 7]; 4], variances: [f32; 4]| {
+            let mut average = values;
+            let mut total = centre_variance;
+            for (line, v) in lines.iter().zip(variances) {
+                total += v;
+                for i in 0..7 {
+                    average[i] += line[i];
+                }
+            }
+            variance(&average.map(|v| v / 5.)) / (total / 5.).max(1e-8)
+        };
+        // Both one-sided windows reuse two symmetric lines. Keep their samples
+        // and variances, preserving the accumulation order while avoiding four
+        // duplicate seven-pixel reads and repeated variance calculations.
+        let neighbours = [-6, -3, 3, 6].map(line);
+        let variances = neighbours.each_ref().map(variance);
+        let mut coherence = agreement(neighbours, variances);
+        // At a finite strip's boundary, half of a symmetric neighbourhood can
+        // be flat background. Require the same five-line agreement on either
+        // side rather than weakening the noise or source-colour tests.
+        for side in [1, -1] {
+            if coherence >= 0.7 {
+                break;
+            }
+            // Clamped copies of one border line are not independent evidence.
+            let end_x = x.round_ties_even() as i32 + 12 * side * dy;
+            let end_y = y.round_ties_even() as i32 + 12 * side * dx;
+            if !(0..im.width as i32).contains(&end_x) || !(0..im.height as i32).contains(&end_y) {
+                continue;
+            }
+            let near = if side == 1 { [2, 3] } else { [1, 0] };
+            let far = [line(9 * side), line(12 * side)];
+            coherence = coherence.max(agreement(
+                [neighbours[near[0]], neighbours[near[1]], far[0], far[1]],
+                [
+                    variances[near[0]],
+                    variances[near[1]],
+                    variance(&far[0]),
+                    variance(&far[1]),
+                ],
+            ));
+        }
+        (colour * ((coherence - 0.55) / 0.15).clamp(0., 1.), false)
+    };
+    let mut coherent = 0f32;
+    for (dx, dy) in [(1, 0), (0, 1)] {
+        let (mut evidence, flat_colour_edge) = periodic(x, y, dx, dy);
+        if flat_colour_edge && variation < 1e-6 {
+            // The smooth-colour border beside reconstructed slats can itself
+            // have too few extrema. Accept immediate parallel support only
+            // when its source chromaticity agrees within 0.2%. Source-sample
+            // variation must be below 0.1% too: proximity to slats alone must
+            // not protect real CA on a neighbouring ordinary edge.
+            for side in [-3, 3] {
+                let (nx, ny) = (x + (side * dy) as f32, y + (side * dx) as f32);
+                let (xx, yy) = (nx.round_ties_even() as i32, ny.round_ties_even() as i32);
+                if !(0..im.width as i32).contains(&xx) || !(0..im.height as i32).contains(&yy) {
+                    continue;
+                }
+                let matching = (1.
+                    - distance(im.px(yy as usize * im.width as usize + xx as usize)) / 0.000004)
+                    .clamp(0., 1.);
+                if matching > 0. {
+                    evidence = evidence.max(matching * periodic(nx, ny, dx, dy).0);
+                    if evidence == 1. {
+                        break;
+                    }
+                }
+            }
+        }
+        coherent = coherent.max(evidence);
+        // Each axis contributes at most one; no later evidence can improve it.
+        if coherent == 1. {
+            break;
+        }
+    }
+    let keep = coherent * (1. - ((variation / introduced).sqrt() - 0.1) / 0.3).clamp(0., 1.);
+    let gain = luma(p) / luma(samples[1]).max(1e-8);
+    std::array::from_fn(|c| p[c] + keep * (samples[1][c] * gain - p[c]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stripe_window_centres_match_gpu_at_halfway_positions() {
+        use crate::camera_data::{CameraImage, Metadata};
+        let im = CameraImage {
+            width: 64,
+            height: 64,
+            pixels: (0..64 * 64)
+                .map(|i| {
+                    let x = i % 64;
+                    let l = 0.1 + 0.06 * (std::f32::consts::TAU * x as f32 / 3.8).sin();
+                    if x == 34 {
+                        [l * 1.5, l, l * 0.5]
+                    } else {
+                        [l; 3]
+                    }
+                })
+                .collect(),
+            metadata: Metadata::default(),
+            recovered: Default::default(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        let samples = [[0.15; 3], [0.1; 3], [0.12; 3]];
+        let at = |x| stripe_ca_sample((&im).into(), x, 30., samples);
+        // GPU round(30.5) is 30; a 31-centred window includes the coloured
+        // column at 34 and correctly rejects protection instead.
+        assert_ne!(at(30.), at(31.));
+        assert_eq!(at(30.5), at(30.));
+        assert_eq!(at(29.5), at(30.));
     }
 }

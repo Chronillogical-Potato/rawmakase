@@ -107,11 +107,13 @@ fn warp_sample(x: f32, y: f32) -> vec3<f32> {
     if scale.x == scale.y && scale.z == scale.y {
         p = footprint_sample(gx, gy);
     } else {
-        p = vec3(
-            footprint_sample(cx + dx * scale.x - 0.5, cy + dy * scale.x - 0.5).x,
-            footprint_sample(gx, gy).y,
-            footprint_sample(cx + dx * scale.z - 0.5, cy + dy * scale.z - 0.5).z,
-        );
+        let red = footprint_sample(cx + dx * scale.x - 0.5, cy + dy * scale.x - 0.5);
+        let green = footprint_sample(gx, gy);
+        let blue = footprint_sample(cx + dx * scale.z - 0.5, cy + dy * scale.z - 0.5);
+        p = vec3(red.x, green.y, blue.z);
+        if s(S_XTRANS) > 0.5 {
+            p = stripe_ca_sample(gx, gy, red, green, blue);
+        }
     }
     var gain = 1.0;
     if has(S_VIGNETTING) {
@@ -213,4 +215,124 @@ fn sample_region(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocat
     samples[3u * i + 2u] = p.z;
     positions[2u * i] = pos.x;
     positions[2u * i + 1u] = pos.y;
+}
+fn stripe_luma(p: vec3<f32>) -> f32 {
+    return dot(p, vec3(0.25, 0.5, 0.25));
+}
+fn stripe_chroma(p: vec3<f32>) -> vec2<f32> {
+    return vec2(p.x - p.y, p.z - p.y) / max(stripe_luma(p), 1e-8);
+}
+fn stripe_periodic(x: f32, y: f32, dx: i32, dy: i32) -> vec2<f32> {
+    var values: array<f32, 7>;
+    var low = vec2(1e30);
+    var high = vec2(-1e30);
+    var lo = 1e30;
+    var hi = -1e30;
+    for (var i = 0; i < 7; i++) {
+        let k = i - 3;
+        let xx = clamp(i32(round(x)) + k * dx, 0, i32(su(S_WIDTH)) - 1);
+        let yy = clamp(i32(round(y)) + k * dy, 0, i32(su(S_HEIGHT)) - 1);
+        let p = px(u32(yy) * su(S_WIDTH) + u32(xx));
+        let colour = stripe_chroma(p);
+        low = min(low, colour);
+        high = max(high, colour);
+        let l = sqrt(max(stripe_luma(p), 0.0));
+        values[i] = l;
+        lo = min(lo, l);
+        hi = max(hi, l);
+    }
+    var previous = 0.0;
+    var turns = 0u;
+    for (var i = 0; i < 6; i++) {
+        let d = values[i + 1] - values[i];
+        if abs(d) > (hi - lo) * 0.05 {
+            if d * previous < 0.0 { turns += 1u; }
+            previous = d;
+        }
+    }
+    let range = high - low;
+    let colour = clamp((0.0025 - dot(range, range)) / 0.0021, 0.0, 1.0);
+    if colour == 0.0 { return vec2(0.0); }
+    if turns < 2u { return vec2(0.0, select(0.0, 1.0, colour == 1.0)); }
+    var coherence = 0.0;
+    // Symmetric, then either one-sided five-line neighbourhood, matching CPU.
+    for (var window = 0; window < 3; window++) {
+        if coherence >= 0.7 { break; }
+        if window > 0 {
+            let reach = select(12, -12, window == 2);
+            let end_x = i32(round(x)) + reach * dy;
+            let end_y = i32(round(y)) + reach * dx;
+            if end_x < 0 || end_x >= i32(su(S_WIDTH)) || end_y < 0 || end_y >= i32(su(S_HEIGHT)) {
+                continue;
+            }
+        }
+        var average = values;
+        var total = stripe_variance(values);
+        let offsets = array<i32, 4>(-6, -3, 3, 6);
+        for (var side = 0; side < 4; side++) {
+            var across = offsets[side];
+            if window > 0 {
+                across = (side + 1) * 3;
+                if window == 2 { across = -across; }
+            }
+            var line: array<f32, 7>;
+            for (var i = 0; i < 7; i++) {
+                let k = i - 3;
+                let xx = clamp(i32(round(x)) + k * dx + across * dy, 0, i32(su(S_WIDTH)) - 1);
+                let yy = clamp(i32(round(y)) + k * dy + across * dx, 0, i32(su(S_HEIGHT)) - 1);
+                line[i] = sqrt(max(stripe_luma(px(u32(yy) * su(S_WIDTH) + u32(xx))), 0.0));
+                average[i] += line[i];
+            }
+            total += stripe_variance(line);
+        }
+        for (var i = 0; i < 7; i++) { average[i] /= 5.0; }
+        coherence = max(coherence, stripe_variance(average) / max(total / 5.0, 1e-8));
+    }
+    return vec2(colour * clamp((coherence - 0.55) / 0.15, 0.0, 1.0), 0.0);
+}
+fn stripe_variance(line: array<f32, 7>) -> f32 {
+    var mean = 0.0;
+    for (var i = 0; i < 7; i++) { mean += line[i]; }
+    mean /= 7.0;
+    var variance = 0.0;
+    for (var i = 0; i < 7; i++) { let d = line[i] - mean; variance += d * d; }
+    return variance / 7.0;
+}
+// `pipeline::fields::stripe_ca_sample`.
+fn stripe_ca_sample(x: f32, y: f32, red: vec3<f32>, green: vec3<f32>, blue: vec3<f32>) -> vec3<f32> {
+    let p = vec3(red.x, green.y, blue.z);
+    let base = stripe_chroma(green);
+    let d = stripe_chroma(p) - base;
+    let dr = stripe_chroma(red) - base;
+    let db = stripe_chroma(blue) - base;
+    let introduced = dot(d, d);
+    let variation = max(dot(dr, dr), dot(db, db));
+    if introduced < 1e-8 || variation >= 0.16 * introduced { return p; }
+    var stripe_weight = 0.0;
+    for (var axis = 0; axis < 2; axis++) {
+        let dx = 1 - axis;
+        let dy = axis;
+        let local = stripe_periodic(x, y, dx, dy);
+        var evidence = local.x;
+        if local.y > 0.5 && variation < 1e-6 {
+            for (var side = -3; side <= 3; side += 6) {
+                let nx = x + f32(side * dy);
+                let ny = y + f32(side * dx);
+                let xx = i32(round(nx));
+                let yy = i32(round(ny));
+                if xx < 0 || xx >= i32(su(S_WIDTH)) || yy < 0 || yy >= i32(su(S_HEIGHT)) { continue; }
+                let difference = stripe_chroma(px(u32(yy) * su(S_WIDTH) + u32(xx))) - base;
+                let matching = clamp(1.0 - dot(difference, difference) / 0.000004, 0.0, 1.0);
+                if matching > 0.0 {
+                    evidence = max(evidence, matching * stripe_periodic(nx, ny, dx, dy).x);
+                    if evidence == 1.0 { break; }
+                }
+            }
+        }
+        stripe_weight = max(stripe_weight, evidence);
+        if stripe_weight == 1.0 { break; }
+    }
+    let keep = stripe_weight * clamp(1.0 - (sqrt(variation / introduced) - 0.1) / 0.3, 0.0, 1.0);
+    let gain = stripe_luma(p) / max(stripe_luma(green), 1e-8);
+    return p + keep * (green * gain - p);
 }

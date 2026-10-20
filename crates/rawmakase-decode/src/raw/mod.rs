@@ -18,10 +18,12 @@ pub fn version() -> String {
     rawmakase_raw::VERSION.to_string()
 }
 /// What a developed image depends on in the decoder, for identities of
-/// developed images kept across runs (stored previews): the decoding, bumped
-/// (with [`version`]) when it changes what photos develop to.
+/// developed images kept across runs (stored previews): the decoding and the
+/// demosaic and associated lens sampling, bumped when these change the output.
+/// 2: Directional X-Trans blending, stripe chromaticity reconstruction and
+/// matching lens-CA sampling protection (#547).
 pub fn developed() -> String {
-    "rawmakase-raw 1".into()
+    "rawmakase-raw 2".into()
 }
 /// Runs `work` on a thread of its own at background priority: a lower
 /// scheduling priority, and parallel work (RAWmakase's decoders) on two
@@ -299,6 +301,7 @@ impl Raw {
             width,
             height,
             pattern: &pattern,
+            white: wb,
         };
         let (w, h, pixels) = if half {
             let (w, h, pixels) = crate::demosaic::half(&cfa);

@@ -17,6 +17,55 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
 The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm and DNG, not Sony). Recipes saved before the field existed lack it and never apply it.
 
+### Reconstructed X-Trans fine detail
+
+Demosaicing can reconstruct nearly constant chromaticity on stripes whose colour
+is finer than the CFA resolves ([demosaicing](demosaic.md)). Independently shifting
+red and blue then samples different slat brightnesses and creates colour again,
+even from a uniformly coloured input.
+
+The CPU lens sampler and its GPU counterpart protect that case on X-Trans images.
+They compare source chromaticity at the three channel sample positions with the
+chromaticity introduced by assembling the remapped channels. When the source
+variation is less than 40% of that introduced colour (full protection below 10%),
+and a seven-pixel horizontal or vertical neighbourhood contains at least two
+significant luminance slope reversals with coherent chromaticity, the sample moves towards the original
+chromaticity at green's position. It keeps the remapped sample's luminance,
+distortion and vignetting. A single monotonic edge does not meet the repeated-detail
+condition; existing chromaticity variation also rejects protection. Two reversals cover periods through four pixels at every phase. CPU and GPU choose the window centre with ties-to-even rounding, including at half-size sampling positions. Coherence is
+full below a 2% chromaticity span and fades to zero at 5%; checking the whole
+line prevents chance agreement between two interpolated noise samples from
+suppressing high-ISO colour noise. The repeated luminance must also agree on
+five parallel lines separated by three pixels: the variance of their average,
+after square-root encoding, must exceed 55% of their mean individual variance
+(full protection at 70%). This rejects random luminance noise even after colour
+noise reduction has made its chromaticity smooth. The check uses
+the samples already read for CA plus a small neighbourhood only for candidates. The CPU reuses symmetric line samples and their variances in the one-sided windows, limiting the footprint to nine lines. A full-protection result ends the CPU and GPU search over parallel lines and axes, since further evidence cannot improve it.
+
+A finite strip's boundary needs one-sided support: the symmetric five-line
+window may contain two or three flat background lines, lowering agreement even
+when every slat line matches. If the symmetric check is not fully coherent,
+the CPU and GPU also check five lines extending in either direction along the
+slats (offsets 0, 3, 6, 9 and 12 pixels, or their negatives). The same coherence
+threshold, local extrema, chromaticity span and source-variation guards apply;
+none is relaxed. One-sided windows must fit inside
+the image; clamped duplicate border lines cannot establish coherence.
+
+The immediately adjacent border may itself lack the repeated extrema. Only if
+its seven-pixel chromaticity span is already below 2%, the sampler may use a
+parallel line three pixels away that passes the same periodic/coherence tests.
+Its chromaticity must also match the border's (weight fades to zero at a 0.2%
+distance), and variation between the three source sample positions must be below
+0.1%. This stricter condition avoids protecting real CA on an ordinary edge next
+to periodic detail. The original relative source-variation guard still applies.
+Tests also keep an ordinary CA edge beside periodic detail unchanged.
+
+Tests cover constant-colour stripes, unchanged isolated CA edges and resolved
+coloured stripes, and CPU/GPU presented-preview agreement with fine stripes and lens corrections.
+This is a safeguard for reconstructed detail, not a replacement for the lens's
+CA model. Ambiguous low-contrast real colour within fine repeated detail remains
+a limitation.
+
 ### Fujifilm vignetting strength
 
 Applied at full strength, the Fujifilm table leaves corners about 0.08 EV brighter than Lightroom on three X100F photos, while the centre matches. Raising the gain to the power 0.85 brings corners within ±0.03 EV. The LCP path matches at full strength ([below](#adobe-lcp-profiles)); Sony's built-in table has not been compared. The X100F Lightroom reference scorecard goes from 0.0148 to 0.0120 mean MAE.

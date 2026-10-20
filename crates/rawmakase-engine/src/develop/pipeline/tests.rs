@@ -1908,3 +1908,139 @@ fn color_detail_does_not_control_luminance_noise_reduction() -> Result<()> {
     assert_eq!(low.pixels, high.pixels);
     Ok(())
 }
+
+#[test]
+fn lens_ca_protects_finite_stripes_at_every_phase() {
+    for period in [3.03, 3.6, 3.8, 4.] {
+        for phase in [0., std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2] {
+            let error = lens_ca_stripe_error(period, phase);
+            assert!(error < 0.001, "period={period} phase={phase}: {error}");
+        }
+    }
+}
+
+fn lens_ca_stripe_error(period: f32, phase: f32) -> f32 {
+    use crate::optics::{LensCorrection, Radial};
+    let mut im = fixture();
+    im.width = 192;
+    im.height = 192;
+    im.metadata.width = im.width;
+    im.metadata.height = im.height;
+    im.metadata.xtrans = true;
+    im.pixels = (0..192 * 192)
+        .map(|i| {
+            let l = 0.1
+                + if (76..112).contains(&(i / 192)) {
+                    0.06 * (std::f32::consts::TAU * (i % 192) as f32 / period + phase).sin()
+                } else {
+                    0.
+                };
+            [1.08 * l, l, 0.92 * l]
+        })
+        .collect();
+    im.metadata.lens = Some(LensCorrection {
+        source: "test".into(),
+        default_on: true,
+        vignetting: None,
+        distortion: None,
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.004; 2],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.; 2],
+            },
+        ]),
+    });
+    let r = Recipe::for_metadata(&im.metadata);
+    let warp = LensWarp::new(&im, &r).unwrap();
+    let mut error = 0f32;
+    for y in 75..113 {
+        for x in 30..162 {
+            let p = warp.sample((&im).into(), x as f32, y as f32, &r, 0.);
+            error = error.max((p[0] / p[1] - 1.08).abs());
+        }
+    }
+    error
+}
+
+#[test]
+fn stripe_ca_guard_keeps_isolated_edges_resolved_colour_and_noise() {
+    use crate::optics::{LensCorrection, Radial};
+    let mut im = fixture();
+    im.width = 192;
+    im.height = 64;
+    im.metadata.width = im.width;
+    im.metadata.height = im.height;
+    im.metadata.xtrans = true;
+    im.metadata.lens = Some(LensCorrection {
+        source: "test".into(),
+        default_on: true,
+        vignetting: None,
+        distortion: None,
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.004; 2],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![0.997; 2],
+            },
+        ]),
+    });
+    for case in 0..5 {
+        let mut seed = 0x23456789u32;
+        im.pixels = (0..192 * 64)
+            .map(|i| {
+                let x = (i % 192) as f32;
+                if case == 1 {
+                    let v = (std::f32::consts::TAU * x / 3.03).sin();
+                    [0.1 + 0.07 * v, 0.1 - 0.06 * v, 0.1 + 0.04 * v]
+                } else if case == 3 {
+                    seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let l = 0.08 + 0.04 * (seed >> 8) as f32 / 16777216.;
+                    [1.08 * l, l, 0.92 * l]
+                } else if case == 2 {
+                    std::array::from_fn(|_| {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        0.1 + 0.04 * ((seed >> 8) as f32 / 16777216. - 0.5)
+                    })
+                } else {
+                    let edge = |x: f32| 0.03 + 0.2 / (1. + (-(x - 70.) / 2.).exp());
+                    let slat = if case == 4 && x < 68. {
+                        1. + 0.25 * (std::f32::consts::TAU * (i / 192) as f32 / 3.03).sin()
+                    } else {
+                        1.
+                    };
+                    [edge(x + 0.3) * slat, edge(x) * slat, edge(x - 0.2) * slat]
+                }
+            })
+            .collect();
+        let mut unguarded = im.clone();
+        unguarded.metadata.xtrans = false;
+        let r = Recipe::for_metadata(&im.metadata);
+        let a = LensWarp::new(&im, &r).unwrap();
+        let b = LensWarp::new(&unguarded, &r).unwrap();
+        let mut changed = 0;
+        for y in 10..54 {
+            for x in 10..182 {
+                // The textured side may need alias protection; the ordinary
+                // CA edge beside it must retain the original correction.
+                if case == 4 && x < 68 {
+                    continue;
+                }
+                let p = a.sample((&im).into(), x as f32, y as f32, &r, 0.);
+                let q = b.sample((&unguarded).into(), x as f32, y as f32, &r, 0.);
+                if case == 3 {
+                    changed += usize::from(p.iter().zip(q).any(|(a, b)| (a - b).abs() > 1e-5));
+                } else {
+                    assert_eq!(p, q, "changed case={case} at {x},{y}");
+                }
+            }
+        }
+        assert!(changed < 44 * 172 / 20, "noise pixels changed: {changed}");
+    }
+}
