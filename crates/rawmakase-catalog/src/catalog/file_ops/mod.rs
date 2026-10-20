@@ -28,6 +28,7 @@ mod execute;
 mod folder;
 mod journal;
 mod lock;
+mod names;
 mod plan;
 mod preconditions;
 mod recover;
