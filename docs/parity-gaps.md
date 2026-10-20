@@ -191,6 +191,71 @@ small or too unlike the validation sets to fit a per-photo Highlights pull; more
 linear-profile Camera Raw renders of varied photos, including low-key scenes and
 the signature-edit sets' kind of photo, should come before another model.
 
+### Default render, Blacks, negative Dehaze and Clarity (2026-10-20)
+
+Started from the open issues #467, #468, #470, #471 and #474, judged against
+`main-a8c5d6d7-metric2` with its pinned build. No tone candidate from this round
+passed its train-split check; none was gated or merged. Train fits are on
+`*-train`, judged on rendered train photos (final-image ΔE00 and band ΔL\*) before
+any validation run; holdout was not touched.
+
+- **Default render against each control (validation).** Each control's own error
+  is measured as ΔE00 between our render and Camera Raw's with the default
+  render's per-pixel Lab error carried over (not meaningful where a control clips
+  both renders, as negative Blacks does).
+  - Negative Dehaze is the control's own error: pixls mid −100 is 12.17, of which
+    the default 0.54 and the control 10.65; owner's low −100 9.14, control 8.75.
+  - Positive Exposure (#470) is mostly the default render: pixls mid +1 2.41 with
+    the default at 2.04; its 20–30 L\* band is +7.0 against +6.2 at default. Most
+    of the pixls mid default was the Panasonic DMC-ZS60 (10.65, +0.84 EV uniform),
+    which main's DMC-ZS60 row (#540, −0.5) has fixed since a8c5d6d7. The DMC-G85
+    (7.78) is a contrast difference, not exposure, still open.
+  - Positive Blacks (#474) is the control's own on low-key photos: +100 about
+    2.1–2.4 of its own, about +2 L\* too light in the darkest band.
+  - Clarity +100 (#468) is mixed: pixls high 5.02 with 3.44 from the default;
+    own and Signature Edits 1.4–3.4 of its own. Clarity −100 is the default's.
+  - The Hasselblad L1D-20c (3.82) is its unapplied OpcodeList3 GainMap (lens
+    shading), not tone: 0 L\* at the centre to −11 L\* in the corners.
+- **Blacks keyed on the 0.1th percentile (#471).** Exactly neutral on
+  `blacks-train`: `BLACK_KEYS` starts at −8 stops and every photo's minimum and
+  0.1th percentile lie below it (−8.7 to −12.7), so both clamp to the same row. A
+  key sweep (−8 to −3.5) found low-key photos preferring −5 to −6.5; the best rule
+  (0.1th percentile − median − 4) moves Blacks −25 from 1.21 to 1.14 (mean 1.873 →
+  1.859) and the rest not at all. Per side, at default Camera Raw's black pixels
+  are at our L\* below 1 (0.56% black in Camera Raw only, 0.11% in ours only): it
+  clips the last half L\* where ours approaches; the clipping rule counts it, ΔE00
+  barely does. On low-key photos ours is lighter than Camera Raw's Blacks −50
+  between default L\* 3 and 12 (at 8: 1.7–1.8 against 0.9–1.0).
+- **Negative Dehaze as added haze (#467).** The dark-channel model with the
+  airlight, J = p·t + A·(1−t), adds far too much: the airlight is near sky white,
+  and even ω 0.12 at −25 lifts shadows 26 L\*. What Camera Raw does, in its own
+  renders: an additive veil whose size follows the photo's median luminance (log
+  correlation 0.83; its 99th percentile, today's key, 0.23), at −50 and −25 about
+  0.3 and 0.12 of −100's, coloured like the airlight (b\* correlation 0.64, slope
+  1.0; the photo's mean colour 0.02), fading toward black, with a contrast change
+  per photo from 0.34 to 1.33 (display-linear slope) that follows the airlight's
+  brightness (correlation 0.73) and the haze density (−0.48). A veil of the
+  median in the airlight's colour, fading as L / (L + 0.3·median), with a fixed
+  gain, takes the median of half the train photos at −100 from 8.62 to 6.66
+  (−50 4.06 → 3.46, −25 2.29 → 2.25) with every band within 3 L\*, but 11 photos
+  get worse by more than 0.5 (one 3.24 → 12.79), so it would fail the
+  no-photo-regresses rule. Keying today's curves on the median instead of the
+  99th percentile was no better (−100 8.62 → 8.78 at median + 2).
+- **Clarity on photos (#468).** The four-scale weights refitted on `clarity-train`
+  (53 photos, map grid registered to the renders, L\*-weighted least squares,
+  cross-validated by photo) cut per-pixel L\* RMS at +100 from 5.40 to 4.45, but
+  rendered train photos did not follow: +100 median 2.54 → 2.63 (9 better, 13
+  worse), +50 1.92 → 1.83, −100 1.63 → 1.68. At 1024 px Camera Raw's +100 adds
+  1.6–4.1 L\* of change finer than 2 px that ours (on the 512 px map) does not; a
+  full-resolution term like Texture made it worse (+30: 2.54 → 2.59, 1 better, 16
+  worse). Our mid-scale strength against Camera Raw's ranges from 0.03× to 1.3×
+  by photo.
+
+Next steps, if resumed: negative Dehaze with a contrast factor predicted from the
+airlight and haze density (fit on `dehaze-train`, check per photo before any
+validation run); Camera Raw probes for positive Blacks and Exposure against
+DefaultBlackRender None (#474, #470), which this round could not render.
+
 ## Color
 
 - **Saturation** −100 renders Camera Raw's exact luminance gray ([saturation](color-mixer.md#saturation)): 0.65 mean ΔE00 on the chart, down from 3.97. Between −50 and +100 it is the photo-measured tables (chart: −50 1.21, +50 1.39, +100 2.93); Camera Raw's own blend toward luminance fits the chart better but was worse on real photos. **Vibrance** follows Camera Raw's chart measurements beyond ±50 ([vibrance](color-mixer.md#vibrance)): −100 at 0.83 and +100 at 1.00 on the chart, down from 3.90 and 1.54; up to ±50 it is the photo-measured tables.

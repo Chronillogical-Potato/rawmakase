@@ -145,7 +145,10 @@ Exposure, and parts of the cool magenta corner of Temp and Tint.
   prepared curves at steps of 0.1; pixels outside it keep the global response.
   Full-frame masked Shadows matches the global adjustment in Camera Raw probes
   with both Auto and None default-black rendering. Blacks retains its separate
-  minimum-based key.
+  minimum-based key. On photos that key is almost always below `BLACK_KEYS`'s first
+  row (−8 stops), so Blacks renders photos through that row; keying it on the 0.1th
+  percentile changes nothing, and a key relative to the median gains under 0.1 ΔE00
+  on the train photos ([parity gaps](parity-gaps.md), 2026-10-20).
 
   Camera Raw 18.7 neutral ramps with the same scene values and different camera
   baselines produce the same dark outputs; raising Exposure moves the response.
@@ -363,7 +366,12 @@ few stops below at +40. A curve per amount explains ±40 to 0.10 (doing nothing:
 training photos the same curves fitted on the photos themselves do better at every
 amount (cross-validated by photo, per-channel gain in EV): +100 0.54 against 0.69 for
 the synthetic curves and 0.90 for doing nothing, +40 0.16 (0.18, 0.30), −40 0.14 (0.16,
-0.57), −100 0.34 (0.39, 1.45). **Negative Dehaze** uses these photo-fitted curves.
+0.57), −100 0.34 (0.39, 1.45). **Negative Dehaze** uses these photo-fitted curves. In Camera
+Raw's renders of the train photos it is rather a veil: sized by the photo's median luminance,
+coloured like the airlight, fading toward black, with a contrast change per photo (display
+slope 0.34–1.33) that follows the airlight's brightness. A veil model without that per-photo
+contrast term improved the median but made 11 of 26 photos worse ([parity
+gaps](parity-gaps.md), 2026-10-20).
 
 **Positive Dehaze** is a dark-channel haze removal model (`scene_tone/haze.rs`), on the
 scene tone stage's input (linear ProPhoto), measured on the photo's measurement copy (512
