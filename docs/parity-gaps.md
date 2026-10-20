@@ -168,6 +168,22 @@ dark. None of the candidates below passed the validation gate against
   11 worse by more than 0.3, 17 regional regressions. Its per-photo changes
   correlate 0.63 with the range-aware version's.
 
+- **Why it does not carry over (2026-10-20).** The engine applies the fitted gain
+  exactly (on a D7100 photo its scene gain matches the Python model within 0.03 EV),
+  so the gap is the model, not the port. The range-aware version improved the
+  −100 mean in nearly every validation family (plain −0.22, stress −0.16, own-stress
+  −0.49, signature edits −0.05 ΔE00); it failed on the regional rule, where in about
+  12 photos a cluster of bright regions moved several ΔE00 the wrong way (one from
+  1.8 to 11.8) while the photo's median improved. One curve per photo, chosen from
+  global statistics, is wrong in all bright areas of a photo at once when the
+  choice is wrong. At half strength (rows halfway between main's and the
+  range-aware ones) −100 improved by −0.07 median, 6 photos better and none worse
+  by more than 0.3, but 6 photos still regress regionally (702250c1, a2d7222a,
+  2d9c40f6, ae83bb3a, 1860202e) and two stress photos clip more at −25 and −50;
+  it fails too. The train-split regional proxy rated the histogram model best and
+  validation rated it worst, so the train split does not predict validation for
+  per-photo choices.
+
 Next step, if resumed: none of the train-split fits (Shadows refit, range-aware,
 histogram-shape) carried over to validation, though each held up in
 cross-validation by photo. The train split (80 linear-profile photos) is too
