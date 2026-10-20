@@ -123,6 +123,8 @@ pub(crate) struct Editor {
     auto_advance: bool,
     /// Synchronize Folder: the scan under way or the plan waiting for review.
     folder_sync: folder_sync::FolderSync,
+    /// The file operation under way, from its plan to its outcome.
+    file_ops: file_ops::FileOps,
     /// The photo open in Develop when a synchronization was applied, and its
     /// file's new path if it was found moved: the reload that follows keeps
     /// the document, unsaved edit included, following the file (see
@@ -347,6 +349,7 @@ impl Editor {
             selection: Default::default(),
             auto_advance: session.auto_advance,
             folder_sync: Default::default(),
+            file_ops: Default::default(),
             relink_open: None,
             checksums_paused: session.pause_checksums,
             first_conversion: if session.no_auto_black_white_mix {
@@ -830,6 +833,7 @@ mod curve_menu;
 mod dialogs;
 mod display;
 mod export;
+mod file_ops;
 pub(crate) mod folder_locations;
 mod folder_sync;
 mod guided_tool;

@@ -705,19 +705,22 @@ impl Editor {
                     .catalog_photo
                     .is_some_and(|id| removed.value.contains(&id))
                 {
-                    // Nothing may save into a removed photo, nor a load still
-                    // under way bring it back.
-                    self.load.invalidate();
-                    self.selection.clear_document();
-                    self.document.reset(None);
-                    self.preview.clear_document();
-                    self.presets.clear_document();
-                    self.view.clear_document();
-                    self.module = Module::Library;
+                    self.close_removed_document();
                 }
             }
             Err(e) => self.status = format!("Folder not removed: {e:#}"),
         }
+    }
+    /// Closes the open photo, removed from the catalog: nothing may save
+    /// into it, nor a load still under way bring it back.
+    pub(super) fn close_removed_document(&mut self) {
+        self.load.invalidate();
+        self.selection.clear_document();
+        self.document.reset(None);
+        self.preview.clear_document();
+        self.presets.clear_document();
+        self.view.clear_document();
+        self.module = Module::Library;
     }
     /// Says why Develop could not open a photo.
     pub(super) fn not_editable_window(&mut self, ctx: &egui::Context) {

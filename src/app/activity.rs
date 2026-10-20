@@ -10,6 +10,11 @@ pub(super) enum Activity {
     /// Sync Settings is writing other photos' edits: moving to another photo or
     /// catalog waits for it.
     Syncing,
+    /// A file operation (Remove from Catalog, and later moving and trashing
+    /// photos) is planned, confirmed or running: from just after the open
+    /// edit was saved until its outcome is applied, nothing else writes the
+    /// photos' rows (see `file_ops`).
+    ChangingFiles,
 }
 impl Activity {
     pub(crate) fn is_busy(&self) -> bool {
@@ -46,6 +51,27 @@ impl Activity {
     pub(crate) fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
+    /// Something else is writing the open photo's or other photos' rows:
+    /// autosave, saving before navigation and undo wait for it.
+    pub(crate) fn holds_catalog_writes(&self) -> bool {
+        matches!(self, Self::Syncing | Self::ChangingFiles)
+    }
+    pub(crate) fn begin_file_change(&mut self) -> bool {
+        if self.is_busy() {
+            return false;
+        }
+        *self = Self::ChangingFiles;
+        true
+    }
+    /// A file operation holds the catalog: closing waits for it.
+    pub(crate) fn is_changing_files(&self) -> bool {
+        matches!(self, Self::ChangingFiles)
+    }
+    pub(crate) fn finish_file_change(&mut self) {
+        if self.is_changing_files() {
+            *self = Self::Idle;
+        }
+    }
     pub(crate) fn finish_sync(&mut self) {
         if self.is_syncing() {
             *self = Self::Idle;
@@ -76,6 +102,25 @@ mod tests {
         assert!(!activity.begin_dialog() && !activity.begin_folder_change());
         activity.finish_dialog();
         assert!(!activity.is_busy());
+    }
+    #[test]
+    fn a_file_change_holds_catalog_writes_until_it_finishes() {
+        let mut activity = Activity::default();
+        assert!(!activity.holds_catalog_writes());
+        assert!(activity.begin_file_change());
+        assert!(activity.holds_catalog_writes() && activity.is_busy());
+        assert!(!activity.is_dialog() && !activity.is_syncing());
+        assert!(
+            !activity.begin_file_change() && !activity.begin_sync() && !activity.begin_dialog()
+        );
+        // Only its own end ends it.
+        activity.finish_dialog();
+        activity.finish_sync();
+        assert!(activity.is_changing_files());
+        activity.finish_file_change();
+        assert!(!activity.is_busy());
+        assert!(activity.begin_sync());
+        assert!(activity.holds_catalog_writes());
     }
     #[test]
     fn a_sync_keeps_dialogs_and_other_syncs_waiting() {

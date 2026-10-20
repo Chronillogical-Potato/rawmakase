@@ -197,7 +197,7 @@ impl Editor {
     }
     /// Shared by UI shortcuts and external commands; false preserves a failed step.
     pub(super) fn command_history(&mut self, redo: bool) -> bool {
-        if self.activity.is_syncing() {
+        if self.activity.holds_catalog_writes() {
             return false;
         }
         let applied = self.step(if redo {

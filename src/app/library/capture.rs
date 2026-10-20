@@ -45,6 +45,9 @@ impl Library {
         }
     }
     pub(super) fn start_capture_times(&mut self) {
+        if self.reads_suspended {
+            return;
+        }
         let availability = &self.availability;
         self.session
             .start_capture_times(|path| availability.is_available(path));

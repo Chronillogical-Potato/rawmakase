@@ -304,6 +304,10 @@ impl Editor {
             self.status = "Wait for Sync Settings to finish before updating".into();
             return;
         }
+        if self.activity.is_changing_files() {
+            self.status = "Wait for the file operation to finish before updating".into();
+            return;
+        }
         // Edits are saved before the app quits for the helper.
         if !self.flush() {
             return;

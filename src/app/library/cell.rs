@@ -328,6 +328,8 @@ pub(in crate::app) enum PhotoAction {
     Copy(super::CopyAction),
     /// Read Metadata from Files.
     ReadMetadata,
+    /// Remove from Catalog.
+    Remove,
     /// Library › Previews: Build Standard-Sized Previews.
     BuildPreviews(crate::catalog::preview_cache::PreviewKind),
     /// Library › Previews: Discard 1:1 Previews, or Standard and 1:1.
@@ -335,6 +337,12 @@ pub(in crate::app) enum PhotoAction {
     /// Develop's Set as Reference Photo.
     SetReference,
 }
+/// Remove from Catalog's shortcut, as Lightroom shows it.
+const REMOVE_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌥⌫"
+} else {
+    "Alt+Backspace"
+};
 /// Create Virtual Copy's shortcut, as Lightroom shows it.
 pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "⌘'"
@@ -419,6 +427,10 @@ pub(in crate::app) fn photo_menu(
         menu_separator(ui);
         if menu_item(ui, "Read Metadata from Files…", "", true, false) {
             action = Some(PhotoAction::ReadMetadata);
+            ui.close();
+        }
+        if menu_item(ui, "Remove from Catalog…", REMOVE_SHORTCUT, true, false) {
+            action = Some(PhotoAction::Remove);
             ui.close();
         }
         menu_separator(ui);

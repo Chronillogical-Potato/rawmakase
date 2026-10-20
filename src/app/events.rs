@@ -31,6 +31,8 @@ impl Editor {
                     self.folder_synced(result);
                 }
                 // The dialog's own DialogClosed follows.
+                Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
+                Event::FileOpDone(batch, done) => self.file_op_done(batch, *done),
                 Event::FolderQuestion(question) => {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
                 }

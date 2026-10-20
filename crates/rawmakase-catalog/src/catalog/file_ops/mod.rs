@@ -201,6 +201,13 @@ impl Plan {
     pub fn skipped(&self) -> &[Skipped] {
         &self.skipped
     }
+    /// Every catalog photo the plan would change.
+    pub fn photos(&self) -> Vec<PhotoId> {
+        self.items
+            .iter()
+            .flat_map(|i| i.preconditions.rows.iter().copied())
+            .collect()
+    }
     /// Whether there is anything to do.
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
