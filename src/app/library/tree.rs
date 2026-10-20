@@ -96,6 +96,13 @@ pub(super) enum TreeAction {
         name: String,
         folder: Option<FolderId>,
     },
+    /// Rename Folder…: catalog folder `folder` of `root`, at logical path
+    /// `logical`.
+    RenameFolder {
+        folder: FolderId,
+        root: RootId,
+        logical: String,
+    },
     /// Photos dropped on catalog folder `folder`, named `name`.
     Drop {
         folder: FolderId,
@@ -262,6 +269,17 @@ pub(super) fn folder_tree_row(
                 parent: node.logical.clone(),
                 name: node.name.clone(),
                 folder: node.folder,
+            });
+            ui.close();
+        }
+        // A root is renamed in Finder, then located again.
+        if let (Some(folder), None) = (node.folder, node.root)
+            && ui.button("Rename Folder…").clicked()
+        {
+            action = Some(TreeAction::RenameFolder {
+                folder,
+                root: node.in_root,
+                logical: node.logical.clone(),
             });
             ui.close();
         }

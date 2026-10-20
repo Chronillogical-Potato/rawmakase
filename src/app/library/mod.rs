@@ -76,6 +76,15 @@ pub(crate) enum FileRequest {
     Trash(Vec<PhotoId>),
     /// Delete Rejected Photos, of the source shown.
     DeleteRejected,
+    /// Rename Photo… (one) or Rename Photos… (several).
+    Rename(Vec<PhotoId>),
+    /// Rename Folder… for catalog folder `folder` of `root`, at logical
+    /// path `logical`.
+    RenameFolder {
+        folder: FolderId,
+        root: crate::catalog::RootId,
+        logical: String,
+    },
     /// Move photos into catalog folder `to`, named `name` (a drop on it).
     Move {
         photos: Vec<PhotoId>,
@@ -712,6 +721,13 @@ impl Library {
             _ => {}
         }
     }
+    /// Rename Photo… or Rename Photos… for `ids` (F2, the thumbnail menu),
+    /// for the editor to ask.
+    pub(in crate::app) fn request_rename(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.file_request = Some(FileRequest::Rename(ids));
+        }
+    }
     /// Move to Trash for `ids` (⌘⌥⇧Delete, the thumbnail menu), whatever is
     /// shown, for the editor to confirm.
     pub(in crate::app) fn request_trash(&mut self, ids: Vec<PhotoId>) {
@@ -778,6 +794,24 @@ impl Library {
             "" => format!("root:{root}"),
             parent => format!("root:{root}/{parent}"),
         });
+    }
+    /// Follows a folder of `root` renamed or moved from logical path `from`
+    /// to `to` in the tree: what was selected or unfolded in it still is.
+    pub(in crate::app) fn folder_renamed(
+        &mut self,
+        root: crate::catalog::RootId,
+        from: &str,
+        to: &str,
+    ) {
+        let (from, to) = (format!("root:{root}/{from}"), format!("root:{root}/{to}"));
+        self.selected_folders.rekey(&from, &to);
+        self.expanded = std::mem::take(&mut self.expanded)
+            .into_iter()
+            .map(|key| match folder_selection::rekeyed(&key, &from) {
+                Some(rest) => format!("{to}{rest}"),
+                None => key,
+            })
+            .collect();
     }
     /// Unfolds the folder New Folder Inside made a folder in, so the tree
     /// shows it.

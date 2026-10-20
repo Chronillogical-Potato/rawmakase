@@ -285,6 +285,10 @@ impl Library {
                     let ids = self.selected_ids();
                     self.delete_press(press.modifiers, ids)
                 }
+                (Key::F2, false) if !press.repeat && !press.modifiers.any() => {
+                    let ids = self.selected_ids();
+                    self.request_rename(ids)
+                }
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),
@@ -312,6 +316,10 @@ impl Library {
                 (Key::Delete | Key::Backspace, _) if !press.repeat => {
                     let ids = self.selection.active.into_iter().collect();
                     self.delete_press(press.modifiers, ids)
+                }
+                (Key::F2, false) if !press.repeat && !press.modifiers.any() => {
+                    let ids = self.selection.active.into_iter().collect();
+                    self.request_rename(ids)
                 }
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 (Key::N, false) if !press.modifiers.any() => self.open_survey(),

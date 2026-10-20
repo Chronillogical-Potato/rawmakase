@@ -2704,3 +2704,24 @@ fn rejected_photos_of_the_offline_source_are_only_offline_ones() -> Result<()> {
     assert_eq!(l.rejected_in_source(), [gone]);
     Ok(())
 }
+/// A folder renamed in the tree keeps what was selected and unfolded in it,
+/// and nothing beside it changes.
+#[test]
+fn a_renamed_folder_keeps_its_selection_and_unfolded_folders() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    let root = RootId(3);
+    library.selected_folders = folder_selection::FolderSelection::one("root:3/trip/day1");
+    library.expanded = ["root:3/trip", "root:3/trip/day1", "root:3/tripod"]
+        .map(String::from)
+        .into();
+    library.folder_renamed(root, "trip", "Iceland");
+    assert!(library.selected_folders.contains("root:3/Iceland/day1"));
+    assert_eq!(library.selected_folders.anchor(), "root:3/Iceland/day1");
+    let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
+    expanded.sort();
+    assert_eq!(
+        expanded,
+        ["root:3/Iceland", "root:3/Iceland/day1", "root:3/tripod"]
+    );
+    Ok(())
+}

@@ -79,6 +79,14 @@ pub(crate) enum Event {
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     /// A file operation was planned (see `app::file_ops`).
+    /// Rename Photo(s)' photos in the order they are numbered in, for the
+    /// catalog they were read from.
+    /// The cancel flag it was read with tells it from a later one.
+    RenameOrdered(
+        crate::catalog::CatalogLocation,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        Box<Result<crate::catalog::file_ops::RenameOrder, String>>,
+    ),
     /// The plan, and Delete's Move to Trash beside it.
     FileOpPlanned(
         Box<

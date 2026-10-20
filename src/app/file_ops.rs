@@ -40,6 +40,9 @@ use std::time::{Duration, Instant};
 #[path = "file_ops_dialogs.rs"]
 mod dialogs;
 use dialogs::{Choosing, Naming};
+#[path = "file_ops_rename.rs"]
+mod rename;
+use rename::{Renaming, RenamingFolder};
 
 /// A Trash that takes nothing, for tests whose operations have no file to
 /// trash.
@@ -65,6 +68,16 @@ pub(super) enum Verb {
     },
     /// Move to Trash alone (⌘⌥⇧Delete).
     Trash,
+    /// Renames photos; `one`'s old and new names when one is renamed.
+    Rename {
+        one: Option<(String, String)>,
+    },
+    /// Renames a folder of `root` from logical path `from` to `to`.
+    RenameFolder {
+        root: crate::catalog::RootId,
+        from: String,
+        to: String,
+    },
     /// Into the folder named so.
     Move {
         to: String,
@@ -83,6 +96,7 @@ impl Verb {
         match self {
             Self::Remove | Self::Delete { .. } => "nothing was removed",
             Self::Trash => "nothing was moved to the Trash",
+            Self::Rename { .. } | Self::RenameFolder { .. } => "nothing was renamed",
             Self::Move { .. } => "nothing was moved",
             Self::Create { .. } => "no folder was made",
         }
@@ -92,6 +106,7 @@ impl Verb {
         match self {
             Self::Remove | Self::Delete { .. } => "Nothing to remove",
             Self::Trash => "Nothing to move to the Trash",
+            Self::Rename { .. } | Self::RenameFolder { .. } => "Nothing to rename",
             Self::Move { .. } | Self::Create { moving: true, .. } => "Nothing to move",
             Self::Create { .. } => "No folder to make",
         }
@@ -100,6 +115,8 @@ impl Verb {
     fn failed(&self) -> &'static str {
         match self {
             Self::Remove | Self::Delete { .. } | Self::Trash => "Photos not removed",
+            Self::Rename { .. } => "Photos not renamed",
+            Self::RenameFolder { .. } => "Folder not renamed",
             Self::Move { .. } => "Photos not moved",
             Self::Create { .. } => "Folder not made",
         }
@@ -130,6 +147,16 @@ enum State {
     Choosing(Box<Choosing>),
     /// New Folder Inside…: the name being given. Holds nothing.
     Naming(Box<Naming>),
+    /// Rename Photo(s): the photos' order read on a worker, which `cancel`
+    /// stops. Holds the catalog, as the dialog after it does.
+    Ordering {
+        catalog: CatalogLocation,
+        cancel: Arc<AtomicBool>,
+    },
+    /// Rename Photo or Rename Photos, open; holds the catalog.
+    Renaming(Box<Renaming>),
+    /// Rename Folder…, open. Holds nothing.
+    RenamingFolder(Box<RenamingFolder>),
     /// Planned on a worker, for this catalog.
     Planning {
         catalog: CatalogLocation,
@@ -203,12 +230,17 @@ impl FileOps {
             cancel.store(true, Ordering::Relaxed);
         }
     }
-    /// Whether a dialog of a file operation that holds nothing is open:
-    /// keys go to it, not to the photos behind.
+    /// Whether a dialog of a file operation with a field or a list is
+    /// open: keys go to it, not to the photos behind.
     pub(super) fn dialog_open(&self) -> bool {
         matches!(
             self.state,
-            State::Choosing(_) | State::Naming(_) | State::Unfinished { .. }
+            State::Choosing(_)
+                | State::Naming(_)
+                | State::Unfinished { .. }
+                | State::Ordering { .. }
+                | State::Renaming(_)
+                | State::RenamingFolder(_)
         )
     }
     /// Whether a running operation was asked to stop.
@@ -429,6 +461,20 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             };
             (title, "Move to Trash")
         }
+        // Their dialogs ask; this is what they planned.
+        Verb::Rename { .. } | Verb::RenameFolder { .. } => {
+            for (old, new) in s.renames.iter().take(8) {
+                lines.push(format!("{old} → {new}"));
+            }
+            left(&mut lines, ("left as it is", "left as they are"));
+            (
+                format!(
+                    "Rename {}?",
+                    widgets::plural(s.renames.len(), "photo", "photos")
+                ),
+                "Rename",
+            )
+        }
         Verb::Move { .. } | Verb::Create { .. } => {
             lines.push(if s.companions > 0 {
                 format!(
@@ -474,7 +520,11 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
                     "Make Folder and Move",
                 ),
                 Verb::Move { to } => (format!("Move {photos} to “{to}”?"), "Move"),
-                Verb::Remove | Verb::Delete { .. } | Verb::Trash => unreachable!(),
+                Verb::Remove
+                | Verb::Delete { .. }
+                | Verb::Trash
+                | Verb::Rename { .. }
+                | Verb::RenameFolder { .. } => unreachable!(),
             }
         }
     };
@@ -556,7 +606,30 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
     let moved = count(|r| matches!(r, ItemResult::Moved { .. }));
     let created = count(|r| matches!(r, ItemResult::Created { .. })) > 0;
     let trashed = count(|r| *r == ItemResult::Trashed);
+    let renamed: Vec<&str> = outcome
+        .items
+        .iter()
+        .filter_map(|i| match &i.result {
+            ItemResult::Renamed { name } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let folder_renamed = count(|r| matches!(r, ItemResult::FolderRenamed { .. })) > 0;
+    let last = |path: &str| path.rsplit('/').next().unwrap_or_default().to_string();
     let mut text = match verb {
+        Verb::Rename {
+            one: Some((old, _)),
+        } if renamed.len() == 1 => format!("Renamed {old} to {}", renamed[0]),
+        Verb::Rename { .. } => format!(
+            "Renamed {}",
+            widgets::plural(renamed.len(), "photo", "photos")
+        ),
+        Verb::RenameFolder { from, .. } if !folder_renamed => {
+            format!("Folder {} not renamed", last(from))
+        }
+        Verb::RenameFolder { from, to, .. } => {
+            format!("Renamed folder {} to {}", last(from), last(to))
+        }
         Verb::Trash => format!(
             "Moved {} to the Trash",
             widgets::plural(trashed, "photo", "photos")
@@ -597,6 +670,7 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
     if !left.is_empty() {
         let what = match verb {
             Verb::Create { .. } if !created => String::new(),
+            Verb::RenameFolder { .. } => String::new(),
             _ => format!(" · {} left", widgets::plural(left.len(), "photo", "photos")),
         };
         text.push_str(&format!("{what}: {}", left[0]));
@@ -686,7 +760,10 @@ impl Editor {
     /// Nothing is held when the save fails.
     fn request_file_op(&mut self, op: FileOp, trash: Option<FileOp>, verb: Verb) {
         // A dialog that led here holds nothing.
-        if matches!(self.file_ops.state, State::Choosing(_) | State::Naming(_)) {
+        if matches!(
+            self.file_ops.state,
+            State::Choosing(_) | State::Naming(_) | State::RenamingFolder(_)
+        ) {
             self.file_ops.state = State::Idle;
         }
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
@@ -800,7 +877,11 @@ impl Editor {
             }
             Ok((plan, trash)) => {
                 let generation = self.library.as_ref().map_or(0, |l| l.session.generation());
-                let asked = matches!(verb, Verb::Create { moving: false, .. });
+                // Asked already: by Create, or by Rename Folder…'s Rename.
+                let asked = matches!(
+                    verb,
+                    Verb::Create { moving: false, .. } | Verb::RenameFolder { .. }
+                );
                 self.file_ops.state = State::Confirming {
                     plan: Box::new(plan),
                     // None of the files can go: Remove from Catalog alone.
@@ -826,6 +907,9 @@ impl Editor {
             State::Choosing(_) => return self.choose_folder_window(ctx),
             State::Naming(_) => return self.new_folder_window(ctx),
             State::Unfinished { .. } => return self.unfinished_window(ctx),
+            State::Ordering { .. } => return self.ordering_window(ctx),
+            State::Renaming(_) => return self.rename_window(ctx),
+            State::RenamingFolder(_) => return self.rename_folder_window(ctx),
             _ => {}
         }
         let State::Confirming {
@@ -840,6 +924,7 @@ impl Editor {
             Verb::Delete { .. } => "delete-photos",
             Verb::Trash => "trash-photos",
             Verb::Move { .. } | Verb::Create { .. } => "move-photos",
+            Verb::Rename { .. } | Verb::RenameFolder { .. } => "rename",
         };
         // Delete's second action is Move to Trash.
         let trashing = trash.is_some();
@@ -980,6 +1065,16 @@ impl Editor {
             }
         };
         self.status = summary_of(&outcome, &verb);
+        // The tree's selection and unfolded folders follow a folder renamed.
+        if let Verb::RenameFolder { root, from, to } = &verb
+            && outcome
+                .items
+                .iter()
+                .any(|i| matches!(i.result, ItemResult::FolderRenamed { .. }))
+            && let Some(library) = &mut self.library
+        {
+            library.folder_renamed(*root, from, to);
+        }
         // After the summary: a catalog that can't be read again says so.
         self.apply_file_outcome(&outcome);
         self.release_files();
@@ -998,7 +1093,20 @@ impl Editor {
                 .collect()
         };
         let removed = ids(|r| matches!(r, ItemResult::Removed | ItemResult::Trashed));
-        let moved = ids(|r| matches!(r, ItemResult::Moved { .. }));
+        // A folder renamed is read again, photos in it or not.
+        let folder_changed = outcome
+            .items
+            .iter()
+            .any(|i| matches!(i.result, ItemResult::FolderRenamed { .. }));
+        // Each a photo whose file is at another path now.
+        let moved = ids(|r| {
+            matches!(
+                r,
+                ItemResult::Moved { .. }
+                    | ItemResult::Renamed { .. }
+                    | ItemResult::FolderRenamed { .. }
+            )
+        });
         let created = outcome
             .items
             .iter()
@@ -1007,7 +1115,7 @@ impl Editor {
         if created && let Some(library) = &mut self.library {
             library.unfold_new_folder();
         }
-        if !removed.is_empty() || !moved.is_empty() || created {
+        if !removed.is_empty() || !moved.is_empty() || created || folder_changed {
             self.reread_after_files(&removed, &moved);
         }
     }
@@ -1118,6 +1226,11 @@ impl Editor {
                             let at = (progress.done + 1).min(progress.steps);
                             format!("Moving {at} of {} to the Trash…", progress.steps)
                         }
+                        Verb::Rename { .. } => {
+                            let at = (progress.done + 1).min(progress.steps);
+                            format!("Renaming {at} of {}…", progress.steps)
+                        }
+                        Verb::RenameFolder { .. } => "Renaming the folder…".to_string(),
                         Verb::Move { to } => {
                             let at = (progress.done + 1).min(progress.steps);
                             format!("Moving {at} of {} to {to}…", progress.steps)
@@ -1181,6 +1294,9 @@ impl Editor {
 #[cfg(test)]
 #[path = "file_ops_move_tests.rs"]
 mod move_tests;
+#[cfg(test)]
+#[path = "file_ops_rename_tests.rs"]
+mod rename_tests;
 #[cfg(test)]
 #[path = "file_ops_tests.rs"]
 mod tests;

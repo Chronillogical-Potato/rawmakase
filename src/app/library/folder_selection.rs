@@ -44,6 +44,19 @@ impl FolderSelection {
             anchor: key.to_string(),
         }
     }
+    /// Follows a folder renamed or moved from tree key `from` to `to`: its
+    /// key and those of the folders in it.
+    pub(super) fn rekey(&mut self, from: &str, to: &str) {
+        for key in self
+            .keys
+            .iter_mut()
+            .chain(std::iter::once(&mut self.anchor))
+        {
+            if let Some(rest) = rekeyed(key, from) {
+                *key = format!("{to}{rest}");
+            }
+        }
+    }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }
@@ -104,6 +117,13 @@ impl FolderSelection {
             }
         }
     }
+}
+
+/// What follows `from` in tree key `key`, when `key` is `from` or a folder
+/// in it.
+pub(super) fn rekeyed<'a>(key: &'a str, from: &str) -> Option<&'a str> {
+    let rest = key.strip_prefix(from)?;
+    (rest.is_empty() || rest.starts_with('/')).then_some(rest)
 }
 
 #[cfg(test)]

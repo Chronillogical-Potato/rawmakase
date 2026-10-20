@@ -44,13 +44,17 @@ pub(super) fn tap(e: &mut Editor, k: Key, modifiers: Modifiers) {
 }
 
 /// Frames until the workers have answered and the app is idle again, or
-/// the confirmation is waiting.
+/// the confirmation or a dialog is waiting.
 pub(super) fn settle(e: &mut Editor) {
     let until = Instant::now() + Duration::from_secs(10);
     while Instant::now() < until {
         let ctx = e.context.clone();
         e.events(&ctx);
-        if !e.activity.is_busy() || e.file_ops.confirming() {
+        let waiting = e.file_ops.ordering_cancel().is_some();
+        if !e.activity.is_busy()
+            || e.file_ops.confirming()
+            || (e.file_ops.dialog_open() && !waiting)
+        {
             frame(e, Vec::new());
             return;
         }
