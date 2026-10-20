@@ -54,6 +54,34 @@ fn an_exclusive_rename_moves_a_directory_but_never_onto_one() {
 }
 
 #[test]
+fn a_folder_is_made_only_where_nothing_is() {
+    let d = dir();
+    let (a, file, link) = (d.path().join("a"), d.path().join("f"), d.path().join("l"));
+    create_dir(&a).unwrap();
+    assert_eq!(entry(&a).unwrap().kind, EntryKind::Directory);
+    // Never adopted: a folder, a file, or a link there already.
+    fs::write(a.join("x.NEF"), b"x").unwrap();
+    assert!(matches!(create_dir(&a), Err(FsError::AlreadyExists)));
+    assert!(a.join("x.NEF").is_file());
+    fs::write(&file, b"file").unwrap();
+    assert!(matches!(create_dir(&file), Err(FsError::AlreadyExists)));
+    assert_eq!(fs::read(&file).unwrap(), b"file");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(d.path().join("nowhere"), &link).unwrap();
+        assert!(matches!(create_dir(&link), Err(FsError::AlreadyExists)));
+        assert!(!d.path().join("nowhere").exists());
+    }
+    let _ = link;
+    // Its parent must be there; nothing is made on the way.
+    assert!(matches!(
+        create_dir(&d.path().join("b/c")),
+        Err(FsError::NotFound)
+    ));
+    assert!(!d.path().join("b").exists());
+}
+
+#[test]
 fn a_missing_source_is_not_found() {
     let d = dir();
     assert!(matches!(

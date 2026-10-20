@@ -181,7 +181,10 @@ fn summary_of(outcome: &Outcome) -> String {
         .items
         .iter()
         .filter_map(|i| match &i.result {
-            ItemResult::Removed | ItemResult::Moved { .. } | ItemResult::Trashed => None,
+            ItemResult::Removed
+            | ItemResult::Moved { .. }
+            | ItemResult::Trashed
+            | ItemResult::Created { .. } => None,
             ItemResult::Unchanged(why) => Some(why.clone().unwrap_or_else(|| "unchanged".into())),
             ItemResult::NeedsRecovery(why) => Some(why.clone()),
             ItemResult::Kept => Some("kept as it is".into()),

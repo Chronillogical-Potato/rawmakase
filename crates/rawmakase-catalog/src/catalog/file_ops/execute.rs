@@ -13,13 +13,19 @@
 //!    catalog change and `done`. Should that fail, the item is
 //!    `needs_recovery` and recovery retries it.
 //!
+//! A plan that makes a folder makes it first, as its own item (see
+//! [`super::folder`]); its moves go on only once the catalog has it.
+//!
 //! Cancelling stops between items only.
 use super::super::db::{Write, sql};
 use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};
 use super::companions;
 use super::disk::{Disk, Presence, Real, gone, parent, presence, sync_parents};
-use super::journal::{self, Item as Journalled, ItemState, Kind, Member, MemberState, OperationId};
+use super::folder::{self, Made, NewFolder};
+use super::journal::{
+    self, Item as Journalled, ItemState, Kind, Member, MemberState, OperationId, Subject,
+};
 use super::plan::{Folders, Item, occupied, shared};
 use super::{Confirmed, FileOpError, Outcome, Trash};
 use crate::storage::fsops::{EntryKind, FsError};
@@ -61,8 +67,9 @@ pub(super) fn execute_with(
         // Checked in each removal's own transaction, which journalling a
         // disk step waits for (see `Run::remove`).
         Kind::RemoveFromCatalog => (None, HashSet::new()),
-        Kind::MovePhotos | Kind::TrashPhotos => {
+        Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
             let lock = super::lock::acquire(catalog)?;
+            super::recover::prune(catalog)?;
             let recovery = super::recover::run(catalog, disk)?;
             let busy = recovery
                 .unfinished
@@ -77,22 +84,39 @@ pub(super) fn execute_with(
     let run = Run {
         batch: &plan.batch.0,
         computer: &computer,
-        kind: plan.kind,
+        // A new folder's photos move into it.
+        kind: match plan.kind {
+            Kind::CreateFolder => Kind::MovePhotos,
+            kind => kind,
+        },
         folders: &folders,
         trash,
         disk,
     };
     let mut stopped = None;
-    for item in plan.items {
+    let mut items = plan.items;
+    if let Some(new) = &plan.create {
+        match run.create(catalog, new, cancel) {
+            Ok(Some(made)) => rebase(&mut items, &made),
+            Ok(None) => items.clear(),
+            Err(e) => {
+                stopped = Some(format!("{e:#}"));
+                items.clear();
+            }
+        }
+    }
+    for item in items {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
         let result = if item.preconditions.rows.iter().any(|r| busy.contains(r)) {
             run.unchanged(catalog, &item, UNFINISHED)
         } else {
-            match plan.kind {
+            match run.kind {
                 Kind::RemoveFromCatalog => run.remove(catalog, &item),
-                Kind::MovePhotos | Kind::TrashPhotos => run.files(catalog, &item),
+                Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
+                    run.files(catalog, &item)
+                }
             }
         };
         // A catalog that can't be written stops the run; what was
@@ -109,6 +133,19 @@ pub(super) fn execute_with(
 
 /// Why a photo an unfinished file operation involves is left alone.
 const UNFINISHED: &str = "an unfinished file operation involves it";
+
+/// Points `items`, planned into a folder not yet made, at folder `made`:
+/// its id, and the name the disk gave it.
+fn rebase(items: &mut [Item], made: &Made) {
+    for item in items {
+        item.preconditions.to = Some((made.folder, made.resolved.clone()));
+        for m in &mut item.members {
+            if let Some(name) = m.source.file_name() {
+                m.destination = Some(made.dir.join(name));
+            }
+        }
+    }
+}
 
 /// What every item of a run shares.
 struct Run<'a> {
@@ -172,6 +209,99 @@ impl Run<'_> {
             )
             .map(drop)
         })
+    }
+
+    /// Makes folder `new`, journalled first, then adds it to the catalog
+    /// once it is proven there. Returns it when the catalog has it; when it
+    /// doesn't, the item says why, and nothing is to move.
+    fn create(
+        &self,
+        catalog: &mut Catalog,
+        new: &NewFolder,
+        cancel: &AtomicBool,
+    ) -> Result<Option<Made>> {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let dir = parent(&new.path);
+        // a. Checked again and journalled, in one transaction: its parent
+        // where it was, plainly, and its name free.
+        let started = catalog.db.write_immediate(|w| {
+            let plain = self.disk.canonical(dir).is_ok_and(|c| c == dir);
+            let reason = match new.state.check(w, self.computer)? {
+                Some(reason) => Some(reason.to_string()),
+                None if !plain => Some(format!("{} changed since it was planned", dir.display())),
+                None => folder::taken(w, self.computer, self.disk, new)?,
+            };
+            let state = match reason {
+                None => ItemState::Planned,
+                Some(_) => ItemState::NoChange,
+            };
+            let id = journal::insert_folder(
+                w,
+                self.batch,
+                self.computer,
+                state,
+                &new.state,
+                &new.path,
+                reason.as_deref(),
+            )?;
+            Ok(reason.is_none().then_some(id))
+        })?;
+        let Some(id) = started else {
+            return Ok(None);
+        };
+        let set = |catalog: &mut Catalog, state: ItemState, error: &str| {
+            catalog
+                .db
+                .write(|w| journal::set_state(w, id, state, Some(error)))
+        };
+        // b. Made, durable, and which folder it is journalled. A failed
+        // `mkdir` made nothing.
+        if let Err(e) = self.disk.create_dir(&new.path) {
+            set(catalog, ItemState::NoChange, &e.to_string())?;
+            return Ok(None);
+        }
+        let found = self
+            .disk
+            .sync_dir(dir)
+            .and_then(|()| folder::made(self.disk, &new.path));
+        let journalled = found.map_err(|e| e.to_string()).and_then(|(file, at)| {
+            catalog
+                .db
+                .write(|w| journal::set_created(w, id, file, &at))
+                .map_err(|e| format!("{e:#}"))
+        });
+        if let Err(e) = journalled {
+            set(catalog, ItemState::NeedsRecovery, &e)?;
+            return Ok(None);
+        }
+        // c. The catalog's folder, on the evidence.
+        let finished = catalog.db.write_immediate(|w| {
+            let item = journal::item(w, id)?.context("the journalled item is gone")?;
+            folder::complete(w, self.computer, self.disk, &item)
+        });
+        if let Err(e) = finished {
+            set(catalog, ItemState::NeedsRecovery, &format!("{e:#}"))?;
+            return Ok(None);
+        }
+        let item = journal::item(&catalog.db, id)?.context("the journalled item is gone")?;
+        let (Subject::Folder(state), ItemState::Done) = (&item.subject, item.state) else {
+            return Ok(None);
+        };
+        let made = (
+            state.folder,
+            item.members.first().and_then(|m| m.destination.clone()),
+        );
+        let (Some(folder), Some(dir)) = made else {
+            return Ok(None);
+        };
+        let name = dir.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        Ok(Some(Made {
+            folder,
+            resolved: state.parent_path.join(name),
+            dir,
+        }))
     }
 
     /// An item that moves or trashes files.
@@ -482,7 +612,10 @@ pub(super) fn complete(
     disk: &dyn Disk,
     item: &Journalled,
 ) -> Result<()> {
-    let pre = &item.preconditions;
+    let pre = match &item.subject {
+        Subject::Photos(pre) => pre,
+        Subject::Folder(_) => return folder::complete(w, computer, disk, item),
+    };
     let shared_now = match item.members.first() {
         Some(photo) => shared(
             w,
@@ -509,7 +642,8 @@ pub(super) fn complete(
                 }
                 None => Some("it may be in the Trash".into()),
             },
-            Kind::MovePhotos => moved(w, folders, disk, item)?,
+            Kind::MovePhotos => moved(w, folders, disk, pre, item)?,
+            Kind::CreateFolder => Some("not a photo operation".into()),
         },
     };
     let state = match reason {
@@ -526,9 +660,9 @@ fn moved(
     w: &mut Write<'_>,
     folders: &Folders,
     disk: &dyn Disk,
+    pre: &super::preconditions::Preconditions,
     item: &Journalled,
 ) -> Result<Option<String>> {
-    let pre = &item.preconditions;
     let Some((to, _)) = pre.to else {
         return Ok(Some("it has no destination".into()));
     };

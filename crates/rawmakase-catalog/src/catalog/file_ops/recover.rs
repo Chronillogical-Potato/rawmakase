@@ -23,7 +23,10 @@
 //! 4. A trash with every member trashed with a receipt and gone from its
 //!    source: its rows go, `done`. Trashed without a receipt: unfinished
 //!    ("it may be in the Trash").
-//! 5. (Create Folder comes with that operation.)
+//! 5. A folder made: proven there (its file object, by the name the disk
+//!    gave it), it is added to the catalog when the user asks; never made,
+//!    or gone, nothing changed. A folder there whose making wasn't
+//!    journalled is never adopted, and no folder is ever deleted.
 //! 6. Anything else (an offline volume, an error, another file object,
 //!    members split): unfinished, for the user to Put Back or Keep as Is.
 //! 7. Nothing is ever cleaned up because its name looks like ours.
@@ -32,7 +35,8 @@ use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};
 use super::disk::{Disk, Presence, Real, parent, presence};
 use super::execute::{complete, restore};
-use super::journal::{self, Item, ItemState, Kind, Member, MemberState, OperationId};
+use super::folder::{self, FolderState};
+use super::journal::{self, Item, ItemState, Kind, Member, MemberState, OperationId, Subject};
 use super::plan::{Folders, shared};
 use super::{FileOpError, ItemOutcome, ItemResult};
 use anyhow::{Context, Result};
@@ -58,6 +62,8 @@ pub struct Unfinished {
     pub photos: Vec<PhotoId>,
     pub members: Vec<UnfinishedMember>,
     pub reason: String,
+    /// What the user may decide for it, the first the one suggested.
+    pub choices: Vec<Resolution>,
 }
 
 /// One file of an unfinished item.
@@ -79,15 +85,31 @@ pub enum Resolution {
     PutBack,
     /// Leave it as it is, for good; Synchronize Folder can match the files.
     Keep,
+    /// Add the folder it made to the catalog, where it is proven the one
+    /// made.
+    AddFolder,
 }
 
 /// Recovers `catalog`'s unfinished file operations on this computer, and
 /// forgets finished ones older than 30 days.
 pub fn recover(catalog: &mut Catalog) -> Result<Recovery, FileOpError> {
     let _lock = super::lock::acquire(catalog)?;
+    prune(catalog)?;
+    Ok(run(catalog, &Real)?)
+}
+
+/// Whether `catalog` has file operations of this computer that a crash
+/// left undecided, which [`recover`] is for; read without the lock, so
+/// opening a catalog needn't hold it when there are none.
+pub fn unfinished_here(catalog: &Catalog) -> anyhow::Result<bool> {
+    Ok(!journal::unresolved(&catalog.db, &catalog.computer.id)?.is_empty())
+}
+
+/// Forgets finished items older than 30 days; the lock held.
+pub(super) fn prune(catalog: &mut Catalog) -> Result<()> {
     let before = crate::time::utc_text(now() - 30 * 24 * 60 * 60);
     catalog.db.write(|w| journal::prune(w, &before))?;
-    Ok(run(catalog, &Real)?)
+    Ok(())
 }
 
 /// Seconds since 1970.
@@ -141,10 +163,35 @@ pub(super) fn resolve_with(
     if item.computer != computer {
         return Err(FileOpError::OtherComputer);
     }
+    let folder = item.kind == Kind::CreateFolder;
+    match resolution {
+        Resolution::PutBack if folder => {
+            return Err(FileOpError::Unsupported(
+                "A folder that was made is never deleted. Keep it, or add it to the catalog.",
+            ));
+        }
+        Resolution::AddFolder if !folder => {
+            return Err(FileOpError::Unsupported(
+                "Only a folder that was made can be added.",
+            ));
+        }
+        Resolution::AddFolder if item.members.first().and_then(|m| m.id).is_none() => {
+            return Err(FileOpError::Unsupported(folder::NOT_PROVEN));
+        }
+        _ => {}
+    }
     if matches!(item.state, ItemState::NeedsRecovery | ItemState::Restoring) {
         let state = match resolution {
             Resolution::Keep => ItemState::Kept,
             Resolution::PutBack => ItemState::Restoring,
+            Resolution::AddFolder => {
+                catalog
+                    .db
+                    .write_immediate(|w| folder::complete(w, &computer, disk, &item))?;
+                let now =
+                    journal::item(&catalog.db, operation)?.context("No such file operation")?;
+                return Ok(outcome_of(&now));
+            }
         };
         catalog
             .db
@@ -168,6 +215,11 @@ fn decide(
     item: &Item,
 ) -> Result<()> {
     let id = item.id;
+    if item.kind == Kind::CreateFolder {
+        return catalog
+            .db
+            .write_immediate(|w| folder::decide(w, computer, disk, item));
+    }
     // An item being put back stays so however it is left: it is never
     // completed forward, whatever happens to its files later.
     let left = match item.state {
@@ -238,7 +290,9 @@ fn changed(
     folders: &Folders,
     item: &Item,
 ) -> Result<Option<String>> {
-    let pre = &item.preconditions;
+    let Subject::Photos(pre) = &item.subject else {
+        return Ok(None);
+    };
     if let Some(reason) = pre.check(&catalog.db, computer)? {
         return Ok(Some(reason.into()));
     }
@@ -308,17 +362,32 @@ fn unfinished(item: &Item) -> Unfinished {
             })
             .collect(),
         reason: item.error.clone().unwrap_or_default(),
+        choices: match &item.subject {
+            // A folder with its file object journalled may be the one made.
+            Subject::Folder(_) if item.members.first().is_some_and(|m| m.id.is_some()) => {
+                vec![Resolution::AddFolder, Resolution::Keep]
+            }
+            Subject::Folder(_) => vec![Resolution::Keep],
+            Subject::Photos(_) => vec![Resolution::PutBack, Resolution::Keep],
+        },
     }
 }
 
 /// What journalled `item` came to.
 pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
     let result = match item.state {
-        ItemState::Done => match (item.kind, &item.preconditions.to) {
-            (Kind::RemoveFromCatalog, _) => ItemResult::Removed,
-            (Kind::TrashPhotos, _) => ItemResult::Trashed,
-            (Kind::MovePhotos, Some((to, _))) => ItemResult::Moved { to: *to },
-            (Kind::MovePhotos, None) => ItemResult::Unchanged(item.error.clone()),
+        ItemState::Done => match &item.subject {
+            Subject::Folder(FolderState {
+                folder: Some(folder),
+                ..
+            }) => ItemResult::Created { folder: *folder },
+            Subject::Photos(pre) => match (item.kind, &pre.to) {
+                (Kind::RemoveFromCatalog, _) => ItemResult::Removed,
+                (Kind::TrashPhotos, _) => ItemResult::Trashed,
+                (Kind::MovePhotos, Some((to, _))) => ItemResult::Moved { to: *to },
+                _ => ItemResult::Unchanged(item.error.clone()),
+            },
+            Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),
         ItemState::NeedsRecovery => {

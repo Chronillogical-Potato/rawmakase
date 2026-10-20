@@ -12,6 +12,7 @@ pub(super) trait Disk {
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError>;
     fn identity(&self, path: &Path) -> anyhow::Result<Identity>;
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError>;
+    fn create_dir(&self, path: &Path) -> Result<(), FsError>;
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError>;
     /// `path` with every link on the way resolved.
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError>;
@@ -32,6 +33,9 @@ impl Disk for Real {
     }
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         fsops::rename_exclusive(from, to)
+    }
+    fn create_dir(&self, path: &Path) -> Result<(), FsError> {
+        fsops::create_dir(path)
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
         fsops::sync_dir(dir)

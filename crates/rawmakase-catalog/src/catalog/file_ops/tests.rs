@@ -255,6 +255,7 @@ pub(super) enum Call {
     List(PathBuf),
     Identity(PathBuf),
     Rename(PathBuf, PathBuf),
+    CreateDir(PathBuf),
     Sync(PathBuf),
 }
 
@@ -262,6 +263,7 @@ pub(super) enum Call {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Op {
     Rename,
+    CreateDir,
     Sync,
 }
 
@@ -358,6 +360,10 @@ impl Disk for Faulty {
             .borrow_mut()
             .push(Call::Rename(from.into(), to.into()));
         self.step(Op::Rename, || Real.rename(from, to))
+    }
+    fn create_dir(&self, path: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::CreateDir(path.into()));
+        self.step(Op::CreateDir, || Real.create_dir(path))
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::Sync(dir.into()));
