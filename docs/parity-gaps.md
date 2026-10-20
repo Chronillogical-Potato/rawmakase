@@ -153,9 +153,27 @@ dark. None of the candidates below passed the validation gate against
   scene-context offset, which was calibrated for main's tables; its train
   improvement did not carry over to rendered validation photos.
 
-Next step, if resumed: a Highlights pull that is also limited by absolute
-brightness or area, fitted on train photos that include low-key scenes with
-mid-bright areas; the current train split has too few of them.
+- **Follow-up (2026-10-20): how Camera Raw's pull varies.** On the 80 train photos
+  Camera Raw compresses bright areas by about 20% at every scale from 1 to 32 px
+  of the 512-px map, as RAWmakase does: Highlights is not an exposure-like
+  change of whole regions. A per-photo table on RAWmakase's guided base halves the
+  held-out error at −100 (0.158 → 0.080 RMS), so the base is right and the curve
+  varies by photo; the variation is consistent across −25, −50 and −100. Keys
+  from other percentiles, absolute level, histogram rank, a range-normalised level
+  and a two-scale (regional) term all fit worse than the base less the key.
+  A table conditioned on the base histogram's shape (spread, skew, kurtosis,
+  entropy, mean, interquartile range, centroids weighted to the top) cut held-out
+  train error by 16% at −100 (49 photos better, 5 worse) but failed validation
+  worse than the range-aware version: −100 median −0.04 ΔE00, 9 photos better and
+  11 worse by more than 0.3, 17 regional regressions. Its per-photo changes
+  correlate 0.63 with the range-aware version's.
+
+Next step, if resumed: none of the train-split fits (Shadows refit, range-aware,
+histogram-shape) carried over to validation, though each held up in
+cross-validation by photo. The train split (80 linear-profile photos) is too
+small or too unlike the validation sets to fit a per-photo Highlights pull; more
+linear-profile Camera Raw renders of varied photos, including low-key scenes and
+the signature-edit sets' kind of photo, should come before another model.
 
 ## Color
 
