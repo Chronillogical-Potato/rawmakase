@@ -1821,6 +1821,85 @@ pub(super) fn confirm_modal<T: Copy>(
         });
     choice.or(response.should_close().then_some(dismissed))
 }
+/// A confirmation for something that can't be undone with Undo, such as
+/// removing photos from the catalog: Cancel has the focus, so Return or
+/// Space alone cancels, as do Escape and a click outside; the action needs a
+/// click, or Tab to it first. Keys already held down when it opened (a held
+/// Delete repeating, a Return still down) do nothing until they are
+/// released. Some(true) for the action, Some(false) for cancelling, None
+/// while it is open.
+pub(super) fn destructive_confirm(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    lines: &[String],
+    cancel: &str,
+    action: &str,
+) -> Option<bool> {
+    /// The keys down when the dialog first showed, until all are released.
+    #[derive(Clone, Default)]
+    struct Opened {
+        held: Vec<egui::Key>,
+        focused: bool,
+    }
+    let key = egui::Id::new(id).with("destructive-confirm");
+    let down: Vec<egui::Key> = ctx.input(|i| i.keys_down.iter().copied().collect());
+    let mut opened = ctx
+        .data_mut(|d| d.get_temp::<Opened>(key))
+        .unwrap_or_else(|| Opened {
+            held: down.clone(),
+            focused: false,
+        });
+    // While a key held from before is down, no key reaches the buttons.
+    opened.held.retain(|k| down.contains(k));
+    if !opened.held.is_empty() {
+        ctx.input_mut(|i| {
+            i.events.retain(|e| !matches!(e, egui::Event::Key { .. }));
+        });
+    }
+    let palette = theme::palette(ctx);
+    let mut choice = None;
+    let response = egui::Modal::new(egui::Id::new(id))
+        .frame(modal_frame(&palette).inner_margin(24))
+        .show(ctx, |ui| {
+            ui.set_width(440.);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(15.)
+                    .color(palette.gray(236)),
+            );
+            ui.add_space(6.);
+            for line in lines {
+                ui.label(egui::RichText::new(line).size(12.).color(palette.gray(150)));
+            }
+            ui.add_space(20.);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                let cancelled = ui.button(cancel);
+                // Cancel has the focus at first, and keeps it while a key
+                // held from before is down (egui moves focus on Tab before
+                // anything here sees the key).
+                if !opened.focused || !opened.held.is_empty() {
+                    cancelled.request_focus();
+                    opened.focused = true;
+                }
+                if cancelled.clicked() {
+                    choice = Some(false);
+                }
+                if primary_button(ui, action).clicked() {
+                    choice = Some(true);
+                }
+            });
+        });
+    let choice = choice.or(response.should_close().then_some(false));
+    ctx.data_mut(|d| match choice {
+        Some(_) => d.remove::<Opened>(key),
+        None => {
+            d.insert_temp(key, opened);
+        }
+    });
+    choice
+}
 /// "1 photo", "2 photos": `n` with the word for its number.
 pub(super) fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })

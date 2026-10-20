@@ -306,7 +306,7 @@ impl Library {
         self.offer_previous_import = false;
         self.filter();
     }
-    pub(super) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
+    pub(in crate::app) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
         self.filters.previous_import = false;
         self.filters.collection = Some(id);
         self.filters.members = self

@@ -280,6 +280,18 @@ impl Library {
                 (Key::B, _) if !press.repeat => {
                     self.quick_key(press.modifiers, self.selected_ids())
                 }
+                // Once per press: a held Delete must not ask again. Option
+                // makes it Remove from Catalog, even in a collection.
+                (Key::Delete | Key::Backspace, false)
+                    if !press.repeat && !press.modifiers.shift && !press.modifiers.ctrl =>
+                {
+                    let ids = self.selected_ids();
+                    if press.modifiers.alt {
+                        self.request_removal(ids)
+                    } else {
+                        self.delete_key(ids)
+                    }
+                }
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),
@@ -303,6 +315,17 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
+                // The Loupe's photo, once per press.
+                (Key::Delete | Key::Backspace, false)
+                    if !press.repeat && !press.modifiers.shift && !press.modifiers.ctrl =>
+                {
+                    let ids = self.selection.active.into_iter().collect();
+                    if press.modifiers.alt {
+                        self.request_removal(ids)
+                    } else {
+                        self.delete_key(ids)
+                    }
+                }
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 (Key::N, false) if !press.modifiers.any() => self.open_survey(),
                 // The Loupe applies B to the photo shown, once per press.

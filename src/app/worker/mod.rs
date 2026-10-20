@@ -78,6 +78,13 @@ pub(crate) enum Event {
     FolderSyncApplied(Result<Box<crate::app::folder_sync::Synced>, String>),
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
+    /// A file operation was planned (see `app::file_ops`).
+    FileOpPlanned(Box<Result<crate::catalog::file_ops::Plan, String>>),
+    /// A file operation's run ended, its thread's report of it.
+    FileOpDone(
+        crate::catalog::file_ops::BatchId,
+        Box<Result<crate::catalog::file_ops::Outcome, String>>,
+    ),
     Monitor(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),

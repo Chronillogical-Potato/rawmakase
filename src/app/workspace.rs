@@ -145,6 +145,13 @@ impl Editor {
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
         }
+        if let Some(ids) = self
+            .library
+            .as_mut()
+            .and_then(|l| l.take_photo_removal_request())
+        {
+            self.request_photo_removal(ids);
+        }
         if let Some(library) = &mut self.library
             && library.take_reread_finished()
         {
@@ -156,6 +163,7 @@ impl Editor {
         self.remove_folder_window(&ctx);
         self.folder_sync_window(&ctx);
         self.read_metadata_window(&ctx);
+        self.file_op_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
         self.copy_dialog_window(&ctx);
@@ -615,6 +623,7 @@ impl Editor {
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
                     self.folder_sync_progress(ui);
+                    self.file_op_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
@@ -1125,6 +1134,7 @@ impl Editor {
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
+            self.develop_delete_key(ctx);
             let (copy, paste, previous, treatment);
             let mut reset = false;
             let mut sync = false;
@@ -1647,6 +1657,8 @@ impl Editor {
             Some("Sync Settings")
         } else if self.activity.is_changing_folder() {
             Some(FOLDER_CHANGE)
+        } else if self.activity.is_changing_files() {
+            Some(FILE_CHANGE)
         } else if self.automation.outputs_running() {
             Some(OUTPUT)
         } else {
@@ -1664,8 +1676,15 @@ impl Editor {
         if ctx.input(|i| i.viewport().close_requested()) {
             let until = Instant::now() + super::exit::DEADLINE;
             let anyway = std::mem::take(&mut self.close_anyway);
+            // A file operation stops after the photo under way; closing
+            // waits for it, or goes anyway, saving nothing while it holds
+            // the catalog (the open edit was saved before it began, and the
+            // journal leaves what it cut short to recovery).
+            self.file_ops.stop();
             let flushed = if !anyway && self.closing_waits_for().is_some() {
                 None
+            } else if anyway && self.activity.is_changing_files() {
+                Some(Flushed::Saved)
             } else {
                 Some(self.flush_by(until))
             };
@@ -1703,7 +1722,7 @@ impl Editor {
                 // must stay possible should it stall on a network share.
                 let anyway = match waits_for {
                     Some(OUTPUT) => Some("Cancel it and close"),
-                    Some(FOLDER_CHANGE) => Some("Close anyway"),
+                    Some(FOLDER_CHANGE | FILE_CHANGE) => Some("Close anyway"),
                     _ => None,
                 };
                 if let Some(label) = anyway
@@ -1921,6 +1940,7 @@ fn status_frame(ui: &egui::Ui, side: i8) -> egui::Frame {
 const OUTPUT: &str = "the output the control socket asked for";
 /// What the close guard calls a folder change.
 const FOLDER_CHANGE: &str = "the folder change";
+const FILE_CHANGE: &str = "the file operation";
 
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as

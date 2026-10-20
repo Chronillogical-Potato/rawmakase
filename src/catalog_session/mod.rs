@@ -88,6 +88,12 @@ impl CatalogSession {
     pub(crate) fn generation(&self) -> u64 {
         self.generation
     }
+    /// Starts a new structural generation without reading the catalog
+    /// again: what background readers read before is dropped when it comes
+    /// back, as before a change that may free photos' ids.
+    pub(crate) fn bump_generation(&mut self) {
+        self.generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    }
     /// Calls `wake` whenever a background read has something to save, for
     /// whoever shows the catalog to poll it.
     pub(crate) fn wake_with(&mut self, wake: Wake) {

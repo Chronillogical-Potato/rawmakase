@@ -1,4 +1,5 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
+use crate::app::widgets::plural;
 use crate::catalog::{Catalog, FolderId, Photo, PhotoId, RootId};
 use crate::catalog_session::{CatalogSession, Committed, Opened};
 use anyhow::Result;
@@ -170,6 +171,12 @@ pub(crate) struct Library {
     message_detail: (String, String),
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<PhotoId>>,
+    /// Photos Delete or the thumbnail menu asked to remove from the catalog,
+    /// for the editor to confirm.
+    photo_removal_request: Option<Vec<PhotoId>>,
+    /// Background reads are held off while a file operation holds the
+    /// catalog: nothing starts them until it lets go.
+    reads_suspended: bool,
     /// A thumbnail menu's Build or Discard Previews, for the editor to carry out.
     previews_request: Option<PreviewsRequest>,
     /// The offline RAW in the Loupe and its stored preview's identity, as the
@@ -252,6 +259,8 @@ impl Library {
             message: String::new(),
             message_detail: Default::default(),
             read_request: None,
+            photo_removal_request: None,
+            reads_suspended: false,
             previews_request: None,
             loupe_stored: None,
             refusal_shown: None,
@@ -617,6 +626,60 @@ impl Library {
     /// confirm.
     pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<PhotoId>> {
         self.read_request.take()
+    }
+    /// Photos Remove from Catalog was asked for, for the editor to confirm.
+    pub(in crate::app) fn take_photo_removal_request(&mut self) -> Option<Vec<PhotoId>> {
+        self.photo_removal_request.take()
+    }
+    /// Delete and Backspace (with Option too): in the Quick Collection, takes
+    /// `ids` out of it, as one undoable step; in an imported collection, which
+    /// can't be changed, nothing; elsewhere, asks to remove them from the
+    /// catalog.
+    pub(in crate::app) fn delete_key(&mut self, ids: Vec<PhotoId>) {
+        if ids.is_empty() {
+            return;
+        }
+        if self.showing_quick() {
+            let Some(quick) = self.quick() else {
+                return;
+            };
+            let summary = format!(
+                "Removed from Quick Collection · {}",
+                plural(ids.len(), "photo", "photos")
+            );
+            if let Err(e) = self.record_collection(quick, Vec::new(), ids, summary) {
+                self.message = format!("Quick Collection not changed: {e}");
+            }
+        } else if self.filters.collection.is_some() {
+            self.message = "Imported collections can't be changed".into();
+        } else {
+            self.request_removal(ids);
+        }
+    }
+    /// Remove from Catalog for `ids` (⌥Delete, the thumbnail menu), whatever
+    /// is shown, for the editor to confirm.
+    pub(in crate::app) fn request_removal(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.photo_removal_request = Some(ids);
+        }
+    }
+    /// Holds off the background reads while a file operation holds the
+    /// catalog: the readers stop, Read Metadata from Files with them, what
+    /// they read before is dropped when it comes back, and nothing starts
+    /// them again until [`Self::resume_background_reads`].
+    pub(in crate::app) fn suspend_background_reads(&mut self) {
+        self.reads_suspended = true;
+        self.cancel_reread();
+        self.session.stop_background_reads();
+        self.session.bump_generation();
+    }
+    /// Background reads go on after a file operation let the catalog go:
+    /// capture times, photo info and checksums, for what is still missing.
+    pub(in crate::app) fn resume_background_reads(&mut self) {
+        self.reads_suspended = false;
+        self.start_capture_times();
+        self.start_photo_info();
+        self.start_checksums();
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
     pub(in crate::app) fn take_previews_request(&mut self) -> Option<PreviewsRequest> {

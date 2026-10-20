@@ -5,6 +5,9 @@ use super::Library;
 
 impl Library {
     pub(super) fn start_checksums(&mut self) {
+        if self.reads_suspended {
+            return;
+        }
         let availability = &self.availability;
         self.session
             .start_checksums(|path| availability.is_available(path));

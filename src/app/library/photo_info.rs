@@ -68,6 +68,9 @@ impl Library {
     }
     /// Reads the info of the photos that have none, unless already reading.
     pub(super) fn start_photo_info(&mut self) {
+        if self.reads_suspended {
+            return;
+        }
         let availability = &self.availability;
         self.session
             .start_photo_info(|path| availability.is_available(path));
