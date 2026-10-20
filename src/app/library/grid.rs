@@ -412,12 +412,22 @@ const DRAG_DISTANCE: f32 = 8.;
 
 /// Drags the photos `ids` gives from cell `response`, once the pointer is
 /// [`DRAG_DISTANCE`] from where it was pressed; how many while they are
-/// dragged. Escape (egui's) ends the drag: it doesn't start again until
-/// the button is pressed again.
+/// dragged.
 pub(super) fn drag_payload(
     response: &egui::Response,
     ids: impl FnOnce() -> Vec<PhotoId>,
 ) -> Option<usize> {
+    drag_once(response, || super::DraggedPhotos(ids())).map(|p| p.0.len())
+}
+
+/// Drags what `payload` makes from `response`, once the pointer is
+/// [`DRAG_DISTANCE`] from where it was pressed; it while it is dragged.
+/// Escape (egui's) ends the drag: it doesn't start again until the button
+/// is pressed again.
+pub(super) fn drag_once<P: std::any::Any + Send + Sync>(
+    response: &egui::Response,
+    payload: impl FnOnce() -> P,
+) -> Option<std::sync::Arc<P>> {
     let ctx = &response.ctx;
     let key = response.id.with("photo-drag");
     if !response.dragged() {
@@ -427,7 +437,7 @@ pub(super) fn drag_payload(
     let started = ctx.data(|d| d.get_temp::<bool>(key));
     match started {
         // Under way, or ended by Escape.
-        Some(true) => egui::DragAndDrop::payload::<super::DraggedPhotos>(ctx).map(|p| p.0.len()),
+        Some(true) => egui::DragAndDrop::payload::<P>(ctx),
         Some(false) => None,
         None => {
             let far = ctx.input(|i| {
@@ -440,10 +450,8 @@ pub(super) fn drag_payload(
                 return None;
             }
             ctx.data_mut(|d| d.insert_temp(key, true));
-            let ids = ids();
-            let count = ids.len();
-            response.dnd_set_drag_payload(super::DraggedPhotos(ids));
-            Some(count)
+            response.dnd_set_drag_payload(payload());
+            egui::DragAndDrop::payload::<P>(ctx)
         }
     }
 }
