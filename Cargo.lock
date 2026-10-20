@@ -3786,12 +3786,14 @@ dependencies = [
  "rawmakase-tiff",
  "rayon",
  "roxmltree 0.21.1",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "toml",
  "unicode-normalization",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

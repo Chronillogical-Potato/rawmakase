@@ -8,7 +8,7 @@
 //! [`Catalog::apply_folder_sync`] applies what the user accepted, checking
 //! each action again first. Nothing on disk is ever changed.
 mod apply;
-mod digest;
+pub(super) mod digest;
 mod scan;
 
 use super::db::{Reads, sql};
@@ -40,7 +40,7 @@ pub enum SyncScope {
 
 /// Where a catalog folder is on this computer.
 #[derive(Clone, Debug)]
-pub(super) struct Located {
+pub(in crate::catalog) struct Located {
     pub root: RootId,
     pub logical: String,
     /// `None` when it can't be on this computer.
@@ -307,62 +307,70 @@ impl Catalog {
     }
     /// Every catalog folder and where it is on this computer, read in `db`.
     pub(super) fn locate_folders(&self, db: &impl Reads) -> Result<HashMap<FolderId, Located>> {
-        row! {
-            struct FolderRow {
-                id: FolderId,
-                root: RootId,
-                original: String,
-                relative: String,
-                logical: Option<String>,
-            }
+        locate_folders(db, &self.computer.id)
+    }
+}
+
+/// Every catalog folder and where it is on `computer`, read in `db`.
+pub(in crate::catalog) fn locate_folders(
+    db: &impl Reads,
+    computer: &str,
+) -> Result<HashMap<FolderId, Located>> {
+    row! {
+        struct FolderRow {
+            id: FolderId,
+            root: RootId,
+            original: String,
+            relative: String,
+            logical: Option<String>,
         }
-        row! {
-            struct LocationRow {
-                root: RootId,
-                relative: String,
-                path: String,
-            }
+    }
+    row! {
+        struct LocationRow {
+            root: RootId,
+            relative: String,
+            path: String,
         }
-        let folders: Vec<FolderRow> = db.read(
-            sql!(
-                "SELECT f.id, f.root, r.original_path, f.relative_path, p.path
+    }
+    let folders: Vec<FolderRow> = db.read(
+        sql!(
+            "SELECT f.id, f.root, r.original_path, f.relative_path, p.path
                  FROM folders f JOIN roots r ON r.id = f.root
                  LEFT JOIN folder_paths p ON p.folder = f.id"
-            ),
-            &[],
-        )?;
-        let located: Vec<LocationRow> = db.read(
-            sql!("SELECT root, relative_path, path FROM folder_locations WHERE computer=?"),
-            &[&self.computer.id],
-        )?;
-        let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();
-        for l in located {
-            rows.entry(l.root)
-                .or_default()
-                .push((l.relative, PathBuf::from(l.path)));
-        }
-        Ok(folders
-            .into_iter()
-            .map(|f| {
-                let logical = f
-                    .logical
-                    .unwrap_or_else(|| logical_from_legacy(&f.original, &f.relative));
-                let own = rows.get(&f.root).map_or(&[][..], |r| &r[..]);
-                let (anchor, path) = resolve_anchored(&f.original, own, &logical, cfg!(windows))
-                    .filter(|(_, path)| !path.as_os_str().is_empty())
-                    .unzip();
-                (
-                    f.id,
-                    Located {
-                        root: f.root,
-                        logical,
-                        path,
-                        anchor,
-                    },
-                )
-            })
-            .collect())
+        ),
+        &[],
+    )?;
+    let located: Vec<LocationRow> = db.read(
+        sql!("SELECT root, relative_path, path FROM folder_locations WHERE computer=?"),
+        &[&computer],
+    )?;
+    let mut rows: HashMap<RootId, Vec<(String, PathBuf)>> = HashMap::new();
+    for l in located {
+        rows.entry(l.root)
+            .or_default()
+            .push((l.relative, PathBuf::from(l.path)));
     }
+    Ok(folders
+        .into_iter()
+        .map(|f| {
+            let logical = f
+                .logical
+                .unwrap_or_else(|| logical_from_legacy(&f.original, &f.relative));
+            let own = rows.get(&f.root).map_or(&[][..], |r| &r[..]);
+            let (anchor, path) = resolve_anchored(&f.original, own, &logical, cfg!(windows))
+                .filter(|(_, path)| !path.as_os_str().is_empty())
+                .unzip();
+            (
+                f.id,
+                Located {
+                    root: f.root,
+                    logical,
+                    path,
+                    anchor,
+                },
+            )
+        })
+        .collect())
 }
 
 /// Master `id` as the catalog has it now, if it still is a master.
@@ -395,7 +403,7 @@ pub(super) fn list_all(directory: &Path) -> std::io::Result<()> {
 }
 
 /// A file name as a case-insensitive volume compares it: NFC, lower case.
-pub(super) fn folded(name: &std::ffi::OsStr) -> String {
+pub(in crate::catalog) fn folded(name: &std::ffi::OsStr) -> String {
     use unicode_normalization::UnicodeNormalization;
     name.to_string_lossy()
         .nfc()

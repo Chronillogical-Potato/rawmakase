@@ -262,3 +262,42 @@ CREATE TABLE IF NOT EXISTS folder_locations (
     path TEXT NOT NULL,
     PRIMARY KEY(root, relative_path, computer)
 );
+
+-- File operations' journal (see `file_ops::journal`): what RAWmakase was
+-- moving, renaming or trashing on disk, written before each step, so an
+-- operation a crash cut short is finished or reported, never guessed.
+-- Releases before it ignore these tables.
+
+-- One item of an operation: a photo with its virtual copies and companion
+-- files, or one folder. `state` is planned, restoring, no_change,
+-- needs_recovery, kept or done; `preconditions` (JSON) is what must still
+-- hold of the catalog for the item to go on: its photos, their digests,
+-- folders and resolved paths.
+CREATE TABLE IF NOT EXISTS file_operations (
+    id INTEGER PRIMARY KEY,
+    batch TEXT NOT NULL,
+    computer TEXT NOT NULL REFERENCES computers(id),
+    kind TEXT NOT NULL,
+    state TEXT NOT NULL,
+    preconditions TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    error TEXT
+);
+CREATE INDEX IF NOT EXISTS file_operations_batch ON file_operations(batch);
+CREATE INDEX IF NOT EXISTS file_operations_state ON file_operations(state);
+
+-- Each file or folder an item touches, in the order it is changed: its
+-- exact source and destination, its file object (`fsops::FileId`) and
+-- `Identity` (JSON) as planned; `state` is planned, moved, trashed or
+-- restored, and `receipt` where the Trash put it.
+CREATE TABLE IF NOT EXISTS file_operation_members (
+    operation INTEGER NOT NULL REFERENCES file_operations(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    destination TEXT,
+    file_id TEXT,
+    identity TEXT,
+    state TEXT NOT NULL,
+    receipt TEXT,
+    PRIMARY KEY(operation, ordinal)
+);

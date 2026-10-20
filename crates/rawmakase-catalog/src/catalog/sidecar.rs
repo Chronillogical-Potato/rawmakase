@@ -11,6 +11,7 @@ use crate::xml::ns::JPEG_HEADER;
 use crate::xmp::descriptive::{self, Read};
 use crate::{isobmff, riff};
 use anyhow::{Context, Result};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// What reading sidecars found besides the metadata.
@@ -55,9 +56,12 @@ impl SidecarReport {
     }
 }
 
-/// `path` with `extension` added, in lower or upper case, if it exists.
-fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
-    [suffix.to_ascii_lowercase(), suffix.to_ascii_uppercase()]
+/// The suffix a sidecar's name adds, in the case lookup tries first.
+const SUFFIX: &str = ".xmp";
+
+/// `base` with [`SUFFIX`] added, in lower or upper case, if it exists.
+fn existing(base: &Path) -> Option<PathBuf> {
+    [SUFFIX.to_ascii_lowercase(), SUFFIX.to_ascii_uppercase()]
         .into_iter()
         .map(|s| {
             let mut name = base.as_os_str().to_owned();
@@ -67,15 +71,83 @@ fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The sidecars of `file`, the one used first. A RAW's are digiKam's
+/// What the sidecars `file` could have are named after, in the order lookup
+/// tries them; each takes [`SUFFIX`]. A RAW's are digiKam's
 /// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG, TIFF or PNG has only
 /// "IMG_1234.JPG.xmp", as "IMG_1234.xmp" beside a RAW of the same name is the
-/// RAW's.
-pub fn sidecars(file: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = existing(file, ".xmp").into_iter().collect();
+/// RAW's. The one rule of which file reads which sidecar.
+pub(super) fn sidecar_candidates(file: &Path) -> Vec<PathBuf> {
+    let mut bases = vec![file.to_path_buf()];
     if crate::storage::is_raw(file) {
-        found.extend(existing(&file.with_extension(""), ".xmp"));
+        bases.push(file.with_extension(""));
     }
+    bases.dedup();
+    bases
+}
+
+/// `name` compared as loosely as a volume may compare names: in Unicode
+/// compatibility form (NFKC) and case-folded through lower and upper case,
+/// so `ẞ`, `ß` and `SS` are `ss` and `ﬁ` is `fi`. Meant to be at least as
+/// coarse as APFS's and NTFS's own comparisons, so it may take two names
+/// for one that no volume does: what refusals compare (whether a name is
+/// taken, whether another file reads a sidecar), never what picks a file
+/// to move.
+pub(super) fn caseless(name: &OsStr) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let text: String = name.to_string_lossy().nfkc().collect();
+    // Lower first, so `ẞ` becomes `ß` and then, through upper case, `ss`.
+    text.to_lowercase()
+        .to_uppercase()
+        .to_lowercase()
+        .nfkc()
+        .collect()
+}
+
+/// The sidecar names `file` reads by [`sidecar_candidates`], exactly.
+pub(super) fn sidecar_names(file: &Path) -> Vec<OsString> {
+    sidecar_candidates(file)
+        .into_iter()
+        .map(|base| {
+            let mut name = base.into_os_string();
+            name.push(SUFFIX);
+            name
+        })
+        .collect()
+}
+
+/// The sidecar names `file` reads by [`sidecar_candidates`], as
+/// [`caseless`] compares them.
+pub(super) fn sidecar_names_caseless(file: &Path) -> Vec<String> {
+    sidecar_candidates(file)
+        .into_iter()
+        .map(|base| {
+            let mut name = base.into_os_string();
+            name.push(SUFFIX);
+            caseless(&name)
+        })
+        .collect()
+}
+
+/// The names in a folder's listing `names` that would read the file named
+/// `sidecar` as their sidecar, by [`sidecar_candidates`], compared as
+/// [`sidecar_names_caseless`] does: every file there, in the catalog or not.
+pub(super) fn readers_of<'a>(sidecar: &OsStr, names: &'a [OsString]) -> Vec<&'a OsString> {
+    let Some(wanted) = sidecar.to_str().map(|s| caseless(OsStr::new(s))) else {
+        return Vec::new();
+    };
+    names
+        .iter()
+        .filter(|n| n.as_os_str() != sidecar && n.to_str().is_some())
+        .filter(|n| sidecar_names_caseless(Path::new(n)).contains(&wanted))
+        .collect()
+}
+
+/// The sidecars of `file`, the one used first (see [`sidecar_candidates`]).
+pub fn sidecars(file: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = sidecar_candidates(file)
+        .iter()
+        .filter_map(|base| existing(base))
+        .collect();
     found.dedup();
     found
 }

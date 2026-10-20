@@ -53,7 +53,7 @@ files should preserve.
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes. Settings that ask for Auto measure the photo through `PhotoMeasures`, which `develop::Measures` provides, and packets take the crop as rendered from the caller, so XMP needs no rendering code | `parse.rs`, `apply.rs` |
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
-| `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes. Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs` |
+| `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
 | `export_settings` | Export choices as values: the Export dialog's settings and a photo's saved `ExportOptions` | `export_settings.rs` |
 | `export` | JPEG, 16-bit TIFF and PNG encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `ids` | Typed catalog row ids (`PhotoId`, `FolderId`, `RootId`, `CollectionId`), stored and serialized as their integers; a leaf, so edit resolution and export use them below the catalog | `ids.rs` |
@@ -63,6 +63,7 @@ files should preserve.
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking, Synchronize Folder's engine (`folder_sync`: scan, matching, apply, family digest; named apart from `app/sync.rs`, which is Sync Settings) and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `folder_sync.rs`, `preview_cache.rs` |
 | `catalog::db` | The catalog's one connection boundary: an opaque `Db` with checked reads, `snapshot` for consistent reads, `write` as the only way to write, and `with_lightroom` for import; statements are `Sql` (portable) or `SqliteSql` (Lightroom), shape-checked at compile time; values go through the catalog's own `ToValue`/`FromRow` (`catalog::value`) | `mod.rs`, `sql.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
+| `catalog::file_ops` | The one owner of changing where a photo is, on disk and in the catalog (#370, planned in #556): planning against a snapshot, the refusals, destination conflicts and which companion files go with a photo (by `catalog::sidecar`'s candidate rule), the journal, the operation lock, execution and recovery. Reaches the file system through its `Disk` seam over `storage::fsops` and the Trash through a `Trash` the app passes in | `plan.rs`, `execute.rs`, `recover.rs`, `journal.rs` |
 | `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), the background reads that fill in capture times and photo info for photos added from folders, and the throttled checksum reader, whose results a structural generation guards. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs`, `checksums.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
@@ -188,9 +189,11 @@ inject a temporary file, without changing the process-wide environment.
   migrations are shared by native presets, catalog edits and legacy sidecars. Every saved recipe renders
   with the one engine, and fields it lacks take the recipe defaults, so changes to
   recipe defaults must account for older saved edits.
-- Keep original RAWs and Lightroom sources read-only. Preserve unsupported source
-  data, legacy sidecars, no-clobber publication, ICC/EXIF handling and
-  temporary-file write behavior.
+- Never change an original's contents or a Lightroom source. A photo's file is
+  moved, renamed or put in the Trash only by a file operation the user
+  confirmed (`catalog::file_ops`); nothing copies over, replaces or deletes
+  one. Preserve unsupported source data, legacy sidecars, no-clobber
+  publication, ICC/EXIF handling and temporary-file write behavior.
 - Rendering math stays in `develop` and `camera_profiles`. Fit previews, regions
   and exports must continue to share the relevant processing paths. What the
   [scene tone stage](scene-tone-stage.md) measures of a photo comes from one
@@ -221,6 +224,21 @@ inject a temporary file, without changing the process-wide environment.
 - Autosave writes on its own thread and catalog connection, so a slow disk
   cannot stall editing. Saves before navigation and close wait for it, then
   save synchronously.
+- File operations change catalog rows only on positive evidence: rows follow a
+  file proven at its new path (the same file object, by its exact name in the
+  folder's listing), and go only with a Trash receipt and the file gone from
+  its path; a file's absence alone authorises nothing. A file leaves its path
+  only by an exclusive rename on the same volume (never a link and unlink or a
+  copy) or by the system Trash, which fails closed: a volume without one is
+  refused, never deleted from. Every disk step is journalled, after its folders
+  are synced, before the next, and recovery decides whatever a crash left from
+  the journal and the disk, putting back only what it proves. One process at a
+  time changes a catalog's files, under an OS lock on a file beside the
+  catalog named after its canonical path; catalogs on network volumes or with
+  several hard links are refused. Each item's preconditions (its family's
+  placement and user-state digests, its folders' resolved paths) are captured
+  once in the plan and checked again in the transaction that journals it, the
+  one that completes it, and by recovery.
 
 ## Compatibility
 

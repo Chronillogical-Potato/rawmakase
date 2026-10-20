@@ -4,6 +4,7 @@ pub mod bitmaps;
 mod checksum;
 mod files;
 mod formats;
+pub mod fsops;
 mod identity;
 pub mod mask_assets;
 

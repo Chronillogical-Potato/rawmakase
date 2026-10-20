@@ -45,6 +45,11 @@ pub fn sidecar_path(raw: &Path) -> PathBuf {
     p.push(".rawmakase.json");
     p.into()
 }
+/// Both files an earlier release could have saved beside `raw`: its edit and
+/// its spots and masks. They are only `raw`'s.
+pub(super) fn companion_paths(raw: &Path) -> [PathBuf; 2] {
+    [sidecar_path(raw), local_path(raw)]
+}
 /// Where the photo's spots and masks are saved: next to the sidecar.
 fn local_path(raw: &Path) -> PathBuf {
     let mut p = raw.as_os_str().to_os_string();

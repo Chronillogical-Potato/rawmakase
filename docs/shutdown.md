@@ -126,6 +126,18 @@ that fails, restoring a minimized window to show its question. With nothing
 pending it lets the quit go at once, as before. A logout the app cancels this way stops, and
 macOS says the app interrupted it.
 
+## File operations
+
+`catalog::file_ops` (no UI uses it yet) runs a confirmed operation on the thread
+that calls it, item by item, holding the catalog's operation lock (an OS lock on a
+file beside the catalog) for the whole run. Its cancel flag is checked between
+items only: a step under way finishes, or fails, and is journalled before the next.
+It is never interrupted mid-step from outside. When the process ends while it runs,
+the lock dies with it and the journal leaves the unfinished item to recovery,
+which runs before the next file operation (and, once the Library offers them,
+when it opens the catalog) and finishes it on the evidence on disk or reports it. When the Library gains these operations, their worker will join this table:
+stopped between items, joined under the shared deadline, and left detached past it.
+
 ## Where the code stands
 
 The exit hook (`app/exit.rs`) runs the sequence above (#269, #270, #330). Two

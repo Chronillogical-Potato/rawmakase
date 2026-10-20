@@ -5,7 +5,9 @@
 use rawmakase_interop::{
     exif, export_settings, isobmff, jpeg, lr_develop, raw_defaults, riff, xmp,
 };
-use rawmakase_model::{camera_data, camera_profiles, ids, metadata, model, storage, tiff, xml};
+use rawmakase_model::{
+    camera_data, camera_profiles, ids, metadata, model, storage, tiff, time, xml,
+};
 #[cfg(test)]
 use {rawmakase_interop::presets, rawmakase_model::optics};
 

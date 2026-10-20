@@ -14,7 +14,7 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Wi
 It is a personal project in active development. It develops photos from almost every current camera, including monochrome DNGs (such as the Leica Monochrom's) and linear DNGs (such as iPhone ProRAW); the exceptions are Sigma's Foveon cameras, GoPro's GPR files, the Pentax K-3 Mark III Monochrome's PEFs (its DNGs open), and floating-point or lossy-compressed DNGs (such as Lightroom's HDR merges). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 > [!WARNING]
-> **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. Your originals are never modified, but keep exports of finished work.
+> **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. The contents of your originals are never modified, but keep exports of finished work.
 
 ## Features
 
@@ -22,7 +22,7 @@ It is a personal project in active development. It develops photos from almost e
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders, ratings, flags, color labels, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
 - **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself.
-- **Non-destructive**: originals are never modified. Edits live in the catalog, and all writes are atomic.
+- **Non-destructive**: the contents of your originals are never modified. Edits live in the catalog, and all writes are atomic.
 - **Fast previews**: every change renders at viewport size, with the color and tone stage on the GPU (Metal on macOS, Vulkan on Linux, DirectX 12 or Vulkan on Windows) and a CPU fallback.
 - **Command line**: inspect, render, export thumbnails, import catalogs and profiles, and benchmark without the GUI.
 - **External control**: [MIDI controllers](docs/midi.md), [scripts](docs/automation.md), and a built-in [MCP server](docs/mcp.md) for agents to adjust the running editor, inspect previews, save and export.
