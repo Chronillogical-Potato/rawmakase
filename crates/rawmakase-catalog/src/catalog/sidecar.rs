@@ -55,9 +55,12 @@ impl SidecarReport {
     }
 }
 
-/// `path` with `extension` added, in lower or upper case, if it exists.
-fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
-    [suffix.to_ascii_lowercase(), suffix.to_ascii_uppercase()]
+/// The suffix a sidecar's name adds, in the case lookup tries first.
+const SUFFIX: &str = ".xmp";
+
+/// `base` with [`SUFFIX`] added, in lower or upper case, if it exists.
+fn existing(base: &Path) -> Option<PathBuf> {
+    [SUFFIX.to_ascii_lowercase(), SUFFIX.to_ascii_uppercase()]
         .into_iter()
         .map(|s| {
             let mut name = base.as_os_str().to_owned();
@@ -67,15 +70,26 @@ fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The sidecars of `file`, the one used first. A RAW's are digiKam's
+/// What the sidecars `file` could have are named after, in the order lookup
+/// tries them; each takes [`SUFFIX`]. A RAW's are digiKam's
 /// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG, TIFF or PNG has only
 /// "IMG_1234.JPG.xmp", as "IMG_1234.xmp" beside a RAW of the same name is the
-/// RAW's.
-pub fn sidecars(file: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = existing(file, ".xmp").into_iter().collect();
+/// RAW's. The one rule of which file reads which sidecar.
+pub(super) fn sidecar_candidates(file: &Path) -> Vec<PathBuf> {
+    let mut bases = vec![file.to_path_buf()];
     if crate::storage::is_raw(file) {
-        found.extend(existing(&file.with_extension(""), ".xmp"));
+        bases.push(file.with_extension(""));
     }
+    bases.dedup();
+    bases
+}
+
+/// The sidecars of `file`, the one used first (see [`sidecar_candidates`]).
+pub fn sidecars(file: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = sidecar_candidates(file)
+        .iter()
+        .filter_map(|base| existing(base))
+        .collect();
     found.dedup();
     found
 }
