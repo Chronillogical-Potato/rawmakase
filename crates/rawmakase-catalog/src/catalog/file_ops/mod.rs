@@ -32,15 +32,18 @@ mod names;
 mod plan;
 mod preconditions;
 mod recover;
+mod rename;
 
 pub use execute::execute;
 pub use folder::folder_name_problem;
 pub use journal::OperationId;
 pub(in crate::catalog) use lock::opening;
+pub use names::{NameProblem, photo_name_problem};
 pub use plan::plan;
 pub use recover::{
     Recovery, Resolution, Unfinished, UnfinishedMember, recover, resolve, unfinished_here,
 };
+pub use rename::{Ordered, RenameOrder, RenamePreview, RenameRow, rename_order, rename_preview};
 
 use super::{CatalogLocation, FolderId, PhotoId, RootId};
 use std::fmt;
@@ -69,6 +72,11 @@ pub enum FileOp {
         name: String,
         then_move: Vec<PhotoId>,
     },
+    /// Gives masters' files new names in their folders: each a new stem,
+    /// the extension kept, the companions only they read renamed to match;
+    /// their rows, copies included, follow. All or none: if one can't be
+    /// renamed, none is.
+    RenamePhotos { renames: Vec<(PhotoId, String)> },
 }
 
 /// One run of an operation, by which its outcome is read back from the
@@ -93,6 +101,10 @@ pub enum Skip {
     Missing,
     /// It is in that folder already.
     AlreadyThere,
+    /// It has that name already.
+    SameName,
+    /// Another photo of the rename can't be renamed, so none is.
+    Blocked,
     Refused(Refusal),
 }
 
@@ -123,15 +135,27 @@ pub enum Refusal {
     CompanionClash(String),
     /// Its file can't be read.
     Unreadable(String),
+    /// The new name can't be a file's.
+    BadName(NameProblem),
+    /// Another photo of the same rename has that name now: a name freed in
+    /// the same rename isn't taken.
+    Chain(String),
+    /// The new name differs only in case or accents, which its volume
+    /// can't change on its own.
+    SpellingOnly,
+    /// Its companion can't be renamed to match.
+    CompanionName(String),
 }
 
 impl fmt::Display for Skip {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unknown => f.write_str("It is no longer in the catalog."),
-            Self::CopyOnly => f.write_str("Only original files can be moved."),
+            Self::CopyOnly => f.write_str("Only original files can be moved or renamed."),
             Self::Missing => f.write_str("Its file is missing or offline."),
             Self::AlreadyThere => f.write_str("It is in that folder already."),
+            Self::SameName => f.write_str("It has that name already."),
+            Self::Blocked => f.write_str("Another photo can't be renamed, so none is."),
             Self::Refused(r) => r.fmt(f),
         }
     }
@@ -158,6 +182,15 @@ impl fmt::Display for Refusal {
                 write!(f, "{n} there would share an XMP sidecar with it.")
             }
             Self::Unreadable(e) => write!(f, "Its file can't be read: {e}"),
+            Self::BadName(p) => p.fmt(f),
+            Self::Chain(n) => write!(
+                f,
+                "Another photo being renamed is named {n} now. Rename them in two steps."
+            ),
+            Self::SpellingOnly => f.write_str(
+                "Its volume can't change only the case or accents of a name. Give it another name first.",
+            ),
+            Self::CompanionName(n) => write!(f, "{n} can't be renamed to match it."),
         }
     }
 }
@@ -192,6 +225,8 @@ pub struct Summary {
     pub other_computers: bool,
     /// The folder it makes, by name.
     pub folder: Option<String>,
+    /// The photos' file names and the names they are given, in order.
+    pub renames: Vec<(String, String)>,
 }
 
 /// An operation planned and not yet confirmed. Nothing has changed.
@@ -295,6 +330,8 @@ pub enum FileOpError {
     OtherComputer,
     /// The destination can't take files.
     Destination(String),
+    /// It was stopped before it finished.
+    Cancelled,
     /// The catalog couldn't be read or written.
     Catalog(anyhow::Error),
 }
@@ -317,6 +354,7 @@ impl fmt::Display for FileOpError {
                 f.write_str("The operation changed another computer's files; finish it there.")
             }
             Self::Destination(why) => f.write_str(why),
+            Self::Cancelled => f.write_str("Stopped."),
             Self::Catalog(e) => write!(f, "{e:#}"),
         }
     }
@@ -333,6 +371,8 @@ pub enum ItemResult {
     Moved { to: FolderId },
     /// Its files are in the Trash and its rows left the catalog.
     Trashed,
+    /// Its files are renamed: the photo is named `name` now.
+    Renamed { name: String },
     /// The folder is made, and in the catalog as `folder`.
     Created { folder: FolderId },
     /// Nothing changed, for this reason when there is one.
@@ -386,6 +426,8 @@ mod lock_tests;
 mod plan_tests;
 #[cfg(test)]
 mod recover_tests;
+#[cfg(test)]
+mod rename_tests;
 #[cfg(test)]
 mod rules_tests;
 #[cfg(test)]

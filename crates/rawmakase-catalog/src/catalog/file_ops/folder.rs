@@ -11,7 +11,7 @@ use super::super::locations::{join, logical_location};
 use super::super::sidecar::caseless;
 use super::super::{FolderId, RootId};
 use super::conflicts::Names;
-use super::disk::{Disk, Presence, parent, presence};
+use super::disk::{Disk, Presence, parent, presence, spelled};
 use super::journal::{self, Item, ItemState, Subject};
 use super::names::{self, NameProblem};
 use super::preconditions::RELOCATED;
@@ -183,18 +183,7 @@ pub(super) fn made(disk: &dyn Disk, path: &Path) -> Result<(FileId, PathBuf), Fs
             "what was made is not a folder",
         )));
     }
-    let dir = parent(path);
-    let wanted = caseless(path.file_name().unwrap_or_default());
-    let names = disk.list(dir)?;
-    let mut spelled = names.iter().filter(|n| {
-        caseless(n) == wanted && disk.entry(&dir.join(n)).is_ok_and(|e| e.id == found.id)
-    });
-    match (spelled.next(), spelled.next()) {
-        (Some(name), None) => Ok((found.id, dir.join(name))),
-        _ => Err(FsError::Io(std::io::Error::other(
-            "the folder's name in its parent can't be told",
-        ))),
-    }
+    Ok((found.id, spelled(disk, path, found.id)?))
 }
 
 /// Adds the folder journalled `item` made to the catalog, in `w`'s

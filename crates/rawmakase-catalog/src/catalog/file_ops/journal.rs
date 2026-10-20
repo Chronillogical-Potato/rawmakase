@@ -53,6 +53,8 @@ stored! {
         TrashPhotos = "trash_photos",
         /// A folder is made, on disk and then in the catalog.
         CreateFolder = "create_folder",
+        /// Its photo's file and companions get new names in their folder.
+        RenamePhotos = "rename_photos",
     }
 }
 
@@ -300,6 +302,31 @@ pub(super) fn set_state(
         &[&state.as_str(), &error, &id.0],
     )?;
     anyhow::ensure!(changed == 1, "unknown file operation");
+    Ok(())
+}
+
+/// Marks member `ordinal` of item `id` moved, to `destination`: the
+/// name the disk gave it, which a volume that normalises names may spell
+/// otherwise than asked.
+pub(super) fn set_moved(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    destination: &Path,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!(
+            "UPDATE file_operation_members SET state=?, destination=?
+             WHERE operation=? AND ordinal=?"
+        ),
+        &[
+            &MemberState::Moved.as_str(),
+            &text(destination)?,
+            &id.0,
+            &ordinal,
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation member");
     Ok(())
 }
 

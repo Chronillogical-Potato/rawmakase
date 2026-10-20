@@ -21,7 +21,7 @@ use super::super::db::{Write, sql};
 use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};
 use super::companions;
-use super::disk::{Disk, Presence, Real, gone, parent, presence, sync_parents};
+use super::disk::{Disk, Presence, Real, gone, parent, presence, spelled, sync_parents};
 use super::folder::{self, Made, NewFolder};
 use super::journal::{
     self, Item as Journalled, ItemState, Kind, Member, MemberState, OperationId, Subject,
@@ -67,7 +67,7 @@ pub(super) fn execute_with(
         // Checked in each removal's own transaction, which journalling a
         // disk step waits for (see `Run::remove`).
         Kind::RemoveFromCatalog => (None, HashSet::new()),
-        Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
+        Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
             let lock = super::lock::acquire(catalog)?;
             super::recover::prune(catalog)?;
             let recovery = super::recover::run(catalog, disk)?;
@@ -114,7 +114,7 @@ pub(super) fn execute_with(
         } else {
             match run.kind {
                 Kind::RemoveFromCatalog => run.remove(catalog, &item),
-                Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
+                Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
                     run.files(catalog, &item)
                 }
             }
@@ -360,6 +360,7 @@ impl Run<'_> {
                 state,
                 receipt: receipt.clone(),
             });
+            let mut after = after;
             // The Trash keeps its own folders durable, and may not let them be
             // opened (macOS's needs Full Disk Access).
             let synced = match receipt {
@@ -369,10 +370,26 @@ impl Run<'_> {
             if let Err(e) = synced {
                 return self.put_back(catalog, id, &changed, &e.to_string());
             }
-            if let Err(e) = catalog
-                .db
-                .write(|w| journal::set_member(w, id, ordinal as i64, state, receipt.as_deref()))
-            {
+            // A name given by the user is journalled as the disk spells it,
+            // which a volume that normalises names may not as given.
+            if self.kind == Kind::RenamePhotos {
+                match spelled(self.disk, &after, m.id) {
+                    Ok(at) => after = at,
+                    Err(e) => return self.put_back(catalog, id, &changed, &e.to_string()),
+                }
+                if let Some(last) = changed.last_mut() {
+                    last.destination = Some(after.clone());
+                }
+            }
+            let journalled = match self.kind {
+                Kind::RenamePhotos => catalog
+                    .db
+                    .write(|w| journal::set_moved(w, id, ordinal as i64, &after)),
+                _ => catalog.db.write(|w| {
+                    journal::set_member(w, id, ordinal as i64, state, receipt.as_deref())
+                }),
+            };
+            if let Err(e) = journalled {
                 return self.put_back(catalog, id, &changed, &format!("{e:#}"));
             }
         }
@@ -446,11 +463,15 @@ impl Run<'_> {
                 "another photo in the catalog is the same file now".into(),
             ));
         }
-        // Its companions are still its alone.
-        let planned: Vec<OsString> = companions
+        // Its companions are still its alone: those it carries, and those
+        // a rename keeps as they are.
+        let mut planned: Vec<OsString> = companions
             .iter()
-            .filter_map(|m| m.source.file_name().map(OsString::from))
+            .map(|m| m.source.as_path())
+            .chain(item.kept.iter().map(std::path::PathBuf::as_path))
+            .filter_map(|p| p.file_name().map(OsString::from))
             .collect();
+        planned.sort();
         let names = self
             .disk
             .list(parent(&photo.source))
@@ -465,7 +486,7 @@ impl Run<'_> {
             (Ok(a), Ok(b)) => a.id == b.id,
             _ => false,
         };
-        let carried: Vec<OsString> = companions::of(filename, &names, &same_file)
+        let mut carried: Vec<OsString> = companions::of(filename, &names, &same_file)
             .carried
             .into_iter()
             .filter(|n| {
@@ -474,15 +495,49 @@ impl Run<'_> {
                     .is_ok_and(|e| e.kind == EntryKind::File && e.links == 1)
             })
             .collect();
+        carried.sort();
         if carried != planned {
             return Ok(Some("its XMP sidecars changed since it was planned".into()));
         }
         if let (Some((to, _)), Some(dir)) = (&pre.to, photo.destination.as_deref().map(parent)) {
             let names = self.disk.list(dir).map_err(anyhow::Error::from)?;
-            let mut projected = names.clone();
-            projected.push(filename.to_os_string());
-            projected.extend(planned.iter().cloned());
-            if let Some(other) = companions::arrival_conflict(filename, &planned, &projected) {
+            // A rename stays in its folder, where its own names are its own.
+            let here = dir == parent(&photo.source);
+            let own: Vec<&OsStr> = match here {
+                true => item
+                    .members
+                    .iter()
+                    .map(|m| m.source.as_path())
+                    .chain(item.kept.iter().map(std::path::PathBuf::as_path))
+                    .filter_map(std::path::Path::file_name)
+                    .collect(),
+                false => Vec::new(),
+            };
+            let arriving: Vec<OsString> = item
+                .members
+                .iter()
+                .filter_map(|m| m.destination.as_deref()?.file_name().map(OsString::from))
+                .collect();
+            let Some((new, carried)) = arriving.split_first() else {
+                return Ok(None);
+            };
+            // Companions a rename keeps as they are go with it too.
+            let carried: Vec<OsString> = carried
+                .iter()
+                .cloned()
+                .chain(
+                    item.kept
+                        .iter()
+                        .filter_map(|k| k.file_name().map(OsString::from)),
+                )
+                .collect();
+            let mut projected: Vec<OsString> = names
+                .iter()
+                .filter(|n| !own.contains(&n.as_os_str()))
+                .cloned()
+                .collect();
+            projected.extend(arriving.iter().cloned());
+            if let Some(other) = companions::arrival_conflict(new, &carried, &projected) {
                 return Ok(Some(format!(
                     "{} there would share an XMP sidecar with it now",
                     other.to_string_lossy()
@@ -492,18 +547,23 @@ impl Run<'_> {
                 let Some(name) = m.destination.as_deref().and_then(|d| d.file_name()) else {
                     continue;
                 };
-                let taken = names
+                let mine = |n: &OsStr| here && m.source.file_name() == Some(n);
+                let listed = names
                     .iter()
-                    .any(|n| n == name || item.rules.key(n) == item.rules.key(name))
-                    || !matches!(self.disk.entry(&dir.join(name)), Err(FsError::NotFound));
-                if taken {
+                    .any(|n| !mine(n) && (n == name || item.rules.key(n) == item.rules.key(name)));
+                let found = match self.disk.entry(&dir.join(name)) {
+                    Err(FsError::NotFound) => false,
+                    Ok(e) => !(here && e.id == m.id),
+                    Err(_) => true,
+                };
+                if listed || found {
                     return Ok(Some(format!("{} is there now", name.to_string_lossy())));
                 }
             }
-            if occupied(w, self.folders, *to, dir, filename, &pre.rows)? {
+            if occupied(w, self.folders, *to, dir, new, &pre.rows)? {
                 return Ok(Some(format!(
                     "a photo of the catalog is named {} there now",
-                    filename.to_string_lossy()
+                    new.to_string_lossy()
                 )));
             }
         }
@@ -642,7 +702,7 @@ pub(super) fn complete(
                 }
                 None => Some("it may be in the Trash".into()),
             },
-            Kind::MovePhotos => moved(w, folders, disk, pre, item)?,
+            Kind::MovePhotos | Kind::RenamePhotos => moved(w, folders, disk, pre, item)?,
             Kind::CreateFolder => Some("not a photo operation".into()),
         },
     };

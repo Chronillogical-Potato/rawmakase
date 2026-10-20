@@ -585,6 +585,7 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
             ItemResult::Removed
             | ItemResult::Moved { .. }
             | ItemResult::Trashed
+            | ItemResult::Renamed { .. }
             | ItemResult::Created { .. } => None,
             ItemResult::Unchanged(why) => Some(why.clone().unwrap_or_else(|| "unchanged".into())),
             ItemResult::NeedsRecovery(why) => Some(why.clone()),

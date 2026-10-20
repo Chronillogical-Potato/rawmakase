@@ -260,7 +260,7 @@ fn decide(
     }
     match item.kind {
         // Rule 3.
-        Kind::MovePhotos
+        Kind::MovePhotos | Kind::RenamePhotos
             if item
                 .members
                 .iter()
@@ -385,6 +385,16 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 (Kind::RemoveFromCatalog, _) => ItemResult::Removed,
                 (Kind::TrashPhotos, _) => ItemResult::Trashed,
                 (Kind::MovePhotos, Some((to, _))) => ItemResult::Moved { to: *to },
+                (Kind::RenamePhotos, _) => match item
+                    .members
+                    .first()
+                    .and_then(|m| m.destination.as_deref()?.file_name())
+                {
+                    Some(name) => ItemResult::Renamed {
+                        name: name.to_string_lossy().into_owned(),
+                    },
+                    None => ItemResult::Unchanged(item.error.clone()),
+                },
                 _ => ItemResult::Unchanged(item.error.clone()),
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),

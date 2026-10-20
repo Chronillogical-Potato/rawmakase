@@ -106,6 +106,26 @@ pub(super) fn gone(disk: &dyn Disk, path: &Path, id: fsops::FileId) -> bool {
         })
 }
 
+/// `path` as the disk spells the name of file object `id` there, which a
+/// volume that normalises names may spell otherwise than it was given: the
+/// one name in its folder's listing that `sidecar::caseless` takes for it
+/// and that is that file object.
+pub(super) fn spelled(disk: &dyn Disk, path: &Path, id: fsops::FileId) -> Result<PathBuf, FsError> {
+    let dir = parent(path);
+    let wanted = super::super::sidecar::caseless(path.file_name().unwrap_or_default());
+    let names = disk.list(dir)?;
+    let mut spelled = names.iter().filter(|n| {
+        super::super::sidecar::caseless(n) == wanted
+            && disk.entry(&dir.join(n)).is_ok_and(|e| e.id == id)
+    });
+    match (spelled.next(), spelled.next()) {
+        (Some(name), None) => Ok(dir.join(name)),
+        _ => Err(FsError::Io(std::io::Error::other(
+            "its name in its folder can't be told",
+        ))),
+    }
+}
+
 /// Syncs the folders of `from` and `to` after a rename between them, so
 /// the journal moves past the step only once it is durable.
 pub(super) fn sync_parents(disk: &dyn Disk, from: &Path, to: &Path) -> Result<(), FsError> {
