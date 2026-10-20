@@ -1836,6 +1836,19 @@ pub(super) fn destructive_confirm(
     cancel: &str,
     action: &str,
 ) -> Option<bool> {
+    destructive_choice(ctx, id, title, lines, cancel, &[action]).map(|chosen| chosen.is_some())
+}
+/// [`destructive_confirm`] with several actions after Cancel, the last the
+/// primary one: Some(Some(i)) for `actions[i]`, Some(None) for cancelling,
+/// None while it is open. Tab goes from Cancel to each in turn.
+pub(super) fn destructive_choice(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    lines: &[String],
+    cancel: &str,
+    actions: &[&str],
+) -> Option<Option<usize>> {
     /// The keys down when the dialog first showed, until all are released.
     #[derive(Clone, Default)]
     struct Opened {
@@ -1884,14 +1897,21 @@ pub(super) fn destructive_confirm(
                     opened.focused = true;
                 }
                 if cancelled.clicked() {
-                    choice = Some(false);
+                    choice = Some(None);
                 }
-                if primary_button(ui, action).clicked() {
-                    choice = Some(true);
+                for (i, action) in actions.iter().enumerate() {
+                    let clicked = if i + 1 == actions.len() {
+                        primary_button(ui, action).clicked()
+                    } else {
+                        ui.button(*action).clicked()
+                    };
+                    if clicked {
+                        choice = Some(Some(i));
+                    }
                 }
             });
         });
-    let choice = choice.or(response.should_close().then_some(false));
+    let choice = choice.or(response.should_close().then_some(None));
     ctx.data_mut(|d| match choice {
         Some(_) => d.remove::<Opened>(key),
         None => {
