@@ -68,7 +68,8 @@ impl Editor {
             || self.not_editable.is_some()
             || self.view.shortcuts
             || self.curve_save_open()
-            || self.folder_sync.is_reviewing();
+            || self.folder_sync.is_reviewing()
+            || self.file_ops.dialog_open();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -145,10 +146,23 @@ impl Editor {
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
         }
+        use super::library::FileRequest;
         match self.library.as_mut().and_then(|l| l.take_file_request()) {
-            Some(super::library::FileRequest::Remove(ids)) => self.request_photo_removal(ids),
+            Some(FileRequest::Remove(ids)) => self.request_photo_removal(ids),
+            Some(FileRequest::Move { photos, to, name }) => {
+                self.request_photo_move(photos, to, name)
+            }
+            Some(FileRequest::ChooseFolder(ids)) => self.choose_folder_for(ids),
+            Some(FileRequest::NewFolder {
+                root,
+                parent,
+                name,
+                photos,
+                inside,
+            }) => self.name_new_folder(root, parent, name, photos, inside),
             None => {}
         }
+        self.poll_file_recovery();
         if let Some(library) = &mut self.library
             && library.take_reread_finished()
         {

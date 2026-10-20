@@ -70,7 +70,28 @@ pub(crate) enum CopyAction {
 pub(crate) enum FileRequest {
     /// Remove from Catalog.
     Remove(Vec<PhotoId>),
+    /// Move photos into catalog folder `to`, named `name` (a drop on it).
+    Move {
+        photos: Vec<PhotoId>,
+        to: FolderId,
+        name: String,
+    },
+    /// Move to Folder…: photos to move, once a folder is chosen.
+    ChooseFolder(Vec<PhotoId>),
+    /// New Folder Inside… logical folder `parent` of `root`, named `name`;
+    /// the selection, and whether it is all in that folder.
+    NewFolder {
+        root: crate::catalog::RootId,
+        parent: String,
+        name: String,
+        photos: Vec<PhotoId>,
+        inside: bool,
+    },
 }
+/// Photos being dragged from the grid: the selection, or the photo dragged
+/// when it isn't in it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DraggedPhotos(pub Vec<PhotoId>);
 /// The thumbnail menu's preview commands, for the photos chosen.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PreviewsRequest {
@@ -102,6 +123,9 @@ pub(crate) struct Library {
     /// The folders shown, as tree keys (none is All Photographs).
     selected_folders: folder_selection::FolderSelection,
     expanded: HashSet<String>,
+    /// The tree key of the folder New Folder Inside was last asked in,
+    /// unfolded once the folder is made.
+    new_folder_in: Option<String>,
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
@@ -226,6 +250,7 @@ impl Library {
             filters: Default::default(),
             selected_folders: Default::default(),
             expanded: HashSet::new(),
+            new_folder_in: None,
             thumb_size: 190.,
             cell_style: Default::default(),
             drawn_style: Default::default(),
@@ -669,6 +694,58 @@ impl Library {
         if !ids.is_empty() {
             self.file_request = Some(FileRequest::Remove(ids));
         }
+    }
+    /// Moves `photos` into catalog folder `to` (dropped on it), for the
+    /// editor to confirm; a drop where they all are already does nothing.
+    pub(super) fn request_move(&mut self, photos: Vec<PhotoId>, to: FolderId, name: String) {
+        let there = photos
+            .iter()
+            .all(|id| self.photo(*id).is_some_and(|p| p.folder == to));
+        if !photos.is_empty() && !there {
+            self.file_request = Some(FileRequest::Move { photos, to, name });
+        }
+    }
+    /// New Folder Inside… folder `parent` of `root` (catalog folder
+    /// `folder`, if it is one), offering to move the selection into it.
+    pub(super) fn request_new_folder(
+        &mut self,
+        root: crate::catalog::RootId,
+        parent: String,
+        name: String,
+        folder: Option<FolderId>,
+    ) {
+        let photos = self.selected_ids();
+        let inside = !photos.is_empty()
+            && photos
+                .iter()
+                .all(|id| self.photo(*id).is_some_and(|p| Some(p.folder) == folder));
+        self.file_request = Some(FileRequest::NewFolder {
+            root,
+            parent,
+            name,
+            photos,
+            inside,
+        });
+    }
+    /// Notes that New Folder Inside asks for a folder in logical folder
+    /// `parent` of `root`, to unfold it once the folder is made.
+    pub(in crate::app) fn new_folder_in(&mut self, root: crate::catalog::RootId, parent: &str) {
+        self.new_folder_in = Some(match parent {
+            "" => format!("root:{root}"),
+            parent => format!("root:{root}/{parent}"),
+        });
+    }
+    /// Unfolds the folder New Folder Inside made a folder in, so the tree
+    /// shows it.
+    pub(in crate::app) fn unfold_new_folder(&mut self) {
+        if let Some(key) = self.new_folder_in.take() {
+            self.expanded.insert(key);
+        }
+    }
+    /// Whether the folder tree shows the rows below tree key `key`.
+    #[cfg(test)]
+    pub(in crate::app) fn is_unfolded(&self, key: &str) -> bool {
+        self.expanded.contains(key)
     }
     /// Holds off the background reads while a file operation holds the
     /// catalog: the readers stop, Read Metadata from Files with them, what

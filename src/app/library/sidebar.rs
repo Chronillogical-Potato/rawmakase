@@ -229,6 +229,17 @@ impl Library {
                                 Some(TreeAction::Synchronize(scope, name)) => {
                                     self.sync_request = Some((scope, name));
                                 }
+                                Some(TreeAction::NewFolder {
+                                    root,
+                                    parent,
+                                    name,
+                                    folder,
+                                }) => self.request_new_folder(root, parent, name, folder),
+                                Some(TreeAction::Drop {
+                                    folder,
+                                    name,
+                                    photos,
+                                }) => self.request_move(photos, folder, name),
                                 Some(TreeAction::Remove(name, folders, photos)) => {
                                     self.removal_request = Some(super::FolderRemoval {
                                         catalog: self.session.catalog.location().clone(),

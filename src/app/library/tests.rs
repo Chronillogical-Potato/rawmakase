@@ -2608,3 +2608,71 @@ fn the_filmstrip_cells_keep_their_size_when_the_selection_opens_a_photo() -> Res
     assert_eq!(none, all);
     Ok(())
 }
+#[test]
+fn photos_dragged_past_8_points_onto_a_catalog_folder_are_dropped_there() {
+    use crate::catalog::{FolderId, PhotoId};
+    let ctx = egui::Context::default();
+    let mut node = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    node.folder = Some(FolderId(7));
+    let mut expanded = HashSet::new();
+    let source = egui::Rect::from_min_size(egui::pos2(20., 150.), Vec2::splat(60.));
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut action = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                action = folder_tree_row(ui, &node, 0, &mut expanded, &Default::default());
+                let cell = ui.allocate_rect(source, egui::Sense::click_and_drag());
+                super::grid::drag_payload(&cell, || vec![PhotoId(1), PhotoId(2)]);
+            },
+        );
+        output.textures_delta.clear();
+        action
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let dragging =
+        |ctx: &egui::Context| egui::DragAndDrop::has_payload_of_type::<super::DraggedPhotos>(ctx);
+    frame(vec![]);
+    let start = source.center();
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    // A few points is a click gone astray, not a drag.
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -4.))]);
+    assert!(!dragging(&ctx));
+    let folder = egui::pos2(120., 10.);
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -20.))]);
+    assert!(dragging(&ctx));
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(
+        matches!(
+            &action,
+            Some(TreeAction::Drop { folder: FolderId(7), photos, .. }) if *photos == [PhotoId(1), PhotoId(2)]
+        ),
+        "no drop"
+    );
+    // Escape mid-drag drops nothing.
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -20.))]);
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(action.is_none());
+}
