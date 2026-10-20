@@ -64,6 +64,13 @@ pub(crate) enum CopyAction {
     /// Asks first, as Lightroom does.
     Remove(PhotoId),
 }
+/// A file operation the Library asked for, for the editor to plan and
+/// confirm.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum FileRequest {
+    /// Remove from Catalog.
+    Remove(Vec<PhotoId>),
+}
 /// The thumbnail menu's preview commands, for the photos chosen.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PreviewsRequest {
@@ -171,9 +178,9 @@ pub(crate) struct Library {
     message_detail: (String, String),
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<PhotoId>>,
-    /// Photos Delete or the thumbnail menu asked to remove from the catalog,
-    /// for the editor to confirm.
-    photo_removal_request: Option<Vec<PhotoId>>,
+    /// A file operation asked for (Delete, the thumbnail menu), for the
+    /// editor to confirm.
+    file_request: Option<FileRequest>,
     /// Background reads are held off while a file operation holds the
     /// catalog: nothing starts them until it lets go.
     reads_suspended: bool,
@@ -259,7 +266,7 @@ impl Library {
             message: String::new(),
             message_detail: Default::default(),
             read_request: None,
-            photo_removal_request: None,
+            file_request: None,
             reads_suspended: false,
             previews_request: None,
             loupe_stored: None,
@@ -627,9 +634,9 @@ impl Library {
     pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<PhotoId>> {
         self.read_request.take()
     }
-    /// Photos Remove from Catalog was asked for, for the editor to confirm.
-    pub(in crate::app) fn take_photo_removal_request(&mut self) -> Option<Vec<PhotoId>> {
-        self.photo_removal_request.take()
+    /// The file operation asked for, for the editor to confirm.
+    pub(in crate::app) fn take_file_request(&mut self) -> Option<FileRequest> {
+        self.file_request.take()
     }
     /// Delete and Backspace (with Option too): in the Quick Collection, takes
     /// `ids` out of it, as one undoable step; in an imported collection, which
@@ -660,7 +667,7 @@ impl Library {
     /// is shown, for the editor to confirm.
     pub(in crate::app) fn request_removal(&mut self, ids: Vec<PhotoId>) {
         if !ids.is_empty() {
-            self.photo_removal_request = Some(ids);
+            self.file_request = Some(FileRequest::Remove(ids));
         }
     }
     /// Holds off the background reads while a file operation holds the

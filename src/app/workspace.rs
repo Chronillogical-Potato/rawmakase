@@ -145,12 +145,9 @@ impl Editor {
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
         }
-        if let Some(ids) = self
-            .library
-            .as_mut()
-            .and_then(|l| l.take_photo_removal_request())
-        {
-            self.request_photo_removal(ids);
+        match self.library.as_mut().and_then(|l| l.take_file_request()) {
+            Some(super::library::FileRequest::Remove(ids)) => self.request_photo_removal(ids),
+            None => {}
         }
         if let Some(library) = &mut self.library
             && library.take_reread_finished()
