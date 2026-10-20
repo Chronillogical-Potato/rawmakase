@@ -44,6 +44,87 @@ impl Radial {
     }
 }
 
+/// A gain per colour channel sampled on a grid over part of the image: a DNG GainMap
+/// opcode of OpcodeList3, which applies to the demosaiced image (DJI and Hasselblad
+/// drones' and the Sigma fp's lens shading). It covers `area` (top, left, bottom, right
+/// in fractions of the image's height and width; no gain outside it). Points are
+/// `points` = [rows, columns], starting at `origin` and `spacing` apart, in fractions of
+/// the image's height and width, as the DNG SDK reads them; each holds `planes` gains, one per channel (red, green,
+/// blue) or one for all three. Between points the gain is bilinear, beyond the outermost
+/// ones that of the nearest. `after_warp`: the opcode list warps the image before it,
+/// so it applies at the corrected position rather than the source's.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GainGrid {
+    #[serde(default = "GainGrid::whole")]
+    pub area: [f32; 4],
+    #[serde(default)]
+    pub after_warp: bool,
+    pub points: [usize; 2],
+    pub origin: [f32; 2],
+    pub spacing: [f32; 2],
+    pub planes: usize,
+    pub gains: Vec<f32>,
+}
+impl Default for GainGrid {
+    fn default() -> Self {
+        Self {
+            area: Self::whole(),
+            after_warp: false,
+            points: [1, 1],
+            origin: [0.; 2],
+            spacing: [1.; 2],
+            planes: 1,
+            gains: vec![1.],
+        }
+    }
+}
+impl GainGrid {
+    fn whole() -> [f32; 4] {
+        [0., 0., 1., 1.]
+    }
+    pub(crate) fn valid(&self) -> bool {
+        let [rows, columns] = self.points;
+        let [top, left, bottom, right] = self.area;
+        (0. ..1.).contains(&top)
+            && (0. ..1.).contains(&left)
+            && top < bottom
+            && left < right
+            && bottom <= 1.
+            && right <= 1.
+            && (1..=256).contains(&rows)
+            && (1..=256).contains(&columns)
+            && matches!(self.planes, 1 | 3)
+            && self.gains.len() == rows * columns * self.planes
+            && self.origin.iter().all(|v| v.is_finite())
+            && self.spacing.iter().all(|v| v.is_finite() && *v > 0.)
+            && self.gains.iter().all(|g| (0.2..=8.).contains(g))
+    }
+    /// The gain of each channel at `v`, `h`: fractions of the image's height and width.
+    pub fn gain(&self, v: f32, h: f32) -> [f32; 3] {
+        let [top, left, bottom, right] = self.area;
+        if !(top..bottom).contains(&v) || !(left..right).contains(&h) {
+            return [1.; 3];
+        }
+        let at = |x: f32, axis: usize| {
+            let n = self.points[axis];
+            let f = ((x - self.origin[axis]) / self.spacing[axis]).clamp(0., (n - 1) as f32);
+            let i = (f as usize).min(n.saturating_sub(2));
+            (i, (i + 1).min(n - 1), f - i as f32)
+        };
+        let (r0, r1, tv) = at(v, 0);
+        let (c0, c1, th) = at(h, 1);
+        let g =
+            |r: usize, c: usize, p: usize| self.gains[(r * self.points[1] + c) * self.planes + p];
+        std::array::from_fn(|c| {
+            let p = c.min(self.planes - 1);
+            let top = g(r0, c0, p) + (g(r0, c1, p) - g(r0, c0, p)) * th;
+            let bottom = g(r1, c0, p) + (g(r1, c1, p) - g(r1, c0, p)) * th;
+            top + (bottom - top) * tv
+        })
+    }
+}
+
 /// Built-in lens correction for one photo.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -60,6 +141,10 @@ pub struct LensCorrection {
     pub distortion: Option<Radial>,
     /// Additional source radius scale for red and blue relative to green (1 = none).
     pub chromatic: Option<[Radial; 2]>,
+    /// Gain per channel over the image, before distortion, as a DNG's OpcodeList3
+    /// GainMap applies it (1 = none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_map: Option<GainGrid>,
 }
 /// No correction, for applying measured chromatic aberration alone.
 pub static NO_CORRECTION: LensCorrection = LensCorrection {
@@ -68,18 +153,23 @@ pub static NO_CORRECTION: LensCorrection = LensCorrection {
     vignetting: None,
     distortion: None,
     chromatic: None,
+    gain_map: None,
 };
 impl LensCorrection {
     /// The `source` of the correction read from a Sony file's own tables (a DNG's
     /// opcodes are another source, with Lightroom's framing).
     pub const SONY_BUILTIN: &'static str = "Sony built-in";
     pub fn is_empty(&self) -> bool {
-        self.vignetting.is_none() && self.distortion.is_none() && self.chromatic.is_none()
+        self.vignetting.is_none()
+            && self.distortion.is_none()
+            && self.chromatic.is_none()
+            && self.gain_map.is_none()
     }
     pub fn validate(&self) -> bool {
         self.vignetting.iter().all(Radial::valid)
             && self.distortion.iter().all(Radial::valid)
             && self.chromatic.iter().flatten().all(Radial::valid)
+            && self.gain_map.iter().all(GainGrid::valid)
     }
     #[cfg(any(test, feature = "test-support"))]
     pub fn vignetting_gain(&self, r: f32) -> f32 {

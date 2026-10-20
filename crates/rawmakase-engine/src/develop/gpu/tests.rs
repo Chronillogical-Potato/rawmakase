@@ -633,6 +633,19 @@ fn check_presented_previews(w: u32, h: u32, ca_only: bool) -> Result<()> {
                 radial(vec![1., 1.001, 1.002]),
                 radial(vec![1., 0.999, 0.998]),
             ]),
+            gain_map: Some(crate::optics::GainGrid {
+                // Before the warp: each channel reads it where the built-in
+                // aberration has it sample.
+                area: [0.05, 0.1, 0.95, 0.9],
+                after_warp: false,
+                points: [3, 4],
+                origin: [0., 0.],
+                spacing: [0.5, 1. / 3.],
+                planes: 3,
+                gains: (0..12)
+                    .flat_map(|i| [1. + i as f32 * 0.05, 1.1, 1.3 - i as f32 * 0.02])
+                    .collect(),
+            }),
             ..Default::default()
         }),
         wb: [2.02, 1., 1.89],

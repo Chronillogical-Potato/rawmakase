@@ -18,7 +18,9 @@ const VERSION: i64 = 1;
 // 3: the one engine renders every edit differently from earlier releases.
 // 4: highlight recovery keeps a lone clipped channel's recorded value, which saved
 //    edits of RAWs with clipped light sources render differently.
-const GENERATION: i64 = 4;
+// 5: a DNG's OpcodeList3 GainMaps apply (drones' lens shading), which saved edits of
+//    those DNGs render differently.
+const GENERATION: i64 = 5;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -26,7 +28,8 @@ const RASTER_GENERATION: i64 = 5;
 const LIMIT: i64 = 512 * 1024 * 1024;
 // 2: the one engine, as `GENERATION` 3.
 // 3: highlight recovery, as `GENERATION` 4.
-const SIZED_GENERATION: i64 = 3;
+// 4: OpcodeList3 GainMaps, as `GENERATION` 5.
+const SIZED_GENERATION: i64 = 4;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.

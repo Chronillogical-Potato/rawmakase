@@ -449,7 +449,7 @@ pub(crate) fn measures_contrast_pivot(r: &Recipe) -> bool {
 fn measured_copy(im: Source<'_>) -> std::borrow::Cow<'_, CameraImage> {
     match im.measured {
         Some(copy) => std::borrow::Cow::Borrowed(copy.as_ref()),
-        None => std::borrow::Cow::Owned(preview_source(
+        None => std::borrow::Cow::Owned(super::measurement_source(
             Source::new(im.untextured.unwrap_or(im.image)),
             crate::develop::local_tone::MAP_EDGE,
         )),

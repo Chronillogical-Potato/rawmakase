@@ -69,12 +69,38 @@ impl<'a> VignetteField<'a> {
 pub(super) struct LensWarp<'a> {
     pub(super) map: crate::develop::image_space::LensMap<'a>,
     pub(super) vignetting: Option<VignetteField<'a>>,
+    pub(super) gain_map: Option<GainField<'a>>,
+}
+/// A DNG's OpcodeList3 GainMap over the camera image, at the lens profile's Vignetting
+/// amount like the radial vignetting table.
+pub(crate) struct GainField<'a> {
+    pub(super) grid: &'a crate::optics::GainGrid,
+    pub(super) size: [f32; 2],
+    pub(super) amount: f32,
+}
+impl<'a> GainField<'a> {
+    pub(super) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
+        Some(Self {
+            grid: r.lens_correction(&im.metadata)?.gain_map.as_ref()?,
+            size: [im.width as f32, im.height as f32],
+            amount: r.lens_vignetting,
+        })
+    }
+    /// The gain of each channel at sample position `x`, `y` (pixel `i` centred at `i`),
+    /// as a fraction of the image's width and height to the pixel's centre, as the DNG
+    /// SDK reads the map.
+    pub(crate) fn gain(&self, x: f32, y: f32) -> [f32; 3] {
+        self.grid
+            .gain((y + 0.5) / self.size[1], (x + 0.5) / self.size[0])
+            .map(|g| g.max(0.).powf(self.amount))
+    }
 }
 impl<'a> LensWarp<'a> {
     pub(super) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
         Some(Self {
             map: crate::develop::image_space::LensMap::new(im, r)?,
             vignetting: VignetteField::new(im, r),
+            gain_map: GainField::new(im, r),
         })
     }
     pub(super) fn sample(&self, im: Source, x: f32, y: f32, r: &Recipe, spread: f32) -> [f32; 3] {
@@ -101,7 +127,20 @@ impl<'a> LensWarp<'a> {
             }
         };
         let gain = self.vignetting.as_ref().map_or(1., |v| v.gain(gx, gy));
-        p.map(|v| v * gain)
+        // A GainMap the opcode list applies after its warp reads the corrected
+        // position: the output's, at the fill's scale. Before the warp, each channel
+        // reads it where that channel samples the photo.
+        let channel = self.gain_map.as_ref().map_or([1.; 3], |g| {
+            if g.grid.after_warp {
+                g.gain(m.center[0] + dx - 0.5, m.center[1] + dy - 0.5)
+            } else {
+                std::array::from_fn(|c| {
+                    let [sx, sy] = at(c);
+                    g.gain(sx, sy)[c]
+                })
+            }
+        });
+        std::array::from_fn(|c| p[c] * gain * channel[c])
     }
 }
 

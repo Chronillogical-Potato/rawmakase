@@ -47,7 +47,7 @@ pub(super) fn textured(
     )
 }
 /// `full` (the photo at full resolution) reduced for measuring it, through the stage
-/// cache when there is one.
+/// cache when there is one (`pipeline::measurement_source`).
 fn measurement_copy(
     full: &Arc<CameraImage>,
     cache: Option<&mut StageCache>,
@@ -55,7 +55,7 @@ fn measurement_copy(
 ) -> Result<Arc<CameraImage>> {
     let make = || {
         check_cancel(cancel)?;
-        Ok(develop::pipeline::preview_source(
+        Ok(develop::pipeline::measurement_source(
             full.as_ref().into(),
             develop::local_tone::MAP_EDGE,
         ))

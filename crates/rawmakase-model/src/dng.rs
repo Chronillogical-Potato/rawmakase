@@ -1,8 +1,9 @@
 //! Rendering hints that a DNG carries for its raw image, as Lightroom uses them:
 //! the embedded camera profile, BaselineExposure, the default crop, and the
-//! FixVignetteRadial (OpcodeList2) and WarpRectilinear (OpcodeList3) lens corrections.
+//! FixVignetteRadial (OpcodeList2), and GainMap and WarpRectilinear (OpcodeList3) lens
+//! corrections.
 use crate::{
-    optics::{LensCorrection, Radial},
+    optics::{GainGrid, LensCorrection, Radial},
     tiff::{Entry, Tiff},
 };
 use std::{collections::BTreeMap, fs::File, path::Path};
@@ -107,18 +108,35 @@ pub fn read(path: &Path) -> Option<Dng> {
         .and_then(|e| t.raw(e))
         .and_then(|b| opcode(&b, 3))
         .and_then(|p| vignette(&p));
-    let warp = raw
-        .get(&51022)
-        .and_then(|e| t.raw(e))
-        .and_then(|b| opcode(&b, 1))
+    let list3 = raw.get(&51022).and_then(|e| t.raw(e));
+    let warp = list3
+        .as_deref()
+        .and_then(|b| opcode(b, 1))
         .and_then(|p| warp(&p));
     let (distortion, chromatic) = warp.unwrap_or((None, None));
+    // OpcodeList3 applies to the demosaiced image: the active area (or the whole
+    // stored image), whose size its GainMaps must cover.
+    let area = raw.get(&50829).and_then(|e| t.numbers(e));
+    let size = match area.as_deref() {
+        Some(&[top, left, bottom, right]) if bottom > top && right > left => {
+            Some([(bottom - top) as u32, (right - left) as u32])
+        }
+        _ => {
+            let dim = |t: &mut Tiff, tag| Some(*t.numbers(raw.get(&tag)?)?.first()? as u32);
+            dim(&mut t, 257).zip(dim(&mut t, 256)).map(|(h, w)| [h, w])
+        }
+    };
+    let gain_map = list3
+        .as_deref()
+        .zip(size)
+        .and_then(|(b, size)| gain_grid(b, size));
     let lens = LensCorrection {
         source: "DNG opcodes".into(),
         default_on: true,
         vignetting,
         distortion,
         chromatic,
+        gain_map,
     };
     dng.lens = (!lens.is_empty() && lens.validate()).then_some(lens);
     Some(dng)
@@ -213,17 +231,159 @@ fn profile_tags(t: &mut Tiff, ifd0: &BTreeMap<u16, Entry>) -> Option<Vec<u8>> {
 
 /// Parameters of the first opcode with `id` in a big-endian DNG opcode list.
 fn opcode(b: &[u8], id: u32) -> Option<Vec<u8>> {
+    opcodes(b, id).into_iter().next()
+}
+/// The ids of a big-endian DNG opcode list's opcodes, in order, up to the first that
+/// does not parse.
+fn opcode_ids(b: &[u8]) -> Vec<u32> {
     let be = |o: usize| Some(u32::from_be_bytes(b.get(o..o + 4)?.try_into().ok()?));
+    let mut ids = Vec::new();
     let mut o = 4;
-    for _ in 0..be(0)?.min(64) {
-        let (code, size) = (be(o)?, be(o + 12)? as usize);
-        let params = b.get(o + 16..o + 16 + size)?;
-        if code == id {
-            return Some(params.to_vec());
+    for _ in 0..be(0).unwrap_or(0).min(64) {
+        let Some((code, size)) = be(o).zip(be(o + 12)) else {
+            break;
+        };
+        let end = o.saturating_add(16).saturating_add(size as usize);
+        if b.len() < end {
+            break;
         }
-        o += 16 + size;
+        ids.push(code);
+        o = end;
     }
-    None
+    ids
+}
+/// Parameters of every opcode with `id` in a big-endian DNG opcode list, in order, up
+/// to the first that does not parse.
+fn opcodes(b: &[u8], id: u32) -> Vec<Vec<u8>> {
+    let be = |o: usize| Some(u32::from_be_bytes(b.get(o..o + 4)?.try_into().ok()?));
+    let mut found = Vec::new();
+    let mut o = 4;
+    for _ in 0..be(0).unwrap_or(0).min(64) {
+        let Some((code, size)) = be(o).zip(be(o + 12)) else {
+            break;
+        };
+        let end = o.saturating_add(16).saturating_add(size as usize);
+        let Some(params) = b.get(o + 16..end) else {
+            break;
+        };
+        if code == id {
+            found.push(params.to_vec());
+        }
+        o = end;
+    }
+    found
+}
+/// OpcodeList3's GainMaps (opcode 9) as one gain per channel, on an image of `size`
+/// [height, width]. Each must cover a rectangle inside the image, every row and column,
+/// with planes among the three channels, each plane at most once; maps for separate
+/// planes must share one grid and area, and a warp (opcode 1) may come before them or
+/// after them, not between.
+/// Anything else is not read, and the photo renders as before.
+fn gain_grid(list: &[u8], [height, width]: [u32; 2]) -> Option<GainGrid> {
+    let after_warp = opcode_ids(list)
+        .iter()
+        .position(|id| *id == 1)
+        .zip(opcode_ids(list).iter().position(|id| *id == 9))
+        .is_some_and(|(warp, gain)| warp < gain);
+    if opcode_ids(list)
+        .iter()
+        .skip_while(|id| **id != 9)
+        .skip_while(|id| **id == 9)
+        .any(|id| *id == 9)
+    {
+        return None;
+    }
+    let mut grid: Option<GainGrid> = None;
+    let mut per_plane: [Option<Vec<f32>>; 3] = Default::default();
+    for p in opcodes(list, 9) {
+        let long = |i: usize| {
+            Some(u32::from_be_bytes(
+                p.get(i * 4..i * 4 + 4)?.try_into().ok()?,
+            ))
+        };
+        let double = |o: usize| Some(f64::from_be_bytes(p.get(o..o + 8)?.try_into().ok()?));
+        let header: Vec<u32> = (0..10).map(long).collect::<Option<_>>()?;
+        let &[
+            top,
+            left,
+            bottom,
+            right,
+            plane,
+            planes,
+            row_pitch,
+            col_pitch,
+            rows,
+            columns,
+        ] = header.as_slice()
+        else {
+            return None;
+        };
+        let [spacing_v, spacing_h, origin_v, origin_h] =
+            [40, 48, 56, 64].map(|o| double(o).map(|v| v as f32));
+        let map_planes = long(18)?;
+        let (rows, columns) = (rows as usize, columns as usize);
+        let gains: Vec<f32> = p
+            .get(76..)?
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_be_bytes(*c))
+            .collect();
+        if top >= bottom
+            || left >= right
+            || bottom > height
+            || right > width
+            || (row_pitch, col_pitch) != (1, 1)
+            || planes == 0
+            || plane >= 3
+            || planes > 3 - plane
+            || map_planes == 0
+            || map_planes > planes
+            || !(1..=256).contains(&rows)
+            || !(1..=256).contains(&columns)
+            || gains.len() != rows * columns * map_planes as usize
+        {
+            return None;
+        }
+        let shape = GainGrid {
+            area: [
+                top as f32 / height as f32,
+                left as f32 / width as f32,
+                bottom as f32 / height as f32,
+                right as f32 / width as f32,
+            ],
+            after_warp,
+            points: [rows, columns],
+            origin: [origin_v?, origin_h?],
+            spacing: [spacing_v?, spacing_h?],
+            planes: 1,
+            gains: Vec::new(),
+        };
+        if grid.as_ref().is_some_and(|g| *g != shape) {
+            return None;
+        }
+        grid = Some(shape);
+        for c in plane..plane + planes {
+            // The DNG SDK reads the map's plane of the image plane itself, the last
+            // one for planes beyond the map's.
+            let m = c.min(map_planes - 1) as usize;
+            // Two maps on one plane multiply sample by sample, which a single grid
+            // holds only where their points coincide: not read.
+            if per_plane[c as usize].is_some() {
+                return None;
+            }
+            per_plane[c as usize] = Some(gains.chunks(map_planes as usize).map(|g| g[m]).collect());
+        }
+    }
+    let mut grid = grid?;
+    let points = grid.points[0] * grid.points[1];
+    let one = vec![1.; points];
+    let planes: [&Vec<f32>; 3] = std::array::from_fn(|c| per_plane[c].as_ref().unwrap_or(&one));
+    grid.planes = 3;
+    grid.gains = (0..points).flat_map(|i| planes.map(|p| p[i])).collect();
+    // A map the lens correction does not hold is left out on its own: the file's
+    // warp and vignetting still apply.
+    (grid.valid() && grid.gains.iter().any(|g| (g - 1.).abs() > 1e-4)).then_some(grid)
 }
 fn doubles(p: &[u8]) -> Vec<f64> {
     p.as_chunks::<8>()
@@ -390,6 +550,136 @@ mod tests {
         assert_eq!(blue.eval(1.), 1.);
         // Off-centre corrections are not representable and are skipped.
         assert!(vignette(&be(&[0.2, 0., 0., 0., 0., 0.3, 0.5])).is_none());
+    }
+    /// A GainMap opcode's parameters: `area` (top, left, bottom, right), its planes,
+    /// a `rows` × `columns` map over the whole area and `map_planes` gains per point.
+    fn gain_map(
+        area: [u32; 4],
+        plane: u32,
+        planes: u32,
+        map_planes: u32,
+        gains: &[f32],
+    ) -> Vec<u8> {
+        let (rows, columns) = (2u32, 3u32);
+        let mut p: Vec<u8> = area
+            .into_iter()
+            .chain([plane, planes, 1, 1, rows, columns])
+            .flat_map(u32::to_be_bytes)
+            .collect();
+        p.extend(be(&[1., 0.5, 0., 0.]));
+        p.extend(map_planes.to_be_bytes());
+        p.extend(gains.iter().flat_map(|g| g.to_be_bytes()));
+        p
+    }
+    fn lists(ops: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut b = (ops.len() as u32).to_be_bytes().to_vec();
+        for (id, params) in ops {
+            for v in [*id, 0x0103_0000, 0, params.len() as u32] {
+                b.extend(v.to_be_bytes());
+            }
+            b.extend(params);
+        }
+        b
+    }
+    #[test]
+    fn reads_opcode_list3_gain_maps_per_channel() {
+        let area = [0, 0, 300, 400];
+        // One map for all three planes, as DJI and Hasselblad drones write it, before
+        // the warp.
+        let rgb: Vec<f32> = (0..6)
+            .flat_map(|i| [1. + i as f32 * 0.1, 1., 1.5])
+            .collect();
+        let warp = {
+            let mut w = 1u32.to_be_bytes().to_vec();
+            w.extend(be(&[1., 0.01, 0., 0., 0., 0., 0.5, 0.5]));
+            w
+        };
+        let list = lists(&[(9, gain_map(area, 0, 3, 3, &rgb)), (1, warp.clone())]);
+        let grid = gain_grid(&list, [300, 400]).unwrap();
+        assert_eq!((grid.points, grid.planes), ([2, 3], 3));
+        assert_eq!(grid.gain(0., 0.), [1., 1., 1.5]);
+        // Towards the last point, and halfway along the first row: bilinear.
+        let [r, ..] = grid.gain(0.9999, 0.9999);
+        assert!((r - 1.5).abs() < 1e-3);
+        let [r, ..] = grid.gain(0., 0.25);
+        assert!((r - 1.05).abs() < 1e-6);
+        // Outside the image, nothing.
+        assert_eq!(grid.gain(1., 0.5), [1.; 3]);
+        // A map per plane, and a plane without one keeps its level.
+        let list = lists(&[
+            (9, gain_map(area, 0, 1, 1, &[2.; 6])),
+            (9, gain_map(area, 2, 1, 1, &[3.; 6])),
+        ]);
+        assert_eq!(
+            gain_grid(&list, [300, 400]).unwrap().gain(0.5, 0.5),
+            [2., 1., 3.]
+        );
+        // A map of one plane for all three.
+        let list = lists(&[(9, gain_map(area, 0, 3, 1, &[2.; 6]))]);
+        assert_eq!(
+            gain_grid(&list, [300, 400]).unwrap().gain(0.5, 0.5),
+            [2.; 3]
+        );
+        // Planes from 1: each reads the map's plane of its own index, as the DNG SDK
+        // does, the map's last for planes beyond it.
+        let two: Vec<f32> = (0..6).flat_map(|_| [2., 3.]).collect();
+        let list = lists(&[(9, gain_map(area, 1, 2, 2, &two))]);
+        assert_eq!(
+            gain_grid(&list, [300, 400]).unwrap().gain(0.5, 0.5),
+            [1., 3., 3.]
+        );
+        // A map of part of the image, after the warp (the Sigma fp's): no gain outside
+        // its area, and its points over the area.
+        let list = lists(&[
+            (1, warp.clone()),
+            (9, gain_map([30, 40, 270, 360], 0, 3, 3, &rgb)),
+        ]);
+        let grid = gain_grid(&list, [300, 400]).unwrap();
+        assert!(grid.after_warp);
+        assert_eq!(grid.gain(0.05, 0.5), [1.; 3]);
+        // Inside it, the points are over the whole image, as without an area.
+        assert_eq!(grid.gain(0.5, 0.5), [1.25, 1., 1.5]);
+        assert!(
+            !gain_grid(&lists(&[(9, gain_map(area, 0, 3, 3, &rgb))]), [300, 400])
+                .unwrap()
+                .after_warp
+        );
+        // Grids beyond 256 points a side, however large, are not read.
+        let mut huge = gain_map(area, 0, 3, 3, &[2.; 18]);
+        huge[32..40].copy_from_slice(&[u32::MAX.to_be_bytes(), u32::MAX.to_be_bytes()].concat());
+        assert!(gain_grid(&lists(&[(9, huge)]), [300, 400]).is_none());
+        // Planes beyond the image's three, however large, are not read.
+        assert!(
+            gain_grid(
+                &lists(&[(9, gain_map(area, u32::MAX, 2, 1, &[2.; 6]))]),
+                [300, 400]
+            )
+            .is_none()
+        );
+        // Maps beyond the image, with a warp between them, or of gains 1, are not read.
+        for (list, size) in [
+            (lists(&[(9, gain_map(area, 0, 3, 3, &rgb))]), [290, 400]),
+            (
+                lists(&[
+                    (9, gain_map(area, 0, 1, 1, &[2.; 6])),
+                    (1, warp.clone()),
+                    (9, gain_map(area, 1, 1, 1, &[2.; 6])),
+                ]),
+                [300, 400],
+            ),
+            (lists(&[(9, gain_map(area, 0, 3, 1, &[1.; 6]))]), [300, 400]),
+            // Two maps on one plane, and gains a lens correction does not hold.
+            (
+                lists(&[
+                    (9, gain_map(area, 0, 1, 1, &[2.; 6])),
+                    (9, gain_map(area, 0, 1, 1, &[3.; 6])),
+                ]),
+                [300, 400],
+            ),
+            (lists(&[(9, gain_map(area, 0, 3, 1, &[9.; 6]))]), [300, 400]),
+        ] {
+            assert!(gain_grid(&list, size).is_none());
+        }
     }
     #[test]
     fn non_dng_files_are_ignored() {
