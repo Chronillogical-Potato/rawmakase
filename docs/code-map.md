@@ -383,7 +383,7 @@ What each long-lived worker blocks on, how it stops and whether exit may wait fo
 | Legacy sidecar edits | Adjacent `photo.ARW.rawmakase.json` / `photo.RAF.rawmakase.json`, plus `photo.ARW.rawmakase-local.json` for spots and masks, or identity-keyed JSON under the data directory's `sidecars/`, saved by releases before 0.1.8. Imported into the catalog when their folder is added and left on disk unchanged. |
 | Native catalog | User-selected `.rawmakase` SQLite file; authoritative catalog metadata, edits and preserved import data. Spots, red eye corrections and masks are in the `local_edits` table, Develop History in `develop_history`, raster data in `bitmaps`. |
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF / PNG destination. |
-| Session preferences | `session.json` in the data directory; last path and monitor ICC path. UI tests inject a temporary destination or disable writes. |
+| Session preferences | `session.json` in the data directory; last path, monitor ICC path and whether the window was maximized (not on macOS). UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |
 | Saved point curves | `curves/` in the data directory: one XMP file per curve, named by the curve. |
 | Installed assets | `xmp-presets/` and `camera-profiles/` under asset roots; shared discovery also checks the legacy XDG/Linux data location. Imported XMP files go to `xmp-presets/Imported/` under the current data directory. |

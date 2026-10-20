@@ -199,6 +199,7 @@ impl Editor {
             self.pinned = pinned;
             let _ = self.save_session();
         }
+        self.remember_maximized(&ctx);
         self.sync_undo();
         // The layout is kept once a drag (the thumbnail size) or typing (the search)
         // ends, or when the window closes.
@@ -209,6 +210,23 @@ impl Editor {
         } else {
             LayoutEdit::Settled
         });
+    }
+    /// Saves the session when the window is maximized or restored. A minimized
+    /// window keeps what it was: Windows reports it as not maximized.
+    pub(super) fn remember_maximized(&mut self, ctx: &egui::Context) {
+        let maximized = ctx.input(|i| {
+            let viewport = i.viewport();
+            viewport
+                .maximized
+                .filter(|_| viewport.minimized != Some(true))
+        });
+        if KEEPS_MAXIMIZED
+            && let Some(maximized) = maximized
+            && maximized != self.maximized
+        {
+            self.maximized = maximized;
+            let _ = self.save_session();
+        }
     }
     /// Saves the session when the place in the catalog, or a settled layout, changed.
     pub(super) fn remember_place(&mut self, layout: LayoutEdit) {
@@ -1909,6 +1927,11 @@ pub(super) enum LayoutEdit {
     Changing,
     Settled,
 }
+
+/// Whether the window opens maximized when it was left so. Not on macOS, where egui
+/// reads the state only at launch (emilk/egui#3494), so a window zoomed back out
+/// would still open zoomed.
+pub(super) const KEEPS_MAXIMIZED: bool = !cfg!(target_os = "macos");
 
 /// Keeps the window open for the "Work still pending" question, and shows it: Quit
 /// from the app menu (Cmd-Q) reaches a minimized window, where the question would

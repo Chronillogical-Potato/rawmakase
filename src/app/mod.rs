@@ -51,6 +51,8 @@ pub(crate) struct Editor {
     solo: std::collections::BTreeSet<String>,
     /// Pinned panel sections as last saved to the session.
     pinned: std::collections::BTreeSet<String>,
+    /// Whether the window is maximized, as last saved to the session.
+    maximized: bool,
     /// The panels each module shows (Tab, Shift+Tab, F6–F8).
     panels: panels::WorkspacePanels,
     /// What the last Tab or Shift+Tab hid, and in which module.
@@ -144,6 +146,7 @@ impl Editor {
     pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
+        session: crate::app::session::Session,
         launch: crate::updates::Launch,
     ) -> Self {
         // The desktop's hinting and antialiasing, read once (a D-Bus call on
@@ -161,7 +164,7 @@ impl Editor {
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
-            crate::app::session::load_session(),
+            session,
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
@@ -294,6 +297,7 @@ impl Editor {
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
             pinned: session.pinned.clone(),
+            maximized: session.maximized,
             panels: session.panels,
             tabbed: None,
             onboarding: onboarding::Onboarding::new(show_onboarding),
@@ -377,6 +381,7 @@ impl Editor {
                     last_path: self.session_path(),
                     monitor: self.view.monitor.session_path(),
                     monitor_srgb: self.view.monitor.session_srgb(),
+                    maximized: self.maximized,
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
                     pinned: self.pinned.clone(),
@@ -572,6 +577,7 @@ fn windows_window_icon() -> Option<egui::IconData> {
 }
 
 pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
+    let session = crate::app::session::load_session();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RAWmakase")
@@ -582,6 +588,8 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
             .with_icon(window_icon())
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.])
+            // Restoring leaves it at the size above.
+            .with_maximized(workspace::KEEPS_MAXIMIZED && session.maximized)
             // On macOS the workspace bar is the title bar, under the traffic
             // lights; elsewhere the window keeps its decorations.
             .with_fullsize_content_view(true)
@@ -605,7 +613,7 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         Box::new(move |cc| {
             // The event loop has built the app menu by now.
             crate::platform::quit::through_close_guard(cc);
-            Ok(Box::new(Editor::new(cc, path, launch)))
+            Ok(Box::new(Editor::new(cc, path, session, launch)))
         }),
         &event_loop,
     ));

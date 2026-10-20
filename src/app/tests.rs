@@ -6995,3 +6995,41 @@ fn a_photo_that_failed_to_open_is_not_shown_loading() {
     editor.load.start();
     assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
 }
+#[test]
+fn the_window_reopens_maximized_as_it_was_left() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("session.json");
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session::default(),
+        Some(file.clone()),
+    );
+    let frame = |e: &mut Editor, maximized, minimized| {
+        let mut input = egui::RawInput::default();
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                maximized: Some(maximized),
+                minimized: Some(minimized),
+                ..Default::default()
+            },
+        );
+        ctx.run_ui(input, |ui| e.remember_maximized(ui.ctx()))
+            .textures_delta
+            .clear();
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(&file).unwrap_or_else(|_| b"{}".to_vec()))
+                .unwrap();
+        saved.maximized
+    };
+    let keeps = workspace::KEEPS_MAXIMIZED;
+    assert_eq!(frame(&mut e, true, false), keeps);
+    // Minimized from maximized, Windows reports it not maximized.
+    assert_eq!(frame(&mut e, false, true), keeps);
+    assert_eq!(frame(&mut e, true, false), keeps);
+    // Restored to its size.
+    assert!(!frame(&mut e, false, false));
+    Ok(())
+}
