@@ -46,6 +46,11 @@ impl Activity {
     pub(crate) fn is_syncing(&self) -> bool {
         matches!(self, Self::Syncing)
     }
+    /// Something else is writing the open photo's or other photos' rows:
+    /// autosave, saving before navigation and undo wait for it.
+    pub(crate) fn holds_catalog_writes(&self) -> bool {
+        matches!(self, Self::Syncing)
+    }
     pub(crate) fn finish_sync(&mut self) {
         if self.is_syncing() {
             *self = Self::Idle;

@@ -146,7 +146,7 @@ impl Editor {
     pub(super) fn flush(&mut self) -> bool {
         // A Sync may be writing the open photo: nothing is saved over it until it is
         // done (see `autosave`).
-        if self.activity.is_syncing() {
+        if self.activity.holds_catalog_writes() {
             return false;
         }
         if !self.commit_library_drafts() {
@@ -216,7 +216,7 @@ impl Editor {
         if !self.document.edit.save_state().ready()
             || self.document.edit.history().in_gesture()
             || self.autosave.busy()
-            || self.activity.is_syncing()
+            || self.activity.holds_catalog_writes()
         {
             return;
         }
@@ -255,7 +255,7 @@ impl Editor {
     /// closing. A save still running then goes on, and the edit stays unsaved.
     pub(super) fn flush_by(&mut self, until: Instant) -> Flushed {
         // Saved once a Sync, which may be writing the open photo, is done.
-        if self.activity.is_syncing() {
+        if self.activity.holds_catalog_writes() {
             return Flushed::Late;
         }
         if !self.commit_library_drafts() {
