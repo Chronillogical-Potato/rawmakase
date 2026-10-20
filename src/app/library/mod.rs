@@ -70,6 +70,12 @@ pub(crate) enum CopyAction {
 pub(crate) enum FileRequest {
     /// Remove from Catalog.
     Remove(Vec<PhotoId>),
+    /// Delete: Move to Trash, or Remove from Catalog.
+    Delete(Vec<PhotoId>),
+    /// Move to Trash alone.
+    Trash(Vec<PhotoId>),
+    /// Delete Rejected Photos, of the source shown.
+    DeleteRejected,
     /// Move photos into catalog folder `to`, named `name` (a drop on it).
     Move {
         photos: Vec<PhotoId>,
@@ -685,8 +691,46 @@ impl Library {
         } else if self.filters.collection.is_some() {
             self.message = "Imported collections can't be changed".into();
         } else {
-            self.request_removal(ids);
+            self.file_request = Some(FileRequest::Delete(ids));
         }
+    }
+    /// Delete and Backspace with `modifiers`, for `ids`: alone, as
+    /// [`Self::delete_key`]; with Option, Remove from Catalog, even in a
+    /// collection; with ⌘⌥⇧, Move to Trash; with ⌘, Delete Rejected Photos
+    /// (Ctrl for ⌘ off the Mac).
+    pub(in crate::app) fn delete_press(&mut self, modifiers: egui::Modifiers, ids: Vec<PhotoId>) {
+        match (modifiers.command, modifiers.alt, modifiers.shift) {
+            (true, true, true) => self.request_trash(ids),
+            (true, false, false) => self.file_request = Some(FileRequest::DeleteRejected),
+            (false, alt, false) if !modifiers.ctrl => {
+                if alt {
+                    self.request_removal(ids)
+                } else {
+                    self.delete_key(ids)
+                }
+            }
+            _ => {}
+        }
+    }
+    /// Move to Trash for `ids` (⌘⌥⇧Delete, the thumbnail menu), whatever is
+    /// shown, for the editor to confirm.
+    pub(in crate::app) fn request_trash(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.file_request = Some(FileRequest::Trash(ids));
+        }
+    }
+    /// The rejected photos of the source shown (its folders, collection,
+    /// previous import or offline photos), whatever the filter bar shows:
+    /// Delete Rejected Photos'.
+    pub(in crate::app) fn rejected_in_source(&self) -> Vec<PhotoId> {
+        self.session
+            .photos
+            .iter()
+            .filter(|p| {
+                p.flag == -1 && self.filters.source_holds(p, |path| self.is_available(path))
+            })
+            .map(|p| p.id)
+            .collect()
     }
     /// Remove from Catalog for `ids` (⌥Delete, the thumbnail menu), whatever
     /// is shown, for the editor to confirm.

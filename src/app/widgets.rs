@@ -1826,21 +1826,9 @@ pub(super) fn confirm_modal<T: Copy>(
 /// Space alone cancels, as do Escape and a click outside; the action needs a
 /// click, or Tab to it first. Keys already held down when it opened (a held
 /// Delete repeating, a Return still down) do nothing until they are
-/// released. Some(true) for the action, Some(false) for cancelling, None
-/// while it is open.
-pub(super) fn destructive_confirm(
-    ctx: &egui::Context,
-    id: &str,
-    title: &str,
-    lines: &[String],
-    cancel: &str,
-    action: &str,
-) -> Option<bool> {
-    destructive_choice(ctx, id, title, lines, cancel, &[action]).map(|chosen| chosen.is_some())
-}
-/// [`destructive_confirm`] with several actions after Cancel, the last the
-/// primary one: Some(Some(i)) for `actions[i]`, Some(None) for cancelling,
-/// None while it is open. Tab goes from Cancel to each in turn.
+/// released. Several actions may follow Cancel, the last the primary one:
+/// Some(Some(i)) for `actions[i]`, Some(None) for cancelling, None while it
+/// is open. Tab goes from Cancel to each in turn.
 pub(super) fn destructive_choice(
     ctx: &egui::Context,
     id: &str,

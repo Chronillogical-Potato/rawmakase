@@ -149,6 +149,9 @@ impl Editor {
         use super::library::FileRequest;
         match self.library.as_mut().and_then(|l| l.take_file_request()) {
             Some(FileRequest::Remove(ids)) => self.request_photo_removal(ids),
+            Some(FileRequest::Delete(ids)) => self.request_photo_delete(ids, false),
+            Some(FileRequest::Trash(ids)) => self.request_photo_trash(ids),
+            Some(FileRequest::DeleteRejected) => self.request_rejected_delete(),
             Some(FileRequest::Move { photos, to, name }) => {
                 self.request_photo_move(photos, to, name)
             }
@@ -466,6 +469,20 @@ impl Editor {
                 crate::catalog::folder_sync::SyncScope::All,
                 "All Folders".into(),
             );
+            ui.close();
+        }
+        if menu_row(
+            ui,
+            Icon::Rejected,
+            "Delete Rejected Photos…",
+            self.library.is_some(),
+        )
+        .on_hover_text(
+            "Move the rejected photos shown here to the Trash, or remove them from the catalog",
+        )
+        .clicked()
+        {
+            self.request_rejected_delete();
             ui.close();
         }
         menu_separator(ui);

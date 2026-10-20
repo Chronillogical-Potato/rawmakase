@@ -263,6 +263,14 @@ impl Library {
                 };
                 self.request_removal(ids);
             }
+            PhotoAction::Trash => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.request_trash(ids);
+            }
             PhotoAction::ReadMetadata => {
                 let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
                     self.selected_ids()
