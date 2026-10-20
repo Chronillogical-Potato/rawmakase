@@ -327,7 +327,9 @@ pub(super) fn occupied(
 
 /// Where the files go, checked once.
 struct Target {
-    folder: FolderId,
+    /// The catalog's folder; `None` for one the catalog has no folder of
+    /// its own for.
+    folder: Option<FolderId>,
     /// Where the folder resolves on this computer, as the catalog places it.
     resolved: PathBuf,
     /// Its canonical path, which members' destinations are in.
@@ -382,9 +384,20 @@ impl<'a> Files<'a> {
             .located
             .get(&to)
             .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-        let (Some(path), Some(anchor)) = (&folder.path, &folder.anchor) else {
+        let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
             return Err(refuse("The folder is offline or missing."));
         };
+        self.destination_at(Some(to), &path, &anchor)
+    }
+
+    /// The folder at `path`, resolved below `anchor`, checked to take files.
+    fn destination_at(
+        &mut self,
+        to: Option<FolderId>,
+        path: &Path,
+        anchor: &Path,
+    ) -> Result<Target, FileOpError> {
+        let refuse = |why: &str| FileOpError::Destination(why.to_string());
         let dir = match fsops::canonical_below(anchor, path) {
             Ok(dir) => dir,
             Err(Containment::Fs(FsError::NotFound)) => {
@@ -418,7 +431,7 @@ impl<'a> Files<'a> {
         }
         let names = self.listing(&dir).map_err(FileOpError::Destination)?;
         let mut over = self.folders.over(&dir);
-        over.push(to);
+        over.extend(to);
         let mut catalog = HashSet::new();
         for folder in over {
             let filenames: Vec<String> = self.catalog.db.read(
@@ -429,7 +442,7 @@ impl<'a> Files<'a> {
         }
         Ok(Target {
             folder: to,
-            resolved: path.clone(),
+            resolved: path.to_path_buf(),
             rules: Names(fsops::probe(&dir, &names)),
             dir,
             volume: found.id.volume(),
@@ -554,7 +567,7 @@ impl<'a> Files<'a> {
         }
         let mut preconditions = f.preconditions;
         preconditions.folder_path = Some(path);
-        preconditions.to = target.map(|t| (t.folder, t.resolved.clone()));
+        preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
         Ok(Item {
             preconditions,
             members,
