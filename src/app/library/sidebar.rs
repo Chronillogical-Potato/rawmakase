@@ -246,6 +246,36 @@ impl Library {
                                         logical,
                                     })
                                 }
+                                Some(TreeAction::MoveFolder {
+                                    folder,
+                                    root,
+                                    logical,
+                                }) => {
+                                    self.file_request = Some(super::FileRequest::ChooseParent {
+                                        folder,
+                                        root,
+                                        from: logical,
+                                    })
+                                }
+                                Some(TreeAction::DropFolder {
+                                    folder,
+                                    root,
+                                    from,
+                                    to,
+                                }) => {
+                                    self.file_request = Some(super::FileRequest::MoveFolder {
+                                        folder,
+                                        root,
+                                        from,
+                                        to,
+                                    })
+                                }
+                                Some(TreeAction::Reveal(path)) => {
+                                    if let Err(e) = crate::platform::reveal::reveal(&path) {
+                                        self.message =
+                                            format!("Could not show {}: {e}", path.display());
+                                    }
+                                }
                                 Some(TreeAction::Drop {
                                     folder,
                                     name,

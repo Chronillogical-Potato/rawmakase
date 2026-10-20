@@ -103,12 +103,74 @@ pub(super) enum TreeAction {
         root: RootId,
         logical: String,
     },
+    /// Move Folder…: catalog folder `folder` of `root`, at logical path
+    /// `logical`.
+    MoveFolder {
+        folder: FolderId,
+        root: RootId,
+        logical: String,
+    },
+    /// Catalog folder `folder` of `root`, at logical path `from`, dropped
+    /// on logical folder `to` of that root.
+    DropFolder {
+        folder: FolderId,
+        root: RootId,
+        from: String,
+        to: String,
+    },
+    /// Show the folder in the file manager.
+    Reveal(std::path::PathBuf),
     /// Photos dropped on catalog folder `folder`, named `name`.
     Drop {
         folder: FolderId,
         name: String,
         photos: Vec<PhotoId>,
     },
+}
+/// What of type `P` was dropped on `response` this frame. egui's own
+/// `dnd_release_payload` takes whatever is dragged, of any type, so a row
+/// asking for photos would lose a folder dropped on it.
+fn released<P: std::any::Any + Send + Sync>(
+    response: &egui::Response,
+) -> Option<std::sync::Arc<P>> {
+    egui::DragAndDrop::has_payload_of_type::<P>(&response.ctx)
+        .then(|| response.dnd_release_payload::<P>())
+        .flatten()
+}
+/// A dragged folder's icon and name, following the pointer.
+fn dragged_chip(ui: &egui::Ui, name: &str) {
+    let Some(pos) = ui.ctx().pointer_latest_pos() else {
+        return;
+    };
+    let palette = theme::palette(ui.ctx());
+    let layer = egui::LayerId::new(egui::Order::Tooltip, ui.id().with("dragged-folder"));
+    let painter = ui.ctx().layer_painter(layer);
+    let text = painter.layout_no_wrap(
+        name.to_string(),
+        egui::FontId::proportional(12.),
+        palette.gray(240),
+    );
+    let chip =
+        egui::Rect::from_min_size(pos + Vec2::splat(10.), Vec2::new(text.size().x + 34., 22.));
+    painter.rect_filled(chip, 4., palette.selected_row());
+    painter.rect_stroke(
+        chip.shrink(0.5),
+        4.,
+        egui::Stroke::new(1., palette.selected_marker()),
+        egui::StrokeKind::Inside,
+    );
+    icons::paint_at(
+        &painter,
+        Icon::Folder,
+        egui::pos2(chip.left() + 14., chip.center().y),
+        13.,
+        palette.gray(200),
+    );
+    painter.galley(
+        egui::pos2(chip.left() + 26., chip.center().y - text.size().y / 2.),
+        text,
+        palette.gray(240),
+    );
 }
 pub(super) fn folder_tree_row(
     ui: &mut egui::Ui,
@@ -119,16 +181,45 @@ pub(super) fn folder_tree_row(
 ) -> Option<TreeAction> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::click());
+    // A catalog folder that isn't a root can be dragged onto another
+    // folder of its root.
+    let movable = node.folder.filter(|_| node.root.is_none());
+    let sense = if movable.is_some() {
+        Sense::click_and_drag()
+    } else {
+        Sense::click()
+    };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), sense);
+    // Named from what is dragged: a row's id is its place in the panel.
+    if let Some(folder) = movable
+        && let Some(dragged) = super::grid::drag_once(&response, || super::DraggedFolder {
+            folder,
+            root: node.in_root,
+            from: node.logical.clone(),
+        })
+    {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        dragged_chip(ui, dragged.from.rsplit('/').next().unwrap_or_default());
+    }
     let painter = ui.painter();
     let active = selected.contains(&node.key);
     let open = expanded.contains(&node.key);
-    // Photos dragged over a catalog folder can be dropped on it.
-    let dropping = node.folder.is_some()
+    // Not where it is already, nor itself or a folder in it.
+    let takes = |d: &super::DraggedFolder| {
+        d.root == node.in_root
+            && node.logical != d.from
+            && !node.logical.starts_with(&format!("{}/", d.from))
+            && node.logical != d.from.rsplit_once('/').map_or("", |(p, _)| p)
+    };
+    // Photos dragged over a catalog folder can be dropped on it, and a
+    // folder over any folder of its root that takes it.
+    let dropping = (node.folder.is_some()
         && response
             .dnd_hover_payload::<super::DraggedPhotos>()
-            .is_some();
+            .is_some())
+        || response
+            .dnd_hover_payload::<super::DraggedFolder>()
+            .is_some_and(|d| takes(&d));
     if dropping {
         painter.rect_filled(rect, 3., palette.selected_row());
         painter.rect_stroke(
@@ -206,14 +297,23 @@ pub(super) fn folder_tree_row(
     let mut action = None;
     // Photos are dragged only once the pointer went far enough (see
     // `grid::drag_payload`).
-    if let (Some(folder), Some(dragged)) = (
-        node.folder,
-        response.dnd_release_payload::<super::DraggedPhotos>(),
-    ) {
+    if let (Some(folder), Some(dragged)) =
+        (node.folder, released::<super::DraggedPhotos>(&response))
+    {
         action = Some(TreeAction::Drop {
             folder,
             name: node.name.clone(),
             photos: dragged.0.clone(),
+        });
+    }
+    if let Some(dragged) = released::<super::DraggedFolder>(&response)
+        && takes(&dragged)
+    {
+        action = Some(TreeAction::DropFolder {
+            folder: dragged.folder,
+            root: dragged.root,
+            from: dragged.from.clone(),
+            to: node.logical.clone(),
         });
     }
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
@@ -281,6 +381,20 @@ pub(super) fn folder_tree_row(
                 root: node.in_root,
                 logical: node.logical.clone(),
             });
+            ui.close();
+        }
+        if let Some(folder) = movable
+            && ui.button("Move Folder…").clicked()
+        {
+            action = Some(TreeAction::MoveFolder {
+                folder,
+                root: node.in_root,
+                logical: node.logical.clone(),
+            });
+            ui.close();
+        }
+        if ui.button(crate::platform::reveal::LABEL).clicked() {
+            action = Some(TreeAction::Reveal(node.path.clone()));
             ui.close();
         }
         if !node.ids.is_empty() && ui.button("Remove from Catalog…").clicked() {

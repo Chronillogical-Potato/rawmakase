@@ -2725,3 +2725,153 @@ fn a_renamed_folder_keeps_its_selection_and_unfolded_folders() -> Result<()> {
     );
     Ok(())
 }
+/// A folder dragged past 8 points onto another folder of its root is
+/// dropped there; onto a folder inside it, nothing is.
+#[test]
+fn a_folder_dragged_onto_another_of_its_root_is_dropped_there() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |logical: &str, id: u32| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, y2025, inside) = (
+        node("2024/day1", 1),
+        node("2025", 2),
+        node("2024/day1/sub", 3),
+    );
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &y2025, &inside] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // Rows are 22 points tall, one under another.
+    let (row1, row2, row3) = (
+        egui::pos2(120., 11.),
+        egui::pos2(120., 33.),
+        egui::pos2(120., 55.),
+    );
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let actions = frame(vec![press(row2, false)]);
+    let dropped = actions.into_iter().flatten().find_map(|a| match a {
+        TreeAction::DropFolder {
+            folder, from, to, ..
+        } => Some((folder, from, to)),
+        _ => None,
+    });
+    assert_eq!(
+        dropped,
+        Some((FolderId(1), "2024/day1".into(), "2025".into()))
+    );
+    // Into a folder inside it: no drop.
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    frame(vec![egui::Event::PointerMoved(row3)]);
+    let actions = frame(vec![press(row3, false)]);
+    assert!(
+        !actions
+            .into_iter()
+            .flatten()
+            .any(|a| matches!(a, TreeAction::DropFolder { .. }))
+    );
+}
+
+#[test]
+fn a_dragged_folder_follows_the_pointer_by_name() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |logical: &str, id: u32| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, y2025) = (node("2024/day1", 1), node("2025", 2));
+    let mut expanded = HashSet::new();
+    // Where "day1" is painted this frame.
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &y2025] {
+                    folder_tree_row(ui, n, 0, &mut expanded, &Default::default());
+                }
+            },
+        );
+        output.textures_delta.clear();
+        output
+            .shapes
+            .into_iter()
+            .filter_map(|s| match s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "day1" => Some(t.visual_bounding_rect()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let row1 = egui::pos2(120., 11.);
+    let pointer = egui::pos2(200., 120.);
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    let drawn = frame(vec![egui::Event::PointerMoved(pointer)]);
+    assert!(
+        drawn
+            .iter()
+            .any(|r| r.left() > pointer.x && r.top() > pointer.y - 4. && r.top() < pointer.y + 30.),
+        "its name beside the pointer: {drawn:?}"
+    );
+    // Dropped (here on nothing), it is gone.
+    let drawn = frame(vec![press(pointer, false)]);
+    let drawn = [drawn, frame(vec![])].concat();
+    assert!(drawn.iter().all(|r| r.left() < pointer.x), "{drawn:?}");
+}
