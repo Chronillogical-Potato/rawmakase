@@ -75,3 +75,60 @@ fn a_catalog_replaced_since_it_opened_is_refused() -> Result<()> {
     ));
     Ok(())
 }
+
+#[test]
+fn remove_from_catalog_needs_no_lock_as_it_touches_no_file() -> Result<()> {
+    // A hard-linked catalog can't take the lock, and another window may
+    // hold it: removing rows works all the same.
+    let mut fx = fixture(&["a.NEF", "b.NEF"]);
+    let (a, b) = (fx.photo("a.NEF"), fx.photo("b.NEF"));
+    std::fs::hard_link(&fx.catalog, fx.dir.path().join("Other.rawmakase"))?;
+    let outcome = fx.run(
+        FileOp::RemoveFromCatalog { photos: vec![a] },
+        &NoTrash,
+        &Faulty::default(),
+    );
+    assert_eq!(outcome.items[0].result, ItemResult::Removed);
+    assert!(!fx.rows().contains_key(&a) && fx.rows().contains_key(&b));
+    Ok(())
+}
+
+#[test]
+fn remove_from_catalog_leaves_photos_an_unfinished_operation_involves() -> Result<()> {
+    let mut fx = fixture(&["a.NEF", "b.NEF", "sub/"]);
+    let (a, b) = (fx.photo("a.NEF"), fx.photo("b.NEF"));
+    // A move of a whose completion failed: unfinished.
+    fx.fail_journal("BEFORE UPDATE ON photos");
+    let moved = fx.run(
+        FileOp::MovePhotos {
+            photos: vec![a],
+            to: fx.folder("sub"),
+        },
+        &NoTrash,
+        &Faulty::default(),
+    );
+    assert!(matches!(
+        moved.items[0].result,
+        ItemResult::NeedsRecovery(_)
+    ));
+    fx.reopen();
+    // Another window holds the lock, as a window recovering it would.
+    let other = Catalog::open(&fx.catalog)?;
+    let _held = lock::acquire(&other).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let outcome = fx.run(
+        FileOp::RemoveFromCatalog { photos: vec![a, b] },
+        &NoTrash,
+        &Faulty::default(),
+    );
+    let of = |id| {
+        outcome
+            .items
+            .iter()
+            .find(|i| i.photos == [id])
+            .map(|i| i.result.clone())
+    };
+    assert!(matches!(of(a), Some(ItemResult::Unchanged(Some(_)))));
+    assert_eq!(of(b), Some(ItemResult::Removed));
+    assert!(fx.rows().contains_key(&a));
+    Ok(())
+}

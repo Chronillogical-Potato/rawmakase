@@ -317,6 +317,19 @@ pub(super) fn unresolved(db: &impl Reads, computer: &str) -> Result<Vec<Item>> {
     rows.into_iter().map(|row| read(db, row)).collect()
 }
 
+/// Every item still to be decided, whichever computer's.
+pub(super) fn unresolved_anywhere(db: &impl Reads) -> Result<Vec<Item>> {
+    let rows: Vec<ItemRow> = db.read(
+        sql!(
+            "SELECT id, computer, kind, state, preconditions, error FROM file_operations
+             WHERE state IN ('planned', 'restoring', 'needs_recovery')
+             ORDER BY id"
+        ),
+        &[],
+    )?;
+    rows.into_iter().map(|row| read(db, row)).collect()
+}
+
 /// Forgets the finished items journalled before `before` (a time as
 /// [`crate::time::utc_text`] writes it). Returns how many.
 pub(super) fn prune(w: &mut Write<'_>, before: &str) -> Result<usize> {

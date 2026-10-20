@@ -52,15 +52,26 @@ pub(super) fn execute_with(
     if plan.location != catalog.location || plan.computer != catalog.computer.id {
         return Err(FileOpError::WrongCatalog);
     }
-    let _lock = super::lock::acquire(catalog)?;
-    // What a crash left unfinished first, under the same lock; photos it
-    // still involves are left alone.
-    let recovery = super::recover::run(catalog, disk)?;
-    let busy: HashSet<PhotoId> = recovery
-        .unfinished
-        .iter()
-        .flat_map(|u| u.photos.iter().copied())
-        .collect();
+    // Photos an unfinished operation involves are left alone. Remove from
+    // Catalog touches no file, so it needs neither the lock nor recovery
+    // (and works on a catalog that can't take the lock); it leaves alone the
+    // photos of every computer's unfinished items. Anything else takes the
+    // lock, and decides what a crash left unfinished first.
+    let (_lock, busy): (_, HashSet<PhotoId>) = match plan.kind {
+        // Checked in each removal's own transaction, which journalling a
+        // disk step waits for (see `Run::remove`).
+        Kind::RemoveFromCatalog => (None, HashSet::new()),
+        Kind::MovePhotos | Kind::TrashPhotos => {
+            let lock = super::lock::acquire(catalog)?;
+            let recovery = super::recover::run(catalog, disk)?;
+            let busy = recovery
+                .unfinished
+                .iter()
+                .flat_map(|u| u.photos.iter().copied())
+                .collect();
+            (Some(lock), busy)
+        }
+    };
     let computer = catalog.computer.id.clone();
     let folders = Folders::index(&catalog.db.snapshot(|s| locate_folders(s, &computer))?);
     let run = Run {
@@ -77,7 +88,7 @@ pub(super) fn execute_with(
             break;
         }
         let result = if item.preconditions.rows.iter().any(|r| busy.contains(r)) {
-            run.unchanged(catalog, &item, "an unfinished file operation involves it")
+            run.unchanged(catalog, &item, UNFINISHED)
         } else {
             match plan.kind {
                 Kind::RemoveFromCatalog => run.remove(catalog, &item),
@@ -95,6 +106,9 @@ pub(super) fn execute_with(
     outcome.stopped = stopped;
     Ok(outcome)
 }
+
+/// Why a photo an unfinished file operation involves is left alone.
+const UNFINISHED: &str = "an unfinished file operation involves it";
 
 /// What every item of a run shares.
 struct Run<'a> {
@@ -128,7 +142,17 @@ impl Run<'_> {
     /// transaction.
     fn remove(&self, catalog: &mut Catalog, item: &Item) -> Result<()> {
         catalog.db.write_immediate(|w| {
-            let reason = item.preconditions.check(w, self.computer)?;
+            let mut reason = item.preconditions.check(w, self.computer)?;
+            // An unfinished file operation of any computer that involves
+            // these photos keeps them: it may still need their rows.
+            let involved = journal::unresolved_anywhere(w)?.iter().any(|i| {
+                i.photos()
+                    .iter()
+                    .any(|p| item.preconditions.rows.contains(p))
+            });
+            if reason.is_none() && involved {
+                reason = Some(UNFINISHED);
+            }
             if reason.is_none() {
                 remove_rows(w, &item.preconditions.rows, Removal::Requested)?;
             }
