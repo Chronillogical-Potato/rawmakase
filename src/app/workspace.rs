@@ -199,6 +199,7 @@ impl Editor {
             self.pinned = pinned;
             let _ = self.save_session();
         }
+        self.remember_maximized(&ctx);
         self.sync_undo();
         // The layout is kept once a drag (the thumbnail size) or typing (the search)
         // ends, or when the window closes.
@@ -209,6 +210,50 @@ impl Editor {
         } else {
             LayoutEdit::Settled
         });
+    }
+    /// Saves the session when the window is maximized or restored. A minimized
+    /// window keeps what it was: Windows reports it as not maximized.
+    pub(super) fn remember_maximized(&mut self, ctx: &egui::Context) {
+        if !KEEPS_MAXIMIZED {
+            return;
+        }
+        let (maximized, now) = ctx.input(|i| {
+            let viewport = i.viewport();
+            let maximized = viewport
+                .maximized
+                .filter(|_| viewport.minimized != Some(true));
+            (maximized, i.time)
+        });
+        match self.restoring_maximized {
+            RestoreMaximized::Pending if maximized == Some(true) => {
+                self.restoring_maximized = RestoreMaximized::Done;
+            }
+            RestoreMaximized::Pending => {
+                // Applied once the first frame has shown the window, which X11
+                // window managers wait for. Not to a minimized window, which it
+                // would restore.
+                if maximized == Some(false) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                }
+                self.restoring_maximized = RestoreMaximized::Asked {
+                    until: now + MAXIMIZE_GRACE,
+                };
+                return;
+            }
+            RestoreMaximized::Asked { until } => {
+                if maximized != Some(true) && now < until {
+                    return;
+                }
+                self.restoring_maximized = RestoreMaximized::Done;
+            }
+            RestoreMaximized::Done => {}
+        }
+        if let Some(maximized) = maximized
+            && maximized != self.maximized
+        {
+            self.maximized = maximized;
+            let _ = self.save_session();
+        }
     }
     /// Saves the session when the place in the catalog, or a settled layout, changed.
     pub(super) fn remember_place(&mut self, layout: LayoutEdit) {
@@ -1908,6 +1953,28 @@ pub(super) enum LayoutEdit {
     /// A drag or typing is under way: kept once it ends.
     Changing,
     Settled,
+}
+
+/// Whether the window opens maximized when it was left so. Not on macOS, where egui
+/// reads the state only at launch (emilk/egui#3494), so a window zoomed back out
+/// would still open zoomed.
+pub(super) const KEEPS_MAXIMIZED: bool = !cfg!(target_os = "macos");
+
+/// How long a window reopened maximized waits for the window manager to maximize
+/// it before its state is saved again: until then it shows unmaximized on X11.
+const MAXIMIZE_GRACE: f64 = 2.;
+
+/// Reopening the window maximized, as it was left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum RestoreMaximized {
+    /// The window manager is to be asked on the first frame.
+    Pending,
+    /// Asked; the window's state is kept until it is maximized or `until` (egui
+    /// time) passes, so the frames before don't save it unmaximized.
+    Asked {
+        until: f64,
+    },
+    Done,
 }
 
 /// Keeps the window open for the "Work still pending" question, and shows it: Quit

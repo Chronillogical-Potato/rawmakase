@@ -12,6 +12,9 @@ pub(crate) struct Session {
     pub monitor: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub monitor_srgb: bool,
+    /// The window was maximized when last seen; it opens maximized again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
     /// Titles of panel sections the user collapsed; all others start open.
     #[serde(default)]
     pub collapsed: std::collections::BTreeSet<String>,
