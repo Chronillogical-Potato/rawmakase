@@ -53,6 +53,8 @@ pub(crate) struct Editor {
     pinned: std::collections::BTreeSet<String>,
     /// Whether the window is maximized, as last saved to the session.
     maximized: bool,
+    /// Reopening it maximized, until the window manager has done so.
+    restoring_maximized: workspace::RestoreMaximized,
     /// The panels each module shows (Tab, Shift+Tab, F6–F8).
     panels: panels::WorkspacePanels,
     /// What the last Tab or Shift+Tab hid, and in which module.
@@ -298,6 +300,11 @@ impl Editor {
             solo: session.solo.clone(),
             pinned: session.pinned.clone(),
             maximized: session.maximized,
+            restoring_maximized: if session.maximized {
+                workspace::RestoreMaximized::Pending
+            } else {
+                workspace::RestoreMaximized::Done
+            },
             panels: session.panels,
             tabbed: None,
             onboarding: onboarding::Onboarding::new(show_onboarding),
@@ -588,7 +595,8 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
             .with_icon(window_icon())
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.])
-            // Restoring leaves it at the size above.
+            // Restoring leaves it at the size above. X11 window managers ignore
+            // this while the window is hidden; the first frame asks again.
             .with_maximized(workspace::KEEPS_MAXIMIZED && session.maximized)
             // On macOS the workspace bar is the title bar, under the traffic
             // lights; elsewhere the window keeps its decorations.

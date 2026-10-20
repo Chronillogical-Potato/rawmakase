@@ -6995,41 +6995,92 @@ fn a_photo_that_failed_to_open_is_not_shown_loading() {
     editor.load.start();
     assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
 }
+/// A frame with the window maximized or not, at `time`: the session's value
+/// afterwards, and whether the frame asked to maximize the window.
+fn window_frame(
+    e: &mut Editor,
+    ctx: &egui::Context,
+    time: f64,
+    maximized: bool,
+    minimized: bool,
+) -> (bool, bool) {
+    let mut input = egui::RawInput {
+        time: Some(time),
+        ..Default::default()
+    };
+    input.viewports.insert(
+        egui::ViewportId::ROOT,
+        egui::ViewportInfo {
+            maximized: Some(maximized),
+            minimized: Some(minimized),
+            ..Default::default()
+        },
+    );
+    let mut output = ctx.run_ui(input, |ui| e.remember_maximized(ui.ctx()));
+    output.textures_delta.clear();
+    let asked = output.viewport_output[&egui::ViewportId::ROOT]
+        .commands
+        .contains(&egui::ViewportCommand::Maximized(true));
+    let saved: crate::app::session::Session = e
+        .session_file
+        .as_ref()
+        .and_then(|file| std::fs::read(file).ok())
+        .map_or_else(Default::default, |json| {
+            serde_json::from_slice(&json).unwrap()
+        });
+    (saved.maximized, asked)
+}
 #[test]
 fn the_window_reopens_maximized_as_it_was_left() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
-    let file = dir.path().join("session.json");
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(
         &ctx,
         None,
         crate::app::session::Session::default(),
-        Some(file.clone()),
+        Some(dir.path().join("session.json")),
     );
-    let frame = |e: &mut Editor, maximized, minimized| {
-        let mut input = egui::RawInput::default();
-        input.viewports.insert(
-            egui::ViewportId::ROOT,
-            egui::ViewportInfo {
-                maximized: Some(maximized),
-                minimized: Some(minimized),
-                ..Default::default()
-            },
-        );
-        ctx.run_ui(input, |ui| e.remember_maximized(ui.ctx()))
-            .textures_delta
-            .clear();
-        let saved: crate::app::session::Session =
-            serde_json::from_slice(&std::fs::read(&file).unwrap_or_else(|_| b"{}".to_vec()))
-                .unwrap();
-        saved.maximized
-    };
     let keeps = workspace::KEEPS_MAXIMIZED;
-    assert_eq!(frame(&mut e, true, false), keeps);
+    assert_eq!(window_frame(&mut e, &ctx, 0., true, false), (keeps, false));
     // Minimized from maximized, Windows reports it not maximized.
-    assert_eq!(frame(&mut e, false, true), keeps);
-    assert_eq!(frame(&mut e, true, false), keeps);
+    assert_eq!(window_frame(&mut e, &ctx, 1., false, true), (keeps, false));
+    assert_eq!(window_frame(&mut e, &ctx, 2., true, false), (keeps, false));
     // Restored to its size.
-    assert!(!frame(&mut e, false, false));
+    assert_eq!(window_frame(&mut e, &ctx, 3., false, false), (false, false));
+    Ok(())
+}
+#[test]
+fn a_window_reopened_maximized_keeps_that_until_the_window_manager_maximizes_it()
+-> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("session.json");
+    let session = || crate::app::session::Session {
+        maximized: true,
+        ..Default::default()
+    };
+    crate::storage::atomic_json(&file, &session())?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
+    let keeps = workspace::KEEPS_MAXIMIZED;
+    // An X11 window manager maximizes the window only once it is shown: the first
+    // frame asks again, and the frames before it is maximized don't count.
+    assert_eq!(window_frame(&mut e, &ctx, 0., false, false), (true, keeps));
+    assert_eq!(window_frame(&mut e, &ctx, 0.5, false, false), (true, false));
+    assert_eq!(window_frame(&mut e, &ctx, 1., true, false), (true, false));
+    assert_eq!(
+        window_frame(&mut e, &ctx, 1.5, false, false),
+        (!keeps, false)
+    );
+
+    // One that never maximizes it: after a while, the window is saved as it is.
+    crate::storage::atomic_json(&file, &session())?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, session(), Some(file));
+    assert_eq!(window_frame(&mut e, &ctx, 0., false, false), (true, keeps));
+    assert_eq!(window_frame(&mut e, &ctx, 1.9, false, false), (true, false));
+    assert_eq!(
+        window_frame(&mut e, &ctx, 2.1, false, false),
+        (!keeps, false)
+    );
     Ok(())
 }
