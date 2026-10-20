@@ -185,6 +185,62 @@ impl NameContext<'_> {
     };
 }
 
+/// A Lightroom naming template, filled: what names a file, before its
+/// extension, wherever a file is named (an export, a rename).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NameTemplate {
+    pub naming: Naming,
+    /// The custom text.
+    pub text: String,
+    /// Where Sequence starts.
+    pub start: u32,
+    /// How many digits Sequence has at least, zeros in front ("007").
+    pub padding: usize,
+}
+impl NameTemplate {
+    /// `source`'s new name without its extension, for its place `at`, and a
+    /// note when it lacks what the template needs (a capture date).
+    pub fn stem(&self, source: &Path, at: &NameContext) -> (String, Option<String>) {
+        let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+        let text = name_part(&self.text);
+        let text = text.as_str();
+        // A custom name left empty is the file's own.
+        let custom = if text.is_empty() { &*stem } else { text };
+        let sequence = format!(
+            "{:0width$}",
+            self.start as usize + at.index,
+            width = self.padding
+        );
+        let mut note = None;
+        let name = match self.naming {
+            Naming::Filename => stem.to_string(),
+            Naming::FilenameText if text.is_empty() => stem.to_string(),
+            Naming::FilenameText => format!("{stem}-{text}"),
+            Naming::FilenameSequence => format!("{stem}-{sequence}"),
+            Naming::CustomName => custom.to_string(),
+            Naming::CustomNameSequence => format!("{custom}-{sequence}"),
+            Naming::CustomNameOf => format!("{custom} ({sequence} of {})", at.total),
+            Naming::DateFilename => match at.captured.and_then(date) {
+                Some(date) => format!("{date}-{stem}"),
+                // Never a file's modified date, which would look like a real
+                // capture date.
+                None => {
+                    note = Some("no capture date: named undated".into());
+                    format!("undated-{stem}")
+                }
+            },
+        };
+        // Windows' device names can't be file names, whatever follows a dot.
+        let head = name.split('.').next().unwrap_or_default();
+        let name = if reserved(head) {
+            format!("{head}_{}", &name[head.len()..])
+        } else {
+            name
+        };
+        (name, note)
+    }
+}
+
 /// Lightroom's Post-Processing: what happens once an export is written.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AfterExport {
@@ -437,41 +493,19 @@ impl ExportSettings {
     pub fn file_name(&self, source: &Path) -> String {
         self.file_name_for(source, &NameContext::ONE).0
     }
+    /// The Rename To template as these settings fill it.
+    pub fn name_template(&self) -> NameTemplate {
+        NameTemplate {
+            naming: self.naming(),
+            text: self.custom_text.clone(),
+            start: self.start_number,
+            padding: 0,
+        }
+    }
     /// `source`'s exported name, as the template makes it for its place in the
     /// export, and a note when it lacks what the template needs (a capture date).
     pub fn file_name_for(&self, source: &Path, at: &NameContext) -> (String, Option<String>) {
-        let stem = source.file_stem().unwrap_or_default().to_string_lossy();
-        let text = name_part(&self.custom_text);
-        let text = text.as_str();
-        // A custom name left empty is the file's own.
-        let custom = if text.is_empty() { &*stem } else { text };
-        let sequence = self.start_number as usize + at.index;
-        let mut note = None;
-        let name = match self.naming() {
-            Naming::Filename => stem.to_string(),
-            Naming::FilenameText if text.is_empty() => stem.to_string(),
-            Naming::FilenameText => format!("{stem}-{text}"),
-            Naming::FilenameSequence => format!("{stem}-{sequence}"),
-            Naming::CustomName => custom.to_string(),
-            Naming::CustomNameSequence => format!("{custom}-{sequence}"),
-            Naming::CustomNameOf => format!("{custom} ({sequence} of {})", at.total),
-            Naming::DateFilename => match at.captured.and_then(date) {
-                Some(date) => format!("{date}-{stem}"),
-                // Never a file's modified date, which would look like a real
-                // capture date.
-                None => {
-                    note = Some("no capture date: named undated".into());
-                    format!("undated-{stem}")
-                }
-            },
-        };
-        // Windows' device names can't be file names, whatever follows a dot.
-        let head = name.split('.').next().unwrap_or_default();
-        let name = if reserved(head) {
-            format!("{head}_{}", &name[head.len()..])
-        } else {
-            name
-        };
+        let (name, note) = self.name_template().stem(source, at);
         let extension = self.format.extension();
         let name = if self.uppercase {
             format!("{name}.{}", extension.to_uppercase())
@@ -860,6 +894,38 @@ mod tests {
         s.custom_text = " ".into();
         s.naming = Some(Naming::CustomName);
         assert_eq!(s.file_name_for(source, &at).0, "DSC0001.jpg");
+    }
+    #[test]
+    fn a_template_numbers_from_its_start_with_zeros_in_front() {
+        let source = Path::new("/photos/DSC0001.ARW");
+        let template = |padding| NameTemplate {
+            naming: Naming::CustomNameSequence,
+            text: "Concert".into(),
+            start: 7,
+            padding,
+        };
+        let at = |index| NameContext {
+            index,
+            total: 200,
+            captured: None,
+        };
+        assert_eq!(template(3).stem(source, &at(2)).0, "Concert-009");
+        assert_eq!(template(0).stem(source, &at(2)).0, "Concert-9");
+        assert_eq!(template(1).stem(source, &at(2)).0, "Concert-9");
+        assert_eq!(template(2).stem(source, &at(193)).0, "Concert-200");
+        let of = NameTemplate {
+            naming: Naming::CustomNameOf,
+            ..template(3)
+        };
+        assert_eq!(of.stem(source, &at(0)).0, "Concert (007 of 200)");
+        // An export names its files as before, with no zeros added.
+        let s = ExportSettings {
+            naming: Some(Naming::CustomNameSequence),
+            custom_text: "Concert".into(),
+            start_number: 7,
+            ..Default::default()
+        };
+        assert_eq!(s.name_template(), template(0));
     }
     #[test]
     fn settings_saved_before_the_templates_keep_their_names() {
