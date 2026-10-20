@@ -7075,12 +7075,24 @@ fn a_window_reopened_maximized_keeps_that_until_the_window_manager_maximizes_it(
     // One that never maximizes it: after a while, the window is saved as it is.
     crate::storage::atomic_json(&file, &session())?;
     let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, session(), Some(file));
+    let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
     assert_eq!(window_frame(&mut e, &ctx, 0., false, false), (true, keeps));
     assert_eq!(window_frame(&mut e, &ctx, 1.9, false, false), (true, false));
     assert_eq!(
         window_frame(&mut e, &ctx, 2.1, false, false),
         (!keeps, false)
     );
+
+    // Maximized already (Windows, Wayland), or started minimized: nothing to ask.
+    for minimized in [false, true] {
+        crate::storage::atomic_json(&file, &session())?;
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
+        assert_eq!(
+            window_frame(&mut e, &ctx, 0., true, minimized),
+            (true, false)
+        );
+        assert_eq!(window_frame(&mut e, &ctx, 0.1, true, false), (true, false));
+    }
     Ok(())
 }

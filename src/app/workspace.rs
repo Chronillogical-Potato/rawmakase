@@ -225,10 +225,16 @@ impl Editor {
             (maximized, i.time)
         });
         match self.restoring_maximized {
+            RestoreMaximized::Pending if maximized == Some(true) => {
+                self.restoring_maximized = RestoreMaximized::Done;
+            }
             RestoreMaximized::Pending => {
                 // Applied once the first frame has shown the window, which X11
-                // window managers wait for.
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                // window managers wait for. Not to a minimized window, which it
+                // would restore.
+                if maximized == Some(false) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                }
                 self.restoring_maximized = RestoreMaximized::Asked {
                     until: now + MAXIMIZE_GRACE,
                 };
