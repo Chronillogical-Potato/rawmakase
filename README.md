@@ -11,7 +11,7 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Wi
   <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · Windows (x86_64, ARM64) · <a href="#install">install notes</a></sub>
 </p>
 
-It is a personal project in active development. It develops photos from almost every current camera; the exceptions are Sigma's Foveon cameras, monochrome cameras such as the Leica Monochrom, and DNGs that are already demosaiced ("linear" DNGs, such as merged HDR or panorama files). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
+It is a personal project in active development. It develops photos from almost every current camera, including monochrome DNGs (such as the Leica Monochrom's) and linear DNGs (such as iPhone ProRAW); the exceptions are Sigma's Foveon cameras, GoPro's GPR files, the Pentax K-3 Mark III Monochrome's PEFs (its DNGs open), and floating-point or lossy-compressed DNGs (such as Lightroom's HDR merges). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 > [!WARNING]
 > **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. Your originals are never modified, but keep exports of finished work.
