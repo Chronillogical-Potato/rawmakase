@@ -86,7 +86,7 @@ pub fn folder_name_problem(name: &str) -> Option<&'static str> {
 /// path below it, as `sidecar::caseless` compares names, offline or
 /// missing ones included; and those of any root that resolve there on
 /// `computer`.
-fn in_catalog(
+pub(super) fn in_catalog(
     db: &impl Reads,
     computer: &str,
     root: RootId,

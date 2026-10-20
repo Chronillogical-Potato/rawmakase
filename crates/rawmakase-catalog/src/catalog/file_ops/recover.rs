@@ -260,7 +260,7 @@ fn decide(
     }
     match item.kind {
         // Rule 3.
-        Kind::MovePhotos | Kind::RenamePhotos
+        Kind::MovePhotos | Kind::RenamePhotos | Kind::RenameFolder
             if item
                 .members
                 .iter()
@@ -290,8 +290,10 @@ fn changed(
     folders: &Folders,
     item: &Item,
 ) -> Result<Option<String>> {
-    let Subject::Photos(pre) = &item.subject else {
-        return Ok(None);
+    let pre = match &item.subject {
+        Subject::Photos(pre) => pre,
+        Subject::Tree(tree) => return tree.check(&catalog.db, computer),
+        Subject::Folder(_) => return Ok(None),
     };
     if let Some(reason) = pre.check(&catalog.db, computer)? {
         return Ok(Some(reason.into()));
@@ -368,7 +370,7 @@ fn unfinished(item: &Item) -> Unfinished {
                 vec![Resolution::AddFolder, Resolution::Keep]
             }
             Subject::Folder(_) => vec![Resolution::Keep],
-            Subject::Photos(_) => vec![Resolution::PutBack, Resolution::Keep],
+            Subject::Photos(_) | Subject::Tree(_) => vec![Resolution::PutBack, Resolution::Keep],
         },
     }
 }
@@ -398,6 +400,9 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 _ => ItemResult::Unchanged(item.error.clone()),
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
+            Subject::Tree(tree) => ItemResult::FolderRenamed {
+                folder: tree.folder,
+            },
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),
         ItemState::NeedsRecovery => {

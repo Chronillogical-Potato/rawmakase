@@ -27,6 +27,7 @@ use super::journal::{
     self, Item as Journalled, ItemState, Kind, Member, MemberState, OperationId, Subject,
 };
 use super::plan::{Folders, Item, occupied, shared};
+use super::tree::TreeMove;
 use super::{Confirmed, FileOpError, Outcome, Trash};
 use crate::storage::fsops::{EntryKind, FsError};
 use anyhow::{Context, Result};
@@ -67,7 +68,11 @@ pub(super) fn execute_with(
         // Checked in each removal's own transaction, which journalling a
         // disk step waits for (see `Run::remove`).
         Kind::RemoveFromCatalog => (None, HashSet::new()),
-        Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
+        Kind::MovePhotos
+        | Kind::TrashPhotos
+        | Kind::CreateFolder
+        | Kind::RenamePhotos
+        | Kind::RenameFolder => {
             let lock = super::lock::acquire(catalog)?;
             super::recover::prune(catalog)?;
             let recovery = super::recover::run(catalog, disk)?;
@@ -105,6 +110,11 @@ pub(super) fn execute_with(
             }
         }
     }
+    if let Some(tree) = &plan.tree
+        && let Err(e) = run.tree(catalog, tree, &busy, cancel)
+    {
+        stopped = Some(format!("{e:#}"));
+    }
     for item in items {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -117,6 +127,8 @@ pub(super) fn execute_with(
                 Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
                     run.files(catalog, &item)
                 }
+                // A folder rename has no photo items.
+                Kind::RenameFolder => Ok(()),
             }
         };
         // A catalog that can't be written stops the run; what was
@@ -302,6 +314,114 @@ impl Run<'_> {
             resolved: state.parent_path.join(name),
             dir,
         }))
+    }
+
+    /// Renames folder `tree`'s directory, journalled first, then re-keys
+    /// the catalog's folders of its subtree once it is proven there. Left
+    /// alone when a photo in it is in `busy`, an unfinished operation.
+    fn tree(
+        &self,
+        catalog: &mut Catalog,
+        tree: &TreeMove,
+        busy: &HashSet<PhotoId>,
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        // a. Checked again and journalled, in one transaction.
+        let started = catalog.db.write_immediate(|w| {
+            let involved = tree.state.photos.iter().any(|p| busy.contains(p));
+            let reason = match tree.state.check(w, self.computer)? {
+                Some(reason) => Some(reason),
+                None if involved || super::tree::unfinished(w, tree)? => Some(UNFINISHED.into()),
+                None => self.tree_changed(tree)?,
+            };
+            let state = match reason {
+                None => ItemState::Planned,
+                Some(_) => ItemState::NoChange,
+            };
+            let id = journal::insert_tree(
+                w,
+                self.batch,
+                self.computer,
+                self.kind,
+                state,
+                &tree.state,
+                (&tree.source, &tree.destination, tree.id),
+                reason.as_deref(),
+            )?;
+            Ok(reason.is_none().then_some(id))
+        })?;
+        let Some(id) = started else {
+            return Ok(());
+        };
+        // b. The rename, durable, and the name the disk gave it journalled.
+        let mut member = Member {
+            ordinal: 0,
+            source: tree.source.clone(),
+            destination: Some(tree.destination.clone()),
+            id: Some(tree.id),
+            identity: None,
+            state: MemberState::Moved,
+            receipt: None,
+        };
+        if let Err(e) = self.disk.rename(&tree.source, &tree.destination) {
+            return self.put_back(catalog, id, &[], &e.to_string());
+        }
+        let at = sync_parents(self.disk, &tree.source, &tree.destination)
+            .and_then(|()| spelled(self.disk, &tree.destination, tree.id));
+        let at = match at {
+            Ok(at) => at,
+            Err(e) => return self.put_back(catalog, id, &[member], &e.to_string()),
+        };
+        member.destination = Some(at.clone());
+        if let Err(e) = catalog.db.write(|w| journal::set_moved(w, id, 0, &at)) {
+            return self.put_back(catalog, id, &[member], &format!("{e:#}"));
+        }
+        // c. The catalog follows, on the evidence.
+        let finished = catalog.db.write_immediate(|w| {
+            let journalled = journal::item(w, id)?.context("the journalled item is gone")?;
+            super::tree::complete(w, self.computer, self.disk, &journalled)
+        });
+        if let Err(e) = finished {
+            let error = format!("{e:#}");
+            catalog
+                .db
+                .write(|w| journal::set_state(w, id, ItemState::NeedsRecovery, Some(&error)))
+                .map_err(|again| again.context(error))?;
+        }
+        Ok(())
+    }
+
+    /// Why folder `tree`'s directory is no longer as planned: another file
+    /// object, a link or mount point put in on the way, or its destination
+    /// taken since.
+    fn tree_changed(&self, tree: &TreeMove) -> Result<Option<String>> {
+        let same = self
+            .disk
+            .entry(&tree.source)
+            .is_ok_and(|e| e.id == tree.id && e.kind == EntryKind::Directory);
+        if !same {
+            return Ok(Some(format!(
+                "{} changed since it was planned",
+                tree.source.display()
+            )));
+        }
+        for dir in [parent(&tree.source), parent(&tree.destination)] {
+            let plain = self.disk.canonical(dir).is_ok_and(|c| c == dir)
+                && self
+                    .disk
+                    .entry(dir)
+                    .is_ok_and(|e| e.id.volume() == tree.id.volume());
+            if !plain {
+                return Ok(Some(format!(
+                    "{} changed since it was planned",
+                    dir.display()
+                )));
+            }
+        }
+        super::tree::taken(self.disk, tree)
     }
 
     /// An item that moves or trashes files.
@@ -675,6 +795,7 @@ pub(super) fn complete(
     let pre = match &item.subject {
         Subject::Photos(pre) => pre,
         Subject::Folder(_) => return folder::complete(w, computer, disk, item),
+        Subject::Tree(_) => return super::tree::complete(w, computer, disk, item),
     };
     let shared_now = match item.members.first() {
         Some(photo) => shared(
@@ -703,7 +824,7 @@ pub(super) fn complete(
                 None => Some("it may be in the Trash".into()),
             },
             Kind::MovePhotos | Kind::RenamePhotos => moved(w, folders, disk, pre, item)?,
-            Kind::CreateFolder => Some("not a photo operation".into()),
+            Kind::CreateFolder | Kind::RenameFolder => Some("not a photo operation".into()),
         },
     };
     let state = match reason {

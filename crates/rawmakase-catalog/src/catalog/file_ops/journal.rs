@@ -8,6 +8,7 @@ use super::super::db::{Reads, Write, sql};
 use super::super::value::row;
 use super::folder::FolderState;
 use super::preconditions::Preconditions;
+use super::tree::TreeState;
 use crate::storage::Identity;
 use crate::storage::fsops::FileId;
 use anyhow::{Context, Result, anyhow};
@@ -55,6 +56,9 @@ stored! {
         CreateFolder = "create_folder",
         /// Its photo's file and companions get new names in their folder.
         RenamePhotos = "rename_photos",
+        /// A folder gets a new name, and the catalog's folders of its
+        /// subtree new logical paths.
+        RenameFolder = "rename_folder",
     }
 }
 
@@ -130,6 +134,8 @@ pub(super) enum Subject {
     Photos(Preconditions),
     /// A folder it makes.
     Folder(FolderState),
+    /// A folder it renames, with the subtree it re-keys.
+    Tree(TreeState),
 }
 
 /// A journalled item.
@@ -146,11 +152,13 @@ pub(super) struct Item {
 }
 
 impl Item {
-    /// The catalog photos it concerns; none for a folder.
+    /// The catalog photos it concerns: none for a folder it makes, those
+    /// in the subtree of one it renames.
     pub fn photos(&self) -> &[PhotoId] {
         match &self.subject {
             Subject::Photos(pre) => &pre.rows,
             Subject::Folder(_) => &[],
+            Subject::Tree(tree) => &tree.photos,
         }
     }
 }
@@ -248,6 +256,51 @@ pub(super) fn insert_folder(
              VALUES (?, 0, ?, ?)"
         ),
         &[&id, &text(path)?, &MemberState::Planned.as_str()],
+    )?;
+    Ok(OperationId(id))
+}
+
+/// Journals a new item of `batch` renaming a folder, in `state`: its one
+/// member is the folder's directory, file object `file`, going from
+/// `source` to `destination`.
+#[allow(clippy::too_many_arguments, reason = "one row's columns")]
+pub(super) fn insert_tree(
+    w: &mut Write<'_>,
+    batch: &str,
+    computer: &str,
+    kind: Kind,
+    state: ItemState,
+    tree: &TreeState,
+    (source, destination, file): (&Path, &Path, FileId),
+    error: Option<&str>,
+) -> Result<OperationId> {
+    let id: i64 = w.insert_returning_id(
+        sql!(
+            "INSERT INTO file_operations(batch, computer, kind, state, preconditions, created_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+        ),
+        &[
+            &batch,
+            &computer,
+            &kind.as_str(),
+            &state.as_str(),
+            &serde_json::to_string(tree)?,
+            &crate::time::now_text(),
+            &error,
+        ],
+    )?;
+    w.execute(
+        sql!(
+            "INSERT INTO file_operation_members(operation, ordinal, source, destination, file_id, state)
+             VALUES (?, 0, ?, ?, ?, ?)"
+        ),
+        &[
+            &id,
+            &text(source)?,
+            &text(destination)?,
+            &file.to_string(),
+            &MemberState::Planned.as_str(),
+        ],
     )?;
     Ok(OperationId(id))
 }
@@ -397,7 +450,10 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
     let kind: Kind = row.kind.parse()?;
     let subject = match kind {
         Kind::CreateFolder => Subject::Folder(serde_json::from_str(&row.preconditions)?),
-        _ => Subject::Photos(serde_json::from_str(&row.preconditions)?),
+        Kind::RenameFolder => Subject::Tree(serde_json::from_str(&row.preconditions)?),
+        Kind::RemoveFromCatalog | Kind::MovePhotos | Kind::TrashPhotos | Kind::RenamePhotos => {
+            Subject::Photos(serde_json::from_str(&row.preconditions)?)
+        }
     };
     Ok(Item {
         id: OperationId(row.id),

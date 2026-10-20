@@ -15,6 +15,7 @@ use super::conflicts::{Destination, Names};
 use super::folder::{FolderState, NewFolder, folder_name_problem};
 use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
+use super::tree::TreeMove;
 use super::{BatchId, FileOp, FileOpError, Plan, Refusal, Skip, Skipped, Summary};
 use crate::storage::Identity;
 use crate::storage::fsops::{self, Containment, EntryKind, FileId, FsError, VolumeId};
@@ -86,6 +87,10 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             }
             (Kind::RenamePhotos, ids, None, None)
         }
+        FileOp::RenameFolder { folder, name } => {
+            let tree = super::tree::rename(catalog, folder, &name)?;
+            return tree_plan(catalog, Kind::RenameFolder, tree);
+        }
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
     let mut skipped = Vec::new();
@@ -142,6 +147,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             let mut files = Files::new(catalog, &folders);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
+        Kind::RenameFolder => Vec::new(),
     };
     let mut summary = summarize(&items, &by_id, computers > 1);
     if kind == Kind::RenamePhotos {
@@ -155,8 +161,36 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
         computer: catalog.computer.id.clone(),
         kind,
         create: made,
+        tree: None,
         items,
         skipped,
+        summary,
+    })
+}
+
+/// The plan of folder change `tree`, of `kind`.
+fn tree_plan(catalog: &Catalog, kind: Kind, tree: TreeMove) -> Result<Plan, FileOpError> {
+    let computers: i64 = catalog
+        .db
+        .read_one(sql!("SELECT count(*) FROM computers"), &[])?;
+    let summary = Summary {
+        photos: tree.state.photos.len(),
+        other_computers: computers > 1,
+        folder: tree
+            .destination
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        ..Summary::default()
+    };
+    Ok(Plan {
+        batch: new_batch()?,
+        location: catalog.location.clone(),
+        computer: catalog.computer.id.clone(),
+        kind,
+        create: None,
+        tree: Some(tree),
+        items: Vec::new(),
+        skipped: Vec::new(),
         summary,
     })
 }
@@ -235,7 +269,7 @@ fn expand(
 
 /// Whether `path` is somewhere no operation touches: in a Trash, or in
 /// RAWmakase's own folders.
-fn protected(path: &Path) -> bool {
+pub(super) fn protected(path: &Path) -> bool {
     let trash = path.components().any(|c| {
         let name = c.as_os_str().to_string_lossy().to_lowercase();
         name == ".trash"

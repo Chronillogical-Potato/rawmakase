@@ -33,6 +33,7 @@ mod plan;
 mod preconditions;
 mod recover;
 mod rename;
+mod tree;
 
 pub use execute::execute;
 pub use folder::folder_name_problem;
@@ -77,6 +78,9 @@ pub enum FileOp {
     /// their rows, copies included, follow. All or none: if one can't be
     /// renamed, none is.
     RenamePhotos { renames: Vec<(PhotoId, String)> },
+    /// Gives catalog folder `folder` the name `name`, on disk and in the
+    /// catalog, with every catalog folder below it; their photos follow.
+    RenameFolder { folder: FolderId, name: String },
 }
 
 /// One run of an operation, by which its outcome is read back from the
@@ -239,6 +243,8 @@ pub struct Plan {
     kind: journal::Kind,
     /// The folder it makes before its moves, if any.
     create: Option<folder::NewFolder>,
+    /// The folder it renames, if it renames one.
+    tree: Option<tree::TreeMove>,
     items: Vec<plan::Item>,
     skipped: Vec<Skipped>,
     summary: Summary,
@@ -260,15 +266,21 @@ impl Plan {
         self.items
             .iter()
             .flat_map(|i| i.preconditions.rows.iter().copied())
+            .chain(
+                self.tree
+                    .iter()
+                    .flat_map(|t| t.state.photos.iter().copied()),
+            )
             .collect()
     }
-    /// How many items it runs: each family, and the folder it makes.
+    /// How many items it runs: each family, and the folder it makes or
+    /// renames.
     pub fn steps(&self) -> usize {
-        self.items.len() + usize::from(self.create.is_some())
+        self.items.len() + usize::from(self.create.is_some()) + usize::from(self.tree.is_some())
     }
     /// Whether there is anything to do.
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.create.is_none()
+        self.items.is_empty() && self.create.is_none() && self.tree.is_none()
     }
     /// The user's confirmation, which only the confirming dialog's action
     /// gives: it enforces the order of plan, confirm, execute, not that a
@@ -373,6 +385,9 @@ pub enum ItemResult {
     Trashed,
     /// Its files are renamed: the photo is named `name` now.
     Renamed { name: String },
+    /// The folder `folder` is renamed, with the catalog's folders below it;
+    /// its photos' paths changed with it.
+    FolderRenamed { folder: FolderId },
     /// The folder is made, and in the catalog as `folder`.
     Created { folder: FolderId },
     /// Nothing changed, for this reason when there is one.
@@ -432,3 +447,5 @@ mod rename_tests;
 mod rules_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
