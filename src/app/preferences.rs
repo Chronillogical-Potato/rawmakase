@@ -757,38 +757,47 @@ impl Editor {
         }
         gap(ui);
         group(ui, "Monitor profile");
+        use super::monitor::MonitorProfile;
         let monitor = self.view.monitor.clone();
-        form_row(ui, "Profile", |ui| match &monitor {
-            Some(path) => {
-                value(ui, &path.file_name().unwrap_or_default().to_string_lossy());
-            }
-            None => {
-                value(ui, "sRGB");
-            }
+        form_row(ui, "Profile", |ui| {
+            value(
+                ui,
+                &super::monitor::describe(&monitor, self.view.system_display.display()),
+            )
         });
         let mut choose = false;
-        let mut srgb = false;
+        let mut chosen = None;
         form_row(ui, "", |ui| {
             choose = ui.button("Choose Profile…").clicked();
-            srgb = ui
-                .add_enabled(monitor.is_some(), egui::Button::new("Use sRGB"))
-                .clicked();
+            for (choice, label) in [
+                (MonitorProfile::System, "Use System Profile"),
+                (MonitorProfile::Srgb, "Use sRGB"),
+            ] {
+                if ui
+                    .add_enabled(monitor != choice, egui::Button::new(label))
+                    .clicked()
+                {
+                    chosen = Some(choice);
+                }
+            }
         });
         form_row(ui, "", |ui| {
             hint(
                 ui,
                 if cfg!(target_os = "macos") {
-                    "Keep sRGB to let macOS match colors to the current display automatically. A custom profile overrides this with manual monitor conversion."
+                    "The system profile lets macOS match colors to the current display. A chosen profile, or sRGB for a display set to sRGB, is applied instead with no matching by macOS."
+                } else if cfg!(windows) {
+                    "The system profile is the one Windows assigns to the display the window is on, unless Windows manages color itself. Choose another ICC profile, or sRGB for a display set to sRGB."
                 } else {
-                    "Photos are shown in this profile. Choose your display's calibrated ICC profile, or keep sRGB."
+                    "The system profile is not read on Linux yet, so photos are shown as sRGB. Choose your display's calibrated ICC profile."
                 },
             );
         });
         if choose {
             self.dialog(FileDialog::MonitorProfile, &ctx);
         }
-        if srgb {
-            self.view.monitor = None;
+        if let Some(choice) = chosen {
+            self.view.monitor = choice;
             let _ = self.save_session();
             self.schedule();
         }

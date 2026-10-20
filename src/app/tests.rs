@@ -1056,7 +1056,11 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
     editor.events(&ctx);
     let saved: crate::app::session::Session = serde_json::from_slice(&std::fs::read(path)?)?;
     assert_eq!(saved.last_path, editor.document.path);
-    assert_eq!(saved.monitor, editor.view.monitor);
+    assert_eq!(saved.monitor, Some(dir.path().join("display.icc")));
+    assert_eq!(
+        editor.view.monitor,
+        crate::app::monitor::MonitorProfile::Custom(dir.path().join("display.icc"))
+    );
     Ok(())
 }
 #[test]

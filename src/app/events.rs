@@ -37,7 +37,7 @@ impl Editor {
 
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
-                    self.view.monitor = Some(p);
+                    self.view.monitor = super::monitor::MonitorProfile::Custom(p);
                     let _ = self.save_session();
                     self.schedule();
                 }

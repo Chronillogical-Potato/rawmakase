@@ -7,7 +7,11 @@ use std::path::PathBuf;
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Session {
     pub last_path: Option<PathBuf>,
+    /// Preferences > Monitor profile: a chosen ICC profile; none follows the
+    /// system, or with `monitor_srgb` shows sRGB as it is.
     pub monitor: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub monitor_srgb: bool,
     /// Titles of panel sections the user collapsed; all others start open.
     #[serde(default)]
     pub collapsed: std::collections::BTreeSet<String>,

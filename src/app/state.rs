@@ -324,7 +324,9 @@ pub(super) struct ViewState {
     pub(super) masking: super::mask_tool::MaskTool,
     /// The Guided Upright tool's selection, drag and view options.
     pub(super) guided: super::guided_tool::GuidedTool,
-    pub(super) monitor: Option<PathBuf>,
+    pub(super) monitor: super::monitor::MonitorProfile,
+    /// The display profile the system assigns to the window's display.
+    pub(super) system_display: super::monitor::SystemProbe,
     pub(super) selected_band: usize,
     /// The Color Grading panel's view: 3-Way or one wheel.
     pub(super) grading: super::color_grading::GradingView,
@@ -363,7 +365,8 @@ impl Default for ViewState {
             wheel: Default::default(),
             masking: Default::default(),
             guided: Default::default(),
-            monitor: None,
+            monitor: Default::default(),
+            system_display: Default::default(),
             selected_band: 0,
             grading: Default::default(),
             selected_curve: 0,
@@ -570,6 +573,12 @@ impl PreviewState {
     }
 }
 impl ViewState {
+    /// The ICC profile renders convert to for the monitor, captured by each job.
+    pub(super) fn display_profile(&self) -> Option<PathBuf> {
+        self.monitor
+            .transform(self.system_display.display())
+            .map(Into::into)
+    }
     pub(crate) fn is(&self, tool: Tool) -> bool {
         self.tool == tool
     }

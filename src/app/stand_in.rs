@@ -134,7 +134,7 @@ impl Editor {
             photo,
             path,
             identity: super::preview_build::identity(&record, &self.raw_defaults, self.demosaic),
-            monitor: self.view.monitor.clone(),
+            monitor: self.view.display_profile(),
         })
     }
     /// Asks for the stored preview of the photo load `load` opens, showing a
