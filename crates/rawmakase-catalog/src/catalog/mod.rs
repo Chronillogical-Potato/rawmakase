@@ -14,6 +14,9 @@ pub struct Catalog {
     db: Db,
     /// The computer it is open on, whose folder locations apply.
     computer: locations::Computer,
+    /// The file object the catalog was when it opened, if that could be
+    /// told; file operations check it is still the one at its path.
+    file: Option<crate::storage::fsops::FileId>,
 }
 
 mod checksums;
@@ -25,6 +28,7 @@ mod develop_history;
 mod edit_records;
 mod edit_rows;
 mod edits;
+pub mod file_ops;
 pub mod folder_sync;
 mod format_upgrade;
 mod info;
@@ -80,10 +84,12 @@ impl Catalog {
         computer: &locations::Computer,
     ) -> Result<Self> {
         let location = location.into();
+        let (db, file) = file_ops::opening(&location, || Db::open(&location));
         let mut catalog = Self {
-            db: Db::open(&location)?,
+            db: db?,
             location,
             computer: computer.clone(),
+            file,
         };
         catalog.prepare()?;
         Ok(catalog)

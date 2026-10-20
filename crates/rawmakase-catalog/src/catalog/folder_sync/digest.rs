@@ -2,7 +2,8 @@
 //! its virtual copies. Synchronize takes it in the snapshot its scan works
 //! from and checks it again as it applies, so a family changed meanwhile
 //! (by another computer or an older release, which bump no generation) is
-//! left alone.
+//! left alone. File operations split it in two: where the family is
+//! ([`placement`]) and what the user made of it ([`user_state`]).
 use super::super::PhotoId;
 use super::super::db::{Reads, Row, Sql, sql};
 use super::super::value::{FromRow, FromValue, ValueError, ValueRef};
@@ -171,6 +172,107 @@ fn combine(mut members: Vec<(PhotoId, [u8; 32])>) -> FamilyDigest {
         sha.update(hash);
     }
     sha.finalize().into()
+}
+
+/// The tables only background reads write (checksums, photo info), which
+/// [`user_state`] leaves out so a queued read can't change it.
+pub(in crate::catalog) const BACKGROUND_TABLES: [&str; 2] = ["photo_checksums", "photo_info"];
+
+/// The `photos` columns [`user_state`] covers: all but where the photo is
+/// (`folder`, `filename`, which [`placement`] covers) and `captured`, the
+/// sort key background reads fill in.
+/// `user_state_covers_the_photo_columns` checks it against `schema.sql` and
+/// [`user_state`]'s query.
+#[cfg(test)]
+pub(in crate::catalog) const USER_COLUMNS: [&str; 14] = [
+    "id",
+    "original_path",
+    "rating",
+    "flag",
+    "label",
+    "format",
+    "copy_name",
+    "master_id",
+    "orientation",
+    "lightroom_develop",
+    "recipe",
+    "export_options",
+    "identity",
+    "edited_at",
+];
+
+/// The family of `master`: the master and every row whose master it is.
+/// `None` when `master` is no photo.
+fn members(db: &impl Reads, master: PhotoId) -> Result<Option<Vec<PhotoId>>> {
+    let members: Vec<PhotoId> = db.read(
+        sql!("SELECT id FROM photos WHERE id=? OR master_id=? ORDER BY id"),
+        &[&master, &master],
+    )?;
+    Ok(members.contains(&master).then_some(members))
+}
+
+/// Where the family of `master` is: each photo's id, master, folder and
+/// filename. `None` when `master` is no photo.
+pub(in crate::catalog) fn placement(
+    db: &impl Reads,
+    master: PhotoId,
+) -> Result<Option<FamilyDigest>> {
+    if members(db, master)?.is_none() {
+        return Ok(None);
+    }
+    let rows: Vec<Encoded> = db.read(
+        sql!(
+            "SELECT id, master_id, folder, filename FROM photos
+             WHERE id=? OR master_id=? ORDER BY id"
+        ),
+        &[&master, &master],
+    )?;
+    let mut sha = Sha256::new();
+    for row in rows {
+        sha.update((row.0.len() as u64).to_le_bytes());
+        sha.update(row.0);
+    }
+    Ok(Some(sha.finalize().into()))
+}
+
+/// What the user made of the family of `master`: [`family`]'s rows without
+/// where the photos are and without what only background reads write
+/// ([`BACKGROUND_TABLES`], `photos.captured`), so edits, History, metadata,
+/// keywords and collections changed by another connection or release are
+/// seen while a queued background result changes nothing. `None` when
+/// `master` is no photo.
+pub(in crate::catalog) fn user_state(
+    db: &impl Reads,
+    master: PhotoId,
+) -> Result<Option<FamilyDigest>> {
+    let Some(members) = members(db, master)? else {
+        return Ok(None);
+    };
+    let mut hashes = Vec::new();
+    for id in members {
+        let photo: Vec<Encoded> = db.read(
+            sql!(
+                "SELECT id, original_path, rating, flag, label, format, copy_name, master_id,
+                    orientation, lightroom_develop, recipe, export_options, identity, edited_at
+                 FROM photos WHERE id=?"
+            ),
+            &[&id],
+        )?;
+        let mut rows = PhotoRows {
+            photo: photo.into_iter().flat_map(|r| r.0).collect(),
+            tables: Vec::new(),
+        };
+        for (name, one, _) in &PHOTO_TABLES {
+            if BACKGROUND_TABLES.contains(name) {
+                rows.tables.push(Vec::new());
+                continue;
+            }
+            let found: Vec<Encoded> = db.read(*one, &[&id])?;
+            rows.tables.push(found.into_iter().map(|r| r.0).collect());
+        }
+        hashes.push((id, rows.hash()));
+    }
+    Ok(Some(combine(hashes)))
 }
 
 /// The digest of the family of `master` as `db` has it now: its photos (the

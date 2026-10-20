@@ -1,0 +1,358 @@
+//! File operations (#370, planned in #556): the one owner of changing where
+//! a photo is, on disk and in the catalog. A request is planned against a
+//! snapshot ([`plan`]), confirmed by the user ([`Plan::confirm`]), executed
+//! item by item under the catalog's operation lock with every disk step
+//! journalled first ([`execute`]), and anything a crash cut short is
+//! decided from the journal and the disk ([`recover`]).
+//!
+//! What it guarantees:
+//! - No byte of an original is lost or overwritten. A file leaves its path
+//!   only by an exclusive rename on its volume or by the system Trash;
+//!   nothing is unlinked, copied or replaced.
+//! - Catalog rows change only on positive evidence: they follow a file
+//!   proven at its new path (the same file object), and go only with a
+//!   Trash receipt and the file proven gone from its path. A file's absence
+//!   alone authorises nothing; what can't be proven is left as it was and
+//!   reported.
+//! - A rename keeps the file object, its bytes and its time, so a photo's
+//!   `Identity`, saved edit, checksum and caches stay valid.
+//!
+//! Policy (which photos and files an operation takes, what it refuses) is
+//! here; the file system calls are `storage::fsops`, reached through the
+//! [`disk`] seam, and the Trash is the app's, passed in as a [`Trash`].
+mod companions;
+mod conflicts;
+mod disk;
+mod execute;
+mod journal;
+mod lock;
+mod plan;
+mod preconditions;
+mod recover;
+
+pub use execute::execute;
+pub use journal::OperationId;
+pub(in crate::catalog) use lock::opening;
+pub use plan::plan;
+pub use recover::{Recovery, Resolution, Unfinished, UnfinishedMember, recover, resolve};
+
+use super::{CatalogLocation, FolderId, PhotoId};
+use std::fmt;
+use std::path::PathBuf;
+
+/// What the user asked for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileOp {
+    /// Takes photos out of the catalog with their edits and metadata; no
+    /// file changes. A master takes its virtual copies with it; a copy
+    /// alone goes alone.
+    RemoveFromCatalog { photos: Vec<PhotoId> },
+    /// Moves masters' files, with the companions only they read, into
+    /// catalog folder `to` on the same volume; their rows, copies included,
+    /// follow.
+    MovePhotos { photos: Vec<PhotoId>, to: FolderId },
+    /// Puts masters' files, with the companions only they read, in the
+    /// system Trash; then their rows, copies included, leave the catalog.
+    TrashPhotos { photos: Vec<PhotoId> },
+}
+
+/// One run of an operation, by which its outcome is read back from the
+/// journal, whatever happened to the thread that ran it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct BatchId(String);
+
+impl fmt::Display for BatchId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Why a photo the user chose is left out of an operation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// It is no longer in the catalog.
+    Unknown,
+    /// A virtual copy whose master wasn't chosen: it has no file of its own.
+    CopyOnly,
+    /// Its file is missing, or its folder or volume is offline.
+    Missing,
+    /// It is in that folder already.
+    AlreadyThere,
+    Refused(Refusal),
+}
+
+/// Why a photo's file can't be changed safely.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The destination is on another volume.
+    OtherVolume,
+    /// A link, a junction or a mount point is between its root folder and
+    /// it, or it is one itself.
+    NotPlain(PathBuf),
+    /// Another photo of the catalog is the same file: a second root or
+    /// folder over the same directory, a duplicate row or a hard link.
+    Shared,
+    /// It was chosen twice, as the same file through another photo.
+    Twice,
+    /// Its volume is read-only.
+    ReadOnly,
+    /// It is in the Trash, or in RAWmakase's own folders.
+    Protected,
+    /// The destination has a file or folder of that name, or a photo of the
+    /// catalog is named so there.
+    NameTaken(String),
+    /// Two photos of this operation would have that name there.
+    NameTwice(String),
+    /// That file there would read a companion arriving with it, or the
+    /// photo would read that file as its own.
+    CompanionClash(String),
+    /// Its file can't be read.
+    Unreadable(String),
+}
+
+impl fmt::Display for Skip {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unknown => f.write_str("It is no longer in the catalog."),
+            Self::CopyOnly => f.write_str("Only original files can be moved."),
+            Self::Missing => f.write_str("Its file is missing or offline."),
+            Self::AlreadyThere => f.write_str("It is in that folder already."),
+            Self::Refused(r) => r.fmt(f),
+        }
+    }
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OtherVolume => f.write_str(
+                "Moving between drives isn't available yet. Move it in Finder, then Synchronize Folder.",
+            ),
+            Self::NotPlain(p) => write!(
+                f,
+                "{} is a link or another volume inside its folder.",
+                p.display()
+            ),
+            Self::Shared => f.write_str("Another photo in the catalog is the same file."),
+            Self::Twice => f.write_str("The same file was chosen twice."),
+            Self::ReadOnly => f.write_str("Its volume is read-only."),
+            Self::Protected => f.write_str("It is in the Trash or in RAWmakase's own folders."),
+            Self::NameTaken(n) => write!(f, "A file or folder named {n} is already there."),
+            Self::NameTwice(n) => write!(f, "Two of the photos would be named {n} there."),
+            Self::CompanionClash(n) => {
+                write!(f, "{n} there would share an XMP sidecar with it.")
+            }
+            Self::Unreadable(e) => write!(f, "Its file can't be read: {e}"),
+        }
+    }
+}
+
+/// A chosen photo left out, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Skipped {
+    pub photo: PhotoId,
+    pub reason: Skip,
+}
+
+/// What a plan will do, counted for its confirmation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Summary {
+    /// Catalog photos it changes, virtual copies included.
+    pub photos: usize,
+    /// Of those, virtual copies.
+    pub copies: usize,
+    /// Of those, photos with an edit made in RAWmakase.
+    pub edited: usize,
+    /// Photo files it changes on disk.
+    pub files: usize,
+    /// Companion files (XMP sidecars, earlier releases' edit files) going
+    /// with them.
+    pub companions: usize,
+    /// Companions another file reads too, which stay where they are.
+    pub shared_companions: Vec<PathBuf>,
+    /// The photos' file names, in order.
+    pub names: Vec<String>,
+    /// Whether another computer uses the catalog, whose copies of the files
+    /// don't move with them.
+    pub other_computers: bool,
+}
+
+/// An operation planned and not yet confirmed. Nothing has changed.
+#[must_use]
+#[derive(Debug)]
+pub struct Plan {
+    batch: BatchId,
+    location: CatalogLocation,
+    computer: String,
+    kind: journal::Kind,
+    items: Vec<plan::Item>,
+    skipped: Vec<Skipped>,
+    summary: Summary,
+}
+
+impl Plan {
+    /// The run this plan's outcome will be journalled as.
+    pub fn batch(&self) -> &BatchId {
+        &self.batch
+    }
+    pub fn summary(&self) -> &Summary {
+        &self.summary
+    }
+    pub fn skipped(&self) -> &[Skipped] {
+        &self.skipped
+    }
+    /// Whether there is anything to do.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+    /// The user's confirmation, which only the confirming dialog's action
+    /// gives: it enforces the order of plan, confirm, execute, not that a
+    /// person clicked.
+    pub fn confirm(self) -> Confirmed {
+        Confirmed(self)
+    }
+}
+
+/// A plan the user confirmed, executed once.
+#[must_use]
+#[derive(Debug)]
+pub struct Confirmed(Plan);
+
+/// Where a Trash put a file: a path inside it (the item macOS returns, the
+/// file under the freedesktop `files/`, the Recycle Bin's item).
+#[must_use]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrashReceipt {
+    pub location: PathBuf,
+}
+
+/// Why a Trash didn't take a file. The file is where it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TrashError {
+    /// The volume has no Trash that can take it; nothing is deleted
+    /// instead.
+    Unsupported,
+    Failed(String),
+}
+
+impl fmt::Display for TrashError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsupported => f.write_str("Its volume has no Trash."),
+            Self::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// The system Trash. Implemented by the app over the OS, which is trusted
+/// to have moved the file when it gives a receipt; the catalog still
+/// removes rows only once the file is gone from its path as well.
+pub trait Trash {
+    fn trash(&self, path: &std::path::Path) -> Result<TrashReceipt, TrashError>;
+}
+
+/// Why file operations can't run.
+#[derive(Debug)]
+pub enum FileOpError {
+    /// Another RAWmakase window is changing files in this catalog.
+    Busy,
+    /// They can't be made safe for this catalog or here; the reason says
+    /// why.
+    Unsupported(&'static str),
+    /// The plan is of another catalog, or another computer.
+    WrongCatalog,
+    /// The unfinished operation is another computer's to decide.
+    OtherComputer,
+    /// The destination can't take files.
+    Destination(String),
+    /// The catalog couldn't be read or written.
+    Catalog(anyhow::Error),
+}
+
+impl From<anyhow::Error> for FileOpError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Catalog(e)
+    }
+}
+
+impl fmt::Display for FileOpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Busy => {
+                f.write_str("Another RAWmakase window is changing files in this catalog.")
+            }
+            Self::Unsupported(why) => f.write_str(why),
+            Self::WrongCatalog => f.write_str("The operation was planned for another catalog."),
+            Self::OtherComputer => {
+                f.write_str("The operation changed another computer's files; finish it there.")
+            }
+            Self::Destination(why) => f.write_str(why),
+            Self::Catalog(e) => write!(f, "{e:#}"),
+        }
+    }
+}
+
+impl std::error::Error for FileOpError {}
+
+/// What became of one item of a run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ItemResult {
+    /// Its rows left the catalog.
+    Removed,
+    /// Its files and rows are in folder `to` now.
+    Moved { to: FolderId },
+    /// Its files are in the Trash and its rows left the catalog.
+    Trashed,
+    /// Nothing changed, for this reason when there is one.
+    Unchanged(Option<String>),
+    /// It is unfinished and waits for the user (see [`recover`]).
+    NeedsRecovery(String),
+    /// The user left it unfinished.
+    Kept,
+    /// Its thread stopped before it finished; [`recover`] decides it.
+    Interrupted,
+}
+
+/// One item's outcome.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemOutcome {
+    pub operation: OperationId,
+    /// The catalog photos it concerns: removed, moved or untouched as
+    /// [`Self::result`] says. Removed ids may be given to new photos.
+    pub photos: Vec<PhotoId>,
+    pub result: ItemResult,
+}
+
+/// What a run did, read from the journal: the same after success, an
+/// error, a panic or a lost thread. Items a cancel or an error stopped
+/// before they were journalled are not in it, and are untouched.
+#[must_use]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Outcome {
+    pub items: Vec<ItemOutcome>,
+    /// Why the run stopped early, when the catalog couldn't be written: the
+    /// items after it are untouched. Only [`execute`] knows it.
+    pub stopped: Option<String>,
+}
+
+/// The outcome of `batch` in `catalog`, as journalled.
+pub fn outcome(catalog: &super::Catalog, batch: &BatchId) -> anyhow::Result<Outcome> {
+    let items = journal::of_batch(&catalog.db, &batch.0)?;
+    Ok(Outcome {
+        items: items.iter().map(recover::outcome_of).collect(),
+        stopped: None,
+    })
+}
+
+#[cfg(test)]
+mod journal_tests;
+#[cfg(test)]
+mod lock_tests;
+#[cfg(test)]
+mod plan_tests;
+#[cfg(test)]
+mod recover_tests;
+#[cfg(test)]
+mod rules_tests;
+#[cfg(test)]
+mod tests;

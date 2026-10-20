@@ -1,4 +1,6 @@
-use super::digest::{PHOTO_TABLES, every_family, family};
+use super::digest::{
+    BACKGROUND_TABLES, PHOTO_TABLES, USER_COLUMNS, every_family, family, placement, user_state,
+};
 use crate::catalog::Catalog;
 use anyhow::Result;
 
@@ -62,6 +64,80 @@ fn a_familys_digest_changes_with_any_of_its_rows() -> Result<()> {
         assert_eq!(every[&id], digest(&cat, id));
     }
     assert!(!every.contains_key(&copy));
+    Ok(())
+}
+
+#[test]
+fn user_state_covers_the_photo_columns() {
+    // Every `photos` column but where the photo is and its sort key.
+    let schema = include_str!("schema.sql");
+    let table = schema
+        .split("CREATE TABLE IF NOT EXISTS photos (")
+        .nth(1)
+        .and_then(|rest| rest.split(");").next())
+        .unwrap();
+    let mut columns: Vec<&str> = table
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    columns.retain(|c| !["folder", "filename", "captured"].contains(c));
+    let mut covered = USER_COLUMNS.to_vec();
+    columns.sort();
+    covered.sort();
+    assert_eq!(covered, columns);
+    // And the query reads exactly those.
+    let source = include_str!("folder_sync/digest.rs");
+    let query = source
+        .split("\"SELECT id, original_path")
+        .nth(1)
+        .and_then(|rest| rest.split("FROM photos").next())
+        .unwrap();
+    let mut read: Vec<&str> = ["id", "original_path"]
+        .into_iter()
+        .chain(query.split(',').map(str::trim).filter(|c| !c.is_empty()))
+        .collect();
+    read.sort();
+    assert_eq!(read, covered);
+    for table in BACKGROUND_TABLES {
+        assert!(PHOTO_TABLES.iter().any(|(t, ..)| *t == table));
+    }
+}
+
+#[test]
+fn placement_and_user_state_change_apart() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("a.dng"), b"synthetic raw a")?;
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    cat.add_folder(&folder)?;
+    let a = cat.photos()?[0].id;
+    let place = |cat: &Catalog| placement(&cat.db, a).unwrap().unwrap();
+    let user = |cat: &Catalog| user_state(&cat.db, a).unwrap().unwrap();
+    let (p0, u0) = (place(&cat), user(&cat));
+    // Background reads change neither.
+    cat.fill_capture_times(&[(a, "2024-05-01T12:00:00".into())])?;
+    cat.fill_photo_info(&[(a, None)])?;
+    assert_eq!((place(&cat), user(&cat)), (p0, u0));
+    // What the user does changes the user state, not the placement.
+    cat.set_metadata(a, 3, 0, "")?;
+    let u1 = user(&cat);
+    assert_ne!(u1, u0);
+    assert_eq!(place(&cat), p0);
+    // A copy changes both: it is a photo of the family somewhere.
+    cat.create_virtual_copy(a)?;
+    let (p2, u2) = (place(&cat), user(&cat));
+    assert_ne!(p2, p0);
+    assert_ne!(u2, u1);
+    // Where the family is changes the placement only.
+    cat.db_for_tests().execute(
+        "UPDATE photos SET filename='b.dng' WHERE folder IS NOT NULL",
+        [],
+    )?;
+    assert_ne!(place(&cat), p2);
+    assert_eq!(user(&cat), u2);
+    assert!(placement(&cat.db, crate::catalog::PhotoId(9999))?.is_none());
+    assert!(user_state(&cat.db, crate::catalog::PhotoId(9999))?.is_none());
     Ok(())
 }
 
