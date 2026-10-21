@@ -15,6 +15,7 @@ use super::conflicts::{Destination, Names};
 use super::folder::{FolderState, NewFolder, folder_name_problem};
 use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
+use super::tree::TreeMove;
 use super::{BatchId, FileOp, FileOpError, Plan, Refusal, Skip, Skipped, Summary};
 use crate::storage::Identity;
 use crate::storage::fsops::{self, Containment, EntryKind, FileId, FsError, VolumeId};
@@ -32,12 +33,15 @@ pub(super) struct Item {
     pub members: Vec<NewMember>,
     /// Companions another file reads too, which stay.
     pub shared: Vec<PathBuf>,
+    /// The photo's companions a rename leaves as they are: they have the
+    /// name it gives them already.
+    pub kept: Vec<PathBuf>,
     /// How the destination folder compares names.
     pub rules: Names,
 }
 
 row! {
-    struct PhotoRow {
+    pub(super) struct PhotoRow {
         id: PhotoId,
         folder: FolderId,
         filename: String,
@@ -47,14 +51,15 @@ row! {
 }
 
 /// A chosen family, before its files are looked at.
-struct Family {
-    master: PhotoId,
-    preconditions: Preconditions,
+pub(super) struct Family {
+    pub master: PhotoId,
+    pub preconditions: Preconditions,
 }
 
 /// Plans `op` in `catalog` on this computer. Reads the catalog in one
 /// snapshot and the files after it; changes nothing.
 pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
+    let mut stems = HashMap::new();
     let (kind, chosen, to, create) = match op {
         FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
         FileOp::MovePhotos { photos, to } => (Kind::MovePhotos, photos, Some(to), None),
@@ -70,6 +75,22 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             None,
             Some((root, parent, name)),
         ),
+        FileOp::RenamePhotos { renames } => {
+            let mut ids = Vec::new();
+            for (photo, stem) in renames {
+                ids.push(photo);
+                // The same photo given two names has neither.
+                let entry = stems.entry(photo).or_insert_with(|| Some(stem.clone()));
+                if entry.as_ref() != Some(&stem) {
+                    *entry = None;
+                }
+            }
+            (Kind::RenamePhotos, ids, None, None)
+        }
+        FileOp::RenameFolder { folder, name } => {
+            let tree = super::tree::rename(catalog, folder, &name)?;
+            return tree_plan(catalog, Kind::RenameFolder, tree);
+        }
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
     let mut skipped = Vec::new();
@@ -94,6 +115,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
                 preconditions: f.preconditions,
                 members: Vec::new(),
                 shared: Vec::new(),
+                kept: Vec::new(),
                 rules: UNKNOWN,
             })
             .collect(),
@@ -121,8 +143,16 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             }
             items
         }
+        Kind::RenamePhotos => {
+            let mut files = Files::new(catalog, &folders);
+            super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
+        }
+        Kind::RenameFolder => Vec::new(),
     };
     let mut summary = summarize(&items, &by_id, computers > 1);
+    if kind == Kind::RenamePhotos {
+        summary.renames = items.iter().filter_map(super::rename::names).collect();
+    }
     summary.folder = made.as_ref().map(|m| m.state.name.clone());
     skipped.sort_by_key(|s| s.photo);
     Ok(Plan {
@@ -131,8 +161,36 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
         computer: catalog.computer.id.clone(),
         kind,
         create: made,
+        tree: None,
         items,
         skipped,
+        summary,
+    })
+}
+
+/// The plan of folder change `tree`, of `kind`.
+fn tree_plan(catalog: &Catalog, kind: Kind, tree: TreeMove) -> Result<Plan, FileOpError> {
+    let computers: i64 = catalog
+        .db
+        .read_one(sql!("SELECT count(*) FROM computers"), &[])?;
+    let summary = Summary {
+        photos: tree.state.photos.len(),
+        other_computers: computers > 1,
+        folder: tree
+            .destination
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        ..Summary::default()
+    };
+    Ok(Plan {
+        batch: new_batch()?,
+        location: catalog.location.clone(),
+        computer: catalog.computer.id.clone(),
+        kind,
+        create: None,
+        tree: Some(tree),
+        items: Vec::new(),
+        skipped: Vec::new(),
         summary,
     })
 }
@@ -211,7 +269,7 @@ fn expand(
 
 /// Whether `path` is somewhere no operation touches: in a Trash, or in
 /// RAWmakase's own folders.
-fn protected(path: &Path) -> bool {
+pub(super) fn protected(path: &Path) -> bool {
     let trash = path.components().any(|c| {
         let name = c.as_os_str().to_string_lossy().to_lowercase();
         name == ".trash"
@@ -350,7 +408,7 @@ pub(super) fn occupied(
 }
 
 /// Where the files go, checked once.
-struct Target {
+pub(super) struct Target {
     /// The catalog's folder; `None` for one the plan makes, or one the
     /// catalog has no folder of its own for.
     folder: Option<FolderId>,
@@ -368,12 +426,12 @@ struct Target {
 
 /// The files side of planning: what is on disk, read once per folder and
 /// volume.
-struct Files<'a> {
-    catalog: &'a Catalog,
+pub(super) struct Files<'a> {
+    pub catalog: &'a Catalog,
     located: &'a HashMap<FolderId, Located>,
-    folders: Folders,
+    pub folders: Folders,
     listings: HashMap<PathBuf, Result<Vec<OsString>, String>>,
-    volumes: HashMap<VolumeId, bool>,
+    volumes: HashMap<VolumeId, Option<fsops::VolumeFacts>>,
 }
 
 impl<'a> Files<'a> {
@@ -387,18 +445,31 @@ impl<'a> Files<'a> {
         }
     }
 
-    fn listing(&mut self, dir: &Path) -> Result<Vec<OsString>, String> {
+    pub fn listing(&mut self, dir: &Path) -> Result<Vec<OsString>, String> {
         self.listings
             .entry(dir.to_path_buf())
             .or_insert_with(|| fsops::list(dir).map_err(|e| e.to_string()))
             .clone()
     }
 
-    fn read_only(&mut self, volume: VolumeId, path: &Path) -> bool {
+    /// The facts of `volume`, which `path` is on; `None` when they can't be
+    /// read.
+    fn volume(&mut self, volume: VolumeId, path: &Path) -> Option<fsops::VolumeFacts> {
         *self
             .volumes
             .entry(volume)
-            .or_insert_with(|| fsops::volume_facts(path).map_or(true, |v| v.read_only))
+            .or_insert_with(|| fsops::volume_facts(path).ok())
+    }
+
+    fn read_only(&mut self, volume: VolumeId, path: &Path) -> bool {
+        self.volume(volume, path).is_none_or(|v| v.read_only)
+    }
+
+    /// Whether a rename on `volume`, which `path` is on, can change only a
+    /// name's spelling.
+    pub fn renames_spelling(&mut self, volume: VolumeId, path: &Path) -> bool {
+        self.volume(volume, path)
+            .is_some_and(|v| v.renames_spelling)
     }
 
     /// Folder `to`, checked to take files.
@@ -535,7 +606,7 @@ impl<'a> Files<'a> {
 
     /// Family `f`'s item: its file and companions resolved and checked, or
     /// why it is left out.
-    fn family(
+    pub fn family(
         &mut self,
         f: Family,
         by_id: &HashMap<PhotoId, &PhotoRow>,
@@ -655,6 +726,7 @@ impl<'a> Files<'a> {
             preconditions,
             members,
             shared: stays,
+            kept: Vec::new(),
             rules: target.map_or(UNKNOWN, |t| t.rules),
         })
     }
@@ -731,7 +803,7 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
 
 /// Refuses every item one of whose files another item of the plan also
 /// takes: the same file object chosen twice, through two photos.
-fn refuse_twice(items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
+pub(super) fn refuse_twice(items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
     let mut count: HashMap<FileId, usize> = HashMap::new();
     for m in items.iter().flat_map(|i| &i.members) {
         *count.entry(m.id).or_default() += 1;

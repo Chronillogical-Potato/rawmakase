@@ -235,6 +235,17 @@ impl Library {
                                     name,
                                     folder,
                                 }) => self.request_new_folder(root, parent, name, folder),
+                                Some(TreeAction::RenameFolder {
+                                    folder,
+                                    root,
+                                    logical,
+                                }) => {
+                                    self.file_request = Some(super::FileRequest::RenameFolder {
+                                        folder,
+                                        root,
+                                        logical,
+                                    })
+                                }
                                 Some(TreeAction::Drop {
                                     folder,
                                     name,

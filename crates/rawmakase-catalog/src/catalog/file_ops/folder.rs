@@ -11,8 +11,9 @@ use super::super::locations::{join, logical_location};
 use super::super::sidecar::caseless;
 use super::super::{FolderId, RootId};
 use super::conflicts::Names;
-use super::disk::{Disk, Presence, parent, presence};
+use super::disk::{Disk, Presence, parent, presence, spelled};
 use super::journal::{self, Item, ItemState, Subject};
+use super::names::{self, NameProblem};
 use super::preconditions::RELOCATED;
 use crate::storage::fsops::{EntryKind, FileId, FsError};
 use anyhow::{Context, Result};
@@ -65,37 +66,27 @@ pub(super) struct Made {
 /// Why `name` can't be a folder's name, on any system the catalog may be
 /// used on; `None` when it can.
 pub fn folder_name_problem(name: &str) -> Option<&'static str> {
-    const RESERVED: [&str; 22] = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    let stem = name.split('.').next().unwrap_or_default().trim_end();
-    if name.trim().is_empty() {
-        Some("Give the folder a name.")
-    } else if name == "." || name == ".." {
-        Some("That name is taken by the system.")
-    } else if name.contains(['/', '\\']) {
-        Some("A folder's name can't have / or \\ in it.")
-    } else if name.chars().any(char::is_control) {
-        Some("A folder's name can't have control characters in it.")
-    } else if name.contains([':', '*', '?', '"', '<', '>', '|']) {
-        Some("A folder's name can't have : * ? \" < > or | in it, which Windows refuses.")
-    } else if name.ends_with(['.', ' ']) {
-        Some("A folder's name can't end in a dot or a space, which Windows refuses.")
-    } else if RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
-        Some("Windows keeps that name for a device.")
-    } else if name.len() > 255 {
-        Some("That name is too long.")
-    } else {
-        None
-    }
+    Some(match names::problem(name)? {
+        NameProblem::Empty => "Give the folder a name.",
+        NameProblem::Dots => "That name is taken by the system.",
+        NameProblem::Separator => "A folder's name can't have / or \\ in it.",
+        NameProblem::Control => "A folder's name can't have control characters in it.",
+        NameProblem::Windows => {
+            "A folder's name can't have : * ? \" < > or | in it, which Windows refuses."
+        }
+        NameProblem::Trailing => {
+            "A folder's name can't end in a dot or a space, which Windows refuses."
+        }
+        NameProblem::Device => "Windows keeps that name for a device.",
+        NameProblem::Long => "That name is too long.",
+    })
 }
 
 /// The catalog folders that hold logical path `logical` of `root`, or a
 /// path below it, as `sidecar::caseless` compares names, offline or
 /// missing ones included; and those of any root that resolve there on
 /// `computer`.
-fn in_catalog(
+pub(super) fn in_catalog(
     db: &impl Reads,
     computer: &str,
     root: RootId,
@@ -192,18 +183,7 @@ pub(super) fn made(disk: &dyn Disk, path: &Path) -> Result<(FileId, PathBuf), Fs
             "what was made is not a folder",
         )));
     }
-    let dir = parent(path);
-    let wanted = caseless(path.file_name().unwrap_or_default());
-    let names = disk.list(dir)?;
-    let mut spelled = names.iter().filter(|n| {
-        caseless(n) == wanted && disk.entry(&dir.join(n)).is_ok_and(|e| e.id == found.id)
-    });
-    match (spelled.next(), spelled.next()) {
-        (Some(name), None) => Ok((found.id, dir.join(name))),
-        _ => Err(FsError::Io(std::io::Error::other(
-            "the folder's name in its parent can't be told",
-        ))),
-    }
+    Ok((found.id, spelled(disk, path, found.id)?))
 }
 
 /// Adds the folder journalled `item` made to the catalog, in `w`'s

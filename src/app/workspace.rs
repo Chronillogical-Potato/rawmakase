@@ -152,6 +152,12 @@ impl Editor {
             Some(FileRequest::Delete(ids)) => self.request_photo_delete(ids, false),
             Some(FileRequest::Trash(ids)) => self.request_photo_trash(ids),
             Some(FileRequest::DeleteRejected) => self.request_rejected_delete(),
+            Some(FileRequest::Rename(ids)) => self.request_rename(ids),
+            Some(FileRequest::RenameFolder {
+                folder,
+                root,
+                logical,
+            }) => self.rename_folder(folder, root, logical),
             Some(FileRequest::Move { photos, to, name }) => {
                 self.request_photo_move(photos, to, name)
             }

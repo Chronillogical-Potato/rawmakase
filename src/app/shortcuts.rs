@@ -15,7 +15,7 @@ type Shortcut = (&'static str, &'static str);
 /// A titled group of shortcuts.
 type Group<'a> = (&'a str, &'a [Shortcut]);
 
-const LIBRARY: [Shortcut; 14] = [
+const LIBRARY: [Shortcut; 15] = [
     ("Arrows", "Move the active photo"),
     ("Home / End", "First / last photo"),
     ("Shift+Arrows / Shift+click", "Extend the selection"),
@@ -29,6 +29,10 @@ const LIBRARY: [Shortcut; 14] = [
     ("Alt+Delete", "Remove from the catalog"),
     ("Cmd+Alt+Shift+Delete", "Move to Trash"),
     ("Cmd+Delete", "Delete the rejected photos"),
+    (
+        "F2",
+        "Rename the photo, or the selected photos in capture order",
+    ),
     (
         "Cmd+Shift+S",
         "Sync the active photo's settings to the selection",

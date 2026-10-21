@@ -99,6 +99,42 @@ pub(super) fn of(
     found
 }
 
+/// The name companion `companion` of the file named `photo` takes when the
+/// photo is renamed `renamed`, so the same rule finds it: the photo's new
+/// name (or, for a RAW's stem sidecar, its new stem) and the companion's
+/// own ending, in its own case (`.xmp`, `.XMP`). `None` when `companion`
+/// isn't one of `photo`'s names.
+pub(super) fn renamed(photo: &OsStr, renamed: &OsStr, companion: &OsStr) -> Option<OsString> {
+    let (photo, renamed, companion) = (photo.to_str()?, renamed.to_str()?, companion.to_str()?);
+    const ENDINGS: [&str; 3] = [".xmp", ".rawmakase.json", ".rawmakase-local.json"];
+    let mut bases = vec![(photo.to_string(), renamed.to_string(), &ENDINGS[..])];
+    if crate::storage::is_raw(Path::new(photo)) {
+        let stem = |name: &str| {
+            Path::new(name)
+                .with_extension("")
+                .to_str()
+                .map(String::from)
+        };
+        bases.push((stem(photo)?, stem(renamed)?, &ENDINGS[..1]));
+    }
+    for (old, new, endings) in bases {
+        for ending in endings {
+            let Some(at) = companion.len().checked_sub(ending.len()) else {
+                continue;
+            };
+            let (Some(head), Some(tail)) = (companion.get(..at), companion.get(at..)) else {
+                continue;
+            };
+            if tail.eq_ignore_ascii_case(ending)
+                && caseless(OsStr::new(head)) == caseless(OsStr::new(&old))
+            {
+                return Some(format!("{new}{tail}").into());
+            }
+        }
+    }
+    None
+}
+
 /// Why the file named `photo` and its `carried` companions can't arrive in a
 /// folder whose names, once everything arriving there is in, will be
 /// `projected`: the name of a file there the photo would read as its

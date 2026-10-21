@@ -32,6 +32,9 @@ impl Editor {
                 }
                 // The dialog's own DialogClosed follows.
                 Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
+                Event::RenameOrdered(catalog, cancel, ordered) => {
+                    self.rename_ordered(catalog, cancel, *ordered)
+                }
                 Event::FileOpDone(batch, done) => self.file_op_done(batch, *done),
                 Event::FileOpsRecovered(catalog, recovered) => {
                     self.file_ops_recovered(catalog, *recovered)

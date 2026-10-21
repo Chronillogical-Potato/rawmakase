@@ -333,6 +333,8 @@ pub(in crate::app) enum PhotoAction {
     Remove,
     /// Move to Trash.
     Trash,
+    /// Rename Photo… or Rename Photos….
+    Rename,
     /// Move to Folder…: the photo's files to another catalog folder.
     MoveToFolder,
     /// Library › Previews: Build Standard-Sized Previews.
@@ -438,6 +440,10 @@ pub(in crate::app) fn photo_menu(
         menu_separator(ui);
         if menu_item(ui, "Read Metadata from Files…", "", true, false) {
             action = Some(PhotoAction::ReadMetadata);
+            ui.close();
+        }
+        if menu_item(ui, "Rename…", "F2", true, false) {
+            action = Some(PhotoAction::Rename);
             ui.close();
         }
         if menu_item(ui, "Move to Folder…", "", true, false) {

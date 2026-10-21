@@ -65,7 +65,29 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     Ok(VolumeFacts {
         local: is_local(path)?,
         read_only: vfs.f_flag.contains(StatVfsMountFlags::RDONLY),
+        renames_spelling: renames_spelling(path)?,
     })
+}
+
+/// APFS renames a name to another spelling of itself in place (tested in
+/// `a_case_only_rename_works_on_apfs`).
+#[cfg(target_vendor = "apple")]
+fn renames_spelling(path: &Path) -> Result<bool, FsError> {
+    let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
+    let kind: Vec<u8> = fs
+        .f_fstypename
+        .iter()
+        .take_while(|c| **c != 0)
+        .map(|c| *c as u8)
+        .collect();
+    Ok(kind == b"apfs")
+}
+
+/// Elsewhere a volume that folds names may find the new spelling taken, or
+/// rename nothing, so none is taken to.
+#[cfg(not(target_vendor = "apple"))]
+fn renames_spelling(_path: &Path) -> Result<bool, FsError> {
+    Ok(false)
 }
 
 /// macOS says so in the mount's flags.

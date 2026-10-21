@@ -260,7 +260,7 @@ fn decide(
     }
     match item.kind {
         // Rule 3.
-        Kind::MovePhotos
+        Kind::MovePhotos | Kind::RenamePhotos | Kind::RenameFolder
             if item
                 .members
                 .iter()
@@ -290,8 +290,10 @@ fn changed(
     folders: &Folders,
     item: &Item,
 ) -> Result<Option<String>> {
-    let Subject::Photos(pre) = &item.subject else {
-        return Ok(None);
+    let pre = match &item.subject {
+        Subject::Photos(pre) => pre,
+        Subject::Tree(tree) => return tree.check(&catalog.db, computer),
+        Subject::Folder(_) => return Ok(None),
     };
     if let Some(reason) = pre.check(&catalog.db, computer)? {
         return Ok(Some(reason.into()));
@@ -368,7 +370,7 @@ fn unfinished(item: &Item) -> Unfinished {
                 vec![Resolution::AddFolder, Resolution::Keep]
             }
             Subject::Folder(_) => vec![Resolution::Keep],
-            Subject::Photos(_) => vec![Resolution::PutBack, Resolution::Keep],
+            Subject::Photos(_) | Subject::Tree(_) => vec![Resolution::PutBack, Resolution::Keep],
         },
     }
 }
@@ -385,9 +387,22 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 (Kind::RemoveFromCatalog, _) => ItemResult::Removed,
                 (Kind::TrashPhotos, _) => ItemResult::Trashed,
                 (Kind::MovePhotos, Some((to, _))) => ItemResult::Moved { to: *to },
+                (Kind::RenamePhotos, _) => match item
+                    .members
+                    .first()
+                    .and_then(|m| m.destination.as_deref()?.file_name())
+                {
+                    Some(name) => ItemResult::Renamed {
+                        name: name.to_string_lossy().into_owned(),
+                    },
+                    None => ItemResult::Unchanged(item.error.clone()),
+                },
                 _ => ItemResult::Unchanged(item.error.clone()),
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
+            Subject::Tree(tree) => ItemResult::FolderRenamed {
+                folder: tree.folder,
+            },
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),
         ItemState::NeedsRecovery => {

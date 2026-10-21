@@ -9,7 +9,7 @@ use eframe::egui::{self, Key, Modifiers};
 use std::path::{Path, PathBuf};
 
 /// An editor on a catalog of `photos/` holding `names` (paths below it).
-fn editor_with_folders(
+pub(super) fn editor_with_folders(
     names: &[&str],
 ) -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>)> {
     let d = tempfile::tempdir()?;
@@ -31,7 +31,7 @@ fn editor_with_folders(
 }
 
 /// The photo whose file is `name` (below `photos/`).
-fn photo(e: &Editor, d: &tempfile::TempDir, name: &str) -> PhotoId {
+pub(super) fn photo(e: &Editor, d: &tempfile::TempDir, name: &str) -> PhotoId {
     let path = d.path().join("photos").join(name);
     let library = e.library.as_ref().unwrap();
     library
@@ -44,7 +44,7 @@ fn photo(e: &Editor, d: &tempfile::TempDir, name: &str) -> PhotoId {
 }
 
 /// Where the catalog says photo `id`'s file is, below `photos/`.
-fn at(e: &Editor, d: &tempfile::TempDir, id: PhotoId) -> String {
+pub(super) fn at(e: &Editor, d: &tempfile::TempDir, id: PhotoId) -> String {
     let library = e.library.as_ref().unwrap();
     let path = &library.photo(id).unwrap().path;
     let base = d.path().join("photos");
@@ -56,7 +56,7 @@ fn at(e: &Editor, d: &tempfile::TempDir, id: PhotoId) -> String {
 }
 
 /// The catalog folder whose logical path is `relative`.
-fn folder(e: &Editor, relative: &str) -> Option<FolderId> {
+pub(super) fn folder(e: &Editor, relative: &str) -> Option<FolderId> {
     let library = e.library.as_ref().unwrap();
     library
         .session
@@ -66,7 +66,7 @@ fn folder(e: &Editor, relative: &str) -> Option<FolderId> {
         .map(|f| f.id)
 }
 
-fn root(e: &Editor) -> crate::catalog::RootId {
+pub(super) fn root(e: &Editor) -> crate::catalog::RootId {
     e.library.as_ref().unwrap().session.roots[0].0
 }
 
@@ -150,7 +150,7 @@ fn move_to_folder_keeps_keys_from_the_photos_and_escape_closes_it() -> anyhow::R
 }
 
 /// A decoded photo: the half-size one first shown when `fast`.
-fn decoded(fast: bool) -> std::sync::Arc<crate::camera_data::CameraImage> {
+pub(super) fn decoded(fast: bool) -> std::sync::Arc<crate::camera_data::CameraImage> {
     std::sync::Arc::new(crate::camera_data::CameraImage {
         recovered: Default::default(),
         width: 2,
@@ -164,7 +164,7 @@ fn decoded(fast: bool) -> std::sync::Arc<crate::camera_data::CameraImage> {
 }
 
 /// Types `text` into the focused field.
-fn type_text(e: &mut Editor, text: &str) {
+pub(super) fn type_text(e: &mut Editor, text: &str) {
     frame(e, vec![egui::Event::Text(text.into())]);
 }
 

@@ -119,5 +119,7 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     Ok(VolumeFacts {
         local: !remote,
         read_only: flags & FILE_READ_ONLY_VOLUME != 0,
+        // Not tried on Windows' volumes yet.
+        renames_spelling: false,
     })
 }

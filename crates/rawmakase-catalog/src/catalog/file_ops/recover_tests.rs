@@ -664,12 +664,19 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
                 .filter(|_| rng.next(2) == 0)
                 .map(|p| p.id)
                 .collect();
-            let op = match rng.next(4) {
+            let op = match rng.next(5) {
                 0 => FileOp::TrashPhotos { photos },
                 1 => FileOp::RemoveFromCatalog { photos },
                 2 => FileOp::MovePhotos {
                     photos,
                     to: fx.folder("one"),
+                },
+                // Names that sometimes clash, chain or are the photo's own.
+                3 => FileOp::RenamePhotos {
+                    renames: photos
+                        .into_iter()
+                        .map(|p| (p, ["a", "b", "x", "y", "B"][rng.next(5)].to_string()))
+                        .collect(),
                 },
                 _ => FileOp::MovePhotos {
                     photos,
