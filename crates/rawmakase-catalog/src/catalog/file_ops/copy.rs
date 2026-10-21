@@ -105,7 +105,7 @@ fn problem(e: FsError) -> Problem {
 }
 
 /// Why a member's copy didn't finish: a disk step, or the journal.
-enum Failed {
+pub(super) enum Failed {
     Problem(Problem),
     Journal(anyhow::Error),
 }
@@ -165,18 +165,51 @@ fn copy_one(
     cancel: &AtomicBool,
 ) -> Result<(), Failed> {
     let disk = cx.disk;
+    let (temp, made) = write(
+        cx,
+        catalog,
+        (id, ordinal),
+        (&m.source, m.id, &m.identity),
+        temp,
+        cancel,
+    )?;
+    // 4. Its name, never replacing one there.
+    disk.rename(&temp, to).map_err(|e| match e {
+        FsError::AlreadyExists => Problem::NameTaken(name(to)),
+        e => problem(e),
+    })?;
+    disk.sync_dir(parent(to)).map_err(problem)?;
+    // As the disk spells it, which a volume that normalises names may not
+    // as given.
+    let at = spelled(disk, to, made).map_err(problem)?;
+    catalog
+        .db
+        .write(|w| journal::set_copied(w, id, ordinal, &at))
+        .map_err(Failed::Journal)?;
+    Ok(())
+}
+
+/// Steps 1 to 3 for member `ordinal` of item `id`: the original `source`
+/// (file object and `Identity` as planned) copied into a file made at
+/// `temp` where nothing had its name, journalled as it goes, synced, given
+/// the original's time, read back, and the original checked to be still
+/// what was copied. Returns the copy's path as the disk spells it, and its
+/// file object.
+pub(super) fn write(
+    cx: &Cx<'_>,
+    catalog: &mut Catalog,
+    (id, ordinal): (OperationId, i64),
+    (source, source_id, identity): (&Path, FileId, &Identity),
+    temp: &Path,
+    cancel: &AtomicBool,
+) -> Result<(PathBuf, FileId), Failed> {
+    let disk = cx.disk;
     let journal = |catalog: &mut Catalog, f: &dyn Fn(&mut Write<'_>) -> Result<()>| {
         catalog.db.write(|w| f(w)).map_err(Failed::Journal)
     };
     if cancel.load(Ordering::Relaxed) {
         return Err(Problem::Stopped.into());
     }
-    let name = |p: &Path| {
-        p.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    };
     // 1. Made where nothing is; what a crash leaves before it is journalled
     // is found by its name, empty.
     disk.create_file(temp).map_err(|e| match e {
@@ -189,13 +222,13 @@ fn copy_one(
     }
     // As the disk spells it (HFS+ keeps names decomposed), which every
     // later step and recovery find it by.
-    let temp = &spelled(disk, temp, made.id).map_err(problem)?;
+    let temp = spelled(disk, temp, made.id).map_err(problem)?;
     journal(catalog, &|w| {
-        journal::set_copying(w, id, ordinal, made.id, temp)
+        journal::set_copying(w, id, ordinal, made.id, &temp)
     })?;
     // 2. Copied, durable, with the original's time.
     let content = disk
-        .copy_into(&m.source, temp, made.id, &mut |_| {
+        .copy_into(source, &temp, made.id, &mut |_| {
             !cancel.load(Ordering::Relaxed)
         })
         .map_err(|e| match e {
@@ -206,27 +239,17 @@ fn copy_one(
     // Written whole: from here it is never removed while its original
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
-    disk.sync_file(temp).map_err(problem)?;
-    disk.copy_times(&m.source, temp).map_err(problem)?;
-    disk.sync_file(temp).map_err(problem)?;
+    disk.sync_file(&temp).map_err(problem)?;
+    disk.copy_times(source, &temp).map_err(problem)?;
+    disk.sync_file(&temp).map_err(problem)?;
     // 3. Read back, and the original still what was copied.
-    if disk.hash(temp).map_err(problem)? != content {
-        return Err(Problem::Mismatch(m.source.clone()).into());
+    if disk.hash(&temp).map_err(problem)? != content {
+        return Err(Problem::Mismatch(source.to_path_buf()).into());
     }
-    if !unchanged(disk, &m.source, m.id, &m.identity) {
-        return Err(Problem::Changed(m.source.clone()).into());
+    if !unchanged(disk, source, source_id, identity) {
+        return Err(Problem::Changed(source.to_path_buf()).into());
     }
-    // 4. Its name, never replacing one there.
-    disk.rename(temp, to).map_err(|e| match e {
-        FsError::AlreadyExists => Problem::NameTaken(name(to)),
-        e => problem(e),
-    })?;
-    disk.sync_dir(parent(to)).map_err(problem)?;
-    // As the disk spells it, which a volume that normalises names may not
-    // as given.
-    let at = spelled(disk, to, made.id).map_err(problem)?;
-    journal(catalog, &|w| journal::set_copied(w, id, ordinal, &at))?;
-    Ok(())
+    Ok((temp, made.id))
 }
 
 /// Whether `path` is file object `id` with `identity`, looked up by its
