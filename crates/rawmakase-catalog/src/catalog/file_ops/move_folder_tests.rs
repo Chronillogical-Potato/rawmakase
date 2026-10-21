@@ -368,3 +368,99 @@ fn every_failed_commit_of_a_folder_move_ends_proven_and_a_restart_finishes_it() 
     }
     Ok(())
 }
+
+/// Photos two levels down: the catalog has folders for `2024/day1` and
+/// `2024/day2`, none for `2024`.
+fn between_files() -> Fx {
+    fixture(&[
+        "2024/day1/a.NEF",
+        "2024/day1/a.xmp",
+        "2024/day2/b.NEF",
+        "trips/c.NEF",
+    ])
+}
+
+/// Whether the catalog has a folder of its own at `relative`.
+fn has_folder(fx: &Fx, relative: &str) -> bool {
+    let path = fx.root.join(relative);
+    fx.cat.folders().unwrap().iter().any(|f| f.path == path)
+}
+
+#[test]
+fn a_folder_the_catalog_has_no_folder_of_its_own_for_moves_with_those_below() -> Result<()> {
+    let mut fx = between_files();
+    assert!(!has_folder(&fx, "2024"));
+    let (a, b) = (fx.photo("2024/day1/a.NEF"), fx.photo("2024/day2/b.NEF"));
+    let (day1, day2) = (fx.folder("2024/day1"), fx.folder("2024/day2"));
+    let dir_id = fsops::entry(&fx.root.join("2024"))?.id;
+    let op = move_folder(&fx, "2024", "trips");
+    assert_eq!(fx.plan(op.clone()).summary().photos, 2);
+    let outcome = fx.run(op, &NoTrash, &Faulty::default());
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    assert!(!fx.root.join("2024").exists());
+    assert_eq!(fsops::entry(&fx.root.join("trips/2024"))?.id, dir_id);
+    assert!(fx.root.join("trips/2024/day1/a.xmp").is_file());
+    let rows = fx.rows();
+    assert_eq!(rows[&a], "trips/2024/day1/a.NEF");
+    assert_eq!(rows[&b], "trips/2024/day2/b.NEF");
+    assert_eq!(logical(&fx, day1).as_deref(), Some("trips/2024/day1"));
+    assert_eq!(logical(&fx, day2).as_deref(), Some("trips/2024/day2"));
+    // Still no folder of its own, and back up to the root folder.
+    assert!(!has_folder(&fx, "trips/2024"));
+    let outcome = fx.run(
+        move_folder(&fx, "trips/2024", ""),
+        &NoTrash,
+        &Faulty::default(),
+    );
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    assert_eq!(fx.rows()[&b], "2024/day2/b.NEF");
+    Ok(())
+}
+
+#[test]
+fn a_folder_with_no_catalog_folder_at_or_below_it_is_refused() -> Result<()> {
+    let fx = fixture(&["day/a.NEF", "trips/c.NEF"]);
+    // A folder on disk only, one nowhere, and a name only the start of one.
+    std::fs::create_dir(fx.root.join("disk only"))?;
+    for folder in ["disk only", "nowhere", "da"] {
+        let why = refusal(&fx, move_folder(&fx, folder, "trips"));
+        assert!(why.contains("no longer in the catalog"), "{folder}: {why}");
+    }
+    assert!(fx.root.join("disk only").is_dir());
+    Ok(())
+}
+
+#[test]
+fn every_fault_at_every_step_moving_a_folder_with_no_catalog_folder_ends_proven() {
+    let mut runs = 0;
+    for at in [Op::Rename, Op::Sync] {
+        for nth in 0..2 {
+            for fault in [Fault::Fail, Fault::CrashBefore, Fault::CrashAfter] {
+                let case = format!("{at:?} {nth} {fault:?}");
+                let mut fx = between_files();
+                let day1 = fx.folder("2024/day1");
+                let was = before(&fx);
+                let disk = Faulty::at(at, nth, fault);
+                let op = move_folder(&fx, "2024", "trips");
+                let (batch, recovery) = scenario(&mut fx, op, &disk);
+                check(&fx, &was, &recovery, &batch);
+                let (old, new) = (fx.root.join("2024"), fx.root.join("trips/2024"));
+                assert!(old.is_dir() != new.is_dir(), "{case}");
+                let moved = logical(&fx, day1).as_deref() == Some("trips/2024/day1");
+                if moved != new.is_dir() {
+                    assert!(!recovery.unfinished.is_empty(), "{case}: unreported");
+                }
+                for u in &recovery.unfinished {
+                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    assert!(
+                        matches!(back.result, ItemResult::Unchanged(_)),
+                        "{case}: {back:?}"
+                    );
+                }
+                check(&fx, &was, &Recovery::default(), &batch);
+                runs += 1;
+            }
+        }
+    }
+    assert!(runs >= 9);
+}

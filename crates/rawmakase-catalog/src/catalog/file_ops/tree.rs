@@ -1,5 +1,7 @@
 //! Renaming a folder (Rename Folder…) or moving it into another folder of
-//! its root (Move Folder…): the same change with another destination. One
+//! its root (Move Folder…): the same change with another destination. The
+//! folder is a logical path of its root: a catalog folder, or one the
+//! catalog has folders below but none of its own for. One
 //! exclusive rename of its directory on its volume, and the catalog's
 //! folders of the whole subtree re-keyed to the new logical path, `folder_paths` and the legacy
 //! `folders.relative_path` alike. Photos keep their rows: their folders
@@ -224,8 +226,9 @@ pub(super) fn rename(
     plan_to(catalog, root, folder, &to)
 }
 
-/// Refuses the folder at logical path `folder` of `root` unless it is a
-/// folder of the catalog, and not a root.
+/// Refuses the folder at logical path `folder` of `root` unless the
+/// catalog has a folder there or below it (`2024` above `2024/day1` is
+/// one, though it has no folder of its own), and it isn't a root.
 fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     if folder.is_empty() {
@@ -234,7 +237,7 @@ fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpErro
     let located = catalog.db.snapshot(|s| catalog.locate_folders(s))?;
     if !located
         .values()
-        .any(|f| f.root == root && f.logical == folder)
+        .any(|f| f.root == root && below(&f.logical, folder))
     {
         return Err(refuse("The folder is no longer in the catalog."));
     }

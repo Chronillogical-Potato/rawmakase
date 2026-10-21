@@ -561,3 +561,19 @@ fn a_root_added_inside_since_planning_keeps_the_folder_where_it_is() -> Result<(
     assert!(!fx.root.join("Other").exists());
     Ok(())
 }
+
+#[test]
+fn a_folder_the_catalog_has_no_folder_of_its_own_for_is_renamed_with_those_below() -> Result<()> {
+    let mut fx = fixture(&["2024/day1/a.NEF", "2024/day2/b.NEF"]);
+    let (a, day1) = (fx.photo("2024/day1/a.NEF"), fx.folder("2024/day1"));
+    let outcome = fx.run(
+        rename_folder(&fx, "2024", "2024 trip"),
+        &NoTrash,
+        &Faulty::default(),
+    );
+    assert_eq!(results(&outcome), [ItemResult::FolderRenamed]);
+    assert!(fx.root.join("2024 trip/day2/b.NEF").is_file());
+    assert_eq!(fx.rows()[&a], "2024 trip/day1/a.NEF");
+    assert_eq!(fx.folder("2024 trip/day1"), day1, "the same folder");
+    Ok(())
+}
