@@ -646,8 +646,8 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
             _ => None,
         })
         .collect();
-    let folder_renamed = count(|r| matches!(r, ItemResult::FolderRenamed { .. })) > 0;
-    let folder_moved = count(|r| matches!(r, ItemResult::FolderMoved { .. })) > 0;
+    let folder_renamed = count(|r| matches!(r, ItemResult::FolderRenamed)) > 0;
+    let folder_moved = count(|r| matches!(r, ItemResult::FolderMoved)) > 0;
     let last = |path: &str| path.rsplit('/').next().unwrap_or_default().to_string();
     let mut text = match verb {
         Verb::Rename {
@@ -694,8 +694,8 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
             | ItemResult::Moved { .. }
             | ItemResult::Trashed
             | ItemResult::Renamed { .. }
-            | ItemResult::FolderRenamed { .. }
-            | ItemResult::FolderMoved { .. }
+            | ItemResult::FolderRenamed
+            | ItemResult::FolderMoved
             | ItemResult::Created { .. } => None,
             ItemResult::Unchanged(why) => Some(why.clone().unwrap_or_else(|| "unchanged".into())),
             ItemResult::NeedsRecovery(why) => Some(why.clone()),
@@ -1118,7 +1118,7 @@ impl Editor {
             && outcome.items.iter().any(|i| {
                 matches!(
                     i.result,
-                    ItemResult::FolderRenamed { .. } | ItemResult::FolderMoved { .. }
+                    ItemResult::FolderRenamed | ItemResult::FolderMoved
                 )
             })
             && let Some(library) = &mut self.library
@@ -1147,7 +1147,7 @@ impl Editor {
         let folder_changed = outcome.items.iter().any(|i| {
             matches!(
                 i.result,
-                ItemResult::FolderRenamed { .. } | ItemResult::FolderMoved { .. }
+                ItemResult::FolderRenamed | ItemResult::FolderMoved
             )
         });
         // Each a photo whose file is at another path now.
@@ -1156,8 +1156,8 @@ impl Editor {
                 r,
                 ItemResult::Moved { .. }
                     | ItemResult::Renamed { .. }
-                    | ItemResult::FolderRenamed { .. }
-                    | ItemResult::FolderMoved { .. }
+                    | ItemResult::FolderRenamed
+                    | ItemResult::FolderMoved
             )
         });
         let created = outcome

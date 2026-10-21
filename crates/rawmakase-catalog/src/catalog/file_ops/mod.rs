@@ -78,16 +78,21 @@ pub enum FileOp {
     /// their rows, copies included, follow. All or none: if one can't be
     /// renamed, none is.
     RenamePhotos { renames: Vec<(PhotoId, String)> },
-    /// Gives catalog folder `folder` the name `name`, on disk and in the
-    /// catalog, with every catalog folder below it; their photos follow.
-    RenameFolder { folder: FolderId, name: String },
-    /// Moves catalog folder `folder` into logical folder `parent` of
-    /// `root` (which the catalog may have no folder of its own for), on the
-    /// same volume, with every catalog folder below it; their photos
-    /// follow. Only within the folder's own root.
-    MoveFolder {
-        folder: FolderId,
+    /// Gives the folder at logical path `folder` of `root` the name
+    /// `name`, on disk and in the catalog, with every catalog folder below
+    /// it; their photos follow.
+    RenameFolder {
         root: RootId,
+        folder: String,
+        name: String,
+    },
+    /// Moves the folder at logical path `folder` of `root` into logical
+    /// folder `parent` of the same root (either may be a folder the catalog
+    /// has no folder of its own for), on the same volume, with every
+    /// catalog folder below it; their photos follow.
+    MoveFolder {
+        root: RootId,
+        folder: String,
         parent: String,
     },
 }
@@ -394,12 +399,12 @@ pub enum ItemResult {
     Trashed,
     /// Its files are renamed: the photo is named `name` now.
     Renamed { name: String },
-    /// The folder `folder` is renamed, with the catalog's folders below it;
-    /// its photos' paths changed with it.
-    FolderRenamed { folder: FolderId },
-    /// The folder `folder` is moved, with the catalog's folders below it;
-    /// its photos' paths changed with it.
-    FolderMoved { folder: FolderId },
+    /// The folder is renamed, with the catalog's folders below it; their
+    /// photos' paths changed with it.
+    FolderRenamed,
+    /// The folder is moved, with the catalog's folders below it; their
+    /// photos' paths changed with it.
+    FolderMoved,
     /// The folder is made, and in the catalog as `folder`.
     Created { folder: FolderId },
     /// Nothing changed, for this reason when there is one.

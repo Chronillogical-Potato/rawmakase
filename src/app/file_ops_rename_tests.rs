@@ -154,7 +154,7 @@ fn rename_folder_renames_it_on_disk_and_in_the_catalog() -> anyhow::Result<()> {
     );
     let trip = folder(&e, "trip").unwrap();
     let r = root(&e);
-    e.rename_folder(trip, r, "trip".into());
+    e.rename_folder(r, "trip".into());
     frame(&mut e, Vec::new());
     retype(&mut e, "Iceland");
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -172,9 +172,8 @@ fn rename_folder_renames_it_on_disk_and_in_the_catalog() -> anyhow::Result<()> {
 #[test]
 fn a_folder_name_taken_there_renames_nothing_and_says_why() -> anyhow::Result<()> {
     let (d, mut e, _) = editor_with_folders(&["trip/a.RAF", "other/b.RAF"])?;
-    let trip = folder(&e, "trip").unwrap();
     let r = root(&e);
-    e.rename_folder(trip, r, "trip".into());
+    e.rename_folder(r, "trip".into());
     frame(&mut e, Vec::new());
     retype(&mut e, "other");
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -253,7 +252,7 @@ fn an_empty_folder_renamed_is_shown_by_its_new_name() -> anyhow::Result<()> {
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
     let empty = folder(&e, "empty").expect("made");
-    e.rename_folder(empty, r, "empty".into());
+    e.rename_folder(r, "empty".into());
     frame(&mut e, Vec::new());
     retype(&mut e, "Selects");
     tap(&mut e, Key::Enter, Modifiers::NONE);

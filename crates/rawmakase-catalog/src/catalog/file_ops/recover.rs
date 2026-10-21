@@ -400,13 +400,9 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 _ => ItemResult::Unchanged(item.error.clone()),
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
-            Subject::Tree(tree) => match item.kind {
-                Kind::MoveFolder => ItemResult::FolderMoved {
-                    folder: tree.folder,
-                },
-                _ => ItemResult::FolderRenamed {
-                    folder: tree.folder,
-                },
+            Subject::Tree(_) => match item.kind {
+                Kind::MoveFolder => ItemResult::FolderMoved,
+                _ => ItemResult::FolderRenamed,
             },
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),

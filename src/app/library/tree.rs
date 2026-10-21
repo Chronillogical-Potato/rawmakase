@@ -96,24 +96,19 @@ pub(super) enum TreeAction {
         name: String,
         folder: Option<FolderId>,
     },
-    /// Rename Folder…: catalog folder `folder` of `root`, at logical path
-    /// `logical`.
+    /// Rename Folder…: the folder of `root` at logical path `logical`.
     RenameFolder {
-        folder: FolderId,
         root: RootId,
         logical: String,
     },
-    /// Move Folder…: catalog folder `folder` of `root`, at logical path
-    /// `logical`.
+    /// Move Folder…: the folder of `root` at logical path `logical`.
     MoveFolder {
-        folder: FolderId,
         root: RootId,
         logical: String,
     },
-    /// Catalog folder `folder` of `root`, at logical path `from`, dropped
-    /// on logical folder `to` of that root.
+    /// The folder of `root` at logical path `from`, dropped on logical
+    /// folder `to` of that root.
     DropFolder {
-        folder: FolderId,
         root: RootId,
         from: String,
         to: String,
@@ -181,19 +176,18 @@ pub(super) fn folder_tree_row(
 ) -> Option<TreeAction> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
-    // A catalog folder that isn't a root can be dragged onto another
-    // folder of its root.
-    let movable = node.folder.filter(|_| node.root.is_none());
-    let sense = if movable.is_some() {
+    // Any folder but a root can be dragged onto another folder of its
+    // root, one with no catalog folder of its own (only folders below) too.
+    let movable = node.root.is_none();
+    let sense = if movable {
         Sense::click_and_drag()
     } else {
         Sense::click()
     };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), sense);
     // Named from what is dragged: a row's id is its place in the panel.
-    if let Some(folder) = movable
+    if movable
         && let Some(dragged) = super::grid::drag_once(&response, || super::DraggedFolder {
-            folder,
             root: node.in_root,
             from: node.logical.clone(),
         })
@@ -310,7 +304,6 @@ pub(super) fn folder_tree_row(
         && takes(&dragged)
     {
         action = Some(TreeAction::DropFolder {
-            folder: dragged.folder,
             root: dragged.root,
             from: dragged.from.clone(),
             to: node.logical.clone(),
@@ -373,21 +366,15 @@ pub(super) fn folder_tree_row(
             ui.close();
         }
         // A root is renamed in Finder, then located again.
-        if let (Some(folder), None) = (node.folder, node.root)
-            && ui.button("Rename Folder…").clicked()
-        {
+        if movable && ui.button("Rename Folder…").clicked() {
             action = Some(TreeAction::RenameFolder {
-                folder,
                 root: node.in_root,
                 logical: node.logical.clone(),
             });
             ui.close();
         }
-        if let Some(folder) = movable
-            && ui.button("Move Folder…").clicked()
-        {
+        if movable && ui.button("Move Folder…").clicked() {
             action = Some(TreeAction::MoveFolder {
-                folder,
                 root: node.in_root,
                 logical: node.logical.clone(),
             });
