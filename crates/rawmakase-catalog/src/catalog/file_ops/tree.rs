@@ -215,6 +215,7 @@ fn located(db: &impl Reads, root: RootId, logical: &str, folders: &[FolderId]) -
 /// `name`, on this computer.
 pub(super) fn rename(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     folder: &str,
     name: &str,
@@ -233,7 +234,7 @@ pub(super) fn rename(
     if to == folder {
         return Err(refuse("It has that name already."));
     }
-    plan_to(catalog, root, folder, root, &to)
+    plan_to(catalog, disk, root, folder, root, &to)
 }
 
 /// Refuses the folder at logical path `folder` of `root` unless the
@@ -260,6 +261,7 @@ fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpErro
 /// folder of its own for, as for New Folder Inside.
 pub(super) fn relocate(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     folder: &str,
     to_root: RootId,
@@ -279,7 +281,7 @@ pub(super) fn relocate(
     if same && caseless(OsStr::new(&to)) == caseless(OsStr::new(folder)) {
         return Err(refuse("It is in that folder already."));
     }
-    plan_to(catalog, root, folder, to_root, &to)
+    plan_to(catalog, disk, root, folder, to_root, &to)
 }
 
 /// Plans moving the folder at logical path `from` of `root` to logical
@@ -287,6 +289,7 @@ pub(super) fn relocate(
 /// resolve and be online here.
 fn plan_to(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     from: &str,
     to_root: RootId,
@@ -300,12 +303,12 @@ fn plan_to(
         .ok_or_else(|| refuse("The folder is offline or missing."))?;
     // Its directory, as the disk spells it.
     let source = plain(&anchor, &from_path)?;
-    let found = fsops::entry(&source).map_err(|e| refuse(&e.to_string()))?;
+    let found = disk.entry(&source).map_err(|e| refuse(&e.to_string()))?;
     if found.kind != EntryKind::Directory {
         return Err(refuse("The folder is not a folder on disk."));
     }
-    let source = super::disk::spelled(&super::disk::Real, &source, found.id)
-        .map_err(|e| refuse(&e.to_string()))?;
+    let source =
+        super::disk::spelled(disk, &source, found.id).map_err(|e| refuse(&e.to_string()))?;
     // Where it goes: below its new parent, as the catalog places it.
     let mut up: Vec<&str> = names(to).collect();
     let name = up.pop().context("no folder name")?.to_string();
@@ -313,7 +316,7 @@ fn plan_to(
     let (parent_anchor, parent_path) = logical_anchored(db, computer, to_root, &to_parent)?
         .ok_or_else(|| refuse("The destination is offline or missing."))?;
     let dir = plain(&parent_anchor, &parent_path)?;
-    let at = fsops::entry(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let at = disk.entry(&dir).map_err(|e| refuse(&e.to_string()))?;
     if at.kind != EntryKind::Directory {
         return Err(refuse("The destination is not a folder on disk."));
     }
@@ -332,7 +335,9 @@ fn plan_to(
             "Folders in the Trash, or holding the catalog or RAWmakase's own folders, can't be renamed or moved.",
         ));
     }
-    let facts = fsops::volume_facts(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let facts = disk
+        .volume_facts(&dir)
+        .map_err(|e| refuse(&e.to_string()))?;
     if facts.read_only {
         return Err(refuse("The folder's volume is read-only."));
     }
@@ -342,7 +347,7 @@ fn plan_to(
             "The catalog places a folder of that name elsewhere.",
         ));
     }
-    let listing = fsops::list(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let listing = disk.list(&dir).map_err(|e| refuse(&e.to_string()))?;
     let planned = TreeMove {
         state: TreeState {
             root,
@@ -367,7 +372,7 @@ fn plan_to(
     {
         return Err(refuse("It is in that folder already."));
     }
-    if let Some(why) = taken(&super::disk::Real, &planned)? {
+    if let Some(why) = taken(disk, &planned)? {
         return Err(FileOpError::Destination(why));
     }
     if let Some(why) = planned.state.check(db, computer)? {

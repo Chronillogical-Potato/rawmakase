@@ -137,7 +137,7 @@ pub(super) fn plan_with(
             (Kind::RenamePhotos, ids, None, None)
         }
         FileOp::RenameFolder { root, folder, name } => {
-            let tree = super::tree::rename(catalog, root, &folder, &name)?;
+            let tree = super::tree::rename(catalog, disk, root, &folder, &name)?;
             return tree_plan(catalog, Kind::RenameFolder, tree);
         }
         FileOp::MoveFolder {
@@ -146,7 +146,7 @@ pub(super) fn plan_with(
             to_root,
             parent,
         } => {
-            let tree = super::tree::relocate(catalog, root, &folder, to_root, &parent)?;
+            let tree = super::tree::relocate(catalog, disk, root, &folder, to_root, &parent)?;
             return tree_plan(catalog, Kind::MoveFolder, tree);
         }
     };
