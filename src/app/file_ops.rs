@@ -410,10 +410,9 @@ fn question(
     }
 }
 
-/// What a move to another drive does: copies the files there, checks
-/// them, then puts their originals in the Trash.
-fn across_line(files: usize, companions: usize, across: &file_ops::Across) -> String {
-    let what = if companions > 0 {
+/// `files` files, and `companions` sidecar files when there are any.
+fn files_and_sidecars(files: usize, companions: usize) -> String {
+    if companions > 0 {
         format!(
             "{} (and {})",
             widgets::plural(files, "file", "files"),
@@ -421,7 +420,33 @@ fn across_line(files: usize, companions: usize, across: &file_ops::Across) -> St
         )
     } else {
         widgets::plural(files, "file", "files")
-    };
+    }
+}
+
+/// What a move does on disk: copied to another drive, with the rest (on
+/// the destination's drive already) moved by renaming.
+fn move_lines(s: &file_ops::Summary) -> Vec<String> {
+    let mut lines = Vec::new();
+    let (mut files, mut companions) = (s.files, s.companions);
+    if let Some(across) = &s.across {
+        lines.push(across_line(across));
+        files = files.saturating_sub(across.files);
+        companions = companions.saturating_sub(across.companions);
+    }
+    if files > 0 || s.across.is_none() {
+        lines.push(format!(
+            "{} will be moved on disk.",
+            files_and_sidecars(files, companions)
+        ));
+    }
+    lines
+}
+
+/// What a move to another drive does: copies the files there, checks
+/// them, then puts their originals in the Trash.
+fn across_line(across: &file_ops::Across) -> String {
+    let (files, companions) = (across.files, across.companions);
+    let what = files_and_sidecars(files, companions);
     let size = |bytes: u64| match bytes as f64 {
         b if b >= 1e9 => format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB"),
         b => format!("{:.0} MB", (b / 1e6).max(1.)),
@@ -555,20 +580,7 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             )
         }
         Verb::Move { .. } | Verb::Create { .. } => {
-            lines.push(if let Some(across) = &s.across {
-                across_line(s.files, s.companions, across)
-            } else if s.companions > 0 {
-                format!(
-                    "{} (and {}) will be moved on disk.",
-                    widgets::plural(s.files, "file", "files"),
-                    widgets::plural(s.companions, "sidecar file", "sidecar files")
-                )
-            } else {
-                format!(
-                    "{} will be moved on disk.",
-                    widgets::plural(s.files, "file", "files")
-                )
-            });
+            lines.extend(move_lines(s));
             if s.copies > 0 {
                 lines.push(format!(
                     "{} with {}.",
