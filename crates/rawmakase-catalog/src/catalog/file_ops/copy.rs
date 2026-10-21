@@ -33,8 +33,11 @@ use super::super::db::{Write, sql};
 use super::super::sidecar::caseless;
 use super::companions::is_legacy_edit;
 use super::disk::{Disk, Presence, gone, parent, presence, spelled};
-use super::journal::{self, Item, ItemState, Member, MemberState, OperationId, Subject};
+use super::journal::{
+    self, CopyRecord, Item, ItemState, Member, MemberState, OperationId, Subject,
+};
 use super::plan::{self, Folders, occupied, shared};
+use super::proof::{self, Proof, Proofs};
 use super::recover::NOT_BACK;
 use super::{Trash, TrashError};
 use crate::storage::Identity;
@@ -131,7 +134,16 @@ pub(super) fn run(
         let (Some(to), Some(temp)) = (m.destination.as_deref(), temps.get(ordinal)) else {
             return undo(cx, catalog, id, "it has no destination");
         };
-        let copied = copy_one(cx, catalog, id, ordinal as i64, m, temp, to, cancel);
+        let proofs = item.preconditions.proofs;
+        let copied = copy_one(
+            cx,
+            catalog,
+            (id, ordinal as i64),
+            m,
+            (temp, to),
+            proofs,
+            cancel,
+        );
         match copied {
             Ok(()) => {}
             Err(Failed::Problem(p)) => return undo(cx, catalog, id, &p.to_string()),
@@ -151,17 +163,16 @@ pub(super) fn run(
     finish(cx, catalog, &journalled, false)
 }
 
-/// Steps 1 to 4 for member `ordinal`, planned as `m`, through its partial
-/// copy `temp` to `to`.
-#[allow(clippy::too_many_arguments, reason = "one member's step")]
+/// Steps 1 to 4 for member `ordinal` of item `id`, planned as `m`, through
+/// its partial copy `temp` to `to` (the same, where the copy is made at its
+/// name), proven as `proofs` says.
 fn copy_one(
     cx: &Cx<'_>,
     catalog: &mut Catalog,
-    id: OperationId,
-    ordinal: i64,
+    (id, ordinal): (OperationId, i64),
     m: &journal::NewMember,
-    temp: &Path,
-    to: &Path,
+    (temp, to): (&Path, &Path),
+    proofs: Proofs,
     cancel: &AtomicBool,
 ) -> Result<(), Failed> {
     let disk = cx.disk;
@@ -171,17 +182,28 @@ fn copy_one(
         (id, ordinal),
         (&m.source, m.id, &m.identity),
         temp,
+        proofs,
         cancel,
     )?;
-    // 4. Its name, never replacing one there.
-    disk.rename(&temp, to).map_err(|e| match e {
-        FsError::AlreadyExists => Problem::NameTaken(name(to)),
-        e => problem(e),
-    })?;
-    disk.sync_dir(parent(to)).map_err(problem)?;
-    // As the disk spells it, which a volume that normalises names may not
-    // as given.
-    let at = spelled(disk, to, made).map_err(problem)?;
+    // 4. Its name, never replacing one there; made at it already where the
+    // volume can't rename exclusively.
+    let at = match proofs.direct {
+        true => temp,
+        false => {
+            disk.rename(&temp, to).map_err(|e| match e {
+                FsError::AlreadyExists => Problem::NameTaken(name(to)),
+                e => problem(e),
+            })?;
+            disk.sync_dir(parent(to)).map_err(problem)?;
+            // As the disk spells it, which a volume that normalises names
+            // may not as given.
+            match proofs.copies {
+                Proof::Ids => spelled(disk, to, made),
+                Proof::Names => proof::spelled(disk, to),
+            }
+            .map_err(problem)?
+        }
+    };
     catalog
         .db
         .write(|w| journal::set_copied(w, id, ordinal, &at))
@@ -193,14 +215,16 @@ fn copy_one(
 /// (file object and `Identity` as planned) copied into a file made at
 /// `temp` where nothing had its name, journalled as it goes, synced, given
 /// the original's time, read back, and the original checked to be still
-/// what was copied. Returns the copy's path as the disk spells it, and its
-/// file object.
+/// what was copied, each side as `proofs` says. Returns the copy's path as
+/// the disk spells it, and its file object (which proves nothing where its
+/// volume's ids don't stay).
 pub(super) fn write(
     cx: &Cx<'_>,
     catalog: &mut Catalog,
     (id, ordinal): (OperationId, i64),
     (source, source_id, identity): (&Path, FileId, &Identity),
     temp: &Path,
+    proofs: Proofs,
     cancel: &AtomicBool,
 ) -> Result<(PathBuf, FileId), Failed> {
     let disk = cx.disk;
@@ -211,24 +235,40 @@ pub(super) fn write(
         return Err(Problem::Stopped.into());
     }
     // 1. Made where nothing is; what a crash leaves before it is journalled
-    // is found by its name, empty.
-    disk.create_file(temp).map_err(|e| match e {
-        FsError::AlreadyExists => Problem::NameTaken(name(temp)),
-        e => problem(e),
-    })?;
+    // is found by its name, empty. Not made, nothing of it is there: what
+    // is (a file another program made at its name, which may be the
+    // photo's own name where copies are made at it) is never taken for it.
+    if let Err(e) = disk.create_file(temp) {
+        journal(catalog, &|w| journal::set_discarded(w, id, ordinal, None))?;
+        return Err(match e {
+            FsError::AlreadyExists => Problem::NameTaken(name(temp)),
+            e => problem(e),
+        }
+        .into());
+    }
     let made = disk.entry(temp).map_err(problem)?;
     if made.kind != EntryKind::File || made.links != 1 {
         return Err(Problem::Disk(format!("{} isn't the file made", temp.display())).into());
     }
     // As the disk spells it (HFS+ keeps names decomposed), which every
-    // later step and recovery find it by.
-    let temp = spelled(disk, temp, made.id).map_err(problem)?;
+    // later step and recovery find it by. Its file object only where it
+    // stays.
+    let file = (proofs.copies == Proof::Ids).then_some(made.id);
+    let temp = match file {
+        Some(file) => spelled(disk, temp, file),
+        None => proof::spelled(disk, temp),
+    }
+    .map_err(problem)?;
+    // Where names prove it, a file object no file has: a release before
+    // #573 reading the journal finds no file it is, and leaves it for the
+    // user.
+    let journalled = file.unwrap_or(FileId::NOBODY);
     journal(catalog, &|w| {
-        journal::set_copying(w, id, ordinal, Some(made.id), &temp)
+        journal::set_copying(w, id, ordinal, Some(journalled), &temp)
     })?;
     // 2. Copied, durable, with the original's time.
     let content = disk
-        .copy_into(source, &temp, Some(made.id), &mut |_| {
+        .copy_into(source, &temp, file, &mut |_| {
             !cancel.load(Ordering::Relaxed)
         })
         .map_err(|e| match e {
@@ -246,17 +286,19 @@ pub(super) fn write(
     if disk.hash(&temp).map_err(problem)? != content {
         return Err(Problem::Mismatch(source.to_path_buf()).into());
     }
-    if !unchanged(disk, source, source_id, identity) {
+    let id_proves = (proofs.originals == Proof::Ids).then_some(source_id);
+    if !unchanged(disk, source, id_proves, identity) {
         return Err(Problem::Changed(source.to_path_buf()).into());
     }
     Ok((temp, made.id))
 }
 
-/// Whether `path` is file object `id` with `identity`, looked up by its
-/// name: what checks the original between its copy's steps.
-fn unchanged(disk: &dyn Disk, path: &Path, id: FileId, identity: &Identity) -> bool {
+/// Whether `path` is a file with `identity` (and file object `id`, where
+/// that proves it), looked up by its name: what checks the original between
+/// its copy's steps.
+fn unchanged(disk: &dyn Disk, path: &Path, id: Option<FileId>, identity: &Identity) -> bool {
     disk.entry(path)
-        .is_ok_and(|e| e.id == id && e.kind == EntryKind::File)
+        .is_ok_and(|e| e.kind == EntryKind::File && id.is_none_or(|id| e.id == id))
         && disk.identity(path).ok().as_ref() == Some(identity)
 }
 
@@ -264,12 +306,34 @@ fn unchanged(disk: &dyn Disk, path: &Path, id: FileId, identity: &Identity) -> b
 /// that file object, by its exact name in its folder's listing, with its
 /// journalled `Identity`.
 pub(super) fn original_here(disk: &dyn Disk, m: &Member) -> bool {
-    match (m.id, &m.identity) {
-        (Some(id), Some(identity)) => {
-            presence(disk, &m.source, id) == Presence::Here
-                && disk.identity(&m.source).ok().as_ref() == Some(identity)
-        }
-        _ => false,
+    original_proven(disk, m, Proof::Ids)
+}
+
+/// [`original_here`], as `proof` says: by its exact name alone where file
+/// ids don't stay.
+fn original_proven(disk: &dyn Disk, m: &Member, proof: Proof) -> bool {
+    let here = match (proof, m.id) {
+        (Proof::Ids, Some(id)) => presence(disk, &m.source, id) == Presence::Here,
+        (Proof::Ids, None) => false,
+        (Proof::Names, _) => proof::presence(disk, &m.source) == Presence::Here,
+    };
+    here && m.identity.is_some() && disk.identity(&m.source).ok() == m.identity
+}
+
+/// Where member `m`'s original is, as `proof` says.
+fn source_presence(disk: &dyn Disk, m: &Member, proof: Proof) -> Presence {
+    match (proof, m.id) {
+        (Proof::Ids, Some(id)) => presence(disk, &m.source, id),
+        (Proof::Ids, None) => Presence::Unknown,
+        (Proof::Names, _) => proof::presence(disk, &m.source),
+    }
+}
+
+/// The proofs journalled `item` was copied with.
+fn proofs_of(item: &Item) -> Proofs {
+    match &item.subject {
+        Subject::Photos(pre) => pre.proofs,
+        _ => Proofs::default(),
     }
 }
 
@@ -326,13 +390,16 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item) -> Result<Option<String>>
         let (Some(at), Some(copy)) = (m.destination.as_deref(), &m.copy) else {
             return Ok(Some("it has no destination".into()));
         };
-        let here = copy
-            .id
-            .is_some_and(|id| presence(cx.disk, at, id) == Presence::Here);
+        let here = match pre.proofs.copies {
+            Proof::Ids => copy
+                .id
+                .is_some_and(|id| presence(cx.disk, at, id) == Presence::Here),
+            Proof::Names => copy.content.is_some_and(|c| proof::holds(cx.disk, at, c)),
+        };
         if m.state != MemberState::Copied || !here {
             return Ok(Some("its copies aren't all where they were made".into()));
         }
-        if !original_here(cx.disk, m) {
+        if !original_proven(cx.disk, m, pre.proofs.originals) {
             return Ok(Some(Problem::Changed(m.source.clone()).to_string()));
         }
         let (Ok(now), Some(was)) = (cx.disk.identity(at), &m.identity) else {
@@ -404,6 +471,7 @@ fn name(path: &Path) -> String {
 /// each copy back first. Marks it `done`.
 fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> Result<()> {
     let id = item.id;
+    let proofs = proofs_of(item);
     let mut unsynced = None;
     for m in &item.members {
         if m.state != MemberState::Copied {
@@ -418,12 +486,16 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
             kept(catalog, "its copy isn't journalled")?;
             continue;
         };
-        let copy_here = copy
-            .id
-            .is_some_and(|c| presence(cx.disk, at, c) == Presence::Here)
-            && copy.identity.is_some()
-            && cx.disk.identity(at).ok() == copy.identity;
-        let read_back = !recovering
+        let named = match proofs.copies {
+            Proof::Ids => copy
+                .id
+                .is_some_and(|c| presence(cx.disk, at, c) == Presence::Here),
+            Proof::Names => proof::presence(cx.disk, at) == Presence::Here,
+        };
+        let copy_here =
+            named && copy.identity.is_some() && cx.disk.identity(at).ok() == copy.identity;
+        // Where names prove it, its bytes always.
+        let read_back = (!recovering && proofs.copies == Proof::Ids)
             || copy
                 .content
                 .is_some_and(|c| cx.disk.hash(at).is_ok_and(|now| now == c));
@@ -431,7 +503,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
             kept(catalog, "its copy isn't as it was made")?;
             continue;
         }
-        match presence(cx.disk, &m.source, file) {
+        match source_presence(cx.disk, m, proofs.originals) {
             Presence::Here => {}
             // In the Trash, where a crash came before its receipt was
             // journalled, or gone some other way: nothing is left to do.
@@ -446,11 +518,26 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
                 continue;
             }
         }
-        if !original_here(cx.disk, m) {
+        // Where names prove it, its bytes too: the ones copied.
+        let unchanged = original_proven(cx.disk, m, proofs.originals)
+            && (proofs.originals == Proof::Ids
+                || copy
+                    .content
+                    .is_some_and(|c| cx.disk.hash(&m.source).is_ok_and(|now| now == c)));
+        if !unchanged {
             kept(catalog, "it changed since it was copied")?;
             continue;
         }
-        let receipt = match cx.trash.trash(&m.source) {
+        // Its name as the plan took it, composed where names prove it; a
+        // file stored decomposed, which those drivers take only so, by
+        // that spelling of the one file proven there.
+        let trashed = cx.trash.trash(&m.source).or_else(|e| {
+            match (proofs.originals, proof::other_spelling(cx.disk, &m.source)) {
+                (Proof::Names, Some(other)) => cx.trash.trash(&other),
+                _ => Err(e),
+            }
+        });
+        let receipt = match trashed {
             Ok(receipt) => receipt.location,
             Err(e @ TrashError::Unsupported) => {
                 kept(catalog, &e.to_string())?;
@@ -467,7 +554,11 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         catalog.db.write(|w| {
             journal::set_member(w, id, m.ordinal, MemberState::Trashed, Some(&receipt))
         })?;
-        if !gone(cx.disk, &m.source, file) {
+        let left = match proofs.originals {
+            Proof::Ids => !gone(cx.disk, &m.source, file),
+            Proof::Names => !proof::gone(cx.disk, &m.source),
+        };
+        if left {
             kept(catalog, "the Trash took it, but it is still there")?;
         }
     }
@@ -490,11 +581,10 @@ pub(super) enum Originals {
 
 /// Whether every one of `item`'s originals is at its source as `rule` asks.
 fn originals(disk: &dyn Disk, item: &Item, rule: Originals) -> bool {
+    let proof = proofs_of(item).originals;
     item.members.iter().all(|m| match rule {
-        Originals::AsCopied => original_here(disk, m),
-        Originals::Present => {
-            m.id.is_some_and(|id| presence(disk, &m.source, id) == Presence::Here)
-        }
+        Originals::AsCopied => original_proven(disk, m, proof),
+        Originals::Present => source_presence(disk, m, proof) == Presence::Here,
     })
 }
 
@@ -540,7 +630,10 @@ enum Partial {
 /// spell it otherwise than it was given): by its journalled file object
 /// ([`copy_at`]); or, made but not journalled yet, the one such name, only
 /// while it is an empty plain file.
-fn partial(disk: &dyn Disk, m: &Member, temp: &Path) -> Partial {
+fn partial(disk: &dyn Disk, m: &Member, temp: &Path, proofs: Proofs) -> Partial {
+    if proofs.copies == Proof::Names {
+        return partial_named(disk, m, temp, proofs.since);
+    }
     if let Some(id) = m.copy.as_ref().and_then(|c| c.id) {
         return match copy_at(disk, temp, id) {
             Some(Some(at)) => Partial::Ours(at),
@@ -568,6 +661,56 @@ fn partial(disk: &dyn Disk, m: &Member, temp: &Path) -> Partial {
     match empty {
         true => Partial::Ours(at),
         false => Partial::Unknown,
+    }
+}
+
+/// [`partial`] where names prove copies (#573), at exactly the name the
+/// journal gave it: made and journalled, while it holds the bytes copied
+/// (written whole) or its original's first bytes (part way); made but not
+/// journalled, only while empty and made after the item was planned.
+fn partial_named(disk: &dyn Disk, m: &Member, temp: &Path, since: i64) -> Partial {
+    let Some(copy) = &m.copy else {
+        return Partial::Unknown;
+    };
+    match proof::presence(disk, temp) {
+        Presence::Absent => Partial::Gone,
+        Presence::Unknown => Partial::Unknown,
+        Presence::Here => {
+            let ours = match (m.state, copy.content) {
+                (MemberState::Planned, _) => proof::made_after(disk, temp, since),
+                (_, Some(content)) => proof::holds(disk, temp, content),
+                (_, None) => proof::begins(disk, temp, &m.source),
+            };
+            match ours {
+                true => Partial::Ours(temp.to_path_buf()),
+                false => Partial::Unknown,
+            }
+        }
+    }
+}
+
+/// Where member `m`'s complete copy, given the name `at`, is now, as
+/// `proofs` says: by its file object ([`copy_at`]), or where names prove it
+/// by the name alone, holding the bytes copied. `Some(None)` when it isn't
+/// there, `None` when that can't be told.
+fn complete_at(
+    disk: &dyn Disk,
+    at: &Path,
+    copy: &CopyRecord,
+    proofs: Proofs,
+) -> Option<Option<PathBuf>> {
+    match proofs.copies {
+        Proof::Ids => match copy.id {
+            Some(id) => copy_at(disk, at, id),
+            None => Some(None),
+        },
+        Proof::Names => match proof::presence(disk, at) {
+            Presence::Absent => Some(None),
+            Presence::Here if copy.content.is_some_and(|c| proof::holds(disk, at, c)) => {
+                Some(Some(at.to_path_buf()))
+            }
+            _ => None,
+        },
     }
 }
 
@@ -614,6 +757,7 @@ pub(super) fn copy_at(disk: &dyn Disk, at: &Path, id: FileId) -> Option<Option<P
 /// original is proven at its source. Returns whether every one is gone.
 fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
     let disk = cx.disk;
+    let proofs = proofs_of(item);
     let originals = originals(disk, item, rule);
     let rows: &[_] = item.photos();
     let to = match &item.subject {
@@ -630,15 +774,36 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             _ => return Ok(false),
         }
         let mut receipt = None;
-        match partial(disk, m, &copy.temp) {
+        match partial(disk, m, &copy.temp, proofs) {
             // Never renamed, so nothing of it is at its destination. One
             // written whole stays while its original can't be proven: it
             // may be the one copy of those bytes left.
             Partial::Ours(_) if copy.content.is_some() && !originals => return Ok(false),
             // Put Back with an original changed since: written whole, it has
             // the bytes the original had, perhaps the only ones left, so it
-            // goes to the Trash, never unlinked.
-            Partial::Ours(at) if copy.content.is_some() && rule == Originals::Present => {
+            // goes to the Trash, never unlinked; as does one made at its name
+            // there, where the volume can't rename exclusively.
+            // Made at its name there, it is at a visible name from the
+            // start: one a photo of the catalog is named as now (Synchronize
+            // Folder may have added it) stays; any not proven empty goes to
+            // the Trash too.
+            Partial::Ours(at)
+                if proofs.direct
+                    && occupied(
+                        &catalog.db,
+                        cx.folders,
+                        to,
+                        parent(&at),
+                        at.file_name().unwrap_or_default(),
+                        rows,
+                    )? =>
+            {
+                return Ok(false);
+            }
+            Partial::Ours(at)
+                if (copy.content.is_some() && rule == Originals::Present)
+                    || (proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0)) =>
+            {
                 let Ok(r) = cx.trash.trash(&at) else {
                     return Ok(false);
                 };
@@ -657,8 +822,8 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             }
             Partial::Unknown => return Ok(false),
             Partial::Gone => {
-                if let (Some(asked), Some(file)) = (m.destination.as_deref(), copy.id) {
-                    match copy_at(disk, asked, file) {
+                if let Some(asked) = m.destination.as_deref() {
+                    match complete_at(disk, asked, copy, proofs) {
                         Some(None) => {}
                         None => return Ok(false),
                         Some(Some(at)) => {

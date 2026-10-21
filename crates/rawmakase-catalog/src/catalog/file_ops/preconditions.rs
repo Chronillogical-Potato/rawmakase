@@ -62,6 +62,9 @@ pub(in crate::catalog) struct Preconditions {
     /// the catalog's folder there is added, or found, as the rows follow.
     #[serde(default)]
     pub into: Option<Arrival>,
+    /// How a move to another drive proves its copies and originals (#573).
+    #[serde(default, skip_serializing_if = "super::proof::Proofs::is_default")]
+    pub proofs: super::proof::Proofs,
 }
 
 /// A logical folder of a root a move goes to that the catalog had no folder
@@ -102,6 +105,7 @@ impl Preconditions {
             folder_path: None,
             to: None,
             into: None,
+            proofs: Default::default(),
         }))
     }
 

@@ -634,10 +634,21 @@ impl Run<'_> {
             .filter_map(|p| p.file_name().map(OsString::from))
             .collect();
         planned.sort();
+        // As the plan took them where the drive lists them decomposed
+        // (#573).
+        let usable = |dir: &std::path::Path, names: Vec<OsString>, by: super::proof::Proof| match by
+        {
+            super::proof::Proof::Names => names
+                .iter()
+                .map(|n| super::proof::usable(self.disk, dir, n))
+                .collect(),
+            super::proof::Proof::Ids => names,
+        };
         let names = self
             .disk
             .list(parent(&photo.source))
             .map_err(anyhow::Error::from)?;
+        let names = usable(parent(&photo.source), names, pre.proofs.originals);
         // Those it carries, as the plan chose them: a companion with another
         // name elsewhere stays.
         let dir = parent(&photo.source);
@@ -665,6 +676,7 @@ impl Run<'_> {
         if let (true, Some(dir)) = (goes, photo.destination.as_deref().map(parent)) {
             let to = pre.to.as_ref().map(|(to, _)| *to);
             let names = self.disk.list(dir).map_err(anyhow::Error::from)?;
+            let names = usable(dir, names, pre.proofs.copies);
             // A rename stays in its folder, where its own names are its own.
             let here = dir == parent(&photo.source);
             let own: Vec<&OsStr> = match here {

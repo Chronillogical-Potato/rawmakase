@@ -2,7 +2,7 @@
 //! temporary folder, a Trash that keeps files in a folder of its own, and a
 //! disk that fails or "crashes" (panics, as a process ending would leave
 //! things) at a chosen call. Never a real catalog or real photos.
-use super::disk::{Disk, Real};
+use super::disk::{Disk, Real, parent};
 use super::*;
 use crate::catalog::Catalog;
 use crate::storage::Identity;
@@ -242,9 +242,50 @@ impl Fx {
     }
 }
 
+/// `path` with each name as it is stored, looked for in any normalisation
+/// form, as macOS finds names (and Linux, by bytes, doesn't).
+pub(super) fn in_any_form(path: &Path) -> PathBuf {
+    use unicode_normalization::UnicodeNormalization;
+    if path.symlink_metadata().is_ok() {
+        return path.to_path_buf();
+    }
+    let mut at = PathBuf::new();
+    for part in path.components() {
+        let exact = at.join(part);
+        let name = part.as_os_str().to_string_lossy();
+        let nfc: String = name.nfc().collect();
+        let nfd: String = name.nfd().collect();
+        at = [exact.clone(), at.join(nfc), at.join(nfd)]
+            .into_iter()
+            .find(|p| p.symlink_metadata().is_ok())
+            .unwrap_or(exact);
+    }
+    at
+}
+
+/// Whether `path` names its file in the spelling it is stored in, or names
+/// nothing: what macOS's FAT and exFAT drivers ask of a rename or removal.
+pub(super) fn stored_spelling(path: &Path) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return true;
+    };
+    let wanted: String = name.to_string_lossy().nfc().collect();
+    match Real.list(dir) {
+        Ok(names) => names
+            .iter()
+            .filter(|n| n.to_string_lossy().nfc().collect::<String>() == wanted)
+            .all(|n| n == name),
+        Err(_) => true,
+    }
+}
+
 /// A Trash that keeps files in `<fixture>/trash/`, under a unique name.
 pub(super) struct FakeTrash {
     pub dir: PathBuf,
+    /// It takes a file only by the spelling its name is stored in, as
+    /// macOS's Trash may on FAT and exFAT.
+    pub stored_only: bool,
     /// Fails from the `n`-th file on (from 1), if set.
     pub fail_from: Option<usize>,
     /// The process ends right after the `n`-th file went (from 1), if set.
@@ -264,6 +305,7 @@ impl FakeTrash {
             fail_from: None,
             crash_after: None,
             crash_before: None,
+            stored_only: false,
             calls: RefCell::new(0),
         }
     }
@@ -279,6 +321,15 @@ impl Trash for FakeTrash {
         if self.crash_before == Some(n) {
             panic!("injected crash before trashing {n}");
         }
+        // Its folder found by any spelling, as macOS finds it; the name
+        // too, unless the volume takes it only as it is stored.
+        let path = &match self.stored_only {
+            true => in_any_form(parent(path)).join(path.file_name().unwrap()),
+            false => in_any_form(path),
+        };
+        if self.stored_only && !stored_spelling(path) {
+            return Err(TrashError::Failed("not found".into()));
+        }
         if self.fail_from.is_some_and(|from| n >= from) {
             return Err(TrashError::Unsupported);
         }
@@ -286,8 +337,14 @@ impl Trash for FakeTrash {
             "{n}-{}",
             path.file_name().unwrap().to_string_lossy()
         ));
-        crate::storage::fsops::rename_exclusive(path, &location)
-            .map_err(|e| TrashError::Failed(e.to_string()))?;
+        // A volume that can't rename exclusively (exFAT on macOS) moves it
+        // plainly: the name in the Trash is this one's alone.
+        match crate::storage::fsops::rename_exclusive(path, &location) {
+            Err(FsError::Unsupported) if !location.exists() => {
+                std::fs::rename(path, &location).map_err(|e| TrashError::Failed(e.to_string()))?
+            }
+            other => other.map_err(|e| TrashError::Failed(e.to_string()))?,
+        }
         if self.crash_after == Some(n) {
             panic!("injected crash after trashing {n}");
         }
@@ -327,6 +384,19 @@ macro_rules! passes_on {
             go_on: &mut dyn FnMut(u64) -> bool,
         ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
             self.$inner.copy_into(from, to, to_id, go_on)
+        }
+        fn hash_prefix(
+            &self,
+            path: &std::path::Path,
+            len: u64,
+        ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::FsError> {
+            self.$inner.hash_prefix(path, len)
+        }
+        fn created(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<std::time::SystemTime, crate::storage::fsops::FsError> {
+            self.$inner.created(path)
         }
         fn sync_file(&self, path: &std::path::Path) -> Result<(), crate::storage::fsops::FsError> {
             self.$inner.sync_file(path)
@@ -445,11 +515,26 @@ pub(super) struct Faulty {
     pub take_source: Option<PathBuf>,
     /// A file there takes this name just before something is renamed to it.
     pub occupy: Option<PathBuf>,
+    /// A file with these bytes takes this name just before a file is made
+    /// there.
+    pub occupy_on_create: Option<(PathBuf, Vec<u8>)>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    /// Folders whose volume says its file ids can't be proven, as FAT,
-    /// exFAT and network volumes do.
+    /// Folders whose volume says its file ids can't be proven, as network
+    /// volumes do, and isn't FAT or exFAT: refused.
     pub unstable_ids: Vec<PathBuf>,
+    /// Folders, with everything in them, on a volume that says it is exFAT
+    /// (local, its file ids not proven): proven by names.
+    pub names_only: Vec<PathBuf>,
+    /// The `names_only` volume can't rename exclusively, as macOS's exFAT
+    /// can't: it says so, and refuses to.
+    pub no_exclusive_rename: bool,
+    /// Files the volume says were made long ago (1970).
+    pub born_long_ago: Vec<PathBuf>,
+    /// The `names_only` volume lists names decomposed (NFD) but renames and
+    /// removes a file only by the spelling it is stored in (as it was made),
+    /// as macOS's FAT and exFAT drivers do.
+    pub lists_decomposed: bool,
     /// `elsewhere` keeps the names it is given decomposed (NFD), as HFS+
     /// does, and finds a file by any normalisation form of its name.
     pub decompose: bool,
@@ -517,6 +602,15 @@ impl Faulty {
             _ => step(),
         }
     }
+    /// Whether `path` is on the `names_only` volume, which takes no name
+    /// decomposed (`lists_decomposed`), and is one.
+    fn refuses_decomposed(&self, path: &Path) -> bool {
+        self.lists_decomposed && self.fat(path) && !stored_spelling(&self.in_found(path))
+    }
+    /// Whether `path` is on the `names_only` volume.
+    fn fat(&self, path: &Path) -> bool {
+        self.names_only.iter().any(|d| path.starts_with(d))
+    }
     /// Whether `path` is taken for another volume's.
     fn far(&self, path: &Path) -> bool {
         self.elsewhere.as_ref().is_some_and(|d| path.starts_with(d))
@@ -524,21 +618,36 @@ impl Faulty {
     /// `path` as `elsewhere` stores it when it makes a name there.
     fn stored(&self, path: &Path) -> PathBuf {
         use unicode_normalization::UnicodeNormalization;
-        match (self.decompose && self.far(path), path.file_name()) {
+        let path = self.in_found(path);
+        match (self.decompose && self.far(&path), path.file_name()) {
             (true, Some(name)) => {
                 let nfd: String = name.to_string_lossy().nfd().collect();
                 path.with_file_name(nfd)
             }
-            _ => path.to_path_buf(),
+            _ => path,
         }
     }
-    /// The file `path` names on `elsewhere`, which finds a name in any
-    /// normalisation form.
+    /// Whether the volume of `path` finds a name in any normalisation
+    /// form: `elsewhere` when it decomposes, and the `names_only` volume
+    /// when it lists names decomposed, as macOS's drivers do.
+    fn any_form(&self, path: &Path) -> bool {
+        (self.decompose && self.far(path)) || (self.lists_decomposed && self.fat(path))
+    }
+    /// The file `path` names, on a volume that finds a name in any
+    /// normalisation form (`any_form`): each name as it is stored, whatever
+    /// the temporary folder's file system finds (Linux's only by bytes).
     fn found(&self, path: &Path) -> PathBuf {
-        let stored = self.stored(path);
-        match std::fs::symlink_metadata(path).is_err() && stored.symlink_metadata().is_ok() {
-            true => stored,
+        match self.any_form(path) {
+            true => in_any_form(path),
             false => path.to_path_buf(),
+        }
+    }
+    /// `path` with its folder [`Self::found`] and its own name as given: where
+    /// a name is made or looked for as it is spelled.
+    fn in_found(&self, path: &Path) -> PathBuf {
+        match path.file_name() {
+            Some(name) => self.found(parent(path)).join(name),
+            None => path.to_path_buf(),
         }
     }
     /// The number `elsewhere` gives real file object `real`.
@@ -616,8 +725,16 @@ impl Disk for Faulty {
         Ok(found)
     }
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
+        use unicode_normalization::UnicodeNormalization;
         self.calls.borrow_mut().push(Call::List(dir.into()));
-        Real.list(dir)
+        let names = Real.list(&self.found(dir))?;
+        match self.lists_decomposed && self.fat(dir) {
+            true => Ok(names
+                .into_iter()
+                .map(|n| n.to_string_lossy().nfd().collect::<String>().into())
+                .collect()),
+            false => Ok(names),
+        }
     }
     fn identity(&self, path: &Path) -> anyhow::Result<Identity> {
         self.calls.borrow_mut().push(Call::Identity(path.into()));
@@ -630,7 +747,13 @@ impl Disk for Faulty {
         if self.occupy.as_deref() == Some(to) {
             std::fs::write(to, b"raced").unwrap();
         }
+        if self.refuses_decomposed(from) || self.refuses_decomposed(to) {
+            return self.step(Op::Rename, || Err(FsError::NotFound));
+        }
         let (from, to) = (&self.found(from), &self.stored(to));
+        if self.no_exclusive_rename && self.fat(to) {
+            return self.step(Op::Rename, || Err(FsError::Unsupported));
+        }
         let renamed = self.step(Op::Rename, || Real.rename(from, to));
         if renamed.is_ok() && self.renumber_on_rename {
             self.renumber(to);
@@ -639,17 +762,17 @@ impl Disk for Faulty {
     }
     fn create_dir(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CreateDir(path.into()));
-        self.step(Op::CreateDir, || Real.create_dir(path))
+        self.step(Op::CreateDir, || Real.create_dir(&self.in_found(path)))
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::Sync(dir.into()));
-        self.step(Op::Sync, || Real.sync_dir(dir))
+        self.step(Op::Sync, || Real.sync_dir(&self.found(dir)))
     }
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
-        Real.canonical(path)
+        Real.canonical(&self.found(path))
     }
     fn volume_facts(&self, path: &Path) -> Result<crate::storage::fsops::VolumeFacts, FsError> {
-        let mut facts = Real.volume_facts(path)?;
+        let mut facts = Real.volume_facts(&self.found(path))?;
         if let Some(space) = self.space {
             facts.available = space;
         }
@@ -657,10 +780,23 @@ impl Disk for Faulty {
         // folder is on (overlayfs in CI's containers, tmpfs elsewhere): the
         // real detection is `fsops`'s to test.
         facts.stable_ids = !self.unstable_ids.iter().any(|d| d == path);
+        if self.fat(path) {
+            facts.kind = crate::storage::fsops::VolumeKind::Exfat;
+            facts.local = true;
+            facts.stable_ids = false;
+            facts.exclusive_rename = !self.no_exclusive_rename;
+        } else if !facts.stable_ids {
+            facts.kind = crate::storage::fsops::VolumeKind::Other;
+        }
         Ok(facts)
     }
     fn create_file(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CreateFile(path.into()));
+        if let Some((at, bytes)) = &self.occupy_on_create
+            && at == path
+        {
+            std::fs::write(at, bytes).unwrap();
+        }
         self.step(Op::CreateFile, || Real.create_file(&self.stored(path)))
     }
     fn copy_into(
@@ -674,7 +810,7 @@ impl Disk for Faulty {
         self.calls
             .borrow_mut()
             .push(Call::Copy(from.into(), to.into()));
-        let to = &self.found(to);
+        let (from, to) = (&self.found(from), &self.found(to));
         // The file object as the real disk numbers it.
         let to_id = match self.far(to) {
             true => to_id.map(|id| self.real(id)),
@@ -730,7 +866,7 @@ impl Disk for Faulty {
     }
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CopyTimes(to.into()));
-        let to = &self.found(to);
+        let (from, to) = (&self.found(from), &self.found(to));
         self.step(Op::CopyTimes, || {
             Real.copy_times(from, to)?;
             if let Some(step) = self.coarse {
@@ -756,11 +892,36 @@ impl Disk for Faulty {
     }
     fn remove_file(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::RemoveFile(path.into()));
+        if self.refuses_decomposed(path) {
+            return self.step(Op::RemoveFile, || Err(FsError::NotFound));
+        }
         self.step(Op::RemoveFile, || Real.remove_file(&self.found(path)))
     }
     fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::RemoveDir(path.into()));
         self.step(Op::RemoveDir, || Real.remove_dir(&self.found(path)))
+    }
+    fn hash_prefix(
+        &self,
+        path: &Path,
+        len: u64,
+    ) -> Result<crate::storage::fsops::ContentHash, FsError> {
+        Real.hash_prefix(&self.found(path), len)
+    }
+    fn created(&self, path: &Path) -> Result<std::time::SystemTime, FsError> {
+        if self.born_long_ago.iter().any(|p| p == path) {
+            return Ok(std::time::UNIX_EPOCH);
+        }
+        // FAT and exFAT keep birth times; where the temporary folder's file
+        // system doesn't (overlayfs in CI's containers), its time written
+        // stands for it.
+        let path = self.found(path);
+        match Real.created(&path) {
+            Err(_) if self.fat(&path) => std::fs::symlink_metadata(&path)
+                .and_then(|m| m.modified())
+                .map_err(FsError::Io),
+            born => born,
+        }
     }
 }
 

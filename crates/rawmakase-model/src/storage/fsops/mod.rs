@@ -108,6 +108,14 @@ pub struct FileId {
 }
 
 impl FileId {
+    /// A file id no file is given (volume 0, number 0): for a record that
+    /// must name one where none proves anything, so that nothing reading it
+    /// takes a file for the one recorded.
+    pub const NOBODY: Self = Self {
+        volume: VolumeId(0),
+        index: 0,
+    };
+
     pub fn volume(self) -> VolumeId {
         self.volume
     }
