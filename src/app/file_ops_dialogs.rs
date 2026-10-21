@@ -319,7 +319,7 @@ impl Editor {
                 name: n.name,
                 then_move: if moving { n.photos } else { Vec::new() },
             };
-            self.request_file_op(op, verb);
+            self.request_file_op(op, None, verb);
         }
     }
 

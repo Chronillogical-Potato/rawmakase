@@ -331,6 +331,8 @@ pub(in crate::app) enum PhotoAction {
     ReadMetadata,
     /// Remove from Catalog.
     Remove,
+    /// Move to Trash.
+    Trash,
     /// Move to Folder…: the photo's files to another catalog folder.
     MoveToFolder,
     /// Library › Previews: Build Standard-Sized Previews.
@@ -345,6 +347,12 @@ const REMOVE_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "⌥⌫"
 } else {
     "Alt+Backspace"
+};
+/// Move to Trash's shortcut, as Lightroom shows Remove and Trash Photos'.
+const TRASH_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘⌥⇧⌫"
+} else {
+    "Ctrl+Alt+Shift+Backspace"
 };
 /// Create Virtual Copy's shortcut, as Lightroom shows it.
 pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
@@ -438,6 +446,10 @@ pub(in crate::app) fn photo_menu(
         }
         if menu_item(ui, "Remove from Catalog…", REMOVE_SHORTCUT, true, false) {
             action = Some(PhotoAction::Remove);
+            ui.close();
+        }
+        if menu_item(ui, "Move to Trash…", TRASH_SHORTCUT, true, false) {
+            action = Some(PhotoAction::Trash);
             ui.close();
         }
         menu_separator(ui);

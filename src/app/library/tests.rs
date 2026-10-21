@@ -2676,3 +2676,31 @@ fn photos_dragged_past_8_points_onto_a_catalog_folder_are_dropped_there() {
     let action = frame(vec![press(folder, false)]);
     assert!(action.is_none());
 }
+/// Delete Rejected Photos in Offline Photographs: only the rejected photos
+/// shown there, never an online one.
+#[test]
+fn rejected_photos_of_the_offline_source_are_only_offline_ones() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    std::fs::write(d.path().join("kept.ARW"), b"source")?;
+    std::fs::write(d.path().join("gone.ARW"), b"source")?;
+    let db = d.path().join("photos.rawmakase");
+    Catalog::create(&db)?.add_folder(d.path())?;
+    std::fs::remove_file(d.path().join("gone.ARW"))?;
+    let mut l = Library::load(&db, egui::Context::default())?;
+    for p in &mut l.session.photos {
+        p.flag = -1;
+    }
+    l.wait_for_availability();
+    assert_eq!(l.rejected_in_source().len(), 2);
+    l.filters.only_missing = true;
+    l.filter();
+    let gone = l
+        .session
+        .photos
+        .iter()
+        .find(|p| p.filename == "gone.ARW")
+        .unwrap()
+        .id;
+    assert_eq!(l.rejected_in_source(), [gone]);
+    Ok(())
+}

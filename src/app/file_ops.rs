@@ -24,11 +24,14 @@
 use super::{Editor, widgets};
 #[cfg(test)]
 use crate::catalog::file_ops::Summary;
+#[cfg(test)]
+use crate::catalog::file_ops::TrashReceipt;
 use crate::catalog::file_ops::{
-    self, BatchId, FileOp, ItemResult, Outcome, Plan, Trash, TrashError, TrashReceipt, Unfinished,
+    self, BatchId, FileOp, ItemResult, Outcome, Plan, Trash, TrashError, Unfinished,
 };
 use crate::catalog::{CatalogLocation, PhotoId};
 use eframe::egui;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,10 +41,12 @@ use std::time::{Duration, Instant};
 mod dialogs;
 use dialogs::{Choosing, Naming};
 
-/// The Trash file operations get before the app has the system's: no
-/// operation it offers asks it for anything yet.
+/// A Trash that takes nothing, for tests whose operations have no file to
+/// trash.
+#[cfg(test)]
 pub(super) struct Unavailable;
 
+#[cfg(test)]
 impl Trash for Unavailable {
     fn trash(&self, _: &Path) -> Result<TrashReceipt, TrashError> {
         Err(TrashError::Unsupported)
@@ -52,6 +57,14 @@ impl Trash for Unavailable {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Verb {
     Remove,
+    /// Delete: Move to Trash, or Remove from Catalog for photos whose files
+    /// can't go; of the rejected photos in the source (Delete Rejected
+    /// Photos) when `rejected`.
+    Delete {
+        rejected: bool,
+    },
+    /// Move to Trash alone (⌘⌥⇧Delete).
+    Trash,
     /// Into the folder named so.
     Move {
         to: String,
@@ -68,7 +81,8 @@ impl Verb {
     /// "nothing was removed", for a status line.
     fn nothing(&self) -> &'static str {
         match self {
-            Self::Remove => "nothing was removed",
+            Self::Remove | Self::Delete { .. } => "nothing was removed",
+            Self::Trash => "nothing was moved to the Trash",
             Self::Move { .. } => "nothing was moved",
             Self::Create { .. } => "no folder was made",
         }
@@ -76,7 +90,8 @@ impl Verb {
     /// "Nothing to remove", for a plan with nothing to do.
     fn nothing_to(&self) -> &'static str {
         match self {
-            Self::Remove => "Nothing to remove",
+            Self::Remove | Self::Delete { .. } => "Nothing to remove",
+            Self::Trash => "Nothing to move to the Trash",
             Self::Move { .. } | Self::Create { moving: true, .. } => "Nothing to move",
             Self::Create { .. } => "No folder to make",
         }
@@ -84,7 +99,7 @@ impl Verb {
     /// "Photos not removed", for a plan that failed.
     fn failed(&self) -> &'static str {
         match self {
-            Self::Remove => "Photos not removed",
+            Self::Remove | Self::Delete { .. } | Self::Trash => "Photos not removed",
             Self::Move { .. } => "Photos not moved",
             Self::Create { .. } => "Folder not made",
         }
@@ -92,9 +107,10 @@ impl Verb {
 }
 
 /// Where the file operation is.
-#[derive(Default)]
 pub(super) struct FileOps {
     state: State,
+    /// The Trash runs put files in.
+    trash: Arc<dyn Trash + Send + Sync>,
     /// A catalog just opened, whose unfinished file operations are to be
     /// recovered once nothing else runs.
     pending_recovery: Option<CatalogLocation>,
@@ -122,8 +138,11 @@ enum State {
     /// Waiting for the user. `generation` is the session's when it was
     /// planned: a catalog read again since may have given its photos' ids
     /// to others, and the plan is not run.
+    /// `trash` is Delete's other choice, Move to Trash, when any of its
+    /// photos' files can go there.
     Confirming {
         plan: Box<Plan>,
+        trash: Option<Box<Plan>>,
         catalog: CatalogLocation,
         generation: u64,
         verb: Verb,
@@ -163,6 +182,19 @@ pub(super) struct Progress {
     read: Option<Instant>,
 }
 
+impl Default for FileOps {
+    fn default() -> Self {
+        Self {
+            state: State::Idle,
+            trash: Arc::new(crate::platform::trash::SystemTrash),
+            pending_recovery: None,
+            reopen: None,
+            #[cfg(test)]
+            stop_first: false,
+        }
+    }
+}
+
 impl FileOps {
     /// Asks a running operation to stop after the photo under way (the
     /// top bar's Stop, closing the window). What it did by then stands.
@@ -199,9 +231,11 @@ impl FileOps {
     }
     /// The open confirmation's question, what it says and its action.
     #[cfg(test)]
-    pub(super) fn question(&self) -> Option<(String, Vec<String>, &'static str)> {
+    pub(super) fn question(&self) -> Option<(String, Vec<String>, Vec<&'static str>)> {
         match &self.state {
-            State::Confirming { plan, verb, .. } => Some(question(plan, verb)),
+            State::Confirming {
+                plan, trash, verb, ..
+            } => Some(question(plan, trash.as_deref(), verb)),
             _ => None,
         }
     }
@@ -246,18 +280,100 @@ fn names_line(names: &[String]) -> String {
     }
 }
 
-/// The confirmation's question, what it says below it and its action.
-fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
+/// The confirmation's question, what it says below it and its actions
+/// after Cancel. Delete asks whether to move the files to the Trash or
+/// just remove the photos, when `trash` can take any of them.
+fn question(
+    plan: &Plan,
+    trash: Option<&Plan>,
+    verb: &Verb,
+) -> (String, Vec<String>, Vec<&'static str>) {
+    match (verb, trash) {
+        (Verb::Delete { rejected }, Some(trash)) => {
+            let (s, t) = (plan.summary(), trash.summary());
+            let mut lines = Vec::new();
+            if s.names.len() > 1 {
+                lines.push(names_line(&s.names));
+            }
+            lines.push(trash_line(t));
+            // What Remove takes and Move to Trash leaves: files that can't go.
+            let only_removed: Vec<&file_ops::Skipped> = trash
+                .skipped()
+                .iter()
+                .filter(|k| plan.skipped().iter().all(|r| r.photo != k.photo))
+                .collect();
+            if let Some(first) = only_removed.first() {
+                let n = only_removed.len();
+                lines.push(format!(
+                    "{} can only be removed from the catalog; Move to Trash leaves {}: {}",
+                    widgets::plural(n, "photo", "photos"),
+                    if n == 1 { "it" } else { "them" },
+                    first.reason
+                ));
+            }
+            // Either way, these go with the photos removed.
+            copies_line(&mut lines, s);
+            edits_line(&mut lines, s);
+            shared_line(&mut lines, t);
+            if t.other_computers {
+                lines.push(OTHER_COMPUTERS_TRASH.into());
+            }
+            if let Some(first) = plan.skipped().first() {
+                let n = plan.skipped().len();
+                lines.push(format!(
+                    "{} {}: {}",
+                    widgets::plural(n, "photo is", "photos are"),
+                    if n == 1 {
+                        "left as it is"
+                    } else {
+                        "left as they are"
+                    },
+                    first.reason
+                ));
+            }
+            let title = match s.names.as_slice() {
+                [one] if !rejected => {
+                    format!("Move “{one}” to the Trash, or just remove it from the catalog?")
+                }
+                names => format!(
+                    "Move the {} {} to the Trash, or just remove {} from the catalog?",
+                    names.len(),
+                    match (rejected, names.len()) {
+                        (true, 1) => "rejected photo",
+                        (true, _) => "rejected photos",
+                        (false, 1) => "selected photo",
+                        (false, _) => "selected photos",
+                    },
+                    if names.len() == 1 { "it" } else { "them" }
+                ),
+            };
+            (title, lines, vec!["Remove from Catalog", "Move to Trash"])
+        }
+        (Verb::Delete { .. }, None) => {
+            let (title, lines, action) = question_of(plan, &Verb::Remove);
+            (title, lines, vec![action])
+        }
+        _ => {
+            let (title, lines, action) = question_of(plan, verb);
+            (title, lines, vec![action])
+        }
+    }
+}
+
+/// [`question`] for one plan and its one action.
+fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
     let s = plan.summary();
     let mut lines = Vec::new();
     if s.names.len() > 1 {
         lines.push(names_line(&s.names));
     }
-    let left = |lines: &mut Vec<String>, stay: &str| {
+    let left = |lines: &mut Vec<String>, stay: (&str, &str)| {
         if !plan.skipped().is_empty() {
+            let n = plan.skipped().len();
             lines.push(format!(
-                "{} {stay}: {}",
-                widgets::plural(plan.skipped().len(), "photo is", "photos are"),
+                "{} {}: {}",
+                widgets::plural(n, "photo is", "photos are"),
+                if n == 1 { stay.0 } else { stay.1 },
                 plan.skipped()
                     .first()
                     .map(|s| s.reason.to_string())
@@ -266,7 +382,7 @@ fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
         }
     };
     let (title, action) = match verb {
-        Verb::Remove => {
+        Verb::Remove | Verb::Delete { .. } => {
             lines.push("The files stay on disk.".into());
             if s.copies > 0 {
                 lines.push(format!(
@@ -285,7 +401,7 @@ fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
                     widgets::plural(s.edited, "photo has", "photos have")
                 ));
             }
-            left(&mut lines, "left as they are");
+            left(&mut lines, ("left as it is", "left as they are"));
             let title = match s.names.as_slice() {
                 [one] if s.photos == 1 => format!("Remove “{one}” from the catalog?"),
                 _ => format!(
@@ -294,6 +410,24 @@ fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
                 ),
             };
             (title, "Remove from Catalog")
+        }
+        Verb::Trash => {
+            lines.push(trash_line(s));
+            copies_line(&mut lines, s);
+            edits_line(&mut lines, s);
+            shared_line(&mut lines, s);
+            if s.other_computers {
+                lines.push(OTHER_COMPUTERS_TRASH.into());
+            }
+            left(&mut lines, ("left as it is", "left as they are"));
+            let title = match s.names.as_slice() {
+                [one] => format!("Move “{one}” to the Trash?"),
+                names => format!(
+                    "Move {} to the Trash?",
+                    widgets::plural(names.len(), "photo", "photos")
+                ),
+            };
+            (title, "Move to Trash")
         }
         Verb::Move { .. } | Verb::Create { .. } => {
             lines.push(if s.companions > 0 {
@@ -319,33 +453,17 @@ fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
                     }
                 ));
             }
-            if !s.shared_companions.is_empty() {
-                lines.push(format!(
-                    "{} where {}: other files read {} too.",
-                    widgets::plural(
-                        s.shared_companions.len(),
-                        "sidecar file stays",
-                        "sidecar files stay"
-                    ),
-                    if s.shared_companions.len() == 1 {
-                        "it is"
-                    } else {
-                        "they are"
-                    },
-                    if s.shared_companions.len() == 1 {
-                        "it"
-                    } else {
-                        "them"
-                    }
-                ));
-            }
+            shared_line(&mut lines, s);
             if s.other_computers {
                 lines.push(
                     "Other computers using this catalog find these photos missing until the files move there too."
                         .into(),
                 );
             }
-            left(&mut lines, "staying where they are");
+            left(
+                &mut lines,
+                ("staying where it is", "staying where they are"),
+            );
             let photos = match s.names.as_slice() {
                 [one] => format!("“{one}”"),
                 _ => widgets::plural(s.files, "photo", "photos"),
@@ -356,11 +474,71 @@ fn question(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
                     "Make Folder and Move",
                 ),
                 Verb::Move { to } => (format!("Move {photos} to “{to}”?"), "Move"),
-                Verb::Remove => unreachable!(),
+                Verb::Remove | Verb::Delete { .. } | Verb::Trash => unreachable!(),
             }
         }
     };
     (title, lines, action)
+}
+
+/// "2 files (and 1 sidecar file) go to the Trash."
+fn trash_line(s: &file_ops::Summary) -> String {
+    let files = match (s.files, s.companions) {
+        (n, 0) => widgets::plural(n, "file", "files"),
+        (n, c) => format!(
+            "{} (and {})",
+            widgets::plural(n, "file", "files"),
+            widgets::plural(c, "sidecar file", "sidecar files")
+        ),
+    };
+    format!(
+        "{files} {} to the Trash.",
+        if s.files == 1 { "goes" } else { "go" }
+    )
+}
+
+/// "1 virtual copy is removed with its photo."
+fn copies_line(lines: &mut Vec<String>, s: &file_ops::Summary) {
+    if s.copies > 0 {
+        lines.push(format!(
+            "{} removed with {}.",
+            widgets::plural(s.copies, "virtual copy is", "virtual copies are"),
+            if s.copies == 1 {
+                "its photo"
+            } else {
+                "their photos"
+            }
+        ));
+    }
+}
+
+/// That edits made in RAWmakase go with photos removed, and don't come
+/// back with a file put back from the Trash.
+fn edits_line(lines: &mut Vec<String>, s: &file_ops::Summary) {
+    match s.edited {
+        0 => {}
+        1 => lines.push("1 photo has edits in RAWmakase; they are removed with it. Putting the file back from the Trash brings back the file, not its edits.".into()),
+        n => lines.push(format!(
+            "{n} photos have edits in RAWmakase; they are removed with them. Putting the files back from the Trash brings back the files, not their edits."
+        )),
+    }
+}
+
+/// What other computers sharing the catalog see of photos trashed here.
+const OTHER_COMPUTERS_TRASH: &str =
+    "Other computers using this catalog lose these photos too; their copies of the files stay.";
+
+/// "1 sidecar file stays where it is: other files read it too."
+fn shared_line(lines: &mut Vec<String>, s: &file_ops::Summary) {
+    let n = s.shared_companions.len();
+    if n > 0 {
+        lines.push(format!(
+            "{} where {}: other files read {} too.",
+            widgets::plural(n, "sidecar file stays", "sidecar files stay"),
+            if n == 1 { "it is" } else { "they are" },
+            if n == 1 { "it" } else { "them" }
+        ));
+    }
 }
 
 /// The status line after a run: "Removed 3 photos from the catalog", with
@@ -377,8 +555,13 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
         .sum();
     let moved = count(|r| matches!(r, ItemResult::Moved { .. }));
     let created = count(|r| matches!(r, ItemResult::Created { .. })) > 0;
+    let trashed = count(|r| *r == ItemResult::Trashed);
     let mut text = match verb {
-        Verb::Remove => format!(
+        Verb::Trash => format!(
+            "Moved {} to the Trash",
+            widgets::plural(trashed, "photo", "photos")
+        ),
+        Verb::Remove | Verb::Delete { .. } => format!(
             "Removed {} from the catalog",
             widgets::plural(removed, "photo", "photos")
         ),
@@ -415,6 +598,14 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
             _ => format!(" · {} left", widgets::plural(left.len(), "photo", "photos")),
         };
         text.push_str(&format!("{what}: {}", left[0]));
+        // Nothing is deleted instead: that is the user's to do.
+        let no_trash = TrashError::Unsupported.to_string();
+        if left.contains(&no_trash) {
+            text.push_str(&format!(
+                " Delete it in {} if you're sure.",
+                crate::platform::reveal::MANAGER
+            ));
+        }
     }
     if let Some(stopped) = &outcome.stopped {
         text.push_str(&format!(" · stopped: {stopped}"));
@@ -423,12 +614,51 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
 }
 
 impl Editor {
-    /// Remove from Catalog for `photos` (Delete, ⌥Delete, the thumbnail
-    /// menu): saves what is open, keeps the catalog quiet and plans it, then
-    /// asks. Nothing is held when the save fails.
+    /// Remove from Catalog for `photos` (⌥Delete, the thumbnail menu):
+    /// saves what is open, keeps the catalog quiet and plans it, then asks.
+    /// Nothing is held when the save fails.
     pub(super) fn request_photo_removal(&mut self, photos: Vec<PhotoId>) {
         if !photos.is_empty() {
-            self.request_file_op(FileOp::RemoveFromCatalog { photos }, Verb::Remove);
+            self.request_file_op(FileOp::RemoveFromCatalog { photos }, None, Verb::Remove);
+        }
+    }
+
+    /// Delete for `photos`: asks whether to move their files to the Trash
+    /// or just remove them from the catalog, both planned at once; the
+    /// rejected photos of the source when `rejected` (Delete Rejected
+    /// Photos).
+    pub(super) fn request_photo_delete(&mut self, photos: Vec<PhotoId>, rejected: bool) {
+        if !photos.is_empty() {
+            let trash = FileOp::TrashPhotos {
+                photos: photos.clone(),
+            };
+            self.request_file_op(
+                FileOp::RemoveFromCatalog { photos },
+                Some(trash),
+                Verb::Delete { rejected },
+            );
+        }
+    }
+
+    /// Move to Trash for `photos` (⌘⌥⇧Delete).
+    pub(super) fn request_photo_trash(&mut self, photos: Vec<PhotoId>) {
+        if !photos.is_empty() {
+            self.request_file_op(FileOp::TrashPhotos { photos }, None, Verb::Trash);
+        }
+    }
+
+    /// Delete Rejected Photos (⌘Delete, the Library menu): Delete for the
+    /// rejected photos of the source shown, whatever is selected or
+    /// filtered.
+    pub(super) fn request_rejected_delete(&mut self) {
+        let Some(library) = &self.library else {
+            return;
+        };
+        let rejected = library.rejected_in_source();
+        if rejected.is_empty() {
+            self.status = "No rejected photos here".into();
+        } else {
+            self.request_photo_delete(rejected, true);
         }
     }
 
@@ -441,13 +671,18 @@ impl Editor {
         name: String,
     ) {
         if !photos.is_empty() {
-            self.request_file_op(FileOp::MovePhotos { photos, to }, Verb::Move { to: name });
+            self.request_file_op(
+                FileOp::MovePhotos { photos, to },
+                None,
+                Verb::Move { to: name },
+            );
         }
     }
 
-    /// Plans `op`: saves what is open, keeps the catalog quiet and plans it
-    /// on a worker, then asks. Nothing is held when the save fails.
-    fn request_file_op(&mut self, op: FileOp, verb: Verb) {
+    /// Plans `op`, and `trash` beside it for Delete: saves what is open,
+    /// keeps the catalog quiet and plans them on a worker, then asks.
+    /// Nothing is held when the save fails.
+    fn request_file_op(&mut self, op: FileOp, trash: Option<FileOp>, verb: Verb) {
         // A dialog that led here holds nothing.
         if matches!(self.file_ops.state, State::Choosing(_) | State::Naming(_)) {
             self.file_ops.state = State::Idle;
@@ -489,7 +724,13 @@ impl Editor {
             move |tx| {
                 let planned = crate::catalog::Catalog::open(&location)
                     .map_err(|e| format!("{e:#}"))
-                    .and_then(|catalog| file_ops::plan(&catalog, op).map_err(|e| e.to_string()));
+                    .and_then(|catalog| {
+                        let plan = file_ops::plan(&catalog, op).map_err(|e| e.to_string())?;
+                        let trash = trash
+                            .map(|op| file_ops::plan(&catalog, op).map_err(|e| e.to_string()))
+                            .transpose()?;
+                        Ok((plan, trash))
+                    });
                 let _ = tx.send(super::worker::Event::FileOpPlanned(Box::new(planned)));
             },
             |tx, message| {
@@ -509,8 +750,7 @@ impl Editor {
         {
             return;
         }
-        // Whether it was pressed, and with Option (Remove from Catalog, even
-        // in a collection).
+        // Whether it was pressed, and with what (see `Library::delete_press`).
         let pressed = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
                 egui::Event::Key {
@@ -519,13 +759,11 @@ impl Editor {
                     repeat: false,
                     modifiers,
                     ..
-                } if !modifiers.shift && !modifiers.ctrl && !modifiers.command => {
-                    Some(modifiers.alt)
-                }
+                } => Some(*modifiers),
                 _ => None,
             })
         });
-        let (Some(alt), Some(open), Some(library)) =
+        let (Some(modifiers), Some(open), Some(library)) =
             (pressed, self.document.catalog_photo, self.library.as_mut())
         else {
             return;
@@ -536,17 +774,13 @@ impl Editor {
         } else {
             vec![open]
         };
-        if alt {
-            library.request_removal(ids);
-        } else {
-            library.delete_key(ids);
-        }
+        library.delete_press(modifiers, ids);
     }
 
     /// The plan came back: it is asked about, or nothing is to be done. A
     /// folder made with nothing moving into it was asked for already, by
     /// New Folder Inside…'s Create.
-    pub(super) fn file_op_planned(&mut self, planned: Result<Plan, String>) {
+    pub(super) fn file_op_planned(&mut self, planned: Result<(Plan, Option<Plan>), String>) {
         let State::Planning { catalog, verb } = std::mem::take(&mut self.file_ops.state) else {
             return;
         };
@@ -555,18 +789,20 @@ impl Editor {
             return;
         }
         match planned {
-            Ok(plan) if plan.is_empty() => {
+            Ok((plan, _)) if plan.is_empty() => {
                 self.status = match plan.skipped().first() {
                     Some(s) => format!("{}: {}", verb.nothing_to(), s.reason),
                     None => verb.nothing_to().into(),
                 };
                 self.release_files();
             }
-            Ok(plan) => {
+            Ok((plan, trash)) => {
                 let generation = self.library.as_ref().map_or(0, |l| l.session.generation());
                 let asked = matches!(verb, Verb::Create { moving: false, .. });
                 self.file_ops.state = State::Confirming {
                     plan: Box::new(plan),
+                    // None of the files can go: Remove from Catalog alone.
+                    trash: trash.filter(|t| !t.is_empty()).map(Box::new),
                     catalog,
                     generation,
                     verb,
@@ -590,18 +826,26 @@ impl Editor {
             State::Unfinished { .. } => return self.unfinished_window(ctx),
             _ => {}
         }
-        let State::Confirming { plan, verb, .. } = &self.file_ops.state else {
+        let State::Confirming {
+            plan, trash, verb, ..
+        } = &self.file_ops.state
+        else {
             return;
         };
-        let (title, lines, action) = question(plan, verb);
+        let (title, lines, actions) = question(plan, trash.as_deref(), verb);
         let id = match verb {
             Verb::Remove => "remove-photos",
+            Verb::Delete { .. } => "delete-photos",
+            Verb::Trash => "trash-photos",
             Verb::Move { .. } | Verb::Create { .. } => "move-photos",
         };
-        match widgets::destructive_confirm(ctx, id, &title, &lines, "Cancel", action) {
+        // Delete's second action is Move to Trash.
+        let trashing = trash.is_some();
+        match widgets::destructive_choice(ctx, id, &title, &lines, "Cancel", &actions) {
             None => {}
-            Some(true) => self.confirm_file_op(),
-            Some(false) => {
+            Some(Some(1)) if trashing => self.confirm_file_op_with(true),
+            Some(Some(_)) => self.confirm_file_op_with(false),
+            Some(None) => {
                 self.file_ops.state = State::Idle;
                 self.release_files();
             }
@@ -610,14 +854,26 @@ impl Editor {
 
     /// The confirmation's action: runs the plan on a worker.
     pub(super) fn confirm_file_op(&mut self) {
+        self.confirm_file_op_with(false);
+    }
+
+    /// The confirmation's action, Delete's Move to Trash when `trash`:
+    /// runs that plan on a worker.
+    fn confirm_file_op_with(&mut self, trash: bool) {
         let State::Confirming {
             plan,
+            trash: trashing,
             catalog,
             generation,
             verb,
         } = std::mem::take(&mut self.file_ops.state)
         else {
             return;
+        };
+        let (plan, verb) = match (verb, trashing) {
+            (Verb::Delete { .. }, Some(plan)) if trash => (plan, Verb::Trash),
+            (Verb::Delete { .. }, _) => (plan, Verb::Remove),
+            (verb, _) => (plan, verb),
         };
         // Still the catalog it was planned for, not read again since.
         let current = self.library.as_ref().map(|l| l.session.generation());
@@ -645,6 +901,7 @@ impl Editor {
         };
         let confirmed = plan.confirm();
         let failed_batch = batch.clone();
+        let system_trash = self.file_ops.trash.clone();
         super::task::spawn(
             self.tx.clone(),
             self.context.clone(),
@@ -652,7 +909,7 @@ impl Editor {
                 let done = crate::catalog::Catalog::open(&catalog)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|mut catalog| {
-                        file_ops::execute(&mut catalog, confirmed, &Unavailable, &cancel)
+                        file_ops::execute(&mut catalog, confirmed, &*system_trash, &cancel)
                             .map_err(|e| e.to_string())
                     });
                 let _ = tx.send(super::worker::Event::FileOpDone(batch, Box::new(done)));
@@ -851,10 +1108,14 @@ impl Editor {
                         }
                     }
                     match verb {
-                        Verb::Remove => format!(
+                        Verb::Remove | Verb::Delete { .. } => format!(
                             "Removing {} from the catalog",
                             widgets::plural(photos.len(), "photo", "photos")
                         ),
+                        Verb::Trash => {
+                            let at = (progress.done + 1).min(progress.steps);
+                            format!("Moving {at} of {} to the Trash…", progress.steps)
+                        }
                         Verb::Move { to } => {
                             let at = (progress.done + 1).min(progress.steps);
                             format!("Moving {at} of {} to {to}…", progress.steps)
@@ -921,3 +1182,6 @@ mod move_tests;
 #[cfg(test)]
 #[path = "file_ops_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "file_ops_trash_tests.rs"]
+mod trash_tests;

@@ -92,7 +92,7 @@ fn moving_asks_with_its_counts_and_the_files_rows_and_open_photo_follow() -> any
             .iter()
             .any(|l| l == "2 files (and 1 sidecar file) will be moved on disk.")
     );
-    assert_eq!(action, "Move");
+    assert_eq!(action, ["Move"]);
     // Return alone cancels: nothing moved.
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);

@@ -12,6 +12,15 @@ pub(crate) const LABEL: &str = if cfg!(target_os = "macos") {
     "Show in File Manager"
 };
 
+/// The platform's file manager, by name: "Finder".
+pub(crate) const MANAGER: &str = if cfg!(target_os = "macos") {
+    "Finder"
+} else if cfg!(windows) {
+    "Explorer"
+} else {
+    "your file manager"
+};
+
 /// Opens the file manager with `path` selected. On Linux this asks the
 /// desktop's FileManager1 service to select the file and falls back to
 /// opening the containing folder.

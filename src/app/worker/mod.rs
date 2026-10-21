@@ -79,7 +79,18 @@ pub(crate) enum Event {
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     /// A file operation was planned (see `app::file_ops`).
-    FileOpPlanned(Box<Result<crate::catalog::file_ops::Plan, String>>),
+    /// The plan, and Delete's Move to Trash beside it.
+    FileOpPlanned(
+        Box<
+            Result<
+                (
+                    crate::catalog::file_ops::Plan,
+                    Option<crate::catalog::file_ops::Plan>,
+                ),
+                String,
+            >,
+        >,
+    ),
     /// A file operation's run ended, its thread's report of it.
     FileOpDone(
         crate::catalog::file_ops::BatchId,
