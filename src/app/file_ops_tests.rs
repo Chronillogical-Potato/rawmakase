@@ -9,7 +9,7 @@ use eframe::egui::{self, Key, Modifiers, Pos2, Rect, Vec2};
 use std::time::{Duration, Instant};
 
 /// One frame with `events`.
-fn frame(e: &mut Editor, events: Vec<egui::Event>) {
+pub(super) fn frame(e: &mut Editor, events: Vec<egui::Event>) {
     let ctx = e.context.clone();
     let mut output = ctx.run_ui(
         egui::RawInput {
@@ -22,7 +22,7 @@ fn frame(e: &mut Editor, events: Vec<egui::Event>) {
     output.textures_delta.clear();
 }
 
-fn key(key: Key, pressed: bool, repeat: bool, modifiers: Modifiers) -> egui::Event {
+pub(super) fn key(key: Key, pressed: bool, repeat: bool, modifiers: Modifiers) -> egui::Event {
     egui::Event::Key {
         key,
         physical_key: Some(key),
@@ -33,7 +33,7 @@ fn key(key: Key, pressed: bool, repeat: bool, modifiers: Modifiers) -> egui::Eve
 }
 
 /// A key pressed and released.
-fn tap(e: &mut Editor, k: Key, modifiers: Modifiers) {
+pub(super) fn tap(e: &mut Editor, k: Key, modifiers: Modifiers) {
     frame(
         e,
         vec![
@@ -45,7 +45,7 @@ fn tap(e: &mut Editor, k: Key, modifiers: Modifiers) {
 
 /// Frames until the workers have answered and the app is idle again, or
 /// the confirmation is waiting.
-fn settle(e: &mut Editor) {
+pub(super) fn settle(e: &mut Editor) {
     let until = Instant::now() + Duration::from_secs(10);
     while Instant::now() < until {
         let ctx = e.context.clone();
@@ -59,7 +59,7 @@ fn settle(e: &mut Editor) {
     panic!("the file operation never settled");
 }
 
-fn ids_left(e: &Editor) -> Vec<PhotoId> {
+pub(super) fn ids_left(e: &Editor) -> Vec<PhotoId> {
     e.library
         .as_ref()
         .unwrap()
@@ -79,7 +79,7 @@ fn quick_count(e: &Editor) -> usize {
         .map_or(0, |m| m.len())
 }
 
-fn select(e: &mut Editor, ids: &[PhotoId]) {
+pub(super) fn select(e: &mut Editor, ids: &[PhotoId]) {
     let library = e.library.as_mut().unwrap();
     library.select(ids.first().copied());
     if let Some(last) = ids.last() {

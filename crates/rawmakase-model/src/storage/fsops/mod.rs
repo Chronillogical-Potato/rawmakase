@@ -1,10 +1,11 @@
 //! What moving a user's file needs of the file system, and nothing more:
-//! an exclusive rename of a file or directory, which file object a name is,
-//! a folder's exact listing and how it compares names, syncing a folder,
-//! whether a path is below a root with no link or mount point between, and
-//! what a volume is. Policy-free: it knows no photo, catalog or rule of
-//! what may move. It never falls back to a hard link and unlink or to a
-//! copy, so a step either happened whole or did not happen.
+//! an exclusive rename of a file or directory, making a folder where nothing
+//! is, which file object a name is, a folder's exact listing and how it
+//! compares names, syncing a folder, whether a path is below a root with no
+//! link or mount point between, and what a volume is. Policy-free: it knows
+//! no photo, catalog or rule of what may move. It never falls back to a hard
+//! link and unlink or to a copy, so a step either happened whole or did not
+//! happen.
 //!
 //! Each system's calls are in a file of their own (`unix.rs`, `windows.rs`);
 //! a system with neither answers [`FsError::Unsupported`].
@@ -144,6 +145,13 @@ pub fn entry(path: &Path) -> Result<Entry, FsError> {
 /// [`FsError::Unsupported`] and nothing is changed.
 pub fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     os::rename_exclusive(from, to)
+}
+
+/// Makes folder `path`, only if nothing has that name: a folder, file or
+/// link already there is never taken for the new one. Its parent must be
+/// there; nothing is made on the way.
+pub fn create_dir(path: &Path) -> Result<(), FsError> {
+    Ok(std::fs::create_dir(path)?)
 }
 
 /// Makes the renames into or out of `dir` durable. Windows cannot open a

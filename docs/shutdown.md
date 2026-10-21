@@ -77,8 +77,10 @@ that drops it.
 One-shot jobs stay detached: Auto, Upright, Auto straighten, the Point Color and
 Targeted Adjustment samples, the onboarding scan, catalog open and import, file
 dialogs, bulk import, the preset scan, Sync Settings, folder relink and move, the
-file operations' plan and run (Remove from Catalog; the close guard waits for a run,
-with Close anyway, and the journal leaves anything cut short to recovery), the
+file operations' plan, run and recovery (Remove from Catalog, moving photos, New
+Folder Inside, and deciding what a crash left when a catalog opens; the close guard
+waits for a run, with Close anyway, and the journal leaves anything cut short to
+recovery), the
 folder availability probe (which can hang on a stalled mount like the volume
 probe), the update receipt acknowledgement, usage stats collection (which can run
 the package manager) and the watermark fonts. They report through the event channel or a generation check,
@@ -137,8 +139,8 @@ operation that changes files; Remove from Catalog changes none and takes no lock
 items only: a step under way finishes, or fails, and is journalled before the next.
 It is never interrupted mid-step from outside. When the process ends while it runs,
 the lock dies with it and the journal leaves the unfinished item to recovery,
-which runs before the next file operation (and, once the Library offers them,
-when it opens the catalog) and finishes it on the evidence on disk or reports it. The top bar's Stop, and any request to close the window, set the run's cancel
+which runs before the next file operation and when the Library opens the catalog,
+and finishes it on the evidence on disk or reports it. The top bar's Stop, and any request to close the window, set the run's cancel
 flag, so it stops after the photo under way; the close guard then waits for it.
 Close anyway closes at once without saving: the open edit was saved before the
 operation began, and nothing may be written while it holds the catalog.

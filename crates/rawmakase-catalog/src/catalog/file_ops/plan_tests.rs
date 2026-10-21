@@ -408,6 +408,9 @@ fn a_destination_created_just_before_the_rename_is_never_replaced() -> Result<()
             }
             self.0.rename(a, b)
         }
+        fn create_dir(&self, p: &std::path::Path) -> Result<(), fsops::FsError> {
+            self.0.create_dir(p)
+        }
         fn sync_dir(&self, d: &std::path::Path) -> Result<(), fsops::FsError> {
             self.0.sync_dir(d)
         }

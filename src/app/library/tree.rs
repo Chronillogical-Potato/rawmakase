@@ -1,7 +1,7 @@
 use super::folder_selection::{Click, FolderSelection};
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
-use crate::catalog::{Folder, FolderId, RootId};
+use crate::catalog::{Folder, FolderId, PhotoId, RootId};
 use eframe::egui::{self, Vec2};
 use std::{collections::HashSet, path::PathBuf};
 #[derive(Default)]
@@ -10,6 +10,9 @@ pub(super) struct FolderNode {
     pub(super) name: String,
     pub(super) path: PathBuf,
     pub(super) root: Option<RootId>,
+    /// The root it is in, and its logical path there ("" for the root).
+    pub(super) in_root: RootId,
+    pub(super) logical: String,
     pub(super) folder: Option<FolderId>,
     pub(super) own_count: usize,
     pub(super) count: usize,
@@ -23,6 +26,7 @@ impl FolderNode {
             name,
             path,
             root: Some(id),
+            in_root: id,
             ..Default::default()
         }
     }
@@ -31,6 +35,11 @@ impl FolderNode {
         for component in f.relative.split('/').filter(|c| !c.is_empty()) {
             let key = format!("{}/{}", node.key, component);
             let path = node.path.join(component);
+            let in_root = node.in_root;
+            let logical = match node.logical.as_str() {
+                "" => component.to_string(),
+                parent => format!("{parent}/{component}"),
+            };
             node = node
                 .children
                 .entry(component.into())
@@ -38,6 +47,8 @@ impl FolderNode {
                     key,
                     name: component.into(),
                     path,
+                    in_root,
+                    logical,
                     ..Default::default()
                 });
         }
@@ -77,6 +88,20 @@ pub(super) enum TreeAction {
     Remove(String, HashSet<FolderId>, usize),
     /// Synchronize Folder: what to synchronize, and its name.
     Synchronize(crate::catalog::folder_sync::SyncScope, String),
+    /// New Folder Inside…: the folder's root, logical path, name and
+    /// catalog folder, if it has one.
+    NewFolder {
+        root: RootId,
+        parent: String,
+        name: String,
+        folder: Option<FolderId>,
+    },
+    /// Photos dropped on catalog folder `folder`, named `name`.
+    Drop {
+        folder: FolderId,
+        name: String,
+        photos: Vec<PhotoId>,
+    },
 }
 pub(super) fn folder_tree_row(
     ui: &mut egui::Ui,
@@ -92,7 +117,20 @@ pub(super) fn folder_tree_row(
     let painter = ui.painter();
     let active = selected.contains(&node.key);
     let open = expanded.contains(&node.key);
-    if active || response.hovered() {
+    // Photos dragged over a catalog folder can be dropped on it.
+    let dropping = node.folder.is_some()
+        && response
+            .dnd_hover_payload::<super::DraggedPhotos>()
+            .is_some();
+    if dropping {
+        painter.rect_filled(rect, 3., palette.selected_row());
+        painter.rect_stroke(
+            rect.shrink(0.5),
+            3.,
+            egui::Stroke::new(1., palette.selected_marker()),
+            egui::StrokeKind::Inside,
+        );
+    } else if active || response.hovered() {
         painter.rect_filled(
             rect,
             3.,
@@ -159,6 +197,18 @@ pub(super) fn folder_tree_row(
             .or_else(|| node.folder.map(TreeAction::RelinkFolder))
     };
     let mut action = None;
+    // Photos are dragged only once the pointer went far enough (see
+    // `grid::drag_payload`).
+    if let (Some(folder), Some(dragged)) = (
+        node.folder,
+        response.dnd_release_payload::<super::DraggedPhotos>(),
+    ) {
+        action = Some(TreeAction::Drop {
+            folder,
+            name: node.name.clone(),
+            photos: dragged.0.clone(),
+        });
+    }
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
         let pointer = response.interact_pointer_pos().unwrap_or(rect.center());
         if !node.children.is_empty() && pointer.x < x + 6. {
@@ -177,7 +227,7 @@ pub(super) fn folder_tree_row(
         node.path.display(),
         node.count,
         if can_relink {
-            " including subfolders\nRight-click to locate, synchronize or remove"
+            " including subfolders\nRight-click to locate, synchronize, make a folder inside or remove"
         } else {
             ""
         }
@@ -204,6 +254,15 @@ pub(super) fn folder_tree_row(
             && ui.button("Synchronize Folder…").clicked()
         {
             action = Some(TreeAction::Synchronize(scope, node.name.clone()));
+            ui.close();
+        }
+        if ui.button("New Folder Inside…").clicked() {
+            action = Some(TreeAction::NewFolder {
+                root: node.in_root,
+                parent: node.logical.clone(),
+                name: node.name.clone(),
+                folder: node.folder,
+            });
             ui.close();
         }
         if !node.ids.is_empty() && ui.button("Remove from Catalog…").clicked() {

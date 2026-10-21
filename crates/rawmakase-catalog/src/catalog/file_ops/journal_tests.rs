@@ -53,7 +53,7 @@ fn items_round_trip_and_only_unfinished_ones_are_unresolved() -> Result<()> {
     let all = journal::of_batch(&fx.cat.db, "batch")?;
     assert_eq!(all.len(), ItemState::ALL.len());
     let first = &all[0];
-    assert_eq!(first.preconditions, pre);
+    assert_eq!(first.subject, journal::Subject::Photos(pre.clone()));
     assert_eq!(first.members[0].source, member.source);
     assert_eq!(first.members[0].destination, member.destination);
     assert_eq!(first.members[0].id, Some(member.id));

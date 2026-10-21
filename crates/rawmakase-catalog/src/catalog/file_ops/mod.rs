@@ -8,7 +8,8 @@
 //! What it guarantees:
 //! - No byte of an original is lost or overwritten. A file leaves its path
 //!   only by an exclusive rename on its volume or by the system Trash;
-//!   nothing is unlinked, copied or replaced.
+//!   nothing is unlinked, copied or replaced. A folder is made only where
+//!   nothing has its name, and never deleted.
 //! - Catalog rows change only on positive evidence: they follow a file
 //!   proven at its new path (the same file object), and go only with a
 //!   Trash receipt and the file proven gone from its path. A file's absence
@@ -24,6 +25,7 @@ mod companions;
 mod conflicts;
 mod disk;
 mod execute;
+mod folder;
 mod journal;
 mod lock;
 mod plan;
@@ -31,12 +33,15 @@ mod preconditions;
 mod recover;
 
 pub use execute::execute;
+pub use folder::folder_name_problem;
 pub use journal::OperationId;
 pub(in crate::catalog) use lock::opening;
 pub use plan::plan;
-pub use recover::{Recovery, Resolution, Unfinished, UnfinishedMember, recover, resolve};
+pub use recover::{
+    Recovery, Resolution, Unfinished, UnfinishedMember, recover, resolve, unfinished_here,
+};
 
-use super::{CatalogLocation, FolderId, PhotoId};
+use super::{CatalogLocation, FolderId, PhotoId, RootId};
 use std::fmt;
 use std::path::PathBuf;
 
@@ -54,6 +59,15 @@ pub enum FileOp {
     /// Puts masters' files, with the companions only they read, in the
     /// system Trash; then their rows, copies included, leave the catalog.
     TrashPhotos { photos: Vec<PhotoId> },
+    /// Makes folder `name` below logical folder `parent` of `root` (which
+    /// the catalog may have no folder of its own for), on disk and in the
+    /// catalog; then moves `then_move` into it, as [`Self::MovePhotos`].
+    CreateFolder {
+        root: RootId,
+        parent: String,
+        name: String,
+        then_move: Vec<PhotoId>,
+    },
 }
 
 /// One run of an operation, by which its outcome is read back from the
@@ -175,6 +189,8 @@ pub struct Summary {
     /// Whether another computer uses the catalog, whose copies of the files
     /// don't move with them.
     pub other_computers: bool,
+    /// The folder it makes, by name.
+    pub folder: Option<String>,
 }
 
 /// An operation planned and not yet confirmed. Nothing has changed.
@@ -185,6 +201,8 @@ pub struct Plan {
     location: CatalogLocation,
     computer: String,
     kind: journal::Kind,
+    /// The folder it makes before its moves, if any.
+    create: Option<folder::NewFolder>,
     items: Vec<plan::Item>,
     skipped: Vec<Skipped>,
     summary: Summary,
@@ -208,9 +226,13 @@ impl Plan {
             .flat_map(|i| i.preconditions.rows.iter().copied())
             .collect()
     }
+    /// How many items it runs: each family, and the folder it makes.
+    pub fn steps(&self) -> usize {
+        self.items.len() + usize::from(self.create.is_some())
+    }
     /// Whether there is anything to do.
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.items.is_empty() && self.create.is_none()
     }
     /// The user's confirmation, which only the confirming dialog's action
     /// gives: it enforces the order of plan, confirm, execute, not that a
@@ -310,6 +332,8 @@ pub enum ItemResult {
     Moved { to: FolderId },
     /// Its files are in the Trash and its rows left the catalog.
     Trashed,
+    /// The folder is made, and in the catalog as `folder`.
+    Created { folder: FolderId },
     /// Nothing changed, for this reason when there is one.
     Unchanged(Option<String>),
     /// It is unfinished and waits for the user (see [`recover`]).
@@ -351,6 +375,8 @@ pub fn outcome(catalog: &super::Catalog, batch: &BatchId) -> anyhow::Result<Outc
     })
 }
 
+#[cfg(test)]
+mod folder_tests;
 #[cfg(test)]
 mod journal_tests;
 #[cfg(test)]

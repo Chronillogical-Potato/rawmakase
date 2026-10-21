@@ -78,7 +78,8 @@ pub(super) fn photo_cell(
     let response = ui.interact(
         rect,
         egui::Id::new(("catalog-photo-cell", photo.id)),
-        Sense::click(),
+        // Dragged onto a folder, the photos move there.
+        Sense::click_and_drag(),
     );
     // Lightroom grid: dark cells separated by thin gutters, a light surround
     // for the selection, and the color label tinting the cell.
@@ -330,6 +331,8 @@ pub(in crate::app) enum PhotoAction {
     ReadMetadata,
     /// Remove from Catalog.
     Remove,
+    /// Move to Folder…: the photo's files to another catalog folder.
+    MoveToFolder,
     /// Library › Previews: Build Standard-Sized Previews.
     BuildPreviews(crate::catalog::preview_cache::PreviewKind),
     /// Library › Previews: Discard 1:1 Previews, or Standard and 1:1.
@@ -427,6 +430,10 @@ pub(in crate::app) fn photo_menu(
         menu_separator(ui);
         if menu_item(ui, "Read Metadata from Files…", "", true, false) {
             action = Some(PhotoAction::ReadMetadata);
+            ui.close();
+        }
+        if menu_item(ui, "Move to Folder…", "", true, false) {
+            action = Some(PhotoAction::MoveToFolder);
             ui.close();
         }
         if menu_item(ui, "Remove from Catalog…", REMOVE_SHORTCUT, true, false) {

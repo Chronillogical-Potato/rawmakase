@@ -6,11 +6,13 @@
 //! changed.
 use super::super::db::{Reads, sql};
 use super::super::folder_sync::Located;
+use super::super::locations::{join, logical_anchored, logical_location};
 use super::super::sidecar::caseless;
 use super::super::value::row;
-use super::super::{Catalog, FolderId, PhotoId};
+use super::super::{Catalog, FolderId, PhotoId, RootId};
 use super::companions::{self, Companions};
 use super::conflicts::{Destination, Names};
+use super::folder::{FolderState, NewFolder, folder_name_problem};
 use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
 use super::{BatchId, FileOp, FileOpError, Plan, Refusal, Skip, Skipped, Summary};
@@ -53,10 +55,21 @@ struct Family {
 /// Plans `op` in `catalog` on this computer. Reads the catalog in one
 /// snapshot and the files after it; changes nothing.
 pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
-    let (kind, chosen, to) = match op {
-        FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None),
-        FileOp::MovePhotos { photos, to } => (Kind::MovePhotos, photos, Some(to)),
-        FileOp::TrashPhotos { photos } => (Kind::TrashPhotos, photos, None),
+    let (kind, chosen, to, create) = match op {
+        FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
+        FileOp::MovePhotos { photos, to } => (Kind::MovePhotos, photos, Some(to), None),
+        FileOp::TrashPhotos { photos } => (Kind::TrashPhotos, photos, None, None),
+        FileOp::CreateFolder {
+            root,
+            parent,
+            name,
+            then_move,
+        } => (
+            Kind::CreateFolder,
+            then_move,
+            None,
+            Some((root, parent, name)),
+        ),
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
     let mut skipped = Vec::new();
@@ -73,6 +86,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
         Ok((photos, folders, families, computers))
     })?;
     let by_id: HashMap<PhotoId, &PhotoRow> = photos.iter().map(|p| (p.id, p)).collect();
+    let mut made = None;
     let items = match kind {
         Kind::RemoveFromCatalog => families
             .into_iter()
@@ -83,9 +97,17 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
                 rules: UNKNOWN,
             })
             .collect(),
-        Kind::MovePhotos | Kind::TrashPhotos => {
+        Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
             let mut files = Files::new(catalog, &folders);
-            let destination = to.map(|to| files.destination(to)).transpose()?;
+            let destination = match (to, create) {
+                (Some(to), _) => Some(files.destination(to)?),
+                (None, Some((root, parent, name))) => {
+                    let (new, target) = files.new_folder(root, &parent, &name)?;
+                    made = Some(new);
+                    Some(target)
+                }
+                (None, None) => None,
+            };
             let mut items = Vec::new();
             for f in families {
                 match files.family(f, &by_id, destination.as_ref()) {
@@ -100,13 +122,15 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             items
         }
     };
-    let summary = summarize(&items, &by_id, computers > 1);
+    let mut summary = summarize(&items, &by_id, computers > 1);
+    summary.folder = made.as_ref().map(|m| m.state.name.clone());
     skipped.sort_by_key(|s| s.photo);
     Ok(Plan {
         batch: new_batch()?,
         location: catalog.location.clone(),
         computer: catalog.computer.id.clone(),
         kind,
+        create: made,
         items,
         skipped,
         summary,
@@ -327,7 +351,9 @@ pub(super) fn occupied(
 
 /// Where the files go, checked once.
 struct Target {
-    folder: FolderId,
+    /// The catalog's folder; `None` for one the plan makes, or one the
+    /// catalog has no folder of its own for.
+    folder: Option<FolderId>,
     /// Where the folder resolves on this computer, as the catalog places it.
     resolved: PathBuf,
     /// Its canonical path, which members' destinations are in.
@@ -382,9 +408,78 @@ impl<'a> Files<'a> {
             .located
             .get(&to)
             .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-        let (Some(path), Some(anchor)) = (&folder.path, &folder.anchor) else {
+        let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
             return Err(refuse("The folder is offline or missing."));
         };
+        self.destination_at(Some(to), &path, &anchor)
+    }
+
+    /// Folder `name` to make below logical folder `parent` of `root`,
+    /// checked, and it as where files go.
+    fn new_folder(
+        &mut self,
+        root: RootId,
+        parent: &str,
+        name: &str,
+    ) -> Result<(NewFolder, Target), FileOpError> {
+        let refuse = |why: &str| FileOpError::Destination(why.to_string());
+        if let Some(problem) = folder_name_problem(name) {
+            return Err(refuse(problem));
+        }
+        let computer = &self.catalog.computer.id;
+        let (anchor, path) = logical_anchored(&self.catalog.db, computer, root, parent)?
+            .ok_or_else(|| refuse("The folder is offline or missing."))?;
+        // The catalog's own folder there, if it has one.
+        let own = self
+            .located
+            .iter()
+            .find(|(_, f)| f.root == root && f.logical == parent)
+            .map(|(id, _)| *id);
+        let at = self.destination_at(own, &path, &anchor)?;
+        let new = NewFolder {
+            state: FolderState {
+                root,
+                parent: parent.to_string(),
+                parent_path: path.clone(),
+                name: name.to_string(),
+                folder: None,
+            },
+            path: at.dir.join(name),
+            rules: at.rules,
+        };
+        let disk = super::disk::Real;
+        let free = super::folder::taken(&self.catalog.db, computer, &disk, &new)
+            .map_err(FileOpError::Catalog)?;
+        if let Some(why) = free {
+            return Err(FileOpError::Destination(why));
+        }
+        let resolved = path.join(name);
+        let placed = logical_location(&self.catalog.db, computer, root, &join(parent, name))?;
+        if placed.as_ref() != Some(&resolved) {
+            return Err(refuse(
+                "The catalog places a folder of that name elsewhere.",
+            ));
+        }
+        let target = Target {
+            folder: None,
+            resolved,
+            dir: new.path.clone(),
+            volume: at.volume,
+            names: Vec::new(),
+            rules: at.rules,
+            catalog: HashSet::new(),
+        };
+        Ok((new, target))
+    }
+
+    /// The folder at `path`, resolved below `anchor`, checked to take files.
+    fn destination_at(
+        &mut self,
+        to: Option<FolderId>,
+        path: &Path,
+        anchor: &Path,
+    ) -> Result<Target, FileOpError> {
+        let refuse = |why: &str| FileOpError::Destination(why.to_string());
         let dir = match fsops::canonical_below(anchor, path) {
             Ok(dir) => dir,
             Err(Containment::Fs(FsError::NotFound)) => {
@@ -418,7 +513,7 @@ impl<'a> Files<'a> {
         }
         let names = self.listing(&dir).map_err(FileOpError::Destination)?;
         let mut over = self.folders.over(&dir);
-        over.push(to);
+        over.extend(to);
         let mut catalog = HashSet::new();
         for folder in over {
             let filenames: Vec<String> = self.catalog.db.read(
@@ -429,7 +524,7 @@ impl<'a> Files<'a> {
         }
         Ok(Target {
             folder: to,
-            resolved: path.clone(),
+            resolved: path.to_path_buf(),
             rules: Names(fsops::probe(&dir, &names)),
             dir,
             volume: found.id.volume(),
@@ -554,7 +649,8 @@ impl<'a> Files<'a> {
         }
         let mut preconditions = f.preconditions;
         preconditions.folder_path = Some(path);
-        preconditions.to = target.map(|t| (t.folder, t.resolved.clone()));
+        // A folder the plan makes has no id yet: execution gives it.
+        preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
         Ok(Item {
             preconditions,
             members,

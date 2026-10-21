@@ -6,6 +6,7 @@
 use super::super::PhotoId;
 use super::super::db::{Reads, Write, sql};
 use super::super::value::row;
+use super::folder::FolderState;
 use super::preconditions::Preconditions;
 use crate::storage::Identity;
 use crate::storage::fsops::FileId;
@@ -50,6 +51,8 @@ stored! {
         MovePhotos = "move_photos",
         /// Its photo's file and companions go to the Trash, then its rows.
         TrashPhotos = "trash_photos",
+        /// A folder is made, on disk and then in the catalog.
+        CreateFolder = "create_folder",
     }
 }
 
@@ -76,6 +79,8 @@ stored! {
         Planned = "planned",
         Moved = "moved",
         Trashed = "trashed",
+        /// A folder made, at its destination: the name the disk gave it.
+        Created = "created",
         /// Put back where it was.
         Restored = "restored",
     }
@@ -116,6 +121,15 @@ impl Member {
     }
 }
 
+/// What a journalled item is about, with what must still hold of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Subject {
+    /// A family of photos, or a lone virtual copy.
+    Photos(Preconditions),
+    /// A folder it makes.
+    Folder(FolderState),
+}
+
 /// A journalled item.
 #[derive(Clone, Debug)]
 pub(super) struct Item {
@@ -124,14 +138,18 @@ pub(super) struct Item {
     pub computer: String,
     pub kind: Kind,
     pub state: ItemState,
-    pub preconditions: Preconditions,
+    pub subject: Subject,
     pub members: Vec<Member>,
     pub error: Option<String>,
 }
 
 impl Item {
+    /// The catalog photos it concerns; none for a folder.
     pub fn photos(&self) -> &[PhotoId] {
-        &self.preconditions.rows
+        match &self.subject {
+            Subject::Photos(pre) => &pre.rows,
+            Subject::Folder(_) => &[],
+        }
     }
 }
 
@@ -169,6 +187,11 @@ pub(super) fn insert(
             &error,
         ],
     )?;
+    insert_members(w, id, members)?;
+    Ok(OperationId(id))
+}
+
+fn insert_members(w: &mut Write<'_>, id: i64, members: &[NewMember]) -> Result<()> {
     for (ordinal, m) in members.iter().enumerate() {
         let destination = m.destination.as_deref().map(text).transpose()?;
         w.execute(
@@ -188,7 +211,81 @@ pub(super) fn insert(
             ],
         )?;
     }
+    Ok(())
+}
+
+/// Journals a new item of `batch` making folder `path`, in `state`: its one
+/// member has no file object yet, as the folder isn't made.
+pub(super) fn insert_folder(
+    w: &mut Write<'_>,
+    batch: &str,
+    computer: &str,
+    state: ItemState,
+    folder: &FolderState,
+    path: &Path,
+    error: Option<&str>,
+) -> Result<OperationId> {
+    let id: i64 = w.insert_returning_id(
+        sql!(
+            "INSERT INTO file_operations(batch, computer, kind, state, preconditions, created_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+        ),
+        &[
+            &batch,
+            &computer,
+            &Kind::CreateFolder.as_str(),
+            &state.as_str(),
+            &serde_json::to_string(folder)?,
+            &crate::time::now_text(),
+            &error,
+        ],
+    )?;
+    w.execute(
+        sql!(
+            "INSERT INTO file_operation_members(operation, ordinal, source, state)
+             VALUES (?, 0, ?, ?)"
+        ),
+        &[&id, &text(path)?, &MemberState::Planned.as_str()],
+    )?;
     Ok(OperationId(id))
+}
+
+/// Records the folder item `id` made: its file object, and the name the
+/// disk gave it at `made`.
+pub(super) fn set_created(
+    w: &mut Write<'_>,
+    id: OperationId,
+    file: FileId,
+    made: &Path,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!(
+            "UPDATE file_operation_members SET state=?, file_id=?, destination=?
+             WHERE operation=? AND ordinal=0"
+        ),
+        &[
+            &MemberState::Created.as_str(),
+            &file.to_string(),
+            &text(made)?,
+            &id.0,
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation member");
+    Ok(())
+}
+
+/// Replaces folder item `id`'s state, as it is once the catalog has it.
+pub(super) fn set_folder(w: &mut Write<'_>, id: OperationId, folder: &FolderState) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operations SET preconditions=? WHERE id=? AND kind=?"),
+        &[
+            &serde_json::to_string(folder)?,
+            &id.0,
+            &Kind::CreateFolder.as_str(),
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown folder operation");
+    Ok(())
 }
 
 /// Sets item `id`'s state, and its error when one is given.
@@ -270,12 +367,17 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
             })
         })
         .collect::<Result<_>>()?;
+    let kind: Kind = row.kind.parse()?;
+    let subject = match kind {
+        Kind::CreateFolder => Subject::Folder(serde_json::from_str(&row.preconditions)?),
+        _ => Subject::Photos(serde_json::from_str(&row.preconditions)?),
+    };
     Ok(Item {
         id: OperationId(row.id),
         computer: row.computer,
-        kind: row.kind.parse()?,
+        kind,
         state: row.state.parse()?,
-        preconditions: serde_json::from_str(&row.preconditions)?,
+        subject,
         members,
         error: row.error,
     })

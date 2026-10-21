@@ -207,6 +207,16 @@ pub(super) fn logical_location(
     root: RootId,
     logical: &str,
 ) -> Result<Option<PathBuf>> {
+    Ok(logical_anchored(db, computer, root, logical)?.map(|(_, path)| path))
+}
+/// [`logical_location`], with the location it resolves below (see
+/// [`resolve_anchored`]).
+pub(super) fn logical_anchored(
+    db: &impl Reads,
+    computer: &str,
+    root: RootId,
+    logical: &str,
+) -> Result<Option<(PathBuf, PathBuf)>> {
     let original: Option<String> =
         db.read_optional(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
     let Some(original) = original else {
@@ -223,8 +233,8 @@ pub(super) fn logical_location(
         .into_iter()
         .map(|l| (l.relative, PathBuf::from(l.path)))
         .collect();
-    Ok(resolve_in(&original, &rows, logical, cfg!(windows))
-        .filter(|path| !path.as_os_str().is_empty()))
+    Ok(resolve_anchored(&original, &rows, logical, cfg!(windows))
+        .filter(|(_, path)| !path.as_os_str().is_empty()))
 }
 /// Forgets where folder `folder` is on every computer, as it leaves the
 /// catalog: a location left behind would refuse the folder added again as

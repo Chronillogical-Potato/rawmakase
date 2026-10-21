@@ -17,12 +17,12 @@ use anyhow::Result;
 use std::collections::{BTreeMap, HashSet};
 
 /// The files and rows a scenario starts from.
-struct Before {
+pub(super) struct Before {
     files: BTreeMap<String, Vec<u8>>,
     rows: BTreeMap<PhotoId, String>,
 }
 
-fn before(fx: &Fx) -> Before {
+pub(super) fn before(fx: &Fx) -> Before {
     Before {
         files: fx.files(),
         rows: fx.rows(),
@@ -30,7 +30,27 @@ fn before(fx: &Fx) -> Before {
 }
 
 /// The invariants, after a restart and recovery.
-fn check(fx: &Fx, before: &Before, recovery: &Recovery, batch: &BatchId) {
+pub(super) fn check(fx: &Fx, before: &Before, recovery: &Recovery, batch: &BatchId) {
+    check_files(fx, before, recovery, batch);
+    let unfinished: HashSet<PhotoId> = recovery
+        .unfinished
+        .iter()
+        .flat_map(|u| u.photos.iter().copied())
+        .collect();
+    for item in super::outcome(&fx.cat, batch).unwrap().items {
+        match item.result {
+            ItemResult::NeedsRecovery(_) => {
+                assert!(item.photos.iter().all(|p| unfinished.contains(p)));
+            }
+            ItemResult::Interrupted | ItemResult::Kept => panic!("{item:?} left undecided"),
+            _ => {}
+        }
+    }
+}
+
+/// The files and rows invariants alone, which hold whatever the user
+/// decided: every original once, and every row where its file is proven.
+pub(super) fn check_files(fx: &Fx, before: &Before, recovery: &Recovery, batch: &BatchId) {
     let removed = journal::of_batch(&fx.cat.db, &batch.0)
         .unwrap()
         .iter()
@@ -75,15 +95,6 @@ fn check(fx: &Fx, before: &Before, recovery: &Recovery, batch: &BatchId) {
                     "{id:?} removed with its file not in the Trash"
                 );
             }
-        }
-    }
-    for item in super::outcome(&fx.cat, batch).unwrap().items {
-        match item.result {
-            ItemResult::NeedsRecovery(_) => {
-                assert!(item.photos.iter().all(|p| unfinished.contains(p)));
-            }
-            ItemResult::Interrupted | ItemResult::Kept => panic!("{item:?} left undecided"),
-            _ => {}
         }
     }
 }
@@ -864,4 +875,75 @@ fn a_file_back_from_the_trash_under_an_alias_keeps_its_rows() -> Result<()> {
         "rows removed with the file back as SS.NEF"
     );
     Ok(())
+}
+
+#[test]
+fn only_a_crash_leaves_something_to_recover_when_a_catalog_opens() {
+    let mut fx = move_files();
+    assert!(!unfinished_here(&fx.cat).unwrap(), "nothing journalled yet");
+    let _ = fx.run(move_op(&fx), &NoTrash, &disk::Real);
+    assert!(
+        !unfinished_here(&fx.cat).unwrap(),
+        "finished items don't count"
+    );
+    let mut fx = move_files();
+    let plan = fx.plan(move_op(&fx));
+    let disk = Faulty::at(Op::Rename, 1, Fault::CrashAfter);
+    crashes(|| {
+        drop(
+            execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &NoTrash,
+                &Default::default(),
+                &disk,
+            )
+            .unwrap(),
+        );
+    });
+    fx.reopen();
+    assert!(unfinished_here(&fx.cat).unwrap());
+    let recovery = fx.recover(&disk::Real);
+    for u in &recovery.unfinished {
+        resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+    }
+    assert!(!unfinished_here(&fx.cat).unwrap());
+}
+
+#[test]
+fn running_an_operation_forgets_finished_ones_older_than_30_days() {
+    let mut fx = fixture(&["a.NEF", "b.NEF", "sub/"]);
+    let old = fx.plan(FileOp::MovePhotos {
+        photos: vec![fx.photo("a.NEF")],
+        to: fx.folder("sub"),
+    });
+    let old_batch = old.batch().clone();
+    drop(
+        execute::execute_with(
+            &mut fx.cat,
+            old.confirm(),
+            &NoTrash,
+            &Default::default(),
+            &disk::Real,
+        )
+        .unwrap(),
+    );
+    fx.cat
+        .db_for_tests()
+        .execute_batch("UPDATE file_operations SET created_at='2000-01-01 00:00:00'")
+        .unwrap();
+    let _ = fx.run(
+        FileOp::MovePhotos {
+            photos: vec![fx.photo("b.NEF")],
+            to: fx.folder("sub"),
+        },
+        &NoTrash,
+        &disk::Real,
+    );
+    assert!(
+        super::outcome(&fx.cat, &old_batch)
+            .unwrap()
+            .items
+            .is_empty()
+    );
 }

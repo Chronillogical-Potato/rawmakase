@@ -85,6 +85,18 @@ pub(crate) enum Event {
         crate::catalog::file_ops::BatchId,
         Box<Result<crate::catalog::file_ops::Outcome, String>>,
     ),
+    /// A catalog's unfinished file operations were recovered; `None` when
+    /// another window holds them, or they can't run there.
+    FileOpsRecovered(
+        crate::catalog::CatalogLocation,
+        Box<Result<Option<crate::catalog::file_ops::Recovery>, String>>,
+    ),
+    /// The user's choice for an unfinished file operation was carried out.
+    FileOpResolved(
+        crate::catalog::CatalogLocation,
+        crate::catalog::file_ops::OperationId,
+        Box<Result<crate::catalog::file_ops::ItemOutcome, String>>,
+    ),
     Monitor(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),

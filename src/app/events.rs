@@ -33,6 +33,12 @@ impl Editor {
                 // The dialog's own DialogClosed follows.
                 Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
                 Event::FileOpDone(batch, done) => self.file_op_done(batch, *done),
+                Event::FileOpsRecovered(catalog, recovered) => {
+                    self.file_ops_recovered(catalog, *recovered)
+                }
+                Event::FileOpResolved(catalog, operation, resolved) => {
+                    self.file_op_resolved(catalog, operation, *resolved)
+                }
                 Event::FolderQuestion(question) => {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
                 }
@@ -409,6 +415,11 @@ impl Editor {
                     self.clear_reference();
                 }
                 l.set_defaults(self.raw_defaults.clone());
+                // A catalog opened (not read again) may have file
+                // operations a crash left unfinished.
+                if !reloaded {
+                    self.recover_files_later(l.session.catalog.location().clone());
+                }
                 self.library = Some(l);
                 self.module = Module::Library;
                 // On launch, return to the folder, photo and module of last time.
