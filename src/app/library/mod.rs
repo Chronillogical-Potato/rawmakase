@@ -78,6 +78,21 @@ pub(crate) enum FileRequest {
     DeleteRejected,
     /// Rename Photo… (one) or Rename Photos… (several).
     Rename(Vec<PhotoId>),
+    /// Move Folder…: where catalog folder `folder` of `root`, at logical
+    /// path `from`, goes is to be chosen.
+    ChooseParent {
+        folder: FolderId,
+        root: crate::catalog::RootId,
+        from: String,
+    },
+    /// Moves catalog folder `folder` of `root` from logical path `from`
+    /// into logical folder `to` (a drop).
+    MoveFolder {
+        folder: FolderId,
+        root: crate::catalog::RootId,
+        from: String,
+        to: String,
+    },
     /// Rename Folder… for catalog folder `folder` of `root`, at logical
     /// path `logical`.
     RenameFolder {
@@ -102,6 +117,14 @@ pub(crate) enum FileRequest {
         photos: Vec<PhotoId>,
         inside: bool,
     },
+}
+/// A folder being dragged in the Folders panel: catalog folder `folder` of
+/// `root`, at logical path `from`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DraggedFolder {
+    pub folder: FolderId,
+    pub root: crate::catalog::RootId,
+    pub from: String,
 }
 /// Photos being dragged from the grid: the selection, or the photo dragged
 /// when it isn't in it.

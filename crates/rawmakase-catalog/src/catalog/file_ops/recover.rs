@@ -260,7 +260,7 @@ fn decide(
     }
     match item.kind {
         // Rule 3.
-        Kind::MovePhotos | Kind::RenamePhotos | Kind::RenameFolder
+        Kind::MovePhotos | Kind::RenamePhotos | Kind::RenameFolder | Kind::MoveFolder
             if item
                 .members
                 .iter()
@@ -400,8 +400,13 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 _ => ItemResult::Unchanged(item.error.clone()),
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
-            Subject::Tree(tree) => ItemResult::FolderRenamed {
-                folder: tree.folder,
+            Subject::Tree(tree) => match item.kind {
+                Kind::MoveFolder => ItemResult::FolderMoved {
+                    folder: tree.folder,
+                },
+                _ => ItemResult::FolderRenamed {
+                    folder: tree.folder,
+                },
             },
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),

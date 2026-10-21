@@ -81,6 +81,15 @@ pub enum FileOp {
     /// Gives catalog folder `folder` the name `name`, on disk and in the
     /// catalog, with every catalog folder below it; their photos follow.
     RenameFolder { folder: FolderId, name: String },
+    /// Moves catalog folder `folder` into logical folder `parent` of
+    /// `root` (which the catalog may have no folder of its own for), on the
+    /// same volume, with every catalog folder below it; their photos
+    /// follow. Only within the folder's own root.
+    MoveFolder {
+        folder: FolderId,
+        root: RootId,
+        parent: String,
+    },
 }
 
 /// One run of an operation, by which its outcome is read back from the
@@ -388,6 +397,9 @@ pub enum ItemResult {
     /// The folder `folder` is renamed, with the catalog's folders below it;
     /// its photos' paths changed with it.
     FolderRenamed { folder: FolderId },
+    /// The folder `folder` is moved, with the catalog's folders below it;
+    /// its photos' paths changed with it.
+    FolderMoved { folder: FolderId },
     /// The folder is made, and in the catalog as `folder`.
     Created { folder: FolderId },
     /// Nothing changed, for this reason when there is one.
@@ -437,6 +449,8 @@ mod folder_tests;
 mod journal_tests;
 #[cfg(test)]
 mod lock_tests;
+#[cfg(test)]
+mod move_folder_tests;
 #[cfg(test)]
 mod plan_tests;
 #[cfg(test)]

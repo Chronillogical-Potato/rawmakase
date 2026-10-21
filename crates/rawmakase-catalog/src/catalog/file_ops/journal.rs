@@ -59,6 +59,9 @@ stored! {
         /// A folder gets a new name, and the catalog's folders of its
         /// subtree new logical paths.
         RenameFolder = "rename_folder",
+        /// A folder moves into another of its root, and the catalog's
+        /// folders of its subtree get new logical paths.
+        MoveFolder = "move_folder",
     }
 }
 
@@ -134,7 +137,7 @@ pub(super) enum Subject {
     Photos(Preconditions),
     /// A folder it makes.
     Folder(FolderState),
-    /// A folder it renames, with the subtree it re-keys.
+    /// A folder it renames or moves, with the subtree it re-keys.
     Tree(TreeState),
 }
 
@@ -450,7 +453,9 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
     let kind: Kind = row.kind.parse()?;
     let subject = match kind {
         Kind::CreateFolder => Subject::Folder(serde_json::from_str(&row.preconditions)?),
-        Kind::RenameFolder => Subject::Tree(serde_json::from_str(&row.preconditions)?),
+        Kind::RenameFolder | Kind::MoveFolder => {
+            Subject::Tree(serde_json::from_str(&row.preconditions)?)
+        }
         Kind::RemoveFromCatalog | Kind::MovePhotos | Kind::TrashPhotos | Kind::RenamePhotos => {
             Subject::Photos(serde_json::from_str(&row.preconditions)?)
         }
