@@ -55,6 +55,7 @@ mod preconditions;
 mod recover;
 mod rename;
 mod tree;
+mod tree_copy;
 
 pub use execute::execute;
 pub use folder::folder_name_problem;
@@ -556,5 +557,7 @@ mod rename_tests;
 mod rules_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_copy_tests;
 #[cfg(test)]
 mod tree_tests;

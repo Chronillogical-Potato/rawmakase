@@ -249,6 +249,9 @@ pub(super) struct FakeTrash {
     pub fail_from: Option<usize>,
     /// The process ends right after the `n`-th file went (from 1), if set.
     pub crash_after: Option<usize>,
+    /// The process ends just before the `n`-th file would go (from 1), if
+    /// set.
+    pub crash_before: Option<usize>,
     pub calls: RefCell<usize>,
 }
 
@@ -260,6 +263,7 @@ impl FakeTrash {
             dir,
             fail_from: None,
             crash_after: None,
+            crash_before: None,
             calls: RefCell::new(0),
         }
     }
@@ -272,6 +276,9 @@ impl Trash for FakeTrash {
             *calls += 1;
             *calls
         };
+        if self.crash_before == Some(n) {
+            panic!("injected crash before trashing {n}");
+        }
         if self.fail_from.is_some_and(|from| n >= from) {
             return Err(TrashError::Unsupported);
         }
@@ -343,6 +350,9 @@ macro_rules! passes_on {
         ) -> Result<(), crate::storage::fsops::FsError> {
             self.$inner.remove_file(path)
         }
+        fn remove_dir(&self, path: &std::path::Path) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.remove_dir(path)
+        }
     };
 }
 pub(super) use passes_on;
@@ -364,6 +374,7 @@ pub(super) enum Call {
     CopyTimes(PathBuf),
     Hash(PathBuf),
     RemoveFile(PathBuf),
+    RemoveDir(PathBuf),
 }
 
 /// Which kind of call a fault is at.
@@ -378,6 +389,7 @@ pub(super) enum Op {
     CopyTimes,
     Hash,
     RemoveFile,
+    RemoveDir,
 }
 
 impl Op {
@@ -745,6 +757,10 @@ impl Disk for Faulty {
     fn remove_file(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::RemoveFile(path.into()));
         self.step(Op::RemoveFile, || Real.remove_file(&self.found(path)))
+    }
+    fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::RemoveDir(path.into()));
+        self.step(Op::RemoveDir, || Real.remove_dir(&self.found(path)))
     }
 }
 

@@ -54,6 +54,10 @@ pub(in crate::catalog) struct TreeState {
     /// Where `from` and `to` resolve on this computer.
     pub from_path: PathBuf,
     pub to_path: PathBuf,
+    /// Its layout, when it is copied to another volume (#572): absent from
+    /// items that rename it, as 0.4.2 journalled them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub across: Option<super::tree_copy::TreeAcross>,
 }
 
 /// A folder change planned: its state, and its directory as captured.
@@ -68,6 +72,8 @@ pub(super) struct TreeMove {
     pub rules: Names,
     /// Whether its volume renames a name to another spelling of itself.
     pub spelling: bool,
+    /// How it is copied, when its destination is on another volume.
+    pub copy: Option<super::tree_copy::TreeCopy>,
 }
 
 /// Why a root can't be renamed or moved here.
@@ -325,11 +331,6 @@ fn plan_to(
             "A folder can't be moved into itself or a folder inside it.",
         ));
     }
-    if at.id.volume() != found.id.volume() {
-        return Err(refuse(
-            "Moving between drives isn't available yet. Move it in Finder, then locate the folder again.",
-        ));
-    }
     if protected(&source) || protected(&dir) || holds_own(catalog, &source) {
         return Err(refuse(
             "Folders in the Trash, or holding the catalog or RAWmakase's own folders, can't be renamed or moved.",
@@ -358,12 +359,14 @@ fn plan_to(
             photos: Vec::new(),
             from_path,
             to_path,
+            across: None,
         },
         destination: dir.join(&name),
         source,
         id: found.id,
         rules: Names(fsops::probe(&dir, &listing)),
         spelling: facts.renames_spelling,
+        copy: None,
     };
     // Another root over its own directory, or one nested in its root, can
     // name where it is already by another logical path.
@@ -382,6 +385,17 @@ fn plan_to(
     planned.state.photos = photos_in(db, &planned.state.folders)?;
     if unfinished(db, &planned)? {
         return Err(refuse(UNFINISHED));
+    }
+    // Another volume's folder takes a copy of the whole tree (#572), its
+    // names read last, once nothing else refuses it.
+    if at.id.volume() != found.id.volume() {
+        let mut copy =
+            super::tree_copy::plan(disk, &planned.source, &dir, at.id.volume(), planned.rules)?;
+        super::tree_copy::map(db, disk, &planned, &mut copy)?;
+        planned.state.across = Some(super::tree_copy::TreeAcross {
+            directories: copy.directories(),
+        });
+        planned.copy = Some(copy);
     }
     Ok(planned)
 }
@@ -500,7 +514,7 @@ fn overlapped(
 }
 
 /// The photos in `folders`.
-fn photos_in(db: &impl Reads, folders: &[(FolderId, String)]) -> Result<Vec<PhotoId>> {
+pub(super) fn photos_in(db: &impl Reads, folders: &[(FolderId, String)]) -> Result<Vec<PhotoId>> {
     let mut photos = Vec::new();
     for (folder, _) in folders {
         let ids: Vec<PhotoId> = db.read(sql!("SELECT id FROM photos WHERE folder=?"), &[folder])?;
@@ -532,23 +546,37 @@ pub(super) fn unfinished(db: &impl Reads, planned: &TreeMove) -> Result<bool> {
 /// Re-keys the subtree of `state` to logical path `to` of its destination
 /// root in `w`'s transaction: each folder's root and logical path, and the
 /// form releases before logical paths read. Each folder keeps its id.
-fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
+pub(super) fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
+    let mut paths = Vec::new();
     for (folder, logical) in &state.folders {
         let rest = logical
             .strip_prefix(state.from.as_str())
             .context("a folder outside the subtree")?;
-        let new = format!("{to}{rest}");
-        let native: PathBuf = names(&new).collect();
+        paths.push((*folder, format!("{to}{rest}")));
+    }
+    set_paths(w, state.to_root(), &paths)
+}
+
+/// Gives each of `paths`' folders root `root` and its logical path there,
+/// in `w`'s transaction, `folder_paths` and the form releases before
+/// logical paths read alike.
+pub(super) fn set_paths(
+    w: &mut Write<'_>,
+    root: RootId,
+    paths: &[(FolderId, String)],
+) -> Result<()> {
+    for (folder, new) in paths {
+        let native: PathBuf = names(new).collect();
         w.execute(
             sql!(
                 "INSERT INTO folder_paths(folder, path) VALUES (?, ?)
                  ON CONFLICT(folder) DO UPDATE SET path=excluded.path"
             ),
-            &[folder, &new],
+            &[folder, new],
         )?;
         w.execute(
             sql!("UPDATE folders SET root=?, relative_path=? WHERE id=?"),
-            &[&state.to_root(), &native.to_string_lossy(), folder],
+            &[&root, &native.to_string_lossy(), folder],
         )?;
     }
     Ok(())

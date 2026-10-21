@@ -57,7 +57,7 @@ pub(super) struct CopyTo {
 
 /// What a move to another volume must leave free there, beyond what it
 /// copies: room for the folders' own records.
-const SPARE: u64 = 32 << 20;
+pub(super) const SPARE: u64 = 32 << 20;
 
 /// The name of member `ordinal` of item `item`'s partial copy, for its file
 /// named `name`, in run `batch`: hidden (so Synchronize Folder and Add
@@ -138,7 +138,7 @@ pub(super) fn plan_with(
         }
         FileOp::RenameFolder { root, folder, name } => {
             let tree = super::tree::rename(catalog, disk, root, &folder, &name)?;
-            return tree_plan(catalog, Kind::RenameFolder, tree);
+            return tree_plan(catalog, Kind::RenameFolder, tree, batch);
         }
         FileOp::MoveFolder {
             root,
@@ -147,7 +147,7 @@ pub(super) fn plan_with(
             parent,
         } => {
             let tree = super::tree::relocate(catalog, disk, root, &folder, to_root, &parent)?;
-            return tree_plan(catalog, Kind::MoveFolder, tree);
+            return tree_plan(catalog, Kind::MoveFolder, tree, batch);
         }
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
@@ -230,11 +230,29 @@ pub(super) fn plan_with(
     })
 }
 
-/// The plan of folder change `tree`, of `kind`.
-fn tree_plan(catalog: &Catalog, kind: Kind, tree: TreeMove) -> Result<Plan, FileOpError> {
+/// The plan of folder change `tree`, of `kind`, run as `batch`. A folder
+/// copied to another volume is built in a hidden folder named for it.
+fn tree_plan(
+    catalog: &Catalog,
+    kind: Kind,
+    mut tree: TreeMove,
+    batch: BatchId,
+) -> Result<Plan, FileOpError> {
     let computers: i64 = catalog
         .db
         .read_one(sql!("SELECT count(*) FROM computers"), &[])?;
+    let name = tree.destination.file_name().unwrap_or_default().to_owned();
+    let dir = super::disk::parent(&tree.destination).to_path_buf();
+    let across = tree.copy.as_mut().map(|copy| {
+        copy.hidden = dir.join(temp_name(&name, &batch, 0, 0));
+        super::Across {
+            files: copy.files(),
+            companions: 0,
+            bytes: copy.bytes,
+            volume: copy.top.clone(),
+            available: copy.available,
+        }
+    });
     let summary = Summary {
         photos: tree.state.photos.len(),
         other_computers: computers > 1,
@@ -242,10 +260,11 @@ fn tree_plan(catalog: &Catalog, kind: Kind, tree: TreeMove) -> Result<Plan, File
             .destination
             .file_name()
             .map(|n| n.to_string_lossy().into_owned()),
+        across,
         ..Summary::default()
     };
     Ok(Plan {
-        batch: new_batch()?,
+        batch,
         location: catalog.location.clone(),
         computer: catalog.computer.id.clone(),
         kind,

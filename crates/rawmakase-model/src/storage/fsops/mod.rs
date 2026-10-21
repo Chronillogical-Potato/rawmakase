@@ -11,7 +11,8 @@
 //! one on its own so its caller journals between them ([`copy`]): making an
 //! empty file where nothing has its name, copying into it while hashing
 //! what was read, syncing it, giving it the source's time, hashing a file,
-//! and removing a file (which only a partial copy is for).
+//! and removing a file (which only a partial copy is for) or an empty
+//! folder (which only one a copy made is for).
 //!
 //! Each system's calls are in a file of their own (`unix.rs`, `windows.rs`);
 //! a system with neither answers [`FsError::Unsupported`].
@@ -186,6 +187,13 @@ pub fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
 /// there; nothing is made on the way.
 pub fn create_dir(path: &Path) -> Result<(), FsError> {
     Ok(std::fs::create_dir(path)?)
+}
+
+/// Removes folder `path` only while it is empty: a folder holding anything,
+/// or a file, is left as it is. Not for a user's folder: its caller proves
+/// `path` is one it made.
+pub fn remove_dir(path: &Path) -> Result<(), FsError> {
+    Ok(std::fs::remove_dir(path)?)
 }
 
 /// Makes the renames into or out of `dir` durable. Windows cannot open a

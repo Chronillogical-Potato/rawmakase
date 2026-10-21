@@ -469,6 +469,89 @@ pub(super) fn insert_tree(
     Ok(OperationId(id))
 }
 
+/// A file or folder of a folder copied to another volume, as planned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NewTreeMember {
+    pub source: PathBuf,
+    /// Where it is once the folder has its name there.
+    pub destination: PathBuf,
+    pub id: FileId,
+    /// A file's; `None` for a folder.
+    pub identity: Option<Identity>,
+    /// Where it is made, inside the hidden folder the copy is built in.
+    pub temp: PathBuf,
+}
+
+/// Journals a new item of `batch` copying a folder to another volume, in
+/// `state`: its members planned, each with the place it is made.
+#[allow(clippy::too_many_arguments, reason = "one row's columns")]
+pub(super) fn insert_tree_copy(
+    w: &mut Write<'_>,
+    batch: &str,
+    computer: &str,
+    kind: Kind,
+    state: ItemState,
+    tree: &TreeState,
+    members: &[NewTreeMember],
+    error: Option<&str>,
+) -> Result<OperationId> {
+    let id: i64 = w.insert_returning_id(
+        sql!(
+            "INSERT INTO file_operations(batch, computer, kind, state, preconditions, created_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+        ),
+        &[
+            &batch,
+            &computer,
+            &kind.as_str(),
+            &state.as_str(),
+            &serde_json::to_string(tree)?,
+            &crate::time::now_text(),
+            &error,
+        ],
+    )?;
+    for (ordinal, m) in members.iter().enumerate() {
+        let identity = m.identity.as_ref().map(serde_json::to_string).transpose()?;
+        w.execute(
+            sql!(
+                "INSERT INTO file_operation_members(operation, ordinal, source, destination,
+                    file_id, identity, state)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            ),
+            &[
+                &id,
+                &(ordinal as i64),
+                &text(&m.source)?,
+                &text(&m.destination)?,
+                &m.id.to_string(),
+                &identity,
+                &MemberState::Planned.as_str(),
+            ],
+        )?;
+        w.execute(
+            sql!("INSERT INTO file_operation_copies(operation, ordinal, temp) VALUES (?, ?, ?)"),
+            &[&id, &(ordinal as i64), &text(&m.temp)?],
+        )?;
+    }
+    Ok(OperationId(id))
+}
+
+/// Records where member `ordinal` of item `id` is once its step is done:
+/// `destination`, as the disk spells it.
+pub(super) fn set_destination(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    destination: &Path,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operation_members SET destination=? WHERE operation=? AND ordinal=?"),
+        &[&text(destination)?, &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation member");
+    Ok(())
+}
+
 /// Records the folder item `id` made: its file object, and the name the
 /// disk gave it at `made`.
 pub(super) fn set_created(

@@ -32,6 +32,8 @@ pub(super) trait Disk {
     fn hash(&self, path: &Path) -> Result<ContentHash, FsError>;
     /// Removes a partial copy, which its caller proves its own.
     fn remove_file(&self, path: &Path) -> Result<(), FsError>;
+    /// Removes an empty folder a copy made, which its caller proves its own.
+    fn remove_dir(&self, path: &Path) -> Result<(), FsError>;
 }
 
 /// The file system itself.
@@ -85,6 +87,9 @@ impl Disk for Real {
     }
     fn remove_file(&self, path: &Path) -> Result<(), FsError> {
         fsops::remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
+        fsops::remove_dir(path)
     }
 }
 

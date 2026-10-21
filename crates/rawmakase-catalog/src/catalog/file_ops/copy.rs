@@ -263,7 +263,7 @@ fn unchanged(disk: &dyn Disk, path: &Path, id: FileId, identity: &Identity) -> b
 /// Whether member `m`'s original is proven at its source as it was copied:
 /// that file object, by its exact name in its folder's listing, with its
 /// journalled `Identity`.
-fn original_here(disk: &dyn Disk, m: &Member) -> bool {
+pub(super) fn original_here(disk: &dyn Disk, m: &Member) -> bool {
     match (m.id, &m.identity) {
         (Some(id), Some(identity)) => {
             presence(disk, &m.source, id) == Presence::Here
@@ -479,7 +479,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
 
 /// What must hold of an item's originals for its copies to be discarded.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Originals {
+pub(super) enum Originals {
     /// Each the file object and `Identity` it was copied as: whatever is
     /// undone on its own.
     AsCopied,
@@ -579,7 +579,7 @@ fn partial(disk: &dyn Disk, m: &Member, temp: &Path) -> Partial {
 /// when it can't be told, as when a file there has that name but is
 /// another file object: on a volume that renumbers its files it may be the
 /// copy, so its absence is never concluded from it.
-fn copy_at(disk: &dyn Disk, at: &Path, id: FileId) -> Option<Option<PathBuf>> {
+pub(super) fn copy_at(disk: &dyn Disk, at: &Path, id: FileId) -> Option<Option<PathBuf>> {
     let dir = parent(at);
     let wanted = caseless(at.file_name()?);
     let mut ours = Vec::new();
