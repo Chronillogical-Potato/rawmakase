@@ -78,11 +78,16 @@ pub enum FileOp {
     /// file changes. A master takes its virtual copies with it; a copy
     /// alone goes alone.
     RemoveFromCatalog { photos: Vec<PhotoId> },
-    /// Moves masters' files, with the companions only they read, into
-    /// catalog folder `to`; their rows, copies included, follow. On the
-    /// same volume a file is renamed; on another it is copied, and its
-    /// original put in the Trash once the catalog follows the copy.
-    MovePhotos { photos: Vec<PhotoId>, to: FolderId },
+    /// Moves masters' files, with the companions only they read, into the
+    /// folder at logical path `to` of `root`; their rows, copies included,
+    /// follow. On the same volume a file is renamed; on another it is
+    /// copied, and its original put in the Trash once the catalog follows
+    /// the copy.
+    MovePhotos {
+        photos: Vec<PhotoId>,
+        root: RootId,
+        to: String,
+    },
     /// Puts masters' files, with the companions only they read, in the
     /// system Trash; then their rows, copies included, leave the catalog.
     TrashPhotos { photos: Vec<PhotoId> },

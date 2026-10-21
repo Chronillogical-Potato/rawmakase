@@ -782,9 +782,10 @@ impl Editor {
         to: crate::catalog::FolderId,
         name: String,
     ) {
-        if !photos.is_empty() {
+        let place = self.library.as_ref().and_then(|l| l.folder_place(to));
+        if let (false, Some((root, to))) = (photos.is_empty(), place) {
             self.request_file_op(
-                FileOp::MovePhotos { photos, to },
+                FileOp::MovePhotos { photos, root, to },
                 None,
                 Verb::Move { to: name },
             );

@@ -921,6 +921,11 @@ impl Library {
         let name = relative.rsplit('/').next().unwrap_or(relative).to_string();
         Some((SyncScope::Folder(folder.id), name))
     }
+    /// The root and logical path of catalog folder `id`, as the Library has it.
+    pub(in crate::app) fn folder_place(&self, id: FolderId) -> Option<(RootId, String)> {
+        let folder = self.session.folders.iter().find(|f| f.id == id)?;
+        Some((folder.root, folder.relative.clone()))
+    }
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()
     }

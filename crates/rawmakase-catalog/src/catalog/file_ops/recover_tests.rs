@@ -182,7 +182,8 @@ fn move_files() -> Fx {
 fn move_op(fx: &Fx) -> FileOp {
     FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF"), fx.photo("b.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     }
 }
 
@@ -372,7 +373,8 @@ fn moved_but_unfinished() -> (Fx, BatchId) {
     fx.fail_journal("BEFORE UPDATE ON photos");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let batch = plan.batch().clone();
     let outcome = execute::execute_with(
@@ -476,7 +478,8 @@ fn a_put_back_resumes_after_a_crash_and_never_completes_forward() -> Result<()> 
         let a = fx.photo("a.NEF");
         let plan = fx.plan(FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         });
         let batch = plan.batch().clone();
         assert!(crashes(|| {
@@ -514,7 +517,8 @@ fn a_put_back_after_another_release_synchronized_the_photo_renames_nothing() -> 
     let sub = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: sub,
+        root: fx.root_of(sub),
+        to: fx.logical(sub),
     });
     assert!(crashes(|| {
         let _ = execute::execute_with(
@@ -730,12 +734,14 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
                 0 => FileOp::TrashPhotos { photos },
                 5 => FileOp::MovePhotos {
                     photos,
-                    to: fx.folder("far"),
+                    root: fx.root_id(),
+                    to: "far".into(),
                 },
                 1 => FileOp::RemoveFromCatalog { photos },
                 2 => FileOp::MovePhotos {
                     photos,
-                    to: fx.folder("one"),
+                    root: fx.root_id(),
+                    to: "one".into(),
                 },
                 // Names that sometimes clash, chain or are the photo's own.
                 3 => FileOp::RenamePhotos {
@@ -746,7 +752,8 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
                 },
                 _ => FileOp::MovePhotos {
                     photos,
-                    to: fx.folder("two"),
+                    root: fx.root_id(),
+                    to: "two".into(),
                 },
             };
             let fault = [Fault::Fail, Fault::CrashBefore, Fault::CrashAfter][rng.next(3)];
@@ -848,7 +855,8 @@ fn a_family_shared_with_a_new_photo_before_completion_is_left_unfinished() -> Re
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         },
         &NoTrash,
         &Faulty::default(),
@@ -1013,7 +1021,8 @@ fn running_an_operation_forgets_finished_ones_older_than_30_days() {
     let mut fx = fixture(&["a.NEF", "b.NEF", "sub/"]);
     let old = fx.plan(FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let old_batch = old.batch().clone();
     drop(
@@ -1033,7 +1042,8 @@ fn running_an_operation_forgets_finished_ones_older_than_30_days() {
     let _ = fx.run(
         FileOp::MovePhotos {
             photos: vec![fx.photo("b.NEF")],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         },
         &NoTrash,
         &disk::Real,

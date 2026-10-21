@@ -109,7 +109,9 @@ pub(super) fn plan_with(
     let mut stems = HashMap::new();
     let (kind, chosen, to, create) = match op {
         FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
-        FileOp::MovePhotos { photos, to } => (Kind::MovePhotos, photos, Some(to), None),
+        FileOp::MovePhotos { photos, root, to } => {
+            (Kind::MovePhotos, photos, Some((root, to)), None)
+        }
         FileOp::TrashPhotos { photos } => (Kind::TrashPhotos, photos, None, None),
         FileOp::CreateFolder {
             root,
@@ -179,7 +181,7 @@ pub(super) fn plan_with(
         Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
             let mut files = Files::new(catalog, &folders, disk);
             let destination = match (to, create) {
-                (Some(to), _) => Some(files.destination(to)?),
+                (Some((root, to)), _) => Some(files.destination(root, &to)?),
                 (None, Some((root, parent, name))) => {
                     let (new, target) = files.new_folder(root, &parent, &name)?;
                     made = Some(new);
@@ -541,11 +543,15 @@ impl<'a> Files<'a> {
     }
 
     /// Folder `to`, checked to take files.
-    fn destination(&mut self, to: FolderId) -> Result<Target, FileOpError> {
+    /// The folder at logical path `logical` of `root`, checked to take
+    /// files.
+    fn destination(&mut self, root: RootId, logical: &str) -> Result<Target, FileOpError> {
         let refuse = |why: &str| FileOpError::Destination(why.to_string());
-        let folder = self
+        let (to, folder) = self
             .located
-            .get(&to)
+            .iter()
+            .find(|(_, f)| f.root == root && f.logical == logical)
+            .map(|(id, f)| (*id, f))
             .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
         let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
             return Err(refuse("The folder is offline or missing."));

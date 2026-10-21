@@ -45,7 +45,8 @@ fn a_copy_alone_is_removed_alone_but_never_moved_or_trashed() -> Result<()> {
     for op in [
         FileOp::MovePhotos {
             photos: vec![copy],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         FileOp::TrashPhotos { photos: vec![copy] },
     ] {
@@ -78,7 +79,8 @@ fn a_master_chosen_with_its_copy_is_one_item_and_unknown_photos_are_skipped() ->
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![copy, a, gone, a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.summary().photos, 2);
     assert_eq!(plan.summary().files, 1);
@@ -92,7 +94,8 @@ fn a_master_chosen_with_its_copy_is_one_item_and_unknown_photos_are_skipped() ->
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![copy, a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &Faulty::default(),
@@ -111,7 +114,8 @@ fn a_missing_file_is_removed_from_the_catalog_but_skipped_for_disk_operations() 
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.skipped()[0].reason, Skip::Missing);
     let plan = fx.plan(FileOp::TrashPhotos { photos: vec![a] });
@@ -154,14 +158,16 @@ fn a_move_keeps_the_file_object_its_time_identity_edit_and_checksum() -> Result<
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.summary().companions, 1);
     let disk = Faulty::default();
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &disk,
@@ -258,7 +264,8 @@ fn background_reads_between_plan_and_execute_strand_nothing() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     // What the checksum reader and the capture and info backfills write.
     fx.cat
@@ -284,7 +291,8 @@ fn a_family_changed_by_another_connection_after_planning_is_left_alone() -> Resu
         let op = match remove {
             false => FileOp::MovePhotos {
                 photos: vec![a, b],
-                to,
+                root: fx.root_of(to),
+                to: fx.logical(to),
             },
             true => FileOp::RemoveFromCatalog { photos: vec![a, b] },
         };
@@ -328,7 +336,8 @@ fn a_photo_removed_and_added_again_with_new_edits_is_refused() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     // Another connection removes it and adds the same file again, under
     // the same id (SQLite reuses the largest), with an edit of its own.
@@ -365,7 +374,8 @@ fn a_destination_created_between_plan_and_execute_is_left_alone() -> Result<()> 
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     std::fs::write(fx.root.join("sub/a.NEF"), b"someone else's")?;
     let outcome = execute::execute_with(
@@ -424,7 +434,8 @@ fn a_destination_created_just_before_the_rename_is_never_replaced() -> Result<()
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &disk,
@@ -457,7 +468,8 @@ fn a_name_taken_in_the_destination_is_refused() -> Result<()> {
     let to = fx.folder("sub/x");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![b, c],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(
         plan.skipped(),
@@ -470,7 +482,8 @@ fn a_name_taken_in_the_destination_is_refused() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(
         plan.skipped().first().map(|s| s.reason.clone()),
@@ -482,7 +495,8 @@ fn a_name_taken_in_the_destination_is_refused() -> Result<()> {
     std::fs::write(fx.root.join("sub/x/C.NEF"), b"not in the catalog")?;
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![c],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     let refused = plan.skipped().first().map(|s| s.reason.clone());
     let dir = fx.root.join("sub/x");
@@ -504,7 +518,8 @@ fn two_photos_arriving_with_one_name_are_both_refused() -> Result<()> {
     let (x, y) = (fx.photo("one/a.NEF"), fx.photo("two/a.NEF"));
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![x, y],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert!(plan.is_empty());
     let reasons: Vec<_> = plan.skipped().iter().map(|s| s.reason.clone()).collect();
@@ -525,7 +540,8 @@ fn an_nfd_name_takes_the_nfc_name_on_a_normalising_volume() -> Result<()> {
     let a = fx.photo("caf\u{e9}.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert!(matches!(
         &plan.skipped()[0].reason,
@@ -540,7 +556,8 @@ fn a_photo_already_in_the_folder_is_skipped() -> Result<()> {
     let a = fx.photo("sub/a.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(plan.skipped()[0].reason, Skip::AlreadyThere);
     Ok(())
@@ -554,7 +571,8 @@ fn a_shared_sidecar_stays_and_is_said_to() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.summary().companions, 0);
     assert_eq!(
@@ -564,7 +582,8 @@ fn a_shared_sidecar_stays_and_is_said_to() -> Result<()> {
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &Faulty::default(),
@@ -582,7 +601,8 @@ fn a_companion_another_file_there_would_read_is_refused() -> Result<()> {
     let a = fx.photo("A.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(
         plan.skipped()[0].reason,
@@ -593,7 +613,8 @@ fn a_companion_another_file_there_would_read_is_refused() -> Result<()> {
     let b = fx.photo("B.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![b],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(
         plan.skipped()[0].reason,
@@ -605,7 +626,8 @@ fn a_companion_another_file_there_would_read_is_refused() -> Result<()> {
     let (x, y) = (fx.photo("one/A.NEF"), fx.photo("two/A.DNG"));
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![x, y],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     // Skips come in photo id order, which the listing decides.
     let reason = |id| {
@@ -641,7 +663,8 @@ fn two_folders_over_one_directory_make_its_files_shared() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.skipped()[0].reason, Skip::Refused(Refusal::Shared));
     // Or a duplicate row of the same file in its own folder.
@@ -694,7 +717,8 @@ fn a_link_inside_the_root_is_not_followed() -> Result<()> {
         &fx.cat,
         FileOp::MovePhotos {
             photos: vec![a],
-            to: linked,
+            root: fx.root_of(linked),
+            to: fx.logical(linked),
         },
     );
     assert!(matches!(into, Err(FileOpError::Destination(_))));
@@ -707,7 +731,8 @@ fn cancelling_stops_between_items() -> Result<()> {
     let (a, b) = (fx.photo("a.NEF"), fx.photo("b.NEF"));
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a, b],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let cancel = std::sync::atomic::AtomicBool::new(true);
     let outcome = execute::execute_with(
@@ -746,7 +771,8 @@ fn the_outcome_reads_the_same_from_the_journal_afterwards() -> Result<()> {
     let a = fx.photo("a.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let batch = plan.batch().clone();
     let outcome = execute::execute_with(
@@ -789,7 +815,8 @@ fn a_sidecar_reader_appearing_after_planning_leaves_the_photo_alone() -> Result<
         let a = fx.photo("a.NEF");
         let plan = fx.plan(FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         });
         std::fs::write(fx.root.join(at), b"another reader")?;
         let outcome = execute::execute_with(
@@ -815,7 +842,8 @@ fn a_destination_replaced_by_a_link_after_planning_is_not_followed() -> Result<(
     let a = fx.photo("a.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let elsewhere = fx.dir.path().join("elsewhere");
     std::fs::create_dir(&elsewhere)?;
@@ -845,13 +873,15 @@ fn a_sidecar_with_another_name_elsewhere_stays_and_the_photo_still_moves() -> Re
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.summary().shared_companions, [fx.root.join("a.xmp")]);
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &Faulty::default(),
@@ -873,7 +903,8 @@ fn a_second_row_naming_the_same_file_by_an_alias_makes_it_shared() -> Result<()>
     fx.add_row(&root, "", "SS.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(plan.skipped()[0].reason, Skip::Refused(Refusal::Shared));
     Ok(())
@@ -898,7 +929,8 @@ fn companions_are_owned_by_any_name_the_volume_takes_for_theirs() -> Result<()> 
     let a = fx.photo("\u{df}.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(plan.summary().companions, 0);
     assert_eq!(plan.summary().shared_companions.len(), 1);
@@ -907,7 +939,8 @@ fn companions_are_owned_by_any_name_the_volume_takes_for_theirs() -> Result<()> 
     let a = fx.photo("\u{df}.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert!(matches!(
         &plan.skipped()[0].reason,
@@ -927,7 +960,8 @@ fn an_offline_photo_holds_its_name_against_any_alias_of_it() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert!(matches!(
         plan.skipped(),
@@ -939,7 +973,8 @@ fn an_offline_photo_holds_its_name_against_any_alias_of_it() -> Result<()> {
     let _ = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &Faulty::default(),
@@ -958,14 +993,16 @@ fn capital_sharp_s_is_held_to_the_same_rules() -> Result<()> {
     let a = fx.photo("\u{1e9e}.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert_eq!(plan.summary().companions, 0, "SS.DNG reads it too");
     let fx = fixture(&["\u{1e9e}.NEF", "sub/", "sub/SS.xmp"]);
     let a = fx.photo("\u{1e9e}.NEF");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert!(matches!(
         &plan.skipped()[0].reason,
@@ -976,7 +1013,8 @@ fn capital_sharp_s_is_held_to_the_same_rules() -> Result<()> {
     std::fs::remove_file(fx.root.join("sub/SS.NEF"))?;
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     assert!(matches!(
         &plan.skipped()[0].reason,
@@ -996,13 +1034,15 @@ fn a_file_only_alike_in_compatibility_form_is_not_a_companion() -> Result<()> {
     let to = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     });
     assert_eq!(plan.summary().companions, 0);
     let _ = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to,
+            root: fx.root_of(to),
+            to: fx.logical(to),
         },
         &NoTrash,
         &Faulty::default(),

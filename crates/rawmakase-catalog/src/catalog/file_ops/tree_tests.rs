@@ -366,7 +366,8 @@ fn an_unfinished_operation_inside_it_refuses_the_folder() -> Result<()> {
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![fx.photo("day/a.NEF")],
-            to: fx.folder("day/sub"),
+            root: fx.root_id(),
+            to: "day/sub".into(),
         },
         &NoTrash,
         &Faulty::default(),

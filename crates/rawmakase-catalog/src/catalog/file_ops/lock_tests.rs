@@ -13,7 +13,8 @@ fn a_held_lock_keeps_another_window_from_changing_or_recovering_files() -> Resul
     let held = lock::acquire(&other).map_err(|e| anyhow::anyhow!("{e}"))?;
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let run = execute::execute_with(
         &mut fx.cat,
@@ -105,7 +106,8 @@ fn remove_from_catalog_leaves_photos_an_unfinished_operation_involves() -> Resul
     let moved = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         },
         &NoTrash,
         &Faulty::default(),

@@ -32,7 +32,8 @@ fn far(fx: &Fx) -> Faulty {
 fn to_far(fx: &Fx, names: &[&str]) -> FileOp {
     FileOp::MovePhotos {
         photos: names.iter().map(|n| fx.photo(n)).collect(),
-        to: fx.folder("far"),
+        root: fx.root_id(),
+        to: "far".into(),
     }
 }
 
@@ -214,7 +215,8 @@ fn a_move_on_one_drive_still_renames() -> Result<()> {
     let disk = Faulty::default();
     let op = FileOp::MovePhotos {
         photos: vec![a],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     };
     assert_eq!(fx.plan_on(op.clone(), &disk)?.summary().across, None);
     let outcome = run(&mut fx, op, &NoTrash, &disk, &AtomicBool::new(false));
@@ -1461,7 +1463,8 @@ fn a_move_between_two_real_volumes() -> Result<()> {
     );
     let op = FileOp::MovePhotos {
         photos: vec![a],
-        to,
+        root: fx.root_of(to),
+        to: fx.logical(to),
     };
     let plan = fx.plan(op);
     let across = plan.summary().across.clone().expect("it copies");

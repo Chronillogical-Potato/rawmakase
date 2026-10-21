@@ -70,6 +70,29 @@ impl Fx {
             .unwrap_or_else(|| panic!("no photo {name}"))
             .id
     }
+    /// The root, as the catalog has it.
+    pub fn root_id(&self) -> crate::catalog::RootId {
+        self.cat.folders().unwrap()[0].root
+    }
+    /// The root of catalog folder `folder`.
+    pub fn root_of(&self, folder: FolderId) -> crate::catalog::RootId {
+        self.place(folder).0
+    }
+    /// The logical path of catalog folder `folder` in its root.
+    pub fn logical(&self, folder: FolderId) -> String {
+        self.place(folder).1
+    }
+    fn place(&self, folder: FolderId) -> (crate::catalog::RootId, String) {
+        self.cat
+            .db_for_tests()
+            .query_row(
+                "SELECT f.root, p.path FROM folders f JOIN folder_paths p ON p.folder=f.id
+                 WHERE f.id=?",
+                [folder.0],
+                |r| Ok((crate::catalog::RootId(r.get(0)?), r.get(1)?)),
+            )
+            .unwrap()
+    }
     /// The catalog folder at `relative` below the root ("" is the root).
     pub fn folder(&self, relative: &str) -> FolderId {
         let path = if relative.is_empty() {
