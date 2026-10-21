@@ -2609,11 +2609,11 @@ fn the_filmstrip_cells_keep_their_size_when_the_selection_opens_a_photo() -> Res
     Ok(())
 }
 #[test]
-fn photos_dragged_past_8_points_onto_a_catalog_folder_are_dropped_there() {
-    use crate::catalog::{FolderId, PhotoId};
+fn photos_dragged_past_8_points_onto_a_folder_are_dropped_there() {
+    use crate::catalog::PhotoId;
     let ctx = egui::Context::default();
-    let mut node = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
-    node.folder = Some(FolderId(7));
+    // A root with no photos of its own: no catalog folder, a folder still.
+    let node = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
     let mut expanded = HashSet::new();
     let source = egui::Rect::from_min_size(egui::pos2(20., 150.), Vec2::splat(60.));
     let mut frame = |events: Vec<egui::Event>| {
@@ -2658,7 +2658,8 @@ fn photos_dragged_past_8_points_onto_a_catalog_folder_are_dropped_there() {
     assert!(
         matches!(
             &action,
-            Some(TreeAction::Drop { folder: FolderId(7), photos, .. }) if *photos == [PhotoId(1), PhotoId(2)]
+            Some(TreeAction::Drop { root: RootId(42), to, photos, .. })
+                if to.is_empty() && *photos == [PhotoId(1), PhotoId(2)]
         ),
         "no drop"
     );

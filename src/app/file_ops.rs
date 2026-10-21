@@ -837,11 +837,11 @@ impl Editor {
     pub(super) fn request_photo_move(
         &mut self,
         photos: Vec<PhotoId>,
-        to: crate::catalog::FolderId,
+        root: crate::catalog::RootId,
+        to: String,
         name: String,
     ) {
-        let place = self.library.as_ref().and_then(|l| l.folder_place(to));
-        if let (false, Some((root, to))) = (photos.is_empty(), place) {
+        if !photos.is_empty() {
             self.request_file_op(
                 FileOp::MovePhotos { photos, root, to },
                 None,

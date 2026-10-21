@@ -96,10 +96,12 @@ pub(crate) enum FileRequest {
         root: crate::catalog::RootId,
         logical: String,
     },
-    /// Move photos into catalog folder `to`, named `name` (a drop on it).
+    /// Move photos into the folder of `root` at logical path `to`, named
+    /// `name` (a drop on it).
     Move {
         photos: Vec<PhotoId>,
-        to: FolderId,
+        root: RootId,
+        to: String,
         name: String,
     },
     /// Move to Folder…: photos to move, once a folder is chosen.
@@ -773,14 +775,28 @@ impl Library {
             self.file_request = Some(FileRequest::Remove(ids));
         }
     }
-    /// Moves `photos` into catalog folder `to` (dropped on it), for the
-    /// editor to confirm; a drop where they all are already does nothing.
-    pub(super) fn request_move(&mut self, photos: Vec<PhotoId>, to: FolderId, name: String) {
-        let there = photos
-            .iter()
-            .all(|id| self.photo(*id).is_some_and(|p| p.folder == to));
+    /// Moves `photos` into the folder of `root` at logical path `to`
+    /// (dropped on it), for the editor to confirm; a drop where they all
+    /// are already does nothing.
+    pub(super) fn request_move(
+        &mut self,
+        photos: Vec<PhotoId>,
+        root: RootId,
+        to: String,
+        name: String,
+    ) {
+        let place = Some((root, to.clone()));
+        let there = photos.iter().all(|id| {
+            self.photo(*id)
+                .is_some_and(|p| self.folder_place(p.folder) == place)
+        });
         if !photos.is_empty() && !there {
-            self.file_request = Some(FileRequest::Move { photos, to, name });
+            self.file_request = Some(FileRequest::Move {
+                photos,
+                root,
+                to,
+                name,
+            });
         }
     }
     /// New Folder Inside… folder `parent` of `root` (catalog folder

@@ -256,10 +256,11 @@ impl Library {
                                     }
                                 }
                                 Some(TreeAction::Drop {
-                                    folder,
+                                    root,
+                                    to,
                                     name,
                                     photos,
-                                }) => self.request_move(photos, folder, name),
+                                }) => self.request_move(photos, root, to, name),
                                 Some(TreeAction::Remove(name, folders, photos)) => {
                                     self.removal_request = Some(super::FolderRemoval {
                                         catalog: self.session.catalog.location().clone(),

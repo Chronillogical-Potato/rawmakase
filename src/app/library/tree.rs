@@ -115,9 +115,11 @@ pub(super) enum TreeAction {
     },
     /// Show the folder in the file manager.
     Reveal(std::path::PathBuf),
-    /// Photos dropped on catalog folder `folder`, named `name`.
+    /// Photos dropped on the folder of `root` at logical path `to`, named
+    /// `name`: a catalog folder, or one with no catalog folder of its own.
     Drop {
-        folder: FolderId,
+        root: RootId,
+        to: String,
         name: String,
         photos: Vec<PhotoId>,
     },
@@ -205,12 +207,11 @@ pub(super) fn folder_tree_row(
             && !node.logical.starts_with(&format!("{}/", d.from))
             && node.logical != d.from.rsplit_once('/').map_or("", |(p, _)| p)
     };
-    // Photos dragged over a catalog folder can be dropped on it, and a
-    // folder over any folder of its root that takes it.
-    let dropping = (node.folder.is_some()
-        && response
-            .dnd_hover_payload::<super::DraggedPhotos>()
-            .is_some())
+    // Photos dragged over any folder can be dropped on it, and a folder
+    // over any folder of its root that takes it.
+    let dropping = response
+        .dnd_hover_payload::<super::DraggedPhotos>()
+        .is_some()
         || response
             .dnd_hover_payload::<super::DraggedFolder>()
             .is_some_and(|d| takes(&d));
@@ -291,11 +292,10 @@ pub(super) fn folder_tree_row(
     let mut action = None;
     // Photos are dragged only once the pointer went far enough (see
     // `grid::drag_payload`).
-    if let (Some(folder), Some(dragged)) =
-        (node.folder, released::<super::DraggedPhotos>(&response))
-    {
+    if let Some(dragged) = released::<super::DraggedPhotos>(&response) {
         action = Some(TreeAction::Drop {
-            folder,
+            root: node.in_root,
+            to: node.logical.clone(),
             name: node.name.clone(),
             photos: dragged.0.clone(),
         });

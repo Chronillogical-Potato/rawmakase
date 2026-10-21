@@ -74,14 +74,13 @@ pub(super) fn root(e: &Editor) -> crate::catalog::RootId {
 fn moving_asks_with_its_counts_and_the_files_rows_and_open_photo_follow() -> anyhow::Result<()> {
     let (d, mut e, _) = editor_with_folders(&["a.RAF", "a.xmp", "b.RAF", "sub/x.RAF"])?;
     let (a, b) = (photo(&e, &d, "a.RAF"), photo(&e, &d, "b.RAF"));
-    let sub = folder(&e, "sub").unwrap();
     // The open photo, decoded in full, with an edit saved before anything
     // moves.
     e.module = Module::Develop;
     e.document.catalog_photo = Some(a);
     e.document.path = Some(d.path().join("photos/a.RAF"));
     e.document.set_image(decoded(false));
-    e.request_photo_move(vec![a, b], sub, "sub".into());
+    e.request_photo_move(vec![a, b], root(&e), "sub".into(), "sub".into());
     settle(&mut e);
     let summary = e.file_ops.summary().expect("the confirmation is open");
     assert_eq!((summary.files, summary.companions), (2, 1));
@@ -99,7 +98,7 @@ fn moving_asks_with_its_counts_and_the_files_rows_and_open_photo_follow() -> any
     assert!(!e.file_ops.confirming() && !e.activity.is_busy());
     assert!(d.path().join("photos/a.RAF").is_file());
     // Tab to Move, then Return.
-    e.request_photo_move(vec![a, b], sub, "sub".into());
+    e.request_photo_move(vec![a, b], root(&e), "sub".into(), "sub".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -122,9 +121,9 @@ fn moving_asks_with_its_counts_and_the_files_rows_and_open_photo_follow() -> any
 fn a_drop_where_the_photos_are_already_does_nothing() -> anyhow::Result<()> {
     let (d, mut e, _) = editor_with_folders(&["a.RAF", "sub/x.RAF"])?;
     let x = photo(&e, &d, "sub/x.RAF");
-    let sub = folder(&e, "sub").unwrap();
+    let r = root(&e);
     let library = e.library.as_mut().unwrap();
-    library.request_move(vec![x], sub, "sub".into());
+    library.request_move(vec![x], r, "sub".into(), "sub".into());
     assert!(library.take_file_request().is_none());
     Ok(())
 }
@@ -403,8 +402,7 @@ fn a_load_under_way_when_its_photo_moves_never_brings_back_the_old_path() -> any
     // a is being opened: its header hasn't come yet.
     e.document.reset(Some(a));
     let (opening, _) = e.load.start();
-    let sub = folder(&e, "sub").unwrap();
-    e.request_photo_move(vec![a], sub, "sub".into());
+    e.request_photo_move(vec![a], root(&e), "sub".into(), "sub".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -448,8 +446,7 @@ fn a_photo_shown_at_half_size_when_it_moves_is_opened_again_from_its_new_file() 
     .unwrap();
     let ctx = e.context.clone();
     e.events(&ctx);
-    let sub = folder(&e, "sub").unwrap();
-    e.request_photo_move(vec![a], sub, "sub".into());
+    e.request_photo_move(vec![a], root(&e), "sub".into(), "sub".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -488,8 +485,7 @@ fn a_photo_whose_load_failed_before_it_moved_is_opened_again_from_its_new_file()
     let ctx = e.context.clone();
     e.events(&ctx);
     assert!(e.document.failed.is_some());
-    let sub = folder(&e, "sub").unwrap();
-    e.request_photo_move(vec![a], sub, "sub".into());
+    e.request_photo_move(vec![a], root(&e), "sub".into(), "sub".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -498,5 +494,24 @@ fn a_photo_whose_load_failed_before_it_moved_is_opened_again_from_its_new_file()
     // Opened again (its fixture bytes then fail to decode, on their own
     // time).
     assert_ne!(e.load.id(), opening, "opened again where it is now");
+    Ok(())
+}
+
+#[test]
+fn photos_dropped_on_a_folder_with_no_catalog_folder_move_into_it() -> anyhow::Result<()> {
+    let (d, mut e, _) = editor_with_folders(&["a.RAF", "2024/day1/x.RAF"])?;
+    assert!(folder(&e, "2024").is_none());
+    let a = photo(&e, &d, "a.RAF");
+    e.request_photo_move(vec![a], root(&e), "2024".into(), "2024".into());
+    settle(&mut e);
+    let (title, ..) = e.file_ops.question().expect("it asks");
+    assert_eq!(title, "Move “a.RAF” to “2024”?");
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(d.path().join("photos/2024/a.RAF").is_file());
+    assert_eq!(at(&e, &d, a), "2024/a.RAF");
+    assert!(folder(&e, "2024").is_some(), "now a catalog folder");
+    assert_eq!(e.status, "Moved 1 photo to 2024");
     Ok(())
 }

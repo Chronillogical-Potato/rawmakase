@@ -158,9 +158,12 @@ impl Editor {
                 self.request_folder_move(root, from, to)
             }
             Some(FileRequest::RenameFolder { root, logical }) => self.rename_folder(root, logical),
-            Some(FileRequest::Move { photos, to, name }) => {
-                self.request_photo_move(photos, to, name)
-            }
+            Some(FileRequest::Move {
+                photos,
+                root,
+                to,
+                name,
+            }) => self.request_photo_move(photos, root, to, name),
             Some(FileRequest::ChooseFolder(ids)) => self.choose_folder_for(ids),
             Some(FileRequest::NewFolder {
                 root,

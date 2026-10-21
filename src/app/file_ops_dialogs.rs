@@ -213,7 +213,10 @@ impl Editor {
                 return;
             };
             let name = label.rsplit(" / ").next().unwrap_or(&label).to_string();
-            self.request_photo_move(c.photos, to, name);
+            let place = self.library.as_ref().and_then(|l| l.folder_place(to));
+            if let Some((root, to)) = place {
+                self.request_photo_move(c.photos, root, to, name);
+            }
         }
     }
 
