@@ -92,20 +92,42 @@ pub(super) fn check_files(fx: &Fx, before: &Before, recovery: &Recovery, batch: 
         .flat_map(|u| u.photos.iter().copied())
         .collect();
     let rows = fx.rows();
+    // A row's file as `fx.files` names it: below the root, or, in another
+    // root beside it, by its absolute path, compared with `/` for `\` and
+    // without the `\\?\` prefix Windows' canonical paths have.
+    let plain = |p: String| {
+        let p = p.replace('\\', "/");
+        p.strip_prefix("//?/").map(str::to_string).unwrap_or(p)
+    };
+    let base = plain(
+        fx.dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned(),
+    );
+    let file = |row: &str| match plain(row.to_string())
+        .strip_prefix(&base)
+        .and_then(|rel| rel.strip_prefix('/'))
+    {
+        Some(rel) => rel.to_string(),
+        None => format!("trip/{row}"),
+    };
     for (id, path) in &before.rows {
         // A photo whose file was already missing is never touched.
-        let Some(original) = before.files.get(&format!("trip/{path}")) else {
+        let Some(original) = before.files.get(&file(path)) else {
             assert_eq!(rows.get(id), Some(path), "{id:?} changed without its file");
             continue;
         };
         match rows.get(id) {
             // Rows follow a file proven where they say.
             Some(now_at) if now_at != path => {
-                assert_eq!(now.get(&format!("trip/{now_at}")), Some(original), "{id:?}");
+                assert_eq!(now.get(&file(now_at)), Some(original), "{id:?}");
             }
             // Unchanged rows: their file is there, or the photo is listed.
             Some(_) => {
-                if now.get(&format!("trip/{path}")) != Some(original) {
+                if now.get(&file(path)) != Some(original) {
                     assert!(unfinished.contains(id), "{id:?} lost its file unreported");
                 }
             }
