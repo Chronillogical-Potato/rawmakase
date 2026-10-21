@@ -94,20 +94,25 @@ pub fn create_file(path: &Path) -> Result<(), FsError> {
     Ok(())
 }
 
-/// Copies every byte of `from` into `to`, which must be the empty file
-/// object `to_id` (made by [`create_file`]): `COPY_CHUNK` bytes at a time,
+/// Copies every byte of `from` into `to`, which must be empty and, where
+/// its volume keeps file ids, the file object `to_id` (made by
+/// [`create_file`]): `COPY_CHUNK` bytes at a time,
 /// asking `go_on`, with how many bytes are written so far, after each
 /// chunk. Returns the SHA-256 of the bytes read from `from`. Neither syncs
 /// nor sets times; `to` is never made, truncated or replaced here.
 pub fn copy_into(
     from: &Path,
     to: &Path,
-    to_id: FileId,
+    to_id: Option<FileId>,
     go_on: &mut dyn FnMut(u64) -> bool,
 ) -> Result<ContentHash, CopyError> {
     let mut source = File::open(from)?;
     let mut target = OpenOptions::new().write(true).open(to)?;
-    if super::os::handle_id(&target)? != to_id || target.metadata()?.len() != 0 {
+    let same = match to_id {
+        Some(id) => super::os::handle_id(&target)? == id,
+        None => true,
+    };
+    if !same || target.metadata()?.len() != 0 {
         return Err(CopyError::NotTheFile);
     }
     let mut sha = Sha256::new();
@@ -164,7 +169,13 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
 
 /// The SHA-256 of `path`'s contents, read whole.
 pub fn hash_file(path: &Path) -> Result<ContentHash, FsError> {
-    let mut file = File::open(path)?;
+    hash_prefix(path, u64::MAX)
+}
+
+/// The SHA-256 of `path`'s first `len` bytes, or of all it has when it has
+/// fewer: what a partial copy of it, `len` bytes long, holds.
+pub fn hash_prefix(path: &Path, len: u64) -> Result<ContentHash, FsError> {
+    let mut file = File::open(path)?.take(len);
     let mut sha = Sha256::new();
     let mut buffer = vec![0u8; COPY_CHUNK];
     loop {

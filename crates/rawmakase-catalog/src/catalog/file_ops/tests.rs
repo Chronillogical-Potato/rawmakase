@@ -323,7 +323,7 @@ macro_rules! passes_on {
             &self,
             from: &std::path::Path,
             to: &std::path::Path,
-            to_id: crate::storage::fsops::FileId,
+            to_id: Option<crate::storage::fsops::FileId>,
             go_on: &mut dyn FnMut(u64) -> bool,
         ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
             self.$inner.copy_into(from, to, to_id, go_on)
@@ -667,7 +667,7 @@ impl Disk for Faulty {
         &self,
         from: &Path,
         to: &Path,
-        to_id: crate::storage::fsops::FileId,
+        to_id: Option<crate::storage::fsops::FileId>,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
         use crate::storage::fsops::CopyError;
@@ -677,7 +677,7 @@ impl Disk for Faulty {
         let to = &self.found(to);
         // The file object as the real disk numbers it.
         let to_id = match self.far(to) {
-            true => self.real(to_id),
+            true => to_id.map(|id| self.real(id)),
             false => to_id,
         };
         let (n, fault) = self.fault(Op::Copy);

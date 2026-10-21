@@ -1,7 +1,7 @@
 //! Unix: `lstat` for entries, `renameat2(RENAME_NOREPLACE)` on Linux and
 //! `renameatx_np(RENAME_EXCL)` on macOS through rustix, `statvfs` and
 //! `statfs` for volumes (`f_bavail * f_frsize` the bytes available).
-use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId};
+use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId, VolumeKind};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
@@ -72,86 +72,78 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     use rustix::fs::{StatVfsMountFlags, statvfs};
     let vfs = statvfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     let local = is_local(path)?;
+    let kind = kind(path)?;
     Ok(VolumeFacts {
+        kind,
         local,
         read_only: vfs.f_flag.contains(StatVfsMountFlags::RDONLY),
-        renames_spelling: renames_spelling(path)?,
-        stable_ids: local && stable_ids(path)?,
+        // APFS renames a name to another spelling of itself in place
+        // (tested in `a_case_only_rename_works_on_apfs`); elsewhere a
+        // volume that folds names may find the new spelling taken, or
+        // rename nothing.
+        renames_spelling: cfg!(target_vendor = "apple") && kind == VolumeKind::Apfs,
+        stable_ids: local && kind.keeps_ids(),
+        exclusive_rename: kind.exclusive_rename(),
         available: vfs.f_bavail.saturating_mul(vfs.f_frsize),
     })
 }
 
-/// APFS renames a name to another spelling of itself in place (tested in
-/// `a_case_only_rename_works_on_apfs`).
-#[cfg(target_vendor = "apple")]
-fn renames_spelling(path: &Path) -> Result<bool, FsError> {
-    let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
-    let kind: Vec<u8> = fs
-        .f_fstypename
-        .iter()
-        .take_while(|c| **c != 0)
-        .map(|c| *c as u8)
-        .collect();
-    Ok(kind == b"apfs")
-}
-
 /// macOS names the file system.
 #[cfg(target_vendor = "apple")]
-fn stable_ids(path: &Path) -> Result<bool, FsError> {
+fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
-    let kind: Vec<u8> = fs
+    let name: Vec<u8> = fs
         .f_fstypename
         .iter()
         .take_while(|c| **c != 0)
         .map(|c| *c as u8)
         .collect();
-    Ok(keeps_ids(&kind))
+    Ok(kind_of(&name))
 }
 
-/// Whether macOS's file system `kind` keeps a file's id while it is on it:
-/// only APFS and HFS+ are taken to. FAT and exFAT number files anew, and
-/// FUSE or FSKit file systems may give ids as they like.
+/// The kind of macOS's file system `name` (`f_fstypename`): FSKit's and the
+/// kernel's FAT and exFAT have the same names.
 #[cfg(target_vendor = "apple")]
-pub(super) fn keeps_ids(kind: &[u8]) -> bool {
-    matches!(kind, b"apfs" | b"hfs")
+pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
+    match name {
+        b"apfs" => VolumeKind::Apfs,
+        b"hfs" => VolumeKind::Hfs,
+        b"msdos" => VolumeKind::Fat,
+        b"exfat" => VolumeKind::Exfat,
+        _ => VolumeKind::Other,
+    }
 }
 
 /// Linux numbers the file system type.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn stable_ids(path: &Path) -> Result<bool, FsError> {
+fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     #[allow(
         clippy::unnecessary_cast,
         reason = "the type differs between architectures"
     )]
     let kind = fs.f_type as u64;
-    Ok(keeps_ids(kind))
+    Ok(kind_of(kind))
 }
 
-/// Whether Linux's file system type `kind` keeps a file's id while it is
-/// on it: only ext2, ext3 and ext4, XFS and Btrfs are taken to. FAT and
-/// exFAT make inode numbers up at each mount, and FUSE may give any.
+/// The kind of Linux's file system type `magic` (`f_type`). FUSE (exFAT
+/// through exfat-fuse among others) is another kind.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-pub(super) fn keeps_ids(kind: u64) -> bool {
-    const KEEPS: [u64; 3] = [
-        0xef53,      // ext2, ext3, ext4
-        0x5846_5342, // XFS
-        0x9123_683e, // Btrfs
-    ];
-    KEEPS.contains(&kind)
+pub(super) fn kind_of(magic: u64) -> VolumeKind {
+    match magic {
+        0xef53 => VolumeKind::Ext,
+        0x5846_5342 => VolumeKind::Xfs,
+        0x9123_683e => VolumeKind::Btrfs,
+        0x4d44 => VolumeKind::Fat,
+        0x2011_bab0 => VolumeKind::Exfat,
+        _ => VolumeKind::Other,
+    }
 }
 
 /// Elsewhere the file system can't be told.
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
-fn stable_ids(_path: &Path) -> Result<bool, FsError> {
-    Ok(false)
-}
-
-/// Elsewhere a volume that folds names may find the new spelling taken, or
-/// rename nothing, so none is taken to.
-#[cfg(not(target_vendor = "apple"))]
-fn renames_spelling(_path: &Path) -> Result<bool, FsError> {
-    Ok(false)
+fn kind(_path: &Path) -> Result<VolumeKind, FsError> {
+    Ok(VolumeKind::Other)
 }
 
 /// macOS says so in the mount's flags.

@@ -431,7 +431,7 @@ fn build(
             let at = spelled(disk, &temp, found.id).map_err(problem)?;
             catalog
                 .db
-                .write(|w| journal::set_copying(w, id, ordinal, found.id, &at))
+                .write(|w| journal::set_copying(w, id, ordinal, Some(found.id), &at))
                 .map_err(Failed::Journal)?;
             if e.rel.as_os_str().is_empty() {
                 top = Some(found.id);

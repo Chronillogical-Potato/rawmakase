@@ -138,7 +138,7 @@ fn a_copy_round_trips_and_goes_with_its_item() -> Result<()> {
     let content = fsops::hash_file(&path)?;
     let receipt = fx.root.join("Trash/a.NEF");
     fx.cat.db.write(|w| {
-        journal::set_copying(w, id, 0, file, &temp)?;
+        journal::set_copying(w, id, 0, Some(file), &temp)?;
         journal::set_content(w, id, 0, content)?;
         journal::set_copy_identity(w, id, 0, &member.identity)?;
         journal::set_kept(w, id, 0, "its volume has no Trash")

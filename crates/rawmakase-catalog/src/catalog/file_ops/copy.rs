@@ -224,11 +224,11 @@ pub(super) fn write(
     // later step and recovery find it by.
     let temp = spelled(disk, temp, made.id).map_err(problem)?;
     journal(catalog, &|w| {
-        journal::set_copying(w, id, ordinal, made.id, &temp)
+        journal::set_copying(w, id, ordinal, Some(made.id), &temp)
     })?;
     // 2. Copied, durable, with the original's time.
     let content = disk
-        .copy_into(source, &temp, made.id, &mut |_| {
+        .copy_into(source, &temp, Some(made.id), &mut |_| {
             !cancel.load(Ordering::Relaxed)
         })
         .map_err(|e| match e {

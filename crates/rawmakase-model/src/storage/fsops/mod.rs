@@ -22,8 +22,8 @@ use std::{fmt, io};
 
 mod copy;
 pub use copy::{
-    COPY_CHUNK, ContentHash, CopyError, copy_into, copy_times, create_file, hash_file, remove_file,
-    sync_file,
+    COPY_CHUNK, ContentHash, CopyError, copy_into, copy_times, create_file, hash_file, hash_prefix,
+    remove_file, sync_file,
 };
 
 #[cfg(unix)]
@@ -327,9 +327,50 @@ pub fn canonical_below(root: &Path, path: &Path) -> Result<PathBuf, Containment>
     Ok(at)
 }
 
+/// A volume's file system, as far as moving files on it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumeKind {
+    Apfs,
+    /// HFS+.
+    Hfs,
+    /// ext2, ext3 or ext4.
+    Ext,
+    Xfs,
+    Btrfs,
+    Ntfs,
+    /// FAT12, FAT16 or FAT32.
+    Fat,
+    Exfat,
+    /// Any other, a network share or FUSE among them.
+    Other,
+}
+
+impl VolumeKind {
+    /// Whether a file keeps its file id while it is on it, so a file id
+    /// proves which file a name is. FAT and exFAT number files anew when
+    /// they are written, renamed or mounted again (macOS's msdos at the
+    /// first close after a write; exFAT with temporary numbers from
+    /// `u64::MAX` down, given again after a remount), and give a number to
+    /// another file later.
+    pub fn keeps_ids(self) -> bool {
+        matches!(
+            self,
+            Self::Apfs | Self::Hfs | Self::Ext | Self::Xfs | Self::Btrfs | Self::Ntfs
+        )
+    }
+
+    /// Whether [`rename_exclusive`] works on it: not on macOS's exFAT, which
+    /// answers `ENOTSUP` (measured on macOS 15). Elsewhere it is taken to,
+    /// and a volume that doesn't answers [`FsError::Unsupported`].
+    pub fn exclusive_rename(self) -> bool {
+        !(cfg!(target_vendor = "apple") && self == Self::Exfat)
+    }
+}
+
 /// What a volume is, as far as moving files on it goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VolumeFacts {
+    pub kind: VolumeKind,
     /// On this computer, rather than a network share (or a FUSE file
     /// system, which may be one), where locks are unreliable.
     pub local: bool,
@@ -346,8 +387,17 @@ pub struct VolumeFacts {
     /// written, renamed or mounted again, and give a number to another file
     /// later), network volumes, FUSE, ReFS or any other kind.
     pub stable_ids: bool,
+    /// Whether a file or folder can be renamed on it only where nothing has
+    /// the name ([`VolumeKind::exclusive_rename`]).
+    pub exclusive_rename: bool,
     /// The bytes this user may still write on it.
     pub available: u64,
+}
+
+/// When file `path` was made, as its volume keeps it (to 2 s on FAT, 10 ms
+/// on exFAT).
+pub fn created(path: &Path) -> Result<std::time::SystemTime, FsError> {
+    Ok(std::fs::metadata(path)?.created()?)
 }
 
 /// The facts of the volume `path` is on.

@@ -24,7 +24,7 @@ pub(super) trait Disk {
         &self,
         from: &Path,
         to: &Path,
-        to_id: FileId,
+        to_id: Option<FileId>,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError>;
     fn sync_file(&self, path: &Path) -> Result<(), FsError>;
@@ -71,7 +71,7 @@ impl Disk for Real {
         &self,
         from: &Path,
         to: &Path,
-        to_id: FileId,
+        to_id: Option<FileId>,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError> {
         fsops::copy_into(from, to, to_id, go_on)

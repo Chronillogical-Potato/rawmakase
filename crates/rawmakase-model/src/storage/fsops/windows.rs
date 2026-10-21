@@ -2,7 +2,7 @@
 //! `MOVEFILE_REPLACE_EXISTING` or `MOVEFILE_COPY_ALLOWED` for the exclusive
 //! rename, and the volume's drive type, flags and free space
 //! (`GetDiskFreeSpaceExW`).
-use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId};
+use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId, VolumeKind};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::AsRawHandle as _;
@@ -75,11 +75,15 @@ fn information(file: &std::fs::File) -> Result<(FileId, u64), FsError> {
     Ok((id, u64::from(info.nNumberOfLinks)))
 }
 
-/// Whether file system `kind` keeps a file's id while it is on it: only
-/// NTFS is taken to. FAT and exFAT give ids that change as files are
-/// written or renamed, and ReFS's 64-bit file index isn't promised unique.
-pub(super) fn keeps_ids(kind: &str) -> bool {
-    kind.eq_ignore_ascii_case("NTFS")
+/// The kind of file system `name`, as `GetVolumeInformationW` names it.
+/// ReFS's 64-bit file index isn't promised unique, so it is another kind.
+pub(super) fn kind_of(name: &str) -> VolumeKind {
+    match name.to_ascii_uppercase().as_str() {
+        "NTFS" => VolumeKind::Ntfs,
+        "FAT" | "FAT12" | "FAT16" | "FAT32" => VolumeKind::Fat,
+        "EXFAT" => VolumeKind::Exfat,
+        _ => VolumeKind::Other,
+    }
 }
 
 /// The file object an open file is.
@@ -150,12 +154,15 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     }
     let kind =
         String::from_utf16_lossy(&kind[..kind.iter().position(|c| *c == 0).unwrap_or(kind.len())]);
+    let kind = kind_of(&kind);
     Ok(VolumeFacts {
+        kind,
         local: !remote,
         read_only: flags & FILE_READ_ONLY_VOLUME != 0,
         // Not tried on Windows' volumes yet.
         renames_spelling: false,
-        stable_ids: !remote && keeps_ids(&kind),
+        stable_ids: !remote && kind.keeps_ids(),
+        exclusive_rename: kind.exclusive_rename(),
         available,
     })
 }

@@ -281,13 +281,13 @@ pub(super) fn insert_copies(w: &mut Write<'_>, id: OperationId, temps: &[PathBuf
 }
 
 /// Records that member `ordinal` of item `id` is being copied, into the
-/// partial copy that is file object `file`, at `temp` as the disk spells
-/// it.
+/// partial copy at `temp` as the disk spells it: file object `file`, where
+/// its volume keeps them (never journalled where it doesn't, #573).
 pub(super) fn set_copying(
     w: &mut Write<'_>,
     id: OperationId,
     ordinal: i64,
-    file: FileId,
+    file: Option<FileId>,
     temp: &Path,
 ) -> Result<()> {
     let changed = w.execute(
@@ -295,7 +295,7 @@ pub(super) fn set_copying(
             "UPDATE file_operation_copies SET copy_id=?, temp=?
              WHERE operation=? AND ordinal=?"
         ),
-        &[&file.to_string(), &text(temp)?, &id.0, &ordinal],
+        &[&file.map(|f| f.to_string()), &text(temp)?, &id.0, &ordinal],
     )?;
     anyhow::ensure!(changed == 1, "unknown file operation copy");
     set_member(w, id, ordinal, MemberState::Copying, None)
