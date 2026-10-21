@@ -293,6 +293,147 @@ fn a_temporary_folder_is_on_a_local_writable_volume() {
     let facts = volume_facts(d.path()).unwrap();
     assert!(facts.local);
     assert!(!facts.read_only);
+    assert!(facts.available > 0, "a volume tests write on has room");
+}
+
+#[test]
+fn a_file_is_made_empty_and_only_where_nothing_is() {
+    let d = dir();
+    let (a, b) = (d.path().join("a.part"), d.path().join("b.NEF"));
+    create_file(&a).unwrap();
+    assert_eq!(fs::read(&a).unwrap(), b"");
+    fs::write(&b, b"kept").unwrap();
+    assert!(matches!(create_file(&b), Err(FsError::AlreadyExists)));
+    assert!(matches!(create_file(&a), Err(FsError::AlreadyExists)));
+    assert_eq!(fs::read(&b).unwrap(), b"kept", "never truncated");
+    assert!(matches!(
+        create_file(&d.path().join("no/c")),
+        Err(FsError::NotFound)
+    ));
+}
+
+/// Bytes over several copy chunks, distinct per position.
+fn big() -> Vec<u8> {
+    (0..2 * COPY_CHUNK as u32 + 77)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect()
+}
+
+#[test]
+fn a_copy_has_every_byte_and_the_hash_of_what_was_read() {
+    let d = dir();
+    let (a, b) = (d.path().join("a.NEF"), d.path().join(".a.part"));
+    let bytes = big();
+    fs::write(&a, &bytes).unwrap();
+    create_file(&b).unwrap();
+    let mut seen = Vec::new();
+    let hash = copy_into(&a, &b, entry(&b).unwrap().id, &mut |n| {
+        seen.push(n);
+        true
+    })
+    .unwrap();
+    assert_eq!(fs::read(&b).unwrap(), bytes);
+    assert_eq!(hash, hash_file(&a).unwrap());
+    assert_eq!(hash, hash_file(&b).unwrap());
+    let chunk = COPY_CHUNK as u64;
+    assert_eq!(seen, [chunk, 2 * chunk, 2 * chunk + 77]);
+    assert_eq!(fs::read(&a).unwrap(), bytes, "the source is untouched");
+    // SHA-256 of nothing, as journals keep it, and back.
+    fs::write(&a, b"").unwrap();
+    let empty = hash_file(&a).unwrap();
+    assert_eq!(
+        empty.to_string(),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(empty.to_string().parse::<ContentHash>().unwrap(), empty);
+    assert!("e3b0".parse::<ContentHash>().is_err());
+}
+
+#[test]
+fn a_copy_stops_between_chunks_when_asked() {
+    let d = dir();
+    let (a, b) = (d.path().join("a.NEF"), d.path().join(".a.part"));
+    fs::write(&a, big()).unwrap();
+    create_file(&b).unwrap();
+    let mut calls = 0;
+    let stopped = copy_into(&a, &b, entry(&b).unwrap().id, &mut |_| {
+        calls += 1;
+        false
+    });
+    assert!(matches!(stopped, Err(CopyError::Stopped)));
+    assert_eq!(calls, 1);
+    assert_eq!(fs::metadata(&b).unwrap().len(), COPY_CHUNK as u64);
+}
+
+#[test]
+fn a_copy_goes_only_into_the_empty_file_it_was_given() {
+    let d = dir();
+    let (a, b, c) = (
+        d.path().join("a.NEF"),
+        d.path().join(".b.part"),
+        d.path().join(".c.part"),
+    );
+    fs::write(&a, b"synthetic raw").unwrap();
+    create_file(&b).unwrap();
+    create_file(&c).unwrap();
+    // Another file object than the one given.
+    let other = entry(&c).unwrap().id;
+    assert!(matches!(
+        copy_into(&a, &b, other, &mut |_| true),
+        Err(CopyError::NotTheFile)
+    ));
+    // A file with bytes in it already.
+    fs::write(&b, b"x").unwrap();
+    let id = entry(&b).unwrap().id;
+    assert!(matches!(
+        copy_into(&a, &b, id, &mut |_| true),
+        Err(CopyError::NotTheFile)
+    ));
+    assert_eq!(fs::read(&b).unwrap(), b"x");
+    // Nothing is made where there was nothing.
+    let gone = d.path().join(".gone.part");
+    assert!(matches!(
+        copy_into(&a, &gone, id, &mut |_| true),
+        Err(CopyError::Fs(FsError::NotFound))
+    ));
+    assert!(!gone.exists());
+}
+
+#[test]
+fn a_copy_takes_the_sources_time_and_permissions() {
+    let d = dir();
+    let (a, b) = (d.path().join("a.NEF"), d.path().join(".a.part"));
+    fs::write(&a, b"synthetic raw").unwrap();
+    let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_600_000_000, 123_456_700);
+    fs::File::options()
+        .write(true)
+        .open(&a)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&a, fs::Permissions::from_mode(0o440)).unwrap();
+    }
+    create_file(&b).unwrap();
+    copy_into(&a, &b, entry(&b).unwrap().id, &mut |_| true).unwrap();
+    sync_file(&b).unwrap();
+    copy_times(&a, &b).unwrap();
+    // Read-only now, and still synced.
+    sync_file(&b).unwrap();
+    let (source, copy) = (fs::metadata(&a).unwrap(), fs::metadata(&b).unwrap());
+    assert_eq!(copy.modified().unwrap(), source.modified().unwrap());
+    assert_eq!(copy.modified().unwrap(), when);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(copy.permissions().mode() & 0o777, 0o440);
+    }
+    assert_eq!(fs::read(&b).unwrap(), b"synthetic raw");
+    // Only an unfinished copy is removed, by its caller's proof.
+    remove_file(&b).unwrap();
+    assert!(!b.exists() && a.is_file());
 }
 
 #[test]
@@ -317,6 +458,14 @@ fn errors_say_what_callers_branch_on() {
     assert!(matches!(
         FsError::from(Error::from(ErrorKind::Unsupported)),
         FsError::Unsupported
+    ));
+    assert!(matches!(
+        FsError::from(Error::from(ErrorKind::StorageFull)),
+        FsError::NoSpace
+    ));
+    assert!(matches!(
+        FsError::from(Error::from(ErrorKind::QuotaExceeded)),
+        FsError::NoSpace
     ));
     assert!(matches!(
         FsError::from(Error::from(ErrorKind::TimedOut)),

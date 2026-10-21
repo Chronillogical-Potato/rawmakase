@@ -1,6 +1,7 @@
 //! Windows: `GetFileInformationByHandle` for entries, `MoveFileExW` without
 //! `MOVEFILE_REPLACE_EXISTING` or `MOVEFILE_COPY_ALLOWED` for the exclusive
-//! rename, and the volume's drive type and flags.
+//! rename, and the volume's drive type, flags and free space
+//! (`GetDiskFreeSpaceExW`).
 use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId};
 use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::OpenOptionsExt as _;
@@ -12,8 +13,8 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW, GetVolumePathNameW,
-    MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    GetDiskFreeSpaceExW, GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW,
+    GetVolumePathNameW, MOVEFILE_WRITE_THROUGH, MoveFileExW,
 };
 use windows_sys::Win32::System::SystemServices::FILE_READ_ONLY_VOLUME;
 use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE;
@@ -44,14 +45,7 @@ pub(super) fn entry(path: &Path) -> Result<Entry, FsError> {
         .access_mode(0)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)?;
-    // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value of
-    // the plain C struct, which the call then fills.
-    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
-    // SAFETY: the handle is open for the duration of the call, and `info`
-    // is a valid, writable struct of the type the call expects.
-    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
-        return Err(last_error());
-    }
+    let (id, links) = information(&file)?;
     let kind = if t.is_symlink() {
         EntryKind::Symlink
     } else if t.is_dir() {
@@ -61,14 +55,29 @@ pub(super) fn entry(path: &Path) -> Result<Entry, FsError> {
     } else {
         EntryKind::Other
     };
-    Ok(Entry {
-        id: FileId {
-            volume: VolumeId(u64::from(info.dwVolumeSerialNumber)),
-            index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
-        },
-        kind,
-        links: u64::from(info.nNumberOfLinks),
-    })
+    Ok(Entry { id, kind, links })
+}
+
+/// An open file's file object and how many names it has.
+fn information(file: &std::fs::File) -> Result<(FileId, u64), FsError> {
+    // SAFETY: an all-zero BY_HANDLE_FILE_INFORMATION is a valid value of
+    // the plain C struct, which the call then fills.
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle is open for the duration of the call, and `info`
+    // is a valid, writable struct of the type the call expects.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(last_error());
+    }
+    let id = FileId {
+        volume: VolumeId(u64::from(info.dwVolumeSerialNumber)),
+        index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    };
+    Ok((id, u64::from(info.nNumberOfLinks)))
+}
+
+/// The file object an open file is.
+pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    Ok(information(file)?.0)
 }
 
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
@@ -116,10 +125,25 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     }
     // SAFETY: `root` is NUL-terminated.
     let remote = unsafe { GetDriveTypeW(root.as_ptr()) } == DRIVE_REMOTE;
+    let mut available = 0u64;
+    // SAFETY: `root` is NUL-terminated; `available` is a valid place for
+    // the count, and the other two counts are null, which the call allows.
+    let read = unsafe {
+        GetDiskFreeSpaceExW(
+            root.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if read == 0 {
+        return Err(last_error());
+    }
     Ok(VolumeFacts {
         local: !remote,
         read_only: flags & FILE_READ_ONLY_VOLUME != 0,
         // Not tried on Windows' volumes yet.
         renames_spelling: false,
+        available,
     })
 }

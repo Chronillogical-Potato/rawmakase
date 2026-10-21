@@ -3,15 +3,27 @@
 //! is, which file object a name is, a folder's exact listing and how it
 //! compares names, syncing a folder, whether a path is below a root with no
 //! link or mount point between, and what a volume is. Policy-free: it knows
-//! no photo, catalog or rule of what may move. It never falls back to a hard
-//! link and unlink or to a copy, so a step either happened whole or did not
-//! happen.
+//! no photo, catalog or rule of what may move. A rename never falls back to
+//! a hard link and unlink or to a copy, so a step either happened whole or
+//! did not happen.
+//!
+//! For moving a file to another volume it also has the steps of a copy, each
+//! one on its own so its caller journals between them ([`copy`]): making an
+//! empty file where nothing has its name, copying into it while hashing
+//! what was read, syncing it, giving it the source's time, hashing a file,
+//! and removing a file (which only a partial copy is for).
 //!
 //! Each system's calls are in a file of their own (`unix.rs`, `windows.rs`);
 //! a system with neither answers [`FsError::Unsupported`].
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::{fmt, io};
+
+mod copy;
+pub use copy::{
+    COPY_CHUNK, ContentHash, CopyError, copy_into, copy_times, create_file, hash_file, remove_file,
+    sync_file,
+};
 
 #[cfg(unix)]
 mod unix;
@@ -38,6 +50,8 @@ pub enum FsError {
     PermissionDenied,
     /// The source and destination are on different volumes.
     CrossDevice,
+    /// The volume is full, or the user's quota on it is.
+    NoSpace,
     Io(io::Error),
 }
 
@@ -48,6 +62,7 @@ impl From<io::Error> for FsError {
             io::ErrorKind::NotFound => Self::NotFound,
             io::ErrorKind::PermissionDenied => Self::PermissionDenied,
             io::ErrorKind::CrossesDevices => Self::CrossDevice,
+            io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::NoSpace,
             io::ErrorKind::Unsupported => Self::Unsupported,
             _ => Self::Io(e),
         }
@@ -62,6 +77,7 @@ impl fmt::Display for FsError {
             Self::NotFound => f.write_str("not found"),
             Self::PermissionDenied => f.write_str("permission denied"),
             Self::CrossDevice => f.write_str("on another volume"),
+            Self::NoSpace => f.write_str("the drive is full"),
             Self::Io(e) => e.fmt(f),
         }
     }
@@ -93,6 +109,24 @@ pub struct FileId {
 impl FileId {
     pub fn volume(self) -> VolumeId {
         self.volume
+    }
+    /// The same file object numbered as if on another volume, for tests
+    /// that need two volumes on one: applied twice, it is `self` again.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn elsewhere(self) -> Self {
+        Self {
+            volume: VolumeId(!self.volume.0),
+            index: self.index,
+        }
+    }
+    /// The file object numbered `index` on the same volume, for tests that
+    /// need a volume renumbering its files.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn numbered(self, index: u64) -> Self {
+        Self {
+            volume: self.volume,
+            index,
+        }
     }
 }
 
@@ -297,6 +331,8 @@ pub struct VolumeFacts {
     /// isn't known (a volume may find the name taken, or do nothing), and
     /// it is `false`.
     pub renames_spelling: bool,
+    /// The bytes this user may still write on it.
+    pub available: u64,
 }
 
 /// The facts of the volume `path` is on.

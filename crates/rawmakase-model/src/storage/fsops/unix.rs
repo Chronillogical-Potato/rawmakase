@@ -1,6 +1,6 @@
 //! Unix: `lstat` for entries, `renameat2(RENAME_NOREPLACE)` on Linux and
 //! `renameatx_np(RENAME_EXCL)` on macOS through rustix, `statvfs` and
-//! `statfs` for volumes.
+//! `statfs` for volumes (`f_bavail * f_frsize` the bytes available).
 use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
@@ -24,6 +24,15 @@ pub(super) fn entry(path: &Path) -> Result<Entry, FsError> {
         },
         kind,
         links: m.nlink(),
+    })
+}
+
+/// The file object an open file is.
+pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    let m = file.metadata()?;
+    Ok(FileId {
+        volume: VolumeId(m.dev()),
+        index: m.ino(),
     })
 }
 
@@ -66,6 +75,7 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
         local: is_local(path)?,
         read_only: vfs.f_flag.contains(StatVfsMountFlags::RDONLY),
         renames_spelling: renames_spelling(path)?,
+        available: vfs.f_bavail.saturating_mul(vfs.f_frsize),
     })
 }
 
