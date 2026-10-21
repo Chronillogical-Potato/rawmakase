@@ -78,6 +78,8 @@ impl FolderNode {
         }
     }
 }
+/// Why a folder dropped on another root's folder doesn't move (#572).
+const ACROSS_ROOTS: &str = "Folders can't be moved to another drive or root folder yet. Move it in Finder, then add the folder again.";
 pub(super) enum TreeAction {
     /// The folder's key, and how it was clicked.
     Select(String, Click),
@@ -106,6 +108,8 @@ pub(super) enum TreeAction {
         root: RootId,
         logical: String,
     },
+    /// Something dropped that can't be done, and why.
+    Refused(String),
     /// The folder of `root` at logical path `from`, dropped on logical
     /// folder `to` of that root.
     DropFolder {
@@ -115,9 +119,11 @@ pub(super) enum TreeAction {
     },
     /// Show the folder in the file manager.
     Reveal(std::path::PathBuf),
-    /// Photos dropped on catalog folder `folder`, named `name`.
+    /// Photos dropped on the folder of `root` at logical path `to`, named
+    /// `name`: a catalog folder, or one with no catalog folder of its own.
     Drop {
-        folder: FolderId,
+        root: RootId,
+        to: String,
         name: String,
         photos: Vec<PhotoId>,
     },
@@ -205,12 +211,11 @@ pub(super) fn folder_tree_row(
             && !node.logical.starts_with(&format!("{}/", d.from))
             && node.logical != d.from.rsplit_once('/').map_or("", |(p, _)| p)
     };
-    // Photos dragged over a catalog folder can be dropped on it, and a
-    // folder over any folder of its root that takes it.
-    let dropping = (node.folder.is_some()
-        && response
-            .dnd_hover_payload::<super::DraggedPhotos>()
-            .is_some())
+    // Photos dragged over any folder can be dropped on it, and a folder
+    // over any folder of its root that takes it.
+    let dropping = response
+        .dnd_hover_payload::<super::DraggedPhotos>()
+        .is_some()
         || response
             .dnd_hover_payload::<super::DraggedFolder>()
             .is_some_and(|d| takes(&d));
@@ -291,23 +296,26 @@ pub(super) fn folder_tree_row(
     let mut action = None;
     // Photos are dragged only once the pointer went far enough (see
     // `grid::drag_payload`).
-    if let (Some(folder), Some(dragged)) =
-        (node.folder, released::<super::DraggedPhotos>(&response))
-    {
+    if let Some(dragged) = released::<super::DraggedPhotos>(&response) {
         action = Some(TreeAction::Drop {
-            folder,
+            root: node.in_root,
+            to: node.logical.clone(),
             name: node.name.clone(),
             photos: dragged.0.clone(),
         });
     }
-    if let Some(dragged) = released::<super::DraggedFolder>(&response)
-        && takes(&dragged)
-    {
-        action = Some(TreeAction::DropFolder {
-            root: dragged.root,
-            from: dragged.from.clone(),
-            to: node.logical.clone(),
-        });
+    if let Some(dragged) = released::<super::DraggedFolder>(&response) {
+        if takes(&dragged) {
+            action = Some(TreeAction::DropFolder {
+                root: dragged.root,
+                from: dragged.from.clone(),
+                to: node.logical.clone(),
+            });
+        } else if dragged.root != node.in_root {
+            // Not highlighted, so said: dropped elsewhere it would do nothing
+            // and look broken.
+            action = Some(TreeAction::Refused(ACROSS_ROOTS.into()));
+        }
     }
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
         let pointer = response.interact_pointer_pos().unwrap_or(rect.center());

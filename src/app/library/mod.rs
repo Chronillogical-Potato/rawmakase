@@ -96,10 +96,12 @@ pub(crate) enum FileRequest {
         root: crate::catalog::RootId,
         logical: String,
     },
-    /// Move photos into catalog folder `to`, named `name` (a drop on it).
+    /// Move photos into the folder of `root` at logical path `to`, named
+    /// `name` (a drop on it).
     Move {
         photos: Vec<PhotoId>,
-        to: FolderId,
+        root: RootId,
+        to: String,
         name: String,
     },
     /// Move to Folder…: photos to move, once a folder is chosen.
@@ -419,6 +421,14 @@ impl Library {
                 self.filters.collection = None;
                 self.filters.members.clear();
             }
+        }
+        // The folders shown as the catalog has them now: one may have
+        // gained a catalog folder (photos moved into it) or subfolders.
+        if let Some(scope) = self
+            .folders_scope(&self.selected_folders)
+            .filter(|scope| !scope.is_empty())
+        {
+            self.filters.folder_scope = Some(scope);
         }
         // Copy commands save a name being typed before they run, and so
         // does anything else that reads the catalog again.
@@ -773,14 +783,28 @@ impl Library {
             self.file_request = Some(FileRequest::Remove(ids));
         }
     }
-    /// Moves `photos` into catalog folder `to` (dropped on it), for the
-    /// editor to confirm; a drop where they all are already does nothing.
-    pub(super) fn request_move(&mut self, photos: Vec<PhotoId>, to: FolderId, name: String) {
-        let there = photos
-            .iter()
-            .all(|id| self.photo(*id).is_some_and(|p| p.folder == to));
+    /// Moves `photos` into the folder of `root` at logical path `to`
+    /// (dropped on it), for the editor to confirm; a drop where they all
+    /// are already does nothing.
+    pub(super) fn request_move(
+        &mut self,
+        photos: Vec<PhotoId>,
+        root: RootId,
+        to: String,
+        name: String,
+    ) {
+        let place = Some((root, to.clone()));
+        let there = photos.iter().all(|id| {
+            self.photo(*id)
+                .is_some_and(|p| self.folder_place(p.folder) == place)
+        });
         if !photos.is_empty() && !there {
-            self.file_request = Some(FileRequest::Move { photos, to, name });
+            self.file_request = Some(FileRequest::Move {
+                photos,
+                root,
+                to,
+                name,
+            });
         }
     }
     /// New Folder Inside… folder `parent` of `root` (catalog folder
@@ -920,6 +944,11 @@ impl Library {
             .find(|f| f.root == root && f.relative.trim_end_matches('/') == relative)?;
         let name = relative.rsplit('/').next().unwrap_or(relative).to_string();
         Some((SyncScope::Folder(folder.id), name))
+    }
+    /// The root and logical path of catalog folder `id`, as the Library has it.
+    pub(in crate::app) fn folder_place(&self, id: FolderId) -> Option<(RootId, String)> {
+        let folder = self.session.folders.iter().find(|f| f.id == id)?;
+        Some((folder.root, folder.relative.clone()))
     }
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()

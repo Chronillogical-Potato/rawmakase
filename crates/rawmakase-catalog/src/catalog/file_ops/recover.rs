@@ -6,7 +6,9 @@
 //! the disk decides over anything the journal says. Recovery creates,
 //! deletes and renames nothing, except putting a member back: an exclusive
 //! rename of a member proven at its destination (or in the Trash) to its
-//! source. Every decision is journalled before any disk step.
+//! source; and, for a move to another volume ([`super::copy`]), removing a
+//! partial copy it made and putting copies and originals in the Trash, as
+//! below. Every decision is journalled before any disk step.
 //!
 //! 0. An item being put back (`restoring`) is only ever put back, and stays
 //!    `restoring` until it is (or the user keeps it as it is): its
@@ -29,8 +31,27 @@
 //!    journalled is never adopted, and no folder is ever deleted.
 //! 6. Anything else (an offline volume, an error, another file object,
 //!    members split): unfinished, for the user to Put Back or Keep as Is.
-//! 7. Nothing is ever cleaned up because its name looks like ours.
-//! 8. Finished items are forgotten after 30 days.
+//! 7. A move to another volume the catalog follows (`committed`) is
+//!    finished: each original still the file it copied, whose copy is
+//!    where the catalog says and reads back the same, goes to the Trash;
+//!    one that can't stays, and is reported. One the catalog doesn't follow
+//!    is undone once every original is proven at its source, as it was
+//!    copied: its partial copies are removed, its complete copies (proven
+//!    by their file object and read back the same) go to the Trash, and it
+//!    is `no_change`. An original that can't be proven leaves it for the
+//!    user: Put Back undoes it once each original is the file object it
+//!    was at its source, changed since or not (the user chose to keep the
+//!    originals), and refuses while one isn't; Keep as Is leaves the
+//!    copies.
+//! 8. Nothing is ever cleaned up because its name looks like ours: a
+//!    partial copy is removed by its journalled file object, or, made but
+//!    not yet journalled, only at the name unique to its run and member
+//!    that the journal gave it, and only while empty; one written whole,
+//!    only while its original is proven at its source as it was copied
+//!    (on Put Back it goes to the Trash, as a complete copy). A name held by
+//!    another file object than the journalled one is never taken for the
+//!    copy gone.
+//! 9. Finished items are forgotten after 30 days.
 use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};
 use super::disk::{Disk, Presence, Real, parent, presence};
@@ -38,7 +59,7 @@ use super::execute::{complete, restore};
 use super::folder::{self, FolderState};
 use super::journal::{self, Item, ItemState, Kind, Member, MemberState, OperationId, Subject};
 use super::plan::{Folders, shared};
-use super::{FileOpError, ItemOutcome, ItemResult};
+use super::{FileOpError, ItemOutcome, ItemResult, KeptOriginal, Trash};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
@@ -91,11 +112,12 @@ pub enum Resolution {
 }
 
 /// Recovers `catalog`'s unfinished file operations on this computer, and
-/// forgets finished ones older than 30 days.
-pub fn recover(catalog: &mut Catalog) -> Result<Recovery, FileOpError> {
+/// forgets finished ones older than 30 days. A move to another drive puts
+/// files in `trash`.
+pub fn recover(catalog: &mut Catalog, trash: &dyn Trash) -> Result<Recovery, FileOpError> {
     let _lock = super::lock::acquire(catalog)?;
     prune(catalog)?;
-    Ok(run(catalog, &Real)?)
+    Ok(run(catalog, &Real, trash)?)
 }
 
 /// Whether `catalog` has file operations of this computer that a crash
@@ -120,7 +142,7 @@ fn now() -> i64 {
 }
 
 /// Applies the rules to every unresolved item, the lock held.
-pub(super) fn run(catalog: &mut Catalog, disk: &dyn Disk) -> Result<Recovery> {
+pub(super) fn run(catalog: &mut Catalog, disk: &dyn Disk, trash: &dyn Trash) -> Result<Recovery> {
     let computer = catalog.computer.id.clone();
     let items = journal::unresolved(&catalog.db, &computer)?;
     let mut recovery = Recovery::default();
@@ -129,7 +151,7 @@ pub(super) fn run(catalog: &mut Catalog, disk: &dyn Disk) -> Result<Recovery> {
     }
     let folders = Folders::index(&catalog.db.snapshot(|s| locate_folders(s, &computer))?);
     for item in items {
-        decide(catalog, &computer, &folders, disk, &item)?;
+        decide(catalog, &computer, &folders, disk, trash, &item, false)?;
         let now = journal::item(&catalog.db, item.id)?.context("the journalled item is gone")?;
         match now.state {
             ItemState::NeedsRecovery | ItemState::Restoring => {
@@ -141,13 +163,15 @@ pub(super) fn run(catalog: &mut Catalog, disk: &dyn Disk) -> Result<Recovery> {
     Ok(recovery)
 }
 
-/// Decides unfinished item `operation` as the user chose.
+/// Decides unfinished item `operation` as the user chose. Putting back a
+/// move to another drive puts its copies in `trash`.
 pub fn resolve(
     catalog: &mut Catalog,
     operation: OperationId,
     resolution: Resolution,
+    trash: &dyn Trash,
 ) -> Result<ItemOutcome, FileOpError> {
-    resolve_with(catalog, operation, resolution, &Real)
+    resolve_with(catalog, operation, resolution, &Real, trash)
 }
 
 /// [`resolve`] on `disk`.
@@ -156,6 +180,7 @@ pub(super) fn resolve_with(
     operation: OperationId,
     resolution: Resolution,
     disk: &dyn Disk,
+    trash: &dyn Trash,
 ) -> Result<ItemOutcome, FileOpError> {
     let _lock = super::lock::acquire(catalog)?;
     let computer = catalog.computer.id.clone();
@@ -199,7 +224,7 @@ pub(super) fn resolve_with(
         if state == ItemState::Restoring {
             let item = journal::item(&catalog.db, operation)?.context("No such file operation")?;
             let folders = Folders::index(&catalog.db.snapshot(|s| locate_folders(s, &computer))?);
-            decide(catalog, &computer, &folders, disk, &item)?;
+            decide(catalog, &computer, &folders, disk, trash, &item, true)?;
         }
     }
     let now = journal::item(&catalog.db, operation)?.context("No such file operation")?;
@@ -212,13 +237,25 @@ fn decide(
     computer: &str,
     folders: &Folders,
     disk: &dyn Disk,
+    trash: &dyn Trash,
     item: &Item,
+    put_back: bool,
 ) -> Result<()> {
     let id = item.id;
     if item.kind == Kind::CreateFolder {
         return catalog
             .db
             .write_immediate(|w| folder::decide(w, computer, disk, item));
+    }
+    // Rule 7, before anything that reads members as renamed.
+    if item.copies() {
+        let cx = super::copy::Cx {
+            computer,
+            folders,
+            disk,
+            trash,
+        };
+        return super::copy::decide(&cx, catalog, item, put_back);
     }
     // An item being put back stays so however it is left: it is never
     // completed forward, whatever happens to its files later.
@@ -359,7 +396,15 @@ fn unfinished(item: &Item) -> Unfinished {
             .iter()
             .map(|m| UnfinishedMember {
                 source: m.source.clone(),
-                after: m.after().map(PathBuf::from),
+                // A copy not yet given its name is its hidden partial copy.
+                after: match &m.copy {
+                    Some(copy)
+                        if matches!(m.state, MemberState::Planned | MemberState::Copying) =>
+                    {
+                        Some(copy.temp.clone())
+                    }
+                    _ => m.after().map(PathBuf::from),
+                },
                 changed: m.state != MemberState::Planned,
             })
             .collect(),
@@ -414,11 +459,32 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
         ItemState::Restoring if item.error.is_some() => {
             ItemResult::NeedsRecovery(item.error.clone().unwrap_or_default())
         }
+        // The catalog follows its copies; its originals are still to go.
+        ItemState::Committed => match &item.subject {
+            Subject::Photos(super::preconditions::Preconditions {
+                to: Some((to, _)), ..
+            }) => ItemResult::Moved { to: *to },
+            _ => ItemResult::Interrupted,
+        },
         ItemState::Planned | ItemState::Restoring => ItemResult::Interrupted,
     };
+    let originals_kept = item
+        .members
+        .iter()
+        .filter(|m| m.state == MemberState::OriginalKept)
+        .map(|m| KeptOriginal {
+            path: m.source.clone(),
+            why: m
+                .copy
+                .as_ref()
+                .and_then(|c| c.kept.clone())
+                .unwrap_or_default(),
+        })
+        .collect();
     ItemOutcome {
         operation: item.id,
         photos: item.photos().to_vec(),
         result,
+        originals_kept,
     }
 }

@@ -258,6 +258,47 @@ fn add(
     }
 }
 
+/// The catalog's folder for move destination `into`, directory `at`, in
+/// `w`'s transaction: the one it has at exactly that logical path (`false`)
+/// or, when it has none and no other folder resolves to `at`, a new one
+/// (`true`). Why not, when the catalog places the path elsewhere now, or
+/// has another folder over that directory.
+pub(super) fn arrive(
+    w: &mut Write<'_>,
+    computer: &str,
+    into: &super::preconditions::Arrival,
+    at: &Path,
+) -> Result<std::result::Result<(FolderId, bool), String>> {
+    if logical_location(w, computer, into.root, &into.logical)?.as_ref() != Some(&into.resolved) {
+        return Ok(Err("the catalog places that folder elsewhere now".into()));
+    }
+    let key = caseless(OsStr::new(&into.logical));
+    let (resolved, dir) = (
+        caseless(into.resolved.as_os_str()),
+        caseless(at.as_os_str()),
+    );
+    let over: Vec<(FolderId, super::super::folder_sync::Located)> = locate_folders(w, computer)?
+        .into_iter()
+        .filter(|(_, f)| {
+            (f.root == into.root && caseless(OsStr::new(&f.logical)) == key)
+                || f.path.as_deref().is_some_and(|p| {
+                    let p = caseless(p.as_os_str());
+                    p == resolved || p == dir
+                })
+        })
+        .collect();
+    match over.as_slice() {
+        [] => Ok(Ok((
+            super::super::ingest::folder_id(w, into.root, &into.logical)?,
+            true,
+        ))),
+        [(folder, f)] if f.root == into.root && f.logical == into.logical => {
+            Ok(Ok((*folder, false)))
+        }
+        _ => Ok(Err("the catalog has another folder there now".into())),
+    }
+}
+
 /// Why a folder item is still unfinished when no file object was
 /// journalled: what is there may not be the folder made.
 pub(super) const NOT_PROVEN: &str = "A folder is there that RAWmakase can't tell it made; it stays out of the catalog. Add it with Add Folder if it is yours.";

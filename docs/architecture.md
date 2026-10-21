@@ -53,7 +53,7 @@ files should preserve.
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes. Settings that ask for Auto measure the photo through `PhotoMeasures`, which `develop::Measures` provides, and packets take the crop as rendered from the caller, so XMP needs no rendering code | `parse.rs`, `apply.rs` |
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
-| `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
+| `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts and free space, and a copy's steps; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
 | `export_settings` | Export choices as values: the Export dialog's settings, a photo's saved `ExportOptions`, and the naming templates (`NameTemplate`) exports and renames name files by | `export_settings.rs` |
 | `export` | JPEG, 16-bit TIFF and PNG encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `ids` | Typed catalog row ids (`PhotoId`, `FolderId`, `RootId`, `CollectionId`), stored and serialized as their integers; a leaf, so edit resolution and export use them below the catalog | `ids.rs` |
@@ -192,7 +192,8 @@ inject a temporary file, without changing the process-wide environment.
 - Never change an original's contents or a Lightroom source. A photo's file is
   moved, renamed or put in the Trash only by a file operation the user
   confirmed (`catalog::file_ops`); nothing copies over, replaces or deletes
-  one. Preserve unsupported source data, legacy sidecars, no-clobber
+  one. A move to another volume copies it, verified, and puts the original in
+  the Trash only once the catalog follows the copy. Preserve unsupported source data, legacy sidecars, no-clobber
   publication, ICC/EXIF handling and temporary-file write behavior.
 - Rendering math stays in `develop` and `camera_profiles`. Fit previews, regions
   and exports must continue to share the relevant processing paths. What the
@@ -228,9 +229,16 @@ inject a temporary file, without changing the process-wide environment.
   file proven at its new path (the same file object, by its exact name in the
   folder's listing), and go only with a Trash receipt and the file gone from
   its path; a file's absence alone authorises nothing. A file leaves its path
-  only by an exclusive rename on the same volume (never a link and unlink or a
-  copy) or by the system Trash, which fails closed: a volume without one is
-  refused, never deleted from. Every disk step is journalled, after its folders
+  only by an exclusive rename on the same volume (never a link and unlink) or
+  by the system Trash, which fails closed: a volume without one is refused,
+  never deleted from. To another volume a file is copied (into a hidden
+  partial copy, hashed as read, synced, read back, then renamed exclusively),
+  the catalog follows only proven copies, and the original goes to the Trash
+  only after that, while it is still the file copied; the one file ever
+  unlinked is a partial copy the run made and never named. Such copies are
+  made only between volumes whose file ids stay (local APFS, HFS+, ext,
+  XFS, Btrfs or NTFS ones), and a name held by another file object is never taken for a
+  copy gone. Every disk step is journalled, after its folders
   are synced, before the next, and recovery decides whatever a crash left from
   the journal and the disk, putting back only what it proves. One process at a
   time changes a catalog's files, under an OS lock on a file beside the

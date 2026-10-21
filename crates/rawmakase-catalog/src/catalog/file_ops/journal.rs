@@ -10,7 +10,7 @@ use super::folder::FolderState;
 use super::preconditions::Preconditions;
 use super::tree::TreeState;
 use crate::storage::Identity;
-use crate::storage::fsops::FileId;
+use crate::storage::fsops::{ContentHash, FileId};
 use anyhow::{Context, Result, anyhow};
 use std::path::{Path, PathBuf};
 
@@ -72,6 +72,10 @@ stored! {
         Planned = "planned",
         /// Being put back: never completed forward again.
         Restoring = "restoring",
+        /// Copied to another volume, and the catalog follows the copies:
+        /// only putting its originals in the Trash is left, which never
+        /// changes the catalog.
+        Committed = "committed",
         /// Finished with nothing changed, on disk or in the catalog.
         NoChange = "no_change",
         /// Unfinished, for the user to decide.
@@ -92,6 +96,17 @@ stored! {
         Created = "created",
         /// Put back where it was.
         Restored = "restored",
+        /// Its copy to another volume begun: the partial copy made, and
+        /// its file object journalled.
+        Copying = "copying",
+        /// Its copy complete, verified and at its destination; the original
+        /// as it was.
+        Copied = "copied",
+        /// Its copy gone again (the partial copy removed, or the complete
+        /// one in the Trash); the original as it was.
+        Discarded = "discarded",
+        /// Its original left at its source, the catalog following its copy.
+        OriginalKept = "original_kept",
     }
 }
 
@@ -120,6 +135,28 @@ pub(super) struct Member {
     pub state: MemberState,
     /// Where the Trash put it.
     pub receipt: Option<PathBuf>,
+    /// How it is copied, when it is copied to another volume.
+    pub copy: Option<CopyRecord>,
+}
+
+/// A member copied to another volume, as journalled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct CopyRecord {
+    /// Its partial copy, hidden in the destination folder by a name unique
+    /// to this item and member.
+    pub temp: PathBuf,
+    /// The copy's file object, from when it is made: the partial copy's,
+    /// and the complete one's at its destination.
+    pub id: Option<FileId>,
+    /// The SHA-256 of the bytes copied, once the copy is written whole.
+    pub content: Option<ContentHash>,
+    /// The copy's `Identity` at its destination, once the catalog follows
+    /// it.
+    pub identity: Option<Identity>,
+    /// Where the Trash put the copy, when the move was undone.
+    pub receipt: Option<PathBuf>,
+    /// Why the original stayed at its source.
+    pub kept: Option<String>,
 }
 
 impl Member {
@@ -155,6 +192,10 @@ pub(super) struct Item {
 }
 
 impl Item {
+    /// Whether it copies its files to another volume.
+    pub fn copies(&self) -> bool {
+        self.members.iter().any(|m| m.copy.is_some())
+    }
     /// The catalog photos it concerns: none for a folder it makes, those
     /// in the subtree of one it renames.
     pub fn photos(&self) -> &[PhotoId] {
@@ -225,6 +266,126 @@ fn insert_members(w: &mut Write<'_>, id: i64, members: &[NewMember]) -> Result<(
         )?;
     }
     Ok(())
+}
+
+/// Journals that item `id` copies its members to another volume, each
+/// first to its partial copy `temps[ordinal]`.
+pub(super) fn insert_copies(w: &mut Write<'_>, id: OperationId, temps: &[PathBuf]) -> Result<()> {
+    for (ordinal, temp) in temps.iter().enumerate() {
+        w.execute(
+            sql!("INSERT INTO file_operation_copies(operation, ordinal, temp) VALUES (?, ?, ?)"),
+            &[&id.0, &(ordinal as i64), &text(temp)?],
+        )?;
+    }
+    Ok(())
+}
+
+/// Records that member `ordinal` of item `id` is being copied, into the
+/// partial copy that is file object `file`, at `temp` as the disk spells
+/// it.
+pub(super) fn set_copying(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    file: FileId,
+    temp: &Path,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!(
+            "UPDATE file_operation_copies SET copy_id=?, temp=?
+             WHERE operation=? AND ordinal=?"
+        ),
+        &[&file.to_string(), &text(temp)?, &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation copy");
+    set_member(w, id, ordinal, MemberState::Copying, None)
+}
+
+/// Records the SHA-256 of the bytes member `ordinal` of item `id` was
+/// copied with, once its copy is written whole.
+pub(super) fn set_content(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    content: ContentHash,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operation_copies SET content=? WHERE operation=? AND ordinal=?"),
+        &[&content.to_string(), &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation copy");
+    Ok(())
+}
+
+/// Marks member `ordinal` of item `id` copied, at `destination`: the name
+/// the disk gave it.
+pub(super) fn set_copied(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    destination: &Path,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!(
+            "UPDATE file_operation_members SET state=?, destination=?
+             WHERE operation=? AND ordinal=?"
+        ),
+        &[
+            &MemberState::Copied.as_str(),
+            &text(destination)?,
+            &id.0,
+            &ordinal,
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation member");
+    Ok(())
+}
+
+/// Records the `Identity` of member `ordinal` of item `id`'s copy at its
+/// destination, as the catalog follows it.
+pub(super) fn set_copy_identity(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    identity: &Identity,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operation_copies SET copy_identity=? WHERE operation=? AND ordinal=?"),
+        &[&serde_json::to_string(identity)?, &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation copy");
+    Ok(())
+}
+
+/// Marks member `ordinal` of item `id`'s copy gone again, with where the
+/// Trash put it when it did.
+pub(super) fn set_discarded(
+    w: &mut Write<'_>,
+    id: OperationId,
+    ordinal: i64,
+    receipt: Option<&Path>,
+) -> Result<()> {
+    let receipt = receipt.map(text).transpose()?;
+    let changed = w.execute(
+        sql!(
+            "UPDATE file_operation_copies SET copy_receipt=COALESCE(?, copy_receipt)
+             WHERE operation=? AND ordinal=?"
+        ),
+        &[&receipt, &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation copy");
+    set_member(w, id, ordinal, MemberState::Discarded, None)
+}
+
+/// Marks member `ordinal` of item `id`'s original kept at its source, for
+/// reason `why`.
+pub(super) fn set_kept(w: &mut Write<'_>, id: OperationId, ordinal: i64, why: &str) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operation_copies SET kept=? WHERE operation=? AND ordinal=?"),
+        &[&why, &id.0, &ordinal],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation copy");
+    set_member(w, id, ordinal, MemberState::OriginalKept, None)
 }
 
 /// Journals a new item of `batch` making folder `path`, in `state`: its one
@@ -332,6 +493,25 @@ pub(super) fn set_created(
     Ok(())
 }
 
+/// Replaces photo item `id`'s preconditions, as they are once its
+/// destination is the catalog's folder it added or found there.
+pub(super) fn set_preconditions(
+    w: &mut Write<'_>,
+    id: OperationId,
+    preconditions: &Preconditions,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operations SET preconditions=? WHERE id=? AND kind=?"),
+        &[
+            &serde_json::to_string(preconditions)?,
+            &id.0,
+            &Kind::MovePhotos.as_str(),
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown move operation");
+    Ok(())
+}
+
 /// Replaces folder item `id`'s state, as it is once the catalog has it.
 pub(super) fn set_folder(w: &mut Write<'_>, id: OperationId, folder: &FolderState) -> Result<()> {
     let changed = w.execute(
@@ -417,6 +597,17 @@ row! {
     }
 }
 row! {
+    struct CopyRow {
+        ordinal: i64,
+        temp: String,
+        copy_id: Option<String>,
+        content: Option<String>,
+        copy_identity: Option<String>,
+        copy_receipt: Option<String>,
+        kept: Option<String>,
+    }
+}
+row! {
     struct MemberRow {
         ordinal: i64,
         source: String,
@@ -436,10 +627,41 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
         ),
         &[&row.id],
     )?;
+    let copies: Vec<CopyRow> = db.read(
+        sql!(
+            "SELECT ordinal, temp, copy_id, content, copy_identity, copy_receipt, kept
+             FROM file_operation_copies WHERE operation=? ORDER BY ordinal"
+        ),
+        &[&row.id],
+    )?;
+    let mut copies: std::collections::HashMap<i64, CopyRecord> = copies
+        .into_iter()
+        .map(|c| {
+            let content = c
+                .content
+                .map(|t| t.parse::<ContentHash>().map_err(|e| anyhow!("{e}")))
+                .transpose()?;
+            Ok((
+                c.ordinal,
+                CopyRecord {
+                    temp: c.temp.into(),
+                    id: c.copy_id.map(|t| t.parse()).transpose()?,
+                    content,
+                    identity: c
+                        .copy_identity
+                        .map(|t| serde_json::from_str(&t))
+                        .transpose()?,
+                    receipt: c.copy_receipt.map(PathBuf::from),
+                    kept: c.kept,
+                },
+            ))
+        })
+        .collect::<Result<_>>()?;
     let members = members
         .into_iter()
         .map(|m| {
             Ok(Member {
+                copy: copies.remove(&m.ordinal),
                 ordinal: m.ordinal,
                 source: m.source.into(),
                 destination: m.destination.map(PathBuf::from),
@@ -499,7 +721,7 @@ pub(super) fn unresolved(db: &impl Reads, computer: &str) -> Result<Vec<Item>> {
     let rows: Vec<ItemRow> = db.read(
         sql!(
             "SELECT id, computer, kind, state, preconditions, error FROM file_operations
-             WHERE computer=? AND state IN ('planned', 'restoring', 'needs_recovery')
+             WHERE computer=? AND state IN ('planned', 'restoring', 'committed', 'needs_recovery')
              ORDER BY id"
         ),
         &[&computer],
@@ -512,7 +734,7 @@ pub(super) fn unresolved_anywhere(db: &impl Reads) -> Result<Vec<Item>> {
     let rows: Vec<ItemRow> = db.read(
         sql!(
             "SELECT id, computer, kind, state, preconditions, error FROM file_operations
-             WHERE state IN ('planned', 'restoring', 'needs_recovery')
+             WHERE state IN ('planned', 'restoring', 'committed', 'needs_recovery')
              ORDER BY id"
         ),
         &[],

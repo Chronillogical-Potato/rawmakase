@@ -18,8 +18,8 @@ use std::collections::{BTreeMap, HashSet};
 
 /// The files and rows a scenario starts from.
 pub(super) struct Before {
-    files: BTreeMap<String, Vec<u8>>,
-    rows: BTreeMap<PhotoId, String>,
+    pub files: BTreeMap<String, Vec<u8>>,
+    pub rows: BTreeMap<PhotoId, String>,
 }
 
 pub(super) fn before(fx: &Fx) -> Before {
@@ -55,13 +55,37 @@ pub(super) fn check_files(fx: &Fx, before: &Before, recovery: &Recovery, batch: 
         .unwrap()
         .iter()
         .any(|i| i.kind == Kind::RemoveFromCatalog);
+    let copies = journal::of_batch(&fx.cat.db, &batch.0)
+        .unwrap()
+        .iter()
+        .any(|i| i.copies());
     // Every original once, nothing new, nothing overwritten.
     let mut was: Vec<&Vec<u8>> = before.files.values().collect();
     let now = fx.files();
-    let mut is: Vec<&Vec<u8>> = now.values().collect();
+    let mut is: Vec<&Vec<u8>> = now
+        .iter()
+        // A partial copy, which only an unfinished item may leave, is
+        // looked at on its own.
+        .filter(|(k, _)| !k.ends_with(".rawmakase-part"))
+        .map(|(_, v)| v)
+        .collect();
     was.sort();
     is.sort();
-    assert_eq!(was, is, "files: {:?}", now.keys().collect::<Vec<_>>());
+    if copies {
+        // A move to another volume may also leave copies of originals: in
+        // the Trash, or beside an original it couldn't put there.
+        let mut extra = is.clone();
+        for w in &was {
+            let at = extra.iter().position(|v| v == w);
+            let at = at.unwrap_or_else(|| panic!("a file was lost: {:?}", now.keys()));
+            extra.remove(at);
+        }
+        for e in extra {
+            assert!(was.contains(&e), "a new file: {:?}", now.keys());
+        }
+    } else {
+        assert_eq!(was, is, "files: {:?}", now.keys().collect::<Vec<_>>());
+    }
     let unfinished: HashSet<PhotoId> = recovery
         .unfinished
         .iter()
@@ -122,6 +146,35 @@ fn scenario(fx: &mut Fx, op: FileOp, trash: &dyn Trash, disk: &Faulty) -> (Batch
     (batch, recovery)
 }
 
+/// [`scenario`], planned on `disk` and recovered with `trash` on a disk
+/// that takes `far` for another volume's, as `disk` does.
+fn scenario_on(
+    fx: &mut Fx,
+    op: FileOp,
+    trash: &dyn Trash,
+    disk: &Faulty,
+    far: &std::path::Path,
+) -> (BatchId, Recovery) {
+    let plan = fx.plan_on(op, disk).unwrap();
+    let batch = plan.batch().clone();
+    crashes(|| {
+        drop(
+            execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                trash,
+                &Default::default(),
+                disk,
+            )
+            .unwrap(),
+        );
+    });
+    fx.reopen();
+    let clean = Faulty::default().elsewhere(far);
+    let recovery = fx.recover_with(&clean, trash);
+    (batch, recovery)
+}
+
 fn move_files() -> Fx {
     fixture(&["a.NEF", "a.xmp", "b.NEF", "sub/"])
 }
@@ -129,7 +182,8 @@ fn move_files() -> Fx {
 fn move_op(fx: &Fx) -> FileOp {
     FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF"), fx.photo("b.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     }
 }
 
@@ -157,7 +211,8 @@ fn every_fault_at_every_disk_step_of_a_move_ends_proven() {
                 check(&fx, &was, &recovery, &batch);
                 // And whatever is unfinished can be put back.
                 for u in &recovery.unfinished {
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{at:?} {nth} {fault:?}: {back:?}"
@@ -318,7 +373,8 @@ fn moved_but_unfinished() -> (Fx, BatchId) {
     fx.fail_journal("BEFORE UPDATE ON photos");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let batch = plan.batch().clone();
     let outcome = execute::execute_with(
@@ -370,12 +426,13 @@ fn a_family_changed_before_recovery_is_reported_and_left() -> Result<()> {
         &mut fx.cat,
         recovery.unfinished[0].operation,
         Resolution::PutBack,
+        &NoTrash,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     assert!(matches!(back.result, ItemResult::NeedsRecovery(_)));
     assert!(fx.root.join("sub/a.NEF").is_file());
     // Keep as Is is for good.
-    let kept = resolve(&mut fx.cat, back.operation, Resolution::Keep)
+    let kept = resolve(&mut fx.cat, back.operation, Resolution::Keep, &NoTrash)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     assert_eq!(kept.result, ItemResult::Kept);
     assert!(fx.recover(&disk::Real).unfinished.is_empty());
@@ -399,6 +456,7 @@ fn an_offline_destination_leaves_it_unfinished_and_kept_is_never_completed() -> 
         &mut fx.cat,
         recovery.unfinished[0].operation,
         Resolution::Keep,
+        &NoTrash,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     assert_eq!(kept.result, ItemResult::Kept);
@@ -420,7 +478,8 @@ fn a_put_back_resumes_after_a_crash_and_never_completes_forward() -> Result<()> 
         let a = fx.photo("a.NEF");
         let plan = fx.plan(FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         });
         let batch = plan.batch().clone();
         assert!(crashes(|| {
@@ -458,7 +517,8 @@ fn a_put_back_after_another_release_synchronized_the_photo_renames_nothing() -> 
     let sub = fx.folder("sub");
     let plan = fx.plan(FileOp::MovePhotos {
         photos: vec![a],
-        to: sub,
+        root: fx.root_of(sub),
+        to: fx.logical(sub),
     });
     assert!(crashes(|| {
         let _ = execute::execute_with(
@@ -565,7 +625,7 @@ fn another_computers_items_are_not_this_ones() -> Result<()> {
         name: "Other".into(),
     };
     let mut there = Catalog::open_as(&fx.catalog, &other)?;
-    let recovery = recover(&mut there).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let recovery = recover(&mut there, &NoTrash).map_err(|e| anyhow::anyhow!("{e}"))?;
     assert_eq!(recovery, Recovery::default());
     assert!(matches!(
         results(&super::outcome(&fx.cat, &batch)?)[..],
@@ -642,6 +702,7 @@ impl Lcg {
 
 #[test]
 fn seeded_random_operations_with_faults_keep_every_invariant() {
+    let mut copied = 0;
     for seed in 0..40u64 {
         let mut rng = Lcg(seed);
         let mut fx = fixture(&[
@@ -652,7 +713,10 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
             "c.JPG",
             "one/",
             "two/",
+            "far/",
         ]);
+        // `far/` is taken for another volume's: moves there copy.
+        let far = fx.root.join("far");
         for step in 0..3 {
             let was = before(&fx);
             let photos: Vec<PhotoId> = fx
@@ -661,15 +725,23 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
                 .unwrap()
                 .into_iter()
                 .filter(|p| p.master.is_none())
+                // Planning reads a file's own volume from the disk itself.
+                .filter(|p| !p.path.starts_with(&far))
                 .filter(|_| rng.next(2) == 0)
                 .map(|p| p.id)
                 .collect();
-            let op = match rng.next(5) {
+            let op = match rng.next(6) {
                 0 => FileOp::TrashPhotos { photos },
+                5 => FileOp::MovePhotos {
+                    photos,
+                    root: fx.root_id(),
+                    to: "far".into(),
+                },
                 1 => FileOp::RemoveFromCatalog { photos },
                 2 => FileOp::MovePhotos {
                     photos,
-                    to: fx.folder("one"),
+                    root: fx.root_id(),
+                    to: "one".into(),
                 },
                 // Names that sometimes clash, chain or are the photo's own.
                 3 => FileOp::RenamePhotos {
@@ -680,12 +752,24 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
                 },
                 _ => FileOp::MovePhotos {
                     photos,
-                    to: fx.folder("two"),
+                    root: fx.root_id(),
+                    to: "two".into(),
                 },
             };
             let fault = [Fault::Fail, Fault::CrashBefore, Fault::CrashAfter][rng.next(3)];
-            let kind = [Op::Rename, Op::Sync][rng.next(2)];
-            let disk = Faulty::at(kind, rng.next(6), fault);
+            let fault = [fault, Fault::CrashMid][rng.next(5) / 4];
+            let kinds = [
+                Op::Rename,
+                Op::Sync,
+                Op::CreateFile,
+                Op::Copy,
+                Op::SyncFile,
+                Op::CopyTimes,
+                Op::Hash,
+                Op::RemoveFile,
+            ];
+            let kind = kinds[rng.next(kinds.len())];
+            let disk = Faulty::at(kind, rng.next(6), fault).elsewhere(&far);
             let mut trash = FakeTrash::new(&fx);
             match rng.next(3) {
                 0 => trash.fail_from = Some(1 + rng.next(4)),
@@ -700,13 +784,26 @@ fn seeded_random_operations_with_faults_keep_every_invariant() {
             if let Some(n) = &mut trash.crash_after {
                 *n += 100 * step;
             }
-            let (batch, recovery) = scenario(&mut fx, op, &trash, &disk);
+            let (batch, recovery) = scenario_on(&mut fx, op, &trash, &disk, &far);
             check(&fx, &was, &recovery, &batch);
+            copied += journal::of_batch(&fx.cat.db, &batch.0)
+                .unwrap()
+                .iter()
+                .filter(|i| i.copies() && i.members.iter().any(|m| m.state != MemberState::Planned))
+                .count();
+            let clean = Faulty::default().elsewhere(&far);
+            let back = FakeTrash::new(&fx);
+            *back.calls.borrow_mut() = 100 * step + 50;
             for u in &recovery.unfinished {
-                resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                recover::resolve_with(&mut fx.cat, u.operation, Resolution::PutBack, &clean, &back)
+                    .unwrap();
             }
+            // What Put Back left is still listed.
+            let after = fx.recover_with(&clean, &back);
+            check_files(&fx, &was, &after, &batch);
         }
     }
+    assert!(copied >= 10, "only {copied} copies began");
 }
 
 #[test]
@@ -725,7 +822,8 @@ fn a_put_back_that_fails_stays_a_put_back() -> Result<()> {
     fx.cat
         .db
         .write(|w| journal::set_state(w, id, ItemState::NeedsRecovery, Some("left")))?;
-    let back = resolve(&mut fx.cat, id, Resolution::PutBack).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let back = resolve(&mut fx.cat, id, Resolution::PutBack, &NoTrash)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     assert!(
         matches!(back.result, ItemResult::NeedsRecovery(_)),
         "{back:?}"
@@ -757,7 +855,8 @@ fn a_family_shared_with_a_new_photo_before_completion_is_left_unfinished() -> Re
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![a],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         },
         &NoTrash,
         &Faulty::default(),
@@ -779,7 +878,7 @@ fn another_computer_cannot_decide_this_ones_item() -> Result<()> {
         name: "Other".into(),
     };
     let mut there = Catalog::open_as(&fx.catalog, &other)?;
-    assert!(resolve(&mut there, id, Resolution::Keep).is_err());
+    assert!(resolve(&mut there, id, Resolution::Keep, &NoTrash).is_err());
     assert!(matches!(
         results(&super::outcome(&fx.cat, &batch)?)[..],
         [ItemResult::NeedsRecovery(_)]
@@ -912,7 +1011,7 @@ fn only_a_crash_leaves_something_to_recover_when_a_catalog_opens() {
     assert!(unfinished_here(&fx.cat).unwrap());
     let recovery = fx.recover(&disk::Real);
     for u in &recovery.unfinished {
-        resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
     }
     assert!(!unfinished_here(&fx.cat).unwrap());
 }
@@ -922,7 +1021,8 @@ fn running_an_operation_forgets_finished_ones_older_than_30_days() {
     let mut fx = fixture(&["a.NEF", "b.NEF", "sub/"]);
     let old = fx.plan(FileOp::MovePhotos {
         photos: vec![fx.photo("a.NEF")],
-        to: fx.folder("sub"),
+        root: fx.root_id(),
+        to: "sub".into(),
     });
     let old_batch = old.batch().clone();
     drop(
@@ -942,7 +1042,8 @@ fn running_an_operation_forgets_finished_ones_older_than_30_days() {
     let _ = fx.run(
         FileOp::MovePhotos {
             photos: vec![fx.photo("b.NEF")],
-            to: fx.folder("sub"),
+            root: fx.root_id(),
+            to: "sub".into(),
         },
         &NoTrash,
         &disk::Real,

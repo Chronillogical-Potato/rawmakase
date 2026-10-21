@@ -12,6 +12,7 @@ use super::super::value::row;
 use super::super::{Catalog, FolderId, PhotoId, RootId};
 use super::companions::{self, Companions};
 use super::conflicts::{Destination, Names};
+use super::disk::Disk;
 use super::folder::{FolderState, NewFolder, folder_name_problem};
 use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
@@ -38,6 +39,42 @@ pub(super) struct Item {
     pub kept: Vec<PathBuf>,
     /// How the destination folder compares names.
     pub rules: Names,
+    /// How its files are copied, when the destination is on another volume.
+    pub copy: Option<CopyTo>,
+}
+
+/// An item whose files are copied to another volume, as planned.
+#[derive(Clone, Debug)]
+pub(super) struct CopyTo {
+    /// The destination's volume.
+    pub volume: VolumeId,
+    /// Each member's partial copy, by ordinal: hidden in the destination
+    /// folder, by a name unique to the run, the item and the member.
+    pub temps: Vec<PathBuf>,
+    /// The bytes it copies.
+    pub bytes: u64,
+}
+
+/// What a move to another volume must leave free there, beyond what it
+/// copies: room for the folders' own records.
+const SPARE: u64 = 32 << 20;
+
+/// The name of member `ordinal` of item `item`'s partial copy, for its file
+/// named `name`, in run `batch`: hidden (so Synchronize Folder and Add
+/// Folder pass it by), and with the destination name's start for whoever
+/// finds one left.
+pub(super) fn temp_name(name: &OsStr, batch: &BatchId, item: usize, ordinal: usize) -> OsString {
+    let name = name.to_string_lossy();
+    let mut end = name.len().min(64);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        ".{}.{}-{item}-{ordinal}.rawmakase-part",
+        &name[..end],
+        batch.0
+    )
+    .into()
 }
 
 row! {
@@ -59,10 +96,22 @@ pub(super) struct Family {
 /// Plans `op` in `catalog` on this computer. Reads the catalog in one
 /// snapshot and the files after it; changes nothing.
 pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
+    plan_with(catalog, op, &super::disk::Real)
+}
+
+/// [`plan`] with the volumes and destination folders as `disk` sees them.
+pub(super) fn plan_with(
+    catalog: &Catalog,
+    op: FileOp,
+    disk: &dyn Disk,
+) -> Result<Plan, FileOpError> {
+    let batch = new_batch()?;
     let mut stems = HashMap::new();
     let (kind, chosen, to, create) = match op {
         FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
-        FileOp::MovePhotos { photos, to } => (Kind::MovePhotos, photos, Some(to), None),
+        FileOp::MovePhotos { photos, root, to } => {
+            (Kind::MovePhotos, photos, Some((root, to)), None)
+        }
         FileOp::TrashPhotos { photos } => (Kind::TrashPhotos, photos, None, None),
         FileOp::CreateFolder {
             root,
@@ -116,6 +165,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
     })?;
     let by_id: HashMap<PhotoId, &PhotoRow> = photos.iter().map(|p| (p.id, p)).collect();
     let mut made = None;
+    let mut across = None;
     let items = match kind {
         Kind::RemoveFromCatalog => families
             .into_iter()
@@ -125,12 +175,13 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
                 shared: Vec::new(),
                 kept: Vec::new(),
                 rules: UNKNOWN,
+                copy: None,
             })
             .collect(),
         Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
-            let mut files = Files::new(catalog, &folders);
+            let mut files = Files::new(catalog, &folders, disk);
             let destination = match (to, create) {
-                (Some(to), _) => Some(files.destination(to)?),
+                (Some((root, to)), _) => Some(files.destination(root, &to)?),
                 (None, Some((root, parent, name))) => {
                     let (new, target) = files.new_folder(root, &parent, &name)?;
                     made = Some(new);
@@ -147,12 +198,13 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             }
             refuse_twice(&mut items, &mut skipped);
             if let Some(destination) = &destination {
-                arrivals(destination, &mut items, &mut skipped);
+                arrivals(disk, destination, &mut items, &mut skipped);
+                across = copies(&batch, destination, &mut items)?;
             }
             items
         }
         Kind::RenamePhotos => {
-            let mut files = Files::new(catalog, &folders);
+            let mut files = Files::new(catalog, &folders, disk);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
         Kind::RenameFolder | Kind::MoveFolder => Vec::new(),
@@ -162,9 +214,10 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
         summary.renames = items.iter().filter_map(super::rename::names).collect();
     }
     summary.folder = made.as_ref().map(|m| m.state.name.clone());
+    summary.across = across;
     skipped.sort_by_key(|s| s.photo);
     Ok(Plan {
-        batch: new_batch()?,
+        batch,
         location: catalog.location.clone(),
         computer: catalog.computer.id.clone(),
         kind,
@@ -384,7 +437,7 @@ pub(super) fn shared(
 pub(super) fn occupied(
     db: &impl Reads,
     folders: &Folders,
-    to: FolderId,
+    to: Option<FolderId>,
     dir: &Path,
     filename: &OsStr,
     family: &[PhotoId],
@@ -397,7 +450,9 @@ pub(super) fn occupied(
     }
     let name = caseless(filename);
     let mut over = folders.over(dir);
-    if !over.contains(&to) {
+    if let Some(to) = to
+        && !over.contains(&to)
+    {
         over.push(to);
     }
     for folder in over {
@@ -420,11 +475,19 @@ pub(super) struct Target {
     /// The catalog's folder; `None` for one the plan makes, or one the
     /// catalog has no folder of its own for.
     folder: Option<FolderId>,
+    /// Of a directory the catalog has no folder for, its root and logical
+    /// path, where the catalog's folder is added as photos arrive.
+    place: Option<(RootId, String)>,
     /// Where the folder resolves on this computer, as the catalog places it.
     resolved: PathBuf,
     /// Its canonical path, which members' destinations are in.
     dir: PathBuf,
     volume: VolumeId,
+    /// Where its volume is mounted, and the bytes free there.
+    top: PathBuf,
+    available: Option<u64>,
+    /// Whether its volume's file ids prove which file a name is.
+    stable_ids: bool,
     names: Vec<OsString>,
     rules: Names,
     /// Filenames of the catalog's photos in it, through any folder over the
@@ -437,16 +500,22 @@ pub(super) struct Target {
 pub(super) struct Files<'a> {
     pub catalog: &'a Catalog,
     located: &'a HashMap<FolderId, Located>,
+    disk: &'a dyn Disk,
     pub folders: Folders,
     listings: HashMap<PathBuf, Result<Vec<OsString>, String>>,
     volumes: HashMap<VolumeId, Option<fsops::VolumeFacts>>,
 }
 
 impl<'a> Files<'a> {
-    fn new(catalog: &'a Catalog, located: &'a HashMap<FolderId, Located>) -> Self {
+    fn new(
+        catalog: &'a Catalog,
+        located: &'a HashMap<FolderId, Located>,
+        disk: &'a dyn Disk,
+    ) -> Self {
         Self {
             catalog,
             located,
+            disk,
             folders: Folders::index(located),
             listings: HashMap::new(),
             volumes: HashMap::new(),
@@ -466,7 +535,7 @@ impl<'a> Files<'a> {
         *self
             .volumes
             .entry(volume)
-            .or_insert_with(|| fsops::volume_facts(path).ok())
+            .or_insert_with(|| self.disk.volume_facts(path).ok())
     }
 
     fn read_only(&mut self, volume: VolumeId, path: &Path) -> bool {
@@ -481,16 +550,39 @@ impl<'a> Files<'a> {
     }
 
     /// Folder `to`, checked to take files.
-    fn destination(&mut self, to: FolderId) -> Result<Target, FileOpError> {
+    /// The folder at logical path `logical` of `root`, checked to take
+    /// files: a catalog folder, or a directory of the root the catalog has
+    /// no folder for, which it gains as the photos arrive.
+    fn destination(&mut self, root: RootId, logical: &str) -> Result<Target, FileOpError> {
         let refuse = |why: &str| FileOpError::Destination(why.to_string());
-        let folder = self
+        let own = self
             .located
-            .get(&to)
-            .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-        let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
-            return Err(refuse("The folder is offline or missing."));
-        };
-        self.destination_at(Some(to), &path, &anchor)
+            .iter()
+            .find(|(_, f)| f.root == root && f.logical == logical)
+            .map(|(id, f)| (*id, f));
+        if let Some((to, folder)) = own {
+            let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
+                return Err(refuse("The folder is offline or missing."));
+            };
+            return self.destination_at(Some(to), &path, &anchor);
+        }
+        let computer = &self.catalog.computer.id;
+        let (anchor, path) = logical_anchored(&self.catalog.db, computer, root, logical)?
+            .ok_or_else(|| refuse("The folder is offline or missing."))?;
+        let mut target = self.destination_at(None, &path, &anchor)?;
+        // Another of the catalog's folders there (of another root, or
+        // spelled otherwise): the photos would join neither. The commit
+        // checks again.
+        let key = caseless(OsStr::new(logical));
+        let alike = self
+            .located
+            .values()
+            .any(|f| f.root == root && caseless(OsStr::new(&f.logical)) == key);
+        if alike || !self.folders.over(&target.dir).is_empty() {
+            return Err(refuse("The catalog has another folder there."));
+        }
+        target.place = Some((root, logical.to_string()));
+        Ok(target)
     }
 
     /// Folder `name` to make below logical folder `parent` of `root`,
@@ -526,8 +618,7 @@ impl<'a> Files<'a> {
             path: at.dir.join(name),
             rules: at.rules,
         };
-        let disk = super::disk::Real;
-        let free = super::folder::taken(&self.catalog.db, computer, &disk, &new)
+        let free = super::folder::taken(&self.catalog.db, computer, self.disk, &new)
             .map_err(FileOpError::Catalog)?;
         if let Some(why) = free {
             return Err(FileOpError::Destination(why));
@@ -541,9 +632,13 @@ impl<'a> Files<'a> {
         }
         let target = Target {
             folder: None,
+            place: None,
             resolved,
             dir: new.path.clone(),
             volume: at.volume,
+            top: at.top,
+            available: at.available,
+            stable_ids: at.stable_ids,
             names: Vec::new(),
             rules: at.rules,
             catalog: HashSet::new(),
@@ -578,7 +673,10 @@ impl<'a> Files<'a> {
         // As the disk spells it, which members' destinations are journalled in.
         let dir =
             std::fs::canonicalize(&dir).map_err(|e| FileOpError::Destination(e.to_string()))?;
-        let found = fsops::entry(&dir).map_err(|e| FileOpError::Destination(e.to_string()))?;
+        let found = self
+            .disk
+            .entry(&dir)
+            .map_err(|e| FileOpError::Destination(e.to_string()))?;
         if found.kind != EntryKind::Directory {
             return Err(refuse("The folder is not a folder on disk."));
         }
@@ -601,12 +699,19 @@ impl<'a> Files<'a> {
             )?;
             catalog.extend(filenames.iter().map(|f| caseless(OsStr::new(f))));
         }
+        let facts = self.volume(found.id.volume(), &dir);
+        let available = facts.map(|v| v.available);
+        let stable_ids = facts.is_some_and(|v| v.stable_ids);
         Ok(Target {
             folder: to,
+            place: None,
             resolved: path.to_path_buf(),
             rules: Names(fsops::probe(&dir, &names)),
+            top: super::disk::top(self.disk, &dir),
             dir,
             volume: found.id.volume(),
+            available,
+            stable_ids,
             names,
             catalog,
         })
@@ -640,7 +745,10 @@ impl<'a> Files<'a> {
             Err(Containment::Outside) => return Err(refuse(Refusal::NotPlain(source))),
             Err(Containment::Fs(e)) => return Err(refuse(Refusal::Unreadable(e.to_string()))),
         };
-        let found = fsops::entry(&file).map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
+        let found = self
+            .disk
+            .entry(&file)
+            .map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
         if found.kind != EntryKind::File {
             return Err(refuse(Refusal::Unreadable("it is not a file".into())));
         }
@@ -658,7 +766,11 @@ impl<'a> Files<'a> {
             .map_err(|e| refuse(Refusal::Unreadable(e)))?;
         let wanted = caseless(file.file_name().unwrap_or_default());
         let mut spelled = names.iter().filter(|n| {
-            caseless(n) == wanted && fsops::entry(&dir.join(n)).is_ok_and(|e| e.id == found.id)
+            caseless(n) == wanted
+                && self
+                    .disk
+                    .entry(&dir.join(n))
+                    .is_ok_and(|e| e.id == found.id)
         });
         let (Some(filename), None) = (spelled.next().cloned(), spelled.next()) else {
             return Err(refuse(Refusal::Unreadable(
@@ -682,16 +794,25 @@ impl<'a> Files<'a> {
         if protected(&file) {
             return Err(refuse(Refusal::Protected));
         }
-        if let Some(target) = target {
-            if dir == target.dir {
-                return Err(skip(Skip::AlreadyThere));
-            }
-            if found.id.volume() != target.volume {
-                return Err(refuse(Refusal::OtherVolume));
-            }
+        if let Some(target) = target
+            && dir == target.dir
+        {
+            return Err(skip(Skip::AlreadyThere));
         }
         if self.read_only(found.id.volume(), &dir) {
             return Err(refuse(Refusal::ReadOnly));
+        }
+        // A copy is told from any other file at its name, and its original
+        // from a file put in its place, only by file ids that stay.
+        if let Some(target) = target
+            && target.volume != found.id.volume()
+        {
+            let stable = self
+                .volume(found.id.volume(), &dir)
+                .is_some_and(|v| v.stable_ids);
+            if !stable || !target.stable_ids {
+                return Err(refuse(Refusal::FileIdsUnproven));
+            }
         }
         let identity =
             Identity::read(&file).map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
@@ -710,7 +831,10 @@ impl<'a> Files<'a> {
         let mut stays: Vec<PathBuf> = shared.iter().map(|n| dir.join(n)).collect();
         for name in carried {
             let path = dir.join(&name);
-            let e = fsops::entry(&path).map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
+            let e = self
+                .disk
+                .entry(&path)
+                .map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
             // A companion with another name elsewhere stays, as one another
             // file reads does.
             if e.kind != EntryKind::File || e.links != 1 {
@@ -730,12 +854,31 @@ impl<'a> Files<'a> {
         preconditions.folder_path = Some(path);
         // A folder the plan makes has no id yet: execution gives it.
         preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
+        preconditions.into = target.and_then(|t| {
+            let (root, logical) = t.place.clone()?;
+            Some(super::preconditions::Arrival {
+                root,
+                logical,
+                resolved: t.resolved.clone(),
+                added: false,
+            })
+        });
+        // Another volume's folder takes copies; its partial copies are
+        // named once the run's items are known.
+        let copy = target
+            .filter(|t| t.volume != found.id.volume())
+            .map(|t| CopyTo {
+                volume: t.volume,
+                temps: Vec::new(),
+                bytes: members.iter().map(|m| m.identity.size).sum(),
+            });
         Ok(Item {
             preconditions,
             members,
             shared: stays,
             kept: Vec::new(),
             rules: target.map_or(UNKNOWN, |t| t.rules),
+            copy,
         })
     }
 }
@@ -750,7 +893,7 @@ const UNKNOWN: Names = Names(fsops::NameRules {
 /// Refuses the items whose files can't arrive at `target`: a name taken
 /// there, a name two of them would have, or a companion one of them brings
 /// that another file there would read (or one there its photo would).
-fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
+fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
     let dest = Destination {
         dir: &target.dir,
         names: &target.names,
@@ -775,7 +918,6 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
         .cloned()
         .chain(items.iter().flat_map(names_of))
         .collect();
-    let disk = super::disk::Real;
     let text = |n: &OsString| n.to_string_lossy().into_owned();
     items.retain(|item| {
         let names = names_of(item);
@@ -784,7 +926,7 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
         };
         let refusal = names
             .iter()
-            .find(|n| dest.taken(&disk, n).is_some())
+            .find(|n| dest.taken(disk, n).is_some())
             .map(|n| Refusal::NameTaken(text(n)))
             .or_else(|| {
                 names
@@ -807,6 +949,55 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
             }
         }
     });
+}
+
+/// Names the partial copies of the items copied to `target`'s volume, and
+/// what they copy there; refuses the whole move when that volume hasn't
+/// room for it.
+fn copies(
+    batch: &BatchId,
+    target: &Target,
+    items: &mut [Item],
+) -> Result<Option<super::Across>, FileOpError> {
+    let (mut bytes, mut files, mut companions) = (0u64, 0, 0);
+    for (index, item) in items.iter_mut().enumerate() {
+        let Some(copy) = &mut item.copy else {
+            continue;
+        };
+        files += 1;
+        companions += item.members.len().saturating_sub(1);
+        copy.temps = item
+            .members
+            .iter()
+            .enumerate()
+            .map(|(ordinal, m)| {
+                let name = m.source.file_name().unwrap_or_default();
+                target.dir.join(temp_name(name, batch, index, ordinal))
+            })
+            .collect();
+        bytes = bytes.saturating_add(copy.bytes);
+    }
+    if !items.iter().any(|i| i.copy.is_some()) {
+        return Ok(None);
+    }
+    let Some(available) = target.available else {
+        return Err(FileOpError::Destination(
+            "How much room the other drive has can't be told.".into(),
+        ));
+    };
+    if bytes.saturating_add(SPARE) > available {
+        return Err(FileOpError::NoSpace {
+            needed: bytes,
+            available,
+        });
+    }
+    Ok(Some(super::Across {
+        files,
+        companions,
+        bytes,
+        volume: target.top.clone(),
+        available,
+    }))
 }
 
 /// Refuses every item one of whose files another item of the plan also

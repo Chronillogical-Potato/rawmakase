@@ -410,6 +410,79 @@ fn question(
     }
 }
 
+/// `files` files, and `companions` sidecar files when there are any.
+fn files_and_sidecars(files: usize, companions: usize) -> String {
+    if companions > 0 {
+        format!(
+            "{} (and {})",
+            widgets::plural(files, "file", "files"),
+            widgets::plural(companions, "sidecar file", "sidecar files")
+        )
+    } else {
+        widgets::plural(files, "file", "files")
+    }
+}
+
+/// What a move does on disk: copied to another drive, with the rest (on
+/// the destination's drive already) moved by renaming.
+fn move_lines(s: &file_ops::Summary) -> Vec<String> {
+    let mut lines = Vec::new();
+    let (mut files, mut companions) = (s.files, s.companions);
+    if let Some(across) = &s.across {
+        lines.push(across_line(across));
+        files = files.saturating_sub(across.files);
+        companions = companions.saturating_sub(across.companions);
+    }
+    if files > 0 || s.across.is_none() {
+        lines.push(format!(
+            "{} will be moved on disk.",
+            files_and_sidecars(files, companions)
+        ));
+    }
+    lines
+}
+
+/// What a move to another drive does: copies the files there, checks
+/// them, then puts their originals in the Trash.
+fn across_line(across: &file_ops::Across) -> String {
+    let (files, companions) = (across.files, across.companions);
+    let what = files_and_sidecars(files, companions);
+    let size = |bytes: u64| match bytes as f64 {
+        b if b >= 1e9 => format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB"),
+        b => format!("{:.0} MB", (b / 1e6).max(1.)),
+    };
+    format!(
+        "{what} will be copied to “{}” ({} of {} free), checked, and then {} put in the Trash.",
+        crate::platform::volume::volume_of(&across.volume).name,
+        size(across.bytes),
+        size(across.available),
+        if files + companions == 1 {
+            "its original"
+        } else {
+            "their originals"
+        }
+    )
+}
+
+/// The originals a move to another drive left beside their copies, as the
+/// status line ends: the first, and why.
+fn kept_line(kept: &[file_ops::KeptOriginal]) -> Option<String> {
+    let first = kept.first()?;
+    let name = first.path.file_name().unwrap_or_default().to_string_lossy();
+    Some(format!(
+        " · {}: {name}, {}",
+        if kept.len() == 1 {
+            "1 original stays where it was beside its copy".to_string()
+        } else {
+            format!(
+                "{} originals stay where they were beside their copies",
+                kept.len()
+            )
+        },
+        first.why
+    ))
+}
+
 /// [`question`] for one plan and its one action.
 fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
     let s = plan.summary();
@@ -507,18 +580,7 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             )
         }
         Verb::Move { .. } | Verb::Create { .. } => {
-            lines.push(if s.companions > 0 {
-                format!(
-                    "{} (and {}) will be moved on disk.",
-                    widgets::plural(s.files, "file", "files"),
-                    widgets::plural(s.companions, "sidecar file", "sidecar files")
-                )
-            } else {
-                format!(
-                    "{} will be moved on disk.",
-                    widgets::plural(s.files, "file", "files")
-                )
-            });
+            lines.extend(move_lines(s));
             if s.copies > 0 {
                 lines.push(format!(
                     "{} with {}.",
@@ -719,6 +781,14 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
             ));
         }
     }
+    let kept: Vec<file_ops::KeptOriginal> = outcome
+        .items
+        .iter()
+        .flat_map(|i| i.originals_kept.iter().cloned())
+        .collect();
+    if let Some(kept) = kept_line(&kept) {
+        text.push_str(&kept);
+    }
     if let Some(stopped) = &outcome.stopped {
         text.push_str(&format!(" · stopped: {stopped}"));
     }
@@ -779,12 +849,13 @@ impl Editor {
     pub(super) fn request_photo_move(
         &mut self,
         photos: Vec<PhotoId>,
-        to: crate::catalog::FolderId,
+        root: crate::catalog::RootId,
+        to: String,
         name: String,
     ) {
         if !photos.is_empty() {
             self.request_file_op(
-                FileOp::MovePhotos { photos, to },
+                FileOp::MovePhotos { photos, root, to },
                 None,
                 Verb::Move { to: name },
             );

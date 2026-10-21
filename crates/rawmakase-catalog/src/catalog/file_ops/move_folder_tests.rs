@@ -302,7 +302,8 @@ fn every_fault_at_every_step_of_a_folder_move_ends_proven() {
                 check(&fx, &was, &recovery, &batch);
                 one_place(&fx, day, &recovery, &case);
                 for u in &recovery.unfinished {
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{case}: {back:?}"
@@ -451,7 +452,8 @@ fn every_fault_at_every_step_moving_a_folder_with_no_catalog_folder_ends_proven(
                     assert!(!recovery.unfinished.is_empty(), "{case}: unreported");
                 }
                 for u in &recovery.unfinished {
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{case}: {back:?}"

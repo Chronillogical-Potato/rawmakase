@@ -570,3 +570,108 @@ fn stop_asks_the_run_to_stop_between_photos() -> anyhow::Result<()> {
     assert_eq!(ids_left(&e), ids);
     Ok(())
 }
+
+/// An external drive's mount point as each system names it, and its name.
+#[cfg(target_os = "macos")]
+const DRIVE: (&str, &str) = ("/Volumes/Samsung SSD T5", "Samsung SSD T5");
+#[cfg(all(unix, not(target_os = "macos")))]
+const DRIVE: (&str, &str) = ("/media/me/Samsung SSD T5", "Samsung SSD T5");
+#[cfg(windows)]
+const DRIVE: (&str, &str) = ("E:\\", "E:");
+
+#[test]
+fn a_move_to_another_drive_says_it_copies_there_and_trashes_the_originals() {
+    let across = crate::catalog::file_ops::Across {
+        files: 2,
+        companions: 1,
+        bytes: 1_500_000_000,
+        volume: DRIVE.0.into(),
+        available: 26_000_000_000,
+    };
+    assert_eq!(
+        across_line(&across),
+        format!(
+            "2 files (and 1 sidecar file) will be copied to “{}” (1.5 GB of 26 GB free), \
+         checked, and then their originals put in the Trash.",
+            DRIVE.1
+        )
+    );
+    let small = crate::catalog::file_ops::Across {
+        files: 1,
+        companions: 0,
+        bytes: 24_000_000,
+        ..across
+    };
+    assert_eq!(
+        across_line(&small),
+        format!(
+            "1 file will be copied to “{}” (24 MB of 26 GB free), checked, \
+         and then its original put in the Trash.",
+            DRIVE.1
+        )
+    );
+    // Under a gigabyte free reads in megabytes, not "0 GB".
+    let nearly_full = crate::catalog::file_ops::Across {
+        available: 400_000_000,
+        ..small
+    };
+    assert!(
+        across_line(&nearly_full).contains("(24 MB of 400 MB free)"),
+        "{}",
+        across_line(&nearly_full)
+    );
+}
+
+#[test]
+fn originals_a_move_to_another_drive_kept_are_said() {
+    use crate::catalog::file_ops::KeptOriginal;
+    assert_eq!(kept_line(&[]), None);
+    let kept = [KeptOriginal {
+        path: "/Users/me/Photos/a.ARW".into(),
+        why: "its drive has no Trash".into(),
+    }];
+    assert_eq!(
+        kept_line(&kept).as_deref(),
+        Some(" · 1 original stays where it was beside its copy: a.ARW, its drive has no Trash")
+    );
+    let two = [kept[0].clone(), kept[0].clone()];
+    assert_eq!(
+        kept_line(&two).as_deref(),
+        Some(
+            " · 2 originals stay where they were beside their copies: a.ARW, its drive has no Trash"
+        )
+    );
+}
+
+#[test]
+fn a_move_from_two_drives_says_what_is_copied_and_what_is_moved() {
+    use crate::catalog::file_ops::{Across, Summary};
+    let s = Summary {
+        files: 3,
+        companions: 1,
+        across: Some(Across {
+            files: 1,
+            companions: 0,
+            bytes: 24_000_000,
+            volume: DRIVE.0.into(),
+            available: 26_000_000_000,
+        }),
+        ..Summary::default()
+    };
+    assert_eq!(
+        move_lines(&s),
+        [
+            format!(
+                "1 file will be copied to “{}” (24 MB of 26 GB free), checked, \
+             and then its original put in the Trash.",
+                DRIVE.1
+            ),
+            "2 files (and 1 sidecar file) will be moved on disk.".to_string(),
+        ]
+    );
+    let same_drive = Summary { across: None, ..s };
+    assert_eq!(
+        move_lines(&same_drive),
+        ["3 files (and 1 sidecar file) will be moved on disk."]
+    );
+}

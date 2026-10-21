@@ -315,6 +315,7 @@ fn a_folder_made_just_before_the_rename_is_never_merged_into() -> Result<()> {
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let outcome = fx.run(
         rename_folder(&fx, "day", "New"),
@@ -365,7 +366,8 @@ fn an_unfinished_operation_inside_it_refuses_the_folder() -> Result<()> {
     let outcome = fx.run(
         FileOp::MovePhotos {
             photos: vec![fx.photo("day/a.NEF")],
-            to: fx.folder("day/sub"),
+            root: fx.root_id(),
+            to: "day/sub".into(),
         },
         &NoTrash,
         &Faulty::default(),
@@ -442,7 +444,8 @@ fn every_fault_at_every_step_of_a_folder_rename_ends_proven() {
                 one_place(&fx, &recovery, &case);
                 for u in &recovery.unfinished {
                     assert_eq!(u.choices, [Resolution::PutBack, Resolution::Keep]);
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{case}: {back:?}"

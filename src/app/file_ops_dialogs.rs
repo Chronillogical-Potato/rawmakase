@@ -213,7 +213,10 @@ impl Editor {
                 return;
             };
             let name = label.rsplit(" / ").next().unwrap_or(&label).to_string();
-            self.request_photo_move(c.photos, to, name);
+            let place = self.library.as_ref().and_then(|l| l.folder_place(to));
+            if let Some((root, to)) = place {
+                self.request_photo_move(c.photos, root, to, name);
+            }
         }
     }
 
@@ -376,13 +379,14 @@ impl Editor {
             catalog: catalog.clone(),
         };
         let failed = catalog.clone();
+        let trash = self.file_ops.trash.clone();
         super::super::task::spawn(
             self.tx.clone(),
             self.context.clone(),
             move |tx| {
                 let recovered = crate::catalog::Catalog::open(&catalog)
                     .map_err(|e| format!("{e:#}"))
-                    .and_then(|mut opened| match file_ops::recover(&mut opened) {
+                    .and_then(|mut opened| match file_ops::recover(&mut opened, &*trash) {
                         Ok(recovery) => Ok(Some(recovery)),
                         // Another window holds it, or file operations
                         // can't run here: nothing to decide here now.
@@ -602,6 +606,7 @@ impl Editor {
             items,
         };
         let failed = catalog.clone();
+        let trash = self.file_ops.trash.clone();
         super::super::task::spawn(
             self.tx.clone(),
             self.context.clone(),
@@ -609,7 +614,7 @@ impl Editor {
                 let resolved = crate::catalog::Catalog::open(&catalog)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|mut opened| {
-                        file_ops::resolve(&mut opened, operation, resolution)
+                        file_ops::resolve(&mut opened, operation, resolution, &*trash)
                             .map_err(|e| e.to_string())
                     });
                 let _ = tx.send(super::super::worker::Event::FileOpResolved(

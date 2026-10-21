@@ -249,6 +249,7 @@ impl Library {
                                     self.file_request =
                                         Some(super::FileRequest::MoveFolder { root, from, to })
                                 }
+                                Some(TreeAction::Refused(why)) => self.message = why,
                                 Some(TreeAction::Reveal(path)) => {
                                     if let Err(e) = crate::platform::reveal::reveal(&path) {
                                         self.message =
@@ -256,10 +257,11 @@ impl Library {
                                     }
                                 }
                                 Some(TreeAction::Drop {
-                                    folder,
+                                    root,
+                                    to,
                                     name,
                                     photos,
-                                }) => self.request_move(photos, folder, name),
+                                }) => self.request_move(photos, root, to, name),
                                 Some(TreeAction::Remove(name, folders, photos)) => {
                                     self.removal_request = Some(super::FolderRemoval {
                                         catalog: self.session.catalog.location().clone(),
