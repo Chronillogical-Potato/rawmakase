@@ -71,10 +71,12 @@ pub(super) fn sync_dir(dir: &Path) -> Result<(), FsError> {
 pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     use rustix::fs::{StatVfsMountFlags, statvfs};
     let vfs = statvfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
+    let local = is_local(path)?;
     Ok(VolumeFacts {
-        local: is_local(path)?,
+        local,
         read_only: vfs.f_flag.contains(StatVfsMountFlags::RDONLY),
         renames_spelling: renames_spelling(path)?,
+        stable_ids: local && stable_ids(path)?,
         available: vfs.f_bavail.saturating_mul(vfs.f_frsize),
     })
 }
@@ -91,6 +93,58 @@ fn renames_spelling(path: &Path) -> Result<bool, FsError> {
         .map(|c| *c as u8)
         .collect();
     Ok(kind == b"apfs")
+}
+
+/// macOS names the file system.
+#[cfg(target_vendor = "apple")]
+fn stable_ids(path: &Path) -> Result<bool, FsError> {
+    let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
+    let kind: Vec<u8> = fs
+        .f_fstypename
+        .iter()
+        .take_while(|c| **c != 0)
+        .map(|c| *c as u8)
+        .collect();
+    Ok(keeps_ids(&kind))
+}
+
+/// Whether macOS's file system `kind` keeps a file's id while it is on it:
+/// only APFS and HFS+ are taken to. FAT and exFAT number files anew, and
+/// FUSE or FSKit file systems may give ids as they like.
+#[cfg(target_vendor = "apple")]
+pub(super) fn keeps_ids(kind: &[u8]) -> bool {
+    matches!(kind, b"apfs" | b"hfs")
+}
+
+/// Linux numbers the file system type.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn stable_ids(path: &Path) -> Result<bool, FsError> {
+    let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
+    #[allow(
+        clippy::unnecessary_cast,
+        reason = "the type differs between architectures"
+    )]
+    let kind = fs.f_type as u64;
+    Ok(keeps_ids(kind))
+}
+
+/// Whether Linux's file system type `kind` keeps a file's id while it is
+/// on it: only ext2, ext3 and ext4, XFS and Btrfs are taken to. FAT and
+/// exFAT make inode numbers up at each mount, and FUSE may give any.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(super) fn keeps_ids(kind: u64) -> bool {
+    const KEEPS: [u64; 3] = [
+        0xef53,      // ext2, ext3, ext4
+        0x5846_5342, // XFS
+        0x9123_683e, // Btrfs
+    ];
+    KEEPS.contains(&kind)
+}
+
+/// Elsewhere the file system can't be told.
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+fn stable_ids(_path: &Path) -> Result<bool, FsError> {
+    Ok(false)
 }
 
 /// Elsewhere a volume that folds names may find the new spelling taken, or

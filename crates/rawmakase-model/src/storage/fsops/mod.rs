@@ -331,6 +331,13 @@ pub struct VolumeFacts {
     /// isn't known (a volume may find the name taken, or do nothing), and
     /// it is `false`.
     pub renames_spelling: bool,
+    /// Whether a file keeps its file id while it is on it, so a file id
+    /// proves which file a name is: only on local volumes of kinds known to
+    /// (APFS and HFS+ on macOS; ext2/3/4, XFS and Btrfs on Linux; NTFS on
+    /// Windows). Not on FAT and exFAT (which number files anew when
+    /// written, renamed or mounted again, and give a number to another file
+    /// later), network volumes, FUSE, ReFS or any other kind.
+    pub stable_ids: bool,
     /// The bytes this user may still write on it.
     pub available: u64,
 }

@@ -486,6 +486,8 @@ pub(super) struct Target {
     /// Where its volume is mounted, and the bytes free there.
     top: PathBuf,
     available: Option<u64>,
+    /// Whether its volume's file ids prove which file a name is.
+    stable_ids: bool,
     names: Vec<OsString>,
     rules: Names,
     /// Filenames of the catalog's photos in it, through any folder over the
@@ -636,6 +638,7 @@ impl<'a> Files<'a> {
             volume: at.volume,
             top: at.top,
             available: at.available,
+            stable_ids: at.stable_ids,
             names: Vec::new(),
             rules: at.rules,
             catalog: HashSet::new(),
@@ -696,7 +699,9 @@ impl<'a> Files<'a> {
             )?;
             catalog.extend(filenames.iter().map(|f| caseless(OsStr::new(f))));
         }
-        let available = self.volume(found.id.volume(), &dir).map(|v| v.available);
+        let facts = self.volume(found.id.volume(), &dir);
+        let available = facts.map(|v| v.available);
+        let stable_ids = facts.is_some_and(|v| v.stable_ids);
         Ok(Target {
             folder: to,
             place: None,
@@ -706,6 +711,7 @@ impl<'a> Files<'a> {
             dir,
             volume: found.id.volume(),
             available,
+            stable_ids,
             names,
             catalog,
         })
@@ -795,6 +801,18 @@ impl<'a> Files<'a> {
         }
         if self.read_only(found.id.volume(), &dir) {
             return Err(refuse(Refusal::ReadOnly));
+        }
+        // A copy is told from any other file at its name, and its original
+        // from a file put in its place, only by file ids that stay.
+        if let Some(target) = target
+            && target.volume != found.id.volume()
+        {
+            let stable = self
+                .volume(found.id.volume(), &dir)
+                .is_some_and(|v| v.stable_ids);
+            if !stable || !target.stable_ids {
+                return Err(refuse(Refusal::FileIdsUnproven));
+            }
         }
         let identity =
             Identity::read(&file).map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;

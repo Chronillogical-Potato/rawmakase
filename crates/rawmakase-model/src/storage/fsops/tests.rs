@@ -294,6 +294,10 @@ fn a_temporary_folder_is_on_a_local_writable_volume() {
     assert!(facts.local);
     assert!(!facts.read_only);
     assert!(facts.available > 0, "a volume tests write on has room");
+    // APFS and NTFS keep file ids; Linux's temporary folder may be tmpfs.
+    if cfg!(any(target_vendor = "apple", windows)) {
+        assert!(facts.stable_ids, "{facts:?}");
+    }
 }
 
 #[test]
@@ -471,4 +475,45 @@ fn errors_say_what_callers_branch_on() {
         FsError::from(Error::from(ErrorKind::TimedOut)),
         FsError::Io(_)
     ));
+}
+
+#[test]
+#[ignore = "needs RAWMAKASE_TEST_FAT_VOLUMES: folders on FAT or exFAT volumes, `:` between"]
+fn fat_and_exfat_volumes_have_no_stable_ids() {
+    let Some(dirs) = std::env::var_os("RAWMAKASE_TEST_FAT_VOLUMES") else {
+        return;
+    };
+    for dir in std::env::split_paths(&dirs) {
+        let facts = volume_facts(&dir).unwrap();
+        assert!(!facts.stable_ids, "{}: {facts:?}", dir.display());
+    }
+}
+
+#[test]
+fn only_kinds_known_to_keep_file_ids_are_taken_to() {
+    #[cfg(target_vendor = "apple")]
+    {
+        for kind in [&b"apfs"[..], b"hfs"] {
+            assert!(super::unix::keeps_ids(kind), "{kind:?}");
+        }
+        for kind in [&b"msdos"[..], b"exfat", b"smbfs", b"macfuse", b"nfs", b""] {
+            assert!(!super::unix::keeps_ids(kind), "{kind:?}");
+        }
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        for kind in [0xef53, 0x5846_5342, 0x9123_683e] {
+            assert!(super::unix::keeps_ids(kind), "{kind:x}");
+        }
+        for kind in [0x4d44, 0x2011_bab0, 0x6573_5546, 0x0102_1994, 0x6969] {
+            assert!(!super::unix::keeps_ids(kind), "{kind:x}");
+        }
+    }
+    #[cfg(windows)]
+    {
+        assert!(super::windows::keeps_ids("NTFS"));
+        for kind in ["ReFS", "FAT32", "exFAT", "FAT", ""] {
+            assert!(!super::windows::keeps_ids(kind), "{kind}");
+        }
+    }
 }

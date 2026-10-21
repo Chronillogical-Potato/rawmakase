@@ -75,6 +75,13 @@ fn information(file: &std::fs::File) -> Result<(FileId, u64), FsError> {
     Ok((id, u64::from(info.nNumberOfLinks)))
 }
 
+/// Whether file system `kind` keeps a file's id while it is on it: only
+/// NTFS is taken to. FAT and exFAT give ids that change as files are
+/// written or renamed, and ReFS's 64-bit file index isn't promised unique.
+pub(super) fn keeps_ids(kind: &str) -> bool {
+    kind.eq_ignore_ascii_case("NTFS")
+}
+
 /// The file object an open file is.
 pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
     Ok(information(file)?.0)
@@ -105,9 +112,11 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
         return Err(last_error());
     }
     let mut flags = 0u32;
+    let mut kind = vec![0u16; 64];
     // SAFETY: `root` is the NUL-terminated volume path the call above
-    // wrote; the name buffers are null with length 0, which the call
-    // allows, and `flags` is a valid place for the flags.
+    // wrote; the volume name buffer is null with length 0, which the call
+    // allows, `kind` holds the length given, and `flags` is a valid place
+    // for the flags.
     let read = unsafe {
         GetVolumeInformationW(
             root.as_ptr(),
@@ -116,8 +125,8 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             &mut flags,
-            std::ptr::null_mut(),
-            0,
+            kind.as_mut_ptr(),
+            kind.len() as u32,
         )
     };
     if read == 0 {
@@ -139,11 +148,14 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     if read == 0 {
         return Err(last_error());
     }
+    let kind =
+        String::from_utf16_lossy(&kind[..kind.iter().position(|c| *c == 0).unwrap_or(kind.len())]);
     Ok(VolumeFacts {
         local: !remote,
         read_only: flags & FILE_READ_ONLY_VOLUME != 0,
         // Not tried on Windows' volumes yet.
         renames_spelling: false,
+        stable_ids: !remote && keeps_ids(&kind),
         available,
     })
 }

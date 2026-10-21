@@ -208,6 +208,54 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 }
 
 #[test]
+fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
+    let fx = files();
+    let (here, there) = (fx.root.clone(), fx.root.join("far"));
+    let why = "Moving photos to or from this kind of drive (FAT, exFAT, network and others)";
+    for unstable in [
+        vec![there.clone()],
+        vec![here.clone()],
+        vec![here.clone(), there],
+    ] {
+        let disk = Faulty {
+            unstable_ids: unstable.clone(),
+            ..far(&fx)
+        };
+        let plan = fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk)?;
+        assert!(plan.is_empty(), "{unstable:?}");
+        assert_eq!(plan.summary().across, None);
+        for skipped in plan.skipped() {
+            assert_eq!(skipped.reason, Skip::Refused(Refusal::FileIdsUnproven));
+            assert!(
+                skipped.reason.to_string().starts_with(why),
+                "{}",
+                skipped.reason
+            );
+        }
+        assert_eq!(plan.skipped().len(), 2);
+    }
+    // On one such drive, a move still renames.
+    let mut fx = fixture(&["a.NEF", "sub/"]);
+    let disk = Faulty {
+        unstable_ids: vec![fx.root.clone(), fx.root.join("sub")],
+        ..Faulty::default()
+    };
+    let op = FileOp::MovePhotos {
+        photos: vec![fx.photo("a.NEF")],
+        root: fx.root_id(),
+        to: "sub".into(),
+    };
+    let outcome = run(&mut fx, op, &NoTrash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("sub")
+        }]
+    );
+    Ok(())
+}
+
+#[test]
 fn a_move_on_one_drive_still_renames() -> Result<()> {
     let mut fx = fixture(&["a.NEF", "a.xmp", "sub/"]);
     let a = fx.photo("a.NEF");

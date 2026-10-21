@@ -189,6 +189,10 @@ pub enum Refusal {
     SpellingOnly,
     /// Its companion can't be renamed to match.
     CompanionName(String),
+    /// It would be copied to or from a drive whose file ids can't prove
+    /// which file a name is: any but a local APFS, HFS+, ext, XFS, Btrfs or
+    /// NTFS one (FAT, exFAT, a network share, FUSE, ReFS…).
+    FileIdsUnproven,
 }
 
 impl fmt::Display for Skip {
@@ -232,6 +236,9 @@ impl fmt::Display for Refusal {
                 "Its volume can't change only the case or accents of a name. Give it another name first.",
             ),
             Self::CompanionName(n) => write!(f, "{n} can't be renamed to match it."),
+            Self::FileIdsUnproven => f.write_str(
+                "Moving photos to or from this kind of drive (FAT, exFAT, network and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
+            ),
         }
     }
 }

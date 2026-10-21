@@ -418,6 +418,9 @@ pub(super) struct Faulty {
     pub occupy: Option<PathBuf>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Folders whose volume says its file ids can't be proven, as FAT,
+    /// exFAT and network volumes do.
+    pub unstable_ids: Vec<PathBuf>,
     /// `elsewhere` keeps the names it is given decomposed (NFD), as HFS+
     /// does, and finds a file by any normalisation form of its name.
     pub decompose: bool,
@@ -621,6 +624,10 @@ impl Disk for Faulty {
         if let Some(space) = self.space {
             facts.available = space;
         }
+        // Proven ids unless a test says otherwise, whatever the temporary
+        // folder is on (overlayfs in CI's containers, tmpfs elsewhere): the
+        // real detection is `fsops`'s to test.
+        facts.stable_ids = !self.unstable_ids.iter().any(|d| d == path);
         Ok(facts)
     }
     fn create_file(&self, path: &Path) -> Result<(), FsError> {
