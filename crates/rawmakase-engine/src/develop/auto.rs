@@ -683,6 +683,7 @@ mod tests {
                 values: vec![1., 0.7],
             }),
             chromatic: None,
+            gain_map: None,
         });
         let r = Recipe::for_metadata(&im.metadata);
         assert!(r.lens_correction(&im.metadata).is_some());

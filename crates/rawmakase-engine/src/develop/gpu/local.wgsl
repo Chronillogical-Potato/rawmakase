@@ -121,7 +121,49 @@ fn warp_sample(x: f32, y: f32) -> vec3<f32> {
         let vy = gy + 0.5 - cy;
         gain = powf(table_eval(S_VIGNETTING, sqrt(vx * vx + vy * vy) / s(S_HALF)), s(S_VIGNETTING_AMOUNT));
     }
+    if has(S_GAIN_MAP) {
+        // After the opcode list's warp: the corrected position.
+        if s(su(S_GAIN_MAP) + 13u) > 0.5 {
+            return p * gain * gain_map(cx + dx - 0.5, cy + dy - 0.5);
+        }
+        // Before it: each channel where it samples the photo.
+        let red = gain_map(cx + dx * scale.x - 0.5, cy + dy * scale.x - 0.5).x;
+        let blue = gain_map(cx + dx * scale.z - 0.5, cy + dy * scale.z - 0.5).z;
+        return p * gain * vec3(red, gain_map(gx, gy).y, blue);
+    }
     return p * gain;
+}
+// `GainField::gain`: a DNG's OpcodeList3 GainMap, per channel, at the table that
+// `lens_gpu_params` appends.
+fn gain_map(x: f32, y: f32) -> vec3<f32> {
+    let at = su(S_GAIN_MAP);
+    let rows = su(at);
+    let columns = su(at + 1u);
+    let v = (y + 0.5) / s(at + 7u);
+    let h = (x + 0.5) / s(at + 6u);
+    if v < s(at + 9u) || v >= s(at + 11u) || h < s(at + 10u) || h >= s(at + 12u) {
+        return vec3(1.0);
+    }
+    let fv = clamp((v - s(at + 2u)) / s(at + 4u), 0.0, f32(rows - 1u));
+    let fh = clamp((h - s(at + 3u)) / s(at + 5u), 0.0, f32(columns - 1u));
+    let r0 = min(u32(fv), select(rows - 2u, 0u, rows < 2u));
+    let c0 = min(u32(fh), select(columns - 2u, 0u, columns < 2u));
+    let r1 = min(r0 + 1u, rows - 1u);
+    let c1 = min(c0 + 1u, columns - 1u);
+    let tv = fv - f32(r0);
+    let th = fh - f32(c0);
+    let g = at + 14u;
+    var out = vec3(1.0);
+    for (var c = 0u; c < 3u; c++) {
+        let a = sp[g + (r0 * columns + c0) * 3u + c];
+        let b = sp[g + (r0 * columns + c1) * 3u + c];
+        let d = sp[g + (r1 * columns + c0) * 3u + c];
+        let e = sp[g + (r1 * columns + c1) * 3u + c];
+        let top = a + (b - a) * th;
+        let bottom = d + (e - d) * th;
+        out[c] = powf(max(top + (bottom - top) * tv, 0.0), s(at + 8u));
+    }
+    return out;
 }
 fn powf(x: f32, y: f32) -> f32 {
     if x <= 0.0 {

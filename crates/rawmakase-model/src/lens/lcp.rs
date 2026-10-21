@@ -239,6 +239,7 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         vignetting,
         distortion,
         chromatic,
+        gain_map: None,
     };
     (!c.is_empty() && c.validate()).then_some(c)
 }

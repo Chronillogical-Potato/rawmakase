@@ -82,6 +82,7 @@ fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
         vignetting,
         distortion,
         chromatic,
+        gain_map: None,
     })
 }
 
@@ -131,6 +132,7 @@ fn sony(t: &mut Tiff) -> Option<LensCorrection> {
         vignetting,
         distortion,
         chromatic,
+        gain_map: None,
     })
 }
 

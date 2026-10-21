@@ -862,6 +862,7 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
             values: vec![1., 1.01],
         }),
         chromatic: None,
+        gain_map: None,
     });
     let on = Recipe::for_metadata(&im.metadata);
     assert!(on.lens_builtin);
@@ -885,6 +886,170 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
             assert!((0..3).all(|c| (p[c] - q[c]).abs() < 2e-6));
         }
     }
+}
+/// A DNG's OpcodeList3 GainMap brightens each channel where its grid says, with the
+/// vignetting, and follows the lens Vignetting amount.
+#[test]
+fn opcode_gain_maps_scale_each_channel_where_the_grid_says() {
+    use crate::optics::{GainGrid, LensCorrection};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let w = im.width as f32;
+    // Two columns of points: gain 1 on the first column of pixels; on the last, red 2,
+    // green 1.5, blue 1.
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            // Points on the first and last pixels' centres.
+            origin: [0., 0.5 / w],
+            spacing: [1., (w - 1.) / w],
+            planes: 3,
+            gains: vec![1., 1., 1., 2., 1.5, 1.],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let on = Recipe::for_metadata(&im.metadata);
+    let field = |r: &Recipe| GainField::new(&im, r).unwrap();
+    assert_eq!(field(&on).gain(0., 3.), [1.; 3]);
+    let right = field(&on).gain(w - 1., 3.);
+    assert!(
+        right
+            .iter()
+            .zip([2., 1.5, 1.])
+            .all(|(g, want)| (g - want).abs() < 1e-5),
+        "{right:?}"
+    );
+    let half = field(&on).gain((w - 1.) / 2., 0.);
+    assert!((half[0] - 1.5).abs() < 1e-5, "{half:?}");
+    // Outside the image, nothing.
+    assert_eq!(field(&on).gain(w, 0.), [1.; 3]);
+    let amount = |a: f32| {
+        field(&Recipe {
+            lens_vignetting: a,
+            ..on.clone()
+        })
+        .gain(w - 1., 0.)[0]
+    };
+    assert_eq!(amount(0.), 1.);
+    assert!((amount(2.) - 4.).abs() < 1e-5);
+    // Rendered: the right edge is brighter than the left, and nothing changes with the
+    // built-in correction off.
+    let off = Recipe {
+        lens_builtin: false,
+        ..on.clone()
+    };
+    let lum = |p: [f32; 3]| p.iter().sum::<f32>();
+    let a = render(&im, &on.checked().unwrap(), 0).unwrap();
+    let b = render(&im, &off.checked().unwrap(), 0).unwrap();
+    let at = |r: &Rendered, x: u32| lum(r.pixels[(4 * r.width + x) as usize]);
+    assert!(at(&a, a.width - 1) > at(&a, 0) + 0.05);
+    assert!((at(&b, b.width - 1) - at(&b, 0)).abs() < 1e-5);
+}
+/// The copy the photo is measured on carries its GainMap, as the render corrects it.
+#[test]
+fn measurement_copies_carry_the_gain_map() {
+    use crate::optics::{GainGrid, LensCorrection};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            spacing: [1., 1.],
+            gains: vec![1., 1., 1., 3., 2., 1.],
+            planes: 3,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let copy = measurement_source((&im).into(), 4);
+    let (w, row) = (copy.width as usize, copy.width as usize);
+    let (left, right) = (copy.pixels[row], copy.pixels[row + w - 1]);
+    assert!(
+        right[0] > left[0] * 2. && right[1] > left[1] * 1.5 && (right[2] - left[2]).abs() < 1e-6,
+        "{left:?} {right:?}"
+    );
+    // Without a GainMap the copy is the photo reduced.
+    im.metadata.lens = None;
+    assert_eq!(
+        measurement_source((&im).into(), 4).pixels,
+        preview_source((&im).into(), 4).pixels
+    );
+}
+/// Before a per-channel warp (lateral chromatic aberration), each channel reads the
+/// GainMap where it samples the photo, not where green does.
+#[test]
+fn gain_maps_before_a_warp_follow_each_channels_source() {
+    use crate::optics::{GainGrid, LensCorrection, Radial};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let w = im.width as f32;
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        // Red samples well inside green at the edges.
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 0.8],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 1.],
+            },
+        ]),
+        // Every channel's gain rises from 1 on the left to 3 on the right.
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            spacing: [1., 1.],
+            gains: vec![1., 1., 1., 3., 3., 3.],
+            planes: 3,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let r = Recipe::for_metadata(&im.metadata);
+    let (x, y) = (w - 1., 3.);
+    let red_before = {
+        let warp = LensWarp::new(&im, &r).unwrap();
+        let p = warp.sample(Source::new(&im), x, y, &r, 0.);
+        let m = &warp.map;
+        let ([dx, dy], scale) = m.scales(x, y);
+        let field = warp.gain_map.as_ref().unwrap();
+        let want = |c: usize| {
+            let at = [
+                m.center[0] + dx * scale[c] - 0.5,
+                m.center[1] + dy * scale[c] - 0.5,
+            ];
+            0.1 * field.gain(at[0], at[1])[c]
+        };
+        assert!(want(1) - want(0) > 0.01, "{} {}", want(0), want(1));
+        for c in 0..3 {
+            assert!((p[c] - want(c)).abs() < 1e-5, "{c}: {p:?} {}", want(c));
+        }
+        want(0) / 0.1
+    };
+    // After the warp: every channel at the corrected position, at the fill's scale.
+    if let Some(l) = im.metadata.lens.as_mut() {
+        l.gain_map.as_mut().unwrap().after_warp = true;
+    }
+    let warp = LensWarp::new(&im, &r).unwrap();
+    let p = warp.sample(Source::new(&im), x, y, &r, 0.);
+    let m = &warp.map;
+    let ([dx, dy], _) = m.scales(x, y);
+    let g = warp
+        .gain_map
+        .as_ref()
+        .unwrap()
+        .gain(m.center[0] + dx - 0.5, m.center[1] + dy - 0.5);
+    for c in 0..3 {
+        assert!((p[c] - 0.1 * g[c]).abs() < 1e-5, "{c}: {p:?} {g:?}");
+    }
+    assert!(g[0] > red_before + 0.01);
 }
 #[test]
 fn transform_scales_and_fills_uncovered_area_with_white() {
@@ -1953,6 +2118,7 @@ fn lens_ca_stripe_error(period: f32, phase: f32) -> f32 {
                 values: vec![1.; 2],
             },
         ]),
+        gain_map: None,
     });
     let r = Recipe::for_metadata(&im.metadata);
     let warp = LensWarp::new(&im, &r).unwrap();
@@ -1990,6 +2156,7 @@ fn stripe_ca_guard_keeps_isolated_edges_resolved_colour_and_noise() {
                 values: vec![0.997; 2],
             },
         ]),
+        gain_map: None,
     });
     for case in 0..5 {
         let mut seed = 0x23456789u32;
