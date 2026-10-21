@@ -450,7 +450,9 @@ pub(super) fn drag_once<P: std::any::Any + Send + Sync>(
                 return None;
             }
             ctx.data_mut(|d| d.insert_temp(key, true));
-            response.dnd_set_drag_payload(payload());
+            // Not `dnd_set_drag_payload`: it takes the payload only on the
+            // frame egui's own drag starts, a few points before this one.
+            egui::DragAndDrop::set_payload(ctx, payload());
             egui::DragAndDrop::payload::<P>(ctx)
         }
     }

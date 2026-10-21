@@ -2662,6 +2662,18 @@ fn photos_dragged_past_8_points_onto_a_catalog_folder_are_dropped_there() {
         ),
         "no drop"
     );
+    // A point at a time, as a mouse moves: egui's own drag starts before
+    // the drag distance is reached.
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            start + Vec2::new(0., -(dy as f32)),
+        )]);
+    }
+    assert!(dragging(&ctx), "dragged a point at a time");
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(matches!(action, Some(TreeAction::Drop { .. })), "no drop");
     // Escape mid-drag drops nothing.
     frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
     frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -20.))]);
@@ -2861,8 +2873,13 @@ fn a_dragged_folder_follows_the_pointer_by_name() {
     let row1 = egui::pos2(120., 11.);
     let pointer = egui::pos2(200., 120.);
     frame(vec![]);
+    // A point at a time, as a mouse moves.
     frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
-    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
     let drawn = frame(vec![egui::Event::PointerMoved(pointer)]);
     assert!(
         drawn
