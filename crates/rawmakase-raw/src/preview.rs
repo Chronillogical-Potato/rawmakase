@@ -1,8 +1,11 @@
-//! Embedded JPEG previews, found without decoding the sensor data: each
-//! container lists its candidates, and the largest is the one thumbnails use.
+//! Embedded previews, JPEG or JPEG XL (Lightroom's DNGs of HDR and panorama
+//! merges, whose JPEG is a 256-pixel thumbnail), found without decoding the
+//! sensor data: each container lists its candidates, and the largest is the
+//! one thumbnails use.
 use crate::info::RawInfo;
 
-/// An embedded JPEG: where it is and, when known, its size in pixels.
+/// An embedded JPEG or JPEG XL: where it is and, when known, its size in
+/// pixels.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Candidate {
     pub offset: u64,
@@ -14,7 +17,7 @@ pub(crate) struct Candidate {
 pub(crate) fn largest(candidates: &[Candidate], bytes: &[u8]) -> Option<(u64, u64)> {
     candidates
         .iter()
-        .filter(|c| c.len > 2 && is_jpeg(bytes, c.offset))
+        .filter(|c| c.len > 2 && (is_jpeg(bytes, c.offset) || is_jpeg_xl(bytes, c.offset)))
         .max_by_key(|c| (c.pixels, c.len))
         .map(|c| (c.offset, c.len))
 }
@@ -28,6 +31,16 @@ pub(crate) fn is_jpeg(bytes: &[u8], at: u64) -> bool {
         .ok()
         .and_then(|at| bytes.get(at..at.checked_add(3)?))
         .is_some_and(|b| b[..2] == [0xff, 0xd8] || b[..2] == [0xee, 0xd8] || b[1..] == [0xd8, 0xff])
+}
+
+/// Whether a JPEG XL starts at `at`: a bare codestream (ISO/IEC 18181-1) or
+/// its container (18181-2).
+pub fn is_jpeg_xl(bytes: &[u8], at: u64) -> bool {
+    const CONTAINER: [u8; 12] = [0, 0, 0, 12, b'J', b'X', b'L', b' ', 13, 10, 0x87, 10];
+    usize::try_from(at)
+        .ok()
+        .and_then(|at| bytes.get(at..))
+        .is_some_and(|b| b.starts_with(&[0xff, 0x0a]) || b.starts_with(&CONTAINER))
 }
 
 /// The width and height of the JPEG `len` bytes at `at`, from its first
@@ -70,7 +83,8 @@ pub(crate) fn jpeg_size(bytes: &[u8], at: u64, len: u64) -> Option<[u32; 2]> {
 pub enum NoPreview {
     /// The file has none.
     Missing,
-    /// The file's previews are not JPEG (uncompressed thumbnails).
+    /// The file's previews are neither JPEG nor JPEG XL (uncompressed
+    /// thumbnails).
     NotJpeg,
 }
 

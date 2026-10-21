@@ -3808,6 +3808,7 @@ dependencies = [
 name = "rawmakase-raw"
 version = "0.1.0"
 dependencies = [
+ "jxl-oxide",
  "miniz_oxide 0.9.1",
  "rawmakase-tiff",
  "rayon",

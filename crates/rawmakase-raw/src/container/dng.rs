@@ -3,14 +3,16 @@
 //! active area and default crop, the colour tags, and the data opcodes of
 //! OpcodeList1 and 2 (`opcodes`). The raw image is a CFA mosaic of one sample
 //! per pixel, or linear raw (demosaiced camera RGB, as phones' computational
-//! DNGs and Adobe DNG Converter's linear DNGs store it) of three, interleaved.
+//! DNGs, Adobe DNG Converter's linear DNGs and Lightroom's HDR and panorama
+//! merges store it) of three, interleaved.
 use super::tiff::{Ifd, NAME_MAX, TEXT_MAX, TiffFile};
-use crate::codec::{bits::Msb, dct, ljpeg};
+use crate::codec::{bits::Msb, dct, jxl, ljpeg};
 use crate::error::{Error, Result, corrupt};
 use crate::info::{Cfa, RawInfo, UNSET};
 use crate::io::{Bytes, Order};
 use crate::sensor::Sensor;
 use crate::variant::{Plan, Variant};
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod opcodes;
@@ -39,6 +41,10 @@ pub(crate) struct DngPlan {
     /// Predictor: 1 none, 2 horizontal differences, 34894–34896 Adobe's
     /// floating-point predictor (bytes of 1, 2 or 4 samples at a time).
     pub predictor: u32,
+    /// What floating-point samples are multiplied by, rounded, to give the
+    /// levels: linear raw's are scaled to 16 bits under their white (its
+    /// levels with them); `None` takes a mosaic's integer part.
+    pub float_scale: Option<f64>,
     /// Tile (or strip) size; strips are tiles as wide as the image.
     pub tile: [u32; 2],
     /// Each tile's (offset, length).
@@ -91,11 +97,21 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
     let compression = t.int(ifd, 259).unwrap_or(1);
     let sample_format = t.int(ifd, 339).unwrap_or(1);
     let predictor = t.int(ifd, 317).unwrap_or(1);
-    // Floating-point levels are read on the integer scale of the mosaics
-    // measured; linear raw's (1.0 white by default) are of no file we have.
-    if linear && sample_format == 3 {
+    // Adobe's floating-point predictor is measured on mosaics only (HDRMerge's;
+    // `unpredict_float`), not on pixels of three samples.
+    if linear && sample_format == 3 && predictor != 1 {
         return Err(Error::Unsupported(
-            "DNG linear raw of floating-point samples".into(),
+            "DNG linear raw of predicted floating-point samples".into(),
+        ));
+    }
+    // RowInterleaveFactor and ColumnInterleaveFactor (DNG 1.7) store rows or
+    // columns apart, which no reader here undoes.
+    if [50975, 52547]
+        .iter()
+        .any(|&tag| t.int(ifd, tag).unwrap_or(1) > 1)
+    {
+        return Err(Error::Unsupported(
+            "DNG of interleaved rows or columns".into(),
         ));
     }
     let (tile, tiles) = layout(&t, ifd, width, height, samples)?;
@@ -105,6 +121,7 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
         (8, _) => Variant::DngDeflate,
         (1, 3) => Variant::DngUncompressedFloat,
         (9, _) => Variant::DngVc5,
+        (JPEG_XL, 1 | 3) => Variant::DngJpegXl,
         _ => return Err(Error::Unsupported(format!("DNG compression {compression}"))),
     };
     let cfa = if linear { None } else { Some(cfa(&t, ifd)?) };
@@ -323,10 +340,33 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
             .map(|v| if v.is_finite() { v } else { 0. })
             .collect()
     };
-    let black = reals(50714, 16 * 16 * 4);
-    let black_delta_h = reals(50715, width as usize);
-    let black_delta_v = reals(50716, height as usize);
-    let white = t.ints(ifd, 50717, samples as usize).unwrap_or_default();
+    let mut black = reals(50714, 16 * 16 * 4);
+    let mut black_delta_h = reals(50715, width as usize);
+    let mut black_delta_v = reals(50716, height as usize);
+    let mut white = t.ints(ifd, 50717, samples as usize).unwrap_or_default();
+    // Floating-point mosaics' levels are on the integer scale of the files
+    // measured, and their samples' integer parts are kept. Linear raw's
+    // floats (an HDR merge's, under a WhiteLevel of 32768; 1.0 by default)
+    // are scaled to 16 bits under their white, with their levels, so samples
+    // below 1 keep their precision.
+    let float_scale = (linear && sample_format == 3).then(|| {
+        let top = white.iter().copied().max().unwrap_or(1).max(1);
+        let k = f64::from(LINEAR_WHITE) / f64::from(top);
+        white = (0..samples as usize)
+            .map(|s| {
+                let w = white.get(s).or(white.last()).copied().unwrap_or(1);
+                (f64::from(w) * k).round() as u32
+            })
+            .collect();
+        for v in black
+            .iter_mut()
+            .chain(&mut black_delta_h)
+            .chain(&mut black_delta_v)
+        {
+            *v *= k;
+        }
+        k
+    });
     info.plan = Plan::Dng(DngPlan {
         black_dim,
         black,
@@ -340,6 +380,7 @@ pub(crate) fn open(bytes: &[u8], t: TiffFile) -> Result<RawInfo> {
         compression,
         sample_format,
         predictor,
+        float_scale,
         tile,
         tiles,
         little: t.little(),
@@ -583,12 +624,13 @@ pub(crate) fn decode(
         },
     );
     let mut decoded = Vec::new();
-    for (i, &(offset, len)) in plan
-        .tiles
-        .iter()
-        .enumerate()
-        .take(across * height.div_ceil(th))
-    {
+    let tiles = if plan.compression == JPEG_XL {
+        jpeg_xl(plan, &file, &mut data, cancel)?;
+        0
+    } else {
+        across * height.div_ceil(th)
+    };
+    for (i, &(offset, len)) in plan.tiles.iter().enumerate().take(tiles) {
         if cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
@@ -598,7 +640,7 @@ pub(crate) fn decode(
         let float = plan.sample_format == 3;
         let samples: &[u16] = match plan.compression {
             1 if float => {
-                floats(tile, plan.bps, tile_row * th, plan.little, &mut decoded)?;
+                floats(tile, plan, tile_row * th, plan.little, &mut decoded)?;
                 &decoded
             }
             1 => {
@@ -615,9 +657,9 @@ pub(crate) fn decode(
                 if float && plan.predictor != 1 {
                     // The predictor leaves big-endian samples.
                     unpredict_float(&mut bytes, tw, bytes_per, plan.predictor)?;
-                    floats(&bytes, plan.bps, tw * th, false, &mut decoded)?;
+                    floats(&bytes, plan, tw * th, false, &mut decoded)?;
                 } else if float {
-                    floats(&bytes, plan.bps, tile_row * th, plan.little, &mut decoded)?;
+                    floats(&bytes, plan, tile_row * th, plan.little, &mut decoded)?;
                 } else {
                     unpack(&bytes, plan.bps, tile_row, th, plan.little, &mut decoded)?;
                     if plan.predictor == 2 {
@@ -839,11 +881,11 @@ fn linearize(
     Ok(())
 }
 
-/// `n` floating-point samples of `bps` bits (IEEE half and single
+/// `n` floating-point samples of the plan's bits (IEEE half and single
 /// precision; DNG's 24-bit format: sign, 7-bit exponent biased by 63, 16-bit
-/// mantissa), in the given byte order, as whole numbers: the levels of
-/// floating-point DNGs are on the integer scale.
-fn floats(data: &[u8], bps: u32, n: usize, little: bool, out: &mut Vec<u16>) -> Result<()> {
+/// mantissa), in the given byte order, as levels (`to_level`).
+fn floats(data: &[u8], plan: &DngPlan, n: usize, little: bool, out: &mut Vec<u16>) -> Result<()> {
+    let bps = plan.bps;
     let size = match bps {
         16 | 24 | 32 => bps as usize / 8,
         _ => return Err(Error::Unsupported(format!("DNG with {bps}-bit floats"))),
@@ -861,19 +903,77 @@ fn floats(data: &[u8], bps: u32, n: usize, little: bool, out: &mut Vec<u16>) -> 
             3 => fp24([b[0], b[1], b[2]]),
             _ => f32::from_be_bytes(b),
         };
-        out.push(to_level(v));
+        out.push(to_level(v, plan.float_scale));
     }
     out.resize(n, 0);
     Ok(())
 }
 
-/// A float as a whole-number level: its integer part, as LibRaw's reading of
-/// floating-point DNGs has it (our measurement).
-fn to_level(v: f32) -> u16 {
-    if v.is_nan() {
-        0
+/// A float as a whole-number level: times `scale`, rounded (linear raw's),
+/// else its integer part, as LibRaw's reading of floating-point mosaics has
+/// it (our measurement).
+fn to_level(v: f32, scale: Option<f64>) -> u16 {
+    match scale {
+        _ if v.is_nan() => 0,
+        Some(k) => (f64::from(v) * k).round().clamp(0., 65535.) as u16,
+        None => v.clamp(0., 65535.) as u16,
+    }
+}
+
+/// DNG 1.7's compression code for JPEG XL.
+const JPEG_XL: u32 = 52546;
+
+/// Tiles of more samples than this decode one at a time: each decode may
+/// take `codec::jxl`'s allowance for its tile.
+const PARALLEL_TILE_SAMPLES: usize = 4 << 20;
+
+/// Decodes JPEG XL tiles into `data`, the stored image: each row of tiles
+/// in parallel (one at a time for tiles over `PARALLEL_TILE_SAMPLES`), a
+/// tile at a time. Integer samples are rounded to levels; floating-point
+/// ones become levels as other floats do (`to_level`).
+fn jpeg_xl(plan: &DngPlan, file: &Bytes, data: &mut [u16], cancel: &AtomicBool) -> Result<()> {
+    let (width, spp) = (plan.width as usize, plan.samples as usize);
+    let [tw, th] = [plan.tile[0] as usize, plan.tile[1] as usize];
+    let across = width.div_ceil(tw);
+    let float = plan.sample_format == 3;
+    let band = |(row, band): (usize, &mut [u16])| {
+        let rows = band.len() / (width * spp);
+        for col in 0..across {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
+            let &(offset, len) = plan
+                .tiles
+                .get(row * across + col)
+                .ok_or_else(|| corrupt("DNG tile count"))?;
+            let tile = jxl::decode(file.slice(offset, len)?, [tw, th], spp)?;
+            let x0 = col * tw;
+            let w = tile.width.min(width - x0);
+            for (y, src) in tile
+                .samples
+                .chunks_exact(tile.width * spp)
+                .take(rows)
+                .enumerate()
+            {
+                let dst = &mut band[(y * width + x0) * spp..][..w * spp];
+                for (d, &v) in dst.iter_mut().zip(src) {
+                    *d = if float {
+                        to_level(v, plan.float_scale)
+                    } else if v.is_nan() {
+                        0
+                    } else {
+                        v.round().clamp(0., 65535.) as u16
+                    };
+                }
+            }
+        }
+        Ok(())
+    };
+    let bands = th * width * spp;
+    if tw * th * spp > PARALLEL_TILE_SAMPLES {
+        data.chunks_mut(bands).enumerate().try_for_each(band)
     } else {
-        v.clamp(0., 65535.) as u16
+        data.par_chunks_mut(bands).enumerate().try_for_each(band)
     }
 }
 
@@ -1330,17 +1430,11 @@ pub(crate) mod tests {
         assert_eq!((info.analog_balance, info.cam_mul), ([1.; 3], [1.; 4]));
     }
 
-    /// Linear raw in separate planes or of floating-point samples is
-    /// refused, with a message that says which; so is a linear raw tile
-    /// beyond the size limit in its three samples.
+    /// A linear raw tile beyond the size limit in its three samples is
+    /// refused.
     #[test]
-    fn linear_raw_floats_and_huge_tiles_are_refused() {
-        let le16 = |v: u16| v.to_le_bytes().to_vec();
+    fn huge_linear_raw_tiles_are_refused() {
         let le32 = |v: u32| v.to_le_bytes().to_vec();
-        let mut float = linear_raw();
-        float.extend([(258, 3, 1, le16(32)), (339, 3, 1, le16(3))]);
-        let error = crate::open(&dng(1, 1, &float)).unwrap_err().to_string();
-        assert!(error.contains("floating-point"), "{error}");
         // 30,000 × 30,000 is under the limit as one sample, not as three.
         let mut tiled = linear_raw();
         tiled.extend([
@@ -1351,6 +1445,102 @@ pub(crate) mod tests {
         ]);
         assert!(crate::open(&dng(1, 1, &tiled)).is_err());
         assert!(crate::open(&dng(1, 1, &tiled[2..])).is_ok());
+    }
+
+    /// A DNG of linear raw in one JPEG XL tile (`codec::jxl`'s test
+    /// codestreams) at offset 0 of the data after [`dng`]'s file, with
+    /// `extra` entries.
+    fn jpeg_xl_dng(width: u32, height: u32, tile: &[u8], extra: &[Entry]) -> Vec<u8> {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let le32 = |v: u32| v.to_le_bytes().to_vec();
+        let file = |at: u32| {
+            let mut e = linear_raw();
+            e.extend([
+                (259, 3, 1, le16(52546)),
+                (322, 4, 1, le32(width)),
+                (323, 4, 1, le32(height)),
+                (324, 4, 1, le32(at)),
+                (325, 4, 1, le32(tile.len() as u32)),
+            ]);
+            e.extend(extra.iter().cloned());
+            dng(width, height, &e)
+        };
+        let mut f = file(0);
+        f = file(f.len() as u32);
+        f.extend(tile);
+        f
+    }
+
+    /// Lightroom's HDR merges are linear raw of floats in lossy JPEG XL
+    /// tiles, under a WhiteLevel of 32768 (issue 525): they decode, scaled
+    /// to 16 bits under it, the sun's values as libjxl's djxl has them
+    /// (32004.6, 648.59 and 390.81 in red), not gamut mapped or overflowed.
+    #[test]
+    fn lossy_floating_point_jpeg_xl_linear_raw_decodes() {
+        let le16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let tile = include_bytes!("../../tests/data/jxl-hdr-xyb.jxl");
+        let f = jpeg_xl_dng(
+            32,
+            32,
+            tile,
+            &[
+                (258, 3, 3, le16s(&[16, 16, 16])),
+                (339, 3, 3, le16s(&[3, 3, 3])),
+                (50717, 3, 3, le16s(&[32768, 32768, 32768])),
+            ],
+        );
+        let info = crate::open(&f).unwrap();
+        assert_eq!(info.variant, crate::variant::Variant::DngJpegXl);
+        let s = decode(&f);
+        assert_eq!((s.channels, s.white, s.black), (3, 65535, [0; 4]));
+        for (x, y, djxl) in [(16, 16, 32004.6), (2, 3, 648.59), (30, 28, 390.81)] {
+            let got = f64::from(s.data[(y * 32 + x) * 3]);
+            let want = djxl * 2.;
+            assert!(
+                (got - want).abs() <= want * 1e-3 + 1.,
+                "({x}, {y}): {got}, {want}"
+            );
+        }
+    }
+
+    /// Floating-point linear raw under Adobe's predictor, and data of
+    /// interleaved rows or columns, are refused, not decoded wrongly.
+    #[test]
+    fn predicted_float_linear_raw_and_interleaving_are_refused() {
+        let le16 = |v: u16| v.to_le_bytes().to_vec();
+        let mut float = linear_raw();
+        float.extend([
+            (258, 3, 1, le16(32)),
+            (259, 3, 1, le16(8)),
+            (317, 3, 1, le16(34894)),
+            (339, 3, 1, le16(3)),
+        ]);
+        let error = crate::open(&dng(2, 1, &float)).unwrap_err().to_string();
+        assert!(error.contains("predicted floating-point"), "{error}");
+        for tag in [50975, 52547] {
+            let error = crate::open(&dng(2, 2, &[(tag, 3, 1, le16(2))]))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("interleaved"), "{error}");
+            assert!(crate::open(&dng(2, 2, &[(tag, 3, 1, le16(1))])).is_ok());
+        }
+    }
+
+    /// Lightroom's panoramas are linear raw of 16-bit integers in JPEG XL
+    /// tiles; a lossless tile's samples are kept exactly.
+    #[test]
+    fn integer_jpeg_xl_linear_raw_decodes() {
+        let le16s = |v: &[u16]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let tile = include_bytes!("../../tests/data/jxl-int16-lossless.jxl");
+        let f = jpeg_xl_dng(8, 4, tile, &[(258, 3, 3, le16s(&[16, 16, 16]))]);
+        let s = decode(&f);
+        for y in 0..4u32 {
+            for x in 0..8u32 {
+                let at = ((y * 8 + x) * 3) as usize;
+                let want = [x * 8191 + y * 3, y * 16000 + x, 65535 - x * 7000].map(|v| v as u16);
+                assert_eq!(s.data[at..at + 3], want, "({x}, {y})");
+            }
+        }
     }
 
     /// Linear raw of one sample (monochrome sensors, film scanners) opens
@@ -1566,10 +1756,15 @@ pub(crate) mod tests {
         // 24-bit: 1.5 is exponent 63, mantissa 0x8000.
         assert_eq!(super::fp24([63, 0x80, 0]), 1.5);
         assert_eq!(super::fp24([0x80 | 64, 0, 0]), -2.);
-        assert_eq!(super::to_level(2358.53), 2358);
-        assert_eq!(super::to_level(-1.), 0);
-        assert_eq!(super::to_level(f32::NAN), 0);
-        assert_eq!(super::to_level(1e9), 65535);
+        // A mosaic's integer part; linear raw's scaled and rounded.
+        assert_eq!(super::to_level(2358.53, None), 2358);
+        assert_eq!(super::to_level(-1., None), 0);
+        assert_eq!(super::to_level(f32::NAN, None), 0);
+        assert_eq!(super::to_level(1e9, None), 65535);
+        assert_eq!(super::to_level(0.75, Some(2.)), 2);
+        assert_eq!(super::to_level(0.2, Some(2.)), 0);
+        assert_eq!(super::to_level(f32::NAN, Some(2.)), 0);
+        assert_eq!(super::to_level(1e9, Some(2.)), 65535);
     }
 
     #[test]
