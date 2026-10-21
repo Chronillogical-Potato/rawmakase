@@ -184,6 +184,21 @@ pub fn scan(
             Some((f.path.as_ref()?, (f.root, f.logical.clone())))
         })
         .collect();
+    // A catalog folder listed under another spelling of its name, as a
+    // photo's file may be (macOS's FAT and exFAT list every name
+    // decomposed): by parent directory and folded name.
+    let folder_aliases: HashSet<(PathBuf, String)> = all_paths
+        .iter()
+        .filter_map(|p| {
+            let (parent, name) = (p.parent()?, p.file_name()?);
+            let Some(Listing::Listed { directories, .. }) = listings.get(parent) else {
+                return None;
+            };
+            let aliased =
+                !directories.contains(*p) && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+            aliased.then(|| (parent.to_path_buf(), super::folded(name)))
+        })
+        .collect();
     let mut pending: Vec<PathBuf> = Vec::new();
     for (path, listing) in &listings {
         let Listing::Listed { files, directories } = listing else {
@@ -201,6 +216,10 @@ pub fn scan(
             directories
                 .iter()
                 .filter(|d| !all_paths.contains(d))
+                .filter(|d| {
+                    let name = super::folded(d.file_name().unwrap_or_default());
+                    !folder_aliases.contains(&(path.clone(), name))
+                })
                 .cloned(),
         );
     }

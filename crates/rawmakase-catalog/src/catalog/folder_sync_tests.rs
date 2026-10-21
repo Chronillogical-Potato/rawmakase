@@ -295,6 +295,29 @@ mod scenarios {
     }
 
     #[test]
+    fn a_folder_listed_under_another_spelling_of_its_name_is_not_new() -> Result<()> {
+        // As macOS's FAT and exFAT list a folder RAWmakase named composed:
+        // decomposed, found by either (#573).
+        let mut f = fixture()?;
+        std::fs::create_dir(f.root.join("Lisbon/\u{c9}vora"))?;
+        std::fs::write(f.root.join("Lisbon/\u{c9}vora/IMG_3001.dng"), bytes(4))?;
+        f.cat.add_folder(&f.root)?;
+        f.checksum_all()?;
+        std::fs::rename(
+            f.root.join("Lisbon/\u{c9}vora"),
+            f.root.join("Lisbon/E\u{301}vora"),
+        )?;
+        if !f.root.join("Lisbon/\u{c9}vora/IMG_3001.dng").exists() {
+            // A volume that tells the two spellings apart: two folders.
+            return Ok(());
+        }
+        let plan = f.plan(SyncScope::All)?;
+        assert!(plan.additions.is_empty(), "{:?}", plan.additions);
+        assert!(plan.missing.is_empty() && plan.moves.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn a_photo_moved_to_another_catalog_folder_is_found_from_there() -> Result<()> {
         let mut f = fixture()?;
         let id = f.id("IMG_1002.dng");

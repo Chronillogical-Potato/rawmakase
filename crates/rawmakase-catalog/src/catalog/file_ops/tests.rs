@@ -137,7 +137,12 @@ impl Fx {
                     walk(&p, base, out);
                 } else {
                     let name = p.strip_prefix(base).unwrap().to_string_lossy().into_owned();
-                    if !name.starts_with("Photos.rawmakase") {
+                    // AppleDouble files the test disk keeps beside others
+                    // on FAT and exFAT are part of those.
+                    let apple_double = p
+                        .file_name()
+                        .is_some_and(|n| n.to_string_lossy().starts_with("._"));
+                    if !name.starts_with("Photos.rawmakase") && !apple_double {
                         out.insert(name.replace('\\', "/"), std::fs::read(&p).unwrap());
                     }
                 }
@@ -242,6 +247,9 @@ impl Fx {
     }
 }
 
+/// What the test disk writes as a file's AppleDouble file.
+const APPLE_DOUBLE: &[u8] = b"AppleDouble";
+
 /// `path` with each name as it is stored, looked for in any normalisation
 /// form, as macOS finds names (and Linux, by bytes, doesn't).
 pub(super) fn in_any_form(path: &Path) -> PathBuf {
@@ -344,6 +352,13 @@ impl Trash for FakeTrash {
                 std::fs::rename(path, &location).map_err(|e| TrashError::Failed(e.to_string()))?
             }
             other => other.map_err(|e| TrashError::Failed(e.to_string()))?,
+        }
+        // The AppleDouble file the test disk keeps beside it goes with it,
+        // as macOS moves it.
+        let double =
+            path.with_file_name(format!("._{}", path.file_name().unwrap().to_string_lossy()));
+        if std::fs::read(&double).is_ok_and(|b| b == APPLE_DOUBLE) {
+            std::fs::remove_file(double).unwrap();
         }
         if self.crash_after == Some(n) {
             panic!("injected crash after trashing {n}");
@@ -516,7 +531,7 @@ pub(super) struct Faulty {
     /// A file there takes this name just before something is renamed to it.
     pub occupy: Option<PathBuf>,
     /// A file with these bytes takes this name just before a file is made
-    /// there.
+    /// there; a folder, just before a folder is.
     pub occupy_on_create: Option<(PathBuf, Vec<u8>)>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -531,6 +546,11 @@ pub(super) struct Faulty {
     pub no_exclusive_rename: bool,
     /// Files the volume says were made long ago (1970).
     pub born_long_ago: Vec<PathBuf>,
+    /// The `names_only` volume gets an AppleDouble file (`._name`) beside
+    /// each file whose times are set and each folder made there, which
+    /// goes with it when it is renamed or removed, as macOS keeps what FAT
+    /// and exFAT can't.
+    pub apple_double: bool,
     /// The `names_only` volume lists names decomposed (NFD) but renames and
     /// removes a file only by the spelling it is stored in (as it was made),
     /// as macOS's FAT and exFAT drivers do.
@@ -606,6 +626,19 @@ impl Faulty {
     /// decomposed (`lists_decomposed`), and is one.
     fn refuses_decomposed(&self, path: &Path) -> bool {
         self.lists_decomposed && self.fat(path) && !stored_spelling(&self.in_found(path))
+    }
+    /// `path`'s AppleDouble file, where the volume keeps one.
+    fn apple_double_of(&self, path: &Path) -> Option<PathBuf> {
+        let name = path.file_name()?.to_string_lossy();
+        (self.apple_double && self.fat(path)).then(|| path.with_file_name(format!("._{name}")))
+    }
+    /// Removes `path`'s AppleDouble file once `path` is `gone`.
+    fn forget_apple_double(&self, path: &Path, gone: bool) {
+        if let (true, Some(double)) = (gone, self.apple_double_of(path))
+            && double.exists()
+        {
+            std::fs::remove_file(double).unwrap();
+        }
     }
     /// Whether `path` is on the `names_only` volume.
     fn fat(&self, path: &Path) -> bool {
@@ -755,6 +788,12 @@ impl Disk for Faulty {
             return self.step(Op::Rename, || Err(FsError::Unsupported));
         }
         let renamed = self.step(Op::Rename, || Real.rename(from, to));
+        if renamed.is_ok()
+            && let (Some(a), Some(b)) = (self.apple_double_of(from), self.apple_double_of(to))
+            && a.exists()
+        {
+            std::fs::rename(a, b).unwrap();
+        }
         if renamed.is_ok() && self.renumber_on_rename {
             self.renumber(to);
         }
@@ -762,7 +801,19 @@ impl Disk for Faulty {
     }
     fn create_dir(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CreateDir(path.into()));
-        self.step(Op::CreateDir, || Real.create_dir(&self.in_found(path)))
+        if let Some((at, _)) = &self.occupy_on_create
+            && at == path
+        {
+            std::fs::create_dir(at).unwrap();
+        }
+        let path = &self.in_found(path);
+        let made = self.step(Op::CreateDir, || Real.create_dir(path));
+        if made.is_ok()
+            && let Some(double) = self.apple_double_of(path)
+        {
+            std::fs::write(double, APPLE_DOUBLE).unwrap();
+        }
+        made
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::Sync(dir.into()));
@@ -867,6 +918,9 @@ impl Disk for Faulty {
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CopyTimes(to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
+        if let Some(double) = self.apple_double_of(to) {
+            std::fs::write(double, APPLE_DOUBLE).unwrap();
+        }
         self.step(Op::CopyTimes, || {
             Real.copy_times(from, to)?;
             if let Some(step) = self.coarse {
@@ -895,11 +949,17 @@ impl Disk for Faulty {
         if self.refuses_decomposed(path) {
             return self.step(Op::RemoveFile, || Err(FsError::NotFound));
         }
-        self.step(Op::RemoveFile, || Real.remove_file(&self.found(path)))
+        let at = &self.found(path);
+        let removed = self.step(Op::RemoveFile, || Real.remove_file(at));
+        self.forget_apple_double(at, removed.is_ok());
+        removed
     }
     fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::RemoveDir(path.into()));
-        self.step(Op::RemoveDir, || Real.remove_dir(&self.found(path)))
+        let at = &self.found(path);
+        let removed = self.step(Op::RemoveDir, || Real.remove_dir(at));
+        self.forget_apple_double(at, removed.is_ok());
+        removed
     }
     fn hash_prefix(
         &self,

@@ -243,7 +243,8 @@ inject a temporary file, without changing the process-wide environment.
   a copy gone. A folder moved to another volume is copied whole into one
   hidden folder there, then named by one exclusive rename; its originals go
   to the Trash whole only when the folder holds exactly what was copied, and
-  the only folders ever removed are empty ones that copy made. Every disk step is journalled, after its folders
+  the only folders ever removed are empty ones that copy made. On FAT and
+  exFAT both are proven by names, as photos are (#573). Every disk step is journalled, after its folders
   are synced, before the next, and recovery decides whatever a crash left from
   the journal and the disk, putting back only what it proves. One process at a
   time changes a catalog's files, under an OS lock on a file beside the

@@ -49,7 +49,9 @@ use super::conflicts::Names;
 use super::copy::{self, Cx, Failed, Originals, Problem, copy_at, original_here};
 use super::disk::{Disk, Presence, gone, parent, presence, spelled};
 use super::journal::{self, Item, ItemState, Kind, Member, MemberState, NewTreeMember, Subject};
+use super::plan::occupied;
 use super::preconditions::CHANGED;
+use super::proof::{self, Proof, Proofs};
 use super::recover::NOT_BACK;
 use super::tree::TreeMove;
 use crate::storage::Identity;
@@ -67,6 +69,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::catalog) struct TreeAcross {
     pub directories: usize,
+    /// How its copies and originals are proven and made (#573).
+    #[serde(default, skip_serializing_if = "Proofs::is_default")]
+    pub proofs: Proofs,
 }
 
 /// A name of the tree, as planned.
@@ -100,6 +105,8 @@ pub(super) struct TreeCopy {
     /// [`map`]).
     pub folders: Vec<(FolderId, usize, PathBuf)>,
     pub photos: Vec<(PhotoId, usize)>,
+    /// How its copies and originals are proven and made (#573).
+    pub proofs: Proofs,
 }
 
 impl TreeCopy {
@@ -116,10 +123,17 @@ impl TreeCopy {
 /// otherwise: a link, a special file, another volume inside it, a file with
 /// another name elsewhere, a name the journal can't record, or two names
 /// that `rules` (where given) take for one.
+/// On FAT and exFAT (`compose`), whose drivers list names decomposed but
+/// take them composed, each name is given as `proof::usable` finds it; and
+/// on macOS a file's
+/// AppleDouble file there (`._name` beside `name`, where the system keeps
+/// what the drive can't, and which it makes, moves and removes with it) is
+/// part of that file, not a name of its own.
 pub(super) fn walk(
     disk: &dyn Disk,
     top: &Path,
     rules: Option<Names>,
+    compose: bool,
 ) -> std::result::Result<Vec<Entry>, String> {
     let at = disk.entry(top).map_err(|e| e.to_string())?;
     if at.kind != EntryKind::Directory {
@@ -137,6 +151,9 @@ pub(super) fn walk(
         next += 1;
         let dir = top.join(&rel);
         let mut listed = disk.list(&dir).map_err(|e| e.to_string())?;
+        if compose && cfg!(target_vendor = "apple") {
+            listed = without_apple_double(disk, &dir, listed);
+        }
         listed.sort();
         // Every later step finds a copy by `sidecar::caseless`, which must
         // tell each name from the others; and the destination's own rules.
@@ -157,6 +174,10 @@ pub(super) fn walk(
         }
         for name in listed {
             let path = dir.join(&name);
+            let name = match compose {
+                true => proof::usable(disk, &dir, &name),
+                false => name,
+            };
             if name.to_str().is_none() {
                 return Err(format!(
                     "{} has a name RAWmakase can't record.",
@@ -195,6 +216,38 @@ pub(super) fn walk(
     Ok(dirs)
 }
 
+/// `names` in folder `dir` without the AppleDouble files of others of
+/// them: a file (never a folder) `._name` where `name` (by
+/// `sidecar::caseless`) is among them too.
+fn without_apple_double(
+    disk: &dyn Disk,
+    dir: &Path,
+    names: Vec<std::ffi::OsString>,
+) -> Vec<std::ffi::OsString> {
+    let keys: std::collections::HashSet<String> = names.iter().map(|n| caseless(n)).collect();
+    names
+        .into_iter()
+        .filter(|n| !apple_double(disk, dir, n, &keys))
+        .collect()
+}
+
+/// Whether `name` in folder `dir` is the AppleDouble file macOS keeps for
+/// another of the names `keys` (by `sidecar::caseless`) on FAT and exFAT:
+/// a file `._name`.
+fn apple_double(
+    disk: &dyn Disk,
+    dir: &Path,
+    name: &OsStr,
+    keys: &std::collections::HashSet<String>,
+) -> bool {
+    name.to_string_lossy()
+        .strip_prefix("._")
+        .is_some_and(|of| keys.contains(&caseless(OsStr::new(of))))
+        && disk
+            .entry(&dir.join(name))
+            .is_ok_and(|e| e.kind == EntryKind::File)
+}
+
 /// Plans copying folder `source` into folder `dir` of volume `volume` on
 /// `disk`, whose names compare by `rules`: refused unless both volumes'
 /// file ids are proven, every name below it can be copied, and `dir`'s
@@ -211,9 +264,17 @@ pub(super) fn plan(
         .volume_facts(parent(source))
         .map_err(|e| refuse(e.to_string()))?;
     let there = disk.volume_facts(dir).map_err(|e| refuse(e.to_string()))?;
-    if !here.stable_ids || !there.stable_ids {
+    let (Some(originals), Some(copies)) = (proof::of(&here), proof::of(&there)) else {
         return Err(refuse(FOLDER_IDS_UNPROVEN.into()));
-    }
+    };
+    let proofs = Proofs {
+        originals,
+        copies,
+        direct: !there.exclusive_rename,
+        since: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64),
+    };
     // Its originals go to the Trash once copied.
     if here.read_only {
         return Err(refuse("The folder's volume is read-only.".into()));
@@ -226,8 +287,32 @@ pub(super) fn plan(
             there.to_string_lossy()
         )));
     }
-    let entries = walk(disk, source, Some(rules))
+    let entries = walk(disk, source, Some(rules), originals == Proof::Names)
         .map_err(|why| refuse(format!("{why} The folder can't be moved to another drive.")))?;
+    // Made on FAT or exFAT, a file `._name` beside `name` would be taken
+    // there for `name`'s AppleDouble file, and written over.
+    if cfg!(target_vendor = "apple") && copies == Proof::Names {
+        let keys: std::collections::HashSet<(PathBuf, String)> = entries
+            .iter()
+            .filter_map(|e| Some((e.rel.parent()?.to_path_buf(), caseless(e.rel.file_name()?))))
+            .collect();
+        let taken = entries.iter().find(|e| {
+            let (Some(up), Some(name)) = (e.rel.parent(), e.rel.file_name()) else {
+                return false;
+            };
+            e.identity.is_some()
+                && name
+                    .to_string_lossy()
+                    .strip_prefix("._")
+                    .is_some_and(|of| keys.contains(&(up.to_path_buf(), caseless(OsStr::new(of)))))
+        });
+        if let Some(e) = taken {
+            return Err(refuse(format!(
+                "{} would be taken for Mac metadata of the file beside it on the other drive. The folder can't be moved there.",
+                source.join(&e.rel).display()
+            )));
+        }
+    }
     let bytes = entries
         .iter()
         .filter_map(|e| e.identity.as_ref())
@@ -247,6 +332,7 @@ pub(super) fn plan(
         available: there.available,
         folders: Vec::new(),
         photos: Vec::new(),
+        proofs,
     })
 }
 
@@ -263,7 +349,7 @@ fn alike(
 
 /// Why a folder isn't copied to or from a drive whose file ids can't prove
 /// which file a name is.
-const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (FAT, exFAT, network and others) isn't available yet. Copy it in Finder, then add the folder.";
+const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network and others) isn't available yet. Copy it in Finder, then add the folder.";
 
 /// The members `tree` journals, copied as `copy`: each name's original,
 /// where it goes, and where it is made inside the hidden folder.
@@ -272,12 +358,21 @@ fn members(tree: &TreeMove, copy: &TreeCopy) -> Vec<NewTreeMember> {
         .iter()
         .map(|e| NewTreeMember {
             source: tree.source.join(&e.rel),
-            destination: tree.destination.join(&e.rel),
+            destination: tree.destination.join(made_rel(copy, &e.rel)),
             id: e.id,
             identity: e.identity.clone(),
-            temp: copy.hidden.join(&e.rel),
+            temp: copy.hidden.join(made_rel(copy, &e.rel)),
         })
         .collect()
+}
+
+/// `rel`, as what is made there is named: composed, each name, where names
+/// prove its copies (#573).
+fn made_rel(copy: &TreeCopy, rel: &Path) -> PathBuf {
+    match copy.proofs.copies {
+        Proof::Names => rel.iter().map(proof::composed).collect(),
+        Proof::Ids => rel.to_path_buf(),
+    }
 }
 
 /// Copies folder `tree` as `copy`, journalled first as item of `batch`,
@@ -401,6 +496,7 @@ fn build(
         FsError::NoSpace => Problem::NoSpace,
         e => Problem::Disk(e.to_string()),
     };
+    let proofs = copy.proofs;
     // Each folder made, as the disk spells it, by its path below the tree.
     let mut made: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut top = None;
@@ -413,25 +509,39 @@ fn build(
             (Some(up), Some(name)) => made
                 .get(up)
                 .ok_or_else(|| Problem::Disk("its folder wasn't made".into()))?
-                .join(name),
+                .join(made_rel(copy, Path::new(name))),
             _ => copy.hidden.clone(),
         };
         let Some(identity) = &e.identity else {
-            // 1. A folder.
-            disk.create_dir(&temp).map_err(|e| match e {
-                FsError::AlreadyExists => Problem::NameTaken(name(&temp)),
-                e => problem(e),
-            })?;
+            // 1. A folder. Not made, nothing of it is there: what is (made
+            // by another program at its name) is never taken for it.
+            if let Err(err) = disk.create_dir(&temp) {
+                catalog
+                    .db
+                    .write(|w| journal::set_discarded(w, id, ordinal, None))
+                    .map_err(Failed::Journal)?;
+                return Err(match err {
+                    FsError::AlreadyExists => Problem::NameTaken(name(&temp)),
+                    err => problem(err),
+                }
+                .into());
+            }
             let found = disk.entry(&temp).map_err(problem)?;
             if found.kind != EntryKind::Directory {
                 return Err(
                     Problem::Disk(format!("{} isn't the folder made", temp.display())).into(),
                 );
             }
-            let at = spelled(disk, &temp, found.id).map_err(problem)?;
+            // Its file object only where it stays; elsewhere one no file
+            // has, so a release before #573 finds no folder it is.
+            let (at, file) = match proofs.copies {
+                Proof::Ids => (spelled(disk, &temp, found.id), found.id),
+                Proof::Names => (proof::spelled(disk, &temp), FileId::NOBODY),
+            };
+            let at = at.map_err(problem)?;
             catalog
                 .db
-                .write(|w| journal::set_copying(w, id, ordinal, Some(found.id), &at))
+                .write(|w| journal::set_copying(w, id, ordinal, Some(file), &at))
                 .map_err(Failed::Journal)?;
             if e.rel.as_os_str().is_empty() {
                 top = Some(found.id);
@@ -447,16 +557,17 @@ fn build(
             (id, ordinal),
             (&source, e.id, identity),
             &temp,
-            Default::default(),
+            proofs,
             cancel,
         )?;
-        let destination = tree.destination.join(&e.rel);
+        let destination = tree.destination.join(made_rel(copy, &e.rel));
         catalog
             .db
             .write(|w| journal::set_copied(w, id, ordinal, &destination))
             .map_err(Failed::Journal)?;
     }
-    // 3. Durable, then named, never replacing anything there.
+    // 3. Durable, then named, never replacing anything there; built at its
+    // name already where the volume can't rename exclusively.
     for e in copy.entries.iter().rev().filter(|e| e.identity.is_none()) {
         let dir = made
             .get(&e.rel)
@@ -466,13 +577,19 @@ fn build(
     let (Some(hidden), Some(top)) = (made.get(Path::new("")), top) else {
         return Err(Problem::Disk("the folder wasn't made".into()).into());
     };
-    disk.rename(hidden, &tree.destination)
-        .map_err(|e| match e {
-            FsError::AlreadyExists => Problem::NameTaken(name(&tree.destination)),
-            e => problem(e),
-        })?;
+    if !proofs.direct {
+        disk.rename(hidden, &tree.destination)
+            .map_err(|e| match e {
+                FsError::AlreadyExists => Problem::NameTaken(name(&tree.destination)),
+                e => problem(e),
+            })?;
+    }
     disk.sync_dir(parent(&tree.destination)).map_err(problem)?;
-    let at = spelled(disk, &tree.destination, top).map_err(problem)?;
+    let at = match proofs.copies {
+        Proof::Ids => spelled(disk, &tree.destination, top),
+        Proof::Names => proof::spelled(disk, &tree.destination),
+    }
+    .map_err(problem)?;
     catalog
         .db
         .write(|w| named(w, id, &at))
@@ -508,6 +625,87 @@ fn named(w: &mut Write<'_>, id: journal::OperationId, at: &Path) -> Result<()> {
     journal::set_member(w, id, 0, MemberState::Copied, None)
 }
 
+/// The proofs journalled folder `item` was copied with.
+fn proofs_of(item: &Item) -> Proofs {
+    match &item.subject {
+        Subject::Tree(state) => state.across.as_ref().map(|a| a.proofs).unwrap_or_default(),
+        _ => Proofs::default(),
+    }
+}
+
+/// Where member `m`'s copy, made and journalled, given the name `at`, is
+/// now, as `proofs` says: by its file object ([`copy_at`]); or where names
+/// prove it, by the name alone, a folder there, or a file holding the bytes
+/// copied (written whole) or its original's first bytes (part way).
+/// `Some(None)` when it isn't there, `None` when that can't be told.
+fn copy_found(disk: &dyn Disk, proofs: Proofs, m: &Member, at: &Path) -> Option<Option<PathBuf>> {
+    let copy = m.copy.as_ref()?;
+    match proofs.copies {
+        Proof::Ids => copy_at(disk, at, copy.id?),
+        Proof::Names => match proof::presence(disk, at) {
+            Presence::Absent => Some(None),
+            Presence::Unknown => None,
+            Presence::Here => {
+                let ours = match (&m.identity, copy.content) {
+                    (None, _) => disk.entry(at).is_ok_and(|e| e.kind == EntryKind::Directory),
+                    (Some(_), Some(content)) => proof::holds(disk, at, content),
+                    (Some(_), None) => proof::begins(disk, at, &m.source),
+                };
+                ours.then(|| Some(proof::composed_path(at)))
+            }
+        },
+    }
+}
+
+/// Whether member `m`'s original file is at its source as it was copied,
+/// as `proofs` says: its file object and `Identity`, or its name and
+/// `Identity`.
+fn original_proven(disk: &dyn Disk, proofs: Proofs, m: &Member) -> bool {
+    match proofs.originals {
+        Proof::Ids => original_here(disk, m),
+        Proof::Names => {
+            proof::presence(disk, &m.source) == Presence::Here
+                && m.identity.is_some()
+                && disk.identity(&m.source).ok() == m.identity
+        }
+    }
+}
+
+/// Where member `m`'s original (a file or a folder) is, as `proofs` says.
+fn source_presence(disk: &dyn Disk, proofs: Proofs, m: &Member) -> Presence {
+    match (proofs.originals, m.id) {
+        (Proof::Ids, Some(id)) => presence(disk, &m.source, id),
+        (Proof::Ids, None) => Presence::Unknown,
+        (Proof::Names, _) => proof::presence(disk, &m.source),
+    }
+}
+
+/// Whether member `m`'s original is gone from its source by any spelling,
+/// as `proofs` says.
+fn source_gone(disk: &dyn Disk, proofs: Proofs, m: &Member) -> bool {
+    match (proofs.originals, m.id) {
+        (Proof::Ids, Some(id)) => gone(disk, &m.source, id),
+        (Proof::Ids, None) => false,
+        (Proof::Names, _) => proof::gone(disk, &m.source),
+    }
+}
+
+/// Puts `path` in the Trash; on FAT and exFAT (`proofs`' originals), by its
+/// name composed, then decomposed where that is the same file, as those
+/// drivers take a name only as it is stored.
+fn trash_original(
+    cx: &Cx<'_>,
+    proofs: Proofs,
+    path: &Path,
+) -> std::result::Result<super::TrashReceipt, super::TrashError> {
+    cx.trash.trash(path).or_else(|e| {
+        match (proofs.originals, proof::other_spelling(cx.disk, path)) {
+            (Proof::Names, Some(other)) => cx.trash.trash(&other),
+            _ => Err(e),
+        }
+    })
+}
+
 /// Each member's path below the folder: its original's below the folder's.
 fn rel<'a>(item: &'a Item, m: &'a Member) -> Option<&'a Path> {
     m.source.strip_prefix(&item.members.first()?.source).ok()
@@ -531,14 +729,13 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item, copy: &TreeCopy) -> Resul
     let Some(top) = item.members.first() else {
         return Ok(Some("it has no folder".into()));
     };
-    let named = match (
-        top.destination.as_deref(),
-        top.copy.as_ref().and_then(|c| c.id),
-    ) {
-        (Some(at), Some(id)) => {
-            top.state == MemberState::Copied && presence(disk, at, id) == Presence::Here
+    let proofs = copy.proofs;
+    let named = match top.destination.as_deref() {
+        Some(at) => {
+            top.state == MemberState::Copied
+                && matches!(copy_found(disk, proofs, top, at), Some(Some(_)))
         }
-        _ => false,
+        None => false,
     };
     let Some(at) = top.destination.as_deref().filter(|_| named) else {
         return Ok(Some("the folder isn't where it was copied".into()));
@@ -546,9 +743,9 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item, copy: &TreeCopy) -> Resul
     // Every copy where it was made, every original still what it copied.
     let mut copies: HashMap<usize, Identity> = HashMap::new();
     for (ordinal, m) in item.members.iter().enumerate().skip(1) {
-        let found = match (m.destination.as_deref(), m.copy.as_ref().and_then(|c| c.id)) {
-            (Some(at), Some(id)) => matches!(copy_at(disk, at, id), Some(Some(_))),
-            _ => false,
+        let found = match m.destination.as_deref() {
+            Some(at) => matches!(copy_found(disk, proofs, m, at), Some(Some(_))),
+            None => false,
         };
         if !found {
             return Ok(Some("its copies aren't all where they were made".into()));
@@ -559,7 +756,7 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item, copy: &TreeCopy) -> Resul
         if m.state != MemberState::Copied {
             return Ok(Some("its copies aren't all where they were made".into()));
         }
-        if !original_here(disk, m) {
+        if !original_proven(disk, proofs, m) {
             return Ok(Some(Problem::Changed(m.source.clone()).to_string()));
         }
         let Ok(now) = disk.identity(copy_path) else {
@@ -751,10 +948,11 @@ pub(super) fn map(
 /// copied: what discarding its whole copy needs. Its folders are never
 /// removed, so they needn't be.
 fn originals(disk: &dyn Disk, item: &Item) -> bool {
+    let proofs = proofs_of(item);
     item.members
         .iter()
         .filter(|m| m.identity.is_some())
-        .all(|m| original_here(disk, m))
+        .all(|m| original_proven(disk, proofs, m))
 }
 
 /// Whether folder `item`'s original holds exactly what was planned: the
@@ -764,7 +962,8 @@ fn as_planned(disk: &dyn Disk, item: &Item) -> bool {
     let Some(top) = item.members.first() else {
         return false;
     };
-    let Ok(now) = walk(disk, &top.source, None) else {
+    let proofs = proofs_of(item);
+    let Ok(now) = walk(disk, &top.source, None, proofs.originals == Proof::Names) else {
         return false;
     };
     let planned: HashMap<&Path, &Member> = item
@@ -772,10 +971,16 @@ fn as_planned(disk: &dyn Disk, item: &Item) -> bool {
         .iter()
         .filter_map(|m| Some((rel(item, m)?, m)))
         .collect();
+    // By file object where it proves which it is; by name elsewhere, each
+    // a folder or a file as planned.
     now.len() == planned.len()
         && now.iter().all(|e| {
             planned.get(e.rel.as_path()).is_some_and(|m| {
-                m.id == Some(e.id) && (m.identity.is_none() || m.identity == e.identity)
+                let same = match proofs.originals {
+                    Proof::Ids => m.id == Some(e.id),
+                    Proof::Names => m.identity.is_some() == e.identity.is_some(),
+                };
+                same && (m.identity.is_none() || m.identity == e.identity)
             })
         })
 }
@@ -787,7 +992,8 @@ fn as_made(disk: &dyn Disk, item: &Item, at: &Path) -> bool {
     let Some(hidden) = item.members.first().and_then(|m| m.copy.as_ref()) else {
         return false;
     };
-    let Ok(now) = walk(disk, at, None) else {
+    let proofs = proofs_of(item);
+    let Ok(now) = walk(disk, at, None, proofs.copies == Proof::Names) else {
         return false;
     };
     let made: HashMap<&Path, &Member> = item
@@ -801,11 +1007,14 @@ fn as_made(disk: &dyn Disk, item: &Item, at: &Path) -> bool {
                 let Some(copy) = &m.copy else {
                     return false;
                 };
-                copy.id == Some(e.id)
-                    && (m.identity.is_none()
-                        || copy
-                            .content
-                            .is_some_and(|c| disk.hash(&at.join(&e.rel)).is_ok_and(|h| h == c)))
+                let same = match proofs.copies {
+                    Proof::Ids => copy.id == Some(e.id),
+                    Proof::Names => m.identity.is_some() == e.identity.is_some(),
+                };
+                same && (m.identity.is_none()
+                    || copy
+                        .content
+                        .is_some_and(|c| disk.hash(&at.join(&e.rel)).is_ok_and(|h| h == c)))
             })
         })
 }
@@ -823,18 +1032,34 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
             .db
             .write(|w| journal::set_state(w, id, ItemState::Done, None));
     };
+    let proofs = proofs_of(item);
     let copy_here = |m: &Member| {
         let (Some(at), Some(copy)) = (m.destination.as_deref(), &m.copy) else {
             return false;
         };
-        copy.id
-            .is_some_and(|c| presence(disk, at, c) == Presence::Here)
+        let named = match proofs.copies {
+            Proof::Ids => copy
+                .id
+                .is_some_and(|c| presence(disk, at, c) == Presence::Here),
+            Proof::Names => proof::presence(disk, at) == Presence::Here,
+        };
+        // Where names prove it, its bytes always.
+        named
             && copy.identity.is_some()
             && disk.identity(at).ok() == copy.identity
-            && (!recovering
+            && ((!recovering && proofs.copies == Proof::Ids)
                 || copy
                     .content
                     .is_some_and(|c| disk.hash(at).is_ok_and(|now| now == c)))
+    };
+    // Where names prove an original, its bytes too, before it goes.
+    let unchanged = |m: &Member| {
+        original_proven(disk, proofs, m)
+            && (proofs.originals == Proof::Ids
+                || m.copy
+                    .as_ref()
+                    .and_then(|c| c.content)
+                    .is_some_and(|c| disk.hash(&m.source).is_ok_and(|now| now == c)))
     };
     let files: Vec<&Member> = item
         .members
@@ -843,7 +1068,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         .collect();
     // In the Trash whole, where a crash came before its receipt was
     // journalled, or gone some other way: nothing is left to do.
-    if top.id.is_some_and(|t| gone(disk, &top.source, t)) {
+    if source_gone(disk, proofs, top) {
         catalog.db.write(|w| {
             for m in &item.members {
                 if matches!(m.state, MemberState::Copied | MemberState::Copying) {
@@ -854,12 +1079,10 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         })?;
         return Ok(());
     }
-    let whole = top
-        .id
-        .is_some_and(|t| presence(disk, &top.source, t) == Presence::Here)
+    let whole = source_presence(disk, proofs, top) == Presence::Here
         && files
             .iter()
-            .all(|m| m.state == MemberState::Copied && copy_here(m) && original_here(disk, m))
+            .all(|m| m.state == MemberState::Copied && copy_here(m) && unchanged(m))
         && as_planned(disk, item);
     let kept = |catalog: &mut Catalog, m: &Member, why: &str| {
         catalog
@@ -868,7 +1091,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
     };
     let mut note = None;
     if whole {
-        match cx.trash.trash(&top.source) {
+        match trash_original(cx, proofs, &top.source) {
             Ok(receipt) => {
                 if let Err(e) = disk.sync_dir(parent(&top.source)) {
                     note = Some(format!(
@@ -883,7 +1106,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
                     }
                     Ok(())
                 })?;
-                if !top.id.is_some_and(|t| gone(disk, &top.source, t)) {
+                if !source_gone(disk, proofs, top) {
                     kept(catalog, top, "the Trash took it, but it is still there")?;
                 }
             }
@@ -901,15 +1124,11 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         if m.state != MemberState::Copied {
             continue;
         }
-        let Some(file) = m.id else {
-            kept(catalog, m, "its copy isn't journalled")?;
-            continue;
-        };
         if !copy_here(m) {
             kept(catalog, m, "its copy isn't as it was made")?;
             continue;
         }
-        match presence(disk, &m.source, file) {
+        match source_presence(disk, proofs, m) {
             Presence::Here => {}
             Presence::Absent => {
                 catalog
@@ -922,11 +1141,11 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
                 continue;
             }
         }
-        if !original_here(disk, m) {
+        if !unchanged(m) {
             kept(catalog, m, "it changed since it was copied")?;
             continue;
         }
-        let receipt = match cx.trash.trash(&m.source) {
+        let receipt = match trash_original(cx, proofs, &m.source) {
             Ok(receipt) => receipt.location,
             Err(e) => {
                 kept(catalog, m, &e.to_string())?;
@@ -942,7 +1161,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         catalog.db.write(|w| {
             journal::set_member(w, id, m.ordinal, MemberState::Trashed, Some(&receipt))
         })?;
-        if !gone(disk, &m.source, file) {
+        if !source_gone(disk, proofs, m) {
             kept(catalog, m, "the Trash took it, but it is still there")?;
         }
     }
@@ -950,17 +1169,15 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
     // what in them wasn't copied, which is only there now.
     let planned: std::collections::HashSet<&Path> =
         item.members.iter().filter_map(|m| rel(item, m)).collect();
-    let extra: Option<Vec<PathBuf>> = walk(disk, &top.source, None).ok().map(|now| {
+    let compose = proofs.originals == Proof::Names;
+    let extra: Option<Vec<PathBuf>> = walk(disk, &top.source, None, compose).ok().map(|now| {
         now.into_iter()
             .map(|e| e.rel)
             .filter(|r| !planned.contains(r.as_path()))
             .collect()
     });
     for m in item.members.iter().filter(|m| m.identity.is_none()) {
-        if !m
-            .id
-            .is_some_and(|d| presence(disk, &m.source, d) == Presence::Here)
-        {
+        if source_presence(disk, proofs, m) != Presence::Here {
             continue;
         }
         let at = rel(item, m).unwrap_or(Path::new(""));
@@ -1024,10 +1241,11 @@ enum Built {
     Unknown,
 }
 
-/// Where `item`'s copy is: its hidden folder by its journalled file object
-/// at its hidden name or at its destination (named, whether or not that
-/// was journalled); or, made but not journalled, at its hidden name while
-/// empty.
+/// Where `item`'s copy is: its hidden folder, as its proofs say ([`copy_found`]),
+/// at its hidden name or at its destination (named, whether or not that was
+/// journalled); or, made but not journalled, at its hidden name while empty
+/// ([`unjournalled`]). Built at its name (where the volume can't rename
+/// exclusively), it is named once that is journalled.
 fn built(disk: &dyn Disk, item: &Item) -> Built {
     let Some(top) = item.members.first() else {
         return Built::Unknown;
@@ -1035,23 +1253,49 @@ fn built(disk: &dyn Disk, item: &Item) -> Built {
     let Some(copy) = &top.copy else {
         return Built::Unknown;
     };
-    if let Some(id) = copy.id {
-        let hidden = copy_at(disk, &copy.temp, id);
-        if let Some(Some(_)) = hidden {
-            return Built::Hidden;
+    let proofs = proofs_of(item);
+    match top.state {
+        // Never made: its making failed, so nothing of it is anywhere.
+        MemberState::Discarded => return Built::Gone,
+        MemberState::Planned => {
+            let since = unjournalled_since(proofs);
+            return match unjournalled(disk, &copy.temp, true, false, since) {
+                Made::Gone => Built::Gone,
+                Made::Here(_) => Built::Hidden,
+                Made::Unknown => Built::Unknown,
+            };
         }
-        let named = top.destination.as_deref().map(|d| copy_at(disk, d, id));
-        return match (hidden, named) {
-            (_, Some(Some(Some(at)))) => Built::Named(at),
-            (Some(None), Some(Some(None))) => Built::Gone,
-            _ => Built::Unknown,
+        _ => {}
+    }
+    let hidden = copy_found(disk, proofs, top, &copy.temp);
+    if proofs.direct {
+        return match hidden {
+            Some(Some(at)) if top.state == MemberState::Copied => Built::Named(at),
+            Some(Some(_)) => Built::Hidden,
+            Some(None) => Built::Gone,
+            None => Built::Unknown,
         };
     }
-    match unjournalled(disk, &copy.temp, true, false) {
-        Made::Gone => Built::Gone,
-        Made::Here(_) => Built::Hidden,
-        Made::Unknown => Built::Unknown,
+    if let Some(Some(_)) = hidden {
+        return Built::Hidden;
     }
+    let named = top
+        .destination
+        .as_deref()
+        .map(|d| copy_found(disk, proofs, top, d));
+    match (hidden, named) {
+        (_, Some(Some(Some(at)))) => Built::Named(at),
+        (Some(None), Some(Some(None))) => Built::Gone,
+        _ => Built::Unknown,
+    }
+}
+
+/// What an empty file or folder found where one was being made must have
+/// been made after to be taken for it, as `proofs` say: where its name isn't
+/// unique to the run (made at its name) or names prove it, after the move
+/// was planned (#573).
+fn unjournalled_since(proofs: Proofs) -> Option<i64> {
+    (proofs.direct || proofs.copies == Proof::Names).then_some(proofs.since)
 }
 
 /// What was made at a name inside the hidden folder before it was
@@ -1063,11 +1307,11 @@ enum Made {
 }
 
 /// The one name in `temp`'s folder that `sidecar::caseless` takes for
-/// `temp`'s, while it is empty (a folder when `dir`, else a file); gone
-/// when the folder has no such name, or, `inside` the hidden folder (which
-/// is this run's: nothing else makes a name in it), when that folder isn't
-/// there itself.
-fn unjournalled(disk: &dyn Disk, temp: &Path, dir: bool, inside: bool) -> Made {
+/// `temp`'s, while it is empty (a folder when `dir`, else a file) and, if
+/// `since` is given, made after it; gone when the folder has no such name,
+/// or, `inside` the hidden folder (which is this run's: nothing else makes
+/// a name in it), when that folder isn't there itself.
+fn unjournalled(disk: &dyn Disk, temp: &Path, dir: bool, inside: bool, since: Option<i64>) -> Made {
     let (up, Some(name)) = (parent(temp), temp.file_name()) else {
         return Made::Unknown;
     };
@@ -1094,7 +1338,8 @@ fn unjournalled(disk: &dyn Disk, temp: &Path, dir: bool, inside: bool) -> Made {
         }
         Err(_) => false,
     };
-    match empty {
+    let recent = since.is_none_or(|since| proof::born_after(disk, &at, since));
+    match empty && recent {
         true => Made::Here(at),
         false => Made::Unknown,
     }
@@ -1109,6 +1354,7 @@ fn unjournalled(disk: &dyn Disk, temp: &Path, dir: bool, inside: bool) -> Made {
 /// is journalled `discarded`. Returns whether all of it is gone.
 fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
     let disk = cx.disk;
+    let proofs = proofs_of(item);
     let proven = originals(disk, item);
     let gone_all = |catalog: &mut Catalog, receipt: Option<&Path>| {
         catalog.db.write(|w| {
@@ -1161,13 +1407,19 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                     continue;
                 };
                 let dir = m.identity.is_none();
-                let found = match copy.id {
-                    Some(id) => match copy_at(disk, &copy.temp, id) {
+                let found = match m.state {
+                    MemberState::Planned => unjournalled(
+                        disk,
+                        &copy.temp,
+                        dir,
+                        m.ordinal != 0,
+                        unjournalled_since(proofs),
+                    ),
+                    _ => match copy_found(disk, proofs, m, &copy.temp) {
                         Some(Some(at)) => Made::Here(at),
                         Some(None) => Made::Gone,
                         None => Made::Unknown,
                     },
-                    None => unjournalled(disk, &copy.temp, dir, m.ordinal != 0),
                 };
                 let mut receipt = None;
                 let done = match found {
@@ -1178,7 +1430,9 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                         .remove_dir(&at)
                         .and_then(|()| disk.sync_dir(parent(&at)))
                         .is_ok(),
-                    Made::Here(at) if copy.content.is_some() && !original_here(disk, m) => {
+                    Made::Here(at)
+                        if copy.content.is_some() && !original_proven(disk, proofs, m) =>
+                    {
                         match rule {
                             Originals::AsCopied => false,
                             Originals::Present => match cx.trash.trash(&at) {
@@ -1188,6 +1442,34 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                                 }
                                 Err(_) => false,
                             },
+                        }
+                    }
+                    // Built at its name, a file is at a visible name from
+                    // the start: one a photo of the catalog is named as now
+                    // (Synchronize Folder may have added it) stays; any not
+                    // proven empty goes to the Trash.
+                    Made::Here(at)
+                        if proofs.direct
+                            && occupied(
+                                &catalog.db,
+                                cx.folders,
+                                None,
+                                parent(&at),
+                                at.file_name().unwrap_or_default(),
+                                item.photos(),
+                            )? =>
+                    {
+                        false
+                    }
+                    Made::Here(at)
+                        if proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0) =>
+                    {
+                        match cx.trash.trash(&at) {
+                            Ok(r) => {
+                                receipt = Some(r.location);
+                                disk.sync_dir(parent(&at)).is_ok()
+                            }
+                            Err(_) => false,
                         }
                     }
                     Made::Here(at) => disk

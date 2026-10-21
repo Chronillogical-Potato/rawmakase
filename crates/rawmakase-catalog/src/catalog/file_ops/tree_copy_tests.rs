@@ -4,6 +4,7 @@
 //! that fails before the catalog follows is undone, and recovery decides
 //! whatever a crash leaves at any step. On one volume, the test disk takes
 //! `far/` for another volume's.
+use super::copy_tests::{Far, far_as};
 use super::recover_tests::{before, check};
 use super::tests::{FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results};
 use super::*;
@@ -35,7 +36,7 @@ fn small() -> Fx {
 }
 
 fn far(fx: &Fx) -> Faulty {
-    Faulty::default().elsewhere(&fx.root.join("far"))
+    far_as(fx, Far::Ids)
 }
 
 fn to_far(fx: &Fx) -> FileOp {
@@ -62,6 +63,13 @@ fn tree_of(dir: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
         };
         for e in names {
             let p = e.unwrap().path();
+            // AppleDouble files the test disk keeps beside others on FAT
+            // and exFAT are part of those.
+            if p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("._"))
+            {
+                continue;
+            }
             let rel = p
                 .strip_prefix(base)
                 .unwrap()
@@ -195,8 +203,9 @@ fn a_folder_holding_what_can_t_be_copied_or_proven_is_refused() -> Result<()> {
 }
 
 /// Plans the move, runs it on `disk` (which may crash) with `trash`,
-/// restarts and recovers on the same volumes.
-fn scenario(fx: &mut Fx, trash: &dyn Trash, disk: &Faulty) -> (BatchId, Recovery) {
+/// restarts and recovers on the same volumes, with `far/` on a volume of
+/// `kind`.
+fn scenario_as(fx: &mut Fx, trash: &dyn Trash, disk: &Faulty, kind: Far) -> (BatchId, Recovery) {
     let plan = fx.plan_on(to_far(fx), disk).unwrap();
     let batch = plan.batch().clone();
     crashes(|| {
@@ -212,7 +221,7 @@ fn scenario(fx: &mut Fx, trash: &dyn Trash, disk: &Faulty) -> (BatchId, Recovery
         );
     });
     fx.reopen();
-    let clean = far(fx);
+    let clean = far_as(fx, kind);
     let recovery = fx.recover_with(&clean, trash);
     (batch, recovery)
 }
@@ -229,9 +238,22 @@ fn proven(
     was: &super::recover_tests::Before,
     what: &str,
 ) {
+    proven_as(fx, tree, recovery, batch, was, what, Far::Ids)
+}
+
+/// [`proven`] with `far/` on a volume of `kind`.
+fn proven_as(
+    fx: &mut Fx,
+    tree: &BTreeMap<String, Option<Vec<u8>>>,
+    recovery: &Recovery,
+    batch: &BatchId,
+    was: &super::recover_tests::Before,
+    what: &str,
+    kind: Far,
+) {
     check(fx, was, recovery, batch);
     where_it_says(fx, tree, batch, what);
-    let clean = far(fx);
+    let clean = far_as(fx, kind);
     let trash = FakeTrash::new(fx);
     *trash.calls.borrow_mut() = 100;
     for u in &recovery.unfinished {
@@ -278,20 +300,44 @@ fn where_it_says(fx: &Fx, tree: &BTreeMap<String, Option<Vec<u8>>>, batch: &Batc
 
 #[test]
 fn every_fault_at_every_step_of_a_folder_copy_ends_proven() {
+    assert!(every_fault(Far::Ids) >= 100);
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
+fn every_fault_at_every_step_of_a_folder_copy_to_exfat_ends_proven() {
+    assert!(every_fault(Far::Names) >= 60);
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
+fn every_fault_at_every_step_of_a_folder_built_at_its_name_ends_proven() {
+    assert!(every_fault(Far::Direct) >= 50);
+}
+
+/// Every fault at every step of moving `day/` to `far/` as `kind`, then
+/// recovery: each ends proven. Returns how many runs it made.
+fn every_fault(kind: Far) -> usize {
     let started = std::time::Instant::now();
     // A run without faults says how many steps there are.
     let mut clean = small();
-    let counting = far(&clean);
+    let counting = far_as(&clean, kind);
     let trash = FakeTrash::new(&clean);
     let op = to_far(&clean);
     let outcome = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
-    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{kind:?}");
     assert_eq!(counting.count(Op::Copy), 3);
     // And one undone once two files are whole: a full drive at the last.
     let mut undone = small();
     let failing = Faulty {
-        elsewhere: Some(undone.root.join("far")),
-        ..Faulty::at(Op::Copy, 2, Fault::Fail)
+        faults: vec![(Op::Copy, 2, Fault::Fail)],
+        ..far_as(&undone, kind)
     };
     let trash = FakeTrash::new(&undone);
     let op = to_far(&undone);
@@ -311,7 +357,8 @@ fn every_fault_at_every_step_of_a_folder_copy_ends_proven() {
     ] {
         // Faults while undoing need the undoing run; the others its steps
         // before the fault are the clean run's.
-        let undoing = matches!(op, Op::RemoveFile | Op::RemoveDir | Op::Sync);
+        let undoing = matches!(op, Op::RemoveFile | Op::RemoveDir | Op::Sync)
+            || (kind != Far::Ids && op == Op::Hash);
         let count = counting.count(op).max(failing.count(op));
         for nth in 0..count {
             let faults: &[Fault] = match op {
@@ -324,6 +371,12 @@ fn every_fault_at_every_step_of_a_folder_copy_ends_proven() {
                 _ => &[Fault::Fail, Fault::CrashBefore, Fault::CrashAfter],
             };
             for &fault in faults {
+                // On exFAT, a crash before a call only at its first: it is
+                // one after the call before but for the journal between,
+                // which the ids run covers. Kept so for CI's time.
+                if kind != Far::Ids && fault == Fault::CrashBefore && nth > 0 {
+                    continue;
+                }
                 for undo in [false, true] {
                     if undo && !undoing {
                         continue;
@@ -336,13 +389,13 @@ fn every_fault_at_every_step_of_a_folder_copy_ends_proven() {
                         with.push((Op::Copy, 2, Fault::Fail));
                     }
                     let disk = Faulty {
-                        elsewhere: Some(fx.root.join("far")),
-                        ..Faulty::with(&with)
+                        faults: with,
+                        ..far_as(&fx, kind)
                     };
                     let trash = FakeTrash::new(&fx);
-                    let (batch, recovery) = scenario(&mut fx, &trash, &disk);
-                    let what = format!("{op:?} {nth} {fault:?} undo {undo}");
-                    proven(&mut fx, &tree, &recovery, &batch, &was, &what);
+                    let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, kind);
+                    let what = format!("{kind:?} {op:?} {nth} {fault:?} undo {undo}");
+                    proven_as(&mut fx, &tree, &recovery, &batch, &was, &what, kind);
                     runs += 1;
                 }
             }
@@ -354,26 +407,20 @@ fn every_fault_at_every_step_of_a_folder_copy_ends_proven() {
             let mut fx = small();
             let was = before(&fx);
             let tree = tree_of(&fx.root.join("day"));
-            let disk = far(&fx);
+            let disk = far_as(&fx, kind);
             let mut trash = FakeTrash::new(&fx);
             match crash {
                 true => trash.crash_after = Some(n),
                 false => trash.fail_from = Some(n),
             }
-            let (batch, recovery) = scenario(&mut fx, &trash, &disk);
-            proven(
-                &mut fx,
-                &tree,
-                &recovery,
-                &batch,
-                &was,
-                &format!("trash {n} {crash}"),
-            );
+            let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, kind);
+            let what = format!("{kind:?} trash {n} {crash}");
+            proven_as(&mut fx, &tree, &recovery, &batch, &was, &what, kind);
             runs += 1;
         }
     }
-    assert!(runs >= 100, "{runs}");
-    eprintln!("{runs} runs in {:?}", started.elapsed());
+    eprintln!("{kind:?}: {runs} runs in {:?}", started.elapsed());
+    runs
 }
 
 #[test]
@@ -643,7 +690,10 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
         .find(|id| *id != fx.root_id())
         .unwrap();
     let a = fx.photo("day/a.NEF");
-    let tree = tree_of(&fx.root.join("day"));
+    // Names FAT and exFAT on macOS list decomposed, stored either way.
+    std::fs::write(fx.root.join("day/Caf\u{e9}.NEF"), bytes("cafe"))?;
+    std::fs::write(fx.root.join("day/sub/Ru\u{308}gen.NEF"), bytes("rugen"))?;
+    let tree = as_seen(tree_of(&fx.root.join("day")));
     let op = FileOp::MoveFolder {
         root: fx.root_id(),
         folder: "day".into(),
@@ -655,7 +705,7 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
     let trash = FakeTrash::new(&fx);
     let outcome = execute::execute(&mut fx.cat, plan.confirm(), &trash, &AtomicBool::new(false))?;
     assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
-    assert_eq!(tree_of(&dir.join("day")), tree);
+    assert_eq!(as_seen(tree_of(&dir.join("day"))), tree);
     assert!(!fx.root.join("day").exists());
     let path = fx
         .cat
@@ -671,7 +721,56 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
     drop(fx);
+    clear(&dir)?;
     there.close()?;
+    Ok(())
+}
+
+/// A tree as names compare on every drive: composed, without macOS's
+/// AppleDouble files (`._name` beside `name`) on FAT and exFAT.
+fn as_seen(tree: BTreeMap<String, Option<Vec<u8>>>) -> BTreeMap<String, Option<Vec<u8>>> {
+    use unicode_normalization::UnicodeNormalization;
+    let composed: BTreeMap<String, Option<Vec<u8>>> = tree
+        .into_iter()
+        .map(|(k, v)| (k.nfc().collect(), v))
+        .collect();
+    let apple_double = |k: &str| {
+        let (dir, name) = k.rsplit_once('/').map_or(("", k), |(d, n)| (d, n));
+        name.strip_prefix("._").is_some_and(|of| {
+            let main = match dir {
+                "" => of.to_string(),
+                dir => format!("{dir}/{of}"),
+            };
+            composed.contains_key(&main)
+        })
+    };
+    composed
+        .iter()
+        .filter(|(k, _)| !apple_double(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// Removes everything in `dir`, by names composed (macOS's exFAT removes a
+/// file only by the spelling it is stored in, which this test made so).
+fn clear(dir: &Path) -> Result<()> {
+    use unicode_normalization::UnicodeNormalization;
+    for name in std::fs::read_dir(dir)? {
+        let name: String = name?.file_name().to_string_lossy().nfc().collect();
+        let path = dir.join(name);
+        if path.is_dir() {
+            clear(&path)?;
+        }
+        let removed = match path.is_dir() {
+            true => std::fs::remove_dir(&path),
+            false => std::fs::remove_file(&path),
+        };
+        // AppleDouble `._` files go with the file they are of.
+        match removed {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            other => other?,
+        }
+    }
     Ok(())
 }
 
@@ -1000,5 +1099,272 @@ fn a_missing_folder_never_takes_the_place_of_another_named_alike() -> Result<()>
     assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
     assert_eq!(logical(&fx, sub), "far/day/sub");
     assert_eq!(logical(&fx, upper), "far/day/SUB");
+    Ok(())
+}
+
+/// The copy ids journalled for batch `batch`'s items, as text.
+fn copy_ids(fx: &Fx, batch: &BatchId) -> Vec<Option<String>> {
+    let db = fx.cat.db_for_tests();
+    let mut stmt = db
+        .prepare(
+            "SELECT c.copy_id FROM file_operation_copies c
+             JOIN file_operations o ON o.id=c.operation WHERE o.batch=?1",
+        )
+        .unwrap();
+    stmt.query_map([batch.to_string()], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
+#[test]
+fn a_folder_moves_to_exfat_proven_by_names_and_journals_no_real_id() -> Result<()> {
+    for kind in [Far::Names, Far::Direct] {
+        let mut fx = files();
+        let b = fx.photo("day/sub/b.NEF");
+        let tree = tree_of(&fx.root.join("day"));
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(to_far(&fx), &disk)?;
+        let batch = plan.batch().clone();
+        let outcome = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &AtomicBool::new(false),
+            &disk,
+        )?;
+        assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{kind:?}");
+        assert_eq!(tree_of(&fx.root.join("far/day")), tree, "{kind:?}");
+        assert_eq!(fx.rows()[&b], "far/day/sub/b.NEF");
+        assert!(!fx.root.join("day").exists());
+        let ids = copy_ids(&fx, &batch);
+        assert!(
+            !ids.is_empty() && ids.iter().all(|i| i.as_deref() == Some("0:0")),
+            "{kind:?}: {ids:?}"
+        );
+        // Built at its name where the volume can't rename exclusively.
+        assert_eq!(disk.renames().is_empty(), kind == Far::Direct, "{kind:?}");
+        assert!(partials(&fx).is_empty(), "{kind:?}: {:?}", partials(&fx));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_folder_name_taken_just_before_it_is_made_at_it_is_left_as_it_is() -> Result<()> {
+    let mut fx = files();
+    let tree = tree_of(&fx.root.join("day"));
+    let disk = Faulty {
+        occupy_on_create: Some((fx.root.join("far/day"), Vec::new())),
+        ..far_as(&fx, Far::Direct)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert!(
+        matches!(&results(&outcome)[..], [ItemResult::Unchanged(Some(_))]),
+        "{outcome:?}"
+    );
+    // Theirs: a folder made there by another program, kept.
+    assert!(fx.root.join("far/day").is_dir());
+    assert_eq!(tree_of(&fx.root.join("day")), tree);
+    fx.reopen();
+    assert!(
+        fx.recover_with(&far_as(&fx, Far::Direct), &trash)
+            .unfinished
+            .is_empty()
+    );
+    assert!(fx.root.join("far/day").is_dir());
+    Ok(())
+}
+
+/// The catalog folder of the fixture's root whose logical path is
+/// `logical`, composed.
+fn logical_of(fx: &Fx, logical: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let db = fx.cat.db_for_tests();
+    let mut stmt = db.prepare("SELECT path FROM folder_paths").unwrap();
+    let paths: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    paths
+        .into_iter()
+        .find(|p| p.nfc().collect::<String>() == logical)
+        .unwrap_or_else(|| panic!("no folder {logical}"))
+}
+
+#[test]
+fn accented_names_stored_either_way_move_with_a_folder_to_and_from_exfat() -> Result<()> {
+    // A folder named decomposed, holding a photo named decomposed and one
+    // named composed.
+    let names = [
+        "Cafe\u{301}/Ru\u{308}gen.NEF",
+        "Cafe\u{301}/\u{c9}t\u{e9}.NEF",
+        "far/",
+    ];
+    // To exFAT: made there composed.
+    for kind in [Far::Names, Far::Direct] {
+        let mut fx = fixture(&names);
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let op = FileOp::MoveFolder {
+            root: fx.root_id(),
+            folder: logical_of(&fx, "Caf\u{e9}"),
+            to_root: fx.root_id(),
+            parent: "far".into(),
+        };
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{kind:?}");
+        let made = fx.root.join("far/Caf\u{e9}/R\u{fc}gen.NEF");
+        assert!(super::tests::stored_spelling(&made), "{kind:?}");
+        assert_eq!(
+            std::fs::read(&made)?,
+            bytes("Cafe\u{301}/Ru\u{308}gen.NEF"),
+            "{kind:?}"
+        );
+        // And renamed there, by the spelling it was made in, as FAT renames
+        // only so (exFAT, which can't rename exclusively, renames nothing).
+        if kind == Far::Direct {
+            continue;
+        }
+        let op = FileOp::RenameFolder {
+            root: fx.root_id(),
+            folder: logical_of(&fx, "far/Caf\u{e9}"),
+            name: "Bar".into(),
+        };
+        // A rename keeps a file's number while mounted (measured on macOS).
+        let disk = Faulty {
+            renumber_on_rename: false,
+            ..far_as(&fx, kind)
+        };
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert!(
+            matches!(results(&outcome)[..], [ItemResult::FolderRenamed]),
+            "{kind:?}: {outcome:?}"
+        );
+    }
+    // A folder others made there stored decomposed renames by that
+    // spelling.
+    let mut fx = fixture(&["far/Cafe\u{301}/Ru\u{308}gen.NEF"]);
+    let op = FileOp::RenameFolder {
+        root: fx.root_id(),
+        folder: logical_of(&fx, "far/Caf\u{e9}"),
+        name: "Bar".into(),
+    };
+    let disk = Faulty {
+        renumber_on_rename: false,
+        ..far_as(&fx, Far::Names)
+    };
+    let trash = FakeTrash::new(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert!(
+        matches!(results(&outcome)[..], [ItemResult::FolderRenamed]),
+        "{outcome:?}"
+    );
+    assert!(fx.root.join("far/Bar/Ru\u{308}gen.NEF").exists());
+    // From exFAT: its originals go to the Trash by the spelling stored,
+    // the folder's own name stored decomposed or composed.
+    let composed = [
+        "Caf\u{e9}/Ru\u{308}gen.NEF",
+        "Caf\u{e9}/\u{c9}t\u{e9}.NEF",
+        "far/",
+    ];
+    for names in [names, composed] {
+        let mut fx = fixture(&names);
+        let disk = Faulty {
+            names_only: vec![fx.root.clone()],
+            lists_decomposed: true,
+            ..far(&fx)
+        };
+        let mut trash = FakeTrash::new(&fx);
+        trash.stored_only = true;
+        let op = FileOp::MoveFolder {
+            root: fx.root_id(),
+            folder: logical_of(&fx, "Caf\u{e9}"),
+            to_root: fx.root_id(),
+            parent: "far".into(),
+        };
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{names:?}");
+        assert!(
+            outcome.items[0].originals_kept.is_empty(),
+            "{names:?}: {outcome:?}"
+        );
+        let gone = |name: &str| !fx.root.join(name).exists();
+        assert!(gone("Cafe\u{301}") && gone("Caf\u{e9}"), "{names:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_folder_named_as_an_apple_double_file_moves_with_its_folder() -> Result<()> {
+    // Only a file is macOS's AppleDouble file: a folder `._a.NEF` beside
+    // `a.NEF` on FAT or exFAT is the user's own.
+    let mut fx = fixture(&["day/a.NEF", "day/._a.NEF/only.txt", "far/"]);
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        lists_decomposed: true,
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    assert_eq!(
+        std::fs::read(fx.root.join("far/day/._a.NEF/only.txt"))?,
+        bytes("day/._a.NEF/only.txt")
+    );
+    Ok(())
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn a_file_named_as_anothers_apple_double_file_is_not_copied_to_fat_or_exfat() {
+    // There macOS would take it for `a.NEF`'s, and write over it.
+    for kind in [Far::Names, Far::Direct] {
+        let fx = fixture(&["day/a.NEF", "day/._a.NEF", "far/"]);
+        let refused = fx.plan_on(to_far(&fx), &far_as(&fx, kind));
+        assert!(
+            matches!(&refused, Err(FileOpError::Destination(why)) if why.contains("._a.NEF")),
+            "{kind:?}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn a_folder_holding_the_catalog_is_refused_by_either_spelling() -> Result<()> {
+    // On FAT and exFAT the folder is used by its composed name; the
+    // catalog's own path may spell it decomposed, as the drive lists it.
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().canonicalize()?.join("trip");
+    let holder = root.join("Cafe\u{301}");
+    std::fs::create_dir_all(&holder)?;
+    std::fs::write(holder.join("a.NEF"), bytes("a.NEF"))?;
+    let catalog = holder.join("Photos.rawmakase");
+    let mut cat = crate::catalog::Catalog::create(&catalog)?;
+    cat.add_folder(&root)?;
+    let fx = Fx {
+        dir,
+        root,
+        catalog,
+        cat,
+    };
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        lists_decomposed: true,
+        ..Faulty::default()
+    };
+    let op = FileOp::RenameFolder {
+        root: fx.root_id(),
+        folder: logical_of(&fx, "Caf\u{e9}"),
+        name: "Bar".into(),
+    };
+    let refused = fx.plan_on(op, &disk);
+    assert!(
+        matches!(&refused, Err(FileOpError::Destination(why)) if why.contains("catalog")),
+        "{refused:?}"
+    );
     Ok(())
 }

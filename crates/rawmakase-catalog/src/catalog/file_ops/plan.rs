@@ -242,8 +242,14 @@ fn tree_plan(
         .read_one(sql!("SELECT count(*) FROM computers"), &[])?;
     let name = tree.destination.file_name().unwrap_or_default().to_owned();
     let dir = super::disk::parent(&tree.destination).to_path_buf();
+    let destination = tree.destination.clone();
     let across = tree.copy.as_mut().map(|copy| {
-        copy.hidden = dir.join(temp_name(&name, &batch, 0, 0));
+        // Where the volume can't rename exclusively, it is built at its
+        // name (#573).
+        copy.hidden = match copy.proofs.direct {
+            true => destination.clone(),
+            false => dir.join(temp_name(&name, &batch, 0, 0)),
+        };
         super::Across {
             files: copy.files(),
             companions: 0,
