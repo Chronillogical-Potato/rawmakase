@@ -249,9 +249,11 @@ impl Editor {
                     });
                 ui.add_space(4.);
                 ui.label(
-                    egui::RichText::new("A folder moves on its drive.")
-                        .size(12.)
-                        .color(palette.gray(140)),
+                    egui::RichText::new(
+                        "To another drive, a folder is copied, checked, and then put in the Trash.",
+                    )
+                    .size(12.)
+                    .color(palette.gray(140)),
                 );
                 ui.add_space(16.);
                 ui.horizontal(|ui| {

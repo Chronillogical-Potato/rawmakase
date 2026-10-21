@@ -238,7 +238,10 @@ inject a temporary file, without changing the process-wide environment.
   unlinked is a partial copy the run made and never named. Such copies are
   made only between volumes whose file ids stay (local APFS, HFS+, ext,
   XFS, Btrfs or NTFS ones), and a name held by another file object is never taken for a
-  copy gone. Every disk step is journalled, after its folders
+  copy gone. A folder moved to another volume is copied whole into one
+  hidden folder there, then named by one exclusive rename; its originals go
+  to the Trash whole only when the folder holds exactly what was copied, and
+  the only folders ever removed are empty ones that copy made. Every disk step is journalled, after its folders
   are synced, before the next, and recovery decides whatever a crash left from
   the journal and the disk, putting back only what it proves. One process at a
   time changes a catalog's files, under an OS lock on a file beside the
