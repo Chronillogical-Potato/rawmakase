@@ -13,8 +13,8 @@ add a camera or a variant.
 
 - `crates/rawmakase-tiff` reads TIFF directories (bounded, no RAW knowledge);
   the model's DNG reader and `rawmakase-raw` use it.
-- `crates/rawmakase-raw` depends only on `rawmakase-tiff` and small pure-Rust
-  crates. It has no unsafe code (`#![forbid(unsafe_code)]`), no build script,
+- `crates/rawmakase-raw` depends only on `rawmakase-tiff` and pure-Rust
+  crates (Deflate, JPEG XL through jxl-oxide, rayon, the TOML tables' parser). It has no unsafe code (`#![forbid(unsafe_code)]`), no build script,
   and never panics on malformed input; every allocation is checked against
   header limits (`io::samples`). Metadata records are read in place or up to
   what their reader uses (the `container::tiff` accessors take each tag's
@@ -33,7 +33,10 @@ add a camera or a variant.
 Three operations on the file's bytes, read into memory once:
 
 - `open(bytes) -> RawInfo`: the header facts, no sensor decode;
-- `preview(&RawInfo, bytes)`: the embedded JPEG thumbnails use;
+- `preview(&RawInfo, bytes)`: the embedded preview thumbnails use, the
+  largest JPEG or JPEG XL (Lightroom's DNGs of HDR and panorama merges embed
+  a 1024-pixel JPEG XL beside a 256-pixel JPEG); `rawmakase-decode`'s
+  `raw::thumbnail` decodes either;
 - `decode(&RawInfo, bytes, &cancel) -> Sensor`: the sensor data, with the
   levels read after unpacking. Decoders check `cancel` inside their loops.
 
@@ -42,7 +45,7 @@ Modules, each with a small `pub(crate)` surface:
 | Module | Owns |
 | --- | --- |
 | `io` | Bounded byte reads and the allocation limits |
-| `codec/` | Decoders from bytes to samples, knowing no container or camera: bit pumps, JPEG Huffman codes, lossless JPEG, Nikon's Huffman-coded data and small RAWs, Nikon High Efficiency (JPEG XS), Panasonic's blocks and strips, Sony's codings, Fujifilm's compressed stripes, Canon's CRX, Olympus's coding, packed samples, Pentax's Huffman-coded differences, Samsung's codings, Canon's CRW blocks, Phase One's IIQ rows, Hasselblad's pairs |
+| `codec/` | Decoders from bytes to samples, knowing no container or camera: bit pumps, JPEG Huffman codes, lossless JPEG, DNG's JPEG XL tiles, Nikon's Huffman-coded data and small RAWs, Nikon High Efficiency (JPEG XS), Panasonic's blocks and strips, Sony's codings, Fujifilm's compressed stripes, Canon's CRX, Olympus's coding, packed samples, Pentax's Huffman-coded differences, Samsung's codings, Canon's CRW blocks, Phase One's IIQ rows, Hasselblad's pairs |
 | `container/` | Probing and structure per container family: where the sensor data, previews and maker notes are (`tiff`, `dng`, `nef`, `rw2`, `arw`, `raf`, `cr3`, `orf`, `pef`, `srw`, `erf`, `cr2`, `headerless`, `ciff`, `iiq`, `fff`, `mos`, `sti`, `brcm`, `mrw`, `dcs`, `kdc`) |
 | `vendor/` | Per-maker rules: what a maker's own tags and maker notes mean (white balance, presets, lens, crops, levels) and their decryption (`nikon`, `panasonic`, `sony`, `fujifilm`, `canon_cr3`, `olympus`, `pentax`, `samsung`, `epson`, `canon`, `phase_one`, `hasselblad`, `leaf`) |
 | `variant` | The one selector: `enum Variant`, and one exhaustive `match` from variant to reader and codec |
@@ -61,6 +64,7 @@ A file of a recognised container in a variant this crate does not decode is
 | `DngLosslessJpeg` | DNG, lossless JPEG tiles or strips; DCT JPEG ones some writers store under the same code | DNG 1.7, ITU T.81 |
 | `DngDeflate` | DNG, Deflate tiles, integer (horizontal differences) or floating point (byte planes) | DNG 1.7, Adobe TIFF Technical Note 3 |
 | `DngUncompressedFloat` | DNG, uncompressed 16, 24 or 32-bit floating point | DNG 1.7, IEEE 754 |
+| `DngJpegXl` | DNG, JPEG XL tiles (compression 52546), integer or floating point, lossless or lossy: Lightroom's HDR and panorama merges | DNG 1.7, ISO/IEC 18181, jxl-oxide, checked against libjxl's djxl |
 | `DngVc5` | DNG of VC5-coded tiles (compression 9, GoPro's GPR): opened for its header facts, its sensor data `Unsupported` | DNG 1.7 |
 | `Rw2Delta` | Panasonic RW2/RWL raw formats 3 and 4: delta-coded 16-byte blocks | TIFF 6, ExifTool's PanasonicRaw tag names, our own measurements |
 | `Rw2PackedRotated` | Panasonic RW2 raw format 5: packed 12 or 14-bit samples in 16-byte blocks | TIFF 6, ExifTool's PanasonicRaw tag names, our own measurements |
@@ -129,7 +133,7 @@ a lossless JPEG difference of length 16, which T.81 codes with none; those bits
 hold the difference. A stream that fails to decode as T.81 says is decoded
 again reading them, and that reading is kept only when it consumes the stream
 exactly. Floating-point DNGs hold their levels on the integer scale; RAWmakase
-keeps a sample's integer part. HDRMerge's floating-point mosaics (predictor
+keeps a mosaic's sample's integer part. HDRMerge's floating-point mosaics (predictor
 34894) difference bytes two apart, the same colour's in a Bayer row. Blackmagic's
 DCT-coded tiles decode with an exact inverse DCT; they differ from LibRaw's
 (libjpeg-turbo's) by one 12-bit level in under 0.03% of samples.
@@ -176,10 +180,27 @@ tells the edit that Temp and Tint do not apply (`Recipe::update_wb` keeps
 the gains at 1, masks' Temp and Tint do nothing, rendering ignores gains a
 preset or another photo's edit brought, and Develop disables White
 Balance), as Lightroom does. Like small RAWs they develop at full size in
-both modes. Linear raw in separate planes or of floating-point samples,
-Adobe's lossy linear DNGs
-(compression 34892, baseline JPEG of three components) and JPEG XL (52546)
-tiles are `Unsupported`; Apple's and Samsung's
+both modes. Linear raw of floating-point samples (Lightroom's HDR merges,
+under a WhiteLevel of 32768) is scaled to 16 bits under its white, its
+levels with it, and rounded, so samples below one keep their precision.
+
+JPEG XL tiles (compression 52546, Lightroom's HDR and panorama merges) are
+decoded by jxl-oxide (`codec::jxl`), with two departures from its defaults
+that make it agree with libjxl's djxl (to 1e-4 on Lightroom's tiles): it
+decodes with 32-bit buffers, since Lightroom's tiles say 16-bit ones
+suffice and then hold larger coefficients (an HDR merge's sun), and a lossy
+tile, coded in XYB, is taken from jxl-oxide as linear sRGB and converted to
+the codestream's declared RGB (BT.2100 in Lightroom's) by matrix here,
+since jxl-oxide's own conversion gamut-maps values above one into 0–1.
+Integer samples are the codestream's 0–1 times 2^bits − 1. A tile larger
+than the DNG's tile, or a lossy one declared other than linear RGB with a D65
+white, is refused; a lossless one is taken as stored.
+
+Linear raw in separate planes or of floating-point samples under Adobe's
+predictor (measured on HDRMerge's mosaics only), DNGs of interleaved rows or
+columns (RowInterleaveFactor or ColumnInterleaveFactor over 1) and Adobe's lossy linear DNGs
+(compression 34892, baseline JPEG of three components) are `Unsupported`;
+Apple's and Samsung's
 ProfileGainTableMap, a local tone map Camera Raw applies after the profile,
 is not applied.
 

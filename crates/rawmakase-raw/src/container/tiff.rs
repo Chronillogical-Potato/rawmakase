@@ -307,8 +307,9 @@ fn walk(
 }
 
 impl TiffFile<'_> {
-    /// The JPEG previews the directories list: JPEGInterchangeFormat (513,
-    /// 514) and JPEG-compressed strips of images that are not raw data.
+    /// The previews the directories list: JPEGInterchangeFormat (513, 514)
+    /// and JPEG or JPEG XL-compressed (52546, Lightroom's DNG previews) strips
+    /// of images that are not raw data.
     pub fn previews(&self) -> Vec<crate::preview::Candidate> {
         let mut out = Vec::new();
         for ifd in self.ifds.iter().chain(&self.exif) {
@@ -322,7 +323,7 @@ impl TiffFile<'_> {
                 });
             }
             let photometric = self.int(ifd, 262).unwrap_or(0);
-            if matches!(self.int(ifd, 259), Some(6 | 7))
+            if matches!(self.int(ifd, 259), Some(6 | 7 | 52546))
                 && matches!(photometric, 2 | 6)
                 && let (Some(offsets), Some(counts)) =
                     (self.ints(ifd, 273, 1), self.ints(ifd, 279, 1))
@@ -376,6 +377,40 @@ mod tests {
         f.extend(0u32.to_le_bytes());
         f.extend(values);
         f
+    }
+
+    /// A JPEG XL-compressed RGB strip (Lightroom's DNG previews) is a
+    /// preview candidate, chosen for its pixels; one whose data is not JPEG
+    /// XL is not.
+    #[test]
+    fn jpeg_xl_strips_are_previews() {
+        let jxl = include_bytes!("../../tests/data/jxl-int16-lossless.jxl");
+        let file = |at: u16, data: &[u8]| {
+            let mut f = tiff(&[
+                (256, &[8]),
+                (257, &[4]),
+                (259, &[52546]),
+                (262, &[2]),
+                (273, &[at]),
+                (279, &[jxl.len() as u16]),
+            ]);
+            f.extend(data);
+            f
+        };
+        let at = file(0, &[]).len() as u16;
+        for (data, found) in [(&jxl[..], true), (&[0u8; 300][..], false)] {
+            let f = file(at, data);
+            let t = TiffFile::parse(&f, 0).unwrap();
+            let previews = t.previews();
+            assert_eq!(previews.len(), 1);
+            assert_eq!(previews[0].pixels, 32);
+            let chosen = crate::preview::largest(&previews, &f);
+            assert_eq!(chosen.is_some(), found);
+        }
+        assert!(crate::preview::is_jpeg_xl(jxl, 0));
+        assert!(crate::preview::is_jpeg_xl(&[0xff, 0x0a, 0], 0));
+        assert!(!crate::preview::is_jpeg_xl(&[0xff, 0xd8, 0xff], 0));
+        assert!(!crate::preview::is_jpeg_xl(jxl, u64::MAX));
     }
 
     #[test]

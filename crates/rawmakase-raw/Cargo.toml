@@ -15,6 +15,8 @@ test-support = []
 rawmakase-tiff = { path = "../rawmakase-tiff", version = "0.1.0" }
 # Deflate-compressed DNG tiles.
 miniz_oxide = "0.9"
+# JPEG XL-compressed DNG tiles (DNG 1.7).
+jxl-oxide = { version = "0.12.6", default-features = false }
 rayon = "1.12"
 # The camera fact tables (data/raw-cameras.toml, raw-matrices.toml), parsed
 # once.

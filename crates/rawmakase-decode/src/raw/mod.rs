@@ -481,26 +481,80 @@ fn sony_frame(
     ];
     Some((frame, [left, top, width, height]))
 }
+/// The embedded preview, upright: a JPEG by its EXIF orientation, else the
+/// RAW's; a JPEG XL (Lightroom's DNG previews) by its codestream's, else the
+/// RAW's.
 pub fn thumbnail(raw: &mut Raw) -> anyhow::Result<image::RgbImage> {
-    use image::{ImageDecoder, metadata::Orientation};
     let bytes = raw.thumbnail()?;
-    let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;
-    let mut orientation = decoder.orientation()?;
-    if orientation == Orientation::NoTransforms {
-        orientation = match raw.metadata.flip {
-            3 => Orientation::Rotate180,
-            5 => Orientation::Rotate270,
-            6 => Orientation::Rotate90,
-            _ => Orientation::NoTransforms,
+    preview_image(bytes, raw.metadata.flip)
+}
+/// The most pixels a JPEG XL preview may claim: a 100-megapixel camera's.
+/// Its header is read before any pixel, so a hostile one is refused before
+/// the image is allocated.
+const PREVIEW_PIXELS: u64 = 120_000_000;
+/// An embedded preview's `bytes` decoded upright (see [`thumbnail`]); `flip`
+/// is the RAW's orientation.
+fn preview_image(bytes: Vec<u8>, flip: i32) -> anyhow::Result<image::RgbImage> {
+    use image::{ImageDecoder, metadata::Orientation};
+    let by_raw = match flip {
+        3 => Orientation::Rotate180,
+        5 => Orientation::Rotate270,
+        6 => Orientation::Rotate90,
+        _ => Orientation::NoTransforms,
+    };
+    let (mut im, orientation) = if rawmakase_raw::is_jpeg_xl(&bytes, 0) {
+        // jxl-oxide renders the codestream's own orientation; the RAW's only
+        // applies to one without.
+        let header = jxl_oxide::JxlImage::builder()
+            .read(bytes.as_slice())
+            .map_err(|e| anyhow::anyhow!("Could not read the embedded preview: {e}"))?;
+        let (w, h) = (header.width(), header.height());
+        anyhow::ensure!(
+            u64::from(w) * u64::from(h) <= PREVIEW_PIXELS,
+            "Embedded preview of {w} × {h} pixels"
+        );
+        let own = header.image_header().metadata.orientation;
+        let decoder = jxl_oxide::integration::JxlDecoder::new(std::io::Cursor::new(bytes))?;
+        let orientation = if own == 1 {
+            by_raw
+        } else {
+            Orientation::NoTransforms
         };
-    }
-    let mut im = image::DynamicImage::from_decoder(decoder)?;
+        (image::DynamicImage::from_decoder(decoder)?, orientation)
+    } else {
+        let mut decoder = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(bytes))?;
+        let orientation = match decoder.orientation()? {
+            Orientation::NoTransforms => by_raw,
+            exif => exif,
+        };
+        (image::DynamicImage::from_decoder(decoder)?, orientation)
+    };
     im.apply_orientation(orientation);
     Ok(im.to_rgb8())
 }
 
 #[cfg(test)]
 mod tests {
+    /// A JPEG XL preview (Lightroom's DNGs embed one, of 1024 pixels, beside
+    /// a 256-pixel JPEG) decodes, turned by the RAW's orientation:
+    /// `rawmakase-raw`'s 8 × 4 lossless test codestream, whose pixel (x, y)
+    /// is (x × 8191 + y × 3, y × 16000 + x, 65535 − x × 7000) of 65535.
+    #[test]
+    fn jpeg_xl_previews_decode_upright() {
+        let jxl = include_bytes!("../../../rawmakase-raw/tests/data/jxl-int16-lossless.jxl");
+        let im = super::preview_image(jxl.to_vec(), 0).unwrap();
+        assert_eq!(im.dimensions(), (8, 4));
+        let level = |v: u32| (f64::from(v) / 257.).round() as u8;
+        for (x, y) in [(0, 0), (7, 3), (3, 1)] {
+            let want = [x * 8191 + y * 3, y * 16000 + x, 65535 - x * 7000].map(level);
+            assert_eq!(im.get_pixel(x, y).0, want, "({x}, {y})");
+        }
+        // Orientation 6: turned a quarter clockwise, so 4 × 8.
+        let turned = super::preview_image(jxl.to_vec(), 6).unwrap();
+        assert_eq!(turned.dimensions(), (4, 8));
+        assert_eq!(turned.get_pixel(3, 0), im.get_pixel(0, 0));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn background_threads_are_ten_steps_nicer_than_their_parent() {

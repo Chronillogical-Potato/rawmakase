@@ -25,7 +25,7 @@ mod vendor;
 
 pub use error::{Error, Result};
 pub use info::{Cfa, Presets, RawInfo, SuperCcd, UNSET};
-pub use preview::NoPreview;
+pub use preview::{NoPreview, is_jpeg_xl};
 pub use sensor::Sensor;
 use std::sync::atomic::AtomicBool;
 pub use variant::Variant;
@@ -45,8 +45,9 @@ pub fn open(bytes: &[u8]) -> Result<RawInfo> {
     variant::open(bytes)
 }
 
-/// The embedded JPEG preview of the file `info` was read from (a copy when
-/// its start of image marker needs mending).
+/// The embedded preview of the file `info` was read from, JPEG or JPEG XL
+/// ([`is_jpeg_xl`] tells which; a JPEG is copied when its start of image
+/// marker needs mending).
 pub fn preview<'a>(
     info: &RawInfo,
     bytes: &'a [u8],
@@ -59,7 +60,7 @@ pub fn preview<'a>(
         .and_then(|(start, end)| bytes.get(start..end))
         .ok_or(NoPreview::Missing)?;
     Ok(match jpeg {
-        [first, rest @ ..] if *first != 0xff => {
+        [first, rest @ ..] if *first != 0xff && !preview::is_jpeg_xl(jpeg, 0) => {
             let mut mended = vec![0xff];
             mended.extend_from_slice(rest);
             std::borrow::Cow::Owned(mended)
