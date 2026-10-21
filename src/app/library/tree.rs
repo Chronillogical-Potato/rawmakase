@@ -78,6 +78,8 @@ impl FolderNode {
         }
     }
 }
+/// Why a folder dropped on another root's folder doesn't move (#572).
+const ACROSS_ROOTS: &str = "Folders can't be moved to another drive or root folder yet. Move it in Finder, then add the folder again.";
 pub(super) enum TreeAction {
     /// The folder's key, and how it was clicked.
     Select(String, Click),
@@ -106,6 +108,8 @@ pub(super) enum TreeAction {
         root: RootId,
         logical: String,
     },
+    /// Something dropped that can't be done, and why.
+    Refused(String),
     /// The folder of `root` at logical path `from`, dropped on logical
     /// folder `to` of that root.
     DropFolder {
@@ -300,14 +304,18 @@ pub(super) fn folder_tree_row(
             photos: dragged.0.clone(),
         });
     }
-    if let Some(dragged) = released::<super::DraggedFolder>(&response)
-        && takes(&dragged)
-    {
-        action = Some(TreeAction::DropFolder {
-            root: dragged.root,
-            from: dragged.from.clone(),
-            to: node.logical.clone(),
-        });
+    if let Some(dragged) = released::<super::DraggedFolder>(&response) {
+        if takes(&dragged) {
+            action = Some(TreeAction::DropFolder {
+                root: dragged.root,
+                from: dragged.from.clone(),
+                to: node.logical.clone(),
+            });
+        } else if dragged.root != node.in_root {
+            // Not highlighted, so said: dropped elsewhere it would do nothing
+            // and look broken.
+            action = Some(TreeAction::Refused(ACROSS_ROOTS.into()));
+        }
     }
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
         let pointer = response.interact_pointer_pos().unwrap_or(rect.center());

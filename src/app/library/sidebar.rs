@@ -249,6 +249,7 @@ impl Library {
                                     self.file_request =
                                         Some(super::FileRequest::MoveFolder { root, from, to })
                                 }
+                                Some(TreeAction::Refused(why)) => self.message = why,
                                 Some(TreeAction::Reveal(path)) => {
                                     if let Err(e) = crate::platform::reveal::reveal(&path) {
                                         self.message =

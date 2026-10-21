@@ -2952,3 +2952,77 @@ fn a_folder_with_no_catalog_folder_of_its_own_is_dragged_too() {
     });
     assert_eq!(dropped, Some(("2024".into(), "2025".into())));
 }
+
+#[test]
+fn a_folder_dropped_on_another_root_says_why_nothing_moves() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |root: i64, logical: &str, id: u32| FolderNode {
+        key: format!("root:{root}/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(root),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, elsewhere) = (node(42, "2024/day1", 1), node(43, "trips", 2));
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &elsewhere] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (row1, row2) = (egui::pos2(120., 11.), egui::pos2(120., 33.));
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let actions: Vec<TreeAction> = frame(vec![press(row2, false)])
+        .into_iter()
+        .flatten()
+        .collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, TreeAction::DropFolder { .. })),
+        "nothing moves"
+    );
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            TreeAction::Refused(why) if why.contains("another drive or root folder")
+        )),
+        "says why"
+    );
+}
