@@ -87,16 +87,16 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             }
             (Kind::RenamePhotos, ids, None, None)
         }
-        FileOp::RenameFolder { folder, name } => {
-            let tree = super::tree::rename(catalog, folder, &name)?;
+        FileOp::RenameFolder { root, folder, name } => {
+            let tree = super::tree::rename(catalog, root, &folder, &name)?;
             return tree_plan(catalog, Kind::RenameFolder, tree);
         }
         FileOp::MoveFolder {
-            folder,
             root,
+            folder,
             parent,
         } => {
-            let tree = super::tree::relocate(catalog, folder, root, &parent)?;
+            let tree = super::tree::relocate(catalog, root, &folder, &parent)?;
             return tree_plan(catalog, Kind::MoveFolder, tree);
         }
     };

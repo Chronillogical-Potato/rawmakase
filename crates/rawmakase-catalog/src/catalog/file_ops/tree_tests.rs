@@ -14,7 +14,8 @@ use std::sync::atomic::AtomicBool;
 
 fn rename_folder(fx: &Fx, relative: &str, name: &str) -> FileOp {
     FileOp::RenameFolder {
-        folder: fx.folder(relative),
+        root: fx.cat.roots().unwrap()[0].0,
+        folder: relative.into(),
         name: name.into(),
     }
 }
@@ -74,10 +75,7 @@ fn a_folder_is_renamed_with_its_subtree_and_its_photos_follow() -> Result<()> {
         &NoTrash,
         &Faulty::default(),
     );
-    assert_eq!(
-        results(&outcome),
-        [ItemResult::FolderRenamed { folder: day }]
-    );
+    assert_eq!(results(&outcome), [ItemResult::FolderRenamed]);
     let mut photos = outcome.items[0].photos.clone();
     photos.sort();
     assert_eq!(photos, both);
@@ -123,10 +121,8 @@ fn a_folder_below_one_the_catalog_lacks_and_one_an_older_release_added_are_renam
         &NoTrash,
         &Faulty::default(),
     );
-    assert_eq!(
-        results(&outcome),
-        [ItemResult::FolderRenamed { folder: day }]
-    );
+    assert_eq!(results(&outcome), [ItemResult::FolderRenamed]);
+    assert_eq!(fx.folder("2024/day 1"), day, "the same folder");
     assert_eq!(
         fx.rows()[&fx.photo("2024/day 1/x/b.NEF")],
         "2024/day 1/x/b.NEF"
@@ -233,16 +229,11 @@ fn a_folder_another_root_or_the_catalog_is_inside_is_refused() -> Result<()> {
     let inside = fx.root.join("day/Inside.rawmakase");
     let mut cat = Catalog::create(&inside)?;
     cat.add_folder(&fx.root)?;
-    let day = cat
-        .folders()?
-        .into_iter()
-        .find(|f| f.path == fx.root.join("day"))
-        .unwrap()
-        .id;
     match plan(
         &cat,
         FileOp::RenameFolder {
-            folder: day,
+            root: cat.roots()?[0].0,
+            folder: "day".into(),
             name: "Day".into(),
         },
     ) {
@@ -265,7 +256,7 @@ fn a_case_only_folder_rename_works_where_the_volume_renames_spelling() -> Result
     }
     let outcome = fx.run(op, &NoTrash, &Faulty::default());
     assert!(
-        matches!(results(&outcome)[..], [ItemResult::FolderRenamed { .. }]),
+        matches!(results(&outcome)[..], [ItemResult::FolderRenamed]),
         "{outcome:?}"
     );
     assert_eq!(fsops::list(&fx.root)?, ["Day"]);
@@ -508,10 +499,11 @@ fn every_failed_commit_of_a_folder_rename_ends_proven_and_a_restart_finishes_it(
         if !when.contains("INSERT ON file_operations") && !when.contains("members") {
             assert_eq!(
                 results(&super::outcome(&fx.cat, &batch)?),
-                [ItemResult::FolderRenamed { folder: day }],
+                [ItemResult::FolderRenamed],
                 "{when}"
             );
             assert_eq!(fx.rows()[&fx.photo("New/a.NEF")], "New/a.NEF");
+            assert_eq!(fx.folder("New"), day, "{when}: the same folder");
         }
     }
     Ok(())

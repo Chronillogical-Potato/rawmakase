@@ -15,7 +15,7 @@ fn a_folder_moves_into_another_with_its_photos_once_confirmed() -> anyhow::Resul
     );
     let day1 = folder(&e, "2024/day1").unwrap();
     let r = root(&e);
-    e.request_folder_move(day1, r, "2024/day1".into(), "2025".into());
+    e.request_folder_move(r, "2024/day1".into(), "2025".into());
     settle(&mut e);
     let (title, lines, actions) = e.file_ops.question().expect("it asks");
     assert_eq!(title, "Move folder “day1” into “2025”?");
@@ -30,7 +30,7 @@ fn a_folder_moves_into_another_with_its_photos_once_confirmed() -> anyhow::Resul
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
     assert!(d.path().join("photos/2024/day1/a.RAF").is_file());
-    e.request_folder_move(day1, r, "2024/day1".into(), "2025".into());
+    e.request_folder_move(r, "2024/day1".into(), "2025".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -50,7 +50,7 @@ fn a_folder_moves_to_its_root() -> anyhow::Result<()> {
     let (d, mut e, _) = editor_with_folders(&["2024/day1/a.RAF"])?;
     let day1 = folder(&e, "2024/day1").unwrap();
     let r = root(&e);
-    e.request_folder_move(day1, r, "2024/day1".into(), String::new());
+    e.request_folder_move(r, "2024/day1".into(), String::new());
     settle(&mut e);
     let (title, ..) = e.file_ops.question().expect("it asks");
     assert_eq!(title, "Move folder “day1” into “photos”?");
@@ -65,9 +65,8 @@ fn a_folder_moves_to_its_root() -> anyhow::Result<()> {
 #[test]
 fn a_folder_into_itself_is_refused_and_says_why() -> anyhow::Result<()> {
     let (d, mut e, _) = editor_with_folders(&["2024/day1/a.RAF", "2024/day1/sub/b.RAF"])?;
-    let day1 = folder(&e, "2024/day1").unwrap();
     let r = root(&e);
-    e.request_folder_move(day1, r, "2024/day1".into(), "2024/day1/sub".into());
+    e.request_folder_move(r, "2024/day1".into(), "2024/day1/sub".into());
     settle(&mut e);
     assert!(!e.file_ops.confirming());
     assert!(!e.activity.is_busy());
@@ -86,7 +85,7 @@ fn an_empty_folder_moved_is_shown_where_it_went() -> anyhow::Result<()> {
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
     let empty = folder(&e, "empty").expect("made");
-    e.request_folder_move(empty, r, "empty".into(), "2025".into());
+    e.request_folder_move(r, "empty".into(), "2025".into());
     settle(&mut e);
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
@@ -100,11 +99,10 @@ fn an_empty_folder_moved_is_shown_where_it_went() -> anyhow::Result<()> {
 #[test]
 fn move_folder_offers_folders_with_no_catalog_row_of_their_own() -> anyhow::Result<()> {
     let (_d, mut e, _) = editor_with_folders(&["2024/day1/a.RAF", "2025/day2/b.RAF"])?;
-    let day1 = folder(&e, "2024/day1").unwrap();
     // 2025 has no folder row: only 2025/day2 has photos.
     assert!(folder(&e, "2025").is_none());
     let r = root(&e);
-    e.choose_parent_for(day1, r, "2024/day1".into());
+    e.choose_parent_for(r, "2024/day1".into());
     let offered = e.parent_choices();
     assert!(offered.contains(&"2025".to_string()), "{offered:?}");
     assert!(offered.contains(&"2025/day2".to_string()));

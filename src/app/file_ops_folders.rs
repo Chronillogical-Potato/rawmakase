@@ -5,13 +5,12 @@
 use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::catalog::file_ops::FileOp;
-use crate::catalog::{CatalogLocation, FolderId, RootId};
+use crate::catalog::{CatalogLocation, RootId};
 use eframe::egui::{self, Vec2};
 
 /// Move Folder…, while where it goes is chosen. Holds nothing.
 pub(super) struct ChoosingParent {
     catalog: CatalogLocation,
-    folder: FolderId,
     root: RootId,
     /// Its logical path.
     from: String,
@@ -98,16 +97,9 @@ impl Editor {
             _ => Vec::new(),
         }
     }
-    /// Moves catalog folder `folder` of `root`, at logical path `from`, into
-    /// logical folder `to` of the same root ("" for the root), once
-    /// confirmed.
-    pub(in crate::app) fn request_folder_move(
-        &mut self,
-        folder: FolderId,
-        root: RootId,
-        from: String,
-        to: String,
-    ) {
+    /// Moves the folder of `root` at logical path `from` into logical
+    /// folder `to` of the same root ("" for the root), once confirmed.
+    pub(in crate::app) fn request_folder_move(&mut self, root: RootId, from: String, to: String) {
         let into = match last(&to) {
             "" => self
                 .library
@@ -116,6 +108,11 @@ impl Editor {
             name => name.to_string(),
         };
         let name = last(&from).to_string();
+        let op = FileOp::MoveFolder {
+            root,
+            folder: from.clone(),
+            parent: to.clone(),
+        };
         let verb = Verb::MoveFolder {
             root,
             to: join(&to, &name),
@@ -123,25 +120,12 @@ impl Editor {
             name,
             into,
         };
-        self.request_file_op(
-            FileOp::MoveFolder {
-                folder,
-                root,
-                parent: to,
-            },
-            None,
-            verb,
-        );
+        self.request_file_op(op, None, verb);
     }
 
-    /// Move Folder… for catalog folder `folder` of `root`, at logical path
-    /// `from`: asks where it goes.
-    pub(in crate::app) fn choose_parent_for(
-        &mut self,
-        folder: FolderId,
-        root: RootId,
-        from: String,
-    ) {
+    /// Move Folder… for the folder of `root` at logical path `from`: asks
+    /// where it goes.
+    pub(in crate::app) fn choose_parent_for(&mut self, root: RootId, from: String) {
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
             self.status = "Finish what is running first".into();
             return;
@@ -155,7 +139,6 @@ impl Editor {
         };
         self.file_ops.state = State::ChoosingParent(Box::new(ChoosingParent {
             catalog,
-            folder,
             root,
             from,
             filter: String::new(),
@@ -253,7 +236,7 @@ impl Editor {
             let State::ChoosingParent(c) = std::mem::take(&mut self.file_ops.state) else {
                 return;
             };
-            self.request_folder_move(c.folder, c.root, c.from, to);
+            self.request_folder_move(c.root, c.from, to);
         }
     }
 }

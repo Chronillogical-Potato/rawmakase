@@ -14,7 +14,6 @@
 //! such as another root over a folder in it, nor may the catalog itself or
 //! RAWmakase's own folders be in it.
 use super::super::db::{Reads, Write, sql};
-use super::super::folder_sync::Located;
 use super::super::locations::{join, logical_anchored, logical_location, names};
 use super::super::sidecar::caseless;
 use super::super::value::row;
@@ -29,7 +28,6 @@ use super::preconditions::{CHANGED, RELOCATED};
 use crate::storage::fsops::{self, Containment, EntryKind, FileId, FsError};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -38,7 +36,6 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::catalog) struct TreeState {
     pub root: RootId,
-    pub folder: FolderId,
     /// Its logical path, and the one it is given.
     pub from: String,
     pub to: String,
@@ -202,88 +199,82 @@ fn located(db: &impl Reads, root: RootId, logical: &str, folders: &[FolderId]) -
     Ok(false)
 }
 
-/// Plans renaming catalog folder `folder` to `name`, on this computer.
+/// Plans renaming the folder at logical path `folder` of `root` to
+/// `name`, on this computer.
 pub(super) fn rename(
     catalog: &Catalog,
-    folder: FolderId,
+    root: RootId,
+    folder: &str,
     name: &str,
 ) -> Result<TreeMove, FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     if let Some(problem) = folder_name_problem(name) {
         return Err(refuse(problem));
     }
-    let located = catalog.db.snapshot(|s| catalog.locate_folders(s))?;
-    let f = located
-        .get(&folder)
-        .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-    if f.logical.is_empty() {
-        return Err(refuse(ROOT));
-    }
-    let up: Vec<&str> = names(&f.logical).collect();
+    known(catalog, root, folder)?;
+    let up: Vec<&str> = names(folder).collect();
     let parent = up
         .split_last()
         .map(|(_, up)| up.join("/"))
         .unwrap_or_default();
     let to = join(&parent, name);
-    if to == f.logical {
+    if to == folder {
         return Err(refuse("It has that name already."));
     }
-    plan_to(catalog, &located, folder, &to)
+    plan_to(catalog, root, folder, &to)
 }
 
-/// Plans moving catalog folder `folder` into logical folder `parent` of
-/// `root`, which must be its own root, on this computer. The destination
-/// may be a folder the catalog has no folder of its own for, as for New
-/// Folder Inside.
+/// Refuses the folder at logical path `folder` of `root` unless it is a
+/// folder of the catalog, and not a root.
+fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpError> {
+    let refuse = |why: &str| FileOpError::Destination(why.to_string());
+    if folder.is_empty() {
+        return Err(refuse(ROOT));
+    }
+    let located = catalog.db.snapshot(|s| catalog.locate_folders(s))?;
+    if !located
+        .values()
+        .any(|f| f.root == root && f.logical == folder)
+    {
+        return Err(refuse("The folder is no longer in the catalog."));
+    }
+    Ok(())
+}
+
+/// Plans moving the folder at logical path `folder` of `root` into
+/// logical folder `parent` of the same root, on this computer. The
+/// destination may be a folder the catalog has no folder of its own for,
+/// as for New Folder Inside.
 pub(super) fn relocate(
     catalog: &Catalog,
-    folder: FolderId,
     root: RootId,
+    folder: &str,
     parent: &str,
 ) -> Result<TreeMove, FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
-    let located = catalog.db.snapshot(|s| catalog.locate_folders(s))?;
-    let f = located
-        .get(&folder)
-        .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-    if f.logical.is_empty() {
-        return Err(refuse(ROOT));
-    }
-    if root != f.root {
-        return Err(refuse(
-            "Folders can't be moved to another root folder yet. Move it in Finder, then add or locate the folder again.",
-        ));
-    }
-    if below_caseless(parent, &f.logical) {
+    known(catalog, root, folder)?;
+    if below_caseless(parent, folder) {
         return Err(refuse(
             "A folder can't be moved into itself or a folder inside it.",
         ));
     }
-    let name = names(&f.logical).last().unwrap_or_default();
+    let name = names(folder).last().unwrap_or_default();
     let to = join(parent, name);
-    if caseless(OsStr::new(&to)) == caseless(OsStr::new(&f.logical)) {
+    if caseless(OsStr::new(&to)) == caseless(OsStr::new(folder)) {
         return Err(refuse("It is in that folder already."));
     }
-    plan_to(catalog, &located, folder, &to)
+    plan_to(catalog, root, folder, &to)
 }
 
-/// Plans moving catalog folder `folder` to logical path `to` of its root.
-fn plan_to(
-    catalog: &Catalog,
-    located: &HashMap<FolderId, Located>,
-    folder: FolderId,
-    to: &str,
-) -> Result<TreeMove, FileOpError> {
+/// Plans moving the folder at logical path `from` of `root` to logical
+/// path `to` of the same root.
+fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<TreeMove, FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     let computer = &catalog.computer.id;
     let db = &catalog.db;
-    let f = located
-        .get(&folder)
-        .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-    let (root, from) = (f.root, f.logical.clone());
-    let (Some(from_path), Some(anchor)) = (f.path.clone(), f.anchor.clone()) else {
-        return Err(refuse("The folder is offline or missing."));
-    };
+    let from = from.to_string();
+    let (anchor, from_path) = logical_anchored(db, computer, root, &from)?
+        .ok_or_else(|| refuse("The folder is offline or missing."))?;
     // Its directory, as the disk spells it.
     let source = plain(&anchor, &from_path)?;
     let found = fsops::entry(&source).map_err(|e| refuse(&e.to_string()))?;
@@ -332,7 +323,6 @@ fn plan_to(
     let planned = TreeMove {
         state: TreeState {
             root,
-            folder,
             from: from.clone(),
             to: to.to_string(),
             folders: subtree(db, root, &from)?,

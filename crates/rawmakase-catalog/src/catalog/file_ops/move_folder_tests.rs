@@ -16,8 +16,8 @@ fn root(fx: &Fx) -> RootId {
 
 fn move_folder(fx: &Fx, relative: &str, parent: &str) -> FileOp {
     FileOp::MoveFolder {
-        folder: fx.folder(relative),
         root: root(fx),
+        folder: relative.into(),
         parent: parent.into(),
     }
 }
@@ -56,7 +56,7 @@ fn a_folder_moves_into_another_with_its_subtree_and_its_photos_follow() -> Resul
     assert_eq!(plan.summary().photos, 2);
     assert_eq!(plan.summary().folder.as_deref(), Some("day"));
     let outcome = fx.run(op, &NoTrash, &Faulty::default());
-    assert_eq!(results(&outcome), [ItemResult::FolderMoved { folder: day }]);
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
     assert!(!fx.root.join("day").exists());
     assert_eq!(fsops::entry(&fx.root.join("trips/day"))?.id, dir_id);
     assert_eq!(fsops::entry(&fx.root.join("trips/day/a.NEF"))?.id, file_id);
@@ -72,7 +72,7 @@ fn a_folder_moves_into_another_with_its_subtree_and_its_photos_follow() -> Resul
         &NoTrash,
         &Faulty::default(),
     );
-    assert_eq!(results(&outcome), [ItemResult::FolderMoved { folder: day }]);
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
     assert_eq!(fx.rows()[&b], "day/sub/b.NEF");
     Ok(())
 }
@@ -82,16 +82,12 @@ fn a_folder_moves_into_one_the_catalog_has_no_folder_of_its_own_for() -> Result<
     // Neither the root nor 2024 is a catalog folder.
     let mut fx = fixture(&["2024/day1/a.NEF", "2025/day2/b.NEF"]);
     let a = fx.photo("2024/day1/a.NEF");
-    let day1 = fx.folder("2024/day1");
     let outcome = fx.run(
         move_folder(&fx, "2024/day1", "2025"),
         &NoTrash,
         &Faulty::default(),
     );
-    assert_eq!(
-        results(&outcome),
-        [ItemResult::FolderMoved { folder: day1 }]
-    );
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
     assert_eq!(fx.rows()[&a], "2025/day1/a.NEF");
     Ok(())
 }
@@ -142,22 +138,22 @@ fn a_folder_is_never_moved_into_itself_across_roots_or_onto_a_name_taken() -> Re
         .map(|(id, _, _)| id)
         .find(|id| *id != r)
         .unwrap();
+    // A folder is named in its own root: the other has no "day".
     let why = refusal(
         &fx,
         FileOp::MoveFolder {
-            folder: fx.folder("day"),
             root: other,
+            folder: "day".into(),
             parent: String::new(),
         },
     );
-    assert!(why.contains("another root"), "{why}");
+    assert!(why.contains("no longer in the catalog"), "{why}");
     // The root folder itself.
-    let root_folder = fx.folder("");
     let why = refusal(
         &fx,
         FileOp::MoveFolder {
-            folder: root_folder,
             root: r,
+            folder: String::new(),
             parent: "other".into(),
         },
     );
@@ -364,7 +360,7 @@ fn every_failed_commit_of_a_folder_move_ends_proven_and_a_restart_finishes_it() 
         if moved {
             assert_eq!(
                 results(&super::outcome(&fx.cat, &batch)?),
-                [ItemResult::FolderMoved { folder: day }],
+                [ItemResult::FolderMoved],
                 "{when}"
             );
             assert_eq!(logical(&fx, day).as_deref(), Some("trips/day"));

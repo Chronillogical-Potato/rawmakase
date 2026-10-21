@@ -12,7 +12,7 @@
 use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::catalog::file_ops::{self, FileOp, Plan, RenameOrder, Skip};
-use crate::catalog::{CatalogLocation, FolderId, PhotoId, RootId};
+use crate::catalog::{CatalogLocation, PhotoId, RootId};
 use crate::export_settings::{NameTemplate, Naming};
 use eframe::egui::{self, Vec2};
 use std::sync::Arc;
@@ -63,7 +63,6 @@ pub(super) struct RenameShown {
 /// Rename Folder…, open. Holds nothing.
 pub(super) struct RenamingFolder {
     catalog: CatalogLocation,
-    folder: FolderId,
     root: RootId,
     /// Its logical path, and its name now.
     logical: String,
@@ -532,14 +531,9 @@ impl Editor {
         }
     }
 
-    /// Rename Folder… for catalog folder `folder` of `root`, at logical path
-    /// `logical`: asks its new name.
-    pub(in crate::app) fn rename_folder(
-        &mut self,
-        folder: FolderId,
-        root: RootId,
-        logical: String,
-    ) {
+    /// Rename Folder… for the folder of `root` at logical path `logical`:
+    /// asks its new name.
+    pub(in crate::app) fn rename_folder(&mut self, root: RootId, logical: String) {
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
             self.status = "Finish what is running first".into();
             return;
@@ -554,7 +548,6 @@ impl Editor {
         let old = logical.rsplit('/').next().unwrap_or_default().to_string();
         self.file_ops.state = State::RenamingFolder(Box::new(RenamingFolder {
             catalog,
-            folder,
             root,
             logical,
             name: old.clone(),
@@ -651,6 +644,11 @@ impl Editor {
                 .logical
                 .rsplit_once('/')
                 .map_or(String::new(), |(p, _)| p.to_string());
+            let op = FileOp::RenameFolder {
+                root: f.root,
+                folder: f.logical.clone(),
+                name: f.name.clone(),
+            };
             let verb = Verb::RenameFolder {
                 root: f.root,
                 from: f.logical,
@@ -659,10 +657,6 @@ impl Editor {
                 } else {
                     format!("{parent}/{}", f.name)
                 },
-            };
-            let op = FileOp::RenameFolder {
-                folder: f.folder,
-                name: f.name,
             };
             self.request_file_op(op, None, verb);
         }

@@ -2801,15 +2801,10 @@ fn a_folder_dragged_onto_another_of_its_root_is_dropped_there() {
     frame(vec![egui::Event::PointerMoved(row2)]);
     let actions = frame(vec![press(row2, false)]);
     let dropped = actions.into_iter().flatten().find_map(|a| match a {
-        TreeAction::DropFolder {
-            folder, from, to, ..
-        } => Some((folder, from, to)),
+        TreeAction::DropFolder { from, to, .. } => Some((from, to)),
         _ => None,
     });
-    assert_eq!(
-        dropped,
-        Some((FolderId(1), "2024/day1".into(), "2025".into()))
-    );
+    assert_eq!(dropped, Some(("2024/day1".into(), "2025".into())));
     // Into a folder inside it: no drop.
     frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
     frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);

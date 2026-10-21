@@ -235,40 +235,19 @@ impl Library {
                                     name,
                                     folder,
                                 }) => self.request_new_folder(root, parent, name, folder),
-                                Some(TreeAction::RenameFolder {
-                                    folder,
-                                    root,
-                                    logical,
-                                }) => {
-                                    self.file_request = Some(super::FileRequest::RenameFolder {
-                                        folder,
-                                        root,
-                                        logical,
-                                    })
+                                Some(TreeAction::RenameFolder { root, logical }) => {
+                                    self.file_request =
+                                        Some(super::FileRequest::RenameFolder { root, logical })
                                 }
-                                Some(TreeAction::MoveFolder {
-                                    folder,
-                                    root,
-                                    logical,
-                                }) => {
+                                Some(TreeAction::MoveFolder { root, logical }) => {
                                     self.file_request = Some(super::FileRequest::ChooseParent {
-                                        folder,
                                         root,
                                         from: logical,
                                     })
                                 }
-                                Some(TreeAction::DropFolder {
-                                    folder,
-                                    root,
-                                    from,
-                                    to,
-                                }) => {
-                                    self.file_request = Some(super::FileRequest::MoveFolder {
-                                        folder,
-                                        root,
-                                        from,
-                                        to,
-                                    })
+                                Some(TreeAction::DropFolder { root, from, to }) => {
+                                    self.file_request =
+                                        Some(super::FileRequest::MoveFolder { root, from, to })
                                 }
                                 Some(TreeAction::Reveal(path)) => {
                                     if let Err(e) = crate::platform::reveal::reveal(&path) {
