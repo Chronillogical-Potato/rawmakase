@@ -410,6 +410,54 @@ fn question(
     }
 }
 
+/// What a move to another drive does: copies the files there, checks
+/// them, then puts their originals in the Trash.
+fn across_line(files: usize, companions: usize, across: &file_ops::Across) -> String {
+    let what = if companions > 0 {
+        format!(
+            "{} (and {})",
+            widgets::plural(files, "file", "files"),
+            widgets::plural(companions, "sidecar file", "sidecar files")
+        )
+    } else {
+        widgets::plural(files, "file", "files")
+    };
+    let size = |bytes: u64| match bytes as f64 {
+        b if b >= 1e9 => format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB"),
+        b => format!("{:.0} MB", (b / 1e6).max(1.)),
+    };
+    format!(
+        "{what} will be copied to “{}” ({} of {} free), checked, and then {} put in the Trash.",
+        crate::platform::volume::volume_of(&across.volume).name,
+        size(across.bytes),
+        size(across.available),
+        if files + companions == 1 {
+            "its original"
+        } else {
+            "their originals"
+        }
+    )
+}
+
+/// The originals a move to another drive left beside their copies, as the
+/// status line ends: the first, and why.
+fn kept_line(kept: &[file_ops::KeptOriginal]) -> Option<String> {
+    let first = kept.first()?;
+    let name = first.path.file_name().unwrap_or_default().to_string_lossy();
+    Some(format!(
+        " · {}: {name}, {}",
+        if kept.len() == 1 {
+            "1 original stays where it was beside its copy".to_string()
+        } else {
+            format!(
+                "{} originals stay where they were beside their copies",
+                kept.len()
+            )
+        },
+        first.why
+    ))
+}
+
 /// [`question`] for one plan and its one action.
 fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) {
     let s = plan.summary();
@@ -507,7 +555,9 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             )
         }
         Verb::Move { .. } | Verb::Create { .. } => {
-            lines.push(if s.companions > 0 {
+            lines.push(if let Some(across) = &s.across {
+                across_line(s.files, s.companions, across)
+            } else if s.companions > 0 {
                 format!(
                     "{} (and {}) will be moved on disk.",
                     widgets::plural(s.files, "file", "files"),
@@ -718,6 +768,14 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
                 crate::platform::reveal::MANAGER
             ));
         }
+    }
+    let kept: Vec<file_ops::KeptOriginal> = outcome
+        .items
+        .iter()
+        .flat_map(|i| i.originals_kept.iter().cloned())
+        .collect();
+    if let Some(kept) = kept_line(&kept) {
+        text.push_str(&kept);
     }
     if let Some(stopped) = &outcome.stopped {
         text.push_str(&format!(" · stopped: {stopped}"));

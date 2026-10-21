@@ -570,3 +570,59 @@ fn stop_asks_the_run_to_stop_between_photos() -> anyhow::Result<()> {
     assert_eq!(ids_left(&e), ids);
     Ok(())
 }
+
+#[test]
+fn a_move_to_another_drive_says_it_copies_there_and_trashes_the_originals() {
+    let across = crate::catalog::file_ops::Across {
+        files: 2,
+        companions: 1,
+        bytes: 1_500_000_000,
+        volume: "/Volumes/Samsung SSD T5".into(),
+        available: 26_000_000_000,
+    };
+    assert_eq!(
+        across_line(2, 1, &across),
+        "2 files (and 1 sidecar file) will be copied to “Samsung SSD T5” (1.5 GB of 26 GB free), \
+         checked, and then their originals put in the Trash."
+    );
+    let small = crate::catalog::file_ops::Across {
+        bytes: 24_000_000,
+        ..across
+    };
+    assert_eq!(
+        across_line(1, 0, &small),
+        "1 file will be copied to “Samsung SSD T5” (24 MB of 26 GB free), checked, \
+         and then its original put in the Trash."
+    );
+    // Under a gigabyte free reads in megabytes, not "0 GB".
+    let nearly_full = crate::catalog::file_ops::Across {
+        available: 400_000_000,
+        ..small
+    };
+    assert!(
+        across_line(1, 0, &nearly_full).contains("(24 MB of 400 MB free)"),
+        "{}",
+        across_line(1, 0, &nearly_full)
+    );
+}
+
+#[test]
+fn originals_a_move_to_another_drive_kept_are_said() {
+    use crate::catalog::file_ops::KeptOriginal;
+    assert_eq!(kept_line(&[]), None);
+    let kept = [KeptOriginal {
+        path: "/Users/me/Photos/a.ARW".into(),
+        why: "its drive has no Trash".into(),
+    }];
+    assert_eq!(
+        kept_line(&kept).as_deref(),
+        Some(" · 1 original stays where it was beside its copy: a.ARW, its drive has no Trash")
+    );
+    let two = [kept[0].clone(), kept[0].clone()];
+    assert_eq!(
+        kept_line(&two).as_deref(),
+        Some(
+            " · 2 originals stay where they were beside their copies: a.ARW, its drive has no Trash"
+        )
+    );
+}
