@@ -437,7 +437,7 @@ pub(super) fn shared(
 pub(super) fn occupied(
     db: &impl Reads,
     folders: &Folders,
-    to: FolderId,
+    to: Option<FolderId>,
     dir: &Path,
     filename: &OsStr,
     family: &[PhotoId],
@@ -450,7 +450,9 @@ pub(super) fn occupied(
     }
     let name = caseless(filename);
     let mut over = folders.over(dir);
-    if !over.contains(&to) {
+    if let Some(to) = to
+        && !over.contains(&to)
+    {
         over.push(to);
     }
     for folder in over {
@@ -473,6 +475,9 @@ pub(super) struct Target {
     /// The catalog's folder; `None` for one the plan makes, or one the
     /// catalog has no folder of its own for.
     folder: Option<FolderId>,
+    /// Of a directory the catalog has no folder for, its root and logical
+    /// path, where the catalog's folder is added as photos arrive.
+    place: Option<(RootId, String)>,
     /// Where the folder resolves on this computer, as the catalog places it.
     resolved: PathBuf,
     /// Its canonical path, which members' destinations are in.
@@ -544,19 +549,38 @@ impl<'a> Files<'a> {
 
     /// Folder `to`, checked to take files.
     /// The folder at logical path `logical` of `root`, checked to take
-    /// files.
+    /// files: a catalog folder, or a directory of the root the catalog has
+    /// no folder for, which it gains as the photos arrive.
     fn destination(&mut self, root: RootId, logical: &str) -> Result<Target, FileOpError> {
         let refuse = |why: &str| FileOpError::Destination(why.to_string());
-        let (to, folder) = self
+        let own = self
             .located
             .iter()
             .find(|(_, f)| f.root == root && f.logical == logical)
-            .map(|(id, f)| (*id, f))
-            .ok_or_else(|| refuse("The folder is no longer in the catalog."))?;
-        let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
-            return Err(refuse("The folder is offline or missing."));
-        };
-        self.destination_at(Some(to), &path, &anchor)
+            .map(|(id, f)| (*id, f));
+        if let Some((to, folder)) = own {
+            let (Some(path), Some(anchor)) = (folder.path.clone(), folder.anchor.clone()) else {
+                return Err(refuse("The folder is offline or missing."));
+            };
+            return self.destination_at(Some(to), &path, &anchor);
+        }
+        let computer = &self.catalog.computer.id;
+        let (anchor, path) = logical_anchored(&self.catalog.db, computer, root, logical)?
+            .ok_or_else(|| refuse("The folder is offline or missing."))?;
+        let mut target = self.destination_at(None, &path, &anchor)?;
+        // Another of the catalog's folders there (of another root, or
+        // spelled otherwise): the photos would join neither. The commit
+        // checks again.
+        let key = caseless(OsStr::new(logical));
+        let alike = self
+            .located
+            .values()
+            .any(|f| f.root == root && caseless(OsStr::new(&f.logical)) == key);
+        if alike || !self.folders.over(&target.dir).is_empty() {
+            return Err(refuse("The catalog has another folder there."));
+        }
+        target.place = Some((root, logical.to_string()));
+        Ok(target)
     }
 
     /// Folder `name` to make below logical folder `parent` of `root`,
@@ -606,6 +630,7 @@ impl<'a> Files<'a> {
         }
         let target = Target {
             folder: None,
+            place: None,
             resolved,
             dir: new.path.clone(),
             volume: at.volume,
@@ -674,6 +699,7 @@ impl<'a> Files<'a> {
         let available = self.volume(found.id.volume(), &dir).map(|v| v.available);
         Ok(Target {
             folder: to,
+            place: None,
             resolved: path.to_path_buf(),
             rules: Names(fsops::probe(&dir, &names)),
             top: super::disk::top(self.disk, &dir),
@@ -810,6 +836,15 @@ impl<'a> Files<'a> {
         preconditions.folder_path = Some(path);
         // A folder the plan makes has no id yet: execution gives it.
         preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
+        preconditions.into = target.and_then(|t| {
+            let (root, logical) = t.place.clone()?;
+            Some(super::preconditions::Arrival {
+                root,
+                logical,
+                resolved: t.resolved.clone(),
+                added: false,
+            })
+        });
         // Another volume's folder takes copies; its partial copies are
         // named once the run's items are known.
         let copy = target

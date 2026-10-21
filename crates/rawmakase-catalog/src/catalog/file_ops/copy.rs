@@ -280,9 +280,10 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item) -> Result<Option<String>>
     if let Some(why) = pre.check(w, cx.computer)? {
         return Ok(Some(why.into()));
     }
-    let (Some((to, _)), Some(photo)) = (&pre.to, item.members.first()) else {
+    let (true, Some(photo)) = (pre.to.is_some() || pre.into.is_some(), item.members.first()) else {
         return Ok(Some("it has no destination".into()));
     };
+    let to = pre.to.as_ref().map(|(to, _)| *to);
     let filename = photo.source.file_name().unwrap_or_default();
     if shared(
         w,
@@ -335,7 +336,7 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item) -> Result<Option<String>>
         return Ok(Some("it has no destination".into()));
     };
     let arrived_name = arrived.file_name().unwrap_or_default();
-    if occupied(w, cx.folders, *to, parent(arrived), arrived_name, &pre.rows)? {
+    if occupied(w, cx.folders, to, parent(arrived), arrived_name, &pre.rows)? {
         return Ok(Some(format!(
             "a photo of the catalog is named {} there now",
             arrived_name.to_string_lossy()
@@ -344,9 +345,13 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item) -> Result<Option<String>>
     let text = arrived_name
         .to_str()
         .context("not a name the catalog keeps")?;
+    let to = match super::execute::arrive(w, cx.computer, item.id, pre, parent(arrived))? {
+        Ok(to) => to,
+        Err(why) => return Ok(Some(why)),
+    };
     w.execute(
         sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
-        &[to, &text, &pre.master, &pre.master],
+        &[&to, &text, &pre.master, &pre.master],
     )?;
     // The same bytes, kept with a coarser time: what was saved for the
     // original is the copy's. Only what names exactly the original.
@@ -639,20 +644,9 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                                 && copy
                                     .content
                                     .is_some_and(|c| disk.hash(at).is_ok_and(|now| now == c));
-                            let named = match to {
-                                Some(to) => {
-                                    let filename = at.file_name().unwrap_or_default();
-                                    occupied(
-                                        &catalog.db,
-                                        cx.folders,
-                                        to,
-                                        parent(at),
-                                        filename,
-                                        rows,
-                                    )?
-                                }
-                                None => true,
-                            };
+                            let filename = at.file_name().unwrap_or_default();
+                            let named =
+                                occupied(&catalog.db, cx.folders, to, parent(at), filename, rows)?;
                             if !proven || named {
                                 return Ok(false);
                             }

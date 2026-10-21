@@ -5,8 +5,8 @@
 //! connection, computer or an older release, is reported, never acted on.
 use super::super::db::Reads;
 use super::super::folder_sync::digest::{FamilyDigest, placement, user_state};
-use super::super::locations::folder_path;
-use super::super::{FolderId, PhotoId};
+use super::super::locations::{folder_path, logical_location};
+use super::super::{FolderId, PhotoId, RootId};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -58,6 +58,22 @@ pub(in crate::catalog) struct Preconditions {
     pub folder_path: Option<PathBuf>,
     /// The folder a move goes to, and where it resolved.
     pub to: Option<(FolderId, PathBuf)>,
+    /// A move's destination the catalog had no folder for when planned:
+    /// the catalog's folder there is added, or found, as the rows follow.
+    #[serde(default)]
+    pub into: Option<Arrival>,
+}
+
+/// A logical folder of a root a move goes to that the catalog had no folder
+/// for, and where it resolved.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::catalog) struct Arrival {
+    pub root: RootId,
+    pub logical: String,
+    pub resolved: PathBuf,
+    /// Whether the move added the catalog's folder there, once it did.
+    #[serde(default)]
+    pub added: bool,
 }
 
 /// Why an item can't go on as planned.
@@ -85,6 +101,7 @@ impl Preconditions {
             folder,
             folder_path: None,
             to: None,
+            into: None,
         }))
     }
 
@@ -104,6 +121,12 @@ impl Preconditions {
         }
         if let Some((to, path)) = &self.to
             && folder_path(db, computer, *to)?.as_ref() != Some(path)
+        {
+            return Ok(Some(RELOCATED));
+        }
+        if let (None, Some(into)) = (&self.to, &self.into)
+            && logical_location(db, computer, into.root, &into.logical)?.as_ref()
+                != Some(&into.resolved)
         {
             return Ok(Some(RELOCATED));
         }

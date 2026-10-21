@@ -648,7 +648,9 @@ impl Run<'_> {
         if carried != planned {
             return Ok(Some("its XMP sidecars changed since it was planned".into()));
         }
-        if let (Some((to, _)), Some(dir)) = (&pre.to, photo.destination.as_deref().map(parent)) {
+        let goes = pre.to.is_some() || pre.into.is_some();
+        if let (true, Some(dir)) = (goes, photo.destination.as_deref().map(parent)) {
+            let to = pre.to.as_ref().map(|(to, _)| *to);
             let names = self.disk.list(dir).map_err(anyhow::Error::from)?;
             // A rename stays in its folder, where its own names are its own.
             let here = dir == parent(&photo.source);
@@ -709,7 +711,7 @@ impl Run<'_> {
                     return Ok(Some(format!("{} is there now", name.to_string_lossy())));
                 }
             }
-            if occupied(w, self.folders, *to, dir, new, &pre.rows)? {
+            if occupied(w, self.folders, to, dir, new, &pre.rows)? {
                 return Ok(Some(format!(
                     "a photo of the catalog is named {} there now",
                     new.to_string_lossy()
@@ -861,7 +863,7 @@ pub(super) fn complete(
                 }
                 None => Some("it may be in the Trash".into()),
             },
-            Kind::MovePhotos | Kind::RenamePhotos => moved(w, folders, disk, pre, item)?,
+            Kind::MovePhotos | Kind::RenamePhotos => moved(w, computer, folders, disk, pre, item)?,
             Kind::CreateFolder | Kind::RenameFolder | Kind::MoveFolder => {
                 Some("not a photo operation".into())
             }
@@ -879,14 +881,16 @@ pub(super) fn complete(
 /// catalog has taken the name there. Why not, otherwise.
 fn moved(
     w: &mut Write<'_>,
+    computer: &str,
     folders: &Folders,
     disk: &dyn Disk,
     pre: &super::preconditions::Preconditions,
     item: &Journalled,
 ) -> Result<Option<String>> {
-    let Some((to, _)) = pre.to else {
+    if pre.to.is_none() && pre.into.is_none() {
         return Ok(Some("it has no destination".into()));
-    };
+    }
+    let to = pre.to.as_ref().map(|(to, _)| *to);
     let proven = item
         .members
         .iter()
@@ -911,9 +915,45 @@ fn moved(
         )));
     }
     let name = filename.to_str().context("not a name the catalog keeps")?;
+    let to = match arrive(w, computer, item.id, pre, parent(photo))? {
+        Ok(to) => to,
+        Err(why) => return Ok(Some(why)),
+    };
     w.execute(
         sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
         &[&to, &name, &pre.master, &pre.master],
     )?;
     Ok(None)
+}
+
+/// The catalog folder move item `id`'s rows go to, in `w`'s transaction:
+/// the one planned, or, for a directory the catalog had no folder for, the
+/// one it has there now or adds (recorded in the item's journalled
+/// preconditions, with whether it added it). Called only once every other
+/// check of the change passed, so a folder is never added for rows that
+/// don't follow. Why not, otherwise.
+pub(super) fn arrive(
+    w: &mut Write<'_>,
+    computer: &str,
+    id: OperationId,
+    pre: &super::preconditions::Preconditions,
+    dir: &std::path::Path,
+) -> Result<std::result::Result<crate::catalog::FolderId, String>> {
+    if let Some((to, _)) = &pre.to {
+        return Ok(Ok(*to));
+    }
+    let Some(into) = &pre.into else {
+        return Ok(Err("it has no destination".into()));
+    };
+    let (to, added) = match folder::arrive(w, computer, into, dir)? {
+        Ok(found) => found,
+        Err(why) => return Ok(Err(why)),
+    };
+    let mut now = pre.clone();
+    now.to = Some((to, into.resolved.clone()));
+    if let Some(into) = &mut now.into {
+        into.added = added;
+    }
+    journal::set_preconditions(w, id, &now)?;
+    Ok(Ok(to))
 }

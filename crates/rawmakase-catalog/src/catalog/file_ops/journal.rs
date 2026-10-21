@@ -493,6 +493,25 @@ pub(super) fn set_created(
     Ok(())
 }
 
+/// Replaces photo item `id`'s preconditions, as they are once its
+/// destination is the catalog's folder it added or found there.
+pub(super) fn set_preconditions(
+    w: &mut Write<'_>,
+    id: OperationId,
+    preconditions: &Preconditions,
+) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operations SET preconditions=? WHERE id=? AND kind=?"),
+        &[
+            &serde_json::to_string(preconditions)?,
+            &id.0,
+            &Kind::MovePhotos.as_str(),
+        ],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown move operation");
+    Ok(())
+}
+
 /// Replaces folder item `id`'s state, as it is once the catalog has it.
 pub(super) fn set_folder(w: &mut Write<'_>, id: OperationId, folder: &FolderState) -> Result<()> {
     let changed = w.execute(

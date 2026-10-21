@@ -79,10 +79,11 @@ pub enum FileOp {
     /// alone goes alone.
     RemoveFromCatalog { photos: Vec<PhotoId> },
     /// Moves masters' files, with the companions only they read, into the
-    /// folder at logical path `to` of `root`; their rows, copies included,
-    /// follow. On the same volume a file is renamed; on another it is
-    /// copied, and its original put in the Trash once the catalog follows
-    /// the copy.
+    /// folder at logical path `to` of `root`, which the catalog may have no
+    /// folder of its own for (it gains one as their rows follow, the
+    /// directory being there); their rows, copies included, follow. On the
+    /// same volume a file is renamed; on another it is copied, and its
+    /// original put in the Trash once the catalog follows the copy.
     MovePhotos {
         photos: Vec<PhotoId>,
         root: RootId,
@@ -522,6 +523,8 @@ pub fn outcome(catalog: &super::Catalog, batch: &BatchId) -> anyhow::Result<Outc
     })
 }
 
+#[cfg(test)]
+mod arrive_tests;
 #[cfg(test)]
 mod copy_tests;
 #[cfg(test)]
