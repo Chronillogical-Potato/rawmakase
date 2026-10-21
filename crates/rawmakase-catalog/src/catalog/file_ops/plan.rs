@@ -12,6 +12,7 @@ use super::super::value::row;
 use super::super::{Catalog, FolderId, PhotoId, RootId};
 use super::companions::{self, Companions};
 use super::conflicts::{Destination, Names};
+use super::disk::Disk;
 use super::folder::{FolderState, NewFolder, folder_name_problem};
 use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
@@ -59,6 +60,15 @@ pub(super) struct Family {
 /// Plans `op` in `catalog` on this computer. Reads the catalog in one
 /// snapshot and the files after it; changes nothing.
 pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
+    plan_with(catalog, op, &super::disk::Real)
+}
+
+/// [`plan`] with the volumes and destination folders as `disk` sees them.
+pub(super) fn plan_with(
+    catalog: &Catalog,
+    op: FileOp,
+    disk: &dyn Disk,
+) -> Result<Plan, FileOpError> {
     let mut stems = HashMap::new();
     let (kind, chosen, to, create) = match op {
         FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
@@ -128,7 +138,7 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             })
             .collect(),
         Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
-            let mut files = Files::new(catalog, &folders);
+            let mut files = Files::new(catalog, &folders, disk);
             let destination = match (to, create) {
                 (Some(to), _) => Some(files.destination(to)?),
                 (None, Some((root, parent, name))) => {
@@ -147,12 +157,12 @@ pub fn plan(catalog: &Catalog, op: FileOp) -> Result<Plan, FileOpError> {
             }
             refuse_twice(&mut items, &mut skipped);
             if let Some(destination) = &destination {
-                arrivals(destination, &mut items, &mut skipped);
+                arrivals(disk, destination, &mut items, &mut skipped);
             }
             items
         }
         Kind::RenamePhotos => {
-            let mut files = Files::new(catalog, &folders);
+            let mut files = Files::new(catalog, &folders, disk);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
         Kind::RenameFolder | Kind::MoveFolder => Vec::new(),
@@ -437,16 +447,22 @@ pub(super) struct Target {
 pub(super) struct Files<'a> {
     pub catalog: &'a Catalog,
     located: &'a HashMap<FolderId, Located>,
+    disk: &'a dyn Disk,
     pub folders: Folders,
     listings: HashMap<PathBuf, Result<Vec<OsString>, String>>,
     volumes: HashMap<VolumeId, Option<fsops::VolumeFacts>>,
 }
 
 impl<'a> Files<'a> {
-    fn new(catalog: &'a Catalog, located: &'a HashMap<FolderId, Located>) -> Self {
+    fn new(
+        catalog: &'a Catalog,
+        located: &'a HashMap<FolderId, Located>,
+        disk: &'a dyn Disk,
+    ) -> Self {
         Self {
             catalog,
             located,
+            disk,
             folders: Folders::index(located),
             listings: HashMap::new(),
             volumes: HashMap::new(),
@@ -466,7 +482,7 @@ impl<'a> Files<'a> {
         *self
             .volumes
             .entry(volume)
-            .or_insert_with(|| fsops::volume_facts(path).ok())
+            .or_insert_with(|| self.disk.volume_facts(path).ok())
     }
 
     fn read_only(&mut self, volume: VolumeId, path: &Path) -> bool {
@@ -526,8 +542,7 @@ impl<'a> Files<'a> {
             path: at.dir.join(name),
             rules: at.rules,
         };
-        let disk = super::disk::Real;
-        let free = super::folder::taken(&self.catalog.db, computer, &disk, &new)
+        let free = super::folder::taken(&self.catalog.db, computer, self.disk, &new)
             .map_err(FileOpError::Catalog)?;
         if let Some(why) = free {
             return Err(FileOpError::Destination(why));
@@ -578,7 +593,10 @@ impl<'a> Files<'a> {
         // As the disk spells it, which members' destinations are journalled in.
         let dir =
             std::fs::canonicalize(&dir).map_err(|e| FileOpError::Destination(e.to_string()))?;
-        let found = fsops::entry(&dir).map_err(|e| FileOpError::Destination(e.to_string()))?;
+        let found = self
+            .disk
+            .entry(&dir)
+            .map_err(|e| FileOpError::Destination(e.to_string()))?;
         if found.kind != EntryKind::Directory {
             return Err(refuse("The folder is not a folder on disk."));
         }
@@ -750,7 +768,7 @@ const UNKNOWN: Names = Names(fsops::NameRules {
 /// Refuses the items whose files can't arrive at `target`: a name taken
 /// there, a name two of them would have, or a companion one of them brings
 /// that another file there would read (or one there its photo would).
-fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
+fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) {
     let dest = Destination {
         dir: &target.dir,
         names: &target.names,
@@ -775,7 +793,6 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
         .cloned()
         .chain(items.iter().flat_map(names_of))
         .collect();
-    let disk = super::disk::Real;
     let text = |n: &OsString| n.to_string_lossy().into_owned();
     items.retain(|item| {
         let names = names_of(item);
@@ -784,7 +801,7 @@ fn arrivals(target: &Target, items: &mut Vec<Item>, skipped: &mut Vec<Skipped>) 
         };
         let refusal = names
             .iter()
-            .find(|n| dest.taken(&disk, n).is_some())
+            .find(|n| dest.taken(disk, n).is_some())
             .map(|n| Refusal::NameTaken(text(n)))
             .or_else(|| {
                 names

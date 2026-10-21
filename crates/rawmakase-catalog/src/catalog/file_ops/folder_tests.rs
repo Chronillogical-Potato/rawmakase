@@ -217,6 +217,7 @@ fn a_folder_made_just_before_its_mkdir_is_never_taken_for_it() -> Result<()> {
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let op = new_folder(&fx, "", "New", vec![a]);
     let outcome = fx.run(op, &NoTrash, &Racing(Faulty::default()));

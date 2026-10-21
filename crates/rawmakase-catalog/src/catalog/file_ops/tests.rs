@@ -248,6 +248,20 @@ impl Trash for NoTrash {
     }
 }
 
+/// The calls a test disk wrapping another (as field `$inner`) passes on
+/// unchanged, so each needn't spell them out.
+macro_rules! passes_on {
+    ($inner:tt) => {
+        fn volume_facts(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<crate::storage::fsops::VolumeFacts, crate::storage::fsops::FsError> {
+            self.$inner.volume_facts(path)
+        }
+    };
+}
+pub(super) use passes_on;
+
 /// A disk call, as recorded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Call {
@@ -371,6 +385,9 @@ impl Disk for Faulty {
     }
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
         Real.canonical(path)
+    }
+    fn volume_facts(&self, path: &Path) -> Result<crate::storage::fsops::VolumeFacts, FsError> {
+        Real.volume_facts(path)
     }
 }
 

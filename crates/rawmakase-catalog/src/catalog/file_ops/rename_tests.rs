@@ -493,6 +493,7 @@ fn a_name_taken_just_before_its_rename_is_never_replaced() -> Result<()> {
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let raced = fx.root.join("b.xmp");
     let outcome = fx.run(
@@ -544,6 +545,7 @@ fn a_name_the_disk_spells_otherwise_is_journalled_as_the_disk_spells_it() -> Res
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let mut fx = fixture(&["a.NEF", "a.xmp"]);
     let a = fx.photo("a.NEF");

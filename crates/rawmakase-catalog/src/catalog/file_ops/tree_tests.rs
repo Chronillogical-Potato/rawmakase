@@ -315,6 +315,7 @@ fn a_folder_made_just_before_the_rename_is_never_merged_into() -> Result<()> {
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let outcome = fx.run(
         rename_folder(&fx, "day", "New"),

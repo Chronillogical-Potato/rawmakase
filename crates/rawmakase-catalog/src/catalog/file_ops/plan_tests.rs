@@ -417,6 +417,7 @@ fn a_destination_created_just_before_the_rename_is_never_replaced() -> Result<()
         fn canonical(&self, p: &std::path::Path) -> Result<std::path::PathBuf, fsops::FsError> {
             self.0.canonical(p)
         }
+        tests::passes_on!(0);
     }
     let raced = fx.root.join("sub/a.xmp");
     let disk = Racing(Faulty::default(), &raced);

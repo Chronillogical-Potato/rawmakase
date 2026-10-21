@@ -1,4 +1,4 @@
-//! The file system as execution and recovery see it: exactly the
+//! The file system as planning, execution and recovery see it: exactly the
 //! [`fsops`] calls they make, behind one trait, so tests inject failures
 //! and crashes at any step and record which folders were synced. The real
 //! one is [`Real`]; nothing else implements it outside tests.
@@ -16,6 +16,7 @@ pub(super) trait Disk {
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError>;
     /// `path` with every link on the way resolved.
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError>;
+    fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError>;
 }
 
 /// The file system itself.
@@ -42,6 +43,9 @@ impl Disk for Real {
     }
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
         Ok(std::fs::canonicalize(path)?)
+    }
+    fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError> {
+        fsops::volume_facts(path)
     }
 }
 
