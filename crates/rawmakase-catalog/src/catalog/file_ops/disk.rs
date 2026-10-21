@@ -3,7 +3,7 @@
 //! and crashes at any step and record which folders were synced. The real
 //! one is [`Real`]; nothing else implements it outside tests.
 use crate::storage::Identity;
-use crate::storage::fsops::{self, Entry, FsError};
+use crate::storage::fsops::{self, ContentHash, CopyError, Entry, FileId, FsError};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -17,6 +17,21 @@ pub(super) trait Disk {
     /// `path` with every link on the way resolved.
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError>;
     fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError>;
+    /// The steps of a copy to another volume ([`fsops::create_file`] and
+    /// the rest), each on its own.
+    fn create_file(&self, path: &Path) -> Result<(), FsError>;
+    fn copy_into(
+        &self,
+        from: &Path,
+        to: &Path,
+        to_id: FileId,
+        go_on: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<ContentHash, CopyError>;
+    fn sync_file(&self, path: &Path) -> Result<(), FsError>;
+    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError>;
+    fn hash(&self, path: &Path) -> Result<ContentHash, FsError>;
+    /// Removes a partial copy, which its caller proves its own.
+    fn remove_file(&self, path: &Path) -> Result<(), FsError>;
 }
 
 /// The file system itself.
@@ -47,6 +62,46 @@ impl Disk for Real {
     fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError> {
         fsops::volume_facts(path)
     }
+    fn create_file(&self, path: &Path) -> Result<(), FsError> {
+        fsops::create_file(path)
+    }
+    fn copy_into(
+        &self,
+        from: &Path,
+        to: &Path,
+        to_id: FileId,
+        go_on: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<ContentHash, CopyError> {
+        fsops::copy_into(from, to, to_id, go_on)
+    }
+    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
+        fsops::sync_file(path)
+    }
+    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        fsops::copy_times(from, to)
+    }
+    fn hash(&self, path: &Path) -> Result<ContentHash, FsError> {
+        fsops::hash_file(path)
+    }
+    fn remove_file(&self, path: &Path) -> Result<(), FsError> {
+        fsops::remove_file(path)
+    }
+}
+
+/// Where the volume folder `dir` is on is mounted: `dir`'s furthest
+/// ancestor on the same volume, or `dir` when that can't be read.
+pub(super) fn top(disk: &dyn Disk, dir: &Path) -> PathBuf {
+    let Ok(here) = disk.entry(dir) else {
+        return dir.to_path_buf();
+    };
+    let mut top = dir;
+    while let Some(up) = top.parent() {
+        match disk.entry(up) {
+            Ok(e) if e.id.volume() == here.id.volume() => top = up,
+            _ => break,
+        }
+    }
+    top.to_path_buf()
 }
 
 /// The folder `path` is named in.

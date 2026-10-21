@@ -443,7 +443,8 @@ fn every_fault_at_every_step_of_a_folder_rename_ends_proven() {
                 one_place(&fx, &recovery, &case);
                 for u in &recovery.unfinished {
                     assert_eq!(u.choices, [Resolution::PutBack, Resolution::Keep]);
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{case}: {back:?}"

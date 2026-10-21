@@ -292,7 +292,7 @@ fn every_fault_at_every_step_of_making_a_folder_ends_proven() {
                     } else {
                         u.choices[0]
                     };
-                    resolve(&mut fx.cat, u.operation, choice).unwrap();
+                    resolve(&mut fx.cat, u.operation, choice, &NoTrash).unwrap();
                 }
                 check_files(&fx, &was, &Recovery::default(), &batch);
                 let made = folder_at(&fx, "New");
@@ -330,14 +330,29 @@ fn a_folder_made_before_its_id_was_journalled_is_never_adopted() -> Result<()> {
     assert!(unfinished.photos.is_empty());
     // A folder is never deleted to put it back.
     assert!(matches!(
-        resolve(&mut fx.cat, unfinished.operation, Resolution::PutBack),
+        resolve(
+            &mut fx.cat,
+            unfinished.operation,
+            Resolution::PutBack,
+            &NoTrash
+        ),
         Err(FileOpError::Unsupported(_))
     ));
     assert!(matches!(
-        resolve(&mut fx.cat, unfinished.operation, Resolution::AddFolder),
+        resolve(
+            &mut fx.cat,
+            unfinished.operation,
+            Resolution::AddFolder,
+            &NoTrash
+        ),
         Err(FileOpError::Unsupported(_))
     ));
-    let kept = resolve(&mut fx.cat, unfinished.operation, Resolution::Keep)?;
+    let kept = resolve(
+        &mut fx.cat,
+        unfinished.operation,
+        Resolution::Keep,
+        &NoTrash,
+    )?;
     assert_eq!(kept.result, ItemResult::Kept);
     assert!(fx.root.join("New").is_dir());
     assert!(fx.recover(&disk::Real).unfinished.is_empty());
@@ -381,7 +396,12 @@ fn a_made_folder_not_yet_in_the_catalog_is_added_when_asked() -> Result<()> {
         [Resolution::AddFolder, Resolution::Keep]
     );
     assert!(folder_at(&fx, "New").is_none(), "only when asked");
-    let added = resolve(&mut fx.cat, unfinished.operation, Resolution::AddFolder)?;
+    let added = resolve(
+        &mut fx.cat,
+        unfinished.operation,
+        Resolution::AddFolder,
+        &NoTrash,
+    )?;
     let made = folder_at(&fx, "New").expect("added");
     assert_eq!(added.result, ItemResult::Created { folder: made });
     assert!(fx.recover(&disk::Real).unfinished.is_empty());
@@ -408,7 +428,12 @@ fn a_made_folder_gone_or_replaced_before_recovery_is_never_added() -> Result<()>
     let [unfinished] = &recovery.unfinished[..] else {
         panic!("{recovery:?}");
     };
-    let added = resolve(&mut fx.cat, unfinished.operation, Resolution::AddFolder)?;
+    let added = resolve(
+        &mut fx.cat,
+        unfinished.operation,
+        Resolution::AddFolder,
+        &NoTrash,
+    )?;
     assert!(
         matches!(added.result, ItemResult::NeedsRecovery(_)),
         "{added:?}"

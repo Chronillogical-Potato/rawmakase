@@ -158,6 +158,10 @@ impl Fx {
     pub fn plan(&self, op: FileOp) -> Plan {
         plan(&self.cat, op).unwrap()
     }
+    /// Plans `op` with the volumes and folders as `disk` sees them.
+    pub fn plan_on(&self, op: FileOp, disk: &dyn Disk) -> Result<Plan, FileOpError> {
+        plan::plan_with(&self.cat, op, disk)
+    }
     /// Plans, confirms and executes `op` with `trash` on `disk`.
     pub fn run(&mut self, op: FileOp, trash: &dyn Trash, disk: &dyn Disk) -> Outcome {
         let plan = self.plan(op);
@@ -172,8 +176,12 @@ impl Fx {
     }
     /// Recovers on `disk`.
     pub fn recover(&mut self, disk: &dyn Disk) -> Recovery {
+        self.recover_with(disk, &NoTrash)
+    }
+    /// Recovers on `disk`, with `trash`.
+    pub fn recover_with(&mut self, disk: &dyn Disk, trash: &dyn Trash) -> Recovery {
         let _lock = lock::acquire(&self.cat).unwrap();
-        recover::run(&mut self.cat, disk).unwrap()
+        recover::run(&mut self.cat, disk, trash).unwrap()
     }
     /// Installs trigger `body` (after its name) for the connection's life.
     pub fn fail_journal_with(&self, body: &str) {
@@ -258,6 +266,43 @@ macro_rules! passes_on {
         ) -> Result<crate::storage::fsops::VolumeFacts, crate::storage::fsops::FsError> {
             self.$inner.volume_facts(path)
         }
+        fn create_file(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.create_file(path)
+        }
+        fn copy_into(
+            &self,
+            from: &std::path::Path,
+            to: &std::path::Path,
+            to_id: crate::storage::fsops::FileId,
+            go_on: &mut dyn FnMut(u64) -> bool,
+        ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
+            self.$inner.copy_into(from, to, to_id, go_on)
+        }
+        fn sync_file(&self, path: &std::path::Path) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.sync_file(path)
+        }
+        fn copy_times(
+            &self,
+            from: &std::path::Path,
+            to: &std::path::Path,
+        ) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.copy_times(from, to)
+        }
+        fn hash(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::FsError> {
+            self.$inner.hash(path)
+        }
+        fn remove_file(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.remove_file(path)
+        }
     };
 }
 pub(super) use passes_on;
@@ -271,6 +316,14 @@ pub(super) enum Call {
     Rename(PathBuf, PathBuf),
     CreateDir(PathBuf),
     Sync(PathBuf),
+    CreateFile(PathBuf),
+    Copy(PathBuf, PathBuf),
+    /// A chunk of a copy written, with the bytes written so far.
+    Chunk(u64),
+    SyncFile(PathBuf),
+    CopyTimes(PathBuf),
+    Hash(PathBuf),
+    RemoveFile(PathBuf),
 }
 
 /// Which kind of call a fault is at.
@@ -279,26 +332,81 @@ pub(super) enum Op {
     Rename,
     CreateDir,
     Sync,
+    CreateFile,
+    Copy,
+    SyncFile,
+    CopyTimes,
+    Hash,
+    RemoveFile,
+}
+
+impl Op {
+    /// The steps of a copy to another volume.
+    pub const COPYING: [Op; 8] = [
+        Op::CreateFile,
+        Op::Copy,
+        Op::SyncFile,
+        Op::CopyTimes,
+        Op::Hash,
+        Op::Rename,
+        Op::Sync,
+        Op::RemoveFile,
+    ];
 }
 
 /// What happens at the faulty call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Fault {
-    /// It fails, changing nothing.
+    /// It fails, changing nothing; a copy fails part way, as on a full
+    /// drive.
     Fail,
     /// The process ends before it.
     CrashBefore,
     /// The process ends right after it.
     CrashAfter,
+    /// The process ends in the middle of a copy, part of it written; before
+    /// any other call.
+    CrashMid,
 }
 
 /// The real disk, recording every call and faulting at the `nth` (from 0)
-/// call of a kind, for each fault it has.
+/// call of a kind, for each fault it has; and, for copies, numbering what
+/// is at or below `elsewhere` as if on another volume, and changing what
+/// the hooks ask for.
 #[derive(Default)]
 pub(super) struct Faulty {
     pub faults: Vec<(Op, usize, Fault)>,
     pub calls: RefCell<Vec<Call>>,
-    seen: RefCell<BTreeMap<String, usize>>,
+    pub seen: RefCell<BTreeMap<String, usize>>,
+    /// A folder taken for another volume's, with everything in it.
+    pub elsewhere: Option<PathBuf>,
+    /// The bytes every volume has free, instead of its own.
+    pub space: Option<u64>,
+    /// The step, in nanoseconds, that a copy's time is cut to, as a volume
+    /// keeping times more coarsely does.
+    pub coarse: Option<u64>,
+    /// Each copy reads back with a byte changed.
+    pub corrupt: bool,
+    /// The original gets another byte while it is copied.
+    pub change_source: bool,
+    /// The original is taken away to this path while it is copied.
+    pub take_source: Option<PathBuf>,
+    /// A file there takes this name just before something is renamed to it.
+    pub occupy: Option<PathBuf>,
+    /// Set once a copy wrote its first chunk, as Stop pressed then.
+    pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// `elsewhere` keeps the names it is given decomposed (NFD), as HFS+
+    /// does, and finds a file by any normalisation form of its name.
+    pub decompose: bool,
+    /// `elsewhere` gives a file a new number once it is written and closed,
+    /// as FAT does.
+    pub renumber_on_close: bool,
+    /// `elsewhere` gives a file a new number when it is renamed.
+    pub renumber_on_rename: bool,
+    /// The number `elsewhere` gives each real file object, where it gave
+    /// it another than its own.
+    pub numbers: RefCell<BTreeMap<crate::storage::fsops::FileId, crate::storage::fsops::FileId>>,
+    pub renumbered: RefCell<u64>,
 }
 
 impl Faulty {
@@ -311,6 +419,11 @@ impl Faulty {
             ..Self::default()
         }
     }
+    /// This disk with `dir` taken for another volume.
+    pub fn elsewhere(mut self, dir: &Path) -> Self {
+        self.elsewhere = Some(dir.to_path_buf());
+        self
+    }
     /// How many calls of `op` it saw.
     pub fn count(&self, op: Op) -> usize {
         self.seen
@@ -319,8 +432,8 @@ impl Faulty {
             .copied()
             .unwrap_or(0)
     }
-    /// Runs `step`, a call of kind `op`, with the fault if this is the one.
-    fn step<T>(&self, op: Op, step: impl FnOnce() -> Result<T, FsError>) -> Result<T, FsError> {
+    /// The fault at this call of kind `op`, if any, with its number.
+    fn fault(&self, op: Op) -> (usize, Option<Fault>) {
         let n = {
             let mut seen = self.seen.borrow_mut();
             let n = seen.entry(format!("{op:?}")).or_default();
@@ -332,16 +445,90 @@ impl Faulty {
             .iter()
             .find(|(at, nth, _)| *at == op && *nth == n)
             .map(|f| f.2);
+        (n, fault)
+    }
+    /// Runs `step`, a call of kind `op`, with the fault if this is the one.
+    fn step<T>(&self, op: Op, step: impl FnOnce() -> Result<T, FsError>) -> Result<T, FsError> {
+        let (n, fault) = self.fault(op);
         match fault {
             Some(fault) => match fault {
                 Fault::Fail => Err(FsError::Io(std::io::Error::other("injected failure"))),
-                Fault::CrashBefore => panic!("injected crash before {op:?} {n}"),
+                Fault::CrashBefore | Fault::CrashMid => panic!("injected crash before {op:?} {n}"),
                 Fault::CrashAfter => {
                     let _done = step();
                     panic!("injected crash after {op:?} {n}")
                 }
             },
             _ => step(),
+        }
+    }
+    /// Whether `path` is taken for another volume's.
+    fn far(&self, path: &Path) -> bool {
+        self.elsewhere.as_ref().is_some_and(|d| path.starts_with(d))
+    }
+    /// `path` as `elsewhere` stores it when it makes a name there.
+    fn stored(&self, path: &Path) -> PathBuf {
+        use unicode_normalization::UnicodeNormalization;
+        match (self.decompose && self.far(path), path.file_name()) {
+            (true, Some(name)) => {
+                let nfd: String = name.to_string_lossy().nfd().collect();
+                path.with_file_name(nfd)
+            }
+            _ => path.to_path_buf(),
+        }
+    }
+    /// The file `path` names on `elsewhere`, which finds a name in any
+    /// normalisation form.
+    fn found(&self, path: &Path) -> PathBuf {
+        let stored = self.stored(path);
+        match std::fs::symlink_metadata(path).is_err() && stored.symlink_metadata().is_ok() {
+            true => stored,
+            false => path.to_path_buf(),
+        }
+    }
+    /// The number `elsewhere` gives real file object `real`.
+    fn number(&self, real: crate::storage::fsops::FileId) -> crate::storage::fsops::FileId {
+        self.numbers
+            .borrow()
+            .get(&real)
+            .copied()
+            .unwrap_or_else(|| real.elsewhere())
+    }
+    /// The real file object `elsewhere` numbers `fake`.
+    fn real(&self, fake: crate::storage::fsops::FileId) -> crate::storage::fsops::FileId {
+        self.numbers
+            .borrow()
+            .iter()
+            .find(|(_, f)| **f == fake)
+            .map(|(r, _)| *r)
+            .unwrap_or_else(|| fake.elsewhere())
+    }
+    /// Gives the file at `path`, if `elsewhere`, a number never given yet.
+    fn renumber(&self, path: &Path) {
+        if !self.far(path) {
+            return;
+        }
+        let Ok(real) = Real.entry(path).map(|e| e.id) else {
+            return;
+        };
+        let n = {
+            let mut n = self.renumbered.borrow_mut();
+            *n += 1;
+            u64::MAX - *n
+        };
+        let fake = real.elsewhere().numbered(n);
+        self.numbers.borrow_mut().insert(real, fake);
+    }
+    /// A remount of `elsewhere`: each of `files` gets a new number, and the
+    /// file at `reuse.1` the number the file at `reuse.0` had before.
+    pub fn remount(&self, files: &[&Path], reuse: Option<(&Path, &Path)>) {
+        let before = reuse.map(|(a, _)| self.number(Real.entry(a).unwrap().id));
+        for f in files {
+            self.renumber(f);
+        }
+        if let (Some((_, b)), Some(old)) = (reuse, before) {
+            let real = Real.entry(b).unwrap().id;
+            self.numbers.borrow_mut().insert(real, old);
         }
     }
     pub fn renames(&self) -> Vec<(PathBuf, PathBuf)> {
@@ -354,12 +541,24 @@ impl Faulty {
             })
             .collect()
     }
+    /// How many chunks its copies wrote.
+    pub fn chunks(&self) -> usize {
+        self.calls
+            .borrow()
+            .iter()
+            .filter(|c| matches!(c, Call::Chunk(_)))
+            .count()
+    }
 }
 
 impl Disk for Faulty {
     fn entry(&self, path: &Path) -> Result<Entry, FsError> {
         self.calls.borrow_mut().push(Call::Entry(path.into()));
-        Real.entry(path)
+        let mut found = Real.entry(&self.found(path))?;
+        if self.far(path) {
+            found.id = self.number(found.id);
+        }
+        Ok(found)
     }
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
         self.calls.borrow_mut().push(Call::List(dir.into()));
@@ -367,13 +566,21 @@ impl Disk for Faulty {
     }
     fn identity(&self, path: &Path) -> anyhow::Result<Identity> {
         self.calls.borrow_mut().push(Call::Identity(path.into()));
-        Real.identity(path)
+        Real.identity(&self.found(path))
     }
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         self.calls
             .borrow_mut()
             .push(Call::Rename(from.into(), to.into()));
-        self.step(Op::Rename, || Real.rename(from, to))
+        if self.occupy.as_deref() == Some(to) {
+            std::fs::write(to, b"raced").unwrap();
+        }
+        let (from, to) = (&self.found(from), &self.stored(to));
+        let renamed = self.step(Op::Rename, || Real.rename(from, to));
+        if renamed.is_ok() && self.renumber_on_rename {
+            self.renumber(to);
+        }
+        renamed
     }
     fn create_dir(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CreateDir(path.into()));
@@ -387,7 +594,110 @@ impl Disk for Faulty {
         Real.canonical(path)
     }
     fn volume_facts(&self, path: &Path) -> Result<crate::storage::fsops::VolumeFacts, FsError> {
-        Real.volume_facts(path)
+        let mut facts = Real.volume_facts(path)?;
+        if let Some(space) = self.space {
+            facts.available = space;
+        }
+        Ok(facts)
+    }
+    fn create_file(&self, path: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::CreateFile(path.into()));
+        self.step(Op::CreateFile, || Real.create_file(&self.stored(path)))
+    }
+    fn copy_into(
+        &self,
+        from: &Path,
+        to: &Path,
+        to_id: crate::storage::fsops::FileId,
+        go_on: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
+        use crate::storage::fsops::CopyError;
+        self.calls
+            .borrow_mut()
+            .push(Call::Copy(from.into(), to.into()));
+        let to = &self.found(to);
+        // The file object as the real disk numbers it.
+        let to_id = match self.far(to) {
+            true => self.real(to_id),
+            false => to_id,
+        };
+        let (n, fault) = self.fault(Op::Copy);
+        // Part of it: the first chunk.
+        let part = || Real.copy_into(from, to, to_id, &mut |_| false);
+        match fault {
+            Some(Fault::CrashBefore) => panic!("injected crash before copy {n}"),
+            Some(Fault::Fail) => {
+                let _part = part();
+                return Err(CopyError::Fs(FsError::NoSpace));
+            }
+            Some(Fault::CrashMid) => {
+                let _part = part();
+                panic!("injected crash in copy {n}")
+            }
+            Some(Fault::CrashAfter) | None => {}
+        }
+        let copied = Real.copy_into(from, to, to_id, &mut |written| {
+            self.calls.borrow_mut().push(Call::Chunk(written));
+            if let Some(stop) = &self.stop {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            go_on(written)
+        });
+        if copied.is_ok() && self.corrupt {
+            let mut bytes = std::fs::read(to).unwrap();
+            bytes[0] ^= 0xff;
+            std::fs::write(to, bytes).unwrap();
+        }
+        if let (true, Some(away)) = (copied.is_ok(), &self.take_source) {
+            std::fs::rename(from, away).unwrap();
+        }
+        if copied.is_ok() && self.change_source {
+            let mut bytes = std::fs::read(from).unwrap();
+            bytes.push(b'!');
+            std::fs::write(from, bytes).unwrap();
+        }
+        // Closed after writing.
+        if self.renumber_on_close {
+            self.renumber(to);
+        }
+        if fault == Some(Fault::CrashAfter) {
+            panic!("injected crash after copy {n}");
+        }
+        copied
+    }
+    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::SyncFile(path.into()));
+        self.step(Op::SyncFile, || Real.sync_file(&self.found(path)))
+    }
+    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::CopyTimes(to.into()));
+        let to = &self.found(to);
+        self.step(Op::CopyTimes, || {
+            Real.copy_times(from, to)?;
+            if let Some(step) = self.coarse {
+                let at = std::fs::metadata(to)?.modified()?;
+                let ns = at.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+                let cut = ns - ns % u128::from(step);
+                let cut = std::time::UNIX_EPOCH
+                    + std::time::Duration::new(
+                        (cut / 1_000_000_000) as u64,
+                        (cut % 1_000_000_000) as u32,
+                    );
+                std::fs::File::options()
+                    .write(true)
+                    .open(to)?
+                    .set_modified(cut)?;
+            }
+            Ok(())
+        })
+    }
+    fn hash(&self, path: &Path) -> Result<crate::storage::fsops::ContentHash, FsError> {
+        self.calls.borrow_mut().push(Call::Hash(path.into()));
+        self.step(Op::Hash, || Real.hash(&self.found(path)))
+    }
+    fn remove_file(&self, path: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::RemoveFile(path.into()));
+        self.step(Op::RemoveFile, || Real.remove_file(&self.found(path)))
     }
 }
 

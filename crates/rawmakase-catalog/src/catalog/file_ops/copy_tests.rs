@@ -1,0 +1,1500 @@
+//! Moving photos to another volume: each file copied, verified and renamed
+//! there before the catalog follows, then its original put in the Trash;
+//! anything that fails before the catalog follows undone; and recovery of
+//! whatever a crash leaves at any step. On one volume, the test disk takes
+//! the destination folder for another volume's; one test, run when
+//! `RAWMAKASE_TEST_OTHER_VOLUME` names a folder on another volume, uses two.
+use super::journal::{self, ItemState, MemberState};
+use super::recover_tests::{Before, before, check};
+use super::tests::{FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results};
+use super::*;
+use crate::catalog::HistoryUpdate;
+use crate::export_settings::ExportOptions;
+use crate::model::recipe::Recipe;
+use crate::storage::Identity;
+use crate::storage::fsops;
+use anyhow::Result;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+/// A.NEF carries A.xmp; A.NEF.xmp is A.NEF.DNG's too, so it stays.
+fn files() -> Fx {
+    fixture(&["A.NEF", "A.xmp", "A.NEF.xmp", "A.NEF.DNG", "b.NEF", "far/"])
+}
+
+/// The test disk, with `far/` on another volume.
+fn far(fx: &Fx) -> Faulty {
+    Faulty::default().elsewhere(&fx.root.join("far"))
+}
+
+fn to_far(fx: &Fx, names: &[&str]) -> FileOp {
+    FileOp::MovePhotos {
+        photos: names.iter().map(|n| fx.photo(n)).collect(),
+        to: fx.folder("far"),
+    }
+}
+
+/// Plans `op` and runs it on `disk`, stopping when `cancel` is set.
+fn run(fx: &mut Fx, op: FileOp, trash: &dyn Trash, disk: &Faulty, cancel: &AtomicBool) -> Outcome {
+    let plan = fx.plan_on(op, disk).unwrap();
+    execute::execute_with(&mut fx.cat, plan.confirm(), trash, cancel, disk).unwrap()
+}
+
+/// Partial copies anywhere below the fixture but in the Trash.
+fn partials(fx: &Fx) -> Vec<String> {
+    fx.files()
+        .into_keys()
+        .filter(|k| k.ends_with(".rawmakase-part") && !k.starts_with("trash/"))
+        .collect()
+}
+
+/// Saves an edit and reads a checksum for photo `name`.
+fn edited(fx: &mut Fx, name: &str) -> Result<()> {
+    let id = fx.photo(name);
+    let source = fx.root.join(name);
+    fx.cat.save_edit(
+        id,
+        &source,
+        &Recipe::default(),
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    let crate::storage::ChecksumRead::Done(checksum) =
+        crate::storage::FileChecksum::read_full(&source, |_| true)?
+    else {
+        panic!("not read")
+    };
+    fx.cat.save_checksums(&[crate::catalog::ReadChecksum {
+        photo: id,
+        folder: fx.folder(""),
+        filename: name.into(),
+        path: source,
+        checksum,
+    }])?;
+    Ok(())
+}
+
+/// The identity photo `id`'s saved edit names, as stored.
+fn saved_identity(fx: &Fx, id: PhotoId) -> Option<Identity> {
+    let text: Option<String> = fx
+        .cat
+        .db_for_tests()
+        .query_row("SELECT identity FROM photos WHERE id=?", [id.0], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    text.map(|t| serde_json::from_str(&t).unwrap())
+}
+
+#[test]
+fn a_move_to_another_drive_copies_verifies_and_trashes_the_original() -> Result<()> {
+    let mut fx = files();
+    edited(&mut fx, "A.NEF")?;
+    let a = fx.photo("A.NEF");
+    let copy = fx.cat.create_virtual_copy(a)?;
+    let source = fx.root.join("A.NEF");
+    let identity = Identity::read(&source)?;
+    let modified = std::fs::metadata(&source)?.modified()?;
+    let disk = far(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let across = plan.summary().across.clone().expect("it copies");
+    let sizes = bytes("A.NEF").len() + bytes("A.xmp").len();
+    assert_eq!(across.bytes, sizes as u64);
+    assert_eq!((across.files, across.companions), (1, 1));
+    assert_eq!(
+        across.volume,
+        fx.root.join("far"),
+        "where the other volume begins"
+    );
+    assert!(across.available > 0);
+    assert_eq!(plan.summary().companions, 1);
+    assert_eq!(
+        plan.summary().shared_companions,
+        [fx.root.join("A.NEF.xmp")]
+    );
+    let trash = FakeTrash::new(&fx);
+    let outcome = execute::execute_with(
+        &mut fx.cat,
+        plan.confirm(),
+        &trash,
+        &AtomicBool::new(false),
+        &disk,
+    )?;
+    let to = fx.folder("far");
+    assert_eq!(results(&outcome), [ItemResult::Moved { to }]);
+    assert!(outcome.items[0].originals_kept.is_empty());
+    let target = fx.root.join("far/A.NEF");
+    assert_eq!(std::fs::read(&target)?, bytes("A.NEF"));
+    assert_eq!(std::fs::read(fx.root.join("far/A.xmp"))?, bytes("A.xmp"));
+    assert_eq!(
+        std::fs::metadata(&target)?.modified()?,
+        modified,
+        "its time kept"
+    );
+    assert_eq!(Identity::read(&target)?, identity, "so its identity");
+    assert_ne!(fsops::entry(&target)?.id, fsops::entry(&fx.root)?.id);
+    // The originals are in the Trash, with receipts; the shared one stays.
+    let files = fx.files();
+    assert_eq!(files.get("trash/1-A.NEF"), Some(&bytes("A.NEF")));
+    assert_eq!(files.get("trash/2-A.xmp"), Some(&bytes("A.xmp")));
+    assert!(!source.exists() && !fx.root.join("A.xmp").exists());
+    assert!(fx.root.join("A.NEF.xmp").is_file() && fx.root.join("A.NEF.DNG").is_file());
+    let item = &journal::of_batch(&fx.cat.db, &outcome_batch(&fx, &outcome))?[0];
+    assert_eq!(item.state, ItemState::Done);
+    for m in &item.members {
+        assert_eq!(m.state, MemberState::Trashed);
+        assert!(m.receipt.is_some());
+    }
+    // The rows, the copy's too, follow; the edit opens; the checksum holds.
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    assert_eq!(fx.rows()[&copy], "far/A.NEF");
+    assert!(fx.cat.load_edit(a, &target)?.is_some());
+    assert_eq!(fx.cat.checksums()?[&a].identity, identity);
+    assert!(partials(&fx).is_empty());
+    // Copied, not renamed.
+    assert!(
+        disk.renames()
+            .iter()
+            .all(|(from, _)| from.to_string_lossy().ends_with(".rawmakase-part"))
+    );
+    Ok(())
+}
+
+/// The batch of `outcome`'s first item.
+fn outcome_batch(fx: &Fx, outcome: &Outcome) -> String {
+    use crate::catalog::db::{Reads, sql};
+    fx.cat
+        .db
+        .read_one(
+            sql!("SELECT batch FROM file_operations WHERE id=?"),
+            &[&outcome.items[0].operation.0],
+        )
+        .unwrap()
+}
+
+#[test]
+fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
+    // c.NEF is on the other drive; A.NEF, with A.xmp, is on this one, as
+    // the folder they go to.
+    let mut fx = fixture(&["A.NEF", "A.xmp", "sub/", "far/c.NEF"]);
+    let disk = far(&fx);
+    let op = FileOp::MovePhotos {
+        photos: vec![fx.photo("A.NEF"), fx.photo("far/c.NEF")],
+        root: fx.root_id(),
+        to: "sub".into(),
+    };
+    let plan = fx.plan_on(op.clone(), &disk)?;
+    let summary = plan.summary();
+    assert_eq!((summary.files, summary.companions), (2, 1), "all it moves");
+    let across = summary.across.clone().expect("it copies c.NEF");
+    assert_eq!((across.files, across.companions), (1, 0), "what it copies");
+    assert_eq!(across.bytes, bytes("far/c.NEF").len() as u64);
+    let trash = FakeTrash::new(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let to = fx.folder("sub");
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved { to }, ItemResult::Moved { to }]
+    );
+    assert_eq!(
+        std::fs::read(fx.root.join("sub/c.NEF"))?,
+        bytes("far/c.NEF")
+    );
+    assert_eq!(fx.files().get("trash/1-c.NEF"), Some(&bytes("far/c.NEF")));
+    Ok(())
+}
+
+#[test]
+fn a_move_on_one_drive_still_renames() -> Result<()> {
+    let mut fx = fixture(&["a.NEF", "a.xmp", "sub/"]);
+    let a = fx.photo("a.NEF");
+    let id = fsops::entry(&fx.root.join("a.NEF"))?.id;
+    let disk = Faulty::default();
+    let op = FileOp::MovePhotos {
+        photos: vec![a],
+        to: fx.folder("sub"),
+    };
+    assert_eq!(fx.plan_on(op.clone(), &disk)?.summary().across, None);
+    let outcome = run(&mut fx, op, &NoTrash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("sub")
+        }]
+    );
+    assert_eq!(fsops::entry(&fx.root.join("sub/a.NEF"))?.id, id);
+    for op in [Op::CreateFile, Op::Copy, Op::Hash, Op::RemoveFile] {
+        assert_eq!(disk.count(op), 0, "{op:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn coarser_times_there_rekey_the_saved_edit_and_checksum() -> Result<()> {
+    let mut fx = files();
+    edited(&mut fx, "A.NEF")?;
+    let a = fx.photo("A.NEF");
+    let copy = fx.cat.create_virtual_copy(a)?;
+    let was = Identity::read(&fx.root.join("A.NEF"))?;
+    let mut disk = far(&fx);
+    // FAT's two seconds.
+    disk.coarse = Some(2_000_000_000);
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    let target = fx.root.join("far/A.NEF");
+    let now = Identity::read(&target)?;
+    assert_ne!(now, was, "the time was cut");
+    assert_eq!((now.size, &now.prefix_hash), (was.size, &was.prefix_hash));
+    assert_eq!(std::fs::read(&target)?, bytes("A.NEF"));
+    assert_eq!(saved_identity(&fx, a), Some(now.clone()));
+    assert_eq!(saved_identity(&fx, copy), Some(now.clone()));
+    assert_eq!(fx.cat.checksums()?[&a].identity, now);
+    assert!(fx.cat.load_edit(a, &target)?.is_some(), "the edit opens");
+    assert!(fx.cat.load_edit(copy, &target)?.is_some());
+    Ok(())
+}
+
+#[test]
+fn an_edit_saved_for_another_version_is_not_rekeyed() -> Result<()> {
+    let mut fx = files();
+    edited(&mut fx, "A.NEF")?;
+    let a = fx.photo("A.NEF");
+    // The saved edit names another version of the file.
+    let other = Identity {
+        size: 1,
+        modified_ns: 1,
+        prefix_hash: "0".into(),
+    };
+    fx.cat.db_for_tests().execute(
+        "UPDATE photos SET identity=? WHERE id=?",
+        rusqlite::params![serde_json::to_string(&other)?, a.0],
+    )?;
+    let mut disk = far(&fx);
+    disk.coarse = Some(2_000_000_000);
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(saved_identity(&fx, a), Some(other), "still protected");
+    Ok(())
+}
+
+#[test]
+fn an_earlier_releases_edit_file_and_coarser_times_leave_the_photo() -> Result<()> {
+    let mut fx = fixture(&["a.NEF", "a.NEF.rawmakase.json", "far/"]);
+    let a = fx.photo("a.NEF");
+    let mut disk = far(&fx);
+    disk.coarse = Some(2_000_000_000);
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["a.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let [ItemResult::Unchanged(Some(why))] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert!(why.contains("earlier release"), "{why}");
+    assert_eq!(fx.rows()[&a], "a.NEF");
+    // The originals where they were, the copies in the Trash.
+    let files = fx.files();
+    assert_eq!(files.get("trip/a.NEF"), Some(&bytes("a.NEF")));
+    assert!(!files.contains_key("trip/far/a.NEF"));
+    assert!(!files.contains_key("trip/far/a.NEF.rawmakase.json"));
+    assert_eq!(
+        files.get("trash/1-a.NEF.rawmakase.json"),
+        Some(&bytes("a.NEF.rawmakase.json"))
+    );
+    assert_eq!(files.get("trash/2-a.NEF"), Some(&bytes("a.NEF")));
+    assert!(partials(&fx).is_empty());
+    // Without coarser times it moves.
+    let disk = far(&fx);
+    let op = to_far(&fx, &["a.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    Ok(())
+}
+
+/// Moves A.NEF to far/ with `disk` faulting, expecting the item
+/// unchanged for a reason containing `said`, its rows and the files outside
+/// the Trash as before, and no partial copy left.
+fn unchanged(disk: Faulty, said: &str) -> Result<(Fx, Faulty)> {
+    unchanged_at(files(), disk, said)
+}
+
+#[test]
+fn a_full_drive_part_way_through_a_copy_removes_the_partial_copy() -> Result<()> {
+    let (_fx, disk) = unchanged(Faulty::at(Op::Copy, 0, Fault::Fail), "full")?;
+    assert_eq!(disk.count(Op::RemoveFile), 1);
+    Ok(())
+}
+
+#[test]
+fn a_copy_that_reads_back_otherwise_is_undone() -> Result<()> {
+    let disk = Faulty {
+        corrupt: true,
+        ..Faulty::default()
+    };
+    unchanged(disk, "didn't match the original")?;
+    Ok(())
+}
+
+/// Runs the move of A.NEF to far/ on `disk`, expecting it left for the
+/// user with its copy of A.NEF whole and hidden in far/, and the catalog as
+/// it was; returns the fixture and that copy.
+fn kept_whole(fx: Fx, disk: Faulty) -> Result<(Fx, PathBuf)> {
+    let mut fx = fx;
+    let rows = fx.rows();
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..disk
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert!(
+        matches!(&results(&outcome)[..], [ItemResult::NeedsRecovery(_)]),
+        "{outcome:?}"
+    );
+    assert_eq!(fx.rows(), rows);
+    let [temp] = &partials(&fx)[..] else {
+        panic!("{:?}", partials(&fx))
+    };
+    let temp = fx.dir.path().canonicalize()?.join(temp);
+    assert_eq!(std::fs::read(&temp)?, bytes("A.NEF"), "kept whole");
+    assert!(!fx.files().keys().any(|k| k.starts_with("trash/")));
+    Ok((fx, temp))
+}
+
+#[test]
+fn an_original_changed_while_it_was_copied_keeps_its_verified_copy() -> Result<()> {
+    // The copy has the bytes the original had: perhaps the only ones left.
+    let disk = Faulty {
+        change_source: true,
+        ..Faulty::default()
+    };
+    let (fx, _) = kept_whole(files(), disk)?;
+    let mut changed = bytes("A.NEF");
+    changed.push(b'!');
+    assert_eq!(std::fs::read(fx.root.join("A.NEF"))?, changed);
+    assert!(!fx.root.join("far/A.NEF").exists());
+    Ok(())
+}
+
+#[test]
+fn an_original_gone_while_it_was_copied_keeps_its_verified_copy() -> Result<()> {
+    let fx = files();
+    let disk = Faulty {
+        take_source: Some(fx.dir.path().canonicalize()?.join("taken.NEF")),
+        ..Faulty::default()
+    };
+    let (mut fx, temp) = kept_whole(fx, disk)?;
+    // Recovery keeps it too, while the original can't be proven.
+    let recovery = fx.recover_with(&far(&fx), &FakeTrash::new(&fx));
+    assert_eq!(recovery.unfinished.len(), 1);
+    assert_eq!(std::fs::read(&temp)?, bytes("A.NEF"));
+    Ok(())
+}
+
+/// The files of `fx` below far/, with their bytes.
+fn in_far(fx: &Fx) -> BTreeMap<String, Vec<u8>> {
+    fx.files()
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("trip/far/"))
+        .collect()
+}
+
+/// A photo whose name is composed (NFC), which a volume like HFS+ keeps
+/// decomposed.
+const CAFE: &str = "Caf\u{e9}.NEF";
+
+#[test]
+fn a_volume_spelling_names_otherwise_still_has_its_copies_found() -> Result<()> {
+    // A move that finishes, one undone, and one a crash cuts short part way
+    // through a copy, recovered on the same volume.
+    for (fault, ends) in [
+        (None, "moved"),
+        (Some(Fault::Fail), "undone"),
+        (Some(Fault::CrashMid), "recovered"),
+    ] {
+        let mut fx = fixture(&[CAFE, "far/"]);
+        let photo = fx.photo(CAFE);
+        let base = match fault {
+            Some(fault) => Faulty::at(Op::Copy, 0, fault),
+            None => Faulty::default(),
+        };
+        let disk = Faulty {
+            decompose: true,
+            ..base
+        }
+        .elsewhere(&fx.root.join("far"));
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(
+            FileOp::MovePhotos {
+                photos: vec![photo],
+                root: fx.root_id(),
+                to: "far".into(),
+            },
+            &disk,
+        )?;
+        let batch = plan.batch().clone();
+        crashes(|| {
+            drop(
+                execute::execute_with(
+                    &mut fx.cat,
+                    plan.confirm(),
+                    &trash,
+                    &Default::default(),
+                    &disk,
+                )
+                .unwrap(),
+            );
+        });
+        fx.reopen();
+        let clean = Faulty {
+            decompose: true,
+            ..far(&fx)
+        };
+        let recovery = fx.recover_with(&clean, &trash);
+        assert!(recovery.unfinished.is_empty(), "{ends}: {recovery:?}");
+        assert!(partials(&fx).is_empty(), "{ends}: {:?}", partials(&fx));
+        let result = &results(&super::outcome(&fx.cat, &batch)?)[0];
+        match ends {
+            "moved" => {
+                assert!(matches!(result, ItemResult::Moved { .. }), "{result:?}");
+                let copy = fx
+                    .cat
+                    .photos()?
+                    .into_iter()
+                    .find(|p| p.id == photo)
+                    .unwrap()
+                    .path;
+                assert_eq!(std::fs::read(&copy)?, bytes(CAFE));
+            }
+            _ => {
+                assert!(
+                    matches!(result, ItemResult::Unchanged(_)),
+                    "{ends}: {result:?}"
+                );
+                assert_eq!(std::fs::read(fx.root.join(CAFE))?, bytes(CAFE));
+                assert_eq!(in_far(&fx).len(), 1, "{ends}: only keep.dng");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn put_back_of_a_copy_whose_original_changed_discards_its_copies() -> Result<()> {
+    // The photo is copied whole and given its name; its sidecar's copy is
+    // under way (not whole), or whole but not yet given its name, when the
+    // process ends; then another app rewrites an original: the photo's, or
+    // the sidecar's, whose whole hidden copy then has the only bytes the
+    // sidecar had.
+    for whole in [false, true] {
+        let mut fx = files();
+        let fault = match whole {
+            false => Faulty::at(Op::Copy, 1, Fault::CrashMid),
+            true => Faulty::at(Op::Rename, 1, Fault::CrashBefore),
+        };
+        let disk = Faulty {
+            elsewhere: Some(fx.root.join("far")),
+            ..fault
+        };
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+        assert!(crashes(|| {
+            let _ = execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &trash,
+                &Default::default(),
+                &disk,
+            );
+        }));
+        fx.reopen();
+        let [temp] = &partials(&fx)[..] else {
+            panic!("{:?}", partials(&fx))
+        };
+        let temp_name = temp.rsplit('/').next().unwrap().to_string();
+        let temp = fx.dir.path().canonicalize()?.join(temp);
+        let original = fx.root.join(if whole { "A.xmp" } else { "A.NEF" });
+        let id = fsops::entry(&original)?.id;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&original)?;
+        std::io::Write::write_all(&mut f, b" rewritten")?;
+        drop(f);
+        let rewritten = std::fs::read(&original)?;
+        let recovery = fx.recover_with(&far(&fx), &trash);
+        let [u] = &recovery.unfinished[..] else {
+            panic!("{whole}: {recovery:?}")
+        };
+        // The sidecar's copy is shown where it is: hidden, not at its name.
+        let xmp = u
+            .members
+            .iter()
+            .find(|m| m.source.ends_with("A.xmp"))
+            .unwrap();
+        assert_eq!(xmp.after.as_deref(), Some(temp.as_path()));
+        let photo = u
+            .members
+            .iter()
+            .find(|m| m.source.ends_with("A.NEF"))
+            .unwrap();
+        assert_eq!(
+            photo.after.as_deref(),
+            Some(fx.root.join("far/A.NEF").as_path())
+        );
+        // Put Back: the originals are where they were, so the copies go:
+        // a whole one to the Trash, one not whole removed.
+        let clean = far(&fx);
+        let back = recover::resolve_with(
+            &mut fx.cat,
+            u.operation,
+            Resolution::PutBack,
+            &clean,
+            &trash,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        assert!(matches!(back.result, ItemResult::Unchanged(_)), "{back:?}");
+        assert!(partials(&fx).is_empty(), "{whole}");
+        assert!(!fx.root.join("far/A.NEF").exists());
+        let files = fx.files();
+        let photo_in_trash = match whole {
+            true => {
+                assert_eq!(
+                    files.get(&format!("trash/1-{temp_name}")),
+                    Some(&bytes("A.xmp")),
+                    "the whole hidden copy, in the Trash"
+                );
+                assert_eq!(clean.count(Op::RemoveFile), 0, "nothing unlinked");
+                "trash/2-A.NEF"
+            }
+            false => {
+                assert_eq!(clean.count(Op::RemoveFile), 1, "the partial copy removed");
+                "trash/1-A.NEF"
+            }
+        };
+        assert_eq!(files.get(photo_in_trash), Some(&bytes("A.NEF")), "{whole}");
+        assert_eq!(
+            std::fs::read(&original)?,
+            rewritten,
+            "the original untouched"
+        );
+        assert_eq!(fsops::entry(&original)?.id, id);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_volume_renumbering_its_files_never_loses_or_misjudges_a_copy() -> Result<()> {
+    for (close, rename) in [(true, false), (false, true)] {
+        let mut fx = files();
+        let a = fx.photo("A.NEF");
+        let disk = Faulty {
+            renumber_on_close: close,
+            renumber_on_rename: rename,
+            ..far(&fx)
+        };
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx, &["A.NEF"]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        let what = format!("close {close} rename {rename}");
+        // Its copy can't be told its own once renamed: it stays, the item
+        // waits for the user, and nothing is removed or put in the Trash.
+        assert!(
+            matches!(&results(&outcome)[..], [ItemResult::NeedsRecovery(_)]),
+            "{what}: {outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read(fx.root.join("far/A.NEF"))?,
+            bytes("A.NEF"),
+            "{what}"
+        );
+        assert_eq!(
+            std::fs::read(fx.root.join("A.NEF"))?,
+            bytes("A.NEF"),
+            "{what}"
+        );
+        assert_eq!(fx.rows()[&a], "A.NEF", "{what}");
+        assert!(
+            !fx.files().keys().any(|k| k.starts_with("trash/")),
+            "{what}"
+        );
+        assert_eq!(disk.count(Op::RemoveFile), 0, "{what}");
+        let item = &journal::of_batch(&fx.cat.db, &outcome_batch(&fx, &outcome))?[0];
+        assert_ne!(item.members[0].state, MemberState::Discarded, "{what}");
+        // Recovery, on the same volume, decides nothing either.
+        let recovery = fx.recover_with(&disk, &trash);
+        assert_eq!(recovery.unfinished.len(), 1, "{what}");
+        assert_eq!(
+            std::fs::read(fx.root.join("far/A.NEF"))?,
+            bytes("A.NEF"),
+            "{what}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_remount_renumbering_and_reusing_numbers_misleads_no_recovery() -> Result<()> {
+    // Crashed with the copy at its name (journalled copying), or part way
+    // through it (the partial copy there); then the volume is remounted:
+    // every file is renumbered, and the copy's old number goes to another
+    // file there.
+    for (op, fault) in [(Op::Rename, Fault::CrashAfter), (Op::Copy, Fault::CrashMid)] {
+        let mut fx = files();
+        let disk = Faulty {
+            elsewhere: Some(fx.root.join("far")),
+            ..Faulty::at(op, 0, fault)
+        };
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+        assert!(crashes(|| {
+            let _ = execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &trash,
+                &Default::default(),
+                &disk,
+            );
+        }));
+        fx.reopen();
+        let copy = match op {
+            Op::Rename => fx.root.join("far/A.NEF"),
+            _ => {
+                let [temp] = &partials(&fx)[..] else {
+                    panic!("{:?}", partials(&fx))
+                };
+                fx.dir.path().canonicalize()?.join(temp)
+            }
+        };
+        let other = fx.root.join("far/keep.dng");
+        let before = in_far(&fx);
+        let remounted = far(&fx);
+        remounted.remount(&[&copy, &other], Some((&copy, &other)));
+        let recovery = fx.recover_with(&remounted, &trash);
+        let what = format!("{op:?} {fault:?}");
+        assert_eq!(recovery.unfinished.len(), 1, "{what}: {recovery:?}");
+        assert_eq!(in_far(&fx), before, "{what}: nothing there changed");
+        assert_eq!(std::fs::read(fx.root.join("A.NEF"))?, bytes("A.NEF"));
+        assert!(
+            !fx.files().keys().any(|k| k.starts_with("trash/")),
+            "{what}"
+        );
+        assert_eq!(remounted.count(Op::RemoveFile), 0, "{what}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_name_taken_just_before_its_copy_gets_it_is_never_replaced() -> Result<()> {
+    // The photo is copied; its companion's name is taken at the last
+    // moment: the photo's copy goes to the Trash, the file there stays.
+    let fx = files();
+    let disk = Faulty {
+        occupy: Some(fx.root.join("far/A.xmp")),
+        ..Faulty::default()
+    };
+    let (fx, _) = unchanged_at(fx, disk, "A.xmp is there now")?;
+    let files = fx.files();
+    assert_eq!(files.get("trip/far/A.xmp"), Some(&b"raced".to_vec()));
+    assert!(!files.contains_key("trip/far/A.NEF"));
+    assert_eq!(
+        files.get("trash/1-A.NEF"),
+        Some(&bytes("A.NEF")),
+        "the copy"
+    );
+    assert_eq!(
+        files.get("trip/A.NEF"),
+        Some(&bytes("A.NEF")),
+        "the original"
+    );
+    Ok(())
+}
+
+/// [`unchanged`] on fixture `fx`.
+fn unchanged_at(mut fx: Fx, disk: Faulty, said: &str) -> Result<(Fx, Faulty)> {
+    let rows = fx.rows();
+    let outside = |fx: &Fx| -> Vec<(String, Vec<u8>)> {
+        fx.files()
+            .into_iter()
+            .filter(|(k, _)| !k.starts_with("trash/"))
+            .collect()
+    };
+    let originals = outside(&fx);
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..disk
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let [ItemResult::Unchanged(Some(why))] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert!(why.contains(said), "{why}");
+    assert_eq!(fx.rows(), rows);
+    if !disk.change_source && disk.occupy.is_none() {
+        assert_eq!(outside(&fx), originals);
+    }
+    assert!(partials(&fx).is_empty());
+    Ok((fx, disk))
+}
+
+#[test]
+fn stop_stops_a_copy_between_chunks_and_undoes_it() -> Result<()> {
+    let mut fx = fixture(&["big.NEF", "b.NEF", "far/"]);
+    let big: Vec<u8> = (0..3 * fsops::COPY_CHUNK as u32 + 5)
+        .map(|i| (i % 251) as u8)
+        .collect();
+    std::fs::write(fx.root.join("big.NEF"), &big)?;
+    // Planned after its bytes changed, so it is the file as planned.
+    let stop = Arc::new(AtomicBool::new(false));
+    let disk = Faulty {
+        stop: Some(stop.clone()),
+        ..far(&fx)
+    };
+    let rows = fx.rows();
+    let op = to_far(&fx, &["big.NEF", "b.NEF"]);
+    let outcome = run(&mut fx, op, &NoTrash, &disk, &stop);
+    assert_eq!(disk.chunks(), 1, "it stopped after the first chunk");
+    let [ItemResult::Unchanged(Some(why))] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(why, "Stopped.");
+    assert_eq!(fx.rows(), rows, "b.NEF never started");
+    assert_eq!(std::fs::read(fx.root.join("big.NEF"))?, big);
+    assert!(partials(&fx).is_empty());
+    assert!(!fx.root.join("far/big.NEF").exists());
+    Ok(())
+}
+
+#[test]
+fn a_volume_without_a_trash_keeps_the_original_and_says_so() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let disk = far(&fx);
+    let mut trash = FakeTrash::new(&fx);
+    trash.fail_from = Some(1);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    let kept: Vec<(PathBuf, String)> = outcome.items[0]
+        .originals_kept
+        .iter()
+        .map(|k| (k.path.clone(), k.why.clone()))
+        .collect();
+    let why = TrashError::Unsupported.to_string();
+    assert_eq!(
+        kept,
+        [
+            (fx.root.join("A.NEF"), why.clone()),
+            (fx.root.join("A.xmp"), why)
+        ]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    for name in ["A.NEF", "A.xmp"] {
+        assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name));
+        assert_eq!(std::fs::read(fx.root.join("far").join(name))?, bytes(name));
+    }
+    // And it reads back so from the journal.
+    let batch = BatchId(outcome_batch(&fx, &outcome));
+    assert_eq!(super::outcome(&fx.cat, &batch)?.items, outcome.items);
+    Ok(())
+}
+
+#[test]
+fn not_enough_room_there_refuses_the_whole_move() -> Result<()> {
+    let fx = files();
+    let disk = Faulty {
+        space: Some(1000),
+        ..far(&fx)
+    };
+    let refused = fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk);
+    let needed = (bytes("A.NEF").len() + bytes("A.xmp").len() + bytes("b.NEF").len()) as u64;
+    match refused {
+        Err(FileOpError::NoSpace {
+            needed: n,
+            available,
+        }) => assert_eq!((n, available), (needed, 1000)),
+        other => panic!("{other:?}"),
+    }
+    // Room for it, but not for it and the spare the volume keeps.
+    let disk = Faulty {
+        space: Some(needed + 1),
+        ..far(&fx)
+    };
+    assert!(matches!(
+        fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk),
+        Err(FileOpError::NoSpace { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn times_kept_more_coarsely_are_told_from_other_changes() {
+    let at = |ns: u128| Identity {
+        size: 10,
+        modified_ns: ns,
+        prefix_hash: "ab".into(),
+    };
+    let original = at(1_600_000_001_234_567_891);
+    for coarse in [
+        1_600_000_001_234_567_800, // NTFS
+        1_600_000_001_230_000_000, // exFAT
+        1_600_000_001_000_000_000, // HFS+
+        1_600_000_000_000_000_000, // FAT, down
+        1_600_000_002_000_000_000, // FAT, up
+    ] {
+        assert!(super::copy::coarser(&original, &at(coarse)), "{coarse}");
+    }
+    for other in [
+        1_600_000_001_234_567_892, // not a coarser time
+        1_600_000_004_000_000_000, // too far
+        1_700_000_000_000_000_000, // now, as a volume ignoring times sets
+    ] {
+        assert!(!super::copy::coarser(&original, &at(other)), "{other}");
+    }
+    let mut bigger = at(1_600_000_001_000_000_000);
+    bigger.size = 11;
+    assert!(!super::copy::coarser(&original, &bigger));
+}
+
+/// Plans the move of A.NEF and b.NEF to far/, runs it on `disk` (which
+/// may crash) with `trash`, restarts and recovers on the same volumes.
+fn scenario(fx: &mut Fx, trash: &dyn Trash, disk: &Faulty) -> (BatchId, Recovery) {
+    scenario_of(fx, &["A.NEF", "b.NEF"], trash, disk)
+}
+
+/// [`scenario`] moving the photos `names` alone.
+fn scenario_of(
+    fx: &mut Fx,
+    names: &[&str],
+    trash: &dyn Trash,
+    disk: &Faulty,
+) -> (BatchId, Recovery) {
+    let plan = fx.plan_on(to_far(fx, names), disk).unwrap();
+    let batch = plan.batch().clone();
+    crashes(|| {
+        drop(
+            execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                trash,
+                &Default::default(),
+                disk,
+            )
+            .unwrap(),
+        );
+    });
+    fx.reopen();
+    let clean = far(fx);
+    let recovery = fx.recover_with(&clean, trash);
+    (batch, recovery)
+}
+
+/// After any fault and recovery: no original lost (`check`), each item
+/// done or nothing changed (the catalog following only proven copies), no
+/// partial copy left unless an item is unfinished, and whatever is
+/// unfinished put back in the end.
+fn proven(fx: &mut Fx, was: &Before, batch: &BatchId, recovery: &Recovery, what: &str) {
+    check(fx, was, recovery, batch);
+    copies_where_they_say(fx, was, batch, what);
+    if recovery.unfinished.is_empty() {
+        assert!(partials(fx).is_empty(), "{what}: {:?}", partials(fx));
+    }
+    for item in super::outcome(&fx.cat, batch).unwrap().items {
+        assert!(
+            matches!(
+                item.result,
+                ItemResult::Moved { .. } | ItemResult::Unchanged(_) | ItemResult::NeedsRecovery(_)
+            ),
+            "{what}: {item:?}"
+        );
+    }
+    let clean = far(fx);
+    let trash = FakeTrash::new(fx);
+    *trash.calls.borrow_mut() = 100;
+    for u in &recovery.unfinished {
+        let back = recover::resolve_with(
+            &mut fx.cat,
+            u.operation,
+            Resolution::PutBack,
+            &clean,
+            &trash,
+        )
+        .unwrap();
+        assert!(
+            matches!(back.result, ItemResult::Unchanged(_)),
+            "{what}: {back:?}"
+        );
+    }
+    assert!(partials(fx).is_empty(), "{what}");
+    copies_where_they_say(fx, was, batch, what);
+}
+
+/// Each copy item of `batch` as its outcome says: moved, with every copy
+/// at its destination and every original in the Trash or reported kept;
+/// unchanged, with no copy left outside the Trash.
+fn copies_where_they_say(fx: &Fx, was: &Before, batch: &BatchId, what: &str) {
+    let base = fx.dir.path().canonicalize().unwrap();
+    let rel = |p: &Path| {
+        p.strip_prefix(&base)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    let now = fx.files();
+    let outcome = super::outcome(&fx.cat, batch).unwrap();
+    for (item, journalled) in outcome
+        .items
+        .iter()
+        .zip(journal::of_batch(&fx.cat.db, &batch.0).unwrap())
+    {
+        for m in &journalled.members {
+            let (source, at) = (rel(&m.source), rel(m.destination.as_deref().unwrap()));
+            let original = &was.files[&source];
+            match &item.result {
+                ItemResult::Moved { .. } => {
+                    assert_eq!(now.get(&at), Some(original), "{what}: {at}");
+                    let kept = item.originals_kept.iter().any(|k| k.path == m.source);
+                    assert_eq!(now.contains_key(&source), kept, "{what}: {source}");
+                }
+                ItemResult::Unchanged(_) => {
+                    assert_eq!(now.get(&source), Some(original), "{what}: {source}");
+                    assert_eq!(now.get(&at), was.files.get(&at), "{what}: {at}");
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[test]
+fn every_fault_at_every_step_of_a_copy_ends_proven() {
+    // A run without faults says how many steps there are.
+    let mut clean = files();
+    let counting = far(&clean);
+    let trash = FakeTrash::new(&clean);
+    let op = to_far(&clean, &["A.NEF", "b.NEF"]);
+    let outcome = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
+    assert!(
+        results(&outcome)
+            .iter()
+            .all(|r| matches!(r, ItemResult::Moved { .. }))
+    );
+    assert_eq!(counting.count(Op::Copy), 3);
+    // And one undoing a complete copy: a full drive at its companion's.
+    let mut undone = files();
+    let failing = Faulty {
+        elsewhere: Some(undone.root.join("far")),
+        ..Faulty::at(Op::Copy, 1, Fault::Fail)
+    };
+    let trash = FakeTrash::new(&undone);
+    let op = to_far(&undone, &["A.NEF", "b.NEF"]);
+    let _ = run(&mut undone, op, &trash, &failing, &AtomicBool::new(false));
+    let mut runs = 0;
+    for op in Op::COPYING {
+        let count = counting.count(op).max(failing.count(op));
+        for nth in 0..count {
+            for fault in [
+                Fault::Fail,
+                Fault::CrashBefore,
+                Fault::CrashAfter,
+                Fault::CrashMid,
+            ] {
+                for undo in [false, true] {
+                    let mut fx = files();
+                    let was = before(&fx);
+                    let mut faults = vec![(op, nth, fault)];
+                    if undo && op != Op::Copy {
+                        faults.push((Op::Copy, 1, Fault::Fail));
+                    }
+                    let disk = Faulty {
+                        elsewhere: Some(fx.root.join("far")),
+                        ..Faulty::with(&faults)
+                    };
+                    let trash = FakeTrash::new(&fx);
+                    let (batch, recovery) = scenario(&mut fx, &trash, &disk);
+                    let what = format!("{op:?} {nth} {fault:?} undo {undo}");
+                    proven(&mut fx, &was, &batch, &recovery, &what);
+                    runs += 1;
+                }
+            }
+        }
+    }
+    // The Trash failing at, or crashing after, each file.
+    for n in 1..=4 {
+        for crash in [false, true] {
+            let mut fx = files();
+            let was = before(&fx);
+            let disk = far(&fx);
+            let mut trash = FakeTrash::new(&fx);
+            match crash {
+                true => trash.crash_after = Some(n),
+                false => trash.fail_from = Some(n),
+            }
+            let (batch, recovery) = scenario(&mut fx, &trash, &disk);
+            proven(
+                &mut fx,
+                &was,
+                &batch,
+                &recovery,
+                &format!("trash {n} {crash}"),
+            );
+            runs += 1;
+        }
+    }
+    assert!(runs >= 100, "{runs}");
+}
+
+#[test]
+fn every_failed_journal_write_of_a_copy_ends_proven() -> Result<()> {
+    for when in [
+        "BEFORE INSERT ON file_operation_copies",
+        "BEFORE UPDATE ON file_operation_members WHEN NEW.state = 'copying'",
+        "BEFORE UPDATE ON file_operation_copies WHEN NEW.content IS NOT NULL",
+        "BEFORE UPDATE ON file_operation_members WHEN NEW.state = 'copied'",
+        "BEFORE UPDATE ON photos",
+        "BEFORE UPDATE ON file_operations WHEN NEW.state = 'committed'",
+        "BEFORE UPDATE ON file_operation_members WHEN NEW.state = 'trashed'",
+        "BEFORE UPDATE ON file_operations WHEN NEW.state = 'done'",
+        "BEFORE UPDATE ON file_operation_members WHEN NEW.state = 'discarded'",
+    ] {
+        let mut fx = files();
+        let was = before(&fx);
+        fx.fail_journal(when);
+        let disk = far(&fx);
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk)?;
+        let batch = plan.batch().clone();
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+        // A restart: the trigger is gone with the connection.
+        fx.reopen();
+        let recovery = fx.recover_with(&far(&fx), &trash);
+        assert!(recovery.unfinished.is_empty(), "{when}: {recovery:?}");
+        proven(&mut fx, &was, &batch, &recovery, when);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_crash_after_the_catalog_follows_is_finished_by_recovery() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let disk = far(&fx);
+    let mut trash = FakeTrash::new(&fx);
+    // After the photo's original went, before its receipt was journalled.
+    // A alone: which of several photos goes first follows the order the
+    // folder was listed in, which differs between systems.
+    trash.crash_after = Some(1);
+    let (batch, recovery) = scenario_of(&mut fx, &["A.NEF"], &trash, &disk);
+    assert!(recovery.unfinished.is_empty());
+    let items = journal::of_batch(&fx.cat.db, &batch.0)?;
+    assert_eq!(items[0].state, ItemState::Done);
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    let files = fx.files();
+    assert_eq!(files.get("trash/1-A.NEF"), Some(&bytes("A.NEF")));
+    assert_eq!(files.get("trip/far/A.NEF"), Some(&bytes("A.NEF")));
+    assert!(!files.contains_key("trip/A.NEF") && !files.contains_key("trip/A.xmp"));
+    // Its companion went after the restart, with a receipt.
+    let xmp = &items[0].members[1];
+    assert_eq!(
+        (xmp.state, xmp.receipt.is_some()),
+        (MemberState::Trashed, true)
+    );
+    Ok(())
+}
+
+#[test]
+fn an_original_changed_after_the_catalog_followed_is_kept() -> Result<()> {
+    let mut fx = files();
+    let disk = far(&fx);
+    let mut trash = FakeTrash::new(&fx);
+    trash.crash_after = Some(1);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let batch = plan.batch().clone();
+    assert!(crashes(|| {
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+    }));
+    fx.reopen();
+    // Its companion changed before the catalog opened again; and the copy
+    // of another file there changed too.
+    std::fs::write(fx.root.join("A.xmp"), b"rewritten")?;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert!(recovery.unfinished.is_empty());
+    let outcome = super::outcome(&fx.cat, &batch)?;
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    let kept: Vec<_> = outcome.items[0]
+        .originals_kept
+        .iter()
+        .map(|k| (k.path.clone(), k.why.clone()))
+        .collect();
+    assert_eq!(
+        kept,
+        [(
+            fx.root.join("A.xmp"),
+            "it changed since it was copied".to_string()
+        )]
+    );
+    assert_eq!(std::fs::read(fx.root.join("A.xmp"))?, b"rewritten");
+    assert_eq!(std::fs::read(fx.root.join("far/A.xmp"))?, bytes("A.xmp"));
+    Ok(())
+}
+
+#[test]
+fn an_original_whose_copy_changed_is_kept() -> Result<()> {
+    let mut fx = files();
+    let disk = far(&fx);
+    let mut trash = FakeTrash::new(&fx);
+    trash.crash_after = Some(1);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let batch = plan.batch().clone();
+    assert!(crashes(|| {
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+    }));
+    fx.reopen();
+    // The copy of the companion is changed in place, keeping its size.
+    let mut changed = bytes("A.xmp");
+    let last = changed.len() - 1;
+    changed[last] ^= 1;
+    let copy = fx.root.join("far/A.xmp");
+    let modified = std::fs::metadata(&copy)?.modified()?;
+    std::fs::write(&copy, &changed)?;
+    std::fs::File::options()
+        .write(true)
+        .open(&copy)?
+        .set_modified(modified)?;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert!(recovery.unfinished.is_empty());
+    let outcome = super::outcome(&fx.cat, &batch)?;
+    let kept: Vec<_> = outcome.items[0]
+        .originals_kept
+        .iter()
+        .map(|k| k.path.clone())
+        .collect();
+    assert_eq!(kept, [fx.root.join("A.xmp")]);
+    assert_eq!(
+        std::fs::read(fx.root.join("A.xmp"))?,
+        bytes("A.xmp"),
+        "the original stays"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_crash_part_way_through_a_copy_leaves_a_partial_copy_recovery_removes() -> Result<()> {
+    for fault in [Fault::CrashMid, Fault::CrashAfter] {
+        let mut fx = files();
+        let rows = fx.rows();
+        let disk = Faulty {
+            elsewhere: Some(fx.root.join("far")),
+            ..Faulty::at(Op::Copy, 0, fault)
+        };
+        let trash = FakeTrash::new(&fx);
+        let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+        let batch = plan.batch().clone();
+        assert!(crashes(|| {
+            let _ = execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &trash,
+                &Default::default(),
+                &disk,
+            );
+        }));
+        fx.reopen();
+        assert_eq!(partials(&fx).len(), 1, "{fault:?}");
+        let recovery = fx.recover_with(&far(&fx), &trash);
+        assert!(recovery.unfinished.is_empty());
+        assert_eq!(
+            results(&super::outcome(&fx.cat, &batch)?),
+            [ItemResult::Unchanged(Some("it was interrupted".into()))]
+        );
+        assert!(partials(&fx).is_empty(), "removed outright, not trashed");
+        assert!(!fx.files().keys().any(|k| k.starts_with("trash/")));
+        assert_eq!(fx.rows(), rows);
+    }
+    Ok(())
+}
+
+#[test]
+fn a_partial_copy_made_before_it_was_journalled_is_found_by_its_name() -> Result<()> {
+    let mut fx = files();
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..Faulty::at(Op::CreateFile, 0, Fault::CrashAfter)
+    };
+    let trash = FakeTrash::new(&fx);
+    let (batch, recovery) = scenario(&mut fx, &trash, &disk);
+    assert!(recovery.unfinished.is_empty());
+    let items = journal::of_batch(&fx.cat.db, &batch.0)?;
+    let member = &items[0].members[0];
+    assert!(member.copy.as_ref().is_some_and(|c| c.id.is_none()));
+    assert!(partials(&fx).is_empty());
+    // One with bytes in it at that name isn't ours to remove.
+    let mut fx = files();
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..Faulty::at(Op::CreateFile, 0, Fault::CrashAfter)
+    };
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    assert!(crashes(|| {
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+    }));
+    fx.reopen();
+    let [temp] = &partials(&fx)[..] else {
+        panic!("one partial copy")
+    };
+    let temp = fx.dir.path().canonicalize()?.join(temp);
+    std::fs::write(&temp, b"someone else's")?;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert_eq!(recovery.unfinished.len(), 1);
+    assert_eq!(std::fs::read(&temp)?, b"someone else's");
+    Ok(())
+}
+
+#[test]
+fn an_original_gone_before_recovery_keeps_its_copy_for_the_user() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    // Both files copied; the process ends before the catalog follows.
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..Faulty::at(Op::Sync, 1, Fault::CrashAfter)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    assert!(crashes(|| {
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+    }));
+    fx.reopen();
+    assert!(fx.root.join("far/A.NEF").is_file());
+    // Gone, by whatever means, before the catalog opens again.
+    std::fs::rename(fx.root.join("A.NEF"), fx.dir.path().join("elsewhere.NEF"))?;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    let [u] = &recovery.unfinished[..] else {
+        panic!("{recovery:?}")
+    };
+    assert_eq!(u.choices, [Resolution::PutBack, Resolution::Keep]);
+    // Put Back can't trash the copy, the only one there is now.
+    let clean = far(&fx);
+    let back = recover::resolve_with(
+        &mut fx.cat,
+        u.operation,
+        Resolution::PutBack,
+        &clean,
+        &trash,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let ItemResult::NeedsRecovery(why) = &back.result else {
+        panic!("{back:?}")
+    };
+    assert!(why.contains("an original isn't where it was"), "{why}");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    let kept = recover::resolve_with(&mut fx.cat, u.operation, Resolution::Keep, &clean, &trash)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    assert_eq!(kept.result, ItemResult::Kept);
+    assert_eq!(fx.rows()[&a], "A.NEF", "Synchronize Folder can match it");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    Ok(())
+}
+
+#[test]
+fn a_whole_partial_copy_stays_while_its_original_is_gone() -> Result<()> {
+    let mut fx = files();
+    // Copied and verified, not yet given its name.
+    let disk = Faulty {
+        elsewhere: Some(fx.root.join("far")),
+        ..Faulty::at(Op::Rename, 0, Fault::CrashBefore)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    assert!(crashes(|| {
+        let _ = execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        );
+    }));
+    fx.reopen();
+    std::fs::rename(fx.root.join("A.NEF"), fx.dir.path().join("elsewhere.NEF"))?;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert_eq!(recovery.unfinished.len(), 1);
+    let [temp] = &partials(&fx)[..] else {
+        panic!("{:?}", partials(&fx))
+    };
+    assert_eq!(fx.files()[temp], bytes("A.NEF"), "kept whole");
+    // Back where it was, the item is undone.
+    std::fs::rename(fx.dir.path().join("elsewhere.NEF"), fx.root.join("A.NEF"))?;
+    let u = recovery.unfinished[0].operation;
+    let clean = far(&fx);
+    let back = recover::resolve_with(&mut fx.cat, u, Resolution::PutBack, &clean, &trash)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    assert!(matches!(back.result, ItemResult::Unchanged(_)), "{back:?}");
+    assert!(partials(&fx).is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_new_folder_on_another_drive_takes_copies() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let root = fx.cat.folders()?[0].root;
+    let disk = far(&fx);
+    let trash = FakeTrash::new(&fx);
+    let op = FileOp::CreateFolder {
+        root,
+        parent: "far".into(),
+        name: "new".into(),
+        then_move: vec![a],
+    };
+    let plan = fx.plan_on(op, &disk)?;
+    assert!(plan.summary().across.is_some());
+    let outcome = execute::execute_with(
+        &mut fx.cat,
+        plan.confirm(),
+        &trash,
+        &AtomicBool::new(false),
+        &disk,
+    )?;
+    assert!(matches!(
+        &results(&outcome)[..],
+        [ItemResult::Created { .. }, ItemResult::Moved { .. }]
+    ));
+    assert_eq!(fx.rows()[&a], "far/new/A.NEF");
+    assert_eq!(
+        std::fs::read(fx.root.join("far/new/A.NEF"))?,
+        bytes("A.NEF")
+    );
+    assert!(partials(&fx).is_empty());
+    Ok(())
+}
+
+#[test]
+#[ignore = "needs RAWMAKASE_TEST_OTHER_VOLUME: a writable folder on another volume"]
+fn a_move_between_two_real_volumes() -> Result<()> {
+    let Some(other) = std::env::var_os("RAWMAKASE_TEST_OTHER_VOLUME") else {
+        return Ok(());
+    };
+    let mut fx = fixture(&["a.NEF", "a.xmp"]);
+    let there = tempfile::tempdir_in(&other)?;
+    let dir = there.path().canonicalize()?;
+    assert_ne!(
+        fsops::entry(&dir)?.id.volume(),
+        fsops::entry(&fx.root)?.id.volume(),
+        "{} is on the fixture's volume",
+        dir.display()
+    );
+    std::fs::write(dir.join("keep.dng"), bytes("keep.dng"))?;
+    fx.cat.add_folder(&dir)?;
+    let to = fx
+        .cat
+        .folders()?
+        .into_iter()
+        .find(|f| f.path == dir)
+        .expect("the other volume's folder")
+        .id;
+    let a = fx.photo("a.NEF");
+    let source = fx.root.join("a.NEF");
+    let (identity, modified) = (
+        Identity::read(&source)?,
+        std::fs::metadata(&source)?.modified()?,
+    );
+    let op = FileOp::MovePhotos {
+        photos: vec![a],
+        to,
+    };
+    let plan = fx.plan(op);
+    let across = plan.summary().across.clone().expect("it copies");
+    assert!(dir.starts_with(&across.volume) && across.volume != Path::new("/"));
+    let trash = FakeTrash::new(&fx);
+    let outcome = execute::execute(&mut fx.cat, plan.confirm(), &trash, &AtomicBool::new(false))?;
+    assert_eq!(results(&outcome), [ItemResult::Moved { to }]);
+    let target = dir.join("a.NEF");
+    assert_eq!(std::fs::read(&target)?, bytes("a.NEF"));
+    assert_eq!(std::fs::read(dir.join("a.xmp"))?, bytes("a.xmp"));
+    let copied = Identity::read(&target)?;
+    assert!(
+        copied == identity || super::copy::coarser(&identity, &copied),
+        "{copied:?} {identity:?}"
+    );
+    let kept = std::fs::metadata(&target)?.modified()?;
+    let off = kept
+        .duration_since(modified)
+        .or_else(|_| modified.duration_since(kept))?;
+    assert!(off < std::time::Duration::from_secs(2), "{off:?}");
+    assert!(!source.exists());
+    let files = fx.files();
+    assert_eq!(files.get("trash/1-a.NEF"), Some(&bytes("a.NEF")));
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)?
+        .map(|e| e.map(|e| e.file_name()))
+        .collect::<std::io::Result<_>>()?;
+    assert!(
+        leftovers
+            .iter()
+            .all(|n| !n.to_string_lossy().ends_with(".rawmakase-part")),
+        "{leftovers:?}"
+    );
+    drop(fx);
+    there.close()?;
+    Ok(())
+}

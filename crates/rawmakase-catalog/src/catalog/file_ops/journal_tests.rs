@@ -69,6 +69,7 @@ fn items_round_trip_and_only_unfinished_ones_are_unresolved() -> Result<()> {
         [
             ItemState::Planned,
             ItemState::Restoring,
+            ItemState::Committed,
             ItemState::NeedsRecovery
         ]
     );
@@ -88,12 +89,87 @@ fn items_round_trip_and_only_unfinished_ones_are_unresolved() -> Result<()> {
         .db
         .write(|w| journal::prune(w, "9999-01-01 00:00:00"))?;
     assert_eq!(forgotten, 3);
-    assert_eq!(journal::of_batch(&fx.cat.db, "batch")?.len(), 3);
+    assert_eq!(journal::of_batch(&fx.cat.db, "batch")?.len(), 4);
     assert_eq!(
         fx.cat
             .db
             .write(|w| journal::prune(w, "2000-01-01 00:00:00"))?,
         0
     );
+    Ok(())
+}
+
+#[test]
+fn a_copy_round_trips_and_goes_with_its_item() -> Result<()> {
+    use crate::catalog::db::{Reads, sql};
+    let mut fx = fixture(&["a.NEF", "far/"]);
+    let a = fx.photo("a.NEF");
+    let path = fx.root.join("a.NEF");
+    let member = NewMember {
+        source: path.clone(),
+        destination: Some(fx.root.join("far/a.NEF")),
+        id: fsops::entry(&path)?.id,
+        identity: Identity::read(&path)?,
+    };
+    let temp = fx.root.join("far/.a.NEF.x-0-0.rawmakase-part");
+    let pre = Preconditions::read(&fx.cat.db, a, vec![a])?.unwrap();
+    let computer = fx.cat.computer.id.clone();
+    let id = fx.cat.db.write(|w| {
+        let id = journal::insert(
+            w,
+            "batch",
+            &computer,
+            Kind::MovePhotos,
+            ItemState::Planned,
+            &pre,
+            std::slice::from_ref(&member),
+            None,
+        )?;
+        journal::insert_copies(w, id, std::slice::from_ref(&temp))?;
+        Ok(id)
+    })?;
+    let item = journal::item(&fx.cat.db, id)?.unwrap();
+    assert!(item.copies());
+    let copy = item.members[0].copy.clone().unwrap();
+    assert_eq!(copy.temp, temp);
+    assert_eq!((copy.id, copy.content, copy.identity), (None, None, None));
+    // Each step, as journalled.
+    let file = fsops::entry(&fx.root)?.id;
+    let content = fsops::hash_file(&path)?;
+    let receipt = fx.root.join("Trash/a.NEF");
+    fx.cat.db.write(|w| {
+        journal::set_copying(w, id, 0, file, &temp)?;
+        journal::set_content(w, id, 0, content)?;
+        journal::set_copy_identity(w, id, 0, &member.identity)?;
+        journal::set_kept(w, id, 0, "its volume has no Trash")
+    })?;
+    let m = &journal::item(&fx.cat.db, id)?.unwrap().members[0];
+    assert_eq!(m.state, MemberState::OriginalKept);
+    let copy = m.copy.clone().unwrap();
+    assert_eq!(copy.id, Some(file));
+    assert_eq!(copy.content, Some(content));
+    assert_eq!(copy.identity.as_ref(), Some(&member.identity));
+    assert_eq!(copy.kept.as_deref(), Some("its volume has no Trash"));
+    fx.cat
+        .db
+        .write(|w| journal::set_discarded(w, id, 0, Some(&receipt)))?;
+    let m = &journal::item(&fx.cat.db, id)?.unwrap().members[0];
+    assert_eq!(m.state, MemberState::Discarded);
+    assert_eq!(
+        m.copy.as_ref().unwrap().receipt.as_deref(),
+        Some(receipt.as_path())
+    );
+    // Forgotten with its item.
+    fx.cat
+        .db
+        .write(|w| journal::set_state(w, id, ItemState::Done, None))?;
+    fx.cat
+        .db
+        .write(|w| journal::prune(w, "9999-01-01 00:00:00"))?;
+    let left: i64 = fx
+        .cat
+        .db
+        .read_one(sql!("SELECT count(*) FROM file_operation_copies"), &[])?;
+    assert_eq!(left, 0);
     Ok(())
 }

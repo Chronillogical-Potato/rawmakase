@@ -39,6 +39,42 @@ pub(super) struct Item {
     pub kept: Vec<PathBuf>,
     /// How the destination folder compares names.
     pub rules: Names,
+    /// How its files are copied, when the destination is on another volume.
+    pub copy: Option<CopyTo>,
+}
+
+/// An item whose files are copied to another volume, as planned.
+#[derive(Clone, Debug)]
+pub(super) struct CopyTo {
+    /// The destination's volume.
+    pub volume: VolumeId,
+    /// Each member's partial copy, by ordinal: hidden in the destination
+    /// folder, by a name unique to the run, the item and the member.
+    pub temps: Vec<PathBuf>,
+    /// The bytes it copies.
+    pub bytes: u64,
+}
+
+/// What a move to another volume must leave free there, beyond what it
+/// copies: room for the folders' own records.
+const SPARE: u64 = 32 << 20;
+
+/// The name of member `ordinal` of item `item`'s partial copy, for its file
+/// named `name`, in run `batch`: hidden (so Synchronize Folder and Add
+/// Folder pass it by), and with the destination name's start for whoever
+/// finds one left.
+pub(super) fn temp_name(name: &OsStr, batch: &BatchId, item: usize, ordinal: usize) -> OsString {
+    let name = name.to_string_lossy();
+    let mut end = name.len().min(64);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        ".{}.{}-{item}-{ordinal}.rawmakase-part",
+        &name[..end],
+        batch.0
+    )
+    .into()
 }
 
 row! {
@@ -69,6 +105,7 @@ pub(super) fn plan_with(
     op: FileOp,
     disk: &dyn Disk,
 ) -> Result<Plan, FileOpError> {
+    let batch = new_batch()?;
     let mut stems = HashMap::new();
     let (kind, chosen, to, create) = match op {
         FileOp::RemoveFromCatalog { photos } => (Kind::RemoveFromCatalog, photos, None, None),
@@ -126,6 +163,7 @@ pub(super) fn plan_with(
     })?;
     let by_id: HashMap<PhotoId, &PhotoRow> = photos.iter().map(|p| (p.id, p)).collect();
     let mut made = None;
+    let mut across = None;
     let items = match kind {
         Kind::RemoveFromCatalog => families
             .into_iter()
@@ -135,6 +173,7 @@ pub(super) fn plan_with(
                 shared: Vec::new(),
                 kept: Vec::new(),
                 rules: UNKNOWN,
+                copy: None,
             })
             .collect(),
         Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder => {
@@ -158,6 +197,7 @@ pub(super) fn plan_with(
             refuse_twice(&mut items, &mut skipped);
             if let Some(destination) = &destination {
                 arrivals(disk, destination, &mut items, &mut skipped);
+                across = copies(&batch, destination, &mut items)?;
             }
             items
         }
@@ -172,9 +212,10 @@ pub(super) fn plan_with(
         summary.renames = items.iter().filter_map(super::rename::names).collect();
     }
     summary.folder = made.as_ref().map(|m| m.state.name.clone());
+    summary.across = across;
     skipped.sort_by_key(|s| s.photo);
     Ok(Plan {
-        batch: new_batch()?,
+        batch,
         location: catalog.location.clone(),
         computer: catalog.computer.id.clone(),
         kind,
@@ -435,6 +476,9 @@ pub(super) struct Target {
     /// Its canonical path, which members' destinations are in.
     dir: PathBuf,
     volume: VolumeId,
+    /// Where its volume is mounted, and the bytes free there.
+    top: PathBuf,
+    available: Option<u64>,
     names: Vec<OsString>,
     rules: Names,
     /// Filenames of the catalog's photos in it, through any folder over the
@@ -559,6 +603,8 @@ impl<'a> Files<'a> {
             resolved,
             dir: new.path.clone(),
             volume: at.volume,
+            top: at.top,
+            available: at.available,
             names: Vec::new(),
             rules: at.rules,
             catalog: HashSet::new(),
@@ -619,12 +665,15 @@ impl<'a> Files<'a> {
             )?;
             catalog.extend(filenames.iter().map(|f| caseless(OsStr::new(f))));
         }
+        let available = self.volume(found.id.volume(), &dir).map(|v| v.available);
         Ok(Target {
             folder: to,
             resolved: path.to_path_buf(),
             rules: Names(fsops::probe(&dir, &names)),
+            top: super::disk::top(self.disk, &dir),
             dir,
             volume: found.id.volume(),
+            available,
             names,
             catalog,
         })
@@ -658,7 +707,10 @@ impl<'a> Files<'a> {
             Err(Containment::Outside) => return Err(refuse(Refusal::NotPlain(source))),
             Err(Containment::Fs(e)) => return Err(refuse(Refusal::Unreadable(e.to_string()))),
         };
-        let found = fsops::entry(&file).map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
+        let found = self
+            .disk
+            .entry(&file)
+            .map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
         if found.kind != EntryKind::File {
             return Err(refuse(Refusal::Unreadable("it is not a file".into())));
         }
@@ -676,7 +728,11 @@ impl<'a> Files<'a> {
             .map_err(|e| refuse(Refusal::Unreadable(e)))?;
         let wanted = caseless(file.file_name().unwrap_or_default());
         let mut spelled = names.iter().filter(|n| {
-            caseless(n) == wanted && fsops::entry(&dir.join(n)).is_ok_and(|e| e.id == found.id)
+            caseless(n) == wanted
+                && self
+                    .disk
+                    .entry(&dir.join(n))
+                    .is_ok_and(|e| e.id == found.id)
         });
         let (Some(filename), None) = (spelled.next().cloned(), spelled.next()) else {
             return Err(refuse(Refusal::Unreadable(
@@ -700,13 +756,10 @@ impl<'a> Files<'a> {
         if protected(&file) {
             return Err(refuse(Refusal::Protected));
         }
-        if let Some(target) = target {
-            if dir == target.dir {
-                return Err(skip(Skip::AlreadyThere));
-            }
-            if found.id.volume() != target.volume {
-                return Err(refuse(Refusal::OtherVolume));
-            }
+        if let Some(target) = target
+            && dir == target.dir
+        {
+            return Err(skip(Skip::AlreadyThere));
         }
         if self.read_only(found.id.volume(), &dir) {
             return Err(refuse(Refusal::ReadOnly));
@@ -728,7 +781,10 @@ impl<'a> Files<'a> {
         let mut stays: Vec<PathBuf> = shared.iter().map(|n| dir.join(n)).collect();
         for name in carried {
             let path = dir.join(&name);
-            let e = fsops::entry(&path).map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
+            let e = self
+                .disk
+                .entry(&path)
+                .map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
             // A companion with another name elsewhere stays, as one another
             // file reads does.
             if e.kind != EntryKind::File || e.links != 1 {
@@ -748,12 +804,22 @@ impl<'a> Files<'a> {
         preconditions.folder_path = Some(path);
         // A folder the plan makes has no id yet: execution gives it.
         preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
+        // Another volume's folder takes copies; its partial copies are
+        // named once the run's items are known.
+        let copy = target
+            .filter(|t| t.volume != found.id.volume())
+            .map(|t| CopyTo {
+                volume: t.volume,
+                temps: Vec::new(),
+                bytes: members.iter().map(|m| m.identity.size).sum(),
+            });
         Ok(Item {
             preconditions,
             members,
             shared: stays,
             kept: Vec::new(),
             rules: target.map_or(UNKNOWN, |t| t.rules),
+            copy,
         })
     }
 }
@@ -824,6 +890,55 @@ fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &m
             }
         }
     });
+}
+
+/// Names the partial copies of the items copied to `target`'s volume, and
+/// what they copy there; refuses the whole move when that volume hasn't
+/// room for it.
+fn copies(
+    batch: &BatchId,
+    target: &Target,
+    items: &mut [Item],
+) -> Result<Option<super::Across>, FileOpError> {
+    let (mut bytes, mut files, mut companions) = (0u64, 0, 0);
+    for (index, item) in items.iter_mut().enumerate() {
+        let Some(copy) = &mut item.copy else {
+            continue;
+        };
+        files += 1;
+        companions += item.members.len().saturating_sub(1);
+        copy.temps = item
+            .members
+            .iter()
+            .enumerate()
+            .map(|(ordinal, m)| {
+                let name = m.source.file_name().unwrap_or_default();
+                target.dir.join(temp_name(name, batch, index, ordinal))
+            })
+            .collect();
+        bytes = bytes.saturating_add(copy.bytes);
+    }
+    if !items.iter().any(|i| i.copy.is_some()) {
+        return Ok(None);
+    }
+    let Some(available) = target.available else {
+        return Err(FileOpError::Destination(
+            "How much room the other drive has can't be told.".into(),
+        ));
+    };
+    if bytes.saturating_add(SPARE) > available {
+        return Err(FileOpError::NoSpace {
+            needed: bytes,
+            available,
+        });
+    }
+    Ok(Some(super::Across {
+        files,
+        companions,
+        bytes,
+        volume: target.top.clone(),
+        available,
+    }))
 }
 
 /// Refuses every item one of whose files another item of the plan also

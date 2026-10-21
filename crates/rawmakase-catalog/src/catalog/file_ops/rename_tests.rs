@@ -656,7 +656,8 @@ fn every_fault_at_every_disk_step_of_a_rename_ends_proven() {
                 let (batch, recovery) = scenario(&mut fx, op, &disk);
                 check(&fx, &was, &recovery, &batch);
                 for u in &recovery.unfinished {
-                    let back = resolve(&mut fx.cat, u.operation, Resolution::PutBack).unwrap();
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
                     assert!(
                         matches!(back.result, ItemResult::Unchanged(_)),
                         "{at:?} {nth} {fault:?}: {back:?}"

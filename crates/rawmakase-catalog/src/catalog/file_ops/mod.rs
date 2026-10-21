@@ -8,21 +8,42 @@
 //! What it guarantees:
 //! - No byte of an original is lost or overwritten. A file leaves its path
 //!   only by an exclusive rename on its volume or by the system Trash;
-//!   nothing is unlinked, copied or replaced. A folder is made only where
-//!   nothing has its name, and never deleted.
+//!   nothing is replaced. A folder is made only where nothing has its name,
+//!   and never deleted.
+//! - A photo moved to another volume is copied, never renamed across: into
+//!   a hidden partial copy made where nothing had its name, hashed as it is
+//!   read, synced, given the original's time, read back and compared, then
+//!   renamed exclusively to its name there. The catalog follows the copies
+//!   only once every file of the photo is so copied and its original is
+//!   still the file it copied; only then does the original go to the Trash,
+//!   and only while it is still that file. The one file ever unlinked is a
+//!   partial copy this run made (by its journalled file object, or by its
+//!   unique name where the journal says it was being made, empty) that was
+//!   never renamed to its name, and one written whole only while its
+//!   original is proven at its source as it was copied (when the user puts
+//!   back a move whose original changed since, a partial copy written whole
+//!   goes to the Trash instead): a complete copy goes only to the
+//!   Trash, and only while it is proven the copy (its file object, its
+//!   bytes those of the original) and its original is still at its source.
+//!   A copy's name held by another file object is never taken for the copy
+//!   gone: it is left for the user.
 //! - Catalog rows change only on positive evidence: they follow a file
-//!   proven at its new path (the same file object), and go only with a
-//!   Trash receipt and the file proven gone from its path. A file's absence
-//!   alone authorises nothing; what can't be proven is left as it was and
-//!   reported.
+//!   proven at its new path (the same file object, or a copy proven so),
+//!   and go only with a Trash receipt and the file proven gone from its
+//!   path. A file's absence alone authorises nothing; what can't be proven
+//!   is left as it was and reported.
 //! - A rename keeps the file object, its bytes and its time, so a photo's
-//!   `Identity`, saved edit, checksum and caches stay valid.
+//!   `Identity`, saved edit, checksum and caches stay valid. A copy keeps its
+//!   bytes and its time as closely as its volume can; where it keeps times
+//!   more coarsely, the photo's saved edit and checksum are re-keyed to the
+//!   copy, which has the same bytes.
 //!
 //! Policy (which photos and files an operation takes, what it refuses) is
 //! here; the file system calls are `storage::fsops`, reached through the
 //! [`disk`] seam, and the Trash is the app's, passed in as a [`Trash`].
 mod companions;
 mod conflicts;
+mod copy;
 mod disk;
 mod execute;
 mod folder;
@@ -58,8 +79,9 @@ pub enum FileOp {
     /// alone goes alone.
     RemoveFromCatalog { photos: Vec<PhotoId> },
     /// Moves masters' files, with the companions only they read, into
-    /// catalog folder `to` on the same volume; their rows, copies included,
-    /// follow.
+    /// catalog folder `to`; their rows, copies included, follow. On the
+    /// same volume a file is renamed; on another it is copied, and its
+    /// original put in the Trash once the catalog follows the copy.
     MovePhotos { photos: Vec<PhotoId>, to: FolderId },
     /// Puts masters' files, with the companions only they read, in the
     /// system Trash; then their rows, copies included, leave the catalog.
@@ -129,8 +151,6 @@ pub enum Skip {
 /// Why a photo's file can't be changed safely.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
-    /// The destination is on another volume.
-    OtherVolume,
     /// A link, a junction or a mount point is between its root folder and
     /// it, or it is one itself.
     NotPlain(PathBuf),
@@ -182,9 +202,6 @@ impl fmt::Display for Skip {
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::OtherVolume => f.write_str(
-                "Moving between drives isn't available yet. Move it in Finder, then Synchronize Folder.",
-            ),
             Self::NotPlain(p) => write!(
                 f,
                 "{} is a link or another volume inside its folder.",
@@ -245,6 +262,25 @@ pub struct Summary {
     pub folder: Option<String>,
     /// The photos' file names and the names they are given, in order.
     pub renames: Vec<(String, String)>,
+    /// What it copies to another drive, when the destination is on one.
+    pub across: Option<Across>,
+}
+
+/// A move to another drive: its files are copied there, and their
+/// originals put in the Trash once the catalog follows the copies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Across {
+    /// The photo files copied, of [`Summary::files`]; the rest are renamed
+    /// on their own drive.
+    pub files: usize,
+    /// The companion files copied with them, of [`Summary::companions`].
+    pub companions: usize,
+    /// The bytes copied, companions included.
+    pub bytes: u64,
+    /// The destination drive's top folder (where it is mounted).
+    pub volume: PathBuf,
+    /// The bytes free on it when planned.
+    pub available: u64,
 }
 
 /// An operation planned and not yet confirmed. Nothing has changed.
@@ -356,6 +392,8 @@ pub enum FileOpError {
     OtherComputer,
     /// The destination can't take files.
     Destination(String),
+    /// The destination drive hasn't room for the bytes copied there.
+    NoSpace { needed: u64, available: u64 },
     /// It was stopped before it finished.
     Cancelled,
     /// The catalog couldn't be read or written.
@@ -380,6 +418,12 @@ impl fmt::Display for FileOpError {
                 f.write_str("The operation changed another computer's files; finish it there.")
             }
             Self::Destination(why) => f.write_str(why),
+            Self::NoSpace { needed, available } => write!(
+                f,
+                "The photos need {} on the other drive, which has {} free.",
+                size(*needed),
+                size(*available)
+            ),
             Self::Cancelled => f.write_str("Stopped."),
             Self::Catalog(e) => write!(f, "{e:#}"),
         }
@@ -387,6 +431,21 @@ impl fmt::Display for FileOpError {
 }
 
 impl std::error::Error for FileOpError {}
+
+/// `bytes` for people, in decimal units as Finder and Explorer show drives.
+fn size(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1000 {
+        return format!("{bytes} bytes");
+    }
+    let mut value = bytes as f64 / 1000.0;
+    let mut unit = 0;
+    while value >= 1000.0 && unit + 1 < UNITS.len() {
+        value /= 1000.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
+}
 
 /// What became of one item of a run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -425,6 +484,16 @@ pub struct ItemOutcome {
     /// [`Self::result`] says. Removed ids may be given to new photos.
     pub photos: Vec<PhotoId>,
     pub result: ItemResult,
+    /// Of a move to another drive, the originals left where they were
+    /// beside their copies, the catalog following the copies.
+    pub originals_kept: Vec<KeptOriginal>,
+}
+
+/// An original a move to another drive left at its source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeptOriginal {
+    pub path: PathBuf,
+    pub why: String,
 }
 
 /// What a run did, read from the journal: the same after success, an
@@ -448,6 +517,8 @@ pub fn outcome(catalog: &super::Catalog, batch: &BatchId) -> anyhow::Result<Outc
     })
 }
 
+#[cfg(test)]
+mod copy_tests;
 #[cfg(test)]
 mod folder_tests;
 #[cfg(test)]

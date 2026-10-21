@@ -51,6 +51,15 @@ pub(super) fn readers<'a>(companion: &OsStr, names: &'a [OsString]) -> Vec<&'a O
     found
 }
 
+/// Whether the file named `name` is an edit file an earlier release saved
+/// for the file named `photo`, which names that file's `Identity` inside.
+pub(super) fn is_legacy_edit(photo: &OsStr, name: &OsStr) -> bool {
+    name.to_str().is_some()
+        && companion_paths(Path::new(photo))
+            .iter()
+            .any(|p| caseless(p.as_os_str()) == caseless(name))
+}
+
 /// A photo's companions in its folder.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Companions {

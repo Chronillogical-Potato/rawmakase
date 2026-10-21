@@ -23,10 +23,13 @@ fn a_held_lock_keeps_another_window_from_changing_or_recovering_files() -> Resul
         &Faulty::default(),
     );
     assert!(matches!(run, Err(FileOpError::Busy)));
-    assert!(matches!(recover(&mut fx.cat), Err(FileOpError::Busy)));
+    assert!(matches!(
+        recover(&mut fx.cat, &NoTrash),
+        Err(FileOpError::Busy)
+    ));
     assert!(fx.root.join("a.NEF").is_file());
     drop(held);
-    assert!(recover(&mut fx.cat).is_ok());
+    assert!(recover(&mut fx.cat, &NoTrash).is_ok());
     Ok(())
 }
 

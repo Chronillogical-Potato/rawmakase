@@ -242,3 +242,15 @@ CREATE TABLE IF NOT EXISTS file_operation_members (
     receipt TEXT,
     PRIMARY KEY(operation, ordinal)
 );
+
+CREATE TABLE IF NOT EXISTS file_operation_copies (
+    operation BIGINT NOT NULL REFERENCES file_operations(id) ON DELETE CASCADE,
+    ordinal BIGINT NOT NULL,
+    temp TEXT NOT NULL,
+    copy_id TEXT,
+    content TEXT,
+    copy_identity TEXT,
+    copy_receipt TEXT,
+    kept TEXT,
+    PRIMARY KEY(operation, ordinal)
+);

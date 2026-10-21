@@ -13,10 +13,15 @@
 //!    catalog change and `done`. Should that fail, the item is
 //!    `needs_recovery` and recovery retries it.
 //!
+//! A move to another volume copies instead of renaming in b, and puts the
+//! originals in the Trash after c (see [`super::copy`]); anything failing
+//! before c undoes it.
+//!
 //! A plan that makes a folder makes it first, as its own item (see
 //! [`super::folder`]); its moves go on only once the catalog has it.
 //!
-//! Cancelling stops between items only.
+//! Cancelling stops between items, and between the chunks of a copy, whose
+//! item is then undone.
 use super::super::db::{Write, sql};
 use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};
@@ -76,7 +81,7 @@ pub(super) fn execute_with(
         | Kind::MoveFolder => {
             let lock = super::lock::acquire(catalog)?;
             super::recover::prune(catalog)?;
-            let recovery = super::recover::run(catalog, disk)?;
+            let recovery = super::recover::run(catalog, disk, trash)?;
             let busy = recovery
                 .unfinished
                 .iter()
@@ -126,7 +131,7 @@ pub(super) fn execute_with(
             match run.kind {
                 Kind::RemoveFromCatalog => run.remove(catalog, &item),
                 Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
-                    run.files(catalog, &item)
+                    run.files(catalog, &item, cancel)
                 }
                 // A folder rename or move has no photo items.
                 Kind::RenameFolder | Kind::MoveFolder => Ok(()),
@@ -155,6 +160,13 @@ fn rebase(items: &mut [Item], made: &Made) {
         for m in &mut item.members {
             if let Some(name) = m.source.file_name() {
                 m.destination = Some(made.dir.join(name));
+            }
+        }
+        if let Some(copy) = &mut item.copy {
+            for temp in &mut copy.temps {
+                if let Some(name) = temp.file_name() {
+                    *temp = made.dir.join(name);
+                }
             }
         }
     }
@@ -366,6 +378,7 @@ impl Run<'_> {
             identity: None,
             state: MemberState::Moved,
             receipt: None,
+            copy: None,
         };
         if let Err(e) = self.disk.rename(&tree.source, &tree.destination) {
             return self.put_back(catalog, id, &[], &e.to_string());
@@ -425,8 +438,18 @@ impl Run<'_> {
         super::tree::taken(self.disk, tree)
     }
 
+    /// What copying to another volume needs of the run.
+    fn cx(&self) -> super::copy::Cx<'_> {
+        super::copy::Cx {
+            computer: self.computer,
+            folders: self.folders,
+            disk: self.disk,
+            trash: self.trash,
+        }
+    }
+
     /// An item that moves or trashes files.
-    fn files(&self, catalog: &mut Catalog, item: &Item) -> Result<()> {
+    fn files(&self, catalog: &mut Catalog, item: &Item, cancel: &AtomicBool) -> Result<()> {
         // a. Checked again and journalled, in one transaction.
         let started = catalog.db.write_immediate(|w| {
             let reason = match item.preconditions.check(w, self.computer)? {
@@ -447,11 +470,17 @@ impl Run<'_> {
                 &item.members,
                 reason.as_deref(),
             )?;
+            if let Some(copy) = &item.copy {
+                journal::insert_copies(w, id, &copy.temps)?;
+            }
             Ok(reason.is_none().then_some(id))
         })?;
         let Some(id) = started else {
             return Ok(());
         };
+        if item.copy.is_some() {
+            return super::copy::run(&self.cx(), catalog, item, id, cancel);
+        }
         // b. Each member's step, durable and journalled before the next. A
         // step that happened counts as changed from then on, whether or not
         // what follows it succeeds.
@@ -480,6 +509,7 @@ impl Run<'_> {
                 identity: Some(m.identity.clone()),
                 state,
                 receipt: receipt.clone(),
+                copy: None,
             });
             let mut after = after;
             // The Trash keeps its own folders durable, and may not let them be
@@ -551,18 +581,16 @@ impl Run<'_> {
         };
         // Its folders are still plainly what was planned: each canonical
         // (no link put in on the way since) and on the file's volume (no
-        // mount point).
+        // mount point), or, copied, on the destination's.
         for m in &item.members {
+            let there = item.copy.as_ref().map_or(m.id.volume(), |c| c.volume);
             let dirs = [
-                Some(parent(&m.source)),
-                m.destination.as_deref().map(parent),
+                Some((parent(&m.source), m.id.volume())),
+                m.destination.as_deref().map(|d| (parent(d), there)),
             ];
-            for dir in dirs.into_iter().flatten() {
+            for (dir, volume) in dirs.into_iter().flatten() {
                 let plain = self.disk.canonical(dir).is_ok_and(|c| c == dir)
-                    && self
-                        .disk
-                        .entry(dir)
-                        .is_ok_and(|e| e.id.volume() == m.id.volume());
+                    && self.disk.entry(dir).is_ok_and(|e| e.id.volume() == volume);
                 if !plain {
                     return Ok(Some(format!(
                         "{} changed since it was planned",
@@ -686,6 +714,15 @@ impl Run<'_> {
                     "a photo of the catalog is named {} there now",
                     new.to_string_lossy()
                 )));
+            }
+            // Its partial copies' names are free.
+            for temp in item.copy.iter().flat_map(|c| &c.temps) {
+                let listed = temp
+                    .file_name()
+                    .is_some_and(|t| names.iter().any(|n| n == t));
+                if listed || !matches!(self.disk.entry(temp), Err(FsError::NotFound)) {
+                    return Ok(Some(format!("{} is there now", temp.display())));
+                }
             }
         }
         Ok(None)
