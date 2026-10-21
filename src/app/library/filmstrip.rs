@@ -282,6 +282,10 @@ impl Library {
             self.strip.kinetic.stop();
         }
         let glide = self.strip.kinetic.begin(ui);
+        // A mouse wheel rolled over the strip scrolls it sideways, with no
+        // Shift needed. Only the strip changes this setting.
+        let only_direction =
+            std::mem::replace(&mut ui.style_mut().always_scroll_the_only_direction, true);
         egui::ScrollArea::horizontal()
             .id_salt(ID)
             .auto_shrink(false)
@@ -329,6 +333,7 @@ impl Library {
                     }
                 }
             });
+        ui.style_mut().always_scroll_the_only_direction = only_direction;
         self.strip.kinetic.end(ui, glide);
         Outcome {
             pick: target,

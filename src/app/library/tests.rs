@@ -1520,6 +1520,60 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
     Ok(())
 }
 #[test]
+fn a_mouse_wheel_over_the_filmstrip_scrolls_it_sideways() -> Result<()> {
+    let (_directory, mut library) = library_of(
+        &(0..40)
+            .map(|n| format!("{n:02}.RAF"))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )?;
+    let ctx = library.ctx.clone();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200., 800.));
+    let over_strip = egui::Event::PointerMoved(egui::Pos2::new(600., 780.));
+    let wheel = |y: f32| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: Vec2::new(0., y),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // The strip's horizontal offset after a frame with `events`, then a
+    // second of frames for the smoothed scrolling to settle.
+    let mut time = 0.;
+    let strip = std::cell::Cell::new(None);
+    let mut frames = |library: &mut Library, events: Vec<egui::Event>| {
+        let mut events = Some(events);
+        for _ in 0..30 {
+            time += 1. / 30.;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events: events.take().unwrap_or_default(),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::bottom(super::filmstrip::ID)
+                        .exact_size(super::filmstrip::HEIGHT)
+                        .show(ui, |ui| {
+                            strip.set(Some(ui.make_persistent_id(egui::IdSalt::new("filmstrip"))));
+                            library.filmstrip(ui, None, Module::Develop);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        egui::scroll_area::State::load(&ctx, strip.get().unwrap()).map_or(0., |s| s.offset.x)
+    };
+    assert_eq!(frames(&mut library, vec![over_strip.clone()]), 0.);
+    // Rolling the wheel down moves on through the strip, and up moves back.
+    let on = frames(&mut library, vec![over_strip.clone(), wheel(-3.)]);
+    assert!(on > 0.);
+    assert!(frames(&mut library, vec![over_strip, wheel(1.)]) < on);
+    Ok(())
+}
+#[test]
 fn the_filmstrip_follows_a_change_made_after_it_was_drawn() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
     let ctx = library.ctx.clone();
