@@ -422,6 +422,14 @@ impl Library {
                 self.filters.members.clear();
             }
         }
+        // The folders shown as the catalog has them now: one may have
+        // gained a catalog folder (photos moved into it) or subfolders.
+        if let Some(scope) = self
+            .folders_scope(&self.selected_folders)
+            .filter(|scope| !scope.is_empty())
+        {
+            self.filters.folder_scope = Some(scope);
+        }
         // Copy commands save a name being typed before they run, and so
         // does anything else that reads the catalog again.
         self.copy_names.clear();

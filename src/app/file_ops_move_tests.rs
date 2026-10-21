@@ -515,3 +515,26 @@ fn photos_dropped_on_a_folder_with_no_catalog_folder_move_into_it() -> anyhow::R
     assert_eq!(e.status, "Moved 1 photo to 2024");
     Ok(())
 }
+
+#[test]
+fn photos_moved_into_the_folder_shown_stay_shown_when_it_gains_a_catalog_folder()
+-> anyhow::Result<()> {
+    let (d, mut e, _) = editor_with_folders(&["2024/day1/x.RAF", "2024/day2/y.RAF"])?;
+    let (x, r) = (photo(&e, &d, "2024/day1/x.RAF"), root(&e));
+    // The root is shown; it has no photos, so no catalog folder, of its own.
+    e.library
+        .as_mut()
+        .unwrap()
+        .restore_source(&format!("root:{}", r.0), None);
+    e.request_photo_move(vec![x], r, String::new(), "photos".into());
+    settle(&mut e);
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert_eq!(at(&e, &d, x), "x.RAF");
+    assert!(
+        e.library.as_ref().unwrap().shown().contains(&x),
+        "the moved photo is still shown in the root it was dropped on"
+    );
+    Ok(())
+}
