@@ -2887,3 +2887,67 @@ fn a_dragged_folder_follows_the_pointer_by_name() {
     let drawn = [drawn, frame(vec![])].concat();
     assert!(drawn.iter().all(|r| r.left() < pointer.x), "{drawn:?}");
 }
+
+#[test]
+fn a_folder_with_no_catalog_folder_of_its_own_is_dragged_too() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    // 2024 holds no photos itself: the catalog has folders below it only.
+    let node = |logical: &str, folder: Option<FolderId>| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder,
+        ..Default::default()
+    };
+    let (y2024, y2025) = (node("2024", None), node("2025", Some(FolderId(2))));
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&y2024, &y2025] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (row1, row2) = (egui::pos2(120., 11.), egui::pos2(120., 33.));
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let actions = frame(vec![press(row2, false)]);
+    let dropped = actions.into_iter().flatten().find_map(|a| match a {
+        TreeAction::DropFolder { from, to, .. } => Some((from, to)),
+        _ => None,
+    });
+    assert_eq!(dropped, Some(("2024".into(), "2025".into())));
+}

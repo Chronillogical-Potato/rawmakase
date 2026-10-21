@@ -112,3 +112,30 @@ fn move_folder_offers_folders_with_no_catalog_row_of_their_own() -> anyhow::Resu
     assert!(!offered.contains(&"2024/day1".to_string()));
     Ok(())
 }
+
+#[test]
+fn a_folder_with_no_catalog_folder_of_its_own_moves_with_those_below() -> anyhow::Result<()> {
+    let (d, mut e, _) = editor_with_folders(&["2024/day1/a.RAF", "2024/day2/b.RAF", "2025/c.RAF"])?;
+    assert!(folder(&e, "2024").is_none());
+    let day1 = folder(&e, "2024/day1").unwrap();
+    let a = photo(&e, &d, "2024/day1/a.RAF");
+    let r = root(&e);
+    e.request_folder_move(r, "2024".into(), "2025".into());
+    settle(&mut e);
+    let (title, lines, _) = e.file_ops.question().expect("it asks");
+    assert_eq!(title, "Move folder “2024” into “2025”?");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "The folder moves on disk with the 2 photos and the folders in it."),
+        "{lines:?}"
+    );
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(d.path().join("photos/2025/2024/day2/b.RAF").is_file());
+    assert_eq!(at(&e, &d, a), "2025/2024/day1/a.RAF");
+    assert_eq!(folder(&e, "2025/2024/day1"), Some(day1), "the same folder");
+    assert_eq!(e.status, "Moved folder 2024 into 2025");
+    Ok(())
+}

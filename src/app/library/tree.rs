@@ -176,9 +176,9 @@ pub(super) fn folder_tree_row(
 ) -> Option<TreeAction> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
-    // A catalog folder that isn't a root can be dragged onto another
-    // folder of its root.
-    let movable = node.folder.is_some() && node.root.is_none();
+    // Any folder but a root can be dragged onto another folder of its
+    // root, one with no catalog folder of its own (only folders below) too.
+    let movable = node.root.is_none();
     let sense = if movable {
         Sense::click_and_drag()
     } else {
@@ -366,9 +366,7 @@ pub(super) fn folder_tree_row(
             ui.close();
         }
         // A root is renamed in Finder, then located again.
-        if let (Some(_), None) = (node.folder, node.root)
-            && ui.button("Rename Folder…").clicked()
-        {
+        if movable && ui.button("Rename Folder…").clicked() {
             action = Some(TreeAction::RenameFolder {
                 root: node.in_root,
                 logical: node.logical.clone(),
