@@ -78,8 +78,6 @@ impl FolderNode {
         }
     }
 }
-/// Why a folder dropped on another root's folder doesn't move (#572).
-const ACROSS_ROOTS: &str = "Folders can't be moved to another drive or root folder yet. Move it in Finder, then add the folder again.";
 pub(super) enum TreeAction {
     /// The folder's key, and how it was clicked.
     Select(String, Click),
@@ -108,13 +106,12 @@ pub(super) enum TreeAction {
         root: RootId,
         logical: String,
     },
-    /// Something dropped that can't be done, and why.
-    Refused(String),
     /// The folder of `root` at logical path `from`, dropped on logical
-    /// folder `to` of that root.
+    /// folder `to` of root `to_root` (its own, or another).
     DropFolder {
         root: RootId,
         from: String,
+        to_root: RootId,
         to: String,
     },
     /// Show the folder in the file manager.
@@ -204,15 +201,16 @@ pub(super) fn folder_tree_row(
     let painter = ui.painter();
     let active = selected.contains(&node.key);
     let open = expanded.contains(&node.key);
-    // Not where it is already, nor itself or a folder in it.
+    // Not where it is already, nor itself or a folder in it; any folder of
+    // another root (whose drive the plan checks).
     let takes = |d: &super::DraggedFolder| {
-        d.root == node.in_root
-            && node.logical != d.from
-            && !node.logical.starts_with(&format!("{}/", d.from))
-            && node.logical != d.from.rsplit_once('/').map_or("", |(p, _)| p)
+        d.root != node.in_root
+            || (node.logical != d.from
+                && !node.logical.starts_with(&format!("{}/", d.from))
+                && node.logical != d.from.rsplit_once('/').map_or("", |(p, _)| p))
     };
     // Photos dragged over any folder can be dropped on it, and a folder
-    // over any folder of its root that takes it.
+    // over any folder that takes it.
     let dropping = response
         .dnd_hover_payload::<super::DraggedPhotos>()
         .is_some()
@@ -304,18 +302,15 @@ pub(super) fn folder_tree_row(
             photos: dragged.0.clone(),
         });
     }
-    if let Some(dragged) = released::<super::DraggedFolder>(&response) {
-        if takes(&dragged) {
-            action = Some(TreeAction::DropFolder {
-                root: dragged.root,
-                from: dragged.from.clone(),
-                to: node.logical.clone(),
-            });
-        } else if dragged.root != node.in_root {
-            // Not highlighted, so said: dropped elsewhere it would do nothing
-            // and look broken.
-            action = Some(TreeAction::Refused(ACROSS_ROOTS.into()));
-        }
+    if let Some(dragged) = released::<super::DraggedFolder>(&response)
+        && takes(&dragged)
+    {
+        action = Some(TreeAction::DropFolder {
+            root: dragged.root,
+            from: dragged.from.clone(),
+            to_root: node.in_root,
+            to: node.logical.clone(),
+        });
     }
     if response.clicked() && !crate::app::widgets::context_clicked(&response) {
         let pointer = response.interact_pointer_pos().unwrap_or(rect.center());

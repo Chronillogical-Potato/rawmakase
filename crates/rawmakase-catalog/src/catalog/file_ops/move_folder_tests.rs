@@ -18,6 +18,7 @@ fn move_folder(fx: &Fx, relative: &str, parent: &str) -> FileOp {
     FileOp::MoveFolder {
         root: root(fx),
         folder: relative.into(),
+        to_root: root(fx),
         parent: parent.into(),
     }
 }
@@ -144,6 +145,7 @@ fn a_folder_is_never_moved_into_itself_across_roots_or_onto_a_name_taken() -> Re
         FileOp::MoveFolder {
             root: other,
             folder: "day".into(),
+            to_root: other,
             parent: String::new(),
         },
     );
@@ -154,6 +156,7 @@ fn a_folder_is_never_moved_into_itself_across_roots_or_onto_a_name_taken() -> Re
         FileOp::MoveFolder {
             root: r,
             folder: String::new(),
+            to_root: r,
             parent: "other".into(),
         },
     );

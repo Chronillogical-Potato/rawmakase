@@ -115,12 +115,14 @@ pub enum FileOp {
         name: String,
     },
     /// Moves the folder at logical path `folder` of `root` into logical
-    /// folder `parent` of the same root (either may be a folder the catalog
-    /// has no folder of its own for), on the same volume, with every
-    /// catalog folder below it; their photos follow.
+    /// folder `parent` of root `to_root` (`root` itself, or another; either
+    /// folder may be one the catalog has no folder of its own for), on the
+    /// same volume, with every catalog folder below it; their photos
+    /// follow.
     MoveFolder {
         root: RootId,
         folder: String,
+        to_root: RootId,
         parent: String,
     },
 }
@@ -542,6 +544,8 @@ mod journal_tests;
 mod lock_tests;
 #[cfg(test)]
 mod move_folder_tests;
+#[cfg(test)]
+mod move_root_tests;
 #[cfg(test)]
 mod plan_tests;
 #[cfg(test)]

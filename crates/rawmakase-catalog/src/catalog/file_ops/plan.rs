@@ -143,9 +143,10 @@ pub(super) fn plan_with(
         FileOp::MoveFolder {
             root,
             folder,
+            to_root,
             parent,
         } => {
-            let tree = super::tree::relocate(catalog, root, &folder, &parent)?;
+            let tree = super::tree::relocate(catalog, root, &folder, to_root, &parent)?;
             return tree_plan(catalog, Kind::MoveFolder, tree);
         }
     };
