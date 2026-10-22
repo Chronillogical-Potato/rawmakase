@@ -126,7 +126,7 @@ fn kind(path: &Path) -> Result<VolumeKind, FsError> {
 }
 
 /// The kind of macOS's file system `name` (`f_fstypename`): FSKit's and the
-/// kernel's FAT and exFAT have the same names.
+/// kernel's FAT and exFAT have the same names; `smbfs` is an SMB share.
 #[cfg(target_vendor = "apple")]
 pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
     match name {
@@ -134,6 +134,7 @@ pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
         b"hfs" => VolumeKind::Hfs,
         b"msdos" => VolumeKind::Fat,
         b"exfat" => VolumeKind::Exfat,
+        b"smbfs" => VolumeKind::Smb,
         _ => VolumeKind::Other,
     }
 }
@@ -151,7 +152,7 @@ fn kind(path: &Path) -> Result<VolumeKind, FsError> {
 }
 
 /// The kind of Linux's file system type `magic` (`f_type`). FUSE (exFAT
-/// through exfat-fuse among others) is another kind.
+/// through exfat-fuse and GVFS's shares among others) is another kind.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub(super) fn kind_of(magic: u64) -> VolumeKind {
     match magic {
@@ -160,6 +161,8 @@ pub(super) fn kind_of(magic: u64) -> VolumeKind {
         0x9123_683e => VolumeKind::Btrfs,
         0x4d44 => VolumeKind::Fat,
         0x2011_bab0 => VolumeKind::Exfat,
+        // CIFS, SMB2 and the old SMB.
+        0xff53_4d42 | 0xfe53_4d42 | 0x517b => VolumeKind::Smb,
         _ => VolumeKind::Other,
     }
 }

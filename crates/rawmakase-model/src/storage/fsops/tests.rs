@@ -555,6 +555,50 @@ fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
 }
 
 #[test]
+#[ignore = "needs RAWMAKASE_TEST_NETWORK_SHARE: a writable folder on an SMB share"]
+fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
+    let Some(share) = std::env::var_os("RAWMAKASE_TEST_NETWORK_SHARE") else {
+        return;
+    };
+    let d = tempfile::tempdir_in(share).unwrap();
+    let facts = volume_facts(d.path()).unwrap();
+    let shown = format!("{}: {facts:?}", d.path().display());
+    assert_eq!(facts.kind, VolumeKind::Smb, "{shown}");
+    assert!(!facts.local && !facts.stable_ids, "{shown}");
+    assert!(!facts.exclusive_rename, "{shown}");
+    // It says it can't rename exclusively, and changes nothing.
+    let (a, b) = (d.path().join("a.NEF"), d.path().join("b.NEF"));
+    fs::write(&a, b"a").unwrap();
+    if cfg!(target_vendor = "apple") {
+        assert!(matches!(
+            rename_exclusive(&a, &b),
+            Err(FsError::Unsupported)
+        ));
+        assert_eq!(fs::read(&a).unwrap(), b"a");
+        assert!(!b.exists());
+    }
+    // A file is made only where nothing has its name, in any case or form.
+    assert!(matches!(create_file(&a), Err(FsError::AlreadyExists)));
+    assert!(matches!(
+        create_file(&d.path().join("A.nef")),
+        Err(FsError::AlreadyExists)
+    ));
+    assert_eq!(fs::read(&a).unwrap(), b"a");
+    let c = d.path().join("caf\u{e9}.NEF");
+    create_file(&c).unwrap();
+    assert!(matches!(
+        create_file(&d.path().join("cafe\u{301}.NEF")),
+        Err(FsError::AlreadyExists)
+    ));
+    // With a birth time near now, as the server keeps it.
+    let off = created(&c)
+        .unwrap()
+        .duration_since(std::time::SystemTime::now())
+        .unwrap_or_else(|e| e.duration());
+    assert!(off < std::time::Duration::from_secs(5), "{shown}: {off:?}");
+}
+
+#[test]
 fn a_volume_kind_is_told_from_its_file_system_name() {
     #[cfg(target_vendor = "apple")]
     {
@@ -563,7 +607,8 @@ fn a_volume_kind_is_told_from_its_file_system_name() {
         assert_eq!(kind_of(b"hfs"), VolumeKind::Hfs);
         assert_eq!(kind_of(b"msdos"), VolumeKind::Fat);
         assert_eq!(kind_of(b"exfat"), VolumeKind::Exfat);
-        for other in [&b"smbfs"[..], b"macfuse", b"nfs", b""] {
+        assert_eq!(kind_of(b"smbfs"), VolumeKind::Smb);
+        for other in [&b"macfuse"[..], b"nfs", b"webdav", b"afpfs", b""] {
             assert_eq!(kind_of(other), VolumeKind::Other, "{other:?}");
         }
         // exFAT on macOS answers ENOTSUP to an exclusive rename (measured
@@ -579,6 +624,10 @@ fn a_volume_kind_is_told_from_its_file_system_name() {
         assert_eq!(kind_of(0x9123_683e), VolumeKind::Btrfs);
         assert_eq!(kind_of(0x4d44), VolumeKind::Fat);
         assert_eq!(kind_of(0x2011_bab0), VolumeKind::Exfat);
+        // CIFS, SMB2 and the old SMB.
+        for smb in [0xff53_4d42, 0xfe53_4d42, 0x517b] {
+            assert_eq!(kind_of(smb), VolumeKind::Smb, "{smb:x}");
+        }
         for other in [0x6573_5546, 0x0102_1994, 0x6969] {
             assert_eq!(kind_of(other), VolumeKind::Other, "{other:x}");
         }
@@ -606,9 +655,18 @@ fn a_volume_kind_is_told_from_its_file_system_name() {
     ] {
         assert!(kind.keeps_ids(), "{kind:?}");
     }
-    for kind in [VolumeKind::Fat, VolumeKind::Exfat, VolumeKind::Other] {
+    for kind in [
+        VolumeKind::Fat,
+        VolumeKind::Exfat,
+        VolumeKind::Smb,
+        VolumeKind::Other,
+    ] {
         assert!(!kind.keeps_ids(), "{kind:?}");
     }
+    // An SMB share can't promise a rename won't replace a file another
+    // computer put at the name: macOS's smbfs answers ENOTSUP (measured on
+    // macOS 15), and Linux's CIFS checks the name only on this computer.
+    assert!(!VolumeKind::Smb.exclusive_rename());
 }
 
 #[test]
