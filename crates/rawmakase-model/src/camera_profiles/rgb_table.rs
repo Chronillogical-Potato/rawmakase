@@ -317,36 +317,52 @@ pub(super) fn encode_table(
     bytes
 }
 impl RgbTable {
-    /// A `.cube` as an RGB table, as Camera Raw's Create Profile makes one, with the
-    /// table's bytes (which name it). A 3D cube of up to 64 divisions keeps its grid,
-    /// node for node: resampling onto another grid is measurably lossy. A larger one
-    /// (65 is common) is sampled onto 64, the most the table holds, by tetrahedral
-    /// lookup in the cube; a 1D cube over 4096 entries onto 4096. Outputs are clamped
-    /// to 0–1. Cubes over another domain than 0–1, or with a shaper, are refused until
-    /// it is known what Camera Raw makes of them.
+    /// A `.cube` as an RGB table in the space Camera Raw 18.7's Create Profile gives
+    /// one by default (sRGB primaries and encoding, clipped, amounts 0–2), with the
+    /// table's bytes (which name it). Create Profile samples every 3D cube onto at most
+    /// 32 divisions; here one of up to 64 keeps its grid, node for node, since
+    /// resampling onto another grid is measurably lossy. A larger one (65 is common;
+    /// Create Profile refuses it) is sampled onto 64, the most a table holds, by
+    /// tetrahedral lookup in the cube, as Create Profile resamples; so is a cube with a
+    /// 1D shaper, which is baked in (Create Profile drops it). A 1D cube over 4096
+    /// entries is sampled onto 4096. Outputs are clamped to 0–1. A cube over another
+    /// domain than 0–1 is refused, as Create Profile refuses it, and so is a shaper
+    /// reading another input range.
     pub(super) fn from_cube(cube: &Cube) -> Result<(Self, Vec<u8>)> {
         let (dimensions, divisions, samples) = match cube {
             Cube::Three(lut) => {
                 ensure!(
-                    !lut.has_shaper(),
-                    "the cube has a 1D shaper table in front of its 3D one, which RAWmakase \
-                     cannot import yet"
-                );
-                ensure!(
                     lut.domain() == ([0.; 3], [1.; 3]),
                     "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
-                     cannot import yet",
+                     cannot import (nor can Camera Raw)",
                     lut.domain().0,
                     lut.domain().1
                 );
-                let n = lut.size().min(MAX_3D);
+                if let Some(range) = lut.shaper_input_range() {
+                    ensure!(
+                        range == [0., 1.],
+                        "the cube's shaper reads inputs from {} to {} rather than 0–1, as a \
+                         cube for log or scene-linear input does, which RAWmakase cannot import",
+                        range[0],
+                        range[1]
+                    );
+                }
+                // A shaper bends the input before the 3D table, so the cube's grid is
+                // not a grid in table space: shaper and cube are sampled together on
+                // the most divisions a table holds.
+                let n = if lut.has_shaper() {
+                    MAX_3D
+                } else {
+                    lut.size().min(MAX_3D)
+                };
+                let keep = n == lut.size() && !lut.has_shaper();
                 let at = |i: usize| i as f32 / (n - 1) as f32;
                 let mut samples = Vec::with_capacity(n.pow(3));
                 // Red outermost here, red fastest in the cube.
                 for r in 0..n {
                     for g in 0..n {
                         for b in 0..n {
-                            samples.push(if n == lut.size() {
+                            samples.push(if keep {
                                 lut.node(r, g, b)
                             } else {
                                 lut.lookup([at(r), at(g), at(b)])
@@ -360,7 +376,7 @@ impl RgbTable {
                 ensure!(
                     lut.domain() == ([0.; 3], [1.; 3]),
                     "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
-                     cannot import yet",
+                     cannot import",
                     lut.domain().0,
                     lut.domain().1
                 );

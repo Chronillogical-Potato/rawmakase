@@ -341,6 +341,11 @@ impl Lut3d {
         self.shaper.is_some()
     }
 
+    /// The input range the shaper reads (`LUT_1D_INPUT_RANGE`), if there is one.
+    pub fn shaper_input_range(&self) -> Option<[f32; 2]> {
+        self.shaper.as_ref().map(|s| s.input_range)
+    }
+
     /// The colour at a grid node, red index fastest.
     pub fn node(&self, r: usize, g: usize, b: usize) -> [f32; 3] {
         self.data[r + g * self.size + b * self.size * self.size]
