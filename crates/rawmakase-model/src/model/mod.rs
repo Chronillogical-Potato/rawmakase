@@ -2,7 +2,6 @@
 pub mod edit;
 pub mod effects;
 pub mod image_frame;
-pub mod lut3d;
 pub mod masks;
 pub mod operators;
 pub mod panels;

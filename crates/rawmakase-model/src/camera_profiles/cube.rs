@@ -11,12 +11,12 @@
 //!
 //! Data is stored with the red index changing fastest, then green, then blue, as the
 //! specification requires, so node `(r, g, b)` is at `r + g * size + b * size * size`.
-use crate::camera_profiles::tetrahedral;
+use super::rgb_table::tetrahedral;
 use anyhow::{Result, bail, ensure};
 
 /// A `.cube` 3D lookup table: a regular grid of `size` divisions per side over
 /// `domain_min` to `domain_max`, tetrahedrally interpolated.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Lut3d {
     size: usize,
     domain_min: [f32; 3],
@@ -31,7 +31,7 @@ pub struct Lut3d {
 /// through before the lookup. Resolving calls these "shaper" LUTs, and they are why a
 /// file may carry both sizes. Reading the 3D table and dropping this one renders
 /// plausible, wrong colours rather than failing.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 struct Shaper {
     /// Entries per channel.
     size: usize,
@@ -258,17 +258,6 @@ impl Lut3d {
             |r, g, b| self.node(base[0] + r, base[1] + g, base[2] + b),
             within,
         )
-    }
-
-    /// The colour `rgb` comes out as with `strength`, where 0 leaves it alone and 1 is
-    /// the cube on its own. Values outside 0–1 are clamped.
-    pub fn apply(&self, rgb: [f32; 3], strength: f32) -> [f32; 3] {
-        let strength = strength.clamp(0.0, 1.0);
-        if strength == 0.0 {
-            return rgb;
-        }
-        let looked = self.lookup(rgb);
-        std::array::from_fn(|c| rgb[c] + strength * (looked[c] - rgb[c]))
     }
 }
 
@@ -504,37 +493,6 @@ mod tests {
         assert_eq!(lut.lookup([2.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
         assert_eq!(lut.lookup([9.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
         assert_eq!(lut.lookup([-9.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
-    }
-
-    /// Strength 0 has to leave the pixel exactly as it was, not nearly: it is the same
-    /// value it was handed, and a cube switched off cannot round a colour.
-    #[test]
-    fn strength_zero_is_exactly_the_colour_it_was_given() {
-        let lut = Lut3d::parse(&cube_text(5, |r, g, b| {
-            [
-                1.0 - r as f32 / 4.0,
-                1.0 - g as f32 / 4.0,
-                1.0 - b as f32 / 4.0,
-            ]
-        }))
-        .unwrap();
-        for colour in [[0.3, 0.7, 0.1], [1.0, 0.0, 0.5], [0.9, 0.9, 0.9]] {
-            assert_eq!(lut.apply(colour, 0.0), colour);
-        }
-        // Half strength is halfway between the colour and the cube's answer.
-        let colour = [0.3, 0.3, 0.3];
-        let half = lut.apply(colour, 0.5);
-        let full = lut.lookup(colour);
-        for c in 0..3 {
-            assert!(
-                ((half[c] - (colour[c] + 0.5 * (full[c] - colour[c]))).abs()) < 1e-6,
-                "channel {c}: {half:?} vs {full:?}"
-            );
-        }
-        assert_eq!(lut.apply(colour, 1.0), full);
-        // Out-of-range strengths clamp rather than extrapolate the blend.
-        assert_eq!(lut.apply(colour, -1.0), colour);
-        assert_eq!(lut.apply(colour, 5.0), full);
     }
 
     /// A 1D cube is a different file that happens to share the extension. Saying so is
