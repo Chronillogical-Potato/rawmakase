@@ -191,6 +191,15 @@ small or too unlike the validation sets to fit a per-photo Highlights pull; more
 linear-profile Camera Raw renders of varied photos, including low-key scenes and
 the signature-edit sets' kind of photo, should come before another model.
 
+### Highlights far above the key (2026-10-21)
+
+Synthetic probes showed Highlights −100 holding at about −3.5 EV for areas more than 7
+stops over the key, where Camera Raw keeps pulling (−10.2 EV at 10 stops), clipped or
+not. The −100 row now continues past its table ([negative Highlights past the
+table](scene-tone-stage.md#local-operators)); −50 and −25 still hold,
+since extending them made photo regions worse. Camera Raw's pull at those positions past
+7 stops (about 0.5 and 0.25 EV per stop) is not matched.
+
 ### Default render, Blacks, negative Dehaze and Clarity (2026-10-20)
 
 Started from the open issues #467, #468, #470, #471 and #474, judged against

@@ -26,8 +26,13 @@ fn gpu_measured_tails_match_cpu_globally_and_in_masks() -> Result<()> {
         height: 240,
         pixels: (0..240 * 240)
             .map(|i| {
-                let radius = ((i % 240) as f32 - 120.).hypot((i / 240) as f32 - 120.);
-                [(-7. + 7. * ((45. - radius) / 25.).clamp(0., 1.)).exp2(); 3]
+                let (x, y) = (i % 240, i / 240);
+                let radius = (x as f32 - 120.).hypot(y as f32 - 120.);
+                // 10 stops over the background, past the Highlights table's top (7);
+                // the left half in 2-pixel stripes, where the tail reads the fine mean.
+                let stripe = x < 120 && y / 2 % 2 == 0;
+                let level = if stripe { 0. } else { (45. - radius) / 25. };
+                [(-7. + 10. * level.clamp(0., 1.)).exp2(); 3]
             })
             .collect(),
         metadata: metadata.clone(),

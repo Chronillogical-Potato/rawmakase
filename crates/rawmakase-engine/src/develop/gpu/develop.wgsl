@@ -429,7 +429,7 @@ fn scene_mask(q: vec3<f32>, whites: f32, blacks: f32) -> vec3<f32> {
     return out;
 }
 // local_tone::LocalToneMap::gain
-fn local_curve(i: u32, base: f32) -> f32 {
+fn local_curve(i: u32, base: f32, tail_base: f32) -> f32 {
     let t = offset(i);
     if t < 0 {
         return 0.0;
@@ -440,7 +440,9 @@ fn local_curve(i: u32, base: f32) -> f32 {
     let f = clamp((base - key - lo) / (hi - lo) * 48.0 - 0.5, 0.0, 47.0);
     let j = min(u32(f), 46u);
     let a = table(t + i32(j));
-    return a + (table(t + i32(j) + 1) - a) * (f - f32(j));
+    // The tail per stop past the last column follows the table (`Curve::tail`).
+    let past = max(tail_base - key - (hi - (hi - lo) / 96.0), 0.0);
+    return a + (table(t + i32(j) + 1) - a) * (f - f32(j)) + table(t + 48) * past;
 }
 // Slider position `k` of the 7 around a measured family, with 0 inserted at index 3,
 // and its table index (-1 for the identity).
@@ -472,24 +474,25 @@ fn bracket(values: i32, s: f32) -> vec2<f32> {
 // local_tone::family: a Shadows (0), Highlights (1), Dehaze (2), Shadows detail (3) or
 // Shadows region (4) gain at slider `s`
 // (layout: `local_tone::gpu_families`).
-fn family(f: u32, s_in: f32, key: f32, base: f32) -> f32 {
+fn family(f: u32, s_in: f32, key: f32, base: f32, tail_base: f32) -> f32 {
     if s_in == 0.0 {
         return 0.0;
     }
     let s = clamp(s_in, -1.0, 1.0);
-    let t = offset(P_LOCAL_FAMILIES) + i32(f * 296u);
+    let t = offset(P_LOCAL_FAMILIES) + i32(f * 302u);
     let lo = table(t + 288);
     let hi = table(t + 289);
     let b = bracket(t + 290, s);
     let j = u32(b.x);
     let x = clamp((base - key - lo) / (hi - lo) * 48.0 - 0.5, 0.0, 47.0);
     let i = min(u32(x), 46u);
+    let past = max(tail_base - key - (hi - (hi - lo) / 96.0), 0.0);
     var y = vec2(0.0);
     for (var k = 0u; k < 2u; k++) {
         let row = slider_table(j + k);
         if row >= 0 {
             let a = table(t + row * 48 + i32(i));
-            y[k] = a + (table(t + row * 48 + i32(i) + 1) - a) * (x - f32(i));
+            y[k] = a + (table(t + row * 48 + i32(i) + 1) - a) * (x - f32(i)) + table(t + 296 + row) * past;
         }
     }
     return y.x + (y.y - y.x) * b.y;
@@ -557,6 +560,12 @@ fn local_gain(pos: vec2<f32>, lum: f32) -> f32 {
         coef[k] = top * (1.0 - ty) + bottom * ty;
     }
     let base = coef.x * log2(max(lum, LOCAL_FLOOR)) + coef.y;
+    // Highlights' tail reads the base, but no more than 0.5 stops above the fine mean
+    // (`LocalToneMap::tail_base`).
+    let f = u32(offset(P_LOCAL_FINE));
+    let fine_top = grid[f + iy * w + ix] * (1.0 - tx) + grid[f + iy * w + jx] * tx;
+    let fine_bottom = grid[f + jy * w + ix] * (1.0 - tx) + grid[f + jy * w + jx] * tx;
+    let tail_base = min(base, fine_top * (1.0 - ty) + fine_bottom * ty + 0.5);
     // The measured positive Clarity (clarity.rs), on the same grid.
     var clarity = 0.0;
     let c = offset(P_LOCAL_A + 2u);
@@ -579,16 +588,16 @@ fn local_gain(pos: vec2<f32>, lum: f32) -> f32 {
         let h = p(P_GLOBAL_SH + 1u) + delta[L_HIGHLIGHTS];
         var lift = 0.0;
         if r >= 0 {
-            lift = family(3u, s, 0.0, base - region) + family(4u, s, p(P_LOCAL_KEYS + 2u), region);
+            lift = family(3u, s, 0.0, base - region, base - region) + family(4u, s, p(P_LOCAL_KEYS + 2u), region, region);
         }
-        return exp2(family(0u, s, p(P_LOCAL_KEYS), base)
-            + family(1u, h, p(P_LOCAL_KEYS + 1u), base) + lift + clarity);
+        return exp2(family(0u, s, p(P_LOCAL_KEYS), base, base)
+            + family(1u, h, p(P_LOCAL_KEYS + 1u), base, tail_base) + lift + clarity);
     }
     var lift = 0.0;
     if r >= 0 {
-        lift = local_curve(P_LIFT, base - region) + local_curve(P_LIFT + 4u, region);
+        lift = local_curve(P_LIFT, base - region, base - region) + local_curve(P_LIFT + 4u, region, region);
     }
-    return exp2(local_curve(P_SHADOWS, base) + local_curve(P_HIGHLIGHTS, base) + lift + clarity);
+    return exp2(local_curve(P_SHADOWS, base, base) + local_curve(P_HIGHLIGHTS, base, tail_base) + lift + clarity);
 }
 // scene_tone::haze: the fraction of the haze positive Dehaze `s` removes.
 fn haze_omega(s_in: f32) -> f32 {
@@ -1067,7 +1076,7 @@ fn scene_stage(pro_in: vec3<f32>, pos: vec2<f32>) -> vec3<f32> {
         let key = p(P_DEHAZE + 1u);
         for (var c = 0u; c < 3u; c++) {
             if pro[c] > 0.0 {
-                pro[c] *= exp2(family(2u, dehaze, key, log2(max(pro[c], LOCAL_FLOOR))));
+                pro[c] *= exp2(family(2u, dehaze, key, log2(max(pro[c], LOCAL_FLOOR)), log2(max(pro[c], LOCAL_FLOOR))));
             }
         }
     }

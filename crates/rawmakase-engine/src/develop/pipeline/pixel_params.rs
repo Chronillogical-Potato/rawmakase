@@ -45,6 +45,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("LOCAL_SIZE", 2),
     ("LOCAL_SCALE", 2),
     ("LOCAL_A", 3),
+    // The fine mean's offset into the grid (`local_tone::MapGrid::fine_at`).
+    ("LOCAL_FINE", 1),
     ("SHADOWS", 4),
     ("HIGHLIGHTS", 4),
     // Positive Shadows' detail and region curves (as SHADOWS), and the regional level's
@@ -128,7 +130,7 @@ pub(crate) struct PixelParams {
     /// without masks.
     pub(crate) weights: Vec<u32>,
     /// The Shadows/Highlights map's grids, which the shader reads from a buffer of their
-    /// own (`LOCAL_A` and `LOCAL_REGION` offsets into it; Clarity's into `tables`).
+    /// own (`LOCAL_A`, `LOCAL_FINE` and `LOCAL_REGION` offsets into it; Clarity's into `tables`).
     pub(crate) grid: Option<crate::develop::local_tone::MapGrid>,
     /// The recipe as the camera colour reads it (`stage_cache::color_recipe`), when the
     /// develop pass may keep that colour for its samples and reuse it while the stages
@@ -226,13 +228,20 @@ fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
         None => -1.,
     };
     p.set("LOCAL_A", &[0., grid.cells() as f32, clarity]);
+    p.set("LOCAL_FINE", &[grid.fine_at() as f32]);
     p.set(
         "LOCAL_REGION",
         &[grid.region_at().map_or(-1., |at| at as f32)],
     );
     p.grid = Some(grid);
     let mut curve = |c: Option<&crate::develop::local_tone::Curve>| match c {
-        Some(c) => [p.push(c.table), c.key, c.lo, c.hi],
+        // The table, then its tail (`local_curve` reads it after the 48 columns).
+        Some(c) => [
+            p.push(c.table.into_iter().chain([c.tail])),
+            c.key,
+            c.lo,
+            c.hi,
+        ],
         None => [-1., 0., 0., 0.],
     };
     let shadows = curve(local.shadows.as_ref());

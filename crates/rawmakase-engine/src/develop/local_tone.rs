@@ -16,6 +16,10 @@ use rayon::prelude::*;
 pub(crate) const MAP_EDGE: u32 = 512;
 const RADIUS: f32 = 0.032;
 const EPSILON: f32 = 0.5;
+/// Radius, in map pixels, of the mean the Highlights tail reads, and how far above it
+/// (in stops) the tail's level may sit.
+const TAIL_RADIUS: usize = 2;
+const TAIL_MARGIN: f32 = 0.5;
 /// The darkest scene luminance the map tells apart (−14 stops).
 pub(crate) const FLOOR: f32 = 6.103_515_6e-5;
 /// The regional level positive Shadows reads: a bilateral blur of log2 luminance with a
@@ -24,6 +28,18 @@ const REGION_SCALE: f32 = 0.25;
 const REGION_RANGE: f32 = 4.;
 
 impl Family {
+    /// Row `row` continues past `hi` with the slope of its last 7 columns, per stop.
+    /// After `monotone` every column step is at least -1 stop, so the output past
+    /// `hi` still never decreases (at worst it is flat).
+    pub(super) const fn with_tail(mut self, row: usize) -> Self {
+        let step = (self.hi - self.lo) / 48.;
+        self.tail[row] = (self.tables[row][47] - self.tables[row][40]) / (7. * step);
+        self
+    }
+    /// How far past the last column's centre `base` is, in stops (0 before it).
+    fn past_hi(&self, key: f32, base: f32) -> f32 {
+        past_hi(self.lo, self.hi, key, base)
+    }
     /// Project output log luminance (input + gain), not gain, onto nondecreasing
     /// values. Pool adjacent violators gives the least-squares correction, leaving
     /// every already ordered run alone unless it joins a violating neighbour.
@@ -102,6 +118,12 @@ pub(crate) struct Curve {
     pub(crate) lo: f32,
     pub(crate) hi: f32,
     pub(crate) table: [f32; 48],
+    /// Log2 gain per stop past the last column (`Family::tail`).
+    pub(crate) tail: f32,
+}
+/// How far `base` is past the last column's centre of a table over [lo, hi], in stops.
+fn past_hi(lo: f32, hi: f32, key: f32, base: f32) -> f32 {
+    (base - key - (hi - (hi - lo) / 96.)).max(0.)
 }
 impl Curve {
     fn new(family: &Family, s: f32, key: f32) -> Option<Self> {
@@ -124,6 +146,11 @@ impl Curve {
             .unwrap_or(points.len() - 2);
         let ((s0, t0), (s1, t1)) = (points[j], points[j + 1]);
         let w = (s - s0) / (s1 - s0);
+        let tail_at = |v: f32, t: Option<&[f32; 48]>| {
+            t.and_then(|_| family.values.iter().position(|x| *x == v))
+                .map_or(0., |i| family.tail[i])
+        };
+        let tail = tail_at(s0, t0) + (tail_at(s1, t1) - tail_at(s0, t0)) * w;
         for (i, v) in table.iter_mut().enumerate() {
             let y0 = t0.map_or(0., |t| t[i]);
             let y1 = t1.map_or(0., |t| t[i]);
@@ -134,12 +161,18 @@ impl Curve {
             lo: family.lo,
             hi: family.hi,
             table,
+            tail,
         })
     }
     fn eval(&self, base: f32) -> f32 {
+        self.eval_t(base, base)
+    }
+    fn eval_t(&self, base: f32, tb: f32) -> f32 {
         let f = ((base - self.key - self.lo) / (self.hi - self.lo) * 48. - 0.5).clamp(0., 47.);
         let i = (f as usize).min(46);
-        self.table[i] + (self.table[i + 1] - self.table[i]) * (f - i as f32)
+        self.table[i]
+            + (self.table[i + 1] - self.table[i]) * (f - i as f32)
+            + self.tail * past_hi(self.lo, self.hi, self.key, tb)
     }
 }
 /// The slider values a map is built for: Shadows, Highlights and Clarity, and whether
@@ -176,6 +209,10 @@ pub(crate) struct MapBase {
     logs: Vec<f32>,
     a: Vec<f32>,
     b: Vec<f32>,
+    /// Mean of log2 luminance over a few map pixels (`TAIL_RADIUS`), then the largest of
+    /// those means over the same reach, so the first pixels inside a large bright
+    /// area read its inside rather than the dark outside.
+    fine: Vec<f32>,
     shadow_key: f32,
     highlight_key: f32,
     clarity_key: f32,
@@ -224,6 +261,7 @@ impl MapBase {
             })
             .collect();
         let b: Vec<f32> = m.iter().zip(&a).map(|(m, a)| m - a * m).collect();
+        let fine = dilate(&blur(&logs, w, h, TAIL_RADIUS), w, h, TAIL_RADIUS);
         let (a, b) = rayon::join(|| mean(&a), || mean(&b));
         let average = logs.iter().map(|l| l.exp2() as f64).sum::<f64>() / logs.len() as f64;
         let highlight_key = 0.5 * percentile(0.75) + 0.5 * percentile(0.01);
@@ -236,6 +274,7 @@ impl MapBase {
             logs,
             a,
             b,
+            fine,
             shadow_key: (average as f32).log2(),
             highlight_key,
             clarity_key,
@@ -287,7 +326,7 @@ impl MapBase {
     }
 }
 /// A map's grids as the GPU reads them (`develop.wgsl`'s `grid`): the guided filter's
-/// a, then b, then (when positive Shadows reads it) the regional level. They depend
+/// a, then b, then the fine mean, then (when positive Shadows reads it) the regional level. They depend
 /// only on the map's base, which renders share while the sliders move, so the device
 /// keeps them per base instead of receiving them with every render.
 #[derive(Clone)]
@@ -304,15 +343,20 @@ impl MapGrid {
     pub(crate) fn cells(&self) -> usize {
         self.base.a.len()
     }
+    /// Offset of the fine mean.
+    pub(crate) fn fine_at(&self) -> usize {
+        2 * self.cells()
+    }
     /// Offset of the regional level, if present.
     pub(crate) fn region_at(&self) -> Option<usize> {
-        self.region.then(|| 2 * self.cells())
+        self.region.then(|| 3 * self.cells())
     }
     /// The values, in order.
     pub(crate) fn values(&self) -> Vec<f32> {
-        let mut v = Vec::with_capacity(3 * self.cells());
+        let mut v = Vec::with_capacity(4 * self.cells());
         v.extend(&self.base.a);
         v.extend(&self.base.b);
+        v.extend(&self.base.fine);
         if self.region {
             v.extend(self.base.region());
         }
@@ -403,8 +447,9 @@ impl LocalToneMap {
     /// position `x`, `y`.
     pub(crate) fn gain(&self, x: f32, y: f32, lum: f32) -> f32 {
         let base = self.base(x, y, lum);
+        let tb = self.tail_base(x, y, base);
         let mut ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
-            + self.highlights.as_ref().map_or(0., |c| c.eval(base));
+            + self.highlights.as_ref().map_or(0., |c| c.eval_t(base, tb));
         if let (Some([detail, region]), Some(k)) = (&self.lift, self.region()) {
             let k = self.bilinear(x, y, k);
             ev += detail.eval(base - k) + region.eval(k);
@@ -425,7 +470,13 @@ impl LocalToneMap {
                 + family(&SHADOWS_REGION, sliders[0], self.keys[2], k)
         });
         (family(&SHADOWS, sliders[0], self.keys[0], base)
-            + family(&HIGHLIGHTS, sliders[1], self.keys[1], base)
+            + family_t(
+                &HIGHLIGHTS,
+                sliders[1],
+                self.keys[1],
+                base,
+                self.tail_base(x, y, base),
+            )
             + lift
             + clarity)
             .exp2()
@@ -440,6 +491,12 @@ impl LocalToneMap {
             base: self.base.clone(),
             region: self.regional,
         }
+    }
+    /// The level Highlights' tail reads: the base, but no more than `TAIL_MARGIN` above
+    /// the (dilated) mean of the few pixels around, so stripes and specks too fine to
+    /// carry a pull of their own keep their detail (docs/scene-tone-stage.md).
+    fn tail_base(&self, x: f32, y: f32, base: f32) -> f32 {
+        base.min(self.bilinear(x, y, &self.base.fine) + TAIL_MARGIN)
     }
     fn base(&self, x: f32, y: f32, lum: f32) -> f32 {
         self.bilinear(x, y, &self.base.a) * level(lum) + self.bilinear(x, y, &self.base.b)
@@ -468,21 +525,25 @@ pub(crate) fn grid_sample(v: &[f32], size: [usize; 2], scale: [f32; 2], pos: [f3
 }
 /// The measured positions a slider is bracketed in, as `Curve::new` builds them: each
 /// position with its table, and the identity at 0 in slot `IDENTITY`.
-type Points<'a> = [(f32, Option<&'a [f32; 48]>); 7];
+type Points<'a> = [(f32, Option<(&'a [f32; 48], f32)>); 7];
 /// Slot the identity takes, after the negative slider positions.
 const IDENTITY: usize = 3;
 
 /// A family's log2 gain at slider `s` and base level `base`, as `Curve::new(..).eval`
 /// without building the table.
 pub(crate) fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
+    family_t(f, s, key, base, base)
+}
+pub(crate) fn family_t(f: &Family, s: f32, key: f32, base: f32, tb: f32) -> f32 {
     if s == 0. {
         return 0.;
     }
     let s = s.clamp(-1., 1.);
-    let bin = |t: &[f32; 48]| {
+    let past = f.past_hi(key, tb);
+    let bin = |(t, tail): (&[f32; 48], f32)| {
         let x = ((base - key - f.lo) / (f.hi - f.lo) * 48. - 0.5).clamp(0., 47.);
         let i = (x as usize).min(46);
-        t[i] + (t[i + 1] - t[i]) * (x - i as f32)
+        t[i] + (t[i + 1] - t[i]) * (x - i as f32) + tail * past
     };
     // On the stack: this bracket is built per pixel, for both families.
     let points: Points = std::array::from_fn(|slot| {
@@ -490,7 +551,7 @@ pub(crate) fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
             (0., None)
         } else {
             let i = if slot < IDENTITY { slot } else { slot - 1 };
-            (f.values[i], Some(&f.tables[i]))
+            (f.values[i], Some((&f.tables[i], f.tail[i])))
         }
     });
     let j = points
@@ -503,8 +564,8 @@ pub(crate) fn family(f: &Family, s: f32, key: f32, base: f32) -> f32 {
     y0 + (y1 - y0) * w
 }
 /// The measured families for `develop.wgsl`: Shadows, Highlights, Dehaze and positive
-/// Shadows' detail and region tables, each its 6 × 48 table values, `lo` and `hi`, then
-/// its six slider positions.
+/// Shadows' detail and region tables, each its 6 × 48 table values, `lo` and `hi`, its
+/// six slider positions, then its six tails.
 pub(crate) fn gpu_families() -> Vec<f32> {
     let mut out = Vec::new();
     for f in [
@@ -517,8 +578,31 @@ pub(crate) fn gpu_families() -> Vec<f32> {
         out.extend(f.tables.iter().flatten());
         out.extend([f.lo, f.hi]);
         out.extend(f.values);
+        out.extend(f.tail);
     }
     out
+}
+/// The largest value over a (2r+1)² window, clamped at the borders.
+fn dilate(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let pass = |src: &[f32], horizontal: bool| -> Vec<f32> {
+        (0..w * h)
+            .map(|i| {
+                let (px, py) = (i % w, i / w);
+                (0..=2 * r)
+                    .map(|d| {
+                        let d = d as isize - r as isize;
+                        let (qx, qy) = if horizontal {
+                            ((px as isize + d).clamp(0, w as isize - 1) as usize, py)
+                        } else {
+                            (px, (py as isize + d).clamp(0, h as isize - 1) as usize)
+                        };
+                        src[qy * w + qx]
+                    })
+                    .fold(f32::MIN, f32::max)
+            })
+            .collect()
+    };
+    pass(&pass(x, true), false)
 }
 /// Mean over a (2r+1)² window, clamped at the borders, via running sums.
 pub(super) fn blur(x: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
@@ -568,7 +652,8 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            assert_eq!(&gpu[slot * 296..slot * 296 + 288], f.tables.as_flattened());
+            assert_eq!(&gpu[slot * 302..slot * 302 + 288], f.tables.as_flattened());
+            assert_eq!(&gpu[slot * 302 + 296..slot * 302 + 302], &f.tail);
             for s in -100..=100 {
                 let s = s as f32 / 100.;
                 let curve = Curve::new(f, s, 0.);
@@ -627,6 +712,29 @@ mod tests {
     }
 
     #[test]
+    fn dilate_takes_the_largest_value_in_the_window() {
+        let mut x = vec![0.; 7 * 5];
+        x[2 * 7 + 3] = 1.;
+        let d = dilate(&x, 7, 5, 1);
+        let lit: Vec<usize> = (0..35).filter(|i| d[*i] == 1.).collect();
+        assert_eq!(
+            lit,
+            [
+                7 + 2,
+                7 + 3,
+                7 + 4,
+                14 + 2,
+                14 + 3,
+                14 + 4,
+                21 + 2,
+                21 + 3,
+                21 + 4
+            ]
+        );
+        assert!(dilate(&[2.; 12], 4, 3, 2).iter().all(|v| *v == 2.));
+    }
+
+    #[test]
     fn blur_preserves_constants_and_means() {
         let x = vec![2.; 30];
         assert!(blur(&x, 6, 5, 2).iter().all(|v| (v - 2.).abs() < 1e-6));
@@ -654,7 +762,7 @@ mod tests {
         let h = Curve::new(&HIGHLIGHTS, -0.5, -3.).unwrap();
         assert!(h.eval(0.) < -0.2);
         // Per-pixel evaluation matches the interpolated table.
-        for base in [-8., -3., -1., 0.2] {
+        for base in [-8., -3., -1., 0.2, 4.5, 9.] {
             for (f, s, key) in [
                 (&SHADOWS, -0.45, -1.),
                 (&SHADOWS_DETAIL, 0.45, 0.),
@@ -664,6 +772,103 @@ mod tests {
                 let table = Curve::new(f, s, key).unwrap().eval(base);
                 assert!((family(f, s, key, base) - table).abs() < 1e-5);
             }
+        }
+    }
+
+    #[test]
+    fn negative_highlights_keeps_pulling_past_its_table() {
+        // Camera Raw 18.7 pulls a flat object 8, 9 and 10 stops over a dark background by
+        // 7.9, 9.1 and 10.2 stops at -100, past the table's top at 7 stops; the -100 row
+        // continues with its last slope, the others hold their last column.
+        let at = |s: f32, u: f32| family(&HIGHLIGHTS, s, 0., u);
+        assert!(
+            at(-1., 10.) < at(-1., 7.) - 2.,
+            "{} {}",
+            at(-1., 7.),
+            at(-1., 10.)
+        );
+        assert_eq!(at(-0.5, 10.), at(-0.5, 7.));
+        // Halfway between -100 and -50, half the tail.
+        let tail = |s: f32| at(s, 10.) - at(s, 8.);
+        assert!((tail(-0.75) - tail(-1.) / 2.).abs() < 1e-4);
+        // The output still never decreases past the table.
+        for s in [-1., -0.75] {
+            for u in 70..140 {
+                let u = u as f32 / 10.;
+                assert!(
+                    u + 0.1 + at(s, u + 0.1) >= u + at(s, u) - 1e-5,
+                    "{s} at {u}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn highlights_tail_spares_stripes_too_fine_for_a_pull_of_their_own() {
+        // A block 10 stops over a dark frame, flat or in 2-pixel stripes of the same
+        // brightness and darkness as the frame. Camera Raw keeps pulling the flat
+        // block (-9 stops at -100) but not the fine structure of a window's slats
+        // (docs/scene-tone-stage.md); the tail follows the base only where the few
+        // pixels around are as bright.
+        let w = 256;
+        let block = |stripes: bool| -> Vec<f32> {
+            (0..w * w)
+                .map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    let inside = (88..168).contains(&x) && (88..168).contains(&y);
+                    if inside && (!stripes || y / 2 % 2 == 0) {
+                        1.
+                    } else {
+                        (-10_f32).exp2()
+                    }
+                })
+                .collect()
+        };
+        let pull = |stripes: bool| {
+            let lum = block(stripes);
+            let m = LocalToneMap::from_luminance(
+                lum,
+                [w as u32; 2],
+                [w as u32; 2],
+                Sliders {
+                    highlights: -1.,
+                    ..Default::default()
+                },
+                false,
+            );
+            m.gain(128., 128., 1.).log2()
+        };
+        let (flat, striped) = (pull(false), pull(true));
+        assert!(flat < -5., "flat {flat}");
+        assert!(striped > flat + 1., "flat {flat}, striped {striped}");
+    }
+
+    #[test]
+    fn highlights_tail_pulls_the_edge_of_a_large_block_like_its_inside() {
+        // The few pixels around an edge of the block include the dark frame, so their
+        // plain mean is low; the tail must still pull the block's first pixels as far
+        // as its inside, or the block gets a bright rim.
+        let w = 256;
+        let lum: Vec<f32> = (0..w * w)
+            .map(|i| {
+                let inside = (88..168).contains(&(i % w)) && (88..168).contains(&(i / w));
+                if inside { 1. } else { (-10_f32).exp2() }
+            })
+            .collect();
+        let m = LocalToneMap::from_luminance(
+            lum,
+            [w as u32; 2],
+            [w as u32; 2],
+            Sliders {
+                highlights: -1.,
+                ..Default::default()
+            },
+            false,
+        );
+        let at = |x: f32| m.gain(x, 128., 1.).log2();
+        let inside = at(128.);
+        for x in [88., 89., 90.] {
+            assert!(at(x) < inside + 1., "x {x}: {}, inside {inside}", at(x));
         }
     }
 
