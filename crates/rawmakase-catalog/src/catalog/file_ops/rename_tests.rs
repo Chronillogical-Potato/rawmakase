@@ -382,16 +382,20 @@ fn a_case_only_rename_works_where_the_volume_renames_spelling() -> Result<()> {
 
 #[test]
 fn an_accents_only_rename_works_where_the_volume_renames_spelling() -> Result<()> {
-    // Case-sensitive APFS treats the two spellings as one name yet won't
-    // rename one to the other, so such a rename is refused when planned.
+    // Where the volume doesn't rename a name to another spelling of itself,
+    // a folder that folds names is asked nothing it can't do: case-sensitive
+    // APFS takes the two spellings for one name, and a folder that folds case
+    // (NTFS) is compared caselessly, which folds accents too. Only a folder
+    // telling both apart (ext4) renames.
     let mut fx = fixture(&["caf\u{e9}.NEF"]);
     let a = fx.photo("caf\u{e9}.NEF");
     let spelling = volume(&fx).0;
-    let normalization = fsops::probe(&fx.root, &fsops::list(&fx.root)?).normalization;
+    let rules = fsops::probe(&fx.root, &fsops::list(&fx.root)?);
+    let exact = rules.case == fsops::Folding::Exact && rules.normalization == fsops::Folding::Exact;
     let op = FileOp::RenamePhotos {
         renames: vec![(a, "cafe\u{301}".into())],
     };
-    if !spelling && normalization != fsops::Folding::Exact {
+    if !spelling && !exact {
         assert_eq!(reasons(&fx.plan(op)), [(a, refused(Refusal::SpellingOnly))]);
         assert_eq!(listing(&fx), ["caf\u{e9}.NEF"]);
         return Ok(());
