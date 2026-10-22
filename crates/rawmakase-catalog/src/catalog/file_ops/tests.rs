@@ -288,6 +288,9 @@ pub(super) fn stored_spelling(path: &Path) -> bool {
     }
 }
 
+/// A test's hook on a path.
+pub(super) type PathHook = Option<Box<dyn Fn(&Path)>>;
+
 /// A Trash that keeps files in `<fixture>/trash/`, under a unique name.
 pub(super) struct FakeTrash {
     pub dir: PathBuf,
@@ -302,19 +305,36 @@ pub(super) struct FakeTrash {
     /// set.
     pub crash_before: Option<usize>,
     pub calls: RefCell<usize>,
+    /// What it says when asked whether it takes a path.
+    pub support: TrashSupport,
+    /// Runs on the path just before it is moved: what changes in the
+    /// moment between the last check and the Trash.
+    pub meanwhile: PathHook,
+    /// Runs on where it put the path, right after it moved it.
+    pub after: PathHook,
+    /// Takes a folder's first file (by name) on its own, then fails, as a
+    /// Trash failing part way through a folder may.
+    pub partial: bool,
 }
 
 impl FakeTrash {
     pub fn new(fx: &Fx) -> Self {
-        let dir = fx.dir.path().canonicalize().unwrap().join("trash");
-        std::fs::create_dir_all(&dir).unwrap();
+        Self::at(&fx.dir.path().canonicalize().unwrap().join("trash"))
+    }
+    /// A Trash keeping what it takes in folder `dir`.
+    pub fn at(dir: &Path) -> Self {
+        std::fs::create_dir_all(dir).unwrap();
         Self {
-            dir,
+            dir: dir.to_path_buf(),
             fail_from: None,
             crash_after: None,
             crash_before: None,
             stored_only: false,
             calls: RefCell::new(0),
+            support: TrashSupport::Yes,
+            meanwhile: None,
+            after: None,
+            partial: false,
         }
     }
 }
@@ -341,6 +361,22 @@ impl Trash for FakeTrash {
         if self.fail_from.is_some_and(|from| n >= from) {
             return Err(TrashError::Unsupported);
         }
+        if self.partial {
+            let mut names: Vec<OsString> = std::fs::read_dir(path)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .filter(|n| path.join(n).is_file())
+                .collect();
+            names.sort();
+            if let Some(first) = names.first() {
+                let to = self.dir.join(format!("{n}-{}", first.to_string_lossy()));
+                std::fs::rename(path.join(first), to).unwrap();
+            }
+            return Err(TrashError::Failed("the Trash stopped part way".into()));
+        }
+        if let Some(meanwhile) = &self.meanwhile {
+            meanwhile(path);
+        }
         let location = self.dir.join(format!(
             "{n}-{}",
             path.file_name().unwrap().to_string_lossy()
@@ -360,10 +396,16 @@ impl Trash for FakeTrash {
         if std::fs::read(&double).is_ok_and(|b| b == APPLE_DOUBLE) {
             std::fs::remove_file(double).unwrap();
         }
+        if let Some(after) = &self.after {
+            after(&location);
+        }
         if self.crash_after == Some(n) {
             panic!("injected crash after trashing {n}");
         }
         Ok(TrashReceipt { location })
+    }
+    fn supports(&self, _: &Path) -> TrashSupport {
+        self.support
     }
 }
 
@@ -476,9 +518,13 @@ pub(super) enum Call {
     RemoveDir(PathBuf),
 }
 
+/// A test's hook on each disk call.
+pub(super) type CallHook = Option<Box<dyn Fn(&Call)>>;
+
 /// Which kind of call a fault is at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Op {
+    List,
     Rename,
     CreateDir,
     Sync,
@@ -591,6 +637,20 @@ pub(super) struct Faulty {
     /// it another than its own.
     pub numbers: RefCell<BTreeMap<crate::storage::fsops::FileId, crate::storage::fsops::FileId>>,
     pub renumbered: RefCell<u64>,
+    /// Every listing in reverse order, so nothing may rely on the order a
+    /// folder lists its names in.
+    pub list_reversed: bool,
+    /// Folders that can't be listed, as macOS's Trash without Full Disk
+    /// Access, or a drive gone offline.
+    pub unlistable: RefCell<Vec<PathBuf>>,
+    /// Runs on each call as it is made.
+    pub watch: CallHook,
+    /// Runs on each folder listed, before it is.
+    pub on_list: PathHook,
+    /// Every volume says it is read-only.
+    pub read_only: bool,
+    /// Every volume says it is a network share.
+    pub network: bool,
 }
 
 impl Faulty {
@@ -752,6 +812,13 @@ impl Faulty {
             self.numbers.borrow_mut().insert(real, old);
         }
     }
+    /// Records `call`, and shows it to the watch.
+    fn record(&self, call: Call) {
+        if let Some(watch) = &self.watch {
+            watch(&call);
+        }
+        self.calls.borrow_mut().push(call);
+    }
     pub fn renames(&self) -> Vec<(PathBuf, PathBuf)> {
         self.calls
             .borrow()
@@ -774,7 +841,7 @@ impl Faulty {
 
 impl Disk for Faulty {
     fn entry(&self, path: &Path) -> Result<Entry, FsError> {
-        self.calls.borrow_mut().push(Call::Entry(path.into()));
+        self.record(Call::Entry(path.into()));
         let mut found = Real.entry(&self.found(path))?;
         if self.far(path) {
             found.id = self.number(found.id);
@@ -783,8 +850,18 @@ impl Disk for Faulty {
     }
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
         use unicode_normalization::UnicodeNormalization;
-        self.calls.borrow_mut().push(Call::List(dir.into()));
-        let names = Real.list(&self.found(dir))?;
+        self.record(Call::List(dir.into()));
+        if let Some(hook) = &self.on_list {
+            hook(dir);
+        }
+        if self.unlistable.borrow().iter().any(|d| d == dir) {
+            return Err(FsError::Io(std::io::Error::other("not permitted")));
+        }
+        let mut names = self.step(Op::List, || Real.list(&self.found(dir)))?;
+        if self.list_reversed {
+            names.sort();
+            names.reverse();
+        }
         match self.lists_decomposed && self.fat(dir) {
             true => Ok(names
                 .into_iter()
@@ -794,7 +871,7 @@ impl Disk for Faulty {
         }
     }
     fn identity(&self, path: &Path) -> anyhow::Result<Identity> {
-        self.calls.borrow_mut().push(Call::Identity(path.into()));
+        self.record(Call::Identity(path.into()));
         Real.identity(&self.found(path))
     }
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
@@ -863,6 +940,12 @@ impl Disk for Faulty {
         } else if !facts.stable_ids {
             facts.kind = crate::storage::fsops::VolumeKind::Other;
         }
+        if self.network {
+            facts.kind = crate::storage::fsops::VolumeKind::Other;
+            facts.local = false;
+            facts.stable_ids = false;
+        }
+        facts.read_only |= self.read_only;
         Ok(facts)
     }
     fn create_file(&self, path: &Path) -> Result<(), FsError> {

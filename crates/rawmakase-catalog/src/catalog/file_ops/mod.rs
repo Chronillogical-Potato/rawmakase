@@ -57,6 +57,7 @@ mod recover;
 mod rename;
 mod tree;
 mod tree_copy;
+mod tree_trash;
 
 pub use execute::execute;
 pub use folder::folder_name_problem;
@@ -127,6 +128,11 @@ pub enum FileOp {
         to_root: RootId,
         parent: String,
     },
+    /// Puts the folder at logical path `folder` of `root` in the system
+    /// Trash, with everything in it; then the catalog's folders of its
+    /// subtree leave the catalog with their photos (virtual copies
+    /// included). Its root stays. Planned only by [`plan_with_trash`].
+    TrashFolder { root: RootId, folder: String },
 }
 
 /// One run of an operation, by which its outcome is read back from the
@@ -281,6 +287,30 @@ pub struct Summary {
     pub renames: Vec<(String, String)>,
     /// What it copies to another drive, when the destination is on one.
     pub across: Option<Across>,
+    /// What a folder it puts in the Trash holds.
+    pub tree: Option<TreeCounts>,
+}
+
+/// What a folder put in the Trash holds, from the walk of its tree and the
+/// catalog, for its confirmation.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TreeCounts {
+    /// Folders below it (not itself).
+    pub folders: usize,
+    /// Files in it that are a catalog photo's.
+    pub photos: usize,
+    /// Every other file in it: sidecars, files the catalog doesn't know,
+    /// hidden ones. On macOS's FAT and exFAT a file's AppleDouble file
+    /// (`._name`) is part of it, and not counted.
+    pub other_files: usize,
+    /// The first three of those by name, sorted.
+    pub other_names: Vec<String>,
+    /// Catalog photos in it whose files are missing, and catalog folders in
+    /// it missing on disk: they leave the catalog with it.
+    pub missing_photos: usize,
+    pub missing_folders: usize,
+    /// Virtual copies in it of photos elsewhere, which leave with it.
+    pub stray_copies: usize,
 }
 
 /// A move to another drive: its files are copied there, and their
@@ -312,6 +342,8 @@ pub struct Plan {
     create: Option<folder::NewFolder>,
     /// The folder it renames, if it renames one.
     tree: Option<tree::TreeMove>,
+    /// The folder it puts in the Trash, if it trashes one.
+    trash_tree: Option<tree_trash::TrashTree>,
     items: Vec<plan::Item>,
     skipped: Vec<Skipped>,
     summary: Summary,
@@ -338,16 +370,27 @@ impl Plan {
                     .iter()
                     .flat_map(|t| t.state.photos.iter().copied()),
             )
+            .chain(
+                self.trash_tree
+                    .iter()
+                    .flat_map(|t| t.state.photos.iter().copied()),
+            )
             .collect()
     }
-    /// How many items it runs: each family, and the folder it makes or
-    /// renames.
+    /// How many items it runs: each family, and the folder it makes,
+    /// renames or puts in the Trash.
     pub fn steps(&self) -> usize {
-        self.items.len() + usize::from(self.create.is_some()) + usize::from(self.tree.is_some())
+        self.items.len()
+            + usize::from(self.create.is_some())
+            + usize::from(self.tree.is_some())
+            + usize::from(self.trash_tree.is_some())
     }
     /// Whether there is anything to do.
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.create.is_none() && self.tree.is_none()
+        self.items.is_empty()
+            && self.create.is_none()
+            && self.tree.is_none()
+            && self.trash_tree.is_none()
     }
     /// The user's confirmation, which only the confirming dialog's action
     /// gives: it enforces the order of plan, confirm, execute, not that a
@@ -483,6 +526,17 @@ fn size(bytes: u64) -> String {
     format!("{value:.1} {}", UNITS[unit])
 }
 
+/// Plans `op` in `catalog` on this computer, as [`plan`] does, with the
+/// `trash` it would run with: the only way to plan [`FileOp::TrashFolder`],
+/// which refuses a drive `trash` says has none.
+pub fn plan_with_trash(
+    catalog: &super::Catalog,
+    op: FileOp,
+    trash: &dyn Trash,
+) -> Result<Plan, FileOpError> {
+    plan::plan_trash_with(catalog, op, &disk::Real, trash)
+}
+
 /// What became of one item of a run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ItemResult {
@@ -523,6 +577,9 @@ pub struct ItemOutcome {
     /// Of a move to another drive, the originals left where they were
     /// beside their copies, the catalog following the copies.
     pub originals_kept: Vec<KeptOriginal>,
+    /// Of a folder put in the Trash, what it also took that was added after
+    /// it was checked, when that can be read.
+    pub note: Option<String>,
 }
 
 /// An original a move to another drive left at its source.
@@ -581,3 +638,5 @@ mod tests;
 mod tree_copy_tests;
 #[cfg(test)]
 mod tree_tests;
+#[cfg(test)]
+mod tree_trash_tests;

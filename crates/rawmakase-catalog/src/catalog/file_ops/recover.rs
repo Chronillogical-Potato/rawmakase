@@ -109,6 +109,9 @@ pub enum Resolution {
     /// Add the folder it made to the catalog, where it is proven the one
     /// made.
     AddFolder,
+    /// Take the photos and folders of a folder put in the Trash out of the
+    /// catalog, where its receipt was lost and it is gone from its path.
+    RemoveFromCatalog,
 }
 
 /// Recovers `catalog`'s unfinished file operations on this computer, and
@@ -189,7 +192,20 @@ pub(super) fn resolve_with(
         return Err(FileOpError::OtherComputer);
     }
     let folder = item.kind == Kind::CreateFolder;
+    let trash_tree = matches!(item.subject, Subject::TrashTree(_));
     match resolution {
+        Resolution::PutBack
+            if trash_tree && item.members.first().is_none_or(|m| m.receipt.is_none()) =>
+        {
+            return Err(FileOpError::Unsupported(
+                "It may be in the Trash; put it back in Finder.",
+            ));
+        }
+        Resolution::RemoveFromCatalog if !trash_tree => {
+            return Err(FileOpError::Unsupported(
+                "Only a folder put in the Trash can be removed from the catalog so.",
+            ));
+        }
         Resolution::PutBack if folder => {
             return Err(FileOpError::Unsupported(
                 "A folder that was made is never deleted. Keep it, or add it to the catalog.",
@@ -213,6 +229,16 @@ pub(super) fn resolve_with(
                 catalog
                     .db
                     .write_immediate(|w| folder::complete(w, &computer, disk, &item))?;
+                let now =
+                    journal::item(&catalog.db, operation)?.context("No such file operation")?;
+                return Ok(outcome_of(&now));
+            }
+            Resolution::RemoveFromCatalog => {
+                if let Err(why) =
+                    super::tree_trash::remove_from_catalog(catalog, &computer, disk, &item)?
+                {
+                    return Err(FileOpError::Destination(why));
+                }
                 let now =
                     journal::item(&catalog.db, operation)?.context("No such file operation")?;
                 return Ok(outcome_of(&now));
@@ -242,6 +268,9 @@ fn decide(
     put_back: bool,
 ) -> Result<()> {
     let id = item.id;
+    if let Subject::TrashTree(_) = item.subject {
+        return super::tree_trash::decide(catalog, computer, disk, item);
+    }
     if item.kind == Kind::CreateFolder {
         return catalog
             .db
@@ -333,6 +362,7 @@ fn changed(
     let pre = match &item.subject {
         Subject::Photos(pre) => pre,
         Subject::Tree(tree) => return tree.check(&catalog.db, computer),
+        Subject::TrashTree(tree) => return tree.check(&catalog.db, computer),
         Subject::Folder(_) => return Ok(None),
     };
     if let Some(reason) = pre.check(&catalog.db, computer)? {
@@ -426,6 +456,7 @@ fn unfinished(item: &Item) -> Unfinished {
                 vec![Resolution::AddFolder, Resolution::Keep]
             }
             Subject::Folder(_) => vec![Resolution::Keep],
+            Subject::TrashTree(_) => super::tree_trash::choices(item),
             Subject::Photos(_) | Subject::Tree(_) => vec![Resolution::PutBack, Resolution::Keep],
         },
     }
@@ -460,6 +491,8 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 Kind::MoveFolder => ItemResult::FolderMoved,
                 _ => ItemResult::FolderRenamed,
             },
+            Subject::TrashTree(_) if super::tree_trash::trashed(item) => ItemResult::Trashed,
+            Subject::TrashTree(_) => ItemResult::Removed,
         },
         ItemState::NoChange => ItemResult::Unchanged(item.error.clone()),
         ItemState::NeedsRecovery => {
@@ -499,10 +532,16 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
                 .unwrap_or_default(),
         })
         .collect();
+    // A finished folder Trash's error is what the Trash also took.
+    let note = match (&item.subject, item.state) {
+        (Subject::TrashTree(_), ItemState::Done) => item.error.clone(),
+        _ => None,
+    };
     ItemOutcome {
         operation: item.id,
         photos: item.photos().to_vec(),
         result,
         originals_kept,
+        note,
     }
 }

@@ -148,6 +148,12 @@ pub(super) fn plan_with(
             let tree = super::tree::relocate(catalog, disk, root, &folder, to_root, &parent)?;
             return tree_plan(catalog, Kind::MoveFolder, tree, batch);
         }
+        // Its drive's Trash is asked first.
+        FileOp::TrashFolder { .. } => {
+            return Err(FileOpError::Unsupported(
+                "A folder is put in the Trash only by a plan that knows the Trash.",
+            ));
+        }
     };
     let chosen: BTreeSet<PhotoId> = chosen.into_iter().collect();
     let mut skipped = Vec::new();
@@ -207,7 +213,7 @@ pub(super) fn plan_with(
             let mut files = Files::new(catalog, &folders, disk);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
-        Kind::RenameFolder | Kind::MoveFolder => Vec::new(),
+        Kind::RenameFolder | Kind::MoveFolder | Kind::TrashFolder => Vec::new(),
     };
     let mut summary = summarize(&items, &by_id, computers > 1);
     if kind == Kind::RenamePhotos {
@@ -223,10 +229,27 @@ pub(super) fn plan_with(
         kind,
         create: made,
         tree: None,
+        trash_tree: None,
         items,
         skipped,
         summary,
     })
+}
+
+/// [`plan_with`] with the `trash` the plan would run with, which a folder
+/// Trash asks whether its drive has one.
+pub(super) fn plan_trash_with(
+    catalog: &Catalog,
+    op: FileOp,
+    disk: &dyn Disk,
+    trash: &dyn super::Trash,
+) -> Result<Plan, FileOpError> {
+    match op {
+        FileOp::TrashFolder { root, folder } => {
+            super::tree_trash::plan(catalog, disk, trash, root, &folder, new_batch()?)
+        }
+        op => plan_with(catalog, op, disk),
+    }
 }
 
 /// The plan of folder change `tree`, of `kind`, run as `batch`. A folder
@@ -275,6 +298,7 @@ fn tree_plan(
         kind,
         create: None,
         tree: Some(tree),
+        trash_tree: None,
         items: Vec::new(),
         skipped: Vec::new(),
         summary,

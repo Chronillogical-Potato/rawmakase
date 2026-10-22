@@ -9,6 +9,7 @@ use super::super::value::row;
 use super::folder::FolderState;
 use super::preconditions::Preconditions;
 use super::tree::TreeState;
+use super::tree_trash::TrashTreeState;
 use crate::storage::Identity;
 use crate::storage::fsops::{ContentHash, FileId};
 use anyhow::{Context, Result, anyhow};
@@ -62,6 +63,10 @@ stored! {
         /// A folder moves into another of its root, and the catalog's
         /// folders of its subtree get new logical paths.
         MoveFolder = "move_folder",
+        /// A folder goes to the Trash whole, then the catalog's folders and
+        /// photos of its subtree (#575). An older release can't read the
+        /// kind, and fails closed on an unfinished one.
+        TrashFolder = "trash_folder",
     }
 }
 
@@ -176,6 +181,8 @@ pub(super) enum Subject {
     Folder(FolderState),
     /// A folder it renames or moves, with the subtree it re-keys.
     Tree(TreeState),
+    /// A folder it puts in the Trash, with the subtree it removes.
+    TrashTree(TrashTreeState),
 }
 
 /// A journalled item.
@@ -203,6 +210,7 @@ impl Item {
             Subject::Photos(pre) => &pre.rows,
             Subject::Folder(_) => &[],
             Subject::Tree(tree) => &tree.photos,
+            Subject::TrashTree(tree) => &tree.photos,
         }
     }
 }
@@ -536,6 +544,89 @@ pub(super) fn insert_tree_copy(
     Ok(OperationId(id))
 }
 
+/// A name of a folder put in the Trash, as planned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct NewTrashMember {
+    pub source: PathBuf,
+    /// Its file object as planned; on FAT and exFAT, whose ids change,
+    /// journalled but never relied on.
+    pub id: FileId,
+    /// A file's; `None` for a folder.
+    pub identity: Option<Identity>,
+}
+
+/// Journals a new item of `batch` putting a folder in the Trash, in
+/// `state`: its members planned, the folder first, then its folders and
+/// files as walked.
+pub(super) fn insert_tree_trash(
+    w: &mut Write<'_>,
+    batch: &str,
+    computer: &str,
+    state: ItemState,
+    tree: &TrashTreeState,
+    members: &[NewTrashMember],
+    error: Option<&str>,
+) -> Result<OperationId> {
+    let id: i64 = w.insert_returning_id(
+        sql!(
+            "INSERT INTO file_operations(batch, computer, kind, state, preconditions, created_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id"
+        ),
+        &[
+            &batch,
+            &computer,
+            &Kind::TrashFolder.as_str(),
+            &state.as_str(),
+            &serde_json::to_string(tree)?,
+            &crate::time::now_text(),
+            &error,
+        ],
+    )?;
+    for (ordinal, m) in members.iter().enumerate() {
+        let identity = m.identity.as_ref().map(serde_json::to_string).transpose()?;
+        w.execute(
+            sql!(
+                "INSERT INTO file_operation_members(operation, ordinal, source, file_id, identity,
+                    state)
+                 VALUES (?, ?, ?, ?, ?, ?)"
+            ),
+            &[
+                &id,
+                &(ordinal as i64),
+                &text(&m.source)?,
+                &m.id.to_string(),
+                &identity,
+                &MemberState::Planned.as_str(),
+            ],
+        )?;
+    }
+    Ok(OperationId(id))
+}
+
+/// Marks each of `receipts`' members of item `id` (by ordinal) trashed,
+/// with where the Trash put it.
+pub(super) fn set_receipts(
+    w: &mut Write<'_>,
+    id: OperationId,
+    receipts: &[(i64, PathBuf)],
+) -> Result<()> {
+    for (ordinal, receipt) in receipts {
+        set_member(w, id, *ordinal, MemberState::Trashed, Some(receipt))?;
+    }
+    Ok(())
+}
+
+/// Marks item `id` done, its error set to `note` exactly: no earlier
+/// failure's text survives into a finished item.
+pub(super) fn set_done(w: &mut Write<'_>, id: OperationId, note: Option<&str>) -> Result<()> {
+    let changed = w.execute(
+        sql!("UPDATE file_operations SET state=?, error=? WHERE id=?"),
+        &[&ItemState::Done.as_str(), &note, &id.0],
+    )?;
+    anyhow::ensure!(changed == 1, "unknown file operation");
+    Ok(())
+}
+
 /// Records where member `ordinal` of item `id` is once its step is done:
 /// `destination`, as the disk spells it.
 pub(super) fn set_destination(
@@ -761,6 +852,7 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
         Kind::RenameFolder | Kind::MoveFolder => {
             Subject::Tree(serde_json::from_str(&row.preconditions)?)
         }
+        Kind::TrashFolder => Subject::TrashTree(serde_json::from_str(&row.preconditions)?),
         Kind::RemoveFromCatalog | Kind::MovePhotos | Kind::TrashPhotos | Kind::RenamePhotos => {
             Subject::Photos(serde_json::from_str(&row.preconditions)?)
         }

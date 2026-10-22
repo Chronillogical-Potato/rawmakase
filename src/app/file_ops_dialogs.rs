@@ -551,6 +551,7 @@ impl Editor {
                                         Resolution::PutBack => "Put Back",
                                         Resolution::Keep => "Keep as Is",
                                         Resolution::AddFolder => "Add to Catalog",
+                                        Resolution::RemoveFromCatalog => "Remove from Catalog",
                                     };
                                     if ui.button(label).clicked() {
                                         decided = Some(Decided::Resolve(item.operation, *choice));
