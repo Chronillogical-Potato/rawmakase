@@ -315,6 +315,24 @@ fn plan_to(
     }
     let source =
         super::disk::spelled(disk, &source, found.id).map_err(|e| refuse(&e.to_string()))?;
+    // On FAT and exFAT, whose drivers list names decomposed but rename (FAT)
+    // and trash a folder only as its name is stored: composed where that
+    // finds it, as RAWmakase names what it makes there (#573).
+    let fat = disk.volume_facts(&source).is_ok_and(|f| {
+        use crate::storage::fsops::VolumeKind;
+        matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat)
+    });
+    let listed = source.clone();
+    let source = match (fat, source.file_name()) {
+        (true, Some(name)) => {
+            let dir = super::disk::parent(&source);
+            dir.join(super::proof::usable(disk, dir, name))
+        }
+        _ => source,
+    };
+    // The guards below compare paths by their bytes: they hold for either
+    // spelling.
+    let spellings = [&listed, &source];
     // Where it goes: below its new parent, as the catalog places it.
     let mut up: Vec<&str> = names(to).collect();
     let name = up.pop().context("no folder name")?.to_string();
@@ -326,12 +344,16 @@ fn plan_to(
     if at.kind != EntryKind::Directory {
         return Err(refuse("The destination is not a folder on disk."));
     }
-    if dir.starts_with(&source) {
+    if spellings.iter().any(|s| dir.starts_with(s)) {
         return Err(refuse(
             "A folder can't be moved into itself or a folder inside it.",
         ));
     }
-    if protected(&source) || protected(&dir) || holds_own(catalog, &source) {
+    if protected(&dir)
+        || spellings
+            .iter()
+            .any(|s| protected(s) || holds_own(catalog, s))
+    {
         return Err(refuse(
             "Folders in the Trash, or holding the catalog or RAWmakase's own folders, can't be renamed or moved.",
         ));
@@ -392,8 +414,13 @@ fn plan_to(
         let mut copy =
             super::tree_copy::plan(disk, &planned.source, &dir, at.id.volume(), planned.rules)?;
         super::tree_copy::map(db, disk, &planned, &mut copy)?;
+        // Made there composed where names prove it (#573).
+        if copy.proofs.copies == super::proof::Proof::Names {
+            planned.destination = super::proof::composed_path(&planned.destination);
+        }
         planned.state.across = Some(super::tree_copy::TreeAcross {
             directories: copy.directories(),
+            proofs: copy.proofs,
         });
         planned.copy = Some(copy);
     }

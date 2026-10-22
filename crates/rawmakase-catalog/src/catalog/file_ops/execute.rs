@@ -393,7 +393,20 @@ impl Run<'_> {
             receipt: None,
             copy: None,
         };
-        if let Err(e) = self.disk.rename(&tree.source, &tree.destination) {
+        // By its name as planned, or the other spelling of the same folder
+        // where the drive renames only by the one stored (FAT, #573).
+        let renamed = self
+            .disk
+            .rename(&tree.source, &tree.destination)
+            .or_else(
+                |e| match super::proof::other_spelling(self.disk, &tree.source) {
+                    Some(other) if matches!(e, FsError::NotFound) => {
+                        self.disk.rename(&other, &tree.destination)
+                    }
+                    _ => Err(e),
+                },
+            );
+        if let Err(e) = renamed {
             return self.put_back(catalog, id, &[], &e.to_string());
         }
         let at = sync_parents(self.disk, &tree.source, &tree.destination)

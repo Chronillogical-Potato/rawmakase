@@ -211,10 +211,16 @@ pub(super) fn begins(disk: &dyn Disk, path: &Path, original: &Path) -> bool {
 /// Whether the empty file at `path` was made after `since` (seconds since
 /// 1970), allowing for FAT's two-second step.
 pub(super) fn made_after(disk: &dyn Disk, path: &Path, since: i64) -> bool {
+    born_after(disk, path, since) && disk.identity(path).is_ok_and(|i| i.size == 0)
+}
+
+/// Whether what is at `path` (a file or a folder) was made after `since`,
+/// as [`made_after`] allows.
+pub(super) fn born_after(disk: &dyn Disk, path: &Path, since: i64) -> bool {
     let born = disk
         .created(path)
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs() as i64);
-    born.is_some_and(|b| b + 2 >= since) && disk.identity(path).is_ok_and(|i| i.size == 0)
+    born.is_some_and(|b| b + 2 >= since)
 }

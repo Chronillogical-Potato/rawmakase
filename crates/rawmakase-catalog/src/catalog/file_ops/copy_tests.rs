@@ -31,7 +31,7 @@ fn far(fx: &Fx) -> Faulty {
 
 /// What `far/`'s volume is in a test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Far {
+pub(super) enum Far {
     /// One that keeps file ids.
     Ids,
     /// exFAT (#573): its files numbered anew when written, renamed or
@@ -43,7 +43,7 @@ enum Far {
 }
 
 /// The test disk, with `far/` on another volume of `kind`.
-fn far_as(fx: &Fx, kind: Far) -> Faulty {
+pub(super) fn far_as(fx: &Fx, kind: Far) -> Faulty {
     let dir = fx.root.join("far");
     let mut disk = Faulty::default().elsewhere(&dir);
     if kind != Far::Ids {
@@ -51,8 +51,10 @@ fn far_as(fx: &Fx, kind: Far) -> Faulty {
         disk.renumber_on_close = true;
         disk.renumber_on_rename = true;
         disk.no_exclusive_rename = kind == Far::Direct;
-        // As macOS's drivers list names.
+        // As macOS's drivers list names, and keep what the drive can't
+        // (only macOS makes AppleDouble files).
         disk.lists_decomposed = true;
+        disk.apple_double = cfg!(target_vendor = "apple");
     }
     disk
 }
