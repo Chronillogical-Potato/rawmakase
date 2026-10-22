@@ -219,7 +219,8 @@ impl RgbTable {
         let out: [f32; 3] = std::array::from_fn(|c| {
             let v = encoded[c] + amount * (looked[c] - encoded[c]);
             match self.gamut {
-                Gamut::Clip => v,
+                // Over 100% the blend can leave 0–1; Camera Raw clips it per channel.
+                Gamut::Clip => v.clamp(0., 1.),
                 Gamut::Extend => v + full[c] - encoded[c],
             }
         });
@@ -460,7 +461,8 @@ pub mod tests {
     }
     pub(crate) const ADOBE: Tail = (1, 3, 0, [0., 2.]);
     /// Tables of every kind for GPU tests: a 3D Adobe RGB table, a 3D linear ProPhoto
-    /// one that extends the gamut, and a 1D sRGB one.
+    /// one that extends the gamut, a 1D sRGB one, and a 3D sRGB one whose blend leaves
+    /// 0–1 at amounts over 1 (`clips_over_one`).
     pub(crate) fn variety() -> Vec<RgbTable> {
         let curves = |v: f32| {
             [
@@ -473,10 +475,15 @@ pub mod tests {
             table_bytes(17, fade, ADOBE),
             table_bytes(9, fade, (2, 0, 1, [0., 2.])),
             table_bytes_1d(64, curves, (0, 1, 0, [0., 2.])),
+            table_bytes(9, clips_over_one, (0, 1, 0, [0., 2.])),
         ]
         .iter()
         .map(|b| RgbTable::decode(&encode(b)).unwrap())
         .collect()
+    }
+    /// Red quartered and blue lifted by half: at amount 2 red goes below 0 and blue above 1.
+    pub(crate) fn clips_over_one([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [0.25 * r, g, (b + 0.5).min(1.)]
     }
     /// A smooth creative grade, as `fade` in scripts/corpus/synthetic-looks.py.
     pub(crate) fn fade([r, g, b]: [f32; 3]) -> [f32; 3] {
@@ -535,6 +542,21 @@ pub mod tests {
                 assert!((got[c] - want).abs() < 1e-4, "{amount}: {got:?}");
             }
         }
+        // Over 1 the blend can leave 0–1; a clipping table clips it there per channel,
+        // as Camera Raw 18.7 renders `cube-creative-33-200` (whose dark grays lose
+        // red and green, not their hue). A sRGB table keeps the encoding visible.
+        let srgb = RgbTable::decode(&encode(&table_bytes(
+            5,
+            clips_over_one,
+            (0, 1, 0, [0., 2.]),
+        )))?;
+        let x = 0.4f32;
+        let got = srgb.apply([srgb_decode(x); 3], 2.);
+        let want = [0., x, 1.].map(srgb_decode);
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4),
+            "{got:?} {want:?}"
+        );
         // Profile Amount times the look's own amount, within the table's bounds.
         let bounded = RgbTable::decode(&encode(&table_bytes(5, fade, (1, 3, 0, [0.5, 1.5]))))?;
         assert_eq!(bounded.amount(0.5, 2.), 1.);

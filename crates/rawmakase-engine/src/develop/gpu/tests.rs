@@ -372,6 +372,11 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.saturation = 0.3;
     r.grading[1] = [0.1, 0.3, 0.];
     recipes.push(r);
+    // Over 100% a clipping table clips its blend to 0–1, which Color Grading's
+    // ProPhoto gains would otherwise carry into the other channels.
+    let mut r = base(&rgb_tables[3]);
+    r.grading[1] = [0.1, 0.3, 0.];
+    recipes.push(r);
     let mut r = base(&tables);
     r.exposure = 0.7;
     r.contrast = 0.4;
