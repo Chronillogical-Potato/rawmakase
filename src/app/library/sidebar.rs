@@ -13,6 +13,8 @@ use std::collections::HashSet;
 pub(super) struct Trees {
     /// What the lists were: see [`Library::lists_key`].
     key: ListsKey,
+    /// The drive each root was on, in the catalog's order of roots.
+    drives: Vec<crate::platform::volume::Volume>,
     /// The startup disk first, then other drives by name.
     volumes: Vec<Drive>,
     collections: Vec<collections::CollectionNode>,
@@ -29,6 +31,13 @@ struct Drive {
 /// failed, the Quick Collection made).
 type ListsKey = (u64, usize, usize, usize, usize);
 
+impl Trees {
+    /// The drives the Folders panel shows, in order.
+    #[cfg(test)]
+    pub(super) fn drives(&self) -> Vec<crate::platform::volume::Volume> {
+        self.volumes.iter().map(|d| d.volume.clone()).collect()
+    }
+}
 impl Library {
     fn lists_key(&self) -> ListsKey {
         let members = self
@@ -45,22 +54,32 @@ impl Library {
             members,
         )
     }
-    /// The sidebar's trees, built again only when the lists changed.
+    /// Where each root folder is on this computer.
+    pub(super) fn root_paths(&self) -> Vec<std::path::PathBuf> {
+        let roots = self.session.roots.iter();
+        roots
+            .map(|(_, original, mapped)| mapped.as_deref().unwrap_or(original).into())
+            .collect()
+    }
+    /// The sidebar's trees, built again only when the lists, or the drives
+    /// their roots are on, changed.
     fn sidebar_trees(&mut self) -> std::sync::Arc<Trees> {
         let key = self.lists_key();
-        if let Some(trees) = self.sidebar_trees.as_ref().filter(|t| t.key == key) {
+        let paths = self.root_paths();
+        let drives = self.volumes.drives(paths.iter().map(|p| p.as_path()));
+        if let Some(trees) = self
+            .sidebar_trees
+            .as_ref()
+            .filter(|t| t.key == key && t.drives == drives)
+        {
             return trees.clone();
         }
         let mut volumes: std::collections::BTreeMap<
             crate::platform::volume::Volume,
             Vec<(RootId, String, Option<String>)>,
         > = Default::default();
-        for root in &self.session.roots {
-            let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
-            volumes
-                .entry(crate::platform::volume::volume_of(&path))
-                .or_default()
-                .push(root.clone());
+        for (root, drive) in self.session.roots.iter().zip(&drives) {
+            volumes.entry(drive.clone()).or_default().push(root.clone());
         }
         let mut volumes: Vec<_> = volumes
             .into_iter()
@@ -103,6 +122,7 @@ impl Library {
         volumes.sort_by_key(|d: &Drive| (d.volume.mount.is_some(), d.volume.name.to_lowercase()));
         let trees = std::sync::Arc::new(Trees {
             key,
+            drives,
             volumes,
             collections: collections::tree(
                 &self.session.collections,
@@ -175,9 +195,8 @@ impl Library {
                 });
                 section(ui, "Folders", false, |ui| {
                     // Lightroom-style volume headers with an attached light.
-                    self.volumes
-                        .check(ui.ctx(), trees.volumes.iter().map(|v| &v.volume));
-                    let online = self.volumes.snapshot();
+                    self.volumes.check(ui.ctx(), self.root_paths());
+                    let online = self.volumes.snapshot().online;
                     self.volumes_checked(&online);
                     // Applied once every row is drawn, for a Shift-click range.
                     let mut clicked = None;

@@ -450,7 +450,7 @@ fn across_line(across: &file_ops::Across) -> String {
     let what = files_and_sidecars(files, companions);
     format!(
         "{what} will be copied to “{}” ({} of {} free), checked, and then {} put in the Trash.",
-        crate::platform::volume::volume_of(&across.volume).name,
+        crate::platform::volume::name_of_mount(&across.volume),
         size(across.bytes),
         size(across.available),
         if files + companions == 1 {
@@ -464,7 +464,7 @@ fn across_line(across: &file_ops::Across) -> String {
 /// What moving a folder to another drive does: copies all of it there,
 /// checks it, then puts the folder in the Trash.
 fn folder_across_line(across: &file_ops::Across) -> String {
-    let drive = crate::platform::volume::volume_of(&across.volume).name;
+    let drive = crate::platform::volume::name_of_mount(&across.volume);
     if across.files == 0 {
         return format!(
             "Its folders will be made on “{drive}”, and then the folder put in the Trash."

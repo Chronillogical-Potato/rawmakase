@@ -99,7 +99,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer", "objc2-core-graphics"] }
 # The Trash (src/platform/trash/macos.rs): NSFileManager's trashItemAtURL,
-# and URLForDirectory for whether a volume has one.
+# and URLForDirectory for whether a volume has one; a drive's name for the
+# Folders panel (src/platform/volume.rs): NSURLVolumeNameKey.
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "FoundationErrors", "NSError", "NSFileManager", "NSPathUtilities", "NSString", "NSURL"] }
 
 # The freedesktop Trash (src/platform/trash/freedesktop.rs, also built for
