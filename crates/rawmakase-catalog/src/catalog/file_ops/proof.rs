@@ -1,7 +1,7 @@
 //! Which file a name is, on a volume whose file ids change (#573): FAT and
 //! exFAT number files anew when they are written, renamed or mounted again,
 //! and give a number to another file later, so there a file object proves
-//! nothing. A copy there is proven by its exact name, its size and its
+//! nothing; nor does it on an SMB share, whose mounts number it anew. A copy there is proven by its exact name, its size and its
 //! SHA-256 (the bytes copied, journalled), an original by its exact name,
 //! its `Identity` and, before it goes to the Trash, its SHA-256 again. An
 //! item journals which proof each side takes ([`Proofs`]), so recovery
@@ -67,25 +67,46 @@ impl Proofs {
 }
 
 /// The proof a volume of `facts` takes, if any: by ids where they stay, by
-/// names on a local FAT or exFAT volume; none elsewhere (a network share,
-/// FUSE, ReFS…), which is refused.
+/// names on a local FAT or exFAT volume and on an SMB share on macOS; none
+/// elsewhere (other network shares, FUSE, ReFS…), which is refused.
+///
+/// On macOS an SMB share's ids prove nothing across mounts (each mount is
+/// another `st_dev`), nor at all from a server without file ids, where
+/// smbfs makes them from names. It makes a file only where no name is
+/// (`O_EXCL`, atomic on the server), lists names decomposed and finds them
+/// by either form, but renames nothing exclusively: its copies are made at
+/// their names (measured on macOS 15 against a Synology share). SMB on
+/// Linux and Windows isn't measured yet.
 pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
     match facts.kind {
         _ if facts.stable_ids => Some(Proof::Ids),
         VolumeKind::Fat | VolumeKind::Exfat if facts.local => Some(Proof::Names),
+        VolumeKind::Smb if cfg!(target_vendor = "apple") => Some(Proof::Names),
         _ => None,
     }
 }
 
+/// Whether what is copied off a volume of `facts` keeps its originals where
+/// they are: macOS has no Trash on an SMB share (it answers
+/// NSFeatureUnsupportedError and leaves the file, measured on macOS 15),
+/// and nothing is deleted instead. What a move's question says; the Trash
+/// decides when it runs.
+pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
+    facts.kind == VolumeKind::Smb && cfg!(target_vendor = "apple")
+}
+
+/// Whether a volume of `kind` is one names prove files on ([`of`]).
+pub(super) fn by_names(kind: VolumeKind) -> bool {
+    matches!(kind, VolumeKind::Fat | VolumeKind::Exfat | VolumeKind::Smb)
+}
+
 /// The names in `path`'s folder that `sidecar::caseless` takes for its
-/// name, when the folder lists whole and is on a FAT or exFAT volume.
+/// name, when the folder lists whole and is on a volume names prove files
+/// on.
 fn alike(disk: &dyn Disk, path: &Path) -> Option<Vec<OsString>> {
     let (dir, name) = (parent(path), path.file_name()?);
     let names = disk.list(dir).ok()?;
-    let fat = disk
-        .volume_facts(dir)
-        .is_ok_and(|f| matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat));
-    if !fat {
+    if !disk.volume_facts(dir).is_ok_and(|f| by_names(f.kind)) {
         return None;
     }
     let wanted = super::super::sidecar::caseless(name);

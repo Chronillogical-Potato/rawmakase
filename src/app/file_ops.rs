@@ -444,34 +444,59 @@ fn move_lines(s: &file_ops::Summary) -> Vec<String> {
 }
 
 /// What a move to another drive does: copies the files there, checks
-/// them, then puts their originals in the Trash.
+/// them, then puts their originals in the Trash; those on a network share,
+/// which has no Trash, stay there.
 fn across_line(across: &file_ops::Across) -> String {
     let (files, companions) = (across.files, across.companions);
     let what = files_and_sidecars(files, companions);
-    format!(
-        "{what} will be copied to “{}” ({} of {} free), checked, and then {} put in the Trash.",
-        crate::platform::volume::volume_of(&across.volume).name,
-        size(across.bytes),
-        size(across.available),
+    let drive = crate::platform::volume::volume_of(&across.volume).name;
+    let (copied, free) = (size(across.bytes), size(across.available));
+    if across.originals_stay > 0 && across.originals_stay >= files {
+        let stay = match files + companions {
+            1 => "Its original stays",
+            _ => "Their originals stay",
+        };
+        return format!(
+            "{what} will be copied to “{drive}” ({copied} of {free} free) and checked. {stay} on the network share: it has no Trash."
+        );
+    }
+    let mut line = format!(
+        "{what} will be copied to “{drive}” ({copied} of {free} free), checked, and then {} put in the Trash.",
         if files + companions == 1 {
             "its original"
         } else {
             "their originals"
         }
-    )
+    );
+    match across.originals_stay {
+        0 => {}
+        1 => line.push_str(" The original of 1 file stays on its network share: it has no Trash."),
+        n => line.push_str(&format!(
+            " The originals of {n} files stay on their network share: it has no Trash."
+        )),
+    }
+    line
 }
 
 /// What moving a folder to another drive does: copies all of it there,
-/// checks it, then puts the folder in the Trash.
+/// checks it, then puts the folder in the Trash; one on a network share,
+/// which has no Trash, stays there.
 fn folder_across_line(across: &file_ops::Across) -> String {
     let drive = crate::platform::volume::volume_of(&across.volume).name;
+    let stays = across.originals_stay > 0;
+    let then = match stays {
+        true => ". The folder stays on the network share: it has no Trash.",
+        false => ", and then the folder put in the Trash.",
+    };
     if across.files == 0 {
-        return format!(
-            "Its folders will be made on “{drive}”, and then the folder put in the Trash."
-        );
+        return format!("Its folders will be made on “{drive}”{then}");
     }
+    let checked = match stays {
+        true => " and checked",
+        false => ", checked",
+    };
     format!(
-        "Its {} will be copied to “{}” ({} of {} free), checked, and then the folder put in the Trash.",
+        "Its {} will be copied to “{}” ({} of {} free){checked}{then}",
         widgets::plural(across.files, "file", "files"),
         drive,
         size(across.bytes),
