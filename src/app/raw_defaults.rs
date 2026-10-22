@@ -405,6 +405,7 @@ mod tests {
                     id: generation,
                     profiles: profiles(&m),
                     errors: Vec::new(),
+                    groups: Default::default(),
                 },
             ] {
                 editor.tx.send(event).unwrap();
@@ -525,6 +526,7 @@ mod tests {
                 id: generation,
                 profiles: profiles(&m),
                 errors: Vec::new(),
+                groups: Default::default(),
             },
         ] {
             editor.tx.send(event).unwrap();

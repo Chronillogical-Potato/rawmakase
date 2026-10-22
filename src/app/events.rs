@@ -139,9 +139,11 @@ impl Editor {
                     id,
                     profiles,
                     errors,
+                    groups,
                 } if id == self.load.id() => {
                     self.document.profiles = profiles;
                     self.document.profile_errors = errors;
+                    self.document.profile_groups = groups;
                     self.refresh_photo_defaults();
                     self.refresh_preset_support();
                     if let Some(text) = self.document.pending_lightroom.take() {

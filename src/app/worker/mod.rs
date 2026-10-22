@@ -126,6 +126,7 @@ pub(crate) enum Event {
         id: u64,
         profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
         errors: Vec<String>,
+        groups: crate::camera_profiles::Groups,
     },
     PresetLoad(PathBuf),
     /// Point Color's dropper sample for the photo loaded as `id`, taken with

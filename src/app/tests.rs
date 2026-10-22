@@ -6719,6 +6719,7 @@ fn the_basic_panel_offers_relative_white_balance_for_a_jpeg() {
             id: generation,
             profiles,
             errors: Vec::new(),
+            groups: Default::default(),
         },
     ] {
         editor.tx.send(event).unwrap();

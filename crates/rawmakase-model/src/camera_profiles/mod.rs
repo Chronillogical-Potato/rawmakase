@@ -794,9 +794,11 @@ pub use cube_look::Fidelity;
 pub use dcp::{d65_color_matrix, from_bytes};
 pub use enhanced::RgbLook;
 pub use library::{
-    CubeImport, Imported, ImportedProfile, adobe_installed, builtin, compose_look, import_files,
-    import_readable, installed, library_dirs, load, read_cube,
+    CubeImport, Groups, Imported, ImportedProfile, Listed, MenuEntry, adobe_installed, builtin,
+    compose_look, import_files, import_readable, installed, library_dirs, listed, load, read_cube,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use library::{import_into_dir, listed_from};
 pub use look_settings::LookSettings;
 pub use rgb_table::{Dimensions, Gamut};
 #[cfg(test)]

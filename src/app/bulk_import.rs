@@ -606,9 +606,10 @@ impl Editor {
             match summary.kind {
                 ImportKind::CameraProfiles => {
                     if let Some(m) = &self.document.metadata {
-                        let (profiles, errors) = crate::camera_profiles::installed(m);
-                        self.document.profiles = profiles;
-                        self.document.profile_errors = errors;
+                        let listed = crate::camera_profiles::listed(m);
+                        self.document.profiles = listed.profiles;
+                        self.document.profile_errors = listed.errors;
+                        self.document.profile_groups = listed.groups;
                         // Importing never changes an edit: the user picks a
                         // profile. A photo without one follows the raw defaults,
                         // which may now resolve to an imported profile.
