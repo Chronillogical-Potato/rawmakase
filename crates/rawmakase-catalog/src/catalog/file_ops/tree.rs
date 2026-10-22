@@ -54,6 +54,10 @@ pub(in crate::catalog) struct TreeState {
     /// Where `from` and `to` resolve on this computer.
     pub from_path: PathBuf,
     pub to_path: PathBuf,
+    /// Its layout, when it is copied to another volume (#572): absent from
+    /// items that rename it, as 0.4.2 journalled them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub across: Option<super::tree_copy::TreeAcross>,
 }
 
 /// A folder change planned: its state, and its directory as captured.
@@ -68,6 +72,8 @@ pub(super) struct TreeMove {
     pub rules: Names,
     /// Whether its volume renames a name to another spelling of itself.
     pub spelling: bool,
+    /// How it is copied, when its destination is on another volume.
+    pub copy: Option<super::tree_copy::TreeCopy>,
 }
 
 /// Why a root can't be renamed or moved here.
@@ -215,6 +221,7 @@ fn located(db: &impl Reads, root: RootId, logical: &str, folders: &[FolderId]) -
 /// `name`, on this computer.
 pub(super) fn rename(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     folder: &str,
     name: &str,
@@ -233,7 +240,7 @@ pub(super) fn rename(
     if to == folder {
         return Err(refuse("It has that name already."));
     }
-    plan_to(catalog, root, folder, root, &to)
+    plan_to(catalog, disk, root, folder, root, &to)
 }
 
 /// Refuses the folder at logical path `folder` of `root` unless the
@@ -260,6 +267,7 @@ fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpErro
 /// folder of its own for, as for New Folder Inside.
 pub(super) fn relocate(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     folder: &str,
     to_root: RootId,
@@ -279,7 +287,7 @@ pub(super) fn relocate(
     if same && caseless(OsStr::new(&to)) == caseless(OsStr::new(folder)) {
         return Err(refuse("It is in that folder already."));
     }
-    plan_to(catalog, root, folder, to_root, &to)
+    plan_to(catalog, disk, root, folder, to_root, &to)
 }
 
 /// Plans moving the folder at logical path `from` of `root` to logical
@@ -287,6 +295,7 @@ pub(super) fn relocate(
 /// resolve and be online here.
 fn plan_to(
     catalog: &Catalog,
+    disk: &dyn Disk,
     root: RootId,
     from: &str,
     to_root: RootId,
@@ -300,12 +309,12 @@ fn plan_to(
         .ok_or_else(|| refuse("The folder is offline or missing."))?;
     // Its directory, as the disk spells it.
     let source = plain(&anchor, &from_path)?;
-    let found = fsops::entry(&source).map_err(|e| refuse(&e.to_string()))?;
+    let found = disk.entry(&source).map_err(|e| refuse(&e.to_string()))?;
     if found.kind != EntryKind::Directory {
         return Err(refuse("The folder is not a folder on disk."));
     }
-    let source = super::disk::spelled(&super::disk::Real, &source, found.id)
-        .map_err(|e| refuse(&e.to_string()))?;
+    let source =
+        super::disk::spelled(disk, &source, found.id).map_err(|e| refuse(&e.to_string()))?;
     // Where it goes: below its new parent, as the catalog places it.
     let mut up: Vec<&str> = names(to).collect();
     let name = up.pop().context("no folder name")?.to_string();
@@ -313,7 +322,7 @@ fn plan_to(
     let (parent_anchor, parent_path) = logical_anchored(db, computer, to_root, &to_parent)?
         .ok_or_else(|| refuse("The destination is offline or missing."))?;
     let dir = plain(&parent_anchor, &parent_path)?;
-    let at = fsops::entry(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let at = disk.entry(&dir).map_err(|e| refuse(&e.to_string()))?;
     if at.kind != EntryKind::Directory {
         return Err(refuse("The destination is not a folder on disk."));
     }
@@ -322,17 +331,14 @@ fn plan_to(
             "A folder can't be moved into itself or a folder inside it.",
         ));
     }
-    if at.id.volume() != found.id.volume() {
-        return Err(refuse(
-            "Moving between drives isn't available yet. Move it in Finder, then locate the folder again.",
-        ));
-    }
     if protected(&source) || protected(&dir) || holds_own(catalog, &source) {
         return Err(refuse(
             "Folders in the Trash, or holding the catalog or RAWmakase's own folders, can't be renamed or moved.",
         ));
     }
-    let facts = fsops::volume_facts(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let facts = disk
+        .volume_facts(&dir)
+        .map_err(|e| refuse(&e.to_string()))?;
     if facts.read_only {
         return Err(refuse("The folder's volume is read-only."));
     }
@@ -342,7 +348,7 @@ fn plan_to(
             "The catalog places a folder of that name elsewhere.",
         ));
     }
-    let listing = fsops::list(&dir).map_err(|e| refuse(&e.to_string()))?;
+    let listing = disk.list(&dir).map_err(|e| refuse(&e.to_string()))?;
     let planned = TreeMove {
         state: TreeState {
             root,
@@ -353,12 +359,14 @@ fn plan_to(
             photos: Vec::new(),
             from_path,
             to_path,
+            across: None,
         },
         destination: dir.join(&name),
         source,
         id: found.id,
         rules: Names(fsops::probe(&dir, &listing)),
         spelling: facts.renames_spelling,
+        copy: None,
     };
     // Another root over its own directory, or one nested in its root, can
     // name where it is already by another logical path.
@@ -367,7 +375,7 @@ fn plan_to(
     {
         return Err(refuse("It is in that folder already."));
     }
-    if let Some(why) = taken(&super::disk::Real, &planned)? {
+    if let Some(why) = taken(disk, &planned)? {
         return Err(FileOpError::Destination(why));
     }
     if let Some(why) = planned.state.check(db, computer)? {
@@ -377,6 +385,17 @@ fn plan_to(
     planned.state.photos = photos_in(db, &planned.state.folders)?;
     if unfinished(db, &planned)? {
         return Err(refuse(UNFINISHED));
+    }
+    // Another volume's folder takes a copy of the whole tree (#572), its
+    // names read last, once nothing else refuses it.
+    if at.id.volume() != found.id.volume() {
+        let mut copy =
+            super::tree_copy::plan(disk, &planned.source, &dir, at.id.volume(), planned.rules)?;
+        super::tree_copy::map(db, disk, &planned, &mut copy)?;
+        planned.state.across = Some(super::tree_copy::TreeAcross {
+            directories: copy.directories(),
+        });
+        planned.copy = Some(copy);
     }
     Ok(planned)
 }
@@ -495,7 +514,7 @@ fn overlapped(
 }
 
 /// The photos in `folders`.
-fn photos_in(db: &impl Reads, folders: &[(FolderId, String)]) -> Result<Vec<PhotoId>> {
+pub(super) fn photos_in(db: &impl Reads, folders: &[(FolderId, String)]) -> Result<Vec<PhotoId>> {
     let mut photos = Vec::new();
     for (folder, _) in folders {
         let ids: Vec<PhotoId> = db.read(sql!("SELECT id FROM photos WHERE folder=?"), &[folder])?;
@@ -527,23 +546,37 @@ pub(super) fn unfinished(db: &impl Reads, planned: &TreeMove) -> Result<bool> {
 /// Re-keys the subtree of `state` to logical path `to` of its destination
 /// root in `w`'s transaction: each folder's root and logical path, and the
 /// form releases before logical paths read. Each folder keeps its id.
-fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
+pub(super) fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
+    let mut paths = Vec::new();
     for (folder, logical) in &state.folders {
         let rest = logical
             .strip_prefix(state.from.as_str())
             .context("a folder outside the subtree")?;
-        let new = format!("{to}{rest}");
-        let native: PathBuf = names(&new).collect();
+        paths.push((*folder, format!("{to}{rest}")));
+    }
+    set_paths(w, state.to_root(), &paths)
+}
+
+/// Gives each of `paths`' folders root `root` and its logical path there,
+/// in `w`'s transaction, `folder_paths` and the form releases before
+/// logical paths read alike.
+pub(super) fn set_paths(
+    w: &mut Write<'_>,
+    root: RootId,
+    paths: &[(FolderId, String)],
+) -> Result<()> {
+    for (folder, new) in paths {
+        let native: PathBuf = names(new).collect();
         w.execute(
             sql!(
                 "INSERT INTO folder_paths(folder, path) VALUES (?, ?)
                  ON CONFLICT(folder) DO UPDATE SET path=excluded.path"
             ),
-            &[folder, &new],
+            &[folder, new],
         )?;
         w.execute(
             sql!("UPDATE folders SET root=?, relative_path=? WHERE id=?"),
-            &[&state.to_root(), &native.to_string_lossy(), folder],
+            &[&root, &native.to_string_lossy(), folder],
         )?;
     }
     Ok(())

@@ -623,6 +623,38 @@ fn a_move_to_another_drive_says_it_copies_there_and_trashes_the_originals() {
 }
 
 #[test]
+fn a_folder_moved_to_another_drive_says_it_copies_all_of_it_there() {
+    let across = crate::catalog::file_ops::Across {
+        files: 12,
+        companions: 0,
+        bytes: 1_500_000_000,
+        volume: DRIVE.0.into(),
+        available: 26_000_000_000,
+    };
+    assert_eq!(
+        folder_across_line(&across),
+        format!(
+            "Its 12 files will be copied to “{}” (1.5 GB of 26 GB free), checked, \
+         and then the folder put in the Trash.",
+            DRIVE.1
+        )
+    );
+    // Only folders in it: nothing is copied but folders.
+    let empty = crate::catalog::file_ops::Across {
+        files: 0,
+        bytes: 0,
+        ..across
+    };
+    assert_eq!(
+        folder_across_line(&empty),
+        format!(
+            "Its folders will be made on “{}”, and then the folder put in the Trash.",
+            DRIVE.1
+        )
+    );
+}
+
+#[test]
 fn originals_a_move_to_another_drive_kept_are_said() {
     use crate::catalog::file_ops::KeptOriginal;
     assert_eq!(kept_line(&[]), None);

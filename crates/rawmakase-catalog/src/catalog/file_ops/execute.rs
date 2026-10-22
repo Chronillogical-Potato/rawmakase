@@ -150,7 +150,7 @@ pub(super) fn execute_with(
 }
 
 /// Why a photo an unfinished file operation involves is left alone.
-const UNFINISHED: &str = "an unfinished file operation involves it";
+pub(super) const UNFINISHED: &str = "an unfinished file operation involves it";
 
 /// Points `items`, planned into a folder not yet made, at folder `made`:
 /// its id, and the name the disk gave it.
@@ -342,9 +342,22 @@ impl Run<'_> {
         if cancel.load(Ordering::Relaxed) {
             return Ok(());
         }
+        let involved = tree.state.photos.iter().any(|p| busy.contains(p));
+        // To another volume, its tree is copied.
+        if let Some(copy) = &tree.copy {
+            return super::tree_copy::run(
+                &self.cx(),
+                catalog,
+                self.batch,
+                self.kind,
+                tree,
+                copy,
+                involved,
+                cancel,
+            );
+        }
         // a. Checked again and journalled, in one transaction.
         let started = catalog.db.write_immediate(|w| {
-            let involved = tree.state.photos.iter().any(|p| busy.contains(p));
             let reason = match tree.state.check(w, self.computer)? {
                 Some(reason) => Some(reason),
                 None if involved || super::tree::unfinished(w, tree)? => Some(UNFINISHED.into()),

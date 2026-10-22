@@ -448,10 +448,6 @@ fn move_lines(s: &file_ops::Summary) -> Vec<String> {
 fn across_line(across: &file_ops::Across) -> String {
     let (files, companions) = (across.files, across.companions);
     let what = files_and_sidecars(files, companions);
-    let size = |bytes: u64| match bytes as f64 {
-        b if b >= 1e9 => format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB"),
-        b => format!("{:.0} MB", (b / 1e6).max(1.)),
-    };
     format!(
         "{what} will be copied to “{}” ({} of {} free), checked, and then {} put in the Trash.",
         crate::platform::volume::volume_of(&across.volume).name,
@@ -463,6 +459,33 @@ fn across_line(across: &file_ops::Across) -> String {
             "their originals"
         }
     )
+}
+
+/// What moving a folder to another drive does: copies all of it there,
+/// checks it, then puts the folder in the Trash.
+fn folder_across_line(across: &file_ops::Across) -> String {
+    let drive = crate::platform::volume::volume_of(&across.volume).name;
+    if across.files == 0 {
+        return format!(
+            "Its folders will be made on “{drive}”, and then the folder put in the Trash."
+        );
+    }
+    format!(
+        "Its {} will be copied to “{}” ({} of {} free), checked, and then the folder put in the Trash.",
+        widgets::plural(across.files, "file", "files"),
+        drive,
+        size(across.bytes),
+        size(across.available),
+    )
+}
+
+/// `bytes` as a drive's size or free space is shown: gigabytes, or under
+/// one, megabytes.
+fn size(bytes: u64) -> String {
+    match bytes as f64 {
+        b if b >= 1e9 => format!("{:.1} GB", b / 1e9).replace(".0 GB", " GB"),
+        b => format!("{:.0} MB", (b / 1e6).max(1.)),
+    }
 }
 
 /// The originals a move to another drive left beside their copies, as the
@@ -558,6 +581,9 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
                 "The folder moves on disk with the {} and the folders in it.",
                 widgets::plural(s.photos, "photo", "photos")
             ));
+            if let Some(across) = &s.across {
+                lines.push(folder_across_line(across));
+            }
             if s.other_computers {
                 lines.push(
                     "Other computers using this catalog find these photos missing until the folder moves there too."

@@ -517,3 +517,21 @@ fn only_kinds_known_to_keep_file_ids_are_taken_to() {
         }
     }
 }
+
+#[test]
+fn only_an_empty_folder_is_removed() {
+    let d = dir();
+    let empty = d.path().join("empty");
+    let full = d.path().join("full");
+    fs::create_dir(&empty).unwrap();
+    fs::create_dir(&full).unwrap();
+    fs::write(full.join("kept.NEF"), b"kept").unwrap();
+    fs::write(d.path().join("file.NEF"), b"file").unwrap();
+    remove_dir(&empty).unwrap();
+    assert!(!empty.exists());
+    assert!(remove_dir(&full).is_err());
+    assert_eq!(fs::read(full.join("kept.NEF")).unwrap(), b"kept");
+    assert!(remove_dir(&d.path().join("file.NEF")).is_err());
+    assert!(d.path().join("file.NEF").is_file());
+    assert!(matches!(remove_dir(&empty), Err(FsError::NotFound)));
+}

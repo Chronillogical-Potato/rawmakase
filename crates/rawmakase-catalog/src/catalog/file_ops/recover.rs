@@ -255,7 +255,10 @@ fn decide(
             disk,
             trash,
         };
-        return super::copy::decide(&cx, catalog, item, put_back);
+        return match item.subject {
+            Subject::Tree(_) => super::tree_copy::decide(&cx, catalog, item, put_back),
+            _ => super::copy::decide(&cx, catalog, item, put_back),
+        };
     }
     // An item being put back stays so however it is left: it is never
     // completed forward, whatever happens to its files later.
@@ -388,6 +391,13 @@ fn at_sources(disk: &dyn Disk, members: &[Member]) -> bool {
 }
 
 fn unfinished(item: &Item) -> Unfinished {
+    // A folder copied to another volume is in its hidden folder until that
+    // is named.
+    let hidden = matches!(item.subject, Subject::Tree(_))
+        && item
+            .members
+            .first()
+            .is_some_and(|m| m.copy.is_some() && m.state != MemberState::Copied);
     Unfinished {
         operation: item.id,
         photos: item.photos().to_vec(),
@@ -399,7 +409,8 @@ fn unfinished(item: &Item) -> Unfinished {
                 // A copy not yet given its name is its hidden partial copy.
                 after: match &m.copy {
                     Some(copy)
-                        if matches!(m.state, MemberState::Planned | MemberState::Copying) =>
+                        if hidden
+                            || matches!(m.state, MemberState::Planned | MemberState::Copying) =>
                     {
                         Some(copy.temp.clone())
                     }
@@ -464,14 +475,21 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
             Subject::Photos(super::preconditions::Preconditions {
                 to: Some((to, _)), ..
             }) => ItemResult::Moved { to: *to },
+            Subject::Tree(_) => ItemResult::FolderMoved,
             _ => ItemResult::Interrupted,
         },
         ItemState::Planned | ItemState::Restoring => ItemResult::Interrupted,
     };
-    let originals_kept = item
+    // Files first: a folder of a folder copied to another drive stays
+    // because of what stays in it.
+    let mut kept: Vec<&Member> = item
         .members
         .iter()
         .filter(|m| m.state == MemberState::OriginalKept)
+        .collect();
+    kept.sort_by_key(|m| m.identity.is_none());
+    let originals_kept = kept
+        .into_iter()
         .map(|m| KeptOriginal {
             path: m.source.clone(),
             why: m
