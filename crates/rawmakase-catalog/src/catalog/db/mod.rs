@@ -64,6 +64,15 @@ impl Db {
     /// publishes it under its final name.
     pub(in crate::catalog) fn create(path: &Path) -> Result<()> {
         let db = Connection::open(path)?;
+        // Unit tests of this crate rebuild a catalog per injected fault. The
+        // fault is an in-process panic, so a commit only has to reach the
+        // operating system. `synchronous=FULL` (SQLite's default, and what a
+        // shipping catalog uses below) flushes every statement; on NTFS that
+        // flush is most of the Windows fault-matrix time. `cfg(test)` is off
+        // when this crate is compiled as a dependency, so the app's tests
+        // and the shipping binary stay `FULL`.
+        #[cfg(test)]
+        db.execute_batch("PRAGMA synchronous=OFF;")?;
         db.execute_batch(&format!(
             "PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version={VERSION};"
         ))?;
@@ -88,6 +97,11 @@ impl Db {
             "Unsupported RAWmakase catalog version; file left unchanged"
         );
         db.busy_timeout(Duration::from_secs(5))?;
+        // See `create`: this crate's unit tests skip the durability flush.
+        // Split so a shipping open cannot compile the OFF pragma.
+        #[cfg(test)]
+        db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=OFF;")?;
+        #[cfg(not(test))]
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
         Ok(Self {
             backend: Backend::Sqlite(db),
