@@ -84,11 +84,15 @@ const LOCATED: &str = "A folder in it is located on its own (on this or another 
 /// is refused.
 const OVERLAP: &str = "Another folder or root of the catalog is inside it on disk.";
 /// Why a folder an unfinished file operation involves is refused.
-const UNFINISHED: &str = "An unfinished file operation involves it.";
+pub(super) const UNFINISHED: &str = "An unfinished file operation involves it.";
 
 /// The catalog's folders of `root` at logical path `logical` or below it,
 /// exactly.
-fn subtree(db: &impl Reads, root: RootId, logical: &str) -> Result<Vec<(FolderId, String)>> {
+pub(super) fn subtree(
+    db: &impl Reads,
+    root: RootId,
+    logical: &str,
+) -> Result<Vec<(FolderId, String)>> {
     let mut found: Vec<(FolderId, String)> = locate_folders_of(db, root)?
         .into_iter()
         .filter(|(_, l)| below(l, logical))
@@ -137,7 +141,7 @@ fn below_caseless(path: &str, top: &str) -> bool {
 }
 
 /// Whether `path` is `dir` or inside it, by `sidecar::caseless`.
-fn inside(path: &Path, dir: &Path) -> bool {
+pub(super) fn inside(path: &Path, dir: &Path) -> bool {
     let (p, d) = (caseless(path.as_os_str()), caseless(dir.as_os_str()));
     Path::new(&p).starts_with(Path::new(&d))
 }
@@ -192,7 +196,12 @@ impl TreeState {
 /// Whether a folder of `root` at logical path `logical` or below it has a
 /// location of its own on any computer, or (one of `folders`) a legacy
 /// mapping.
-fn located(db: &impl Reads, root: RootId, logical: &str, folders: &[FolderId]) -> Result<bool> {
+pub(super) fn located(
+    db: &impl Reads,
+    root: RootId,
+    logical: &str,
+    folders: &[FolderId],
+) -> Result<bool> {
     row! {
         struct Location {
             relative: String,
@@ -246,7 +255,7 @@ pub(super) fn rename(
 /// Refuses the folder at logical path `folder` of `root` unless the
 /// catalog has a folder there or below it (`2024` above `2024/day1` is
 /// one, though it has no folder of its own), and it isn't a root.
-fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpError> {
+pub(super) fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     if folder.is_empty() {
         return Err(refuse(ROOT));
@@ -428,7 +437,7 @@ fn plan_to(
 }
 
 /// `path`, below `anchor` with no link or mount point between, canonical.
-fn plain(anchor: &Path, path: &Path) -> Result<PathBuf, FileOpError> {
+pub(super) fn plain(anchor: &Path, path: &Path) -> Result<PathBuf, FileOpError> {
     let refuse = |why: String| FileOpError::Destination(why);
     let dir = match fsops::canonical_below(anchor, path) {
         Ok(dir) => dir,
@@ -450,7 +459,7 @@ fn plain(anchor: &Path, path: &Path) -> Result<PathBuf, FileOpError> {
 }
 
 /// Whether the catalog's own files are in `dir`.
-fn holds_own(catalog: &Catalog, dir: &Path) -> bool {
+pub(super) fn holds_own(catalog: &Catalog, dir: &Path) -> bool {
     let CatalogLocation::File(file) = catalog.location();
     std::fs::canonicalize(file).is_ok_and(|f| f.starts_with(dir))
         || [crate::storage::data_dir(), crate::storage::local_data_dir()]
@@ -504,7 +513,7 @@ pub(super) fn taken(disk: &dyn Disk, planned: &TreeMove) -> Result<Option<String
 /// (`ours`), being inside the folder on disk refuses it: inside any of
 /// `dirs`, as resolved or as the disk has them. (Where it goes is taken
 /// by any folder there, which refuses it anyway.)
-fn overlapped(
+pub(super) fn overlapped(
     db: &impl Reads,
     computer: &str,
     ours: &[FolderId],
