@@ -234,8 +234,10 @@ inject a temporary file, without changing the process-wide environment.
   never deleted from. To another volume a file is copied (into a hidden
   partial copy, hashed as read, synced, read back, then renamed exclusively),
   the catalog follows only proven copies, and the original goes to the Trash
-  only after that, while it is still the file copied; the one file ever
-  unlinked is a partial copy the run made and never named. Such copies are
+  only after that, while it is still the file copied and its extras
+  (extended attributes, resource forks, alternate data streams) are still
+  its copy's; a drive that can't keep them leaves it where it is; the one
+  file ever unlinked is a partial copy the run made and never named. Such copies are
   made only between volumes whose file ids stay (local APFS, HFS+, ext,
   XFS, Btrfs or NTFS ones) or FAT and exFAT ones, where a copy is proven by
   its exact name and SHA-256 instead and no file id is journalled (#573);

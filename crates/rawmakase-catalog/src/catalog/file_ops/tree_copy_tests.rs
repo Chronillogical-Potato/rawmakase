@@ -6,7 +6,9 @@
 //! `far/` for another volume's.
 use super::copy_tests::{Far, far_as};
 use super::recover_tests::{before, check};
-use super::tests::{FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results};
+use super::tests::{
+    FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results, tagged,
+};
 use super::*;
 use crate::storage::fsops;
 use anyhow::Result;
@@ -153,6 +155,222 @@ fn a_folder_moves_to_another_drive_by_a_verified_copy_and_its_original_goes_to_t
     let renames = disk.renames();
     assert_eq!(renames.len(), 1, "{renames:?}");
     assert!(renames[0].0.to_string_lossy().ends_with(".rawmakase-part"));
+    Ok(())
+}
+
+/// Sets folder `dir`'s modification time.
+fn set_folder_time(dir: &Path, when: std::time::SystemTime) -> Result<()> {
+    #[cfg(windows)]
+    let folder = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_WRITE_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS.
+        std::fs::OpenOptions::new()
+            .access_mode(0x100)
+            .custom_flags(0x0200_0000)
+            .open(dir)?
+    };
+    #[cfg(not(windows))]
+    let folder = std::fs::File::open(dir)?;
+    Ok(folder.set_modified(when)?)
+}
+
+#[test]
+fn a_folders_extras_dates_and_permissions_go_with_it_to_another_drive() -> Result<()> {
+    for kind in [Far::Ids, Far::Names, Far::Direct] {
+        let mut fx = files();
+        let day = fx.root.join("day");
+        let tags = ["", "sub", "sub/b.NEF", "a.xmp"];
+        let tagged_all = tags
+            .iter()
+            .all(|t| tagged(&day.join(t), "tag", t.as_bytes()));
+        let extras: Vec<_> = match tagged_all {
+            true => tags
+                .iter()
+                .map(|t| fsops::extras(&day.join(t)))
+                .collect::<Result<_, _>>()?,
+            false => Vec::new(),
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(day.join("sub"), std::fs::Permissions::from_mode(0o750))?;
+        }
+        let when = |s| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s);
+        for (dir, at) in [
+            ("sub", 1_500_000_000),
+            ("empty", 1_500_000_100),
+            ("", 1_400_000_000),
+        ] {
+            set_folder_time(&day.join(dir), when(at))?;
+        }
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{kind:?}");
+        assert!(outcome.items[0].originals_kept.is_empty(), "{outcome:?}");
+        let copy = fx.root.join("far/day");
+        for (dir, at) in [
+            ("sub", 1_500_000_000),
+            ("empty", 1_500_000_100),
+            ("", 1_400_000_000),
+        ] {
+            let modified = std::fs::metadata(copy.join(dir))?.modified()?;
+            assert_eq!(modified, when(at), "{kind:?} {dir}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(copy.join("sub"))?.permissions().mode();
+            assert_eq!(mode & 0o777, 0o750, "{kind:?}");
+        }
+        if tagged_all {
+            for (t, was) in tags.iter().zip(&extras) {
+                assert_eq!(&fsops::extras(&copy.join(t))?, was, "{kind:?} {t}");
+            }
+        }
+        assert!(!day.exists(), "{kind:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_drive_that_can_t_keep_a_folders_extras_moves_nothing() -> Result<()> {
+    let mut fx = files();
+    let tree = tree_of(&fx.root.join("day"));
+    let disk = Faulty {
+        keeps_no_extras: true,
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let [ItemResult::Unchanged(Some(why))] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert!(why.contains("can't keep"), "{why}");
+    assert_eq!(tree_of(&fx.root.join("day")), tree);
+    assert!(!fx.root.join("far/day").exists());
+    assert!(partials(&fx).is_empty(), "{:?}", partials(&fx));
+    Ok(())
+}
+
+#[test]
+fn a_folder_tagged_after_the_catalog_follows_stays_and_its_files_go() -> Result<()> {
+    let mut fx = files();
+    let day = fx.root.join("day");
+    // Read before it is copied, once copied, then before it would go.
+    let disk = Faulty {
+        retag: Some((day.clone(), 2)),
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    let kept = &outcome.items[0].originals_kept;
+    let top = kept
+        .iter()
+        .find(|k| k.path == day)
+        .expect("the folder stays");
+    assert_eq!(top.why, super::copy::EXTRAS_DIFFER);
+    assert!(!day.join("a.NEF").exists() && !day.join("sub/b.NEF").exists());
+    assert_eq!(
+        std::fs::read(fx.root.join("far/day/a.NEF"))?,
+        bytes("day/a.NEF")
+    );
+    Ok(())
+}
+
+#[test]
+fn a_file_tagged_after_the_catalog_follows_stays_with_its_folder() -> Result<()> {
+    let mut fx = files();
+    let a = fx.root.join("day/a.xmp");
+    let disk = Faulty {
+        retag: Some((a.clone(), 2)),
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
+    let kept = &outcome.items[0].originals_kept;
+    assert_eq!(kept[0].path, a, "{kept:?}");
+    assert_eq!(kept[0].why, super::copy::EXTRAS_DIFFER);
+    assert_eq!(std::fs::read(&a)?, bytes("day/a.xmp"));
+    assert!(!fx.root.join("day/a.NEF").exists());
+    Ok(())
+}
+
+#[test]
+fn recovery_keeps_the_date_a_folders_copy_got_before_its_originals_went() -> Result<()> {
+    let mut fx = files();
+    let day = fx.root.join("day");
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    set_folder_time(&day, when)?;
+    // Not whole (a file tagged since), so its files go one by one, and the
+    // process ends once the first is in the Trash, which dates its folder.
+    let disk = Faulty {
+        retag: Some((day.join("a.xmp"), 2)),
+        ..far(&fx)
+    };
+    let mut trash = FakeTrash::new(&fx);
+    trash.crash_after = Some(1);
+    let plan = fx.plan_on(to_far(&fx), &disk)?;
+    assert!(crashes(|| {
+        drop(execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        ));
+    }));
+    assert_eq!(
+        std::fs::metadata(fx.root.join("far/day"))?.modified()?,
+        when
+    );
+    fx.reopen();
+    trash.crash_after = None;
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert!(recovery.unfinished.is_empty(), "{recovery:?}");
+    assert_eq!(
+        std::fs::metadata(fx.root.join("far/day"))?.modified()?,
+        when
+    );
+    Ok(())
+}
+
+#[test]
+fn an_original_gone_before_recovery_keeps_only_its_own_folders_date_from_the_copy() -> Result<()> {
+    let mut fx = files();
+    let day = fx.root.join("day");
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    set_folder_time(&day.join("sub"), when)?;
+    // The process ends once the catalog follows, before any folder there
+    // is dated (after its four files' times).
+    let disk = Faulty {
+        faults: vec![(Op::CopyTimes, 4, Fault::CrashBefore)],
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx), &disk)?;
+    assert!(crashes(|| {
+        drop(execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        ));
+    }));
+    // Then the user deletes one original in `day` itself.
+    std::fs::remove_file(day.join("a.NEF"))?;
+    fx.reopen();
+    let recovery = fx.recover_with(&far(&fx), &trash);
+    assert!(recovery.unfinished.is_empty(), "{recovery:?}");
+    let copied = std::fs::metadata(fx.root.join("far/day/sub"))?.modified()?;
+    assert_eq!(copied, when, "a folder whose files are all there is dated");
     Ok(())
 }
 
@@ -348,6 +566,7 @@ fn every_fault(kind: Far) -> usize {
         Op::CreateFile,
         Op::Copy,
         Op::SyncFile,
+        Op::CopyExtras,
         Op::CopyTimes,
         Op::Hash,
         Op::Sync,
@@ -693,6 +912,30 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
     // Names FAT and exFAT on macOS list decomposed, stored either way.
     std::fs::write(fx.root.join("day/Caf\u{e9}.NEF"), bytes("cafe"))?;
     std::fs::write(fx.root.join("day/sub/Ru\u{308}gen.NEF"), bytes("rugen"))?;
+    // Tags on a folder and a file, and on macOS a custom folder icon: a
+    // file with only a resource fork, and its folder's FinderInfo flag.
+    let tags = ["", "sub", "a.NEF"];
+    let mut extras = Vec::new();
+    if super::tests::keeps_extras(&dir) {
+        let day = fx.root.join("day");
+        if cfg!(target_vendor = "apple") {
+            let icon = day.join("Icon\r");
+            std::fs::write(&icon, b"")?;
+            std::fs::write(icon.join("..namedfork/rsrc"), bytes("icon"))?;
+            let mut info = [0u8; 32];
+            info[8] = 0x04;
+            fsops::set_extra(&day, "com.apple.FinderInfo", &info)?;
+        }
+        for t in tags {
+            fsops::set_extra(&day.join(t), "tag", t.as_bytes())?;
+        }
+        for t in tags
+            .iter()
+            .chain(cfg!(target_vendor = "apple").then_some(&"Icon\r"))
+        {
+            extras.push((t.to_string(), fsops::extras(&day.join(t))?));
+        }
+    }
     let tree = as_seen(tree_of(&fx.root.join("day")));
     let op = FileOp::MoveFolder {
         root: fx.root_id(),
@@ -706,6 +949,9 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
     let outcome = execute::execute(&mut fx.cat, plan.confirm(), &trash, &AtomicBool::new(false))?;
     assert_eq!(results(&outcome), [ItemResult::FolderMoved]);
     assert_eq!(as_seen(tree_of(&dir.join("day"))), tree);
+    for (t, was) in &extras {
+        assert_eq!(&fsops::extras(&dir.join("day").join(t))?, was, "{t:?}");
+    }
     assert!(!fx.root.join("day").exists());
     let path = fx
         .cat

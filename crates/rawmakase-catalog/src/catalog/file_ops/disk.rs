@@ -28,7 +28,14 @@ pub(super) trait Disk {
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError>;
     fn sync_file(&self, path: &Path) -> Result<(), FsError>;
+    /// Gives file or folder `to` the extras of `from` (extended attributes,
+    /// alternate data streams), [`FsError::Unsupported`] where its volume
+    /// can't keep them.
+    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError>;
+    /// Gives file or folder `to` the times and permission bits of `from`.
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError>;
+    /// The SHA-256 of file or folder `path`'s extras.
+    fn extras(&self, path: &Path) -> Result<ContentHash, FsError>;
     fn hash(&self, path: &Path) -> Result<ContentHash, FsError>;
     /// The SHA-256 of `path`'s first `len` bytes.
     fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError>;
@@ -89,8 +96,14 @@ impl Disk for Real {
     fn sync_file(&self, path: &Path) -> Result<(), FsError> {
         fsops::sync_file(path)
     }
+    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        fsops::copy_extras(from, to)
+    }
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         fsops::copy_times(from, to)
+    }
+    fn extras(&self, path: &Path) -> Result<ContentHash, FsError> {
+        fsops::extras(path)
     }
     fn hash(&self, path: &Path) -> Result<ContentHash, FsError> {
         fsops::hash_file(path)
