@@ -195,11 +195,11 @@ pub(super) fn look_xmp(converted: &Converted, name: &str, group: &str) -> String
         ("UUID", id),
         ("SupportsAmount", "True"),
         ("SupportsColor", "True"),
-        ("SupportsMonochrome", "False"),
+        ("SupportsMonochrome", "True"),
         ("SupportsHighDynamicRange", "True"),
         ("SupportsNormalDynamicRange", "True"),
         ("SupportsSceneReferred", "True"),
-        ("SupportsOutputReferred", "False"),
+        ("SupportsOutputReferred", "True"),
         ("CameraModelRestriction", ""),
         ("Copyright", ""),
         ("ContactInfo", ""),
@@ -658,6 +658,10 @@ pub(super) mod tests {
         assert!(xml.contains(&format!("crs:RGBTable=\"{}\"", a.uuid)));
         assert!(xml.contains(&format!("crs:Table_{}=", a.uuid)));
         assert!(xml.contains(&format!("crs:UUID=\"{}\"", a.uuid)));
+        // Offered for B&W and for rendered (JPEG, TIFF) photos in Lightroom, as Camera
+        // Raw 18.7's Create Profile marks the looks it makes from cubes.
+        assert!(xml.contains("crs:SupportsMonochrome=\"True\""), "{xml}");
+        assert!(xml.contains("crs:SupportsOutputReferred=\"True\""), "{xml}");
         assert!(xml.contains("Warm &amp; &lt;Bright&gt;</rdf:li>"));
         let look = LookFile::parse(&xml).unwrap();
         assert_eq!(look.name, "Portra");
