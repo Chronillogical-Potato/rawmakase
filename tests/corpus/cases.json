@@ -1489,6 +1489,176 @@
    }
   },
   {
+   "name": "cube-identity-17-100",
+   "look": {
+    "file": "cube-identity-17.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-identity-33-100",
+   "look": {
+    "file": "cube-identity-33.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-swap-17-100",
+   "look": {
+    "file": "cube-swap-17.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-hue-rotation-33-100",
+   "look": {
+    "file": "cube-hue-rotation-33.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-posterize-17-100",
+   "look": {
+    "file": "cube-posterize-17.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-bw-33-100",
+   "look": {
+    "file": "cube-bw-33.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-out-of-range-17-100",
+   "look": {
+    "file": "cube-out-of-range-17.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-curve-1d-1024-100",
+   "look": {
+    "file": "cube-curve-1d-1024.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-32-100",
+   "look": {
+    "file": "cube-creative-32.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-0",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 0
+   }
+  },
+  {
+   "name": "cube-creative-33-50",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "cube-creative-33-100",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-200",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "cube-creative-65-50",
+   "look": {
+    "file": "cube-creative-65.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "cube-creative-65-100",
+   "look": {
+    "file": "cube-creative-65.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-65-200",
+   "look": {
+    "file": "cube-creative-65.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "cube-creative-33-saturation+50",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "Saturation": "+50"
+   }
+  },
+  {
+   "name": "cube-creative-33-point-curve",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   },
+   "curves": {
+    "ToneCurvePV2012": [
+     "0, 0",
+     "64, 48",
+     "128, 128",
+     "192, 208",
+     "255, 255"
+    ]
+   }
+  },
+  {
+   "name": "cube-creative-33-grading-midtones-h30",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "ColorGradeMidtoneHue": "30",
+    "ColorGradeMidtoneSat": "50"
+   }
+  },
+  {
+   "name": "cube-creative-33-grading-shadows-h210",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "SplitToningShadowHue": "210",
+    "SplitToningShadowSaturation": "50"
+   }
+  },
+  {
+   "name": "cube-creative-33-bw",
+   "look": {
+    "file": "cube-creative-33.xmp",
+    "amount": 1
+   },
+   "settings": {
+    "ConvertToGrayscale": "True"
+   }
+  },
+  {
    "name": "bw-mix-zero",
    "settings": {
     "ConvertToGrayscale": "True",
