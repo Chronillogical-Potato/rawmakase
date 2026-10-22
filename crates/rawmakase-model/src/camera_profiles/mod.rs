@@ -782,6 +782,7 @@ mod library;
 mod look_settings;
 pub mod open;
 mod rgb_table;
+
 pub use dcp::{d65_color_matrix, from_bytes};
 pub use enhanced::RgbLook;
 pub use library::{
@@ -789,6 +790,8 @@ pub use library::{
     library_dirs, load,
 };
 pub use look_settings::LookSettings;
+/// Shared with `.cube` 3D lookup tables, which interpolate the same way.
+pub use rgb_table::tetrahedral;
 pub use rgb_table::{Dimensions, Gamut};
 #[cfg(test)]
 mod tests;
