@@ -5,10 +5,14 @@
 //! made, whose path is the receipt. A refused delete is
 //! [`TrashError::Unsupported`]; any other failure, abort or a delete without
 //! a recycled item is [`TrashError::Failed`]. Neither deletes the file.
-use crate::catalog::file_ops::{TrashError, TrashReceipt};
+//!
+//! Whether a file's volume has a Recycle Bin is told from its drive type:
+//! removable, network, CD and RAM drives have none; on a fixed drive the
+//! bin may be turned off or too small, which only the delete tells.
+use crate::catalog::file_ops::{TrashError, TrashReceipt, TrashSupport};
 use std::cell::RefCell;
 use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt as _;
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::{E_ABORT, RPC_E_CHANGED_MODE};
 use windows::Win32::System::Com::{
@@ -38,6 +42,35 @@ pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
         Seen { .. } => Err(TrashError::Failed(
             "the Recycle Bin didn't say where the file went".into(),
         )),
+    }
+}
+
+/// Whether `path` can go to the Recycle Bin, by its drive's type.
+pub(super) fn supports(path: &Path) -> TrashSupport {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetVolumePathNameW};
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut root = vec![0u16; path.len().max(261) + 1];
+    // SAFETY: `path` is NUL-terminated and `root` holds the length given.
+    if unsafe { GetVolumePathNameW(path.as_ptr(), root.as_mut_ptr(), root.len() as u32) } == 0 {
+        return TrashSupport::Unknown;
+    }
+    // SAFETY: `root` is the NUL-terminated volume path the call above
+    // wrote.
+    of_drive(unsafe { GetDriveTypeW(root.as_ptr()) })
+}
+
+/// What a drive of type `kind` (`GetDriveTypeW`) says: no Recycle Bin on
+/// removable (USB sticks and cards, FAT and exFAT among them), network, CD
+/// or RAM drives; a fixed one's may be turned off, or too small for what
+/// goes, so it can't be told. A network folder that has a bin (a
+/// redirected one) is refused too.
+fn of_drive(kind: u32) -> TrashSupport {
+    use windows_sys::Win32::System::WindowsProgramming::{
+        DRIVE_CDROM, DRIVE_RAMDISK, DRIVE_REMOTE, DRIVE_REMOVABLE,
+    };
+    match kind {
+        DRIVE_REMOVABLE | DRIVE_REMOTE | DRIVE_CDROM | DRIVE_RAMDISK => TrashSupport::No,
+        _ => TrashSupport::Unknown,
     }
 }
 
@@ -260,5 +293,25 @@ fn file_path(item: &IShellItem) -> windows::core::Result<PathBuf> {
         let path = PathBuf::from(OsString::from_wide(name.as_wide()));
         CoTaskMemFree(Some(name.0 as *const _));
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::of_drive;
+    use crate::catalog::file_ops::TrashSupport;
+    use windows_sys::Win32::System::WindowsProgramming::{
+        DRIVE_CDROM, DRIVE_FIXED, DRIVE_NO_ROOT_DIR, DRIVE_RAMDISK, DRIVE_REMOTE, DRIVE_REMOVABLE,
+        DRIVE_UNKNOWN,
+    };
+
+    #[test]
+    fn drives_without_a_recycle_bin_say_no() {
+        for kind in [DRIVE_REMOVABLE, DRIVE_REMOTE, DRIVE_CDROM, DRIVE_RAMDISK] {
+            assert_eq!(of_drive(kind), TrashSupport::No, "{kind}");
+        }
+        for kind in [DRIVE_FIXED, DRIVE_UNKNOWN, DRIVE_NO_ROOT_DIR] {
+            assert_eq!(of_drive(kind), TrashSupport::Unknown, "{kind}");
+        }
     }
 }

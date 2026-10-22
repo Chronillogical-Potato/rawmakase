@@ -388,11 +388,29 @@ impl fmt::Display for TrashError {
     }
 }
 
+/// Whether a folder's drive has a Trash, as far as can be told without
+/// trying or writing anything. Only a sure [`TrashSupport::No`] refuses a
+/// plan; the Trash itself still fails closed, so a wrong `Yes` or
+/// `Unknown` costs a refusal when it runs, never a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrashSupport {
+    Yes,
+    /// Its Trash would refuse what is on it.
+    No,
+    /// It can't be told before trying.
+    Unknown,
+}
+
 /// The system Trash. Implemented by the app over the OS, which is trusted
 /// to have moved the file when it gives a receipt; the catalog still
 /// removes rows only once the file is gone from its path as well.
 pub trait Trash {
     fn trash(&self, path: &std::path::Path) -> Result<TrashReceipt, TrashError>;
+    /// Whether `path`, a file or folder, can go to this Trash, asked
+    /// without trying: by default it can't be told.
+    fn supports(&self, _path: &std::path::Path) -> TrashSupport {
+        TrashSupport::Unknown
+    }
 }
 
 /// Why file operations can't run.
