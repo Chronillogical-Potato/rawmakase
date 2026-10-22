@@ -331,7 +331,7 @@ fn a_copy_has_every_byte_and_the_hash_of_what_was_read() {
     fs::write(&a, &bytes).unwrap();
     create_file(&b).unwrap();
     let mut seen = Vec::new();
-    let hash = copy_into(&a, &b, entry(&b).unwrap().id, &mut |n| {
+    let hash = copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |n| {
         seen.push(n);
         true
     })
@@ -360,7 +360,7 @@ fn a_copy_stops_between_chunks_when_asked() {
     fs::write(&a, big()).unwrap();
     create_file(&b).unwrap();
     let mut calls = 0;
-    let stopped = copy_into(&a, &b, entry(&b).unwrap().id, &mut |_| {
+    let stopped = copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |_| {
         calls += 1;
         false
     });
@@ -383,21 +383,26 @@ fn a_copy_goes_only_into_the_empty_file_it_was_given() {
     // Another file object than the one given.
     let other = entry(&c).unwrap().id;
     assert!(matches!(
-        copy_into(&a, &b, other, &mut |_| true),
+        copy_into(&a, &b, Some(other), &mut |_| true),
         Err(CopyError::NotTheFile)
     ));
     // A file with bytes in it already.
     fs::write(&b, b"x").unwrap();
     let id = entry(&b).unwrap().id;
     assert!(matches!(
-        copy_into(&a, &b, id, &mut |_| true),
+        copy_into(&a, &b, Some(id), &mut |_| true),
+        Err(CopyError::NotTheFile)
+    ));
+    // Nor, on a volume whose ids can't be proven, by any id.
+    assert!(matches!(
+        copy_into(&a, &b, None, &mut |_| true),
         Err(CopyError::NotTheFile)
     ));
     assert_eq!(fs::read(&b).unwrap(), b"x");
     // Nothing is made where there was nothing.
     let gone = d.path().join(".gone.part");
     assert!(matches!(
-        copy_into(&a, &gone, id, &mut |_| true),
+        copy_into(&a, &gone, Some(id), &mut |_| true),
         Err(CopyError::Fs(FsError::NotFound))
     ));
     assert!(!gone.exists());
@@ -421,7 +426,7 @@ fn a_copy_takes_the_sources_time_and_permissions() {
         fs::set_permissions(&a, fs::Permissions::from_mode(0o440)).unwrap();
     }
     create_file(&b).unwrap();
-    copy_into(&a, &b, entry(&b).unwrap().id, &mut |_| true).unwrap();
+    copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |_| true).unwrap();
     sync_file(&b).unwrap();
     copy_times(&a, &b).unwrap();
     // Read-only now, and still synced.
@@ -479,43 +484,109 @@ fn errors_say_what_callers_branch_on() {
 
 #[test]
 #[ignore = "needs RAWMAKASE_TEST_FAT_VOLUMES: folders on FAT or exFAT volumes, `:` between"]
-fn fat_and_exfat_volumes_have_no_stable_ids() {
+fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
     let Some(dirs) = std::env::var_os("RAWMAKASE_TEST_FAT_VOLUMES") else {
         return;
     };
     for dir in std::env::split_paths(&dirs) {
         let facts = volume_facts(&dir).unwrap();
-        assert!(!facts.stable_ids, "{}: {facts:?}", dir.display());
+        let shown = format!("{}: {facts:?}", dir.display());
+        assert!(!facts.stable_ids, "{shown}");
+        assert!(
+            matches!(facts.kind, VolumeKind::Fat | VolumeKind::Exfat),
+            "{shown}"
+        );
+        // What a volume says it can't rename exclusively, it can't.
+        let d = tempfile::tempdir_in(&dir).unwrap();
+        let (a, b) = (d.path().join("a.part"), d.path().join("b.NEF"));
+        fs::write(&a, b"a").unwrap();
+        match rename_exclusive(&a, &b) {
+            Ok(()) => assert!(facts.exclusive_rename, "{shown}"),
+            Err(FsError::Unsupported) => assert!(!facts.exclusive_rename, "{shown}"),
+            Err(e) => panic!("{shown}: {e}"),
+        }
+        // A file made has a birth time, near now.
+        let c = d.path().join("c.NEF");
+        create_file(&c).unwrap();
+        let born = created(&c).unwrap();
+        let off = born
+            .duration_since(std::time::SystemTime::now())
+            .unwrap_or_else(|e| e.duration());
+        assert!(off < std::time::Duration::from_secs(5), "{shown}: {off:?}");
     }
 }
 
 #[test]
-fn only_kinds_known_to_keep_file_ids_are_taken_to() {
+fn a_volume_kind_is_told_from_its_file_system_name() {
     #[cfg(target_vendor = "apple")]
     {
-        for kind in [&b"apfs"[..], b"hfs"] {
-            assert!(super::unix::keeps_ids(kind), "{kind:?}");
+        use super::unix::kind_of;
+        assert_eq!(kind_of(b"apfs"), VolumeKind::Apfs);
+        assert_eq!(kind_of(b"hfs"), VolumeKind::Hfs);
+        assert_eq!(kind_of(b"msdos"), VolumeKind::Fat);
+        assert_eq!(kind_of(b"exfat"), VolumeKind::Exfat);
+        for other in [&b"smbfs"[..], b"macfuse", b"nfs", b""] {
+            assert_eq!(kind_of(other), VolumeKind::Other, "{other:?}");
         }
-        for kind in [&b"msdos"[..], b"exfat", b"smbfs", b"macfuse", b"nfs", b""] {
-            assert!(!super::unix::keeps_ids(kind), "{kind:?}");
-        }
+        // exFAT on macOS answers ENOTSUP to an exclusive rename (measured
+        // on macOS 15).
+        assert!(!VolumeKind::Exfat.exclusive_rename());
+        assert!(VolumeKind::Fat.exclusive_rename());
     }
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        for kind in [0xef53, 0x5846_5342, 0x9123_683e] {
-            assert!(super::unix::keeps_ids(kind), "{kind:x}");
-        }
-        for kind in [0x4d44, 0x2011_bab0, 0x6573_5546, 0x0102_1994, 0x6969] {
-            assert!(!super::unix::keeps_ids(kind), "{kind:x}");
+        use super::unix::kind_of;
+        assert_eq!(kind_of(0xef53), VolumeKind::Ext);
+        assert_eq!(kind_of(0x5846_5342), VolumeKind::Xfs);
+        assert_eq!(kind_of(0x9123_683e), VolumeKind::Btrfs);
+        assert_eq!(kind_of(0x4d44), VolumeKind::Fat);
+        assert_eq!(kind_of(0x2011_bab0), VolumeKind::Exfat);
+        for other in [0x6573_5546, 0x0102_1994, 0x6969] {
+            assert_eq!(kind_of(other), VolumeKind::Other, "{other:x}");
         }
     }
     #[cfg(windows)]
     {
-        assert!(super::windows::keeps_ids("NTFS"));
-        for kind in ["ReFS", "FAT32", "exFAT", "FAT", ""] {
-            assert!(!super::windows::keeps_ids(kind), "{kind}");
+        use super::windows::kind_of;
+        assert_eq!(kind_of("NTFS"), VolumeKind::Ntfs);
+        for fat in ["FAT", "FAT32", "fat32"] {
+            assert_eq!(kind_of(fat), VolumeKind::Fat, "{fat}");
+        }
+        assert_eq!(kind_of("exFAT"), VolumeKind::Exfat);
+        for other in ["ReFS", ""] {
+            assert_eq!(kind_of(other), VolumeKind::Other, "{other}");
         }
     }
+    // Only these keep a file's id while it is on them.
+    for kind in [
+        VolumeKind::Apfs,
+        VolumeKind::Hfs,
+        VolumeKind::Ext,
+        VolumeKind::Xfs,
+        VolumeKind::Btrfs,
+        VolumeKind::Ntfs,
+    ] {
+        assert!(kind.keeps_ids(), "{kind:?}");
+    }
+    for kind in [VolumeKind::Fat, VolumeKind::Exfat, VolumeKind::Other] {
+        assert!(!kind.keeps_ids(), "{kind:?}");
+    }
+}
+
+#[test]
+fn a_file_s_birth_time_and_its_first_bytes_are_read() {
+    let d = dir();
+    let a = d.path().join("a.NEF");
+    let before = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
+    fs::write(&a, b"0123456789").unwrap();
+    assert!(created(&a).unwrap() >= before);
+    fs::write(d.path().join("head"), b"0123").unwrap();
+    assert_eq!(
+        hash_prefix(&a, 4).unwrap(),
+        hash_file(&d.path().join("head")).unwrap()
+    );
+    // Asked for more than it has, it hashes what it has.
+    assert_eq!(hash_prefix(&a, 100).unwrap(), hash_file(&a).unwrap());
 }
 
 #[test]

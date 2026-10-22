@@ -52,6 +52,7 @@ mod lock;
 mod names;
 mod plan;
 mod preconditions;
+mod proof;
 mod recover;
 mod rename;
 mod tree;
@@ -192,9 +193,9 @@ pub enum Refusal {
     SpellingOnly,
     /// Its companion can't be renamed to match.
     CompanionName(String),
-    /// It would be copied to or from a drive whose file ids can't prove
-    /// which file a name is: any but a local APFS, HFS+, ext, XFS, Btrfs or
-    /// NTFS one (FAT, exFAT, a network share, FUSE, ReFS…).
+    /// It would be copied to or from a drive whose files RAWmakase can't
+    /// tell apart: any but a local APFS, HFS+, ext, XFS, Btrfs, NTFS, FAT or
+    /// exFAT one (a network share, FUSE, ReFS…).
     FileIdsUnproven,
 }
 
@@ -240,7 +241,7 @@ impl fmt::Display for Refusal {
             ),
             Self::CompanionName(n) => write!(f, "{n} can't be renamed to match it."),
             Self::FileIdsUnproven => f.write_str(
-                "Moving photos to or from this kind of drive (FAT, exFAT, network and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
+                "Moving photos to or from this kind of drive (network and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
             ),
         }
     }

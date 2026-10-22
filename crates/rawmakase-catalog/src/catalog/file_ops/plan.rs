@@ -18,7 +18,6 @@ use super::journal::{Kind, NewMember};
 use super::preconditions::Preconditions;
 use super::tree::TreeMove;
 use super::{BatchId, FileOp, FileOpError, Plan, Refusal, Skip, Skipped, Summary};
-use crate::storage::Identity;
 use crate::storage::fsops::{self, Containment, EntryKind, FileId, FsError, VolumeId};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -276,6 +275,13 @@ fn tree_plan(
     })
 }
 
+/// Seconds since 1970.
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
 /// A run's id: random, so two runs never share one.
 fn new_batch() -> anyhow::Result<BatchId> {
     let mut bytes = [0u8; 16];
@@ -506,8 +512,10 @@ pub(super) struct Target {
     /// Where its volume is mounted, and the bytes free there.
     top: PathBuf,
     available: Option<u64>,
-    /// Whether its volume's file ids prove which file a name is.
-    stable_ids: bool,
+    /// How its volume proves which file a name is, if it can at all.
+    proof: Option<super::proof::Proof>,
+    /// Whether its volume can rename only where nothing has the name.
+    exclusive_rename: bool,
     names: Vec<OsString>,
     rules: Names,
     /// Filenames of the catalog's photos in it, through any folder over the
@@ -658,7 +666,8 @@ impl<'a> Files<'a> {
             volume: at.volume,
             top: at.top,
             available: at.available,
-            stable_ids: at.stable_ids,
+            proof: at.proof,
+            exclusive_rename: at.exclusive_rename,
             names: Vec::new(),
             rules: at.rules,
             catalog: HashSet::new(),
@@ -721,7 +730,8 @@ impl<'a> Files<'a> {
         }
         let facts = self.volume(found.id.volume(), &dir);
         let available = facts.map(|v| v.available);
-        let stable_ids = facts.is_some_and(|v| v.stable_ids);
+        let proof = facts.as_ref().and_then(super::proof::of);
+        let exclusive_rename = facts.is_some_and(|v| v.exclusive_rename);
         Ok(Target {
             folder: to,
             place: None,
@@ -731,7 +741,8 @@ impl<'a> Files<'a> {
             dir,
             volume: found.id.volume(),
             available,
-            stable_ids,
+            proof,
+            exclusive_rename,
             names,
             catalog,
         })
@@ -797,6 +808,34 @@ impl<'a> Files<'a> {
                 "its name in its folder can't be told".into(),
             )));
         };
+        // Copied from FAT or exFAT, whose drivers list names decomposed but
+        // rename and remove them only by their stored spelling, its names
+        // are journalled and used composed where that finds them (#573).
+        let across = target.is_some_and(|t| t.volume != found.id.volume());
+        let composed = across
+            && self
+                .volume(found.id.volume(), &dir)
+                .as_ref()
+                .and_then(super::proof::of)
+                == Some(super::proof::Proof::Names);
+        // What it makes there is named composed too, so it is stored in
+        // the one spelling those drivers then take for it.
+        let made_composed =
+            across && target.is_some_and(|t| t.proof == Some(super::proof::Proof::Names));
+        let there = |name: &OsStr| match made_composed {
+            true => super::proof::composed(name),
+            false => name.to_os_string(),
+        };
+        let (filename, names) = match composed {
+            true => (
+                super::proof::usable(self.disk, &dir, &filename),
+                names
+                    .iter()
+                    .map(|n| super::proof::usable(self.disk, &dir, n))
+                    .collect(),
+            ),
+            false => (filename, names),
+        };
         let file = dir.join(&filename);
         let rows = &f.preconditions.rows;
         let shared = shared(
@@ -823,27 +862,40 @@ impl<'a> Files<'a> {
             return Err(refuse(Refusal::ReadOnly));
         }
         // A copy is told from any other file at its name, and its original
-        // from a file put in its place, only by file ids that stay.
+        // from a file put in its place, by file ids that stay, or on FAT and
+        // exFAT by exact names and SHA-256 (#573).
+        let mut proofs = super::proof::Proofs::default();
         if let Some(target) = target
             && target.volume != found.id.volume()
         {
-            let stable = self
+            let here = self
                 .volume(found.id.volume(), &dir)
-                .is_some_and(|v| v.stable_ids);
-            if !stable || !target.stable_ids {
+                .as_ref()
+                .and_then(super::proof::of);
+            let (Some(originals), Some(copies)) = (here, target.proof) else {
                 return Err(refuse(Refusal::FileIdsUnproven));
-            }
-        }
-        let identity =
-            Identity::read(&file).map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
-        let same_file =
-            |a: &OsStr, b: &OsStr| match (fsops::entry(&dir.join(a)), fsops::entry(&dir.join(b))) {
-                (Ok(a), Ok(b)) => a.id == b.id,
-                _ => false,
             };
+            proofs = super::proof::Proofs {
+                originals,
+                copies,
+                direct: !target.exclusive_rename,
+                since: now(),
+            };
+        }
+        let identity = self
+            .disk
+            .identity(&file)
+            .map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
+        let same_file = |a: &OsStr, b: &OsStr| match (
+            self.disk.entry(&dir.join(a)),
+            self.disk.entry(&dir.join(b)),
+        ) {
+            (Ok(a), Ok(b)) => a.id == b.id,
+            _ => false,
+        };
         let Companions { carried, shared } = companions::of(&filename, &names, &same_file);
         let mut members = vec![NewMember {
-            destination: target.map(|t| t.dir.join(&filename)),
+            destination: target.map(|t| t.dir.join(there(&filename))),
             source: file,
             id: found.id,
             identity,
@@ -861,10 +913,12 @@ impl<'a> Files<'a> {
                 stays.push(path);
                 continue;
             }
-            let identity =
-                Identity::read(&path).map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
+            let identity = self
+                .disk
+                .identity(&path)
+                .map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
             members.push(NewMember {
-                destination: target.map(|t| t.dir.join(&name)),
+                destination: target.map(|t| t.dir.join(there(&name))),
                 source: path,
                 id: e.id,
                 identity,
@@ -872,6 +926,7 @@ impl<'a> Files<'a> {
         }
         let mut preconditions = f.preconditions;
         preconditions.folder_path = Some(path);
+        preconditions.proofs = proofs;
         // A folder the plan makes has no id yet: execution gives it.
         preconditions.to = target.and_then(|t| Some((t.folder?, t.resolved.clone())));
         preconditions.into = target.and_then(|t| {
@@ -920,10 +975,14 @@ fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &m
         rules: target.rules,
         catalog: &target.catalog,
     };
+    // The names they arrive with.
     let names_of = |item: &Item| -> Vec<OsString> {
         item.members
             .iter()
-            .filter_map(|m| m.source.file_name().map(OsString::from))
+            .filter_map(|m| {
+                let at = m.destination.as_deref().unwrap_or(&m.source);
+                at.file_name().map(OsString::from)
+            })
             .collect()
     };
     let mut uses: HashMap<String, usize> = HashMap::new();
@@ -986,13 +1045,20 @@ fn copies(
         };
         files += 1;
         companions += item.members.len().saturating_sub(1);
+        // Where its volume can't rename exclusively, each is made at its
+        // name there (#573).
+        let direct = item.preconditions.proofs.direct;
         copy.temps = item
             .members
             .iter()
             .enumerate()
-            .map(|(ordinal, m)| {
-                let name = m.source.file_name().unwrap_or_default();
-                target.dir.join(temp_name(name, batch, index, ordinal))
+            .map(|(ordinal, m)| match (direct, &m.destination) {
+                (true, Some(to)) => to.clone(),
+                _ => {
+                    let at = m.destination.as_deref().unwrap_or(&m.source);
+                    let name = at.file_name().unwrap_or_default();
+                    target.dir.join(temp_name(name, batch, index, ordinal))
+                }
             })
             .collect();
         bytes = bytes.saturating_add(copy.bytes);

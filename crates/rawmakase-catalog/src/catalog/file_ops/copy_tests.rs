@@ -26,7 +26,35 @@ fn files() -> Fx {
 
 /// The test disk, with `far/` on another volume.
 fn far(fx: &Fx) -> Faulty {
-    Faulty::default().elsewhere(&fx.root.join("far"))
+    far_as(fx, Far::Ids)
+}
+
+/// What `far/`'s volume is in a test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Far {
+    /// One that keeps file ids.
+    Ids,
+    /// exFAT (#573): its files numbered anew when written, renamed or
+    /// mounted again; proven by names.
+    Names,
+    /// exFAT on macOS, which can't rename exclusively either: copies are
+    /// made at their names.
+    Direct,
+}
+
+/// The test disk, with `far/` on another volume of `kind`.
+fn far_as(fx: &Fx, kind: Far) -> Faulty {
+    let dir = fx.root.join("far");
+    let mut disk = Faulty::default().elsewhere(&dir);
+    if kind != Far::Ids {
+        disk.names_only = vec![dir];
+        disk.renumber_on_close = true;
+        disk.renumber_on_rename = true;
+        disk.no_exclusive_rename = kind == Far::Direct;
+        // As macOS's drivers list names.
+        disk.lists_decomposed = true;
+    }
+    disk
 }
 
 fn to_far(fx: &Fx, names: &[&str]) -> FileOp {
@@ -211,7 +239,7 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
     let fx = files();
     let (here, there) = (fx.root.clone(), fx.root.join("far"));
-    let why = "Moving photos to or from this kind of drive (FAT, exFAT, network and others)";
+    let why = "Moving photos to or from this kind of drive (network and others)";
     for unstable in [
         vec![there.clone()],
         vec![here.clone()],
@@ -934,7 +962,7 @@ fn times_kept_more_coarsely_are_told_from_other_changes() {
 /// Plans the move of A.NEF and b.NEF to far/, runs it on `disk` (which
 /// may crash) with `trash`, restarts and recovers on the same volumes.
 fn scenario(fx: &mut Fx, trash: &dyn Trash, disk: &Faulty) -> (BatchId, Recovery) {
-    scenario_of(fx, &["A.NEF", "b.NEF"], trash, disk)
+    scenario_of(fx, &["A.NEF", "b.NEF"], trash, disk, Far::Ids)
 }
 
 /// [`scenario`] moving the photos `names` alone.
@@ -943,6 +971,7 @@ fn scenario_of(
     names: &[&str],
     trash: &dyn Trash,
     disk: &Faulty,
+    kind: Far,
 ) -> (BatchId, Recovery) {
     let plan = fx.plan_on(to_far(fx, names), disk).unwrap();
     let batch = plan.batch().clone();
@@ -959,7 +988,7 @@ fn scenario_of(
         );
     });
     fx.reopen();
-    let clean = far(fx);
+    let clean = far_as(fx, kind);
     let recovery = fx.recover_with(&clean, trash);
     (batch, recovery)
 }
@@ -968,7 +997,7 @@ fn scenario_of(
 /// done or nothing changed (the catalog following only proven copies), no
 /// partial copy left unless an item is unfinished, and whatever is
 /// unfinished put back in the end.
-fn proven(fx: &mut Fx, was: &Before, batch: &BatchId, recovery: &Recovery, what: &str) {
+fn proven(fx: &mut Fx, was: &Before, batch: &BatchId, recovery: &Recovery, what: &str, kind: Far) {
     check(fx, was, recovery, batch);
     copies_where_they_say(fx, was, batch, what);
     if recovery.unfinished.is_empty() {
@@ -983,7 +1012,7 @@ fn proven(fx: &mut Fx, was: &Before, batch: &BatchId, recovery: &Recovery, what:
             "{what}: {item:?}"
         );
     }
-    let clean = far(fx);
+    let clean = far_as(fx, kind);
     let trash = FakeTrash::new(fx);
     *trash.calls.borrow_mut() = 100;
     for u in &recovery.unfinished {
@@ -1043,29 +1072,59 @@ fn copies_where_they_say(fx: &Fx, was: &Before, batch: &BatchId, what: &str) {
 
 #[test]
 fn every_fault_at_every_step_of_a_copy_ends_proven() {
+    assert!(every_fault(Far::Ids) >= 100);
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
+fn every_fault_at_every_step_of_a_copy_to_exfat_ends_proven() {
+    assert!(every_fault(Far::Names) >= 80);
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
+fn every_fault_at_every_step_of_a_copy_made_at_its_name_ends_proven() {
+    assert!(every_fault(Far::Direct) >= 60);
+}
+
+/// Every fault at every step of moving A.NEF and b.NEF to `far/` as `kind`,
+/// then recovery: each ends proven. Returns how many runs it made.
+fn every_fault(kind: Far) -> usize {
+    let started = std::time::Instant::now();
     // A run without faults says how many steps there are.
     let mut clean = files();
-    let counting = far(&clean);
+    let counting = far_as(&clean, kind);
     let trash = FakeTrash::new(&clean);
     let op = to_far(&clean, &["A.NEF", "b.NEF"]);
     let outcome = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
     assert!(
         results(&outcome)
             .iter()
-            .all(|r| matches!(r, ItemResult::Moved { .. }))
+            .all(|r| matches!(r, ItemResult::Moved { .. })),
+        "{kind:?}: {outcome:?}"
     );
     assert_eq!(counting.count(Op::Copy), 3);
     // And one undoing a complete copy: a full drive at its companion's.
     let mut undone = files();
     let failing = Faulty {
-        elsewhere: Some(undone.root.join("far")),
-        ..Faulty::at(Op::Copy, 1, Fault::Fail)
+        faults: vec![(Op::Copy, 1, Fault::Fail)],
+        ..far_as(&undone, kind)
     };
     let trash = FakeTrash::new(&undone);
     let op = to_far(&undone, &["A.NEF", "b.NEF"]);
     let _ = run(&mut undone, op, &trash, &failing, &AtomicBool::new(false));
     let mut runs = 0;
     for op in Op::COPYING {
+        // On exFAT, faults while undoing are run with an undoing run only for
+        // the steps undoing takes; the others' steps before the fault are the
+        // clean run's, as for ids. Kept so to keep CI's time in check.
+        let undoing = kind == Far::Ids || matches!(op, Op::RemoveFile | Op::Sync | Op::Hash);
         let count = counting.count(op).max(failing.count(op));
         for nth in 0..count {
             for fault in [
@@ -1074,7 +1133,15 @@ fn every_fault_at_every_step_of_a_copy_ends_proven() {
                 Fault::CrashAfter,
                 Fault::CrashMid,
             ] {
+                // A crash before a call is one after the call before it but
+                // for the journal between, which the ids run covers.
+                if kind != Far::Ids && fault == Fault::CrashBefore && nth > 0 {
+                    continue;
+                }
                 for undo in [false, true] {
+                    if undo && !undoing {
+                        continue;
+                    }
                     let mut fx = files();
                     let was = before(&fx);
                     let mut faults = vec![(op, nth, fault)];
@@ -1082,13 +1149,14 @@ fn every_fault_at_every_step_of_a_copy_ends_proven() {
                         faults.push((Op::Copy, 1, Fault::Fail));
                     }
                     let disk = Faulty {
-                        elsewhere: Some(fx.root.join("far")),
-                        ..Faulty::with(&faults)
+                        faults,
+                        ..far_as(&fx, kind)
                     };
                     let trash = FakeTrash::new(&fx);
-                    let (batch, recovery) = scenario(&mut fx, &trash, &disk);
-                    let what = format!("{op:?} {nth} {fault:?} undo {undo}");
-                    proven(&mut fx, &was, &batch, &recovery, &what);
+                    let (batch, recovery) =
+                        scenario_of(&mut fx, &["A.NEF", "b.NEF"], &trash, &disk, kind);
+                    let what = format!("{kind:?} {op:?} {nth} {fault:?} undo {undo}");
+                    proven(&mut fx, &was, &batch, &recovery, &what, kind);
                     runs += 1;
                 }
             }
@@ -1099,24 +1167,20 @@ fn every_fault_at_every_step_of_a_copy_ends_proven() {
         for crash in [false, true] {
             let mut fx = files();
             let was = before(&fx);
-            let disk = far(&fx);
+            let disk = far_as(&fx, kind);
             let mut trash = FakeTrash::new(&fx);
             match crash {
                 true => trash.crash_after = Some(n),
                 false => trash.fail_from = Some(n),
             }
-            let (batch, recovery) = scenario(&mut fx, &trash, &disk);
-            proven(
-                &mut fx,
-                &was,
-                &batch,
-                &recovery,
-                &format!("trash {n} {crash}"),
-            );
+            let (batch, recovery) = scenario_of(&mut fx, &["A.NEF", "b.NEF"], &trash, &disk, kind);
+            let what = format!("{kind:?} trash {n} {crash}");
+            proven(&mut fx, &was, &batch, &recovery, &what, kind);
             runs += 1;
         }
     }
-    assert!(runs >= 100, "{runs}");
+    eprintln!("{kind:?}: {runs} runs in {:?}", started.elapsed());
+    runs
 }
 
 #[test]
@@ -1150,7 +1214,7 @@ fn every_failed_journal_write_of_a_copy_ends_proven() -> Result<()> {
         fx.reopen();
         let recovery = fx.recover_with(&far(&fx), &trash);
         assert!(recovery.unfinished.is_empty(), "{when}: {recovery:?}");
-        proven(&mut fx, &was, &batch, &recovery, when);
+        proven(&mut fx, &was, &batch, &recovery, when, Far::Ids);
     }
     Ok(())
 }
@@ -1165,7 +1229,7 @@ fn a_crash_after_the_catalog_follows_is_finished_by_recovery() -> Result<()> {
     // A alone: which of several photos goes first follows the order the
     // folder was listed in, which differs between systems.
     trash.crash_after = Some(1);
-    let (batch, recovery) = scenario_of(&mut fx, &["A.NEF"], &trash, &disk);
+    let (batch, recovery) = scenario_of(&mut fx, &["A.NEF"], &trash, &disk, Far::Ids);
     assert!(recovery.unfinished.is_empty());
     let items = journal::of_batch(&fx.cat.db, &batch.0)?;
     assert_eq!(items[0].state, ItemState::Done);
@@ -1479,13 +1543,25 @@ fn a_new_folder_on_another_drive_takes_copies() -> Result<()> {
     Ok(())
 }
 
+/// The master photo whose name is `name`, composed.
+fn named(fx: &Fx, name: &str) -> Result<PhotoId> {
+    use unicode_normalization::UnicodeNormalization;
+    let photos = fx.cat.photos()?;
+    let found = photos
+        .iter()
+        .find(|p| p.master.is_none() && p.filename.nfc().collect::<String>() == name);
+    Ok(found.unwrap_or_else(|| panic!("no photo {name}")).id)
+}
+
 #[test]
 #[ignore = "needs RAWMAKASE_TEST_OTHER_VOLUME: a writable folder on another volume"]
 fn a_move_between_two_real_volumes() -> Result<()> {
     let Some(other) = std::env::var_os("RAWMAKASE_TEST_OTHER_VOLUME") else {
         return Ok(());
     };
-    let mut fx = fixture(&["a.NEF", "a.xmp"]);
+    // And names FAT and exFAT on macOS list decomposed: one stored
+    // composed, one stored decomposed.
+    let mut fx = fixture(&["a.NEF", "a.xmp", CAFE, "Ru\u{308}gen.NEF"]);
     let there = tempfile::tempdir_in(&other)?;
     let dir = there.path().canonicalize()?;
     assert_ne!(
@@ -1509,17 +1585,25 @@ fn a_move_between_two_real_volumes() -> Result<()> {
         Identity::read(&source)?,
         std::fs::metadata(&source)?.modified()?,
     );
+    // Found composed: Add Folder keeps the name as the drive lists it.
+    let cafe = named(&fx, CAFE)?;
     let op = FileOp::MovePhotos {
-        photos: vec![a],
+        photos: vec![a, cafe, named(&fx, "R\u{fc}gen.NEF")?],
         root: fx.root_of(to),
         to: fx.logical(to),
     };
     let plan = fx.plan(op);
     let across = plan.summary().across.clone().expect("it copies");
-    assert!(dir.starts_with(&across.volume) && across.volume != Path::new("/"));
+    assert!(dir.starts_with(&across.volume), "{across:?}");
     let trash = FakeTrash::new(&fx);
     let outcome = execute::execute(&mut fx.cat, plan.confirm(), &trash, &AtomicBool::new(false))?;
-    assert_eq!(results(&outcome), [ItemResult::Moved { to }]);
+    assert_eq!(results(&outcome), vec![ItemResult::Moved { to }; 3]);
+    assert!(
+        outcome.items.iter().all(|i| i.originals_kept.is_empty()),
+        "{outcome:?}"
+    );
+    assert_eq!(std::fs::read(dir.join(CAFE))?, bytes(CAFE));
+    assert!(!fx.root.join(CAFE).exists());
     let target = dir.join("a.NEF");
     assert_eq!(std::fs::read(&target)?, bytes("a.NEF"));
     assert_eq!(std::fs::read(dir.join("a.xmp"))?, bytes("a.xmp"));
@@ -1535,7 +1619,13 @@ fn a_move_between_two_real_volumes() -> Result<()> {
     assert!(off < std::time::Duration::from_secs(2), "{off:?}");
     assert!(!source.exists());
     let files = fx.files();
-    assert_eq!(files.get("trash/1-a.NEF"), Some(&bytes("a.NEF")));
+    assert!(
+        files
+            .iter()
+            .any(|(k, v)| k.starts_with("trash/") && k.ends_with("-a.NEF") && *v == bytes("a.NEF")),
+        "{:?}",
+        files.keys()
+    );
     let leftovers: Vec<_> = std::fs::read_dir(&dir)?
         .map(|e| e.map(|e| e.file_name()))
         .collect::<std::io::Result<_>>()?;
@@ -1546,6 +1636,438 @@ fn a_move_between_two_real_volumes() -> Result<()> {
         "{leftovers:?}"
     );
     drop(fx);
+    // exFAT on macOS removes a file only by its name composed, which
+    // `remove_dir_all` doesn't give.
+    for name in std::fs::read_dir(&dir)?.map(|e| e.map(|e| e.file_name())) {
+        let name: String =
+            unicode_normalization::UnicodeNormalization::nfc(name?.to_string_lossy().as_ref())
+                .collect();
+        // AppleDouble `._` files go with the file they are of.
+        match std::fs::remove_file(dir.join(name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            other => other?,
+        }
+    }
     there.close()?;
+    Ok(())
+}
+
+/// The copy ids journalled for batch `batch`'s items, as text.
+fn copy_ids(fx: &Fx, batch: &BatchId) -> Vec<Option<String>> {
+    let db = fx.cat.db_for_tests();
+    let mut stmt = db
+        .prepare(
+            "SELECT c.copy_id FROM file_operation_copies c
+             JOIN file_operations o ON o.id=c.operation WHERE o.batch=?1",
+        )
+        .unwrap();
+    stmt.query_map([batch.to_string()], |r| r.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
+#[test]
+fn a_move_to_exfat_proves_its_copies_by_names_and_journals_no_file_id() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let disk = far_as(&fx, Far::Names);
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let batch = plan.batch().clone();
+    let outcome = execute::execute_with(
+        &mut fx.cat,
+        plan.confirm(),
+        &trash,
+        &AtomicBool::new(false),
+        &disk,
+    )?;
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    assert_eq!(std::fs::read(fx.root.join("far/A.xmp"))?, bytes("A.xmp"));
+    assert!(!fx.root.join("A.NEF").exists());
+    // A release before #573 finds no file object it is: one no file has.
+    let ids = copy_ids(&fx, &batch);
+    assert!(
+        !ids.is_empty() && ids.iter().all(|i| i.as_deref() == Some("0:0")),
+        "{ids:?}"
+    );
+    // Its partial copies were renamed into place.
+    assert!(!disk.renames().is_empty());
+    assert!(partials(&fx).is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_move_to_a_drive_without_an_exclusive_rename_makes_each_copy_at_its_name() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let disk = far_as(&fx, Far::Direct);
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    assert!(disk.renames().is_empty(), "{:?}", disk.renames());
+    let made: Vec<PathBuf> = disk
+        .calls
+        .borrow()
+        .iter()
+        .filter_map(|c| match c {
+            super::tests::Call::CreateFile(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(made, [fx.root.join("far/A.NEF"), fx.root.join("far/A.xmp")]);
+    assert!(fx.files().contains_key("trash/1-A.NEF"));
+    Ok(())
+}
+
+#[test]
+fn a_move_between_exfat_drives_proves_its_originals_by_names() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    // The fixture's volume and `far/`'s both exFAT.
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        renumber_on_close: true,
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    assert_eq!(fx.files().get("trash/1-A.NEF"), Some(&bytes("A.NEF")));
+    Ok(())
+}
+
+#[test]
+fn an_original_on_exfat_changed_where_its_identity_doesn_t_look_is_kept() -> Result<()> {
+    let mut fx = fixture(&["big.NEF", "far/"]);
+    let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(fx.root.join("big.NEF"), &big)?;
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        ..far(&fx)
+    };
+    let mut trash = FakeTrash::new(&fx);
+    trash.crash_before = Some(1);
+    let op = FileOp::MovePhotos {
+        photos: vec![fx.photo("big.NEF")],
+        root: fx.root_id(),
+        to: "far".into(),
+    };
+    let plan = fx.plan_on(op, &disk)?;
+    let batch = plan.batch().clone();
+    assert!(crashes(|| {
+        drop(execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        ));
+    }));
+    // A byte past what its `Identity` reads changes, its time kept.
+    let path = fx.root.join("big.NEF");
+    let modified = std::fs::metadata(&path)?.modified()?;
+    let mut changed = big.clone();
+    changed[150_000] ^= 0xff;
+    std::fs::write(&path, &changed)?;
+    std::fs::File::options()
+        .write(true)
+        .open(&path)?
+        .set_modified(modified)?;
+    fx.reopen();
+    trash.crash_before = None;
+    let recovery = fx.recover_with(&disk, &trash);
+    assert!(recovery.unfinished.is_empty(), "{recovery:?}");
+    let outcome = super::outcome(&fx.cat, &batch)?;
+    let kept = &outcome.items[0].originals_kept;
+    assert_eq!(kept.len(), 1, "{outcome:?}");
+    assert_eq!(kept[0].why, "it changed since it was copied");
+    assert_eq!(std::fs::read(&path)?, changed);
+    assert_eq!(std::fs::read(fx.root.join("far/big.NEF"))?, big);
+    Ok(())
+}
+
+#[test]
+fn an_empty_file_at_the_name_made_before_the_move_was_planned_is_left() -> Result<()> {
+    let mut fx = files();
+    let disk = Faulty {
+        faults: vec![(Op::CreateFile, 0, Fault::CrashAfter)],
+        ..far_as(&fx, Far::Direct)
+    };
+    let trash = FakeTrash::new(&fx);
+    let (_, recovery) = scenario_of(&mut fx, &["A.NEF"], &trash, &disk, Far::Direct);
+    // Made after planning, it is the copy begun: removed.
+    assert!(recovery.unfinished.is_empty(), "{recovery:?}");
+    assert!(!fx.root.join("far/A.NEF").exists());
+    // One the volume says was made long before is never taken for it.
+    let mut fx = files();
+    let disk = Faulty {
+        faults: vec![(Op::CreateFile, 0, Fault::CrashAfter)],
+        ..far_as(&fx, Far::Direct)
+    };
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    assert!(crashes(|| {
+        drop(execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        ));
+    }));
+    fx.reopen();
+    let old = Faulty {
+        born_long_ago: vec![fx.root.join("far/A.NEF")],
+        ..far_as(&fx, Far::Direct)
+    };
+    let recovery = fx.recover_with(&old, &trash);
+    assert_eq!(recovery.unfinished.len(), 1, "{recovery:?}");
+    assert!(fx.root.join("far/A.NEF").is_file());
+    Ok(())
+}
+
+#[test]
+fn a_name_taken_just_before_a_copy_is_made_at_it_is_left_as_it_is() -> Result<()> {
+    for theirs in [&b""[..], b"theirs"] {
+        let mut fx = files();
+        let disk = Faulty {
+            occupy_on_create: Some((fx.root.join("far/A.xmp"), theirs.to_vec())),
+            ..far_as(&fx, Far::Direct)
+        };
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx, &["A.NEF"]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        let [ItemResult::Unchanged(Some(why))] = &results(&outcome)[..] else {
+            panic!("{theirs:?}: {outcome:?}")
+        };
+        assert!(why.contains("A.xmp"), "{why}");
+        assert_eq!(std::fs::read(fx.root.join("far/A.xmp"))?, theirs);
+        // Its copy made before it, at its name, went to the Trash.
+        assert!(!fx.root.join("far/A.NEF").exists());
+        assert_eq!(std::fs::read(fx.root.join("A.NEF"))?, bytes("A.NEF"));
+        fx.reopen();
+        assert!(
+            fx.recover_with(&far_as(&fx, Far::Direct), &trash)
+                .unfinished
+                .is_empty()
+        );
+    }
+    Ok(())
+}
+
+/// `Café.NEF` with its sidecar, and `far/`.
+fn accented() -> Fx {
+    fixture(&[CAFE, "Caf\u{e9}.xmp", "far/"])
+}
+
+#[test]
+fn an_accented_name_moves_to_exfat_whose_driver_lists_it_decomposed() -> Result<()> {
+    for kind in [Far::Names, Far::Direct] {
+        let mut fx = accented();
+        let photo = fx.photo(CAFE);
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx, &[CAFE]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert_eq!(
+            results(&outcome),
+            [ItemResult::Moved {
+                to: fx.folder("far")
+            }],
+            "{kind:?}"
+        );
+        assert_eq!(fx.rows()[&photo], format!("far/{CAFE}"), "{kind:?}");
+        assert_eq!(std::fs::read(fx.root.join("far").join(CAFE))?, bytes(CAFE));
+        assert!(!fx.root.join(CAFE).exists(), "{kind:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn an_accented_name_moves_from_exfat_whose_driver_lists_it_decomposed() -> Result<()> {
+    let mut fx = accented();
+    let photo = fx.photo(CAFE);
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        lists_decomposed: true,
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &[CAFE]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&photo], format!("far/{CAFE}"));
+    assert!(outcome.items[0].originals_kept.is_empty(), "{outcome:?}");
+    assert!(!fx.root.join(CAFE).exists());
+    Ok(())
+}
+
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
+fn every_fault_moving_an_accented_name_to_exfat_ends_proven() {
+    let mut runs = 0;
+    for kind in [Far::Names, Far::Direct] {
+        let mut clean = accented();
+        let counting = far_as(&clean, kind);
+        let trash = FakeTrash::new(&clean);
+        let op = to_far(&clean, &[CAFE]);
+        let _ = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
+        for op in Op::COPYING {
+            for nth in 0..counting.count(op) {
+                for fault in [Fault::Fail, Fault::CrashAfter, Fault::CrashMid] {
+                    if fault == Fault::CrashMid && op != Op::Copy {
+                        continue;
+                    }
+                    let mut fx = accented();
+                    let was = before(&fx);
+                    let disk = Faulty {
+                        faults: vec![(op, nth, fault)],
+                        ..far_as(&fx, kind)
+                    };
+                    let trash = FakeTrash::new(&fx);
+                    let (batch, recovery) = scenario_of(&mut fx, &[CAFE], &trash, &disk, kind);
+                    let what = format!("{kind:?} {op:?} {nth} {fault:?}");
+                    proven(&mut fx, &was, &batch, &recovery, &what, kind);
+                    runs += 1;
+                }
+            }
+        }
+    }
+    assert!(runs >= 40, "{runs}");
+}
+
+/// `Café.NEF` decomposed, as a file copied from elsewhere may be stored.
+const CAFE_NFD: &str = "Cafe\u{301}.NEF";
+
+#[test]
+fn a_name_stored_decomposed_moves_to_and_from_fat_and_exfat() -> Result<()> {
+    // To them: made there composed, the one spelling their drivers take
+    // for what RAWmakase makes.
+    for kind in [Far::Names, Far::Direct] {
+        let mut fx = fixture(&[CAFE_NFD, "far/"]);
+        let photo = fx.photo(CAFE_NFD);
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx, &[CAFE_NFD]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert_eq!(
+            results(&outcome),
+            [ItemResult::Moved {
+                to: fx.folder("far")
+            }],
+            "{kind:?}"
+        );
+        assert_eq!(fx.rows()[&photo], format!("far/{CAFE}"), "{kind:?}");
+        assert!(
+            super::tests::stored_spelling(&fx.root.join("far").join(CAFE)),
+            "{kind:?}: stored composed"
+        );
+    }
+    // From them: an original stored decomposed goes to the Trash by that
+    // spelling.
+    let mut fx = fixture(&[CAFE_NFD, "far/"]);
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        lists_decomposed: true,
+        ..far(&fx)
+    };
+    let mut trash = FakeTrash::new(&fx);
+    trash.stored_only = true;
+    let op = to_far(&fx, &[CAFE_NFD]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert!(outcome.items[0].originals_kept.is_empty(), "{outcome:?}");
+    assert!(!fx.root.join(CAFE_NFD).exists());
+    Ok(())
+}
+
+#[test]
+fn a_copy_made_at_its_name_that_a_photo_of_the_catalog_is_now_stays() -> Result<()> {
+    let mut fx = files();
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 0, Fault::CrashAfter)],
+        ..far_as(&fx, Far::Direct)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    assert!(crashes(|| {
+        drop(execute::execute_with(
+            &mut fx.cat,
+            plan.confirm(),
+            &trash,
+            &Default::default(),
+            &disk,
+        ));
+    }));
+    // Meanwhile the catalog takes the file at that name for a photo of its
+    // own, as Synchronize Folder may.
+    let root = fx.root.clone();
+    fx.add_row(&root, "far", "A.NEF");
+    fx.reopen();
+    let recovery = fx.recover_with(&far_as(&fx, Far::Direct), &trash);
+    assert_eq!(recovery.unfinished.len(), 1, "{recovery:?}");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    Ok(())
+}
+
+#[test]
+fn another_spelling_of_a_name_is_taken_only_for_the_same_file() -> Result<()> {
+    // The Trash and a rename fall back to a name's decomposed spelling,
+    // which macOS's FAT and exFAT take only so: never where that is another
+    // file (#573).
+    let dir = tempfile::tempdir()?;
+    let composed = dir.path().join(CAFE);
+    std::fs::write(&composed, b"original")?;
+    let other = super::proof::other_spelling(&super::disk::Real, &composed);
+    let decomposed = dir.path().join(CAFE_NFD);
+    match decomposed.exists() {
+        // Found by either spelling: the same file.
+        true => assert_eq!(other, Some(decomposed)),
+        // Found only by its bytes: another file of the other spelling is
+        // never taken for it.
+        false => {
+            assert_eq!(other, None);
+            std::fs::write(&decomposed, b"another")?;
+            assert_eq!(
+                super::proof::other_spelling(&super::disk::Real, &composed),
+                None
+            );
+        }
+    }
     Ok(())
 }

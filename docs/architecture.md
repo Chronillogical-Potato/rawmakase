@@ -237,8 +237,10 @@ inject a temporary file, without changing the process-wide environment.
   only after that, while it is still the file copied; the one file ever
   unlinked is a partial copy the run made and never named. Such copies are
   made only between volumes whose file ids stay (local APFS, HFS+, ext,
-  XFS, Btrfs or NTFS ones), and a name held by another file object is never taken for a
-  copy gone. A folder moved to another volume is copied whole into one
+  XFS, Btrfs or NTFS ones) or FAT and exFAT ones, where a copy is proven by
+  its exact name and SHA-256 instead and no file id is journalled (#573);
+  and a name held by another file object, or not proven, is never taken for
+  a copy gone. A folder moved to another volume is copied whole into one
   hidden folder there, then named by one exclusive rename; its originals go
   to the Trash whole only when the folder holds exactly what was copied, and
   the only folders ever removed are empty ones that copy made. Every disk step is journalled, after its folders

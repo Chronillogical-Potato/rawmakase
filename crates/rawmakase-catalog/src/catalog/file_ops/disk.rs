@@ -24,12 +24,16 @@ pub(super) trait Disk {
         &self,
         from: &Path,
         to: &Path,
-        to_id: FileId,
+        to_id: Option<FileId>,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError>;
     fn sync_file(&self, path: &Path) -> Result<(), FsError>;
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError>;
     fn hash(&self, path: &Path) -> Result<ContentHash, FsError>;
+    /// The SHA-256 of `path`'s first `len` bytes.
+    fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError>;
+    /// When `path` was made.
+    fn created(&self, path: &Path) -> Result<std::time::SystemTime, FsError>;
     /// Removes a partial copy, which its caller proves its own.
     fn remove_file(&self, path: &Path) -> Result<(), FsError>;
     /// Removes an empty folder a copy made, which its caller proves its own.
@@ -71,10 +75,16 @@ impl Disk for Real {
         &self,
         from: &Path,
         to: &Path,
-        to_id: FileId,
+        to_id: Option<FileId>,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError> {
         fsops::copy_into(from, to, to_id, go_on)
+    }
+    fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError> {
+        fsops::hash_prefix(path, len)
+    }
+    fn created(&self, path: &Path) -> Result<std::time::SystemTime, FsError> {
+        fsops::created(path)
     }
     fn sync_file(&self, path: &Path) -> Result<(), FsError> {
         fsops::sync_file(path)
