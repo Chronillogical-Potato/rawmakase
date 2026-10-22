@@ -4,13 +4,16 @@ RAWmakase renders with profiles from its own library and files the user explicit
 
 ## Import and select
 
-Use **Import profiles…** in the Develop Profile menu or **Import Profiles…** in Preferences. Select one or more `.dcp` / `.xmp` files. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
+Use **Import profiles…** in the Develop Profile menu or **Import Profiles…** in Preferences. Select one or more `.dcp` / `.xmp` files, `.cube` LUTs (see [.cube LUTs](#cube-luts)), or folders holding them. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
 
 The CLI uses the same importer:
 
 ```sh
 rawmakase import-profiles '/selected/Fujifilm X100F Adobe Standard.dcp' '/selected/Adobe Color.xmp'
+rawmakase import-profiles '/selected/Film LUTs'
 ```
+
+It prints a line for each `.cube` and for each file it could not import, and fails when any file was not imported or nothing was found.
 
 Selected files are validated and copied into `camera-profiles` under RAWmakase's application data directory (`~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` on Linux). An identical reimport is harmless. A different file with the same filename is reported instead of overwritten. The entire selection is validated before copying starts. Source files remain unchanged.
 
@@ -77,6 +80,19 @@ Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table loo
 The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it was not checked closely, because RAWmakase compressed out-of-gamut colours toward gray where Camera Raw clips them; RAWmakase now clips per channel too ([out-of-gamut colors](color-pipeline.md#out-of-gamut-colors)).
 
 A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
+
+## .cube LUTs
+
+Camera Raw and Lightroom have no LUT stage: Photoshop's Camera Raw **Create Profile** turns a `.cube` into a creative look profile whose RGB table is the cube, and the third-party LUT packs that ship Lightroom profiles beside their cubes store each cube node for node as such a table. RAWmakase does the same. Importing a `.cube` (from the Profile menu, Preferences or `rawmakase import-profiles`, files or folders) writes a look XMP into the profile library; the cube itself is not kept. From then on it is an ordinary look: it is listed in **Profile**, renders through the [RGB table](#rgb-tables) path on the CPU and GPU, takes a Profile Amount of 0–200%, and is embedded in the recipe with its table, so presets, snapshots and History carry it and deleting the library file later does not change an edit. There is no Recipe field or format change for it.
+
+- **Where it applies.** Where Camera Raw applies RGB tables: after the tone controls, point curves, HSL and Saturation, before Color Grading, which therefore applies on top of the LUT. Like other creative looks it names no base profile and goes over the photo's own: Adobe Standard when imported, else a DNG's own profile, else RAWmakase Standard. A LUT made for a log or HDR input is not a look and renders wrongly here, as in Lightroom.
+- **Switching it off and strength.** Choose another profile, or set Amount to 0%, which leaves the table out entirely. Amount blends in the table's encoding as for any RGB table, up to 200%.
+- **Conversion.** The table is in sRGB primaries and sRGB encoding, colours outside sRGB clipped before the lookup, amount bounds 0–2 (what third-party profiles made from cubes carry). A 3D cube of 2–64 divisions keeps its grid, node for node: resampling onto another grid is lossy (33 divisions onto 32 costs up to 13 8-bit levels on a sharp creative cube, keeping 33 costs nothing). A larger cube (65 is common) is sampled onto 64 divisions, the most a table holds, by tetrahedral lookup in the cube. A 1D cube becomes a 1D table, resampled to 4096 entries above that. Outputs outside 0–1 are clamped, as the table holds no more.
+- **Fidelity report.** Each file is measured at import against its cube, on its nodes and cell centres and the table's: *exact* (within 16-bit rounding), *approximated* with its largest error in 8-bit levels and why (resampled, outputs clamped), or *refused* with the reason. The status line counts approximated and renamed files, and its tooltip lists them; the CLI prints every file.
+- **Refused for now.** Cubes whose `DOMAIN_MIN`/`DOMAIN_MAX` (or input range) is not 0–1, cubes with a 1D shaper in front of the 3D table, `LUT_3D_OUTPUT_RANGE`, and files that are not cubes (such as the macOS `._` files zips carry beside them, which folder imports skip). What Camera Raw does with domains and shapers is still to be measured. Other LUT formats (`.3dl`, Hald, `.csp`) and zips are not read.
+- **Names and groups.** The look is named after the file (`Portra.cube` lists as **Portra**); the cube's `TITLE` becomes its description, as packs often repeat one title across files, and the folder it was in its group. Profile names identify looks in the profile list, in recipes and in XMP sidecars, so a name a different profile already has — another folder's Portra, one of the library's DCPs or looks (an Adobe one included), RAWmakase Standard or Color, or Adobe Standard or Color, which Lightroom edits fall back from by name — is never shadowed: the cube is named **Portra (Cool)** after its folder, then **Portra (Cool 2)**, and the import reports the rename. The table's MD5 names the table and the look's UUID, so importing the same cube again is recognised by its table under its name or any name it was renamed to, whatever folder it comes from or how its text is written, and reported as already imported.
+- **Profile menu.** For now imported LUTs are listed in the flat, name-sorted Profile menu with every other profile; a menu grouped by `crs:Group` is planned (#582).
+- **Lightroom.** The generated XMP is a standard look profile: installed in Lightroom or Camera Raw it renders there, and sidecars that name it resolve back in RAWmakase by name and UUID. The other way does not work: a profile Lightroom creates from the same cube has a UUID of Adobe's own and does not resolve to RAWmakase's import.
 
 ## Settings inside looks
 

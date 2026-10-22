@@ -1,5 +1,6 @@
 use super::{
     CameraProfile,
+    cube_look::{self, Fidelity, Names, Placement},
     enhanced::{LookBase, LookFile},
     from_bytes,
 };
@@ -265,10 +266,61 @@ fn collect(dir: &Path, depth: usize, files: &mut Vec<std::path::PathBuf>) {
     }
 }
 
-/// Explicitly import files into RAWmakase's own library. Validate the complete batch
-/// before writing; never follow or discover Adobe application directories.
-pub fn import_files(paths: &[std::path::PathBuf]) -> Result<Vec<std::path::PathBuf>> {
+/// Explicitly import files into RAWmakase's own library: DCPs and look XMPs are
+/// copied, and a `.cube` becomes a look XMP (see `cube_look`). Validate the complete
+/// batch before writing; never follow or discover Adobe application directories.
+pub fn import_files(paths: &[std::path::PathBuf]) -> Result<Vec<ImportedProfile>> {
     import_into(paths, &crate::storage::data_dir().join("camera-profiles"))
+}
+/// One file [`import_files`] took into the library.
+#[derive(Clone, Debug)]
+pub struct ImportedProfile {
+    /// The file chosen.
+    pub source: PathBuf,
+    /// The library's file: a DCP's or look's copy, or the look made from a `.cube`.
+    pub path: PathBuf,
+    /// For a `.cube`, the look it became.
+    pub cube: Option<CubeImport>,
+}
+/// What became of a `.cube`.
+#[derive(Clone, Debug)]
+pub struct CubeImport {
+    /// The look's name in the profile list.
+    pub name: String,
+    /// The cube's file stem, which the look is named after unless a different
+    /// profile has that name.
+    pub stem: String,
+    /// In the library already, under `name`: nothing was written.
+    pub already: bool,
+    /// How faithfully the look holds the cube.
+    pub fidelity: Fidelity,
+}
+impl CubeImport {
+    /// Named other than its file, as a different profile has that name.
+    pub fn renamed(&self) -> bool {
+        self.name != self.stem
+    }
+}
+impl std::fmt::Display for CubeImport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.already {
+            return write!(f, "already imported as look \"{}\"", self.name);
+        }
+        write!(f, "imported as look \"{}\"", self.name)?;
+        if self.renamed() {
+            write!(f, ", as another profile is named \"{}\"", self.stem)?;
+        }
+        write!(f, ": {}", self.fidelity)
+    }
+}
+/// Whether a `.cube` can be imported, and how faithfully: what [`import_files`] would
+/// make of its bytes.
+pub fn read_cube(bytes: &[u8]) -> Result<Fidelity> {
+    ensure!(
+        bytes.len() as u64 <= cube_look::MAX_BYTES,
+        "the cube is too large"
+    );
+    Ok(cube_look::convert(bytes)?.fidelity)
 }
 /// What [`import_readable`] did.
 #[derive(Debug, Default)]
@@ -307,13 +359,13 @@ fn import_readable_into(paths: &[std::path::PathBuf], destination: &Path) -> Res
         Vec::new()
     } else {
         import_into(&readable, destination)?
+            .into_iter()
+            .map(|done| done.path)
+            .collect()
     };
     Ok(Imported { imported, skipped })
 }
-fn import_into(
-    paths: &[std::path::PathBuf],
-    destination: &Path,
-) -> Result<Vec<std::path::PathBuf>> {
+fn import_into(paths: &[std::path::PathBuf], destination: &Path) -> Result<Vec<ImportedProfile>> {
     use anyhow::Context;
     use std::io::Write;
     ensure!(
@@ -322,34 +374,68 @@ fn import_into(
     );
     let mut files = Vec::new();
     let mut bases = Vec::new();
+    // The names a cube's look must not take: the library's profiles and looks, this
+    // import's, and RAWmakase's own.
+    let mut names = Names::default();
+    // Lightroom edits naming Adobe's two fall back to RAWmakase's by name alone.
+    for name in [
+        super::open::STANDARD,
+        super::open::COLOR,
+        "Adobe Standard",
+        "Adobe Color",
+    ] {
+        names.profile(name);
+    }
     let mut existing = Vec::new();
     collect(destination, 0, &mut existing);
+    let mut looks = Vec::new();
     for p in existing {
-        if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dcp"))
+        if p.parent() == Some(destination)
+            && let Some(file) = p.file_name()
+        {
+            names.file(&file.to_string_lossy());
+        }
+        let ext = |e: &str| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(e));
+        if ext("dcp")
             && let Ok(bytes) = std::fs::read(&p)
             && let Ok(profile) = from_bytes(&bytes)
         {
+            names.profile(&profile.name);
             bases.push(profile);
+        } else if ext("xmp") {
+            looks.push(p);
         }
     }
+    let mut cubes = Vec::new();
     for path in paths {
-        ensure!(
-            std::fs::metadata(path)?.len() <= 16_000_000,
-            "Profile too large: {}",
-            path.display()
-        );
         let ext = path
             .extension()
             .and_then(|v| v.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
         ensure!(
-            matches!(ext.as_str(), "dcp" | "xmp"),
-            "Choose DCP or XMP profiles"
+            matches!(ext.as_str(), "dcp" | "xmp" | "cube"),
+            "Choose DCP or XMP profiles or .cube files"
+        );
+        let limit = if ext == "cube" {
+            cube_look::MAX_BYTES
+        } else {
+            16_000_000
+        };
+        ensure!(
+            std::fs::metadata(path)?.len() <= limit,
+            "Profile too large: {}",
+            path.display()
         );
         let bytes = std::fs::read(path)?;
+        if ext == "cube" {
+            cubes.push((path, bytes));
+            continue;
+        }
         if ext == "dcp" {
-            bases.push(from_bytes(&bytes).with_context(|| format!("{}", path.display()))?);
+            let profile = from_bytes(&bytes).with_context(|| format!("{}", path.display()))?;
+            names.profile(&profile.name);
+            bases.push(profile);
         }
         let target = destination.join(path.file_name().context("Missing profile filename")?);
         if target.exists() {
@@ -359,20 +445,23 @@ fn import_into(
                 target.file_name().unwrap().to_string_lossy()
             );
         }
-        if let Some((_, previous, _)) = files.iter().find(|(p, _, _)| *p == target) {
+        if let Some((_, _, previous, _, _)) = files.iter().find(|(_, p, _, _, _)| *p == target) {
             ensure!(
                 *previous == bytes,
                 "Conflicting profile filenames in import"
             );
         } else {
-            files.push((target, bytes, ext));
+            names.file(&target.file_name().unwrap().to_string_lossy());
+            files.push((path.clone(), target, bytes, ext, None));
         }
     }
-    for (path, bytes, ext) in &files {
+    for (_, path, bytes, ext, _) in &files {
         if ext == "xmp" {
             let file = path.file_name().unwrap().to_string_lossy();
-            let look =
-                LookFile::parse(std::str::from_utf8(bytes)?).with_context(|| format!("{file}"))?;
+            let text = std::str::from_utf8(bytes)?;
+            let look = LookFile::parse(text).with_context(|| format!("{file}"))?;
+            let (name, uuid) = LookFile::identity(text)?;
+            names.look(&name, &uuid, path);
             if let LookBase::Named(name) = &look.base {
                 // The base must also be for the camera the look is restricted to.
                 if !bases
@@ -388,17 +477,71 @@ fn import_into(
             }
         }
     }
-    std::fs::create_dir_all(destination)?;
+    // The library's looks, read only when a cube needs their names.
+    if !cubes.is_empty() {
+        for p in looks {
+            if std::fs::metadata(&p).is_ok_and(|m| m.len() <= 16_000_000)
+                && let Ok(text) = std::fs::read_to_string(&p)
+                && let Ok((name, uuid)) = LookFile::identity(&text)
+            {
+                names.look(&name, &uuid, &p);
+            }
+        }
+    }
+    // Cubes last, so their names avoid every other profile's in this import.
     let mut imported = Vec::new();
-    for (target, bytes, _) in files {
-        if !target.exists() {
+    for (path, bytes) in cubes {
+        let file = path.file_name().unwrap_or_default().to_string_lossy();
+        let converted = cube_look::convert(&bytes).with_context(|| format!("{file}"))?;
+        let (stem, group) = cube_look::stem_and_group(path)?;
+        let report = |name: String, already| CubeImport {
+            name,
+            stem: stem.clone(),
+            already,
+            fidelity: converted.fidelity.clone(),
+        };
+        match names.place(&stem, &group, &converted.uuid)? {
+            Placement::Already(name, library) => imported.push(ImportedProfile {
+                source: path.clone(),
+                path: library,
+                cube: Some(report(name, true)),
+            }),
+            Placement::New(name) => {
+                let file = names.file_for(&name);
+                let target = destination.join(&file);
+                names.file(&file);
+                names.look(&name, &converted.uuid, &target);
+                let xml = cube_look::look_xmp(&converted, &name, &group);
+                files.push((
+                    path.clone(),
+                    target,
+                    xml.into_bytes(),
+                    "cube".into(),
+                    Some(report(name, false)),
+                ));
+            }
+        }
+    }
+    std::fs::create_dir_all(destination)?;
+    let mut written = Vec::new();
+    for (source, target, bytes, _, cube) in files {
+        // A copy equal to the library's file is there already; a cube's look is
+        // new, and a file that appeared under its name since is an error.
+        if cube.is_some() || !target.exists() {
             crate::storage::write_atomic(&target, crate::storage::Replace::NoClobber, |f| {
                 Ok(f.write_all(&bytes)?)
             })?;
         }
-        imported.push(target);
+        written.push(ImportedProfile {
+            source,
+            path: target,
+            cube,
+        });
     }
-    Ok(imported)
+    written.extend(imported);
+    // In the order chosen.
+    written.sort_by_key(|done| paths.iter().position(|p| *p == done.source));
+    Ok(written)
 }
 
 /// Whether `name` is one of the photo's cameras followed by any phone module, so
@@ -598,10 +741,13 @@ mod tests {
         std::fs::write(&source, bytes)?;
         let dest = temp.path().join("rawmakase-library");
         let selected = vec![source.clone()];
-        let result = import_into(&selected, &dest)?;
+        let paths = |done: Vec<ImportedProfile>| -> Vec<PathBuf> {
+            done.into_iter().map(|d| d.path).collect()
+        };
+        let result = paths(import_into(&selected, &dest)?);
         assert_eq!(std::fs::read(&result[0])?, bytes);
         assert_eq!(std::fs::read(&source)?, bytes);
-        assert_eq!(import_into(&selected, &dest)?, result);
+        assert_eq!(paths(import_into(&selected, &dest)?), result);
         std::fs::write(&result[0], b"existing user data")?;
         assert!(import_into(&selected, &dest).is_err());
         assert_eq!(std::fs::read(&result[0])?, b"existing user data");
@@ -645,5 +791,200 @@ mod tests {
     }
     fn names_all(profiles: &[Arc<CameraProfile>]) -> Vec<&str> {
         profiles.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    /// A camera RAWmakase Standard is made for, so creative looks have a base.
+    fn with_matrix() -> Metadata {
+        Metadata {
+            make: "Test".into(),
+            model: "Camera".into(),
+            cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+            ..Default::default()
+        }
+    }
+    fn write_cube(dir: &Path, name: &str, f: impl Fn([f32; 3]) -> [f32; 3]) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, super::super::cube_look::tests::cube_text(9, f)).unwrap();
+        path
+    }
+    fn warm([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [0.05 + 0.9 * r, 0.02 + 0.93 * g, 0.85 * b]
+    }
+    fn cool([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [0.85 * r, 0.02 + 0.93 * g, 0.05 + 0.9 * b]
+    }
+    fn cube_of(done: &ImportedProfile) -> &CubeImport {
+        done.cube.as_ref().expect("a cube's report")
+    }
+
+    /// A cube becomes a look XMP in the library, named after its file and grouped by
+    /// its folder, which the profile list then offers over the photo's base profile.
+    #[test]
+    fn a_cube_imports_as_a_look_the_library_lists() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
+        let dest = temp.path().join("library");
+        let done = import_into(std::slice::from_ref(&cube), &dest)?;
+        assert_eq!(done.len(), 1);
+        let report = cube_of(&done[0]);
+        assert_eq!((report.name.as_str(), report.already), ("Portra", false));
+        assert_eq!(report.fidelity, Fidelity::Exact);
+        assert_eq!(done[0].path, dest.join("Portra.xmp"));
+        let xml = std::fs::read_to_string(&done[0].path)?;
+        assert!(xml.contains(">Film</rdf:li>") && xml.contains(">Test cube</rdf:li>"));
+        // The cube itself is not copied: the look is what the library holds.
+        assert_eq!(std::fs::read_dir(&dest)?.count(), 1);
+        let (profiles, errors) = installed_in(&[dest], &with_matrix(), &Cameras::default());
+        assert!(errors.is_empty(), "{errors:?}");
+        let look = profiles
+            .iter()
+            .find(|p| p.name == "Portra")
+            .expect("listed");
+        let enhanced = look.enhanced.as_ref().unwrap();
+        assert_eq!(enhanced.base_name, super::super::open::STANDARD);
+        assert!(enhanced.rgb.is_some() && enhanced.amount.is_some());
+        Ok(())
+    }
+
+    /// Importing the same cube again changes nothing and says so, whatever folder it
+    /// comes from: its table, not its bytes or its group, is what identifies it.
+    #[test]
+    fn importing_a_cube_again_is_idempotent() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
+        import_into(std::slice::from_ref(&cube), &dest)?;
+        let before = std::fs::read(dest.join("Portra.xmp"))?;
+        let moved = write_cube(&temp.path().join("Elsewhere"), "Portra.cube", warm);
+        // Rewritten with other whitespace and a comment: other bytes, the same table.
+        let text = std::fs::read_to_string(&moved)?;
+        std::fs::write(
+            &moved,
+            format!("# exported again\n{}", text.replace(' ', "  ")),
+        )?;
+        for path in [cube, moved] {
+            let done = import_into(std::slice::from_ref(&path), &dest)?;
+            let report = cube_of(&done[0]);
+            assert!(report.already, "{report}");
+            assert_eq!(done[0].path, dest.join("Portra.xmp"));
+        }
+        assert_eq!(std::fs::read(dest.join("Portra.xmp"))?, before);
+        assert_eq!(std::fs::read_dir(&dest)?.count(), 1);
+        Ok(())
+    }
+
+    /// A different cube under a name the library has is renamed after its folder,
+    /// never shadowing or shadowed: another cube's look, a look XMP (an Adobe name
+    /// included), a DCP or RAWmakase's own profiles. A renamed one imports again as
+    /// already imported.
+    #[test]
+    fn a_name_collision_is_renamed_and_reported() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        std::fs::create_dir_all(&dest)?;
+        let warm_cube = write_cube(&temp.path().join("Warm"), "Portra.cube", warm);
+        import_into(&[warm_cube], &dest)?;
+        // An Adobe look's name, held by a look XMP whose file is named otherwise.
+        let other = write_cube(&temp.path().join("x"), "Other.cube", warm);
+        let converted = super::super::cube_look::convert(&std::fs::read(&other)?)?;
+        std::fs::write(
+            dest.join("adobe-vivid.xmp"),
+            super::super::cube_look::look_xmp(&converted, "Adobe Vivid", "Adobe"),
+        )?;
+        std::fs::write(dest.join("mine.dcp"), dcp("Test Camera", "Camera Neutral"))?;
+        let cool_dir = temp.path().join("Cool");
+        let picks = [
+            write_cube(&cool_dir, "Portra.cube", cool),
+            write_cube(&cool_dir, "Adobe Vivid.cube", cool),
+            write_cube(&cool_dir, "Camera Neutral.cube", cool),
+            write_cube(&cool_dir, "RAWmakase Standard.cube", cool),
+            // Not imported, but the name Lightroom edits fall back by.
+            write_cube(&cool_dir, "Adobe Standard.cube", cool),
+        ];
+        let done = import_into(&picks, &dest)?;
+        let names: Vec<_> = done.iter().map(|d| cube_of(d).name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Portra (Cool)",
+                "Adobe Vivid (Cool)",
+                "Camera Neutral (Cool)",
+                "RAWmakase Standard (Cool)",
+                "Adobe Standard (Cool)"
+            ]
+        );
+        assert!(
+            done.iter()
+                .all(|d| cube_of(d).renamed() && !cube_of(d).already)
+        );
+        assert!(
+            cube_of(&done[0])
+                .to_string()
+                .contains("as another profile is named \"Portra\"")
+        );
+        // A third Portra goes further; the renamed one imports again as itself.
+        let third = write_cube(&temp.path().join("b/Cool"), "Portra.cube", |p| p);
+        let done = import_into(&[third], &dest)?;
+        assert_eq!(cube_of(&done[0]).name, "Portra (Cool 2)");
+        let done = import_into(&picks[..1], &dest)?;
+        assert!(cube_of(&done[0]).already);
+        assert_eq!(cube_of(&done[0]).name, "Portra (Cool)");
+        // The same cube from another folder is found under its new name.
+        let copy = write_cube(&temp.path().join("Cool copy"), "Portra.cube", cool);
+        let done = import_into(&[copy], &dest)?;
+        assert!(cube_of(&done[0]).already, "{}", cube_of(&done[0]));
+        assert_eq!(cube_of(&done[0]).name, "Portra (Cool)");
+        // Every look lists under its own name.
+        let (profiles, _) = installed_in(&[dest], &with_matrix(), &Cameras::default());
+        let listed = names_all(&profiles);
+        for name in [
+            "Portra",
+            "Portra (Cool)",
+            "Portra (Cool 2)",
+            "Adobe Vivid",
+            "Adobe Vivid (Cool)",
+        ] {
+            assert_eq!(
+                listed.iter().filter(|n| **n == name).count(),
+                1,
+                "{name}: {listed:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Something under the look's file name the library scan doesn't list (a
+    /// folder, say) is an error, not a look reported as imported but never written.
+    #[test]
+    fn a_cubes_look_never_claims_a_file_it_did_not_write() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        std::fs::create_dir_all(dest.join("Portra.xmp"))?;
+        let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
+        assert!(import_into(&[cube], &dest).is_err());
+        Ok(())
+    }
+
+    /// A cube the table cannot hold refuses the batch, as any unreadable profile does,
+    /// before anything is written.
+    #[test]
+    fn a_refused_cube_fails_the_batch_before_writing() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let good = write_cube(&temp.path().join("Pack"), "Good.cube", warm);
+        let bad = temp.path().join("Pack/Log.cube");
+        std::fs::write(
+            &bad,
+            super::super::cube_look::tests::cube_text(2, |p| p).replace(
+                "LUT_3D_SIZE 2",
+                "LUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 4 4 4",
+            ),
+        )?;
+        let dest = temp.path().join("library");
+        let error = import_into(&[good, bad], &dest).unwrap_err();
+        assert!(format!("{error:#}").starts_with("Log.cube: "), "{error:#}");
+        assert!(!dest.join("Good.xmp").exists());
+        assert!(read_cube(&std::fs::read(temp.path().join("Pack/Good.cube"))?).is_ok());
+        Ok(())
     }
 }

@@ -156,10 +156,12 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | --- | --- |
 | [camera_profiles/mod.rs](../crates/rawmakase-model/src/camera_profiles/mod.rs) | Profile/table models, validation, camera transforms and profile tone behavior. |
 | [dcp.rs](../crates/rawmakase-model/src/camera_profiles/dcp.rs) | Bounded, endian-aware TIFF/DCP tag decoding. |
-| [library.rs](../crates/rawmakase-model/src/camera_profiles/library.rs) | Explicit profile imports, RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
+| [library.rs](../crates/rawmakase-model/src/camera_profiles/library.rs) | Explicit profile imports (DCPs, look XMPs and `.cube` files as looks), RAWmakase-library loading and camera matching; lists a camera's Adobe profiles on this computer for the one-click import, and reads nothing else from there. |
 | [enhanced.rs](../crates/rawmakase-model/src/camera_profiles/enhanced.rs) | Bounded XMP HSV big-table decoding, profile curves and internal adjustments; camera and creative look files (`LookFile`) and Profile Amount (`Enhanced::at_amount`). |
 | [look_settings.rs](../crates/rawmakase-model/src/camera_profiles/look_settings.rs) | Exposure, Saturation, colour mixer, parametric curve, split toning and vignette settings inside looks; `Recipe::with_profile_adjustments` renders them with the user's. |
 | [rgb_table.rs](../crates/rawmakase-model/src/camera_profiles/rgb_table.rs) | Adobe RGB tables (1D and 3D, in their own primaries and encoding) of creative and camera-matching looks, with tetrahedral interpolation; the colour stage applies them after the colour mixer (`develop.wgsl`'s `rgb_table` on the GPU). |
+| [cube.rs](../crates/rawmakase-model/src/camera_profiles/cube.rs) | The `.cube` reader (3D and 1D tables, domains, shapers), with tetrahedral lookup. By Luke Walker. |
+| [cube_look.rs](../crates/rawmakase-model/src/camera_profiles/cube_look.rs) | A `.cube` imported as a look: its RGB table (`RgbTable::from_cube`), the fidelity measured at import, the generated look XMP and the names imported looks take. `library::import_files` writes it. See [.cube LUTs](lightroom-profiles.md#cube-luts). |
 | [temperature.rs](../crates/rawmakase-model/src/camera_profiles/temperature.rs) | DNG temperature/tint and chromaticity conversion. |
 | [reference.rs](../crates/rawmakase-model/src/camera_profiles/reference.rs) | A photo's baseline exposure (DNG tag or camera table) and verified neutral calibration data. |
 | [dng_tone.rs](../crates/rawmakase-model/src/camera_profiles/dng_tone.rs) | Adobe DNG default tone-curve data. |

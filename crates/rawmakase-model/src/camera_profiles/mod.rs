@@ -624,6 +624,12 @@ impl CameraProfile {
             })
             .collect()
     }
+    /// `self` with the look a `.cube` imports as over it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_cube_for_test(&self, cube: &str) -> Result<Self> {
+        let converted = cube_look::convert(cube.as_bytes())?;
+        enhanced::LookFile::parse(&cube_look::look_xmp(&converted, "Cube", ""))?.compose(self)
+    }
     /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_test_tables(mut self) -> Self {
@@ -776,20 +782,20 @@ fn matmul(a: Matrix, b: Matrix) -> Matrix {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
 
-// Nothing reads cubes yet; the profile import will.
-#[cfg_attr(not(test), allow(dead_code))]
 mod cube;
+mod cube_look;
 mod dcp;
 mod enhanced;
 mod library;
 mod look_settings;
 pub mod open;
 mod rgb_table;
+pub use cube_look::Fidelity;
 pub use dcp::{d65_color_matrix, from_bytes};
 pub use enhanced::RgbLook;
 pub use library::{
-    Imported, adobe_installed, builtin, compose_look, import_files, import_readable, installed,
-    library_dirs, load,
+    CubeImport, Imported, ImportedProfile, adobe_installed, builtin, compose_look, import_files,
+    import_readable, installed, library_dirs, load, read_cube,
 };
 pub use look_settings::LookSettings;
 pub use rgb_table::{Dimensions, Gamut};

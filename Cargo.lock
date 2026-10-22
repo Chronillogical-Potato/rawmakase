@@ -3786,6 +3786,7 @@ dependencies = [
  "anyhow",
  "flate2",
  "libc",
+ "md-5",
  "rawmakase-protocol",
  "rawmakase-tiff",
  "rayon",

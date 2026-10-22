@@ -1,13 +1,15 @@
-//! 3D lookup tables from `.cube` files, as Adobe's Cube LUT specification 1.0 writes
-//! them. A cube is a regular grid of colours: `LUT_3D_SIZE` divisions per side, one
+//! Lookup tables from `.cube` files, as Adobe's Cube LUT specification 1.0 writes
+//! them. A 3D cube is a regular grid of colours: `LUT_3D_SIZE` divisions per side, one
 //! output colour per node, read by tetrahedral interpolation — the same interpolation
 //! `camera_profiles::rgb_table` already uses for Adobe's own 3D RGB tables, and for the
-//! same reason: it is what the DNG SDK does.
+//! same reason: it is what the DNG SDK does. A 1D cube (`LUT_1D_SIZE` alone) is a curve
+//! per channel.
 //!
 //! A cube carries no primaries, so it says nothing about the space its numbers live in
-//! and is conventionally authored in a display space, usually gamma-encoded sRGB. Where
-//! RAWmakase applies one is a separate question, answered at the call site (see #202); this
-//! module only knows how to read a cube and look a colour up in it.
+//! and is conventionally authored in a display space, usually gamma-encoded sRGB. RAWmakase
+//! imports one as a look profile's RGB table (`rgb_table::RgbTable::from_cube`), as
+//! Camera Raw's Create Profile does; this module only knows how to read a cube and look
+//! a colour up in it.
 //!
 //! Data is stored with the red index changing fastest, then green, then blue, as the
 //! specification requires, so node `(r, g, b)` is at `r + g * size + b * size * size`.
@@ -57,6 +59,56 @@ impl Shaper {
     }
 }
 
+/// What a `.cube` file holds: a 3D table, or a 1D one alone.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cube {
+    Three(Lut3d),
+    One(Lut1d),
+}
+
+/// A 1D `.cube`: a curve per channel, `size` entries over `domain_min` to
+/// `domain_max`, interpolated linearly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lut1d {
+    domain_min: [f32; 3],
+    domain_max: [f32; 3],
+    /// One triple per entry; each of its three channels is that channel's curve.
+    table: Vec<[f32; 3]>,
+}
+
+impl Lut1d {
+    /// The curve's entries.
+    pub fn size(&self) -> usize {
+        self.table.len()
+    }
+
+    /// The domain the input is read over.
+    pub fn domain(&self) -> ([f32; 3], [f32; 3]) {
+        (self.domain_min, self.domain_max)
+    }
+
+    /// The entry at `i`, one value per channel.
+    pub fn entry(&self, i: usize) -> [f32; 3] {
+        self.table[i]
+    }
+
+    /// Each channel of `rgb` through its curve, clamped into the domain.
+    pub fn lookup(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let last = self.table.len() - 1;
+        std::array::from_fn(|c| {
+            let unit = ((rgb[c] - self.domain_min[c]) / (self.domain_max[c] - self.domain_min[c]))
+                .clamp(0.0, 1.0);
+            let at = unit * last as f32;
+            let index = (at as usize).min(last - 1);
+            let within = at - index as f32;
+            self.table[index][c] + within * (self.table[index + 1][c] - self.table[index][c])
+        })
+    }
+}
+
+/// The most entries a 1D cube may have, as the specification allows.
+const MAX_1D: usize = 65536;
+
 /// The largest side a cube may declare.
 const MAX_SIDE: usize = 256;
 /// The most colours a cube of that size needs, and so the most that may be collected
@@ -83,7 +135,7 @@ pub fn title_of(text: &str) -> Option<String> {
     })
 }
 
-impl Lut3d {
+impl Cube {
     /// Reads a cube. Comments start at `#` and run to the end of the line.
     pub fn parse(text: &str) -> Result<Self> {
         // A file written on Windows often starts with a UTF-8 byte order mark, which
@@ -131,35 +183,20 @@ impl Lut3d {
             }
         }
 
-        // DOMAIN_MIN/MAX and LUT_3D_INPUT_RANGE are two ways of saying what input
-        // range the table covers, not two stages to compose: composing them would
-        // cancel the domain out entirely. DOMAIN wins, and the other is read only when
-        // it is all there is. Saying so beats picking one silently.
-        let (domain_min, domain_max) = match (domain_min, domain_max, input_range) {
-            (Some(low), Some(high), other) => {
-                if let Some([input_low, input_high]) = other
-                    && (low != [input_low; 3] || high != [input_high; 3])
-                {
-                    bail!(
-                        "DOMAIN_MIN {low:?} / DOMAIN_MAX {high:?} and LUT_3D_INPUT_RANGE \
-         {input_low} {input_high} say different input ranges"
-                    );
-                }
-                (low, high)
-            }
-            (None, None, Some([low, high])) => ([low; 3], [high; 3]),
-            (None, None, None) => ([0.0; 3], [1.0; 3]),
-            _ => bail!("DOMAIN_MIN and DOMAIN_MAX go together, or neither does"),
-        };
         let Some(size) = size else {
-            if size_1d.is_some() {
-                bail!(
-                    "this is a 1D cube (LUT_1D_SIZE) with no LUT_3D_SIZE, which is \
-         not supported yet"
-                );
-            }
-            bail!("no LUT_3D_SIZE in the cube");
+            let Some(size) = size_1d else {
+                bail!("no LUT_3D_SIZE or LUT_1D_SIZE in the cube");
+            };
+            return one_dimensional(
+                size,
+                data,
+                input_range_1d,
+                input_range,
+                domain_min,
+                domain_max,
+            );
         };
+        let (domain_min, domain_max) = domain(domain_min, domain_max, input_range)?;
         ensure!(
             size >= 2,
             "LUT_3D_SIZE of {size} is too small to interpolate between"
@@ -208,21 +245,87 @@ impl Lut3d {
             "a cube of size {size} needs {expected} colours, but this one has {}",
             data.len()
         );
-        for channel in 0..3 {
-            ensure!(
-                domain_max[channel] > domain_min[channel],
-                "DOMAIN_MAX {domain_max:?} is not above DOMAIN_MIN {domain_min:?}"
-            );
-        }
-        Ok(Self {
+        Ok(Self::Three(Lut3d {
             size,
             domain_min,
             domain_max,
             shaper,
             data,
-        })
+        }))
     }
+}
 
+/// The input range a cube covers. DOMAIN_MIN/MAX and an input range keyword
+/// (`LUT_3D_INPUT_RANGE`, or `LUT_1D_INPUT_RANGE` in a 1D cube) are two ways of
+/// saying it, not two stages to compose: composing them would cancel the domain out
+/// entirely. DOMAIN wins, and the other is read only when it is all there is. Saying
+/// so beats picking one silently.
+fn domain(
+    domain_min: Option<[f32; 3]>,
+    domain_max: Option<[f32; 3]>,
+    input_range: Option<[f32; 2]>,
+) -> Result<([f32; 3], [f32; 3])> {
+    let (domain_min, domain_max) = match (domain_min, domain_max, input_range) {
+        (Some(low), Some(high), other) => {
+            if let Some([input_low, input_high]) = other
+                && (low != [input_low; 3] || high != [input_high; 3])
+            {
+                bail!(
+                    "DOMAIN_MIN {low:?} / DOMAIN_MAX {high:?} and the input range \
+         {input_low} {input_high} say different input ranges"
+                );
+            }
+            (low, high)
+        }
+        (None, None, Some([low, high])) => ([low; 3], [high; 3]),
+        (None, None, None) => ([0.0; 3], [1.0; 3]),
+        _ => bail!("DOMAIN_MIN and DOMAIN_MAX go together, or neither does"),
+    };
+    for channel in 0..3 {
+        ensure!(
+            domain_max[channel] > domain_min[channel],
+            "DOMAIN_MAX {domain_max:?} is not above DOMAIN_MIN {domain_min:?}"
+        );
+    }
+    Ok((domain_min, domain_max))
+}
+
+/// A 1D cube: `size` entries, nothing else. In a 1D cube `LUT_1D_INPUT_RANGE` is the
+/// input range, as `LUT_3D_INPUT_RANGE` is in a 3D one, which this one has no use for.
+fn one_dimensional(
+    size: usize,
+    data: Vec<[f32; 3]>,
+    input_range_1d: Option<[f32; 2]>,
+    input_range_3d: Option<[f32; 2]>,
+    domain_min: Option<[f32; 3]>,
+    domain_max: Option<[f32; 3]>,
+) -> Result<Cube> {
+    ensure!(
+        input_range_3d.is_none(),
+        "a 1D cube has no 3D table for LUT_3D_INPUT_RANGE to describe"
+    );
+    ensure!(
+        size >= 2,
+        "LUT_1D_SIZE of {size} is too small to interpolate between"
+    );
+    ensure!(
+        size <= MAX_1D,
+        "LUT_1D_SIZE of {size} is larger than {MAX_1D}"
+    );
+    ensure!(
+        data.len() == size,
+        "a 1D cube of size {size} needs {size} entries, but this one has {}",
+        data.len()
+    );
+    let (domain_min, domain_max) = domain(domain_min, domain_max, input_range_1d)?;
+    Ok(Cube::One(Lut1d {
+        domain_min,
+        domain_max,
+        table: data,
+    }))
+}
+
+impl Lut3d {
     /// The cube's divisions per side.
     pub fn size(&self) -> usize {
         self.size
@@ -231,6 +334,11 @@ impl Lut3d {
     /// The cube's domain, which its input colours are read over.
     pub fn domain(&self) -> ([f32; 3], [f32; 3]) {
         (self.domain_min, self.domain_max)
+    }
+
+    /// Whether a 1D shaper table goes in front of the 3D one.
+    pub fn has_shaper(&self) -> bool {
+        self.shaper.is_some()
     }
 
     /// The colour at a grid node, red index fastest.
@@ -365,6 +473,17 @@ fn two_f32(rest: &str, line: usize) -> Result<[f32; 2]> {
     );
     Ok(parsed)
 }
+/// The reader's tests read 3D cubes alone.
+#[cfg(test)]
+impl Lut3d {
+    fn parse(text: &str) -> Result<Self> {
+        match Cube::parse(text)? {
+            Cube::Three(lut) => Ok(lut),
+            Cube::One(_) => bail!("a 1D cube"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,13 +614,45 @@ mod tests {
         assert_eq!(lut.lookup([-9.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
     }
 
-    /// A 1D cube is a different file that happens to share the extension. Saying so is
-    /// better than reading it as a 3D one and producing noise.
+    /// A 1D cube is a curve per channel, read as one rather than as a 3D table, which
+    /// would produce noise.
     #[test]
-    fn a_1d_cube_is_refused_by_name() {
-        let text = "LUT_1D_SIZE 2\n0 0 0\n1 1 1\n";
-        let error = Lut3d::parse(text).unwrap_err().to_string();
-        assert!(error.contains("1D"), "{error}");
+    fn a_1d_cube_is_read_as_a_curve_per_channel() {
+        let text = "LUT_1D_SIZE 3\n0 0 1\n0.25 0.5 0.5\n1 1 0\n";
+        let Cube::One(lut) = Cube::parse(text).unwrap() else {
+            panic!("not read as 1D");
+        };
+        assert_eq!((lut.size(), lut.entry(1)), (3, [0.25, 0.5, 0.5]));
+        // Each channel on its own curve, linear between entries.
+        assert_eq!(lut.lookup([0.5, 0.5, 0.5]), [0.25, 0.5, 0.5]);
+        assert_eq!(lut.lookup([0.75, 0.25, 1.0]), [0.625, 0.25, 0.0]);
+        // Held at the ends outside the domain.
+        assert_eq!(lut.lookup([-1.0, 2.0, 0.0]), [0.0, 1.0, 1.0]);
+    }
+
+    /// In a 1D cube, `LUT_1D_INPUT_RANGE` says the input range as DOMAIN does, and
+    /// the two have to agree.
+    #[test]
+    fn a_1d_cubes_input_range_is_its_domain() {
+        let Cube::One(lut) =
+            Cube::parse("LUT_1D_SIZE 2\nLUT_1D_INPUT_RANGE 0 2\n0 0 0\n1 1 1\n").unwrap()
+        else {
+            panic!("not read as 1D");
+        };
+        assert_eq!(lut.domain(), ([0.0; 3], [2.0; 3]));
+        assert_eq!(lut.lookup([1.0; 3]), [0.5; 3]);
+        let error = Cube::parse(
+            "LUT_1D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\nLUT_1D_INPUT_RANGE 0 2\n0 0 0\n1 1 1\n",
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("different input ranges"),
+            "{error}"
+        );
+        let error = Cube::parse("LUT_1D_SIZE 3\n0 0 0\n1 1 1\n").unwrap_err();
+        assert!(error.to_string().contains("needs 3"), "{error}");
+        let error = Cube::parse("LUT_1D_SIZE 1\n0 0 0\n").unwrap_err();
+        assert!(error.to_string().contains("too small"), "{error}");
     }
 
     /// A cube whose data does not fill its grid has been truncated somewhere, and
@@ -517,7 +668,7 @@ mod tests {
 
     #[test]
     fn a_cube_without_a_size_is_refused() {
-        let error = Lut3d::parse("0 0 0\n").unwrap_err().to_string();
+        let error = Cube::parse("0 0 0\n").unwrap_err().to_string();
         assert!(error.contains("LUT_3D_SIZE"), "{error}");
     }
 
@@ -764,9 +915,11 @@ mod real_files {
     }
 
     #[test]
-    fn a_1d_cube_alone_is_refused_by_name() {
-        let error = Lut3d::parse("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap_err();
-        assert!(error.to_string().contains("1D"), "{error}");
+    fn a_1d_cube_alone_is_not_read_as_a_3d_one() {
+        assert!(matches!(
+            Cube::parse("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").unwrap(),
+            Cube::One(_)
+        ));
     }
 
     /// The shapes clean files already had, kept so the tolerance above stays deliberate

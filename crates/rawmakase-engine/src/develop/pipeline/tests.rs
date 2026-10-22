@@ -1201,6 +1201,68 @@ fn rgb_tables_follow_the_colour_controls() {
     mono.effects.monochrome = true;
     assert!(spread(&mono) < 1e-3);
 }
+/// A `.cube` imports as a look whose RGB table is the cube: an identity cube at 100%
+/// renders as the base profile does, within the table's 16-bit rounding, at 0% exactly
+/// as it does, and a cube that changes colour changes it.
+#[test]
+fn an_identity_cube_renders_as_its_base_profile() {
+    let m = Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+        ..Default::default()
+    };
+    let base = crate::camera_profiles::open::standard(&m).unwrap();
+    let cube = |size: usize, f: &dyn Fn([f32; 3]) -> [f32; 3]| {
+        let last = (size - 1) as f32;
+        let mut text = format!("LUT_3D_SIZE {size}\n");
+        for b in 0..size {
+            for g in 0..size {
+                for r in 0..size {
+                    let [x, y, z] = f([r as f32 / last, g as f32 / last, b as f32 / last]);
+                    text += &format!("{x} {y} {z}\n");
+                }
+            }
+        }
+        text
+    };
+    let identity = base.with_cube_for_test(&cube(33, &|p| p)).unwrap();
+    let swap = base
+        .with_cube_for_test(&cube(17, &|[r, g, b]| [g, b, r]))
+        .unwrap();
+    let recipe = |profile: &crate::camera_profiles::CameraProfile, amount: f32| Recipe {
+        profile: Some(Arc::new(profile.clone())),
+        profile_amount: amount,
+        ..Default::default()
+    };
+    let plain = recipe(&base, 1.);
+    // Profile Amount is folded into the look where rendering starts.
+    let colour = |r: &Recipe, rgb: [f32; 3]| {
+        let r = r.with_profile_adjustments();
+        color_stage(rgb, &r, &CurveSet::new(&r), None)
+    };
+    let mut worst = 0f32;
+    for i in 0..400u32 {
+        let rgb = [
+            (i * 37 % 101) as f32 / 101.,
+            (i * 91 % 97) as f32 / 97.,
+            (i * 53 % 89) as f32 / 89.,
+        ]
+        .map(|v| 0.6 * v);
+        let want = colour(&plain, rgb);
+        let got = colour(&recipe(&identity, 1.), rgb);
+        worst = (0..3).fold(worst, |w, c| w.max((got[c] - want[c]).abs()));
+        assert_eq!(colour(&recipe(&identity, 0.), rgb), want, "{rgb:?}");
+        assert_eq!(colour(&recipe(&swap, 0.), rgb), want, "{rgb:?}");
+    }
+    assert!(worst < 2e-5, "{worst}");
+    let rgb = [0.3, 0.1, 0.05];
+    let (want, got) = (colour(&plain, rgb), colour(&recipe(&swap, 1.), rgb));
+    assert!(
+        got[2] > want[2] + 0.05 && got[0] < want[0] - 0.05,
+        "{want:?} {got:?}"
+    );
+}
 #[test]
 fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
     use crate::model::panels::{Panel, PanelState};

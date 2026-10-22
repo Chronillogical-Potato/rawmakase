@@ -23,7 +23,8 @@ enum Command {
     Control(rawmakase_ctl::Cli),
     /// Serve editing tools over MCP stdio, connected to the running desktop app.
     Mcp(mcp::Cli),
-    /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
+    /// Import Lightroom DCP and look XMP profiles and .cube LUTs (as looks), or the
+    /// folders holding them, into RAWmakase's profile library.
     ImportProfiles {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
@@ -214,9 +215,18 @@ fn main() -> Result<()> {
             anyhow::ensure!(!done.imported.is_empty(), "No lens profiles imported");
         }
         Some(Command::ImportProfiles { files }) => {
-            for p in rawmakase::camera_profiles::import_files(&files)? {
-                println!("Imported {}", p.display());
+            // Files and folders, imported as the app's Import does: a file that
+            // can't be imported is reported and leaves the rest importing.
+            let summary = rawmakase::app::import_profiles(&files);
+            for line in summary.lines() {
+                println!("{line}");
             }
+            println!("{}", summary.message());
+            anyhow::ensure!(
+                summary.failures() == 0 && summary.done() > 0,
+                "{}",
+                summary.message()
+            );
         }
         Some(Command::ImportCatalog { source, output }) => {
             let path = rawmakase::catalog::lightroom::import_lightroom(&source, &output)?;

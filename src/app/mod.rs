@@ -824,6 +824,7 @@ mod automation;
 mod before_after;
 mod brush_scroll;
 mod bulk_import;
+pub use bulk_import::import_profiles;
 mod catalog;
 mod clipping;
 mod color_grading;

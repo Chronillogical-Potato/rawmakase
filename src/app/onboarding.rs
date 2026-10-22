@@ -572,7 +572,7 @@ impl Editor {
                 Mark::Failed
             };
             row.status = result.message();
-            if !result.failed.is_empty() {
+            if result.has_details() {
                 row.hover = Some(result.details(8));
             }
         } else if scanning && n == 0 {
