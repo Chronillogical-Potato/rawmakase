@@ -85,10 +85,11 @@ pub(crate) enum FileRequest {
         from: String,
     },
     /// Moves the folder of `root` at logical path `from` into logical
-    /// folder `to` (a drop).
+    /// folder `to` of `to_root` (a drop).
     MoveFolder {
         root: crate::catalog::RootId,
         from: String,
+        to_root: crate::catalog::RootId,
         to: String,
     },
     /// Rename Folder… for the folder of `root` at logical path `logical`.
@@ -843,9 +844,13 @@ impl Library {
         &mut self,
         root: crate::catalog::RootId,
         from: &str,
+        to_root: crate::catalog::RootId,
         to: &str,
     ) {
-        let (from, to) = (format!("root:{root}/{from}"), format!("root:{root}/{to}"));
+        let (from, to) = (
+            format!("root:{root}/{from}"),
+            format!("root:{to_root}/{to}"),
+        );
         self.selected_folders.rekey(&from, &to);
         self.expanded = std::mem::take(&mut self.expanded)
             .into_iter()

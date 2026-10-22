@@ -75,11 +75,12 @@ pub(super) enum Verb {
     Rename {
         one: Option<(String, String)>,
     },
-    /// Moves folder `name` of `root` from logical path `from` to `to`,
-    /// into the folder named `into`.
+    /// Moves folder `name` of `root` from logical path `from` to `to` of
+    /// `to_root`, into the folder named `into`.
     MoveFolder {
         root: crate::catalog::RootId,
         from: String,
+        to_root: crate::catalog::RootId,
         to: String,
         name: String,
         into: String,
@@ -1180,12 +1181,17 @@ impl Editor {
         // The tree's selection and unfolded folders follow a folder renamed
         // or moved.
         let followed = match &verb {
-            Verb::RenameFolder { root, from, to } | Verb::MoveFolder { root, from, to, .. } => {
-                Some((*root, from, to))
-            }
+            Verb::RenameFolder { root, from, to } => Some((*root, from, *root, to)),
+            Verb::MoveFolder {
+                root,
+                from,
+                to_root,
+                to,
+                ..
+            } => Some((*root, from, *to_root, to)),
             _ => None,
         };
-        if let Some((root, from, to)) = followed
+        if let Some((root, from, to_root, to)) = followed
             && outcome.items.iter().any(|i| {
                 matches!(
                     i.result,
@@ -1194,7 +1200,7 @@ impl Editor {
             })
             && let Some(library) = &mut self.library
         {
-            library.folder_renamed(root, from, to);
+            library.folder_renamed(root, from, to_root, to);
         }
         // After the summary: a catalog that can't be read again says so.
         self.apply_file_outcome(&outcome);

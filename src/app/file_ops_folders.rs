@@ -1,7 +1,8 @@
-//! Moving a folder (planned in #556): dragged onto another folder of its
-//! root in the Folders panel, or Move Folder… in its menu, which lists
-//! where it can go. Either is confirmed as moving photos is, Cancel
-//! focused; the catalog's folder stays the same folder, its photos follow.
+//! Moving a folder (planned in #556, into another root in #572): dragged
+//! onto another folder in the Folders panel, or Move Folder… in its menu,
+//! which lists where it can go. Either is confirmed as moving photos is,
+//! Cancel focused; the catalog's folder stays the same folder, its photos
+//! follow.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::catalog::file_ops::FileOp;
@@ -15,8 +16,8 @@ pub(super) struct ChoosingParent {
     /// Its logical path.
     from: String,
     filter: String,
-    /// The logical path chosen ("" for the root).
-    chosen: Option<String>,
+    /// The root and logical path chosen ("" for the root itself).
+    chosen: Option<(RootId, String)>,
 }
 
 /// The last name of logical path `path`.
@@ -36,40 +37,67 @@ fn root_name(roots: &[(RootId, String, Option<String>)], root: RootId) -> String
         )
 }
 
-/// Where Move Folder… may put `c`'s folder, as logical paths ("" for the
-/// root) and labels: its root, and every folder of the root the Folders
-/// panel shows (those with no catalog folder of their own too, such as
-/// `2025` above `2025/day2`), but where it is, itself and the folders in it.
+/// Where Move Folder… may put `c`'s folder, as roots and logical paths
+/// ("" for a root itself) with labels and where each is on this computer
+/// (which tells apart two roots of one name): every root, and every folder
+/// of each the Folders panel shows (those with no catalog folder of their
+/// own too, such as `2025` above `2025/day2`), but where it is, itself and
+/// the folders in it. Whether another root is on its drive the plan checks.
 fn parent_rows(
     library: &super::super::library::Library,
     c: &ChoosingParent,
-    root_name: &str,
-) -> Vec<(String, String)> {
+) -> Vec<((RootId, String), String, std::path::PathBuf)> {
     let parent = c.from.rsplit_once('/').map_or("", |(p, _)| p);
     let inside = format!("{}/", c.from);
-    let mut logical: Vec<String> = vec![String::new()];
-    for f in library.session.folders.iter().filter(|f| f.root == c.root) {
-        let mut at = String::new();
-        for name in f.relative.split('/').filter(|n| !n.is_empty()) {
-            at = join(&at, name);
-            logical.push(at.clone());
+    let mut rows = Vec::new();
+    for (root, original, location) in &library.session.roots {
+        let name = root_name(&library.session.roots, *root);
+        let top = std::path::PathBuf::from(location.as_deref().unwrap_or(original));
+        let mut logical: Vec<String> = vec![String::new()];
+        for f in library.session.folders.iter().filter(|f| f.root == *root) {
+            let mut at = String::new();
+            for name in f.relative.split('/').filter(|n| !n.is_empty()) {
+                at = join(&at, name);
+                logical.push(at.clone());
+            }
         }
+        logical.sort();
+        logical.dedup();
+        // Where each is, as the Folders panel shows it: a catalog folder
+        // where it resolves (located on its own, perhaps), any other below
+        // the one above it. Sorted, a folder comes after the one above it.
+        let mut paths: std::collections::HashMap<String, std::path::PathBuf> = library
+            .session
+            .folders
+            .iter()
+            .filter(|f| f.root == *root)
+            .map(|f| (f.relative.clone(), f.path.clone()))
+            .collect();
+        paths.entry(String::new()).or_insert(top);
+        for l in &logical {
+            if !paths.contains_key(l) {
+                let (up, name) = l.rsplit_once('/').unwrap_or(("", l));
+                let path = paths.get(up).map(|p| p.join(name)).unwrap_or_default();
+                paths.insert(l.clone(), path);
+            }
+        }
+        let own = *root == c.root;
+        rows.extend(
+            logical
+                .into_iter()
+                .filter(|l| !own || (l != parent && *l != c.from && !l.starts_with(&inside)))
+                .map(|l| {
+                    let label = if l.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{name} / {}", l.replace('/', " / "))
+                    };
+                    let path = paths.get(l.as_str()).cloned().unwrap_or_default();
+                    ((*root, l), label, path)
+                }),
+        );
     }
-    logical.sort();
-    logical.dedup();
-    let mut rows: Vec<(String, String)> = logical
-        .into_iter()
-        .filter(|l| l != parent && *l != c.from && !l.starts_with(&inside))
-        .map(|l| {
-            let label = if l.is_empty() {
-                root_name.to_string()
-            } else {
-                format!("{root_name} / {}", l.replace('/', " / "))
-            };
-            (l, label)
-        })
-        .collect();
-    rows.sort_by_key(|(_, label)| label.to_lowercase());
+    rows.sort_by_key(|(_, label, _)| label.to_lowercase());
     rows
 }
 
@@ -83,38 +111,54 @@ fn join(parent: &str, name: &str) -> String {
 }
 
 impl Editor {
-    /// What Move Folder… offers, as logical paths.
+    /// What Move Folder… offers, as roots and logical paths.
     #[cfg(test)]
-    pub(super) fn parent_choices(&self) -> Vec<String> {
+    pub(super) fn parent_choices(&self) -> Vec<(RootId, String)> {
         match (&self.file_ops.state, &self.library) {
-            (State::ChoosingParent(c), Some(library)) => {
-                let name = root_name(&library.session.roots, c.root);
-                parent_rows(library, c, &name)
-                    .into_iter()
-                    .map(|(l, _)| l)
-                    .collect()
-            }
+            (State::ChoosingParent(c), Some(library)) => parent_rows(library, c)
+                .into_iter()
+                .map(|(at, ..)| at)
+                .collect(),
             _ => Vec::new(),
         }
     }
+    /// Where Move Folder… says its row for `root`'s logical path `at` is.
+    #[cfg(test)]
+    pub(super) fn parent_path(&self, root: RootId, at: &str) -> Option<std::path::PathBuf> {
+        match (&self.file_ops.state, &self.library) {
+            (State::ChoosingParent(c), Some(library)) => parent_rows(library, c)
+                .into_iter()
+                .find(|((r, l), ..)| *r == root && l == at)
+                .map(|(.., path)| path),
+            _ => None,
+        }
+    }
     /// Moves the folder of `root` at logical path `from` into logical
-    /// folder `to` of the same root ("" for the root), once confirmed.
-    pub(in crate::app) fn request_folder_move(&mut self, root: RootId, from: String, to: String) {
+    /// folder `to` of `to_root` ("" for that root itself), once confirmed.
+    pub(in crate::app) fn request_folder_move(
+        &mut self,
+        root: RootId,
+        from: String,
+        to_root: RootId,
+        to: String,
+    ) {
         let into = match last(&to) {
             "" => self
                 .library
                 .as_ref()
-                .map_or_else(String::new, |l| root_name(&l.session.roots, root)),
+                .map_or_else(String::new, |l| root_name(&l.session.roots, to_root)),
             name => name.to_string(),
         };
         let name = last(&from).to_string();
         let op = FileOp::MoveFolder {
             root,
             folder: from.clone(),
+            to_root,
             parent: to.clone(),
         };
         let verb = Verb::MoveFolder {
             root,
+            to_root,
             to: join(&to, &name),
             from,
             name,
@@ -146,8 +190,8 @@ impl Editor {
         }));
     }
 
-    /// Move Folder…'s window: its root and the root's folders it can go
-    /// into, filtered by name.
+    /// Move Folder…'s window: the roots and their folders it can go into,
+    /// filtered by name.
     pub(super) fn choose_parent_window(&mut self, ctx: &egui::Context) {
         let (State::ChoosingParent(c), Some(library)) = (&mut self.file_ops.state, &self.library)
         else {
@@ -159,10 +203,9 @@ impl Editor {
             return;
         }
         let palette = super::super::theme::palette(ctx);
-        let root_name = root_name(&library.session.roots, c.root);
-        let mut rows = parent_rows(library, c, &root_name);
+        let mut rows = parent_rows(library, c);
         let filter = c.filter.to_lowercase();
-        rows.retain(|(_, label)| label.to_lowercase().contains(&filter));
+        rows.retain(|(_, label, _)| label.to_lowercase().contains(&filter));
         let mut go = None;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("move-folder"))
@@ -185,19 +228,20 @@ impl Editor {
                     .max_height(320.)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        for (logical, label) in &rows {
-                            let row =
-                                ui.selectable_label(c.chosen.as_ref() == Some(logical), label);
+                        for (at, label, path) in &rows {
+                            let row = ui
+                                .selectable_label(c.chosen.as_ref() == Some(at), label)
+                                .on_hover_text(path.display().to_string());
                             if row.clicked() {
-                                c.chosen = Some(logical.clone());
+                                c.chosen = Some(at.clone());
                             }
                             if row.double_clicked() {
-                                go = Some(logical.clone());
+                                go = Some(at.clone());
                             }
                         }
                         if rows.is_empty() {
                             ui.label(
-                                egui::RichText::new("No folder of its root folder is named so.")
+                                egui::RichText::new("No folder is named so.")
                                     .size(12.)
                                     .color(palette.gray(140)),
                             );
@@ -205,7 +249,7 @@ impl Editor {
                     });
                 ui.add_space(4.);
                 ui.label(
-                    egui::RichText::new("A folder moves within its root folder, on its drive.")
+                    egui::RichText::new("A folder moves on its drive.")
                         .size(12.)
                         .color(palette.gray(140)),
                 );
@@ -218,7 +262,7 @@ impl Editor {
                     let chosen = c
                         .chosen
                         .clone()
-                        .filter(|chosen| rows.iter().any(|(r, _)| r == chosen));
+                        .filter(|chosen| rows.iter().any(|(r, ..)| r == chosen));
                     let clicked = ui
                         .add_enabled_ui(chosen.is_some(), |ui| widgets::primary_button(ui, "Move…"))
                         .inner
@@ -232,11 +276,11 @@ impl Editor {
             self.file_ops.state = State::Idle;
             return;
         }
-        if let Some(to) = go {
+        if let Some((to_root, to)) = go {
             let State::ChoosingParent(c) = std::mem::take(&mut self.file_ops.state) else {
                 return;
             };
-            self.request_folder_move(c.root, c.from, to);
+            self.request_folder_move(c.root, c.from, to_root, to);
         }
     }
 }

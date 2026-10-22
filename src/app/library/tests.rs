@@ -2781,7 +2781,7 @@ fn a_renamed_folder_keeps_its_selection_and_unfolded_folders() -> Result<()> {
     library.expanded = ["root:3/trip", "root:3/trip/day1", "root:3/tripod"]
         .map(String::from)
         .into();
-    library.folder_renamed(root, "trip", "Iceland");
+    library.folder_renamed(root, "trip", root, "Iceland");
     assert!(library.selected_folders.contains("root:3/Iceland/day1"));
     assert_eq!(library.selected_folders.anchor(), "root:3/Iceland/day1");
     let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
@@ -2789,6 +2789,25 @@ fn a_renamed_folder_keeps_its_selection_and_unfolded_folders() -> Result<()> {
     assert_eq!(
         expanded,
         ["root:3/Iceland", "root:3/Iceland/day1", "root:3/tripod"]
+    );
+    Ok(())
+}
+/// A folder moved into another root keeps what was selected and unfolded
+/// in it, under that root.
+#[test]
+fn a_folder_moved_to_another_root_keeps_its_selection_and_unfolded_folders() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    library.selected_folders = folder_selection::FolderSelection::one("root:3/trip/day1");
+    library.expanded = ["root:3/trip", "root:3/trip/day1", "root:4/2025"]
+        .map(String::from)
+        .into();
+    library.folder_renamed(RootId(3), "trip", RootId(4), "2025/trip");
+    assert!(library.selected_folders.contains("root:4/2025/trip/day1"));
+    let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
+    expanded.sort();
+    assert_eq!(
+        expanded,
+        ["root:4/2025", "root:4/2025/trip", "root:4/2025/trip/day1"]
     );
     Ok(())
 }
@@ -3008,7 +3027,7 @@ fn a_folder_with_no_catalog_folder_of_its_own_is_dragged_too() {
 }
 
 #[test]
-fn a_folder_dropped_on_another_root_says_why_nothing_moves() {
+fn a_folder_dropped_on_another_roots_folder_is_dropped_there() {
     use crate::catalog::FolderId;
     let ctx = egui::Context::default();
     let node = |root: i64, logical: &str, id: u32| FolderNode {
@@ -3062,21 +3081,20 @@ fn a_folder_dropped_on_another_root_says_why_nothing_moves() {
         )]);
     }
     frame(vec![egui::Event::PointerMoved(row2)]);
-    let actions: Vec<TreeAction> = frame(vec![press(row2, false)])
+    let dropped = frame(vec![press(row2, false)])
         .into_iter()
         .flatten()
-        .collect();
-    assert!(
-        !actions
-            .iter()
-            .any(|a| matches!(a, TreeAction::DropFolder { .. })),
-        "nothing moves"
-    );
-    assert!(
-        actions.iter().any(|a| matches!(
-            a,
-            TreeAction::Refused(why) if why.contains("another drive or root folder")
-        )),
-        "says why"
+        .find_map(|a| match a {
+            TreeAction::DropFolder {
+                root,
+                from,
+                to_root,
+                to,
+            } => Some((root, from, to_root, to)),
+            _ => None,
+        });
+    assert_eq!(
+        dropped,
+        Some((RootId(42), "2024/day1".into(), RootId(43), "trips".into()))
     );
 }

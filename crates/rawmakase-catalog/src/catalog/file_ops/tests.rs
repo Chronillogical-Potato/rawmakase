@@ -70,9 +70,16 @@ impl Fx {
             .unwrap_or_else(|| panic!("no photo {name}"))
             .id
     }
-    /// The root, as the catalog has it.
+    /// The root, as the catalog has it: the one added at `root`, whatever
+    /// others a test adds.
     pub fn root_id(&self) -> crate::catalog::RootId {
-        self.cat.folders().unwrap()[0].root
+        self.cat
+            .roots()
+            .unwrap()
+            .into_iter()
+            .find(|(_, original, _)| Path::new(original) == self.root)
+            .expect("the fixture's root")
+            .0
     }
     /// The root of catalog folder `folder`.
     pub fn root_of(&self, folder: FolderId) -> crate::catalog::RootId {
@@ -106,6 +113,16 @@ impl Fx {
             .into_iter()
             .find(|f| f.path == path)
             .unwrap_or_else(|| panic!("no folder {relative}"))
+            .id
+    }
+    /// The catalog folder at `path`, of whichever root.
+    pub fn folder_at(&self, path: &Path) -> FolderId {
+        self.cat
+            .folders()
+            .unwrap()
+            .into_iter()
+            .find(|f| f.path == path)
+            .unwrap_or_else(|| panic!("no folder {}", path.display()))
             .id
     }
     /// Every file below the folder the fixture is in, by path relative to

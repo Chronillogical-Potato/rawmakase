@@ -1,9 +1,10 @@
 //! Renaming a folder (Rename Folder…) or moving it into another folder of
-//! its root (Move Folder…): the same change with another destination. The
-//! folder is a logical path of its root: a catalog folder, or one the
-//! catalog has folders below but none of its own for. One
-//! exclusive rename of its directory on its volume, and the catalog's
-//! folders of the whole subtree re-keyed to the new logical path, `folder_paths` and the legacy
+//! its root or of another root on its drive (Move Folder…, #572): the same
+//! change with another destination. The folder is a logical path of its
+//! root: a catalog folder, or one the catalog has folders below but none
+//! of its own for. One exclusive rename of its directory on its volume,
+//! and the catalog's folders of the whole subtree re-keyed to the new
+//! logical path (and root), `folder_paths` and the legacy
 //! `folders.relative_path` alike. Photos keep their rows: their folders
 //! keep their ids, so their paths follow.
 //!
@@ -38,9 +39,13 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(in crate::catalog) struct TreeState {
     pub root: RootId,
-    /// Its logical path, and the one it is given.
+    /// Its logical path, and the one it is given (in [`Self::to_root`]).
     pub from: String,
     pub to: String,
+    /// The root it goes into, when another (#572): absent from items of a
+    /// move within a root, as 0.4.2 journalled them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub into: Option<RootId>,
     /// The catalog's folders of the subtree, the folder and every one
     /// below it, by logical path.
     pub folders: Vec<(FolderId, String)>,
@@ -132,6 +137,11 @@ fn inside(path: &Path, dir: &Path) -> bool {
 }
 
 impl TreeState {
+    /// The root it goes into: its own, or the other it is moved into.
+    pub fn to_root(&self) -> RootId {
+        self.into.unwrap_or(self.root)
+    }
+
     /// Why the folder can't be renamed now, read in `db` on `computer`: its
     /// subtree changed in the catalog, it or its destination resolves
     /// elsewhere, a folder in it has a location of its own, or the catalog
@@ -141,7 +151,7 @@ impl TreeState {
             return Ok(Some(CHANGED.into()));
         }
         let from = logical_location(db, computer, self.root, &self.from)?;
-        let to = logical_location(db, computer, self.root, &self.to)?;
+        let to = logical_location(db, computer, self.to_root(), &self.to)?;
         if from.as_ref() != Some(&self.from_path) || to.as_ref() != Some(&self.to_path) {
             return Ok(Some(RELOCATED.into()));
         }
@@ -154,12 +164,12 @@ impl TreeState {
         if let Some(why) = overlapped(db, computer, &ids, &[&self.from_path])? {
             return Ok(Some(why.into()));
         }
-        if located(db, self.root, &self.to, &[])? {
+        if located(db, self.to_root(), &self.to, &[])? {
             return Ok(Some(
                 "The catalog locates a folder of that name elsewhere.".into(),
             ));
         }
-        let there: Vec<_> = in_catalog(db, computer, self.root, &self.to, &self.to_path)?
+        let there: Vec<_> = in_catalog(db, computer, self.to_root(), &self.to, &self.to_path)?
             .into_iter()
             .filter(|(id, _)| !ids.contains(id))
             .collect();
@@ -223,7 +233,7 @@ pub(super) fn rename(
     if to == folder {
         return Err(refuse("It has that name already."));
     }
-    plan_to(catalog, root, folder, &to)
+    plan_to(catalog, root, folder, root, &to)
 }
 
 /// Refuses the folder at logical path `folder` of `root` unless the
@@ -245,33 +255,43 @@ fn known(catalog: &Catalog, root: RootId, folder: &str) -> Result<(), FileOpErro
 }
 
 /// Plans moving the folder at logical path `folder` of `root` into
-/// logical folder `parent` of the same root, on this computer. The
-/// destination may be a folder the catalog has no folder of its own for,
-/// as for New Folder Inside.
+/// logical folder `parent` of `to_root` (the same root or another), on
+/// this computer. The destination may be a folder the catalog has no
+/// folder of its own for, as for New Folder Inside.
 pub(super) fn relocate(
     catalog: &Catalog,
     root: RootId,
     folder: &str,
+    to_root: RootId,
     parent: &str,
 ) -> Result<TreeMove, FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     known(catalog, root, folder)?;
-    if below_caseless(parent, folder) {
+    // Within a root by its logical paths; into another, on disk below.
+    let same = to_root == root;
+    if same && below_caseless(parent, folder) {
         return Err(refuse(
             "A folder can't be moved into itself or a folder inside it.",
         ));
     }
     let name = names(folder).last().unwrap_or_default();
     let to = join(parent, name);
-    if caseless(OsStr::new(&to)) == caseless(OsStr::new(folder)) {
+    if same && caseless(OsStr::new(&to)) == caseless(OsStr::new(folder)) {
         return Err(refuse("It is in that folder already."));
     }
-    plan_to(catalog, root, folder, &to)
+    plan_to(catalog, root, folder, to_root, &to)
 }
 
 /// Plans moving the folder at logical path `from` of `root` to logical
-/// path `to` of the same root.
-fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<TreeMove, FileOpError> {
+/// path `to` of `to_root`: the folder's own root, or another, which must
+/// resolve and be online here.
+fn plan_to(
+    catalog: &Catalog,
+    root: RootId,
+    from: &str,
+    to_root: RootId,
+    to: &str,
+) -> Result<TreeMove, FileOpError> {
     let refuse = |why: &str| FileOpError::Destination(why.to_string());
     let computer = &catalog.computer.id;
     let db = &catalog.db;
@@ -290,7 +310,7 @@ fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<Tree
     let mut up: Vec<&str> = names(to).collect();
     let name = up.pop().context("no folder name")?.to_string();
     let to_parent = up.join("/");
-    let (parent_anchor, parent_path) = logical_anchored(db, computer, root, &to_parent)?
+    let (parent_anchor, parent_path) = logical_anchored(db, computer, to_root, &to_parent)?
         .ok_or_else(|| refuse("The destination is offline or missing."))?;
     let dir = plain(&parent_anchor, &parent_path)?;
     let at = fsops::entry(&dir).map_err(|e| refuse(&e.to_string()))?;
@@ -317,7 +337,7 @@ fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<Tree
         return Err(refuse("The folder's volume is read-only."));
     }
     let to_path = parent_path.join(&name);
-    if logical_location(db, computer, root, to)?.as_ref() != Some(&to_path) {
+    if logical_location(db, computer, to_root, to)?.as_ref() != Some(&to_path) {
         return Err(refuse(
             "The catalog places a folder of that name elsewhere.",
         ));
@@ -328,6 +348,7 @@ fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<Tree
             root,
             from: from.clone(),
             to: to.to_string(),
+            into: (to_root != root).then_some(to_root),
             folders: subtree(db, root, &from)?,
             photos: Vec::new(),
             from_path,
@@ -339,6 +360,13 @@ fn plan_to(catalog: &Catalog, root: RootId, from: &str, to: &str) -> Result<Tree
         rules: Names(fsops::probe(&dir, &listing)),
         spelling: facts.renames_spelling,
     };
+    // Another root over its own directory, or one nested in its root, can
+    // name where it is already by another logical path.
+    if to_root != root
+        && caseless(planned.destination.as_os_str()) == caseless(planned.source.as_os_str())
+    {
+        return Err(refuse("It is in that folder already."));
+    }
     if let Some(why) = taken(&super::disk::Real, &planned)? {
         return Err(FileOpError::Destination(why));
     }
@@ -496,9 +524,9 @@ pub(super) fn unfinished(db: &impl Reads, planned: &TreeMove) -> Result<bool> {
     }))
 }
 
-/// Re-keys the subtree of `state` to logical path `to` in `w`'s
-/// transaction: each folder's logical path, and the form releases before
-/// logical paths read.
+/// Re-keys the subtree of `state` to logical path `to` of its destination
+/// root in `w`'s transaction: each folder's root and logical path, and the
+/// form releases before logical paths read. Each folder keeps its id.
 fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
     for (folder, logical) in &state.folders {
         let rest = logical
@@ -514,8 +542,8 @@ fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
             &[folder, &new],
         )?;
         w.execute(
-            sql!("UPDATE folders SET relative_path=? WHERE id=?"),
-            &[&native.to_string_lossy(), folder],
+            sql!("UPDATE folders SET root=?, relative_path=? WHERE id=?"),
+            &[&state.to_root(), &native.to_string_lossy(), folder],
         )?;
     }
     Ok(())

@@ -154,9 +154,12 @@ impl Editor {
             Some(FileRequest::DeleteRejected) => self.request_rejected_delete(),
             Some(FileRequest::Rename(ids)) => self.request_rename(ids),
             Some(FileRequest::ChooseParent { root, from }) => self.choose_parent_for(root, from),
-            Some(FileRequest::MoveFolder { root, from, to }) => {
-                self.request_folder_move(root, from, to)
-            }
+            Some(FileRequest::MoveFolder {
+                root,
+                from,
+                to_root,
+                to,
+            }) => self.request_folder_move(root, from, to_root, to),
             Some(FileRequest::RenameFolder { root, logical }) => self.rename_folder(root, logical),
             Some(FileRequest::Move {
                 photos,

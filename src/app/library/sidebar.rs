@@ -245,11 +245,19 @@ impl Library {
                                         from: logical,
                                     })
                                 }
-                                Some(TreeAction::DropFolder { root, from, to }) => {
-                                    self.file_request =
-                                        Some(super::FileRequest::MoveFolder { root, from, to })
+                                Some(TreeAction::DropFolder {
+                                    root,
+                                    from,
+                                    to_root,
+                                    to,
+                                }) => {
+                                    self.file_request = Some(super::FileRequest::MoveFolder {
+                                        root,
+                                        from,
+                                        to_root,
+                                        to,
+                                    })
                                 }
-                                Some(TreeAction::Refused(why)) => self.message = why,
                                 Some(TreeAction::Reveal(path)) => {
                                     if let Err(e) = crate::platform::reveal::reveal(&path) {
                                         self.message =
