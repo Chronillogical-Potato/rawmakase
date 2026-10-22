@@ -596,6 +596,33 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
         .duration_since(std::time::SystemTime::now())
         .unwrap_or_else(|e| e.duration());
     assert!(off < std::time::Duration::from_secs(5), "{shown}: {off:?}");
+    // A copy onto it takes each step a move does. A flush through a
+    // handle opened only to read is refused there (EACCES on macOS 15).
+    let local = dir();
+    let source = local.path().join("s.NEF");
+    fs::write(&source, b"synthetic raw").unwrap();
+    let copy = d.path().join("s.NEF");
+    create_file(&copy).unwrap();
+    set_extra(&source, "com.rawmakase.test", b"synthetic").unwrap();
+    let content = copy_into(&source, &copy, None, &mut |_| true).unwrap();
+    sync_file(&copy).unwrap();
+    // Its extras, as a move gives them, between the two.
+    copy_extras(&source, &copy).unwrap();
+    assert_eq!(extras(&copy).unwrap(), extras(&source).unwrap());
+    copy_times(&source, &copy).unwrap();
+    assert_eq!(hash_file(&copy).unwrap(), content);
+    // Its folders sync, though they take no full sync (ENOTSUP).
+    sync_dir(d.path()).unwrap();
+    // With the source's time, to the 100 ns the server keeps, once its
+    // handles close (a flush after the times would lose them then).
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    hash_file(&copy).unwrap();
+    let ns = |p: &std::path::Path| {
+        let t = fs::metadata(p).unwrap().modified().unwrap();
+        t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    };
+    let (kept, was) = (ns(&copy), ns(&source));
+    assert!(kept.abs_diff(was) < 100, "{shown}: {kept} {was}");
 }
 
 #[test]

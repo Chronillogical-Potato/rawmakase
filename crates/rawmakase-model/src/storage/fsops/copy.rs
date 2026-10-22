@@ -2,10 +2,11 @@
 //! caller can journal between them: an empty file made where nothing has
 //! its name ([`create_file`]), the bytes copied into it and hashed as they
 //! are read ([`copy_into`]), made durable ([`sync_file`]), given the
-//! source's extras ([`copy_extras`]) and time ([`copy_times`]), and hashed
-//! again ([`hash_file`]), its extras too ([`extras`]). The file is never
-//! truncated or replaced, and the source never changed. [`remove_file`] is
-//! the one unlink here, for a partial copy.
+//! source's extras ([`copy_extras`]) and time, a file's durably
+//! ([`copy_times`]), and hashed again ([`hash_file`]), its extras too
+//! ([`extras`]). The file is never truncated or replaced, and the source
+//! never changed. [`remove_file`] is the one unlink here, for a partial
+//! copy.
 //!
 //! A file's or folder's extras are what it keeps beside its contents, times
 //! and permissions: its extended attributes on macOS (Finder tags,
@@ -143,21 +144,25 @@ pub fn copy_into(
     Ok(ContentHash::of(sha))
 }
 
-/// Makes file `path`'s contents and times durable.
+/// Makes file `path`'s contents durable.
 pub fn sync_file(path: &Path) -> Result<(), FsError> {
-    // A file given a read-only source's permissions can't be opened to
-    // write any more; Unix syncs through a handle opened to read, and
-    // Windows, which needs one opened to write, copies no permissions.
-    #[cfg(unix)]
-    let file = File::open(path)?;
-    #[cfg(not(unix))]
-    let file = OpenOptions::new().write(true).open(path)?;
+    // Through a handle opened to write: an SMB server flushes no other
+    // (MS-SMB2 3.3.5.11; macOS's smbfs answers EACCES). A file given a
+    // read-only source's permissions can't be opened so any more; Unix
+    // syncs it through one opened to read, and Windows, which needs one
+    // opened to write, copies no permissions.
+    let file = match OpenOptions::new().write(true).open(path) {
+        #[cfg(unix)]
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => File::open(path)?,
+        opened => opened?,
+    };
     Ok(file.sync_all()?)
 }
 
 /// Gives file or folder `to` the modification and access times of `from`
 /// (to the nanosecond where `to`'s volume keeps them; to what it keeps
-/// otherwise), and on Unix its permission bits.
+/// otherwise), and on Unix its permission bits; a file's durably, its
+/// contents made durable first ([`sync_file`]).
 pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
     let source = std::fs::metadata(from)?;
     let file = match source.is_dir() {
@@ -173,8 +178,20 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
         use std::os::unix::fs::PermissionsExt as _;
         let mode = source.permissions().mode() & 0o777;
         file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        // An SMB server given a flush after the times sets the write time
+        // to when its handle closes (macOS 15 against a Synology share,
+        // every time). There `fsync(2)`, which kept them every time; the
+        // server applies the times as it is given them.
+        if !source.is_dir() && super::os::kind(to)? == super::VolumeKind::Smb {
+            return rustix::fs::fsync(&file).map_err(|e| std::io::Error::from(e).into());
+        }
     }
-    Ok(())
+    // A folder's are left to the system, as before (a Windows folder's
+    // handle here may only write attributes, and can't flush).
+    match source.is_dir() {
+        true => Ok(()),
+        false => Ok(file.sync_all()?),
+    }
 }
 
 /// Gives file or folder `to` each extra of `from`, as it is there; what

@@ -70,7 +70,17 @@ fn errno(e: rustix::io::Errno) -> FsError {
 }
 
 pub(super) fn sync_dir(dir: &Path) -> Result<(), FsError> {
-    Ok(std::fs::File::open(dir)?.sync_all()?)
+    let folder = std::fs::File::open(dir)?;
+    match folder.sync_all() {
+        // macOS's SMB shares take no full sync of a folder (measured on
+        // macOS 15), whose names the server made as they were made; there
+        // `fsync(2)` is all there is.
+        #[cfg(target_vendor = "apple")]
+        Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOTSUP.raw_os_error()) => {
+            rustix::fs::fsync(&folder).map_err(|e| std::io::Error::from(e).into())
+        }
+        synced => Ok(synced?),
+    }
 }
 
 pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
@@ -114,7 +124,7 @@ fn case_sensitive(_path: &Path) -> bool {
 
 /// macOS names the file system.
 #[cfg(target_vendor = "apple")]
-fn kind(path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     let name: Vec<u8> = fs
         .f_fstypename
@@ -141,7 +151,7 @@ pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
 
 /// Linux numbers the file system type.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn kind(path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     #[allow(
         clippy::unnecessary_cast,
@@ -169,7 +179,7 @@ pub(super) fn kind_of(magic: u64) -> VolumeKind {
 
 /// Elsewhere the file system can't be told.
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
-fn kind(_path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(_path: &Path) -> Result<VolumeKind, FsError> {
     Ok(VolumeKind::Other)
 }
 

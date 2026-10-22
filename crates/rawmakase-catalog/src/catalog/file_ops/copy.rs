@@ -333,7 +333,6 @@ pub(super) fn write(
     let extras = disk.extras(source).map_err(problem)?;
     carry_extras(disk, source, &temp, extras)?;
     disk.copy_times(source, &temp).map_err(problem)?;
-    disk.sync_file(&temp).map_err(problem)?;
     // 3. Read back, and the original still what was copied.
     if disk.hash(&temp).map_err(problem)? != content {
         return Err(Problem::Mismatch(source.to_path_buf()).into());
