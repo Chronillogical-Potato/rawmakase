@@ -26,7 +26,8 @@ tempfile = "3"
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 
 [target.'cfg(unix)'.dependencies]
-# ENOTSUP, which exFAT on macOS answers an exclusive rename with.
+# ENOTSUP, which exFAT on macOS answers an exclusive rename with, and
+# pathconf(_PC_CASE_SENSITIVE), which rustix doesn't reach.
 libc = "0.2"
 # `storage::fsops`: the exclusive rename (renameat2, renameatx_np) and the
 # volume queries, without hand-written FFI.

@@ -77,15 +77,34 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
         kind,
         local,
         read_only: vfs.f_flag.contains(StatVfsMountFlags::RDONLY),
-        // APFS renames a name to another spelling of itself in place
-        // (tested in `a_case_only_rename_works_on_apfs`); elsewhere a
-        // volume that folds names may find the new spelling taken, or
-        // rename nothing.
-        renames_spelling: cfg!(target_vendor = "apple") && kind == VolumeKind::Apfs,
+        // Case-insensitive APFS renames a name to another spelling of
+        // itself in place (tested in
+        // `a_case_only_rename_works_where_the_volume_renames_spelling`);
+        // elsewhere a volume that folds names may find the new spelling
+        // taken (case-sensitive APFS, for accents), or rename nothing.
+        renames_spelling: kind == VolumeKind::Apfs && !case_sensitive(path),
         stable_ids: local && kind.keeps_ids(),
         exclusive_rename: kind.exclusive_rename(),
         available: vfs.f_bavail.saturating_mul(vfs.f_frsize),
     })
+}
+
+/// Whether the volume tells names apart by case; a case-sensitive APFS
+/// volume still folds accents.
+#[cfg(target_vendor = "apple")]
+fn case_sensitive(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return true;
+    };
+    // SAFETY: `path` is a valid NUL-terminated string for the call.
+    unsafe { libc::pathconf(path.as_ptr(), libc::_PC_CASE_SENSITIVE) != 0 }
+}
+
+/// Only macOS volumes are taken to rename spelling.
+#[cfg(not(target_vendor = "apple"))]
+fn case_sensitive(_path: &Path) -> bool {
+    true
 }
 
 /// macOS names the file system.

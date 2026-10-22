@@ -380,18 +380,23 @@ fn a_case_only_rename_works_where_the_volume_renames_spelling() -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_vendor = "apple")]
 #[test]
-fn an_accents_only_rename_works_on_apfs() -> Result<()> {
+fn an_accents_only_rename_works_where_the_volume_renames_spelling() -> Result<()> {
+    // Case-sensitive APFS treats the two spellings as one name yet won't
+    // rename one to the other, so such a rename is refused when planned.
     let mut fx = fixture(&["caf\u{e9}.NEF"]);
     let a = fx.photo("caf\u{e9}.NEF");
-    let outcome = fx.run(
-        FileOp::RenamePhotos {
-            renames: vec![(a, "cafe\u{301}".into())],
-        },
-        &NoTrash,
-        &Faulty::default(),
-    );
+    let spelling = volume(&fx).0;
+    let normalization = fsops::probe(&fx.root, &fsops::list(&fx.root)?).normalization;
+    let op = FileOp::RenamePhotos {
+        renames: vec![(a, "cafe\u{301}".into())],
+    };
+    if !spelling && normalization != fsops::Folding::Exact {
+        assert_eq!(reasons(&fx.plan(op)), [(a, refused(Refusal::SpellingOnly))]);
+        assert_eq!(listing(&fx), ["caf\u{e9}.NEF"]);
+        return Ok(());
+    }
+    let outcome = fx.run(op, &NoTrash, &Faulty::default());
     assert_eq!(results(&outcome), [renamed("cafe\u{301}.NEF")]);
     assert_eq!(listing(&fx), ["cafe\u{301}.NEF"]);
     assert_eq!(fx.rows()[&a], "cafe\u{301}.NEF");
