@@ -42,6 +42,16 @@ fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
 /// mounts.
 #[cfg(all(unix, not(target_vendor = "apple")))]
 fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| TrashError::Failed(e.to_string()))?;
+    let date = freedesktop::deletion_date(now.as_secs() as i64);
+    freedesktop::trash(path, &places(), &date)
+}
+
+/// Where the Trashes of the user running the app are.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn places() -> freedesktop::Places<'static> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|d| d.is_absolute())
@@ -51,16 +61,11 @@ fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
                 .filter(|h| h.is_absolute())
                 .map(|h| h.join(".local/share"))
         });
-    let places = freedesktop::Places {
+    freedesktop::Places {
         home: data.as_deref().and_then(freedesktop::Home::under),
         uid: rustix::process::getuid().as_raw(),
         top: &freedesktop::mount_top,
-    };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| TrashError::Failed(e.to_string()))?;
-    let date = freedesktop::deletion_date(now.as_secs() as i64);
-    freedesktop::trash(path, &places, &date)
+    }
 }
 
 /// Other systems have no Trash this knows.
