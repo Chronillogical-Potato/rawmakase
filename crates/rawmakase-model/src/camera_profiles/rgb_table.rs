@@ -3,7 +3,7 @@
 //! of an HSV look table. A table maps colours in its own space (primaries and encoding)
 //! through a 1D curve per channel or a 3D grid, and a look applies it at an amount:
 //! `r + amount·(table(r) − r)` in table space, as the DNG SDK blends.
-use super::{Matrix, PRO_TO_RGB, RGB_TO_PRO, matmul};
+use super::{Matrix, PRO_TO_RGB, RGB_TO_PRO, cube::Cube, matmul};
 use crate::color::{mul, srgb_decode, srgb_encode};
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -134,11 +134,11 @@ impl RgbTable {
         let divisions = word(12) as usize;
         let (dimensions, count) = match word(8) {
             1 => {
-                ensure!((2..=4096).contains(&divisions), "Invalid RGB table size");
+                ensure!((2..=MAX_1D).contains(&divisions), "Invalid RGB table size");
                 (Dimensions::One, divisions)
             }
             3 => {
-                ensure!((2..=64).contains(&divisions), "Invalid RGB table size");
+                ensure!((2..=MAX_3D).contains(&divisions), "Invalid RGB table size");
                 (Dimensions::Three, divisions.pow(3))
             }
             n => bail!("Unsupported {n}-dimensional RGB table"),
@@ -225,7 +225,8 @@ impl RgbTable {
         });
         mul(back, out.map(|v| v.signum() * self.gamma.decode(v.abs())))
     }
-    fn lookup(&self, rgb: [f32; 3]) -> [f32; 3] {
+    /// `rgb`, in table space and within 0–1, through the table.
+    pub(super) fn lookup(&self, rgb: [f32; 3]) -> [f32; 3] {
         let n = self.divisions;
         let scaled = rgb.map(|v| v * (n - 1) as f32);
         let base = scaled.map(|v| (v as usize).min(n - 2));
@@ -263,9 +264,126 @@ impl RgbTable {
         self.matrices
     }
 }
+/// The largest 3D and 1D tables the DNG SDK reads.
+const MAX_3D: usize = 64;
+const MAX_1D: usize = 4096;
+/// A table's primaries, gamma and gamut codes and its amount bounds, as stored after
+/// its samples.
+pub(super) type Tail = (u32, u32, u32, [f64; 2]);
+/// What a `.cube`'s table is stored as: sRGB primaries and encoding, colours outside
+/// sRGB clipped, at Profile Amounts 0–200%, as the RGB tables third-party profiles
+/// make from their cubes carry.
+const CUBE: Tail = (0, 1, 0, [0., 2.]);
+/// A table's bytes as the DNG SDK stores them, the inverse of [`RgbTable::decode`]'s
+/// layout: `samples` (0–1, clamped and rounded to 16 bits) in its order, each stored as
+/// its difference from the identity, then `tail`.
+pub(super) fn encode_table(
+    dimensions: Dimensions,
+    divisions: usize,
+    samples: &[[f32; 3]],
+    tail: Tail,
+) -> Vec<u8> {
+    let (code, count) = match dimensions {
+        Dimensions::One => (1u32, divisions),
+        Dimensions::Three => (3, divisions.pow(3)),
+    };
+    assert_eq!(samples.len(), count, "a table's samples fill its grid");
+    let mut bytes = Vec::with_capacity(16 + count * 6 + 28);
+    for v in [1u32, 1, code, divisions as u32] {
+        bytes.extend(v.to_le_bytes());
+    }
+    let grid = |i: usize| ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
+    for (i, sample) in samples.iter().enumerate() {
+        let index = match dimensions {
+            Dimensions::One => [i; 3],
+            Dimensions::Three => [
+                i / (divisions * divisions),
+                i / divisions % divisions,
+                i % divisions,
+            ],
+        };
+        for c in 0..3 {
+            let v = (sample[c].clamp(0., 1.) * 65535.).round() as u16;
+            bytes.extend(v.wrapping_sub(grid(index[c])).to_le_bytes());
+        }
+    }
+    for v in [tail.0, tail.1, tail.2] {
+        bytes.extend(v.to_le_bytes());
+    }
+    for v in tail.3 {
+        bytes.extend(v.to_le_bytes());
+    }
+    bytes
+}
+impl RgbTable {
+    /// A `.cube` as an RGB table, as Camera Raw's Create Profile makes one, with the
+    /// table's bytes (which name it). A 3D cube of up to 64 divisions keeps its grid,
+    /// node for node: resampling onto another grid is measurably lossy. A larger one
+    /// (65 is common) is sampled onto 64, the most the table holds, by tetrahedral
+    /// lookup in the cube; a 1D cube over 4096 entries onto 4096. Outputs are clamped
+    /// to 0–1. Cubes over another domain than 0–1, or with a shaper, are refused until
+    /// it is known what Camera Raw makes of them.
+    pub(super) fn from_cube(cube: &Cube) -> Result<(Self, Vec<u8>)> {
+        let (dimensions, divisions, samples) = match cube {
+            Cube::Three(lut) => {
+                ensure!(
+                    !lut.has_shaper(),
+                    "the cube has a 1D shaper table in front of its 3D one, which RAWmakase \
+                     cannot import yet"
+                );
+                ensure!(
+                    lut.domain() == ([0.; 3], [1.; 3]),
+                    "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
+                     cannot import yet",
+                    lut.domain().0,
+                    lut.domain().1
+                );
+                let n = lut.size().min(MAX_3D);
+                let at = |i: usize| i as f32 / (n - 1) as f32;
+                let mut samples = Vec::with_capacity(n.pow(3));
+                // Red outermost here, red fastest in the cube.
+                for r in 0..n {
+                    for g in 0..n {
+                        for b in 0..n {
+                            samples.push(if n == lut.size() {
+                                lut.node(r, g, b)
+                            } else {
+                                lut.lookup([at(r), at(g), at(b)])
+                            });
+                        }
+                    }
+                }
+                (Dimensions::Three, n, samples)
+            }
+            Cube::One(lut) => {
+                ensure!(
+                    lut.domain() == ([0.; 3], [1.; 3]),
+                    "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
+                     cannot import yet",
+                    lut.domain().0,
+                    lut.domain().1
+                );
+                let n = lut.size().min(MAX_1D);
+                let samples = (0..n)
+                    .map(|i| {
+                        if n == lut.size() {
+                            lut.entry(i)
+                        } else {
+                            lut.lookup([i as f32 / (n - 1) as f32; 3])
+                        }
+                    })
+                    .collect();
+                (Dimensions::One, n, samples)
+            }
+        };
+        let bytes = encode_table(dimensions, divisions, &samples, CUBE);
+        let table = Self::decode(&super::enhanced::compress(&bytes))?;
+        Ok((table, bytes))
+    }
+}
 /// Tetrahedral interpolation in a grid cell, as the DNG SDK does: the cell is split
 /// into six tetrahedra along its gray diagonal, picked by the order of the fractions.
-fn tetrahedral(at: impl Fn(usize, usize, usize) -> [f32; 3], f: [f32; 3]) -> [f32; 3] {
+pub(super) fn tetrahedral(at: impl Fn(usize, usize, usize) -> [f32; 3], f: [f32; 3]) -> [f32; 3] {
     let [fr, fg, fb] = f;
     let c000 = at(0, 0, 0);
     let c111 = at(1, 1, 1);
@@ -316,58 +434,31 @@ pub mod tests {
     pub(crate) fn table_bytes(
         divisions: usize,
         f: impl Fn([f32; 3]) -> [f32; 3],
-        tail: (u32, u32, u32, [f64; 2]),
+        tail: Tail,
     ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        for v in [1u32, 1, 3, divisions as u32] {
-            bytes.extend(v.to_le_bytes());
-        }
-        let grid = |i: usize| ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
+        let at = |i: usize| i as f32 / (divisions - 1) as f32;
+        let mut samples = Vec::new();
         for r in 0..divisions {
             for g in 0..divisions {
                 for b in 0..divisions {
-                    let out = f([r, g, b].map(|i| i as f32 / (divisions - 1) as f32));
-                    for (c, i) in [r, g, b].into_iter().enumerate() {
-                        let v = (out[c].clamp(0., 1.) * 65535.).round() as u16;
-                        bytes.extend(v.wrapping_sub(grid(i)).to_le_bytes());
-                    }
+                    samples.push(f([at(r), at(g), at(b)]));
                 }
             }
         }
-        for v in [tail.0, tail.1, tail.2] {
-            bytes.extend(v.to_le_bytes());
-        }
-        for v in tail.3 {
-            bytes.extend(v.to_le_bytes());
-        }
-        bytes
+        encode_table(Dimensions::Three, divisions, &samples, tail)
     }
     /// A 1D table of `f` (one value to three channel curves) over `divisions`.
     pub(crate) fn table_bytes_1d(
         divisions: usize,
         f: impl Fn(f32) -> [f32; 3],
-        tail: (u32, u32, u32, [f64; 2]),
+        tail: Tail,
     ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        for v in [1u32, 1, 1, divisions as u32] {
-            bytes.extend(v.to_le_bytes());
-        }
-        for i in 0..divisions {
-            let identity = ((i * 0xFFFF + (divisions - 1) / 2) / (divisions - 1)) as u16;
-            for v in f(i as f32 / (divisions - 1) as f32) {
-                let v = (v.clamp(0., 1.) * 65535.).round() as u16;
-                bytes.extend(v.wrapping_sub(identity).to_le_bytes());
-            }
-        }
-        for v in [tail.0, tail.1, tail.2] {
-            bytes.extend(v.to_le_bytes());
-        }
-        for v in tail.3 {
-            bytes.extend(v.to_le_bytes());
-        }
-        bytes
+        let samples: Vec<_> = (0..divisions)
+            .map(|i| f(i as f32 / (divisions - 1) as f32))
+            .collect();
+        encode_table(Dimensions::One, divisions, &samples, tail)
     }
-    pub(crate) const ADOBE: (u32, u32, u32, [f64; 2]) = (1, 3, 0, [0., 2.]);
+    pub(crate) const ADOBE: Tail = (1, 3, 0, [0., 2.]);
     /// Tables of every kind for GPU tests: a 3D Adobe RGB table, a 3D linear ProPhoto
     /// one that extends the gamut, and a 1D sRGB one.
     pub(crate) fn variety() -> Vec<RgbTable> {

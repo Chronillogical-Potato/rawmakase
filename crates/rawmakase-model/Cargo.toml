@@ -16,6 +16,8 @@ rawmakase-protocol = { path = "../rawmakase-protocol", version = "0.1.0" }
 rawmakase-tiff = { path = "../rawmakase-tiff", version = "0.1.0" }
 anyhow = "1"
 flate2 = "1"
+# Names a look's RGB table, as Adobe names tables (`Table_<md5>`).
+md-5 = "0.11"
 sha2 = "0.11"
 unicode-normalization = "0.1"
 rayon = "1.12"

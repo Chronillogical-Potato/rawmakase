@@ -21,7 +21,7 @@ It is a personal project in active development. It develops photos from almost e
 - **Develop**: white balance and picker, one-click Auto tone and Auto white balance, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders, ratings, flags, color labels, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
-- **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself.
+- **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself, and `.cube` LUTs imported as looks, as Camera Raw makes them.
 - **Non-destructive**: the contents of your originals are never modified. Edits live in the catalog, and all writes are atomic.
 - **Fast previews**: every change renders at viewport size, with the color and tone stage on the GPU (Metal on macOS, Vulkan on Linux, DirectX 12 or Vulkan on Windows) and a CPU fallback.
 - **Command line**: inspect, render, export thumbnails, import catalogs and profiles, and benchmark without the GUI.
@@ -30,7 +30,6 @@ It is a personal project in active development. It develops photos from almost e
 
 ## Coming soon
 
-- LUT support
 - AI object removal
 - Agentic features: e.g. culling assistance
 
@@ -162,7 +161,7 @@ The switch in a panel's header turns the panel off without losing its settings, 
 
 ### Camera profiles
 
-Every camera with a usable color matrix gets two profiles of RAWmakase's own: **RAWmakase Standard** (the camera's color matrix with the DNG default tone curve) and **RAWmakase Color** (a mild look on top of it). A new photo uses a compatible imported Adobe Color, then Adobe Standard, then a DNG's own profile, and RAWmakase Color when it has none of those. No Adobe profiles are bundled. For Lightroom's color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) from the **Profile** menu in Develop, from **Preferences**, or with `rawmakase import-profiles`. On a Mac or PC, the Profile menu also looks in Camera Raw's profile folder and, when it finds profiles filed under the camera's name, offers to import them in one click. Imported profiles are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
+Every camera with a usable color matrix gets two profiles of RAWmakase's own: **RAWmakase Standard** (the camera's color matrix with the DNG default tone curve) and **RAWmakase Color** (a mild look on top of it). A new photo uses a compatible imported Adobe Color, then Adobe Standard, then a DNG's own profile, and RAWmakase Color when it has none of those. No Adobe profiles are bundled. For Lightroom's color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) from the **Profile** menu in Develop, from **Preferences**, or with `rawmakase import-profiles`. The same import takes `.cube` LUTs, which become look profiles with a Profile Amount, as Camera Raw's Create Profile makes them. On a Mac or PC, the Profile menu also looks in Camera Raw's profile folder and, when it finds profiles filed under the camera's name, offers to import them in one click. Imported profiles are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
 
 ### Command line
 
