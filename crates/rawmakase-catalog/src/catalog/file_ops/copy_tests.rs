@@ -6,7 +6,9 @@
 //! `RAWMAKASE_TEST_OTHER_VOLUME` names a folder on another volume, uses two.
 use super::journal::{self, ItemState, MemberState};
 use super::recover_tests::{Before, before, check};
-use super::tests::{FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results};
+use super::tests::{
+    FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results, tagged,
+};
 use super::*;
 use crate::catalog::HistoryUpdate;
 use crate::export_settings::ExportOptions;
@@ -432,6 +434,80 @@ fn a_copy_that_reads_back_otherwise_is_undone() -> Result<()> {
         ..Faulty::default()
     };
     unchanged(disk, "didn't match the original")?;
+    Ok(())
+}
+
+#[test]
+fn a_photos_extras_go_with_it_to_another_drive() -> Result<()> {
+    for kind in [Far::Ids, Far::Names, Far::Direct] {
+        let mut fx = files();
+        let (a, xmp) = (fx.root.join("A.NEF"), fx.root.join("A.xmp"));
+        if !tagged(&a, "tag", b"Red") || !tagged(&xmp, "origin", b"camera") {
+            return Ok(());
+        }
+        let extras = (fsops::extras(&a)?, fsops::extras(&xmp)?);
+        let disk = far_as(&fx, kind);
+        let trash = FakeTrash::new(&fx);
+        let op = to_far(&fx, &["A.NEF"]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        let to = fx.folder("far");
+        assert_eq!(results(&outcome), [ItemResult::Moved { to }], "{kind:?}");
+        assert!(outcome.items[0].originals_kept.is_empty(), "{outcome:?}");
+        let copies = (fx.root.join("far/A.NEF"), fx.root.join("far/A.xmp"));
+        assert_eq!(
+            (fsops::extras(&copies.0)?, fsops::extras(&copies.1)?),
+            extras,
+            "{kind:?}"
+        );
+        assert!(!a.exists() && !xmp.exists(), "{kind:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_drive_that_can_t_keep_a_photos_extras_moves_nothing() -> Result<()> {
+    let disk = Faulty {
+        keeps_no_extras: true,
+        ..Faulty::default()
+    };
+    let (fx, _) = unchanged(disk, "can't keep")?;
+    assert!(fx.root.join("A.NEF").is_file());
+    Ok(())
+}
+
+#[test]
+fn an_original_tagged_while_it_was_copied_is_left_as_it_is() -> Result<()> {
+    let fx = files();
+    let disk = Faulty {
+        retag: Some((fx.root.join("A.NEF"), 1)),
+        ..Faulty::default()
+    };
+    unchanged_at(fx, disk, "changed while it was copied")?;
+    Ok(())
+}
+
+#[test]
+fn an_original_tagged_after_the_catalog_followed_is_kept() -> Result<()> {
+    let mut fx = files();
+    let a = fx.root.join("A.NEF");
+    // Read before it is copied, once copied, then before it would go.
+    let disk = Faulty {
+        retag: Some((a.clone(), 2)),
+        ..far(&fx)
+    };
+    let trash = FakeTrash::new(&fx);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let to = fx.folder("far");
+    assert_eq!(results(&outcome), [ItemResult::Moved { to }]);
+    let kept: Vec<_> = outcome.items[0]
+        .originals_kept
+        .iter()
+        .map(|k| (k.path.clone(), k.why.clone()))
+        .collect();
+    assert_eq!(kept, [(a.clone(), super::copy::EXTRAS_DIFFER.to_string())]);
+    assert_eq!(std::fs::read(&a)?, bytes("A.NEF"));
+    assert!(!fx.root.join("A.xmp").exists(), "its companion went");
     Ok(())
 }
 
@@ -1583,6 +1659,11 @@ fn a_move_between_two_real_volumes() -> Result<()> {
         .id;
     let a = fx.photo("a.NEF");
     let source = fx.root.join("a.NEF");
+    let tagged = super::tests::keeps_extras(&dir);
+    if tagged {
+        fsops::set_extra(&source, "tag", b"Red")?;
+    }
+    let extras = fsops::extras(&source)?;
     let (identity, modified) = (
         Identity::read(&source)?,
         std::fs::metadata(&source)?.modified()?,
@@ -1608,6 +1689,7 @@ fn a_move_between_two_real_volumes() -> Result<()> {
     assert!(!fx.root.join(CAFE).exists());
     let target = dir.join("a.NEF");
     assert_eq!(std::fs::read(&target)?, bytes("a.NEF"));
+    assert_eq!(fsops::extras(&target)?, extras, "tagged {tagged}");
     assert_eq!(std::fs::read(dir.join("a.xmp"))?, bytes("a.xmp"));
     let copied = Identity::read(&target)?;
     assert!(

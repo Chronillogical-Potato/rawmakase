@@ -8,10 +8,12 @@
 //!    name, and its file object journalled (`copying`);
 //! 2. the original's bytes copied into it, hashed as they are read
 //!    (stopping between chunks when the run is stopped), the hash
-//!    journalled, synced, given the original's time and permission bits,
-//!    and synced again;
-//! 3. read back and compared with the hash, and the original checked to be
-//!    the file object and `Identity` journalled;
+//!    journalled, synced, given the original's extras (extended
+//!    attributes: Finder tags, FinderInfo, a resource fork; alternate data
+//!    streams on Windows), time and permission bits, and synced again;
+//! 3. read back and compared with the hash, its extras with the
+//!    original's, and the original checked to be the file object and
+//!    `Identity` journalled, with the extras it had before they were copied;
 //! 4. renamed exclusively to its name there, the folder synced, and the
 //!    member journalled `copied`.
 //!
@@ -19,8 +21,9 @@
 //! every original still the file it copied), the rows following the
 //! copies, the photo's saved edit and checksum re-keyed to the copy when
 //! its volume keeps times more coarsely, and the item `committed`. Last,
-//! each original still that file goes to the Trash (`trashed`), or stays,
-//! with why (`original_kept`); the item is `done`.
+//! each original still that file, its extras still its copy's, goes to the
+//! Trash (`trashed`), or stays, with why (`original_kept`); the item is
+//! `done`. A drive that can't keep an original's extras undoes the item.
 //!
 //! Anything that fails before the commit undoes the item: partial copies
 //! are removed, complete ones put in the Trash, and nothing else changes.
@@ -41,7 +44,7 @@ use super::proof::{self, Proof, Proofs};
 use super::recover::NOT_BACK;
 use super::{Trash, TrashError};
 use crate::storage::Identity;
-use crate::storage::fsops::{CopyError, EntryKind, FileId, FsError};
+use crate::storage::fsops::{ContentHash, CopyError, EntryKind, FileId, FsError};
 use anyhow::{Context, Result};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -70,6 +73,9 @@ pub(super) enum Problem {
     NameTaken(String),
     /// The destination drive didn't keep the file's time.
     TimeNotKept(String),
+    /// The destination drive can't keep the file's extras (extended
+    /// attributes, alternate data streams), or didn't.
+    ExtrasNotKept(String),
     /// The photo has an edit file of an earlier release, which names the
     /// photo's time, and the destination drive keeps times more coarsely.
     LegacyEdit(String),
@@ -91,6 +97,10 @@ impl fmt::Display for Problem {
             Self::TimeNotKept(n) => {
                 write!(f, "The other drive didn't keep the date of {n}.")
             }
+            Self::ExtrasNotKept(n) => write!(
+                f,
+                "The other drive can't keep what {n} has besides its contents (Finder tags, extended attributes or alternate data streams), so nothing was moved."
+            ),
             Self::LegacyEdit(n) => write!(
                 f,
                 "{n} was edited by an earlier release, whose edit file the other drive's dates wouldn't match. Open and save its edit first."
@@ -98,6 +108,44 @@ impl fmt::Display for Problem {
             Self::Disk(e) => f.write_str(e),
         }
     }
+}
+
+/// Why an original whose extras aren't its copy's stays.
+pub(super) const EXTRAS_DIFFER: &str =
+    "its Finder tags or other extended attributes aren't its copy's any more";
+
+/// Why file or folder `original` must stay: its extras aren't `copy`'s, or
+/// can't be read; `None` when they are.
+pub(super) fn extras_differ(disk: &dyn Disk, original: &Path, copy: &Path) -> Option<String> {
+    match (disk.extras(original), disk.extras(copy)) {
+        (Ok(a), Ok(b)) if a == b => None,
+        (Ok(_), Ok(_)) => Some(EXTRAS_DIFFER.into()),
+        (Err(e), _) | (_, Err(e)) => Some(format!("its extended attributes can't be read: {e}")),
+    }
+}
+
+/// Gives file or folder `to` the extras of `from`, read as `extras`, and
+/// checks them there: [`Problem::Changed`] when `from`'s are no longer
+/// those, [`Problem::ExtrasNotKept`] when `to`'s volume can't keep them or
+/// reads back others.
+pub(super) fn carry_extras(
+    disk: &dyn Disk,
+    from: &Path,
+    to: &Path,
+    extras: ContentHash,
+) -> Result<(), Problem> {
+    let not_kept = || Problem::ExtrasNotKept(name(from));
+    disk.copy_extras(from, to).map_err(|e| match e {
+        FsError::Unsupported => not_kept(),
+        e => problem(e),
+    })?;
+    if disk.extras(from).map_err(problem)? != extras {
+        return Err(Problem::Changed(from.to_path_buf()));
+    }
+    if disk.extras(to).map_err(problem)? != extras {
+        return Err(not_kept());
+    }
+    Ok(())
 }
 
 fn problem(e: FsError) -> Problem {
@@ -280,6 +328,10 @@ pub(super) fn write(
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
     disk.sync_file(&temp).map_err(problem)?;
+    // Its extras before its time and permissions: writing a resource fork
+    // changes a file's time, and a read-only file takes no more.
+    let extras = disk.extras(source).map_err(problem)?;
+    carry_extras(disk, source, &temp, extras)?;
     disk.copy_times(source, &temp).map_err(problem)?;
     disk.sync_file(&temp).map_err(problem)?;
     // 3. Read back, and the original still what was copied.
@@ -526,6 +578,10 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
                     .is_some_and(|c| cx.disk.hash(&m.source).is_ok_and(|now| now == c)));
         if !unchanged {
             kept(catalog, "it changed since it was copied")?;
+            continue;
+        }
+        if let Some(why) = extras_differ(cx.disk, &m.source, at) {
+            kept(catalog, &why)?;
             continue;
         }
         // Its name as the plan took it, composed where names prove it; a

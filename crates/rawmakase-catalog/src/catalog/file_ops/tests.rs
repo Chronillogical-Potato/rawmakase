@@ -416,12 +416,25 @@ macro_rules! passes_on {
         fn sync_file(&self, path: &std::path::Path) -> Result<(), crate::storage::fsops::FsError> {
             self.$inner.sync_file(path)
         }
+        fn copy_extras(
+            &self,
+            from: &std::path::Path,
+            to: &std::path::Path,
+        ) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.copy_extras(from, to)
+        }
         fn copy_times(
             &self,
             from: &std::path::Path,
             to: &std::path::Path,
         ) -> Result<(), crate::storage::fsops::FsError> {
             self.$inner.copy_times(from, to)
+        }
+        fn extras(
+            &self,
+            path: &std::path::Path,
+        ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::FsError> {
+            self.$inner.extras(path)
         }
         fn hash(
             &self,
@@ -456,6 +469,7 @@ pub(super) enum Call {
     /// A chunk of a copy written, with the bytes written so far.
     Chunk(u64),
     SyncFile(PathBuf),
+    CopyExtras(PathBuf),
     CopyTimes(PathBuf),
     Hash(PathBuf),
     RemoveFile(PathBuf),
@@ -471,6 +485,7 @@ pub(super) enum Op {
     CreateFile,
     Copy,
     SyncFile,
+    CopyExtras,
     CopyTimes,
     Hash,
     RemoveFile,
@@ -479,10 +494,11 @@ pub(super) enum Op {
 
 impl Op {
     /// The steps of a copy to another volume.
-    pub const COPYING: [Op; 8] = [
+    pub const COPYING: [Op; 9] = [
         Op::CreateFile,
         Op::Copy,
         Op::SyncFile,
+        Op::CopyExtras,
         Op::CopyTimes,
         Op::Hash,
         Op::Rename,
@@ -524,6 +540,14 @@ pub(super) struct Faulty {
     pub coarse: Option<u64>,
     /// Each copy reads back with a byte changed.
     pub corrupt: bool,
+    /// The volume taken for another can't keep the extras (extended
+    /// attributes, alternate data streams) of what is copied there, as
+    /// Linux's and Windows' FAT and exFAT can't.
+    pub keeps_no_extras: bool,
+    /// The extras of this file or folder read otherwise from the `n`-th
+    /// time they are read (from 0) on, as if the user tagged it then.
+    pub retag: Option<(PathBuf, usize)>,
+    pub extras_read: RefCell<BTreeMap<PathBuf, usize>>,
     /// The original gets another byte while it is copied.
     pub change_source: bool,
     /// The original is taken away to this path while it is copied.
@@ -915,6 +939,35 @@ impl Disk for Faulty {
         self.calls.borrow_mut().push(Call::SyncFile(path.into()));
         self.step(Op::SyncFile, || Real.sync_file(&self.found(path)))
     }
+    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.calls.borrow_mut().push(Call::CopyExtras(to.into()));
+        let (from, to) = (&self.found(from), &self.found(to));
+        self.step(Op::CopyExtras, || {
+            match self.keeps_no_extras && self.far(to) {
+                true => Err(FsError::Unsupported),
+                false => Real.copy_extras(from, to),
+            }
+        })
+    }
+    fn extras(&self, path: &Path) -> Result<crate::storage::fsops::ContentHash, FsError> {
+        let n = {
+            let mut read = self.extras_read.borrow_mut();
+            let n = read.entry(path.to_path_buf()).or_default();
+            *n += 1;
+            *n - 1
+        };
+        let found = Real.extras(&self.found(path))?;
+        match &self.retag {
+            Some((at, from)) if at == path && n >= *from => {
+                // Another hash than the one read.
+                let mut other = found.to_string();
+                let first = if other.starts_with('0') { "1" } else { "0" };
+                other.replace_range(..1, first);
+                Ok(other.parse().unwrap())
+            }
+            _ => Ok(found),
+        }
+    }
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CopyTimes(to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
@@ -923,7 +976,7 @@ impl Disk for Faulty {
         }
         self.step(Op::CopyTimes, || {
             Real.copy_times(from, to)?;
-            if let Some(step) = self.coarse {
+            if let (Some(step), false) = (self.coarse, to.is_dir()) {
                 let at = std::fs::metadata(to)?.modified()?;
                 let ns = at.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
                 let cut = ns - ns % u128::from(step);
@@ -983,6 +1036,29 @@ impl Disk for Faulty {
             born => born,
         }
     }
+}
+
+/// Gives file or folder `path` the extra `name` (an extended attribute, or
+/// an alternate data stream on Windows), or says the temporary folder's
+/// file system keeps none (overlayfs in some containers), for the test to
+/// end there.
+pub(super) fn tagged(path: &Path, name: &str, value: &[u8]) -> bool {
+    match crate::storage::fsops::set_extra(path, name, value) {
+        Ok(()) => true,
+        Err(FsError::Unsupported) => {
+            eprintln!("{}: no extended attributes here", path.display());
+            false
+        }
+        Err(e) => panic!("{}: {e}", path.display()),
+    }
+}
+
+/// Whether a real drive, at folder `dir`, keeps extras: any on macOS (FAT
+/// and exFAT in AppleDouble files), not FAT and exFAT elsewhere.
+pub(super) fn keeps_extras(dir: &Path) -> bool {
+    use crate::storage::fsops::{VolumeKind, volume_facts};
+    cfg!(target_vendor = "apple")
+        || volume_facts(dir).is_ok_and(|f| !matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat))
 }
 
 /// Runs `f`, which may "crash", and says whether it did.

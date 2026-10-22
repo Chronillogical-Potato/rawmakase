@@ -14,7 +14,9 @@
 //!    copied, hashed, synced, given the original's time, read back and the
 //!    original re-checked, as a photo's copy is ([`copy::write`]), and
 //!    journalled `copied`;
-//! 3. the folders synced, deepest first; the hidden folder renamed
+//! 3. the folders given their originals' extras (extended attributes,
+//!    alternate data streams), checked, and synced, deepest first; the
+//!    hidden folder renamed
 //!    exclusively to the folder's name, its folder synced, and every
 //!    member's destination journalled as the disk spells it (the folder
 //!    `copied`).
@@ -23,11 +25,13 @@
 //! every original still the file it copied, the catalog's folders and photos
 //! of the subtree as planned), the subtree re-keyed to the destination as a
 //! rename does, a photo's saved edit and checksum re-keyed where the volume
-//! keeps times more coarsely, and the item `committed`. Last, the originals:
-//! when every one is proven as copied and the folder holds exactly what was
-//! planned, it goes to the Trash whole; otherwise each file proven as copied
-//! goes on its own, and the rest stay, with the folders, reported
-//! (`original_kept`).
+//! keeps times more coarsely, and the item `committed`. Last, each folder
+//! there is given its original's times and permission bits (now nothing
+//! more is written in it, and a read-only one could no longer be renamed),
+//! then the originals: when every one is proven as copied, its extras still
+//! its copy's, and the folder holds exactly what was planned, it goes to
+//! the Trash whole; otherwise each file proven so goes on its own, and the
+//! rest stay, with the folders, reported (`original_kept`).
 //!
 //! Anything that fails before the commit undoes it. Still hidden, its copies
 //! are removed newest first (one written whole only while its original is
@@ -46,7 +50,7 @@ use super::super::{FolderId, PhotoId};
 use super::FileOpError;
 use super::companions::is_legacy_edit;
 use super::conflicts::Names;
-use super::copy::{self, Cx, Failed, Originals, Problem, copy_at, original_here};
+use super::copy::{self, Cx, Failed, Originals, Problem, copy_at, extras_differ, original_here};
 use super::disk::{Disk, Presence, gone, parent, presence, spelled};
 use super::journal::{self, Item, ItemState, Kind, Member, MemberState, NewTreeMember, Subject};
 use super::plan::occupied;
@@ -566,12 +570,17 @@ fn build(
             .write(|w| journal::set_copied(w, id, ordinal, &destination))
             .map_err(Failed::Journal)?;
     }
-    // 3. Durable, then named, never replacing anything there; built at its
-    // name already where the volume can't rename exclusively.
+    // 3. With their originals' extras (which on FAT and exFAT macOS keeps
+    // in a file beside each, in the folder holding it), durable, then
+    // named, never replacing anything there; built at its name already
+    // where the volume can't rename exclusively.
     for e in copy.entries.iter().rev().filter(|e| e.identity.is_none()) {
         let dir = made
             .get(&e.rel)
             .ok_or_else(|| Problem::Disk("a folder wasn't made".into()))?;
+        let source = tree.source.join(&e.rel);
+        let extras = disk.extras(&source).map_err(problem)?;
+        copy::carry_extras(disk, &source, dir, extras)?;
         disk.sync_dir(dir).map_err(problem)?;
     }
     let (Some(hidden), Some(top)) = (made.get(Path::new("")), top) else {
@@ -1079,10 +1088,56 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         })?;
         return Ok(());
     }
+    // Each folder there given its original's times and permission bits,
+    // deepest first; one that can't be, or whose extras aren't its
+    // original's any more, keeps its original, with why. Not again once a
+    // file went from it (finishing after a crash, its receipt journalled
+    // or not): that dated the original.
+    let emptied = |dir: &Path| {
+        item.members.iter().any(|f| {
+            f.identity.is_some()
+                && parent(&f.source) == dir
+                && (f.state == MemberState::Trashed
+                    || source_presence(disk, proofs, f) == Presence::Absent)
+        })
+    };
+    let mut folders_kept: HashMap<i64, String> = HashMap::new();
+    for m in item.members.iter().rev().filter(|m| m.identity.is_none()) {
+        let at = match m.destination.as_deref() {
+            Some(at) => copy_found(disk, proofs, m, at).flatten(),
+            None => None,
+        };
+        let Some(at) = at else {
+            folders_kept.insert(m.ordinal, "its copy isn't as it was made".into());
+            continue;
+        };
+        if source_presence(disk, proofs, m) != Presence::Here {
+            continue;
+        }
+        let timed = match emptied(&m.source) {
+            true => Ok(()),
+            false => disk.copy_times(&m.source, &at),
+        };
+        if let Err(e) = timed {
+            let why = format!("its dates and permissions couldn't be given to its copy: {e}");
+            folders_kept.insert(m.ordinal, why);
+        } else if let Some(why) = extras_differ(disk, &m.source, &at) {
+            folders_kept.insert(m.ordinal, why);
+        }
+    }
+    // Why file `m` must stay for its extras, if it must.
+    let extras_differ = |m: &Member| match m.destination.as_deref() {
+        Some(at) => extras_differ(disk, &m.source, at),
+        None => Some("its copy isn't journalled".into()),
+    };
     let whole = source_presence(disk, proofs, top) == Presence::Here
-        && files
-            .iter()
-            .all(|m| m.state == MemberState::Copied && copy_here(m) && unchanged(m))
+        && folders_kept.is_empty()
+        && files.iter().all(|m| {
+            m.state == MemberState::Copied
+                && copy_here(m)
+                && unchanged(m)
+                && extras_differ(m).is_none()
+        })
         && as_planned(disk, item);
     let kept = |catalog: &mut Catalog, m: &Member, why: &str| {
         catalog
@@ -1145,6 +1200,10 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
             kept(catalog, m, "it changed since it was copied")?;
             continue;
         }
+        if let Some(why) = extras_differ(m) {
+            kept(catalog, m, &why)?;
+            continue;
+        }
         let receipt = match trash_original(cx, proofs, &m.source) {
             Ok(receipt) => receipt.location,
             Err(e) => {
@@ -1182,6 +1241,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         }
         let at = rel(item, m).unwrap_or(Path::new(""));
         let why = match &extra {
+            _ if folders_kept.contains_key(&m.ordinal) => folders_kept[&m.ordinal].clone(),
             None => "what it holds now can't be read".to_string(),
             Some(extra) => match extra.iter().find(|r| r.starts_with(at)) {
                 Some(r) => format!(

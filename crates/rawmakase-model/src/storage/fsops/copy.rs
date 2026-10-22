@@ -2,9 +2,16 @@
 //! caller can journal between them: an empty file made where nothing has
 //! its name ([`create_file`]), the bytes copied into it and hashed as they
 //! are read ([`copy_into`]), made durable ([`sync_file`]), given the
-//! source's time ([`copy_times`]), and hashed again ([`hash_file`]). The
-//! file is never truncated or replaced, and the source never changed.
-//! [`remove_file`] is the one unlink here, for a partial copy.
+//! source's extras ([`copy_extras`]) and time ([`copy_times`]), and hashed
+//! again ([`hash_file`]), its extras too ([`extras`]). The file is never
+//! truncated or replaced, and the source never changed. [`remove_file`] is
+//! the one unlink here, for a partial copy.
+//!
+//! A file's or folder's extras are what it keeps beside its contents, times
+//! and permissions: its extended attributes on macOS (Finder tags,
+//! FinderInfo, its resource fork, and the rest, but for what the system
+//! sets itself), its `user.` ones on Linux, and its alternate data streams
+//! on Windows.
 use super::{FileId, FsError};
 use sha2::{Digest as _, Sha256};
 use std::fmt;
@@ -148,12 +155,15 @@ pub fn sync_file(path: &Path) -> Result<(), FsError> {
     Ok(file.sync_all()?)
 }
 
-/// Gives file `to` the modification and access times of `from` (to the
-/// nanosecond where `to`'s volume keeps them; to what it keeps otherwise),
-/// and on Unix its permission bits.
+/// Gives file or folder `to` the modification and access times of `from`
+/// (to the nanosecond where `to`'s volume keeps them; to what it keeps
+/// otherwise), and on Unix its permission bits.
 pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
     let source = std::fs::metadata(from)?;
-    let file = OpenOptions::new().write(true).open(to)?;
+    let file = match source.is_dir() {
+        true => super::os::open_folder(to)?,
+        false => OpenOptions::new().write(true).open(to)?,
+    };
     let times = std::fs::FileTimes::new()
         .set_accessed(source.accessed()?)
         .set_modified(source.modified()?);
@@ -165,6 +175,46 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
         file.set_permissions(std::fs::Permissions::from_mode(mode))?;
     }
     Ok(())
+}
+
+/// Gives file or folder `to` each extra of `from`, as it is there; what
+/// `to` has already stays. [`FsError::Unsupported`] where `to`'s volume
+/// can't keep one (FAT and exFAT on Linux and Windows; macOS keeps them
+/// there in AppleDouble files, `._name`). Neither syncs nor compares: see
+/// [`extras`].
+pub fn copy_extras(from: &Path, to: &Path) -> Result<(), FsError> {
+    for name in super::os::extra_names(from)? {
+        let value = super::os::read_extra(from, &name)?;
+        super::os::write_extra(to, &name, &value)?;
+    }
+    Ok(())
+}
+
+/// The SHA-256 of every extra of file or folder `path`, by name: two
+/// files or folders whose extras are the same have the same.
+pub fn extras(path: &Path) -> Result<ContentHash, FsError> {
+    let mut names = super::os::extra_names(path)?;
+    names.sort();
+    let mut sha = Sha256::new();
+    for name in names {
+        let value = super::os::read_extra(path, &name)?;
+        for part in [name.as_encoded_bytes(), &value] {
+            sha.update((part.len() as u64).to_le_bytes());
+            sha.update(part);
+        }
+    }
+    Ok(ContentHash::of(sha))
+}
+
+/// Gives file or folder `path` the extra `name` (on Linux `user.name`),
+/// for tests that need one.
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_extra(path: &Path, name: &str, value: &[u8]) -> Result<(), FsError> {
+    let name = match cfg!(any(target_os = "linux", target_os = "android")) {
+        true => format!("user.{name}"),
+        false => name.to_string(),
+    };
+    super::os::write_extra(path, std::ffi::OsStr::new(&name), value)
 }
 
 /// The SHA-256 of `path`'s contents, read whole.
