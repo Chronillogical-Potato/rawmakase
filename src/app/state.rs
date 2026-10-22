@@ -46,6 +46,8 @@ pub(super) struct Document {
     pub(super) defaults: Option<crate::raw_defaults::Resolved>,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
+    /// Where the Profile menu lists each of `profiles`.
+    pub(super) profile_groups: crate::camera_profiles::Groups,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
     pub(super) auto: super::task::Task,
     /// Point Color's dropper sampling the photo, off the UI thread.

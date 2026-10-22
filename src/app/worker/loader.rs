@@ -204,7 +204,11 @@ fn opener(
                 None => crate::photo::open_source(&path, &job.cancel)?,
             };
             let metadata = opened.metadata().clone();
-            let (profiles, warnings) = crate::camera_profiles::installed(&metadata);
+            let crate::camera_profiles::Listed {
+                profiles,
+                errors,
+                groups,
+            } = crate::camera_profiles::listed(&metadata);
             // The raw defaults; the catalog's edit replaces them once the header
             // is installed.
             let recipe = job.defaults.resolve(&metadata, &profiles).recipe;
@@ -226,7 +230,8 @@ fn opener(
                 Event::Profiles {
                     id: job.id,
                     profiles,
-                    errors: warnings,
+                    errors,
+                    groups,
                 },
             );
             let mut raw = match opened {

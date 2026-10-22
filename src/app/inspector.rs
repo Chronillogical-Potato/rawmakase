@@ -21,6 +21,7 @@ use crate::{app::theme, develop::targeted::Target};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
+mod profile_menu;
 
 /// A histogram corner's clipping triangle: its corner point, which way it
 /// points (1 right, -1 left) and the area that takes its clicks.
@@ -419,6 +420,7 @@ impl Editor {
         let rendered = metadata.as_ref().is_some_and(|m| m.is_rendered());
         let profiles = self.document.profiles.clone();
         let profile_errors = self.document.profile_errors.clone();
+        let profile_groups = self.document.profile_groups.clone();
         let histogram = self.preview.histogram.bins;
         // Auto needs the decoded photo, and runs one estimate at a time.
         let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
@@ -503,10 +505,7 @@ impl Editor {
                         if !rendered {
                             ui.selectable_value(&mut r.profile, None, matrix);
                         }
-                        for profile in &profiles {
-                            ui.selectable_value(&mut r.profile, Some(profile.clone()), &profile.name)
-                                .on_hover_text(&profile.copyright);
-                        }
+                        profile_menu::items(ui, &mut r.profile, &profiles, &profile_groups);
                         if rendered {
                             return;
                         }
@@ -1520,7 +1519,11 @@ impl Editor {
             match result {
                 Ok(done) => {
                     if !done.imported.is_empty() {
-                        let (profiles, errors) = crate::camera_profiles::installed(&m);
+                        let crate::camera_profiles::Listed {
+                            profiles,
+                            errors,
+                            groups,
+                        } = crate::camera_profiles::listed(&m);
                         // As the loader's: the raw defaults are resolved again
                         // after this frame, so changing an unedited photo's recipe
                         // is not taken for an edit.
@@ -1528,6 +1531,7 @@ impl Editor {
                             id: self.load.id(),
                             profiles,
                             errors,
+                            groups,
                         });
                         ui.ctx().request_repaint();
                         self.refresh_library_defaults();

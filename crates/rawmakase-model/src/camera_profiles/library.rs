@@ -109,18 +109,86 @@ pub fn library_dirs() -> Vec<std::path::PathBuf> {
 }
 
 pub fn installed(m: &Metadata) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
-    installed_in(&library_dirs(), m, &CAMERAS)
+    let listed = listed(m);
+    (listed.profiles, listed.errors)
 }
-fn installed_in(
-    dirs: &[PathBuf],
-    m: &Metadata,
-    cameras: &Cameras,
-) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
+/// The profiles for a photo, as [`installed`] lists them, with where the profile
+/// menu shows each.
+pub fn listed(m: &Metadata) -> Listed {
+    listed_in(&library_dirs(), m, &CAMERAS)
+}
+/// The profiles that fit a photo, name-sorted, the files that failed to read, and
+/// the groups of the looks among them.
+#[derive(Clone, Debug, Default)]
+pub struct Listed {
+    pub profiles: Vec<Arc<CameraProfile>>,
+    pub errors: Vec<String>,
+    pub groups: Groups,
+}
+/// The `crs:Group` of each look listed, by its name and UUID. Kept beside the
+/// profiles rather than in them: a profile is embedded in every recipe that uses
+/// it, and earlier releases refuse a recipe whose profile has a field they lack.
+/// Shared, as the menu takes a copy each frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Groups(Arc<HashMap<(String, String), String>>);
+/// Where the profile menu lists a profile: at the top level or in a group's
+/// submenu, under a section heading inside it if any, as `title`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MenuEntry {
+    pub group: Option<String>,
+    /// A heading inside the group. Imported looks have none; it is for a set of
+    /// looks whose variants belong together, such as a film stock's.
+    pub section: Option<String>,
+    pub title: String,
+}
+impl Groups {
+    fn insert(&mut self, name: &str, uuid: &str, group: &str) {
+        Arc::make_mut(&mut self.0)
+            .entry((name.into(), uuid.to_ascii_uppercase()))
+            .or_insert_with(|| group.into());
+    }
+    /// Where the menu lists `profile`. A look goes in the submenu of its group;
+    /// camera profiles (DCPs, a DNG's own), RAWmakase's and a look without a group
+    /// stay at the top level, as does a look in Lightroom's "Profiles" group:
+    /// Adobe Color and the other Adobe Raw and Camera Matching looks, which
+    /// Lightroom lists with the camera's profiles.
+    pub fn entry(&self, profile: &CameraProfile) -> MenuEntry {
+        let group = profile
+            .enhanced
+            .as_ref()
+            .and_then(|look| {
+                self.0
+                    .get(&(profile.name.clone(), look.uuid.to_ascii_uppercase()))
+            })
+            .filter(|group| !group.is_empty() && *group != "Profiles")
+            .cloned();
+        MenuEntry {
+            group,
+            section: None,
+            title: profile.name.clone(),
+        }
+    }
+}
+/// [`listed`] from `dirs` instead of the user's library, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn listed_from(dirs: &[PathBuf], m: &Metadata) -> Listed {
+    listed_in(dirs, m, &Cameras::default())
+}
+/// [`import_files`] into `destination` instead of the user's library, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn import_into_dir(paths: &[PathBuf], destination: &Path) -> Result<Vec<ImportedProfile>> {
+    import_into(paths, destination)
+}
+fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
     if m.is_rendered() {
-        return (vec![Arc::new(CameraProfile::embedded(m))], vec![]);
+        return Listed {
+            profiles: vec![Arc::new(CameraProfile::embedded(m))],
+            ..Listed::default()
+        };
     }
     let mut profiles = Vec::new();
     let mut errors = Vec::new();
+    let mut groups = Groups::default();
     if let Some(p) = builtin(m) {
         profiles.push(p);
     }
@@ -191,14 +259,17 @@ fn installed_in(
                 };
                 format!("Missing matching base camera profile {name}")
             })?;
-            look.compose(base)
+            Ok((look.compose(base)?, look.group))
         });
         match composed {
-            Ok(p) => {
+            Ok((p, group)) => {
                 if !profiles
                     .iter()
                     .any(|old| old.name == p.name && old.camera == p.camera)
                 {
+                    if let Some(look) = &p.enhanced {
+                        groups.insert(&p.name, &look.uuid, &group);
+                    }
                     profiles.push(Arc::new(p));
                 }
             }
@@ -208,7 +279,11 @@ fn installed_in(
     errors.sort();
     errors.dedup();
     profiles.sort_by(|a, b| a.name.cmp(&b.name));
-    (profiles, errors)
+    Listed {
+        profiles,
+        errors,
+        groups,
+    }
 }
 /// A look profile file over the profile it builds on among `bases` (see `look_base`),
 /// without the user's library. `own` is the file's embedded profile, if any.
@@ -609,6 +684,14 @@ pub fn adobe_installed(m: &Metadata) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn installed_in(
+        dirs: &[PathBuf],
+        m: &Metadata,
+        cameras: &Cameras,
+    ) -> (Vec<Arc<CameraProfile>>, Vec<String>) {
+        let listed = listed_in(dirs, m, cameras);
+        (listed.profiles, listed.errors)
+    }
     /// A minimal DCP: the camera it is for, its name and an identity forward matrix.
     fn dcp(camera: &str, name: &str) -> Vec<u8> {
         dcp_with(camera, name, [])
@@ -951,6 +1034,100 @@ mod tests {
                 "{name}: {listed:?}"
             );
         }
+        Ok(())
+    }
+
+    /// The listing says where the menu shows every profile: a look in its group's
+    /// submenu; camera profiles, RAWmakase's, a look without a group and Adobe's
+    /// "Profiles" looks at the top level. The group stays out of the profile, so the
+    /// recipe that embeds it is what earlier releases read.
+    #[test]
+    fn the_listing_groups_looks_and_keeps_profiles_at_the_top() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        std::fs::create_dir_all(&dest)?;
+        std::fs::write(dest.join("mine.dcp"), dcp("Test Camera", "Camera Neutral"))?;
+        let pack = temp.path().join("Pack Moody/For Other Programs/Cube Files");
+        import_into(&[write_cube(&pack, "Portra.cube", warm)], &dest)?;
+        let look = |name: &str, group: &str, f: fn([f32; 3]) -> [f32; 3]| -> Result<()> {
+            let cube = write_cube(&temp.path().join("src"), &format!("{name}.cube"), f);
+            let converted = super::super::cube_look::convert(&std::fs::read(&cube)?)?;
+            std::fs::write(
+                dest.join(format!("{name}.xmp")),
+                super::super::cube_look::look_xmp(&converted, name, group),
+            )?;
+            Ok(())
+        };
+        look("Adobe Vivid", "Profiles", cool)?;
+        look("Loose", "", |p| p)?;
+        look("Faded", "B&W", |[r, g, b]| [r * 0.9, g * 0.9, b * 0.9])?;
+        let listed = listed_in(
+            std::slice::from_ref(&dest),
+            &with_matrix(),
+            &Cameras::default(),
+        );
+        assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+        let entry = |name: &str| {
+            let p = listed.profiles.iter().find(|p| p.name == name).expect(name);
+            listed.groups.entry(p)
+        };
+        assert_eq!(
+            entry("Portra"),
+            MenuEntry {
+                group: Some("Pack Moody".into()),
+                section: None,
+                title: "Portra".into()
+            }
+        );
+        assert_eq!(entry("Faded").group.as_deref(), Some("B&W"));
+        for name in [
+            "Camera Neutral",
+            super::super::open::STANDARD,
+            "Adobe Vivid",
+            "Loose",
+        ] {
+            assert_eq!(entry(name).group, None, "{name}");
+            assert_eq!(entry(name).title, name);
+        }
+        // A profile the listing never saw (an edit's embedded copy, its file gone)
+        // has no group, and neither does a look with the name but another table.
+        let portra = listed.profiles.iter().find(|p| p.name == "Portra").unwrap();
+        let mut other = (**portra).clone();
+        other.enhanced.as_mut().unwrap().uuid = "0".repeat(32);
+        assert_eq!(listed.groups.entry(&other).group, None);
+        assert_eq!(Groups::default().entry(portra).group, None);
+        let saved = serde_json::to_string(&**portra)?;
+        assert!(!saved.contains("Pack Moody"), "{saved}");
+        Ok(())
+    }
+
+    /// Two packs that both keep their cubes in "Cube Files" rename a colliding cube
+    /// after the pack, as it lists under that group too.
+    #[test]
+    fn a_collision_is_renamed_after_the_meaningful_group() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        let pack = |name: &str| temp.path().join(name).join("Cube Files");
+        let first = write_cube(&pack("Pack A"), "Portra.cube", warm);
+        let second = write_cube(&pack("Pack B"), "Portra.cube", cool);
+        let done = import_into(&[first, second.clone()], &dest)?;
+        let names: Vec<_> = done.iter().map(|d| cube_of(d).name.as_str()).collect();
+        assert_eq!(names, ["Portra", "Portra (Pack B)"]);
+        // Imported again from elsewhere, it is found by its table, not its group.
+        let moved = write_cube(&temp.path().join("Moved/LUTs"), "Portra.cube", cool);
+        for path in [second, moved] {
+            let done = import_into(&[path], &dest)?;
+            assert!(cube_of(&done[0]).already);
+            assert_eq!(cube_of(&done[0]).name, "Portra (Pack B)");
+        }
+        let listed = listed_in(&[dest], &with_matrix(), &Cameras::default());
+        let groups: Vec<_> = listed
+            .profiles
+            .iter()
+            .filter(|p| p.name.starts_with("Portra"))
+            .map(|p| listed.groups.entry(p).group.unwrap_or_default())
+            .collect();
+        assert_eq!(groups, ["Pack A", "Pack B"]);
         Ok(())
     }
 

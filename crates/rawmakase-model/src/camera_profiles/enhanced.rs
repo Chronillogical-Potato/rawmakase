@@ -377,6 +377,9 @@ pub(super) enum LookBase {
 #[derive(Clone, Debug)]
 pub(super) struct LookFile {
     pub name: String,
+    /// Its `crs:Group`, which the profile menu lists it under; not part of the
+    /// profile a recipe embeds.
+    pub group: String,
     pub base: LookBase,
     restriction: String,
     copyright: String,
@@ -612,6 +615,7 @@ impl LookFile {
         look.validate_contents()?;
         Ok(Self {
             name: name.into(),
+            group: label(d, "Group").unwrap_or("").trim().into(),
             base,
             restriction: attr("CameraModelRestriction").into(),
             copyright: attr("Copyright").into(),
@@ -638,15 +642,18 @@ fn look_description<'a, 'input>(
 }
 /// The name a look lists under: its `crs:Name`'s default language.
 fn look_name<'a>(d: roxmltree::Node<'a, '_>) -> Result<&'a str> {
+    label(d, "Name").context("Missing profile name")
+}
+/// A label element's (`crs:Name`, `crs:Group`) default language.
+fn label<'a>(d: roxmltree::Node<'a, '_>, element: &str) -> Option<&'a str> {
     d.children()
-        .find(|n| n.has_tag_name((CRS, "Name")))
+        .find(|n| n.has_tag_name((CRS, element)))
         .and_then(|n| {
             n.descendants().find(|n| {
                 n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default")
             })
         })
         .and_then(|n| n.text())
-        .context("Missing profile name")
 }
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code))]

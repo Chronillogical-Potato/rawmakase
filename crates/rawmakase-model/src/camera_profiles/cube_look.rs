@@ -308,9 +308,9 @@ impl Names {
     }
 }
 
-/// A cube's file stem and the folder it was in, which name and group its look, as
-/// the XMP holds them: control characters, which XML drops or rewrites, become
-/// spaces, so the name checked for collisions is the name stored.
+/// A cube's file stem and its folder (see [`group_of`]), which name and group its
+/// look, as the XMP holds them: control characters, which XML drops or rewrites,
+/// become spaces, so the name checked for collisions is the name stored.
 pub(super) fn stem_and_group(path: &Path) -> Result<(String, String)> {
     let clean = |name: &std::ffi::OsStr| {
         name.to_string_lossy()
@@ -322,12 +322,92 @@ pub(super) fn stem_and_group(path: &Path) -> Result<(String, String)> {
     };
     let stem = clean(path.file_stem().context("Missing profile filename")?);
     ensure!(!stem.is_empty(), "Missing profile filename");
-    let group = path
-        .parent()
-        .and_then(|p| p.file_name())
+    let folders: Vec<String> = path
+        .ancestors()
+        .skip(1)
+        .map_while(Path::file_name)
         .map(clean)
-        .unwrap_or_default();
-    Ok((stem, group))
+        .collect();
+    Ok((stem, group_of(&folders)))
+}
+
+/// The group of a cube in `folders`, its folder first, then that folder's and so
+/// on: the nearest whose name says more than that it holds cubes ("Cube Files",
+/// "LUTs", "For Other Programs", as LUT packs name the folder of each format), up
+/// to four folders up. A cube in only such folders, or whose search reaches a
+/// standard folder ("Downloads", "Desktop") or a user's home folder (a folder in
+/// "Users", "home" or Linux's "media" at the top of the path) first, takes its own
+/// folder's name, and one right in a home folder none, so a group never names the
+/// user. A drive's or disk image's name can be one: packs ship as disk images
+/// named after them. Only the path decides, so the same file always gets the same
+/// group.
+pub(super) fn group_of(folders: &[String]) -> String {
+    const GENERIC: &[&str] = &[
+        "1d",
+        "3d",
+        "3dl",
+        "and",
+        "app",
+        "apps",
+        "application",
+        "applications",
+        "cube",
+        "cubes",
+        "export",
+        "file",
+        "files",
+        "for",
+        "format",
+        "formats",
+        "lut",
+        "luts",
+        "macosx",
+        "other",
+        "others",
+        "program",
+        "programs",
+        "software",
+    ];
+    const STANDARD: &[&str] = &[
+        "desktop",
+        "documents",
+        "downloads",
+        "home",
+        "movies",
+        "pictures",
+        "tmp",
+        "users",
+        "volumes",
+    ];
+    let words = |name: &str| -> Vec<String> {
+        name.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let generic = |name: &str| words(name).iter().all(|w| GENERIC.contains(&w.as_str()));
+    let own = folders.first().cloned().unwrap_or_default();
+    let standard = |name: &String| STANDARD.contains(&name.to_lowercase().as_str());
+    for (i, name) in folders.iter().enumerate().take(4) {
+        // A home folder is in "Users" or "home" at the top of the path, or in
+        // "media" or "run/media" there; a folder of those names deeper is not.
+        let above: Vec<String> = folders[i + 1..].iter().map(|f| f.to_lowercase()).collect();
+        let above: Vec<&str> = above.iter().map(String::as_str).collect();
+        let home = matches!(
+            above.as_slice(),
+            ["users"] | ["home"] | ["media"] | ["media", "run"]
+        );
+        if home && i == 0 {
+            return String::new();
+        }
+        if standard(name) || home {
+            break;
+        }
+        if !generic(name) {
+            return name.clone();
+        }
+    }
+    own
 }
 
 #[cfg(test)]
@@ -545,6 +625,60 @@ pub(super) mod tests {
         let converted = convert(cube_text(2, |p| p).as_bytes()).unwrap();
         let xml = look_xmp(&converted, &stem, &group);
         assert_eq!(LookFile::identity(&xml).unwrap().0, stem);
+    }
+
+    /// A cube's group is the nearest folder whose name says more than that it holds
+    /// cubes, so a pack that keeps every look's `.cube` in "Cube Files" groups them
+    /// by the pack's folder, and the group is read back from the look.
+    #[test]
+    fn a_cube_is_grouped_by_its_nearest_meaningful_folder() {
+        let group = |path: &str| stem_and_group(Path::new(path)).unwrap().1;
+        assert_eq!(group("/x/Film/Portra.cube"), "Film");
+        for (path, want) in [
+            (
+                "/x/Pack Moody/For Other Programs/Cube Files/A.cube",
+                "Pack Moody",
+            ),
+            (
+                "/x/Pack Bold/For Other Software/CUBE Files/A.cube",
+                "Pack Bold",
+            ),
+            ("/x/Pack/LUTs/A.cube", "Pack"),
+            ("/x/Pack/3D_LUTs/cube/A.cube", "Pack"),
+            ("/x/2. Gold 200 LUT/A.cube", "2. Gold 200 LUT"),
+            // Four folders at most: past them, the cube's own folder.
+            ("/x/Pack/luts/cubes/files/lut/A.cube", "lut"),
+            // A standard folder ends the search, rather than naming the user.
+            ("/home/me/Downloads/LUTs/A.cube", "LUTs"),
+            ("/home/me/Downloads/A.cube", "Downloads"),
+            ("/Users/me/LUTs/A.cube", "LUTs"),
+            ("/home/me/Cube Files/A.cube", "Cube Files"),
+            ("/Volumes/T5/Pack/LUTs/A.cube", "Pack"),
+            ("/Users/me/Pack/A.cube", "Pack"),
+            // Right in a home folder: no group, rather than the user's name.
+            ("/Users/me/A.cube", ""),
+            ("/home/me/A.cube", ""),
+            ("/media/me/A.cube", ""),
+            // A disk image or drive is named after what it holds.
+            (
+                "/Volumes/Moody Pack/For Other Programs/Cube Files/A.cube",
+                "Moody Pack",
+            ),
+            ("/Volumes/T5/LUTs/A.cube", "T5"),
+            ("/media/me/T5/LUTs/A.cube", "T5"),
+            ("/run/media/me/T5/A.cube", "T5"),
+            // Folders named like those deeper in the path are ordinary ones.
+            ("/Users/me/Media/Film Emulation/A.cube", "Film Emulation"),
+            ("/Users/me/Media/Pack/Cube Files/A.cube", "Pack"),
+            ("/Volumes/T5/Home/Pack/A.cube", "Pack"),
+            ("/LUTs/A.cube", "LUTs"),
+            ("A.cube", ""),
+        ] {
+            assert_eq!(group(path), want, "{path}");
+        }
+        let converted = convert(cube_text(2, |p| p).as_bytes()).unwrap();
+        let xml = look_xmp(&converted, "A", &group("/x/Pack/Cube Files/A.cube"));
+        assert_eq!(LookFile::parse(&xml).unwrap().group, "Pack");
     }
 
     #[test]
