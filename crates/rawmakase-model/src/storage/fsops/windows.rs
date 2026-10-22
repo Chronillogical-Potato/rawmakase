@@ -1,20 +1,24 @@
 //! Windows: `GetFileInformationByHandle` for entries, `MoveFileExW` without
 //! `MOVEFILE_REPLACE_EXISTING` or `MOVEFILE_COPY_ALLOWED` for the exclusive
-//! rename, and the volume's drive type, flags and free space
-//! (`GetDiskFreeSpaceExW`).
+//! rename, the volume's drive type, flags and free space
+//! (`GetDiskFreeSpaceExW`), and alternate data streams for extras
+//! (`FindFirstStreamW`).
 use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId, VolumeKind};
-use std::os::windows::ffi::OsStrExt as _;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::AsRawHandle as _;
 use std::path::Path;
 use windows_sys::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_FILE_NOT_FOUND,
-    ERROR_INVALID_FUNCTION, ERROR_NOT_SAME_DEVICE, ERROR_NOT_SUPPORTED, ERROR_PATH_NOT_FOUND,
+    ERROR_HANDLE_EOF, ERROR_INVALID_FUNCTION, ERROR_INVALID_NAME, ERROR_INVALID_PARAMETER,
+    ERROR_NOT_SAME_DEVICE, ERROR_NOT_SUPPORTED, ERROR_PATH_NOT_FOUND, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_WRITE_ATTRIBUTES, FindClose, FindFirstStreamW, FindNextStreamW, FindStreamInfoStandard,
     GetDiskFreeSpaceExW, GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW,
-    GetVolumePathNameW, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    GetVolumePathNameW, MOVEFILE_WRITE_THROUGH, MoveFileExW, WIN32_FIND_STREAM_DATA,
 };
 use windows_sys::Win32::System::SystemServices::FILE_READ_ONLY_VOLUME;
 use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE;
@@ -165,4 +169,107 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
         exclusive_rename: kind.exclusive_rename(),
         available,
     })
+}
+
+/// A folder, opened to set its times: only that access, through the
+/// handle a folder needs.
+pub(super) fn open_folder(path: &Path) -> Result<std::fs::File, FsError> {
+    Ok(std::fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?)
+}
+
+/// The names of `path`'s extras: its alternate data streams (named
+/// `$DATA` streams, `Zone.Identifier` and the like), without the unnamed
+/// one, its contents. None where its volume keeps none (FAT, exFAT).
+pub(super) fn extra_names(path: &Path) -> Result<Vec<OsString>, FsError> {
+    let path = wide(path);
+    let mut names = Vec::new();
+    // SAFETY: an all-zero WIN32_FIND_STREAM_DATA is a valid value of the
+    // plain C struct, which the calls fill.
+    let mut found: WIN32_FIND_STREAM_DATA = unsafe { std::mem::zeroed() };
+    // SAFETY: `path` is NUL-terminated and outlives the call; `found` is a
+    // valid, writable struct of the type the standard level writes.
+    let search = unsafe {
+        FindFirstStreamW(
+            path.as_ptr(),
+            FindStreamInfoStandard,
+            (&raw mut found).cast(),
+            0,
+        )
+    };
+    if search == INVALID_HANDLE_VALUE {
+        // No named stream, or (`ERROR_INVALID_PARAMETER`, as the call's
+        // documentation says) a volume without streams.
+        return match std::io::Error::last_os_error().raw_os_error() {
+            Some(code) if [ERROR_HANDLE_EOF, ERROR_INVALID_PARAMETER].contains(&(code as u32)) => {
+                Ok(names)
+            }
+            _ => match last_error() {
+                FsError::Unsupported => Ok(names),
+                e => Err(e),
+            },
+        };
+    }
+    let listed = loop {
+        // `:name:$DATA`; the contents are `::$DATA`.
+        let name = &found.cStreamName;
+        let name = &name[..name.iter().position(|c| *c == 0).unwrap_or(0)];
+        let data: Vec<u16> = ":$DATA".encode_utf16().collect();
+        let named = name
+            .strip_prefix(&[u16::from(b':')][..])
+            .and_then(|n| n.strip_suffix(&data[..]))
+            .filter(|n| !n.is_empty());
+        if let Some(named) = named {
+            names.push(OsString::from_wide(named));
+        }
+        // SAFETY: `search` is the open search handle; `found` as above.
+        if unsafe { FindNextStreamW(search, (&raw mut found).cast()) } == 0 {
+            break match std::io::Error::last_os_error().raw_os_error() {
+                Some(code) if code as u32 == ERROR_HANDLE_EOF => Ok(names),
+                _ => Err(last_error()),
+            };
+        }
+    };
+    // SAFETY: `search` is open, and closed once.
+    unsafe { FindClose(search) };
+    listed
+}
+
+/// Alternate data stream `name` of `path`, as a path: after its last name,
+/// never after a separator (`folder\:name` names a file in it).
+fn stream(path: &Path, name: &OsStr) -> std::path::PathBuf {
+    let path: std::path::PathBuf = path.components().collect();
+    let mut at = path.into_os_string();
+    at.push(":");
+    at.push(name);
+    at.into()
+}
+
+/// The contents of `path`'s alternate data stream `name`.
+pub(super) fn read_extra(path: &Path, name: &OsStr) -> Result<Vec<u8>, FsError> {
+    Ok(std::fs::read(stream(path, name))?)
+}
+
+/// Gives `path` the alternate data stream `name` holding `value`, durably,
+/// replacing one it has. [`FsError::Unsupported`] where its volume keeps
+/// none, which takes the stream's name for an invalid one.
+pub(super) fn write_extra(path: &Path, name: &OsStr, value: &[u8]) -> Result<(), FsError> {
+    use std::io::Write as _;
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(stream(path, name))
+        .and_then(|mut file| {
+            file.write_all(value)?;
+            file.sync_all()
+        });
+    match written {
+        Err(e) if e.raw_os_error().map(|c| c as u32) == Some(ERROR_INVALID_NAME) => {
+            Err(FsError::Unsupported)
+        }
+        written => Ok(written?),
+    }
 }

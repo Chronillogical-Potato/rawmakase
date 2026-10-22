@@ -1,7 +1,12 @@
 //! Unix: `lstat` for entries, `renameat2(RENAME_NOREPLACE)` on Linux and
 //! `renameatx_np(RENAME_EXCL)` on macOS through rustix, `statvfs` and
-//! `statfs` for volumes (`f_bavail * f_frsize` the bytes available).
+//! `statfs` for volumes (`f_bavail * f_frsize` the bytes available), and
+//! extended attributes for extras, never following a link.
 use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId, VolumeKind};
+use std::ffi::{OsStr, OsString};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::os::unix::ffi::OsStrExt as _;
+use std::os::unix::ffi::OsStringExt as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
 
@@ -202,4 +207,134 @@ fn is_local(path: &Path) -> Result<bool, FsError> {
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
 fn is_local(_path: &Path) -> Result<bool, FsError> {
     Ok(false)
+}
+
+/// A folder, opened to set its times and permission bits, which its owner
+/// may through any handle.
+pub(super) fn open_folder(path: &Path) -> Result<std::fs::File, FsError> {
+    Ok(std::fs::File::open(path)?)
+}
+
+/// Whether extended attribute `name` is the file's own, which a move
+/// carries: on macOS all but those the system sets itself for whichever
+/// process made a file (`com.apple.provenance`, `com.apple.macl`), protects
+/// (`com.apple.rootless`, `com.apple.security.`, `com.apple.system.`), or
+/// that are marked never to be kept (an `N` after the last `#`,
+/// `xattr_name_with_flags(3)`, but for a suffix also holding `n`, which
+/// `xattr_flags_from_name` takes for no flags at all).
+#[cfg(target_vendor = "apple")]
+pub(super) fn carried(name: &OsStr) -> bool {
+    let name = name.to_string_lossy();
+    let system = [
+        "com.apple.provenance",
+        "com.apple.macl",
+        "com.apple.rootless",
+    ];
+    let protected = ["com.apple.security.", "com.apple.system."];
+    !system.contains(&name.as_ref())
+        && !protected.iter().any(|p| name.starts_with(p))
+        && !name
+            .rsplit_once('#')
+            .is_some_and(|(_, f)| f.contains('N') && !f.contains('n'))
+}
+
+/// On Linux only the user's own (`user.`): `security.` labels are the
+/// destination's to give, `system.` ones are access lists, and `trusted.`
+/// ones need privileges.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(super) fn carried(name: &OsStr) -> bool {
+    name.as_bytes().starts_with(b"user.")
+}
+
+/// The names of `path`'s extras: its extended attributes a move carries.
+/// None where its volume keeps none.
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+pub(super) fn extra_names(path: &Path) -> Result<Vec<OsString>, FsError> {
+    use rustix::fs::llistxattr;
+    use rustix::io::Errno;
+    // Asked for its size, then read; again should it grow between.
+    let list = loop {
+        let size = match llistxattr(path, &mut [0u8; 0][..]) {
+            Ok(size) => size,
+            Err(e) if unsupported(e) => return Ok(Vec::new()),
+            Err(e) => return Err(io(e)),
+        };
+        let mut list = vec![0u8; size];
+        match llistxattr(path, &mut list[..]) {
+            Ok(len) => {
+                list.truncate(len);
+                break list;
+            }
+            Err(Errno::RANGE) => continue,
+            Err(e) => return Err(io(e)),
+        }
+    };
+    Ok(list
+        .split(|b| *b == 0)
+        .filter(|n| !n.is_empty())
+        .map(|n| OsString::from_vec(n.to_vec()))
+        .filter(|n| carried(n))
+        .collect())
+}
+
+/// The value of `path`'s extended attribute `name`, whole (a resource
+/// fork too).
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+pub(super) fn read_extra(path: &Path, name: &OsStr) -> Result<Vec<u8>, FsError> {
+    use rustix::fs::lgetxattr;
+    use rustix::io::Errno;
+    loop {
+        let size = lgetxattr(path, name, &mut [0u8; 0][..]).map_err(io)?;
+        let mut value = vec![0u8; size];
+        match lgetxattr(path, name, &mut value[..]) {
+            Ok(len) => {
+                value.truncate(len);
+                return Ok(value);
+            }
+            Err(Errno::RANGE) => continue,
+            Err(e) => return Err(io(e)),
+        }
+    }
+}
+
+/// Gives `path` the extended attribute `name`, replacing one it has.
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+pub(super) fn write_extra(path: &Path, name: &OsStr, value: &[u8]) -> Result<(), FsError> {
+    use rustix::fs::{XattrFlags, lsetxattr};
+    lsetxattr(path, name, value, XattrFlags::empty()).map_err(io)
+}
+
+/// Other Unix systems: no extended attributes rustix reaches, so what a
+/// file has can't be told (nor is a copy made to another volume there).
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+pub(super) fn extra_names(_path: &Path) -> Result<Vec<OsString>, FsError> {
+    Err(FsError::Unsupported)
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+pub(super) fn read_extra(_path: &Path, _name: &OsStr) -> Result<Vec<u8>, FsError> {
+    Err(FsError::Unsupported)
+}
+
+#[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
+pub(super) fn write_extra(_path: &Path, _name: &OsStr, _value: &[u8]) -> Result<(), FsError> {
+    Err(FsError::Unsupported)
+}
+
+/// A failed call's error as callers branch on it: a volume without
+/// extended attributes as [`FsError::Unsupported`].
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+fn io(e: rustix::io::Errno) -> FsError {
+    match unsupported(e) {
+        true => FsError::Unsupported,
+        false => FsError::from(std::io::Error::from(e)),
+    }
+}
+
+/// Whether `e` says the volume has no extended attributes: `ENOTSUP`
+/// (which std doesn't take for unsupported on macOS) or `EOPNOTSUPP`.
+#[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
+fn unsupported(e: rustix::io::Errno) -> bool {
+    use rustix::io::Errno;
+    e == Errno::NOTSUP || e == Errno::OPNOTSUPP
 }

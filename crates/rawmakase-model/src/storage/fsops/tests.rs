@@ -532,6 +532,25 @@ fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
             .duration_since(std::time::SystemTime::now())
             .unwrap_or_else(|e| e.duration());
         assert!(off < std::time::Duration::from_secs(5), "{shown}: {off:?}");
+        // Extras are kept there only on macOS, in AppleDouble files; a
+        // folder takes its dates.
+        let home = tempfile::tempdir().unwrap();
+        let tagged = home.path().join("tagged");
+        fs::write(&tagged, b"t").unwrap();
+        set_extra(&tagged, "tag", b"Red").unwrap();
+        let kept = copy_extras(&tagged, &c);
+        if cfg!(target_vendor = "apple") {
+            assert!(kept.is_ok(), "{shown}: {kept:?}");
+            assert_eq!(extras(&c).unwrap(), extras(&tagged).unwrap(), "{shown}");
+        } else {
+            assert!(
+                matches!(kept, Err(FsError::Unsupported)),
+                "{shown}: {kept:?}"
+            );
+        }
+        let folder = d.path().join("folder");
+        create_dir(&folder).unwrap();
+        copy_times(home.path(), &folder).unwrap();
     }
 }
 
@@ -624,4 +643,154 @@ fn only_an_empty_folder_is_removed() {
     assert!(remove_dir(&d.path().join("file.NEF")).is_err());
     assert!(d.path().join("file.NEF").is_file());
     assert!(matches!(remove_dir(&empty), Err(FsError::NotFound)));
+}
+
+/// Gives `path` the extra `name` for a test, or says why the temporary
+/// folder's file system can't keep one (overlayfs in some containers).
+fn tagged(path: &Path, name: &str, value: &[u8]) -> bool {
+    match set_extra(path, name, value) {
+        Ok(()) => true,
+        Err(FsError::Unsupported) => {
+            eprintln!("{}: no extended attributes here", path.display());
+            false
+        }
+        Err(e) => panic!("{}: {e}", path.display()),
+    }
+}
+
+#[test]
+fn a_copy_carries_its_originals_extras_and_tells_them_apart() {
+    let d = dir();
+    let (a, b, c) = (
+        d.path().join("a.NEF"),
+        d.path().join(".a.part"),
+        d.path().join("c.NEF"),
+    );
+    fs::write(&a, b"synthetic raw").unwrap();
+    fs::write(&c, b"synthetic raw").unwrap();
+    create_file(&b).unwrap();
+    // None to carry: the same as a file with none.
+    copy_extras(&a, &b).unwrap();
+    assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
+    if !tagged(&a, "tag", b"Red") || !tagged(&a, "where", &[0, 1, 2, 255]) {
+        return;
+    }
+    assert_ne!(extras(&a).unwrap(), extras(&b).unwrap());
+    copy_extras(&a, &b).unwrap();
+    assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
+    // Another value, or another name, is another set.
+    assert!(tagged(&c, "tag", b"Blue") && tagged(&c, "where", &[0, 1, 2, 255]));
+    assert_ne!(extras(&a).unwrap(), extras(&c).unwrap());
+    assert!(tagged(&c, "tag", b"Red") && tagged(&c, "else", b""));
+    assert_ne!(extras(&a).unwrap(), extras(&c).unwrap());
+    // The contents are the copy's own.
+    assert_eq!(fs::read(&b).unwrap(), b"");
+}
+
+#[test]
+fn a_folder_takes_its_originals_extras_dates_and_permissions() {
+    let d = dir();
+    let (a, b) = (d.path().join("trip"), d.path().join(".trip.part"));
+    fs::create_dir(&a).unwrap();
+    fs::write(a.join("a.NEF"), b"synthetic raw").unwrap();
+    create_dir(&b).unwrap();
+    let carried = tagged(&a, "tag", b"Green");
+    let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_500_000_000, 0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&a, fs::Permissions::from_mode(0o750)).unwrap();
+    }
+    super::os::open_folder(&a)
+        .unwrap()
+        .set_modified(when)
+        .unwrap();
+    let when = fs::metadata(&a).unwrap().modified().unwrap();
+    if carried {
+        copy_extras(&a, &b).unwrap();
+        assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
+        // Named with a separator after it, the same folder.
+        assert_eq!(extras(&a.join("")).unwrap(), extras(&a).unwrap());
+    }
+    copy_times(&a, &b).unwrap();
+    let copy = fs::metadata(&b).unwrap();
+    assert_eq!(copy.modified().unwrap(), when);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(copy.permissions().mode() & 0o777, 0o750);
+    }
+    // Nothing of what the original holds.
+    assert_eq!(list(&b).unwrap(), Vec::<OsString>::new());
+}
+
+#[cfg(target_vendor = "apple")]
+#[test]
+fn a_resource_fork_and_finder_info_are_carried_and_compared() {
+    let d = dir();
+    // A custom folder icon: no data fork at all.
+    let (icon, copy) = (d.path().join("Icon\r"), d.path().join(".Icon.part"));
+    fs::write(&icon, b"").unwrap();
+    let fork: Vec<u8> = (0..300_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    fs::write(icon.join("..namedfork/rsrc"), &fork).unwrap();
+    let mut info = [0u8; 32];
+    info[8] = 0x04; // kHasCustomIcon
+    set_extra(&icon, "com.apple.FinderInfo", &info).unwrap();
+    create_file(&copy).unwrap();
+    copy_extras(&icon, &copy).unwrap();
+    assert_eq!(fs::read(copy.join("..namedfork/rsrc")).unwrap(), fork);
+    assert_eq!(extras(&icon).unwrap(), extras(&copy).unwrap());
+    assert_eq!(fs::read(&copy).unwrap(), b"");
+    // A fork that differs by a byte is told.
+    let mut other = fork.clone();
+    other[123_456] ^= 1;
+    fs::write(copy.join("..namedfork/rsrc"), &other).unwrap();
+    assert_ne!(extras(&icon).unwrap(), extras(&copy).unwrap());
+}
+
+#[test]
+fn what_the_system_keeps_for_itself_is_neither_carried_nor_compared() {
+    #[cfg(target_vendor = "apple")]
+    {
+        use super::unix::carried;
+        for kept in [
+            "com.apple.metadata:_kMDItemUserTags",
+            "com.apple.FinderInfo",
+            "com.apple.ResourceFork",
+            "com.apple.quarantine",
+            "com.apple.lastuseddate#PS",
+            "user.tag",
+            // A lower-case `n` too, which Apple's `xattr_flags_from_name`
+            // takes for no flags at all (measured on macOS 15).
+            "user#Nikon",
+        ] {
+            assert!(carried(kept.as_ref()), "{kept}");
+        }
+        // Set by the system for whichever process made the file, and
+        // refused or ignored when written.
+        for system in [
+            "com.apple.provenance",
+            "com.apple.macl",
+            "com.apple.rootless",
+            "com.apple.security.private",
+            "com.apple.system.Security",
+            "com.example.never#N",
+            "com.example.never#PCN",
+            "com.example.never#Notes",
+        ] {
+            assert!(!carried(system.as_ref()), "{system}");
+        }
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use super::unix::carried;
+        assert!(carried("user.xdg.tags".as_ref()));
+        for system in [
+            "security.selinux",
+            "system.posix_acl_access",
+            "trusted.overlay.origin",
+        ] {
+            assert!(!carried(system.as_ref()), "{system}");
+        }
+    }
 }

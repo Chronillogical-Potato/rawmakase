@@ -10,9 +10,11 @@
 //! For moving a file to another volume it also has the steps of a copy, each
 //! one on its own so its caller journals between them ([`copy`]): making an
 //! empty file where nothing has its name, copying into it while hashing
-//! what was read, syncing it, giving it the source's time, hashing a file,
-//! and removing a file (which only a partial copy is for) or an empty
-//! folder (which only one a copy made is for).
+//! what was read, syncing it, giving it (or a folder) the source's extras
+//! (extended attributes, alternate data streams) and time, hashing a file
+//! and a file's or folder's extras, and removing a file (which only a
+//! partial copy is for) or an empty folder (which only one a copy made is
+//! for).
 //!
 //! Each system's calls are in a file of their own (`unix.rs`, `windows.rs`);
 //! a system with neither answers [`FsError::Unsupported`].
@@ -21,9 +23,11 @@ use std::path::{Component, Path, PathBuf};
 use std::{fmt, io};
 
 mod copy;
+#[cfg(any(test, feature = "test-support"))]
+pub use copy::set_extra;
 pub use copy::{
-    COPY_CHUNK, ContentHash, CopyError, copy_into, copy_times, create_file, hash_file, hash_prefix,
-    remove_file, sync_file,
+    COPY_CHUNK, ContentHash, CopyError, copy_extras, copy_into, copy_times, create_file, extras,
+    hash_file, hash_prefix, remove_file, sync_file,
 };
 
 #[cfg(unix)]
