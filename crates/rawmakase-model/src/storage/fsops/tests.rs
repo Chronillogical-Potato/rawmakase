@@ -108,7 +108,7 @@ fn a_case_only_rename_works_on_apfs() {
 
 #[cfg(target_vendor = "apple")]
 #[test]
-fn a_normalisation_only_rename_works_on_apfs() {
+fn a_normalisation_only_rename_works_where_the_volume_renames_spelling() {
     let d = dir();
     let (nfc, nfd) = (
         d.path().join("caf\u{e9}.NEF"),
@@ -116,6 +116,18 @@ fn a_normalisation_only_rename_works_on_apfs() {
     );
     fs::write(&nfc, b"r").unwrap();
     let id = entry(&nfc).unwrap().id;
+    if !volume_facts(d.path()).unwrap().renames_spelling {
+        // Case-sensitive APFS: the other spelling is the same name, taken.
+        assert!(matches!(
+            rename_exclusive(&nfc, &nfd),
+            Err(FsError::AlreadyExists)
+        ));
+        assert_eq!(
+            list(d.path()).unwrap(),
+            vec![OsString::from("caf\u{e9}.NEF")]
+        );
+        return;
+    }
     rename_exclusive(&nfc, &nfd).unwrap();
     assert_eq!(
         list(d.path()).unwrap(),
@@ -126,11 +138,16 @@ fn a_normalisation_only_rename_works_on_apfs() {
 
 #[test]
 fn a_volume_says_whether_a_rename_can_change_only_a_names_spelling() {
-    // Temporary folders are on APFS on macOS; elsewhere it isn't known, and
-    // no volume is taken to.
+    // Temporary folders are on APFS on macOS, which does unless it tells
+    // case apart; elsewhere it isn't known, and no volume is taken to.
     let d = dir();
+    fs::write(d.path().join("a"), b"").unwrap();
+    let caseless = d.path().join("A").exists();
     let facts = volume_facts(d.path()).unwrap();
-    assert_eq!(facts.renames_spelling, cfg!(target_vendor = "apple"));
+    assert_eq!(
+        facts.renames_spelling,
+        cfg!(target_vendor = "apple") && caseless
+    );
 }
 
 #[test]
@@ -214,8 +231,10 @@ fn a_folder_is_probed_through_its_own_names() {
     // NFC "é", which a normalising volume also finds as NFD.
     fs::write(d.path().join("caf\u{e9}.NEF"), b"").unwrap();
     let rules = probe(d.path(), &list(d.path()).unwrap());
-    if cfg!(any(target_vendor = "apple", windows)) {
-        // APFS and NTFS as formatted by default.
+    // APFS and NTFS as formatted by default fold case; a case-sensitive
+    // APFS volume doesn't.
+    let caseless = d.path().join("PHOTO.NEF").exists();
+    if cfg!(any(target_vendor = "apple", windows)) && caseless {
         assert_eq!(rules.case, Folding::Insensitive);
     } else {
         assert_eq!(rules.case, Folding::Exact);
