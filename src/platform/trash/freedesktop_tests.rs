@@ -1,7 +1,9 @@
 //! The freedesktop Trash on folders of a temporary directory: a fake
 //! `$XDG_DATA_HOME` and a fake mount top, so nothing reaches a real Trash.
-use super::{Fs, Home, Places, candidate, deletion_date, encoded, mount_top, trash, trash_with};
-use crate::catalog::file_ops::TrashError;
+use super::{
+    Fs, Home, Places, candidate, deletion_date, encoded, mount_top, supports, trash, trash_with,
+};
+use crate::catalog::file_ops::{TrashError, TrashSupport};
 use crate::storage::fsops::FsError;
 use std::ffi::OsStr;
 use std::fs;
@@ -543,4 +545,166 @@ fn a_home_trash_through_chained_links_hands_back_its_real_place() {
     // No link is needed to find it: losing one can't lose the file.
     assert_eq!(receipt.location, canonical(&real).join("Trash/files/a.jpg"));
     assert_eq!(fs::read(&receipt.location).unwrap(), b"pixels");
+}
+
+/// Everything under `root`, to see that asking made nothing.
+fn tree(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(dir) = todo.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if fs::symlink_metadata(&path).unwrap().is_dir() {
+                todo.push(path.clone());
+            }
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn a_home_trash_says_yes_made_or_not() {
+    let root = tempfile::tempdir().unwrap();
+    let places = at_home(root.path());
+    let path = photo(root.path(), "a.jpg", b"pixels");
+    let before = tree(root.path());
+    assert_eq!(supports(path.parent().unwrap(), &places), TrashSupport::Yes);
+    assert_eq!(supports(&path, &places), TrashSupport::Yes);
+    assert_eq!(tree(root.path()), before, "asking makes nothing");
+
+    let made = trash(&photo(root.path(), "b.jpg", b"b"), &places, DATE).unwrap();
+    assert!(made.location.exists());
+    assert_eq!(supports(&path, &places), TrashSupport::Yes);
+}
+
+#[test]
+fn elsewhere_a_trash_still_to_make_is_unknown_and_a_made_one_yes() {
+    let root = tempfile::tempdir().unwrap();
+    let top = canonical(root.path());
+    let path = photo(root.path(), "a.jpg", b"pixels");
+    let at = |_: &Path, _: u64| Some(top.clone());
+    let places = on_mount(root.path(), &at);
+    let before = tree(root.path());
+    assert_eq!(supports(&path, &places), TrashSupport::Unknown);
+    assert_eq!(tree(root.path()), before, "asking makes nothing");
+
+    let made = trash(&photo(root.path(), "b.jpg", b"b"), &places, DATE).unwrap();
+    assert!(made.location.exists());
+    assert_eq!(supports(&path, &places), TrashSupport::Yes);
+}
+
+#[test]
+fn a_sticky_shared_trash_says_yes_once_this_user_has_a_folder_in_it() {
+    let root = tempfile::tempdir().unwrap();
+    let top = canonical(root.path());
+    let shared = top.join(".Trash");
+    fs::create_dir(&shared).unwrap();
+    chmod(&shared, 0o1777);
+    let path = photo(root.path(), "a.jpg", b"pixels");
+    let at = |_: &Path, _: u64| Some(top.clone());
+    let places = on_mount(root.path(), &at);
+    assert_eq!(supports(&path, &places), TrashSupport::Unknown);
+    let mine = shared.join(uid().to_string());
+    fs::create_dir(&mine).unwrap();
+    chmod(&mine, 0o700);
+    assert_eq!(supports(&path, &places), TrashSupport::Yes);
+}
+
+/// A sure no where the Trash refuses: no mount top, an own Trash that is a
+/// link, a file or a folder holding a link, and Trash folders others can
+/// write to. Each answer is checked against the Trash itself.
+#[test]
+fn it_says_no_where_the_trash_refuses() {
+    for case in [
+        "no top",
+        "link",
+        "file",
+        "files link",
+        "own",
+        "files",
+        "info",
+        "home",
+        "home files",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let top = canonical(root.path());
+        let own = top.join(format!(".Trash-{}", uid()));
+        let path = photo(root.path(), "a.jpg", b"pixels");
+        let at = |_: &Path, _: u64| Some(top.clone());
+        let none = |_: &Path, _: u64| None;
+        let places = match case {
+            "no top" => on_mount(root.path(), &none),
+            "link" => {
+                fs::create_dir(top.join("elsewhere")).unwrap();
+                std::os::unix::fs::symlink(top.join("elsewhere"), &own).unwrap();
+                on_mount(root.path(), &at)
+            }
+            "file" => {
+                fs::write(&own, b"").unwrap();
+                on_mount(root.path(), &at)
+            }
+            "files link" => {
+                fs::create_dir(&own).unwrap();
+                chmod(&own, 0o700);
+                fs::create_dir(top.join("elsewhere")).unwrap();
+                std::os::unix::fs::symlink(top.join("elsewhere"), own.join("files")).unwrap();
+                on_mount(root.path(), &at)
+            }
+            "own" => {
+                fs::create_dir(&own).unwrap();
+                chmod(&own, 0o777);
+                on_mount(root.path(), &at)
+            }
+            "home" | "home files" => {
+                let trash = root.path().join("data/Trash");
+                let open = if case == "home" {
+                    trash
+                } else {
+                    trash.join("files")
+                };
+                fs::create_dir_all(&open).unwrap();
+                chmod(&open, 0o777);
+                at_home(root.path())
+            }
+            sub => {
+                fs::create_dir_all(own.join(sub)).unwrap();
+                chmod(&own, 0o700);
+                chmod(&own.join(sub), 0o777);
+                on_mount(root.path(), &at)
+            }
+        };
+        let before = tree(root.path());
+        assert_eq!(supports(&path, &places), TrashSupport::No, "{case}");
+        assert_eq!(tree(root.path()), before, "{case}: asking makes nothing");
+        assert_eq!(
+            trash(&path, &places, DATE),
+            Err(TrashError::Unsupported),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn a_top_it_cannot_write_says_no() {
+    if uid() == 0 {
+        return; // root writes anywhere
+    }
+    let root = tempfile::tempdir().unwrap();
+    let top = canonical(root.path()).join("volume");
+    fs::create_dir(&top).unwrap();
+    let path = photo(&top, "a.jpg", b"pixels");
+    chmod(&top, 0o555);
+    let at = |_: &Path, _: u64| Some(top.clone());
+    let got = supports(&path, &on_mount(root.path(), &at));
+    chmod(&top, 0o755);
+    assert_eq!(got, TrashSupport::No);
+}
+
+#[test]
+fn a_missing_path_is_unknown() {
+    let root = tempfile::tempdir().unwrap();
+    let got = supports(&root.path().join("gone"), &at_home(root.path()));
+    assert_eq!(got, TrashSupport::Unknown);
 }

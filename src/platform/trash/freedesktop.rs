@@ -14,7 +14,7 @@
 //!
 //! Where the Trashes are comes in as [`Places`], so tests point them at
 //! temporary folders.
-use crate::catalog::file_ops::{TrashError, TrashReceipt};
+use crate::catalog::file_ops::{TrashError, TrashReceipt, TrashSupport};
 use crate::storage::fsops::{self, FsError};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, DirBuilder, OpenOptions};
@@ -60,6 +60,110 @@ pub(super) struct Places<'a> {
 /// ([`deletion_date`]).
 pub(super) fn trash(path: &Path, places: &Places, date: &str) -> Result<TrashReceipt, TrashError> {
     trash_with(path, places, date, &Fs::real())
+}
+
+/// Whether `path` could go to its Trash, told by the steps [`trash`] would
+/// take without making or writing anything: `Yes` where its Trash is there
+/// and usable (or, for the home Trash, could be made), `No` where `trash`
+/// would refuse ([`TrashError::Unsupported`]) as things are, and `Unknown`
+/// where it can't be told (a Trash at the top of a mount still to be made,
+/// whose mount may not let it be private).
+pub(super) fn supports(path: &Path, places: &Places) -> TrashSupport {
+    let Ok(source) = Source::of(path) else {
+        return TrashSupport::Unknown;
+    };
+    if let Some(home) = places.home.as_ref().filter(|h| h.device == source.device) {
+        // Through a link, as `target` follows it.
+        return match fs::metadata(&home.trash) {
+            Ok(m) if m.is_dir() && private(&m, places.uid) && m.dev() == source.device => {
+                inside(&home.trash, places.uid, source.device)
+            }
+            Ok(_) => TrashSupport::No,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                let made_in = home.trash.ancestors().skip(1).find(|d| d.exists());
+                match made_in.map(writable) {
+                    Some(Some(true)) => TrashSupport::Yes,
+                    Some(Some(false)) => TrashSupport::No,
+                    _ => TrashSupport::Unknown,
+                }
+            }
+            Err(_) => TrashSupport::Unknown,
+        };
+    }
+    let Some(top) = (places.top)(&source.folder, source.device) else {
+        return TrashSupport::No;
+    };
+    let shared = top.join(".Trash");
+    let sticky = fs::symlink_metadata(&shared).is_ok_and(|m| m.is_dir() && m.mode() & 0o1000 != 0);
+    let mine = if sticky {
+        own(
+            &shared.join(places.uid.to_string()),
+            places.uid,
+            source.device,
+        )
+    } else {
+        TrashSupport::No
+    };
+    let own = own(
+        &top.join(format!(".Trash-{}", places.uid)),
+        places.uid,
+        source.device,
+    );
+    match (mine, own) {
+        (TrashSupport::Yes, _) | (_, TrashSupport::Yes) => TrashSupport::Yes,
+        (TrashSupport::No, TrashSupport::No) => TrashSupport::No,
+        _ => TrashSupport::Unknown,
+    }
+}
+
+/// What [`own_folder`] would make of `path` as a Trash folder, without
+/// making it: usable, refused, or still to be made (where its parent lets
+/// it be, `Unknown`: the mount decides whether it would be private).
+fn own(path: &Path, uid: u32, device: u64) -> TrashSupport {
+    match fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() && private(&m, uid) && m.dev() == device => inside(path, uid, device),
+        Ok(_) => TrashSupport::No,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => match path.parent().and_then(writable) {
+            Some(false) => TrashSupport::No,
+            _ => TrashSupport::Unknown,
+        },
+        Err(_) => TrashSupport::Unknown,
+    }
+}
+
+/// Whether Trash folder `dir`'s `files/` and `info/`, where they are
+/// there, are usable ([`own_folder`]), and `files/` on `device`, as
+/// [`put`] needs (as the Trash folder itself must be).
+fn inside(dir: &Path, uid: u32, device: u64) -> TrashSupport {
+    for sub in ["files", "info"] {
+        match fs::symlink_metadata(dir.join(sub)) {
+            Ok(m) if m.is_dir() && private(&m, uid) && (sub == "info" || m.dev() == device) => {}
+            Ok(_) => return TrashSupport::No,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return TrashSupport::Unknown,
+        }
+    }
+    TrashSupport::Yes
+}
+
+/// Whether this user may make a folder in `dir`; `None` when that can't be
+/// told.
+fn writable(dir: &Path) -> Option<bool> {
+    use rustix::fs::{Access, access};
+    match access(dir, Access::WRITE_OK | Access::EXEC_OK) {
+        Ok(()) => Some(true),
+        Err(e)
+            if [
+                rustix::io::Errno::ACCESS,
+                rustix::io::Errno::ROFS,
+                rustix::io::Errno::PERM,
+            ]
+            .contains(&e) =>
+        {
+            Some(false)
+        }
+        Err(_) => None,
+    }
 }
 
 type Rename<'a> = &'a dyn Fn(&Path, &Path) -> Result<(), FsError>;

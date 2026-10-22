@@ -8,7 +8,7 @@
 //! This is the trusted boundary the catalog's `Trash` seam documents: a
 //! receipt says the system moved the file. The catalog still removes rows
 //! only once the file is gone from its path as well.
-use crate::catalog::file_ops::{Trash, TrashError, TrashReceipt};
+use crate::catalog::file_ops::{Trash, TrashError, TrashReceipt, TrashSupport};
 use std::path::Path;
 
 #[cfg(any(all(unix, not(target_vendor = "apple")), all(test, unix)))]
@@ -25,6 +25,29 @@ impl Trash for SystemTrash {
     fn trash(&self, path: &Path) -> Result<TrashReceipt, TrashError> {
         system(path)
     }
+    fn supports(&self, path: &Path) -> TrashSupport {
+        system_supports(path)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn system_supports(path: &Path) -> TrashSupport {
+    macos::supports(path)
+}
+
+#[cfg(windows)]
+fn system_supports(path: &Path) -> TrashSupport {
+    windows::supports(path)
+}
+
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn system_supports(path: &Path) -> TrashSupport {
+    freedesktop::supports(path, &places())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn system_supports(_path: &Path) -> TrashSupport {
+    TrashSupport::No
 }
 
 #[cfg(target_os = "macos")]
@@ -42,6 +65,16 @@ fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
 /// mounts.
 #[cfg(all(unix, not(target_vendor = "apple")))]
 fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| TrashError::Failed(e.to_string()))?;
+    let date = freedesktop::deletion_date(now.as_secs() as i64);
+    freedesktop::trash(path, &places(), &date)
+}
+
+/// Where the Trashes of the user running the app are.
+#[cfg(all(unix, not(target_vendor = "apple")))]
+fn places() -> freedesktop::Places<'static> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .filter(|d| d.is_absolute())
@@ -51,16 +84,11 @@ fn system(path: &Path) -> Result<TrashReceipt, TrashError> {
                 .filter(|h| h.is_absolute())
                 .map(|h| h.join(".local/share"))
         });
-    let places = freedesktop::Places {
+    freedesktop::Places {
         home: data.as_deref().and_then(freedesktop::Home::under),
         uid: rustix::process::getuid().as_raw(),
         top: &freedesktop::mount_top,
-    };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| TrashError::Failed(e.to_string()))?;
-    let date = freedesktop::deletion_date(now.as_secs() as i64);
-    freedesktop::trash(path, &places, &date)
+    }
 }
 
 /// Other systems have no Trash this knows.
@@ -72,7 +100,7 @@ fn system(_path: &Path) -> Result<TrashReceipt, TrashError> {
 #[cfg(test)]
 mod tests {
     use super::SystemTrash;
-    use crate::catalog::file_ops::{Trash, TrashError};
+    use crate::catalog::file_ops::{Trash, TrashError, TrashReceipt, TrashSupport};
 
     /// The real Trash takes real files, the user's own on a desktop: a
     /// plain `cargo test` would leave one in it per run. These run on CI,
@@ -114,6 +142,83 @@ mod tests {
         assert!(!folder.exists());
         assert_eq!(std::fs::read(receipt.location.join("a.jpg")).unwrap(), b"a");
         std::fs::remove_dir_all(&receipt.location).unwrap();
+    }
+
+    /// Asking writes nothing, so it runs everywhere: a temporary folder,
+    /// on the drive of the user's own files, has a Trash, or one that
+    /// can't be told before trying.
+    #[test]
+    fn a_temporary_folder_is_not_on_a_drive_without_a_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.jpg");
+        std::fs::write(&file, b"a").unwrap();
+        for path in [dir.path(), &file] {
+            let got = SystemTrash.supports(path);
+            assert_ne!(got, TrashSupport::No, "{}", path.display());
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    /// On the volume `RAWMAKASE_TEST_OTHER_VOLUME` names (a disk image, a
+    /// card): what asking says, and, with `RAWMAKASE_TRASH_TESTS=1`, what
+    /// the Trash then does with a synthetic folder made there. A `No` must
+    /// be a refusal, a `Yes` a receipt. Run with `--nocapture` to record
+    /// the answers.
+    #[test]
+    #[ignore = "needs RAWMAKASE_TEST_OTHER_VOLUME: a writable folder on another volume"]
+    fn another_volume_says_what_its_trash_does() {
+        let Some(other) = std::env::var_os("RAWMAKASE_TEST_OTHER_VOLUME") else {
+            return;
+        };
+        let other = std::path::Path::new(&other);
+        println!(
+            "{}: supports {:?}",
+            other.display(),
+            SystemTrash.supports(other)
+        );
+        if !real_trash() {
+            return;
+        }
+        let there = tempfile::tempdir_in(other).unwrap();
+        let folder = there.path().join("rawmakase-trash-test");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("a.jpg"), b"a").unwrap();
+        // Of the folder itself: `other` may be the top of its mount, which
+        // can't go.
+        let asked = SystemTrash.supports(&folder);
+        println!("{}: supports {asked:?}", folder.display());
+        let got = SystemTrash.trash(&folder);
+        // What kind of answer, not the receipt: its path names the user.
+        let took = match &got {
+            Ok(_) => "a receipt",
+            Err(TrashError::Unsupported) => "unsupported",
+            Err(TrashError::Failed(_)) => "failed",
+        };
+        println!("{}: trash {took}", other.display());
+        match asked {
+            TrashSupport::No => assert_eq!(took, "unsupported"),
+            TrashSupport::Yes => assert_eq!(took, "a receipt"),
+            TrashSupport::Unknown => {}
+        }
+        if let Ok(receipt) = got {
+            assert!(!folder.exists());
+            std::fs::remove_dir_all(&receipt.location).unwrap();
+        }
+    }
+
+    /// A Trash that doesn't say can't be told before trying.
+    #[test]
+    fn a_trash_that_does_not_say_is_unknown() {
+        struct Silent;
+        impl Trash for Silent {
+            fn trash(&self, _: &std::path::Path) -> Result<TrashReceipt, TrashError> {
+                Err(TrashError::Unsupported)
+            }
+        }
+        assert_eq!(
+            Silent.supports(std::path::Path::new("/")),
+            TrashSupport::Unknown
+        );
     }
 
     /// Nothing to trash: an error, and no Trash is touched.
