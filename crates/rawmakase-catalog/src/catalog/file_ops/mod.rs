@@ -455,8 +455,9 @@ impl fmt::Display for FileOpError {
             Self::Destination(why) => f.write_str(why),
             Self::NoSpace { needed, available } => write!(
                 f,
-                "The photos need {} on the other drive, which has {} free.",
+                "The photos need {} on the other drive, and {} must stay free there; it has {} free.",
                 size(*needed),
+                size(plan::SPARE),
                 size(*available)
             ),
             Self::Cancelled => f.write_str("Stopped."),

@@ -996,15 +996,16 @@ fn not_enough_room_there_refuses_the_whole_move() -> Result<()> {
         }) => assert_eq!((n, available), (needed, 1000)),
         other => panic!("{other:?}"),
     }
-    // Room for it, but not for it and the spare the volume keeps.
+    // Room for it, but not for it and the spare the volume keeps; the
+    // refusal says so, rather than seem to have room.
     let disk = Faulty {
         space: Some(needed + 1),
         ..far(&fx)
     };
-    assert!(matches!(
-        fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk),
-        Err(FileOpError::NoSpace { .. })
-    ));
+    let refused = fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk);
+    assert!(matches!(refused, Err(FileOpError::NoSpace { .. })));
+    let message = refused.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(message.contains("33.6 MB must stay free"), "{message}");
     Ok(())
 }
 
