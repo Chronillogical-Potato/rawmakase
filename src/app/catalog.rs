@@ -642,18 +642,22 @@ impl Editor {
             1 => "its photo".to_string(),
             n => format!("its {n} photos"),
         };
+        let body = match removal.empty_root {
+            Some(_) => "The root folder has nothing left in the catalog. Its folder stays on disk; add it again to bring it back.".to_string(),
+            None => format!(
+                "The folder, its subfolders and {photos} leave the catalog, with \
+                 their edits, ratings, keywords and places in collections. The \
+                 files stay on disk; add the folder again to bring them back \
+                 without those."
+            ),
+        };
         // Only a click or the focused button confirms: a stray Return must
         // never remove a folder.
         let Some(remove) = confirm_modal(
             ctx,
             "remove-folder",
             &format!("Remove “{}” from the catalog?", removal.name),
-            &format!(
-                "The folder, its subfolders and {photos} leave the catalog, with \
-                 their edits, ratings, keywords and places in collections. The \
-                 files stay on disk; add the folder again to bring them back \
-                 without those."
-            ),
+            &body,
             false,
             &[("Cancel", false), ("Remove", true)],
             false,
@@ -680,6 +684,13 @@ impl Editor {
                 "{} was not removed: another catalog is open now",
                 removal.name
             );
+            return;
+        }
+        if let Some(root) = removal.empty_root {
+            self.status = match library.remove_empty_root(root, &removal.name) {
+                Ok(()) => library.message.clone(),
+                Err(e) => format!("Root not removed: {e:#}"),
+            };
             return;
         }
         match library.remove_folders(&removal.folders, &removal.name) {

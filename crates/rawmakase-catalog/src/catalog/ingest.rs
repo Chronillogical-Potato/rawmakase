@@ -141,6 +141,20 @@ impl Catalog {
             Ok(photos)
         })
     }
+    /// Removes root `root` from the catalog when it has no folder left (a
+    /// folder put in the Trash or moved to another root took its last one);
+    /// nothing on disk is touched. Returns whether it was removed.
+    pub fn remove_empty_root(&mut self, root: RootId) -> Result<bool> {
+        self.db.write(|w| {
+            let left: Option<FolderId> =
+                w.read_optional(sql!("SELECT id FROM folders WHERE root=?"), &[&root])?;
+            if left.is_some() {
+                return Ok(false);
+            }
+            w.execute(sql!("DELETE FROM folder_locations WHERE root=?"), &[&root])?;
+            Ok(w.execute(sql!("DELETE FROM roots WHERE id=?"), &[&root])? == 1)
+        })
+    }
     /// `import_folder` for callers that can't ask which location a folder
     /// belongs to: they get an error instead.
     pub fn add_folder_with(

@@ -245,6 +245,19 @@ impl Library {
                                         from: logical,
                                     })
                                 }
+                                Some(TreeAction::TrashFolder { root, logical }) => {
+                                    self.file_request =
+                                        Some(super::FileRequest::TrashFolder { root, logical })
+                                }
+                                Some(TreeAction::RemoveRoot(root, name)) => {
+                                    self.removal_request = Some(super::FolderRemoval {
+                                        catalog: self.session.catalog.location().clone(),
+                                        name,
+                                        folders: HashSet::new(),
+                                        photos: 0,
+                                        empty_root: Some(root),
+                                    });
+                                }
                                 Some(TreeAction::DropFolder {
                                     root,
                                     from,
@@ -276,6 +289,7 @@ impl Library {
                                         name,
                                         folders,
                                         photos,
+                                        empty_root: None,
                                     })
                                 }
                                 None => {}
@@ -360,6 +374,12 @@ impl Library {
         self.filters.only_missing = false;
         self.selected_folders.clear();
         self.filter();
+    }
+    /// A plain click on the folder with tree key `key`, as the Folders
+    /// panel gives it.
+    #[cfg(test)]
+    pub(in crate::app) fn click_folder_for_tests(&mut self, key: &str) {
+        self.click_folder(key, Click::Replace, &[key]);
     }
     /// Shows the folders chosen by clicking `key` in the Folders panel;
     /// `rows` are the folder rows shown, in order.

@@ -161,6 +161,9 @@ impl Editor {
                 to,
             }) => self.request_folder_move(root, from, to_root, to),
             Some(FileRequest::RenameFolder { root, logical }) => self.rename_folder(root, logical),
+            Some(FileRequest::TrashFolder { root, logical }) => {
+                self.request_folder_trash(root, logical)
+            }
             Some(FileRequest::Move {
                 photos,
                 root,

@@ -531,7 +531,9 @@ impl Editor {
                                         .color(palette.warning()),
                                 );
                             }
-                            for m in &item.members {
+                            // A folder's every file is a member: the first
+                            // few say where it is.
+                            for m in item.members.iter().take(MEMBERS_SHOWN) {
                                 let text = match (&m.after, m.changed) {
                                     (Some(after), true) => format!(
                                         "{} → {}",
@@ -542,6 +544,16 @@ impl Editor {
                                 };
                                 ui.label(
                                     egui::RichText::new(text).size(11.).color(palette.gray(140)),
+                                );
+                            }
+                            if item.members.len() > MEMBERS_SHOWN {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "and {} more",
+                                        item.members.len() - MEMBERS_SHOWN
+                                    ))
+                                    .size(11.)
+                                    .color(palette.gray(140)),
                                 );
                             }
                             ui.add_space(4.);
@@ -668,6 +680,7 @@ impl Editor {
                     ItemResult::Unchanged(_) => "Put back where it was".into(),
                     ItemResult::Kept => "Kept as it is".into(),
                     ItemResult::Created { .. } => "Added the folder to the catalog".into(),
+                    ItemResult::Removed => "Removed from the catalog".into(),
                     ItemResult::NeedsRecovery(why) => format!("Still unfinished: {why}"),
                     _ => "Decided".into(),
                 };
@@ -692,6 +705,9 @@ impl Editor {
         }
     }
 }
+
+/// How many of an unfinished item's files are listed.
+const MEMBERS_SHOWN: usize = 8;
 
 /// Where Show in Finder looks for an unfinished item: where its first file
 /// is now, if it is anywhere it was, else its folder.

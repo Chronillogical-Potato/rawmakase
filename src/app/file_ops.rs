@@ -85,6 +85,13 @@ pub(super) enum Verb {
         name: String,
         into: String,
     },
+    /// Puts folder `name` of `root`, at logical path `logical`, in the
+    /// Trash.
+    TrashFolder {
+        root: crate::catalog::RootId,
+        logical: String,
+        name: String,
+    },
     /// Renames a folder of `root` from logical path `from` to `to`.
     RenameFolder {
         root: crate::catalog::RootId,
@@ -108,7 +115,7 @@ impl Verb {
     fn nothing(&self) -> &'static str {
         match self {
             Self::Remove | Self::Delete { .. } => "nothing was removed",
-            Self::Trash => "nothing was moved to the Trash",
+            Self::Trash | Self::TrashFolder { .. } => "nothing was moved to the Trash",
             Self::Rename { .. } | Self::RenameFolder { .. } => "nothing was renamed",
             Self::MoveFolder { .. } => "nothing was moved",
             Self::Move { .. } => "nothing was moved",
@@ -119,7 +126,7 @@ impl Verb {
     fn nothing_to(&self) -> &'static str {
         match self {
             Self::Remove | Self::Delete { .. } => "Nothing to remove",
-            Self::Trash => "Nothing to move to the Trash",
+            Self::Trash | Self::TrashFolder { .. } => "Nothing to move to the Trash",
             Self::Rename { .. } | Self::RenameFolder { .. } => "Nothing to rename",
             Self::MoveFolder { .. } => "Nothing to move",
             Self::Move { .. } | Self::Create { moving: true, .. } => "Nothing to move",
@@ -133,6 +140,7 @@ impl Verb {
             Self::Rename { .. } => "Photos not renamed",
             Self::RenameFolder { .. } => "Folder not renamed",
             Self::MoveFolder { .. } => "Folder not moved",
+            Self::TrashFolder { .. } => "Folder not moved to the Trash",
             Self::Move { .. } => "Photos not moved",
             Self::Create { .. } => "Folder not made",
         }
@@ -576,6 +584,11 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             };
             (title, "Move to Trash")
         }
+        Verb::TrashFolder { name, .. } => {
+            let tree = s.tree.clone().unwrap_or_default();
+            lines.extend(trash_folder_lines(s, &tree));
+            (trash_folder_title(name, &tree), "Move to Trash")
+        }
         Verb::MoveFolder { name, into, .. } => {
             lines.push(format!(
                 "The folder moves on disk with the {} and the folders in it.",
@@ -645,11 +658,92 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
                 | Verb::Trash
                 | Verb::Rename { .. }
                 | Verb::RenameFolder { .. }
-                | Verb::MoveFolder { .. } => unreachable!(),
+                | Verb::MoveFolder { .. }
+                | Verb::TrashFolder { .. } => unreachable!(),
             }
         }
     };
     (title, lines, action)
+}
+
+/// "Move folder “trip” and its 3 folders, 120 photos and 14 other files
+/// to the Trash?", each part left out when there is none.
+fn trash_folder_title(name: &str, t: &file_ops::TreeCounts) -> String {
+    let parts: Vec<String> = [
+        (t.folders, "folder", "folders"),
+        (t.photos, "photo", "photos"),
+        (t.other_files, "other file", "other files"),
+    ]
+    .into_iter()
+    .filter(|(n, ..)| *n > 0)
+    .map(|(n, one, many)| widgets::plural(n, one, many))
+    .collect();
+    match parts.as_slice() {
+        [] => format!("Move empty folder “{name}” to the Trash?"),
+        [one] => format!("Move folder “{name}” and its {one} to the Trash?"),
+        [rest @ .., last] => format!(
+            "Move folder “{name}” and its {} and {last} to the Trash?",
+            rest.join(", ")
+        ),
+    }
+}
+
+/// What a folder's question says below its title: its other files by name,
+/// the virtual copies and edits that go, and what the catalog has in it
+/// that isn't on disk.
+fn trash_folder_lines(s: &file_ops::Summary, t: &file_ops::TreeCounts) -> Vec<String> {
+    let mut lines = Vec::new();
+    if t.other_files > 0 {
+        let more = t.other_files - t.other_names.len();
+        let names = t.other_names.join(", ");
+        lines.push(match more {
+            0 => format!("Other files: {names}."),
+            n => format!("Other files: {names} and {n} more."),
+        });
+    }
+    // Copies of photos elsewhere are said apart.
+    let own = file_ops::Summary {
+        copies: s.copies.saturating_sub(t.stray_copies),
+        ..s.clone()
+    };
+    copies_line(&mut lines, &own);
+    if t.stray_copies > 0 {
+        lines.push(format!(
+            "{} in it, of {} elsewhere, {} removed too.",
+            widgets::plural(t.stray_copies, "virtual copy", "virtual copies"),
+            if t.stray_copies == 1 {
+                "a photo"
+            } else {
+                "photos"
+            },
+            if t.stray_copies == 1 { "is" } else { "are" }
+        ));
+    }
+    edits_line(&mut lines, s);
+    if t.missing_photos > 0 {
+        lines.push(format!(
+            "{} in the catalog whose {} missing {} removed from the catalog too.",
+            widgets::plural(t.missing_photos, "photo", "photos"),
+            if t.missing_photos == 1 {
+                "file is"
+            } else {
+                "files are"
+            },
+            if t.missing_photos == 1 { "is" } else { "are" }
+        ));
+    }
+    if t.missing_folders > 0 {
+        lines.push(format!(
+            "{} in the catalog that {} missing on disk {} removed from the catalog too.",
+            widgets::plural(t.missing_folders, "folder", "folders"),
+            if t.missing_folders == 1 { "is" } else { "are" },
+            if t.missing_folders == 1 { "is" } else { "are" }
+        ));
+    }
+    if s.other_computers {
+        lines.push(OTHER_COMPUTERS_TRASH.into());
+    }
+    lines
 }
 
 /// "2 files (and 1 sidecar file) go to the Trash."
@@ -752,6 +846,18 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
         Verb::RenameFolder { from, to, .. } => {
             format!("Renamed folder {} to {}", last(from), last(to))
         }
+        Verb::TrashFolder { name, .. } if trashed == 0 => {
+            format!("Folder {name} not moved to the Trash")
+        }
+        Verb::TrashFolder { name, .. } => {
+            match outcome.items.iter().map(|i| i.photos.len()).sum() {
+                0 => format!("Moved folder {name} to the Trash"),
+                n => format!(
+                    "Moved folder {name} to the Trash with {}",
+                    widgets::plural(n, "photo", "photos")
+                ),
+            }
+        }
         Verb::MoveFolder { name, .. } if !folder_moved => format!("Folder {name} not moved"),
         Verb::MoveFolder { name, into, .. } => format!("Moved folder {name} into {into}"),
         Verb::Trash => format!(
@@ -795,7 +901,9 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
     if !left.is_empty() {
         let what = match verb {
             Verb::Create { .. } if !created => String::new(),
-            Verb::RenameFolder { .. } | Verb::MoveFolder { .. } => String::new(),
+            Verb::RenameFolder { .. } | Verb::MoveFolder { .. } | Verb::TrashFolder { .. } => {
+                String::new()
+            }
             _ => format!(" · {} left", widgets::plural(left.len(), "photo", "photos")),
         };
         text.push_str(&format!("{what}: {}", left[0]));
@@ -815,6 +923,10 @@ fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
         .collect();
     if let Some(kept) = kept_line(&kept) {
         text.push_str(&kept);
+    }
+    // What the Trash also took of a folder, added after it was checked.
+    for note in outcome.items.iter().filter_map(|i| i.note.as_deref()) {
+        text.push_str(&format!(" · {note}"));
     }
     if let Some(stopped) = &outcome.stopped {
         text.push_str(&format!(" · stopped: {stopped}"));
@@ -847,6 +959,26 @@ impl Editor {
                 Verb::Delete { rejected },
             );
         }
+    }
+
+    /// Move to Trash… for the folder of `root` at logical path `logical`
+    /// (a folder's menu in the Folders panel): saves what is open, keeps
+    /// the catalog quiet and plans it, then asks.
+    pub(super) fn request_folder_trash(&mut self, root: crate::catalog::RootId, logical: String) {
+        let name = logical.rsplit('/').next().unwrap_or_default().to_string();
+        let op = FileOp::TrashFolder {
+            root,
+            folder: logical.clone(),
+        };
+        self.request_file_op(
+            op,
+            None,
+            Verb::TrashFolder {
+                root,
+                logical,
+                name,
+            },
+        );
     }
 
     /// Move to Trash for `photos` (⌘⌥⇧Delete).
@@ -934,6 +1066,7 @@ impl Editor {
             verb,
         };
         let ctx = self.context.clone();
+        let system_trash = self.file_ops.trash.clone();
         super::task::spawn(
             self.tx.clone(),
             ctx,
@@ -941,7 +1074,10 @@ impl Editor {
                 let planned = crate::catalog::Catalog::open(&location)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|catalog| {
-                        let plan = file_ops::plan(&catalog, op).map_err(|e| e.to_string())?;
+                        // The Trash runs put files in, which a folder's
+                        // Trash asks whether its drive has one.
+                        let plan = file_ops::plan_with_trash(&catalog, op, &*system_trash)
+                            .map_err(|e| e.to_string())?;
                         let trash = trash
                             .map(|op| file_ops::plan(&catalog, op).map_err(|e| e.to_string()))
                             .transpose()?;
@@ -1064,6 +1200,7 @@ impl Editor {
             Verb::Move { .. } | Verb::Create { .. } => "move-photos",
             Verb::Rename { .. } | Verb::RenameFolder { .. } => "rename",
             Verb::MoveFolder { .. } => "move-folder",
+            Verb::TrashFolder { .. } => "trash-folder",
         };
         // Delete's second action is Move to Trash.
         let trashing = trash.is_some();
@@ -1228,6 +1365,21 @@ impl Editor {
         {
             library.folder_renamed(root, from, to_root, to);
         }
+        // A selection in a folder put in the Trash goes to its parent.
+        let trashed_folder = match &verb {
+            Verb::TrashFolder { root, logical, .. }
+                if outcome
+                    .items
+                    .iter()
+                    .any(|i| i.result == ItemResult::Trashed) =>
+            {
+                Some((*root, logical.clone()))
+            }
+            _ => None,
+        };
+        if let (Some((root, logical)), Some(library)) = (&trashed_folder, &mut self.library) {
+            library.folder_trashed(*root, logical);
+        }
         // After the summary: a catalog that can't be read again says so.
         self.apply_file_outcome(&outcome);
         self.release_files();
@@ -1246,11 +1398,15 @@ impl Editor {
                 .collect()
         };
         let removed = ids(|r| matches!(r, ItemResult::Removed | ItemResult::Trashed));
-        // A folder renamed or moved is read again, photos in it or not.
+        // A folder renamed, moved or put in the Trash (by a run, recovery
+        // or the user's choice) is read again, photos in it or not.
         let folder_changed = outcome.items.iter().any(|i| {
             matches!(
                 i.result,
-                ItemResult::FolderRenamed | ItemResult::FolderMoved
+                ItemResult::FolderRenamed
+                    | ItemResult::FolderMoved
+                    | ItemResult::Removed
+                    | ItemResult::Trashed
             )
         });
         // Each a photo whose file is at another path now.
@@ -1388,6 +1544,9 @@ impl Editor {
                         }
                         Verb::RenameFolder { .. } => "Renaming the folder…".to_string(),
                         Verb::MoveFolder { name, .. } => format!("Moving folder {name}…"),
+                        Verb::TrashFolder { name, .. } => {
+                            format!("Moving folder {name} to the Trash…")
+                        }
                         Verb::Move { to } => {
                             let at = (progress.done + 1).min(progress.steps);
                             format!("Moving {at} of {} to {to}…", progress.steps)
@@ -1460,6 +1619,9 @@ mod rename_tests;
 #[cfg(test)]
 #[path = "file_ops_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "file_ops_trash_folder_tests.rs"]
+mod trash_folder_tests;
 #[cfg(test)]
 #[path = "file_ops_trash_tests.rs"]
 mod trash_tests;

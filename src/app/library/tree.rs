@@ -106,6 +106,14 @@ pub(super) enum TreeAction {
         root: RootId,
         logical: String,
     },
+    /// Move to Trash…: the folder of `root` at logical path `logical`.
+    TrashFolder {
+        root: RootId,
+        logical: String,
+    },
+    /// Remove from Catalog… for a root with nothing left in the catalog:
+    /// the root and its name.
+    RemoveRoot(RootId, String),
     /// The folder of `root` at logical path `from`, dropped on logical
     /// folder `to` of root `to_root` (its own, or another).
     DropFolder {
@@ -383,6 +391,14 @@ pub(super) fn folder_tree_row(
             });
             ui.close();
         }
+        // A root is put in the Trash in Finder, once removed here.
+        if movable && ui.button("Move to Trash…").clicked() {
+            action = Some(TreeAction::TrashFolder {
+                root: node.in_root,
+                logical: node.logical.clone(),
+            });
+            ui.close();
+        }
         if ui.button(crate::platform::reveal::LABEL).clicked() {
             action = Some(TreeAction::Reveal(node.path.clone()));
             ui.close();
@@ -393,6 +409,14 @@ pub(super) fn folder_tree_row(
                 node.ids.clone(),
                 node.count,
             ));
+            ui.close();
+        }
+        // A root its last folder left (a folder put in the Trash, or moved
+        // to another root), as Lightroom keeps a parent folder.
+        if let (Some(root), true) = (node.root, node.ids.is_empty())
+            && ui.button("Remove from Catalog…").clicked()
+        {
+            action = Some(TreeAction::RemoveRoot(root, node.name.clone()));
             ui.close();
         }
     });
