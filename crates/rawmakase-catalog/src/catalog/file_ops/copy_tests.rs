@@ -1820,6 +1820,48 @@ fn a_move_to_a_drive_without_an_exclusive_rename_makes_each_copy_at_its_name() -
     Ok(())
 }
 
+/// A share's listing lags a file another computer made (measured on an
+/// SMB share: 2 to 3 s), while looking a name up finds it: a copy left out
+/// of the listing is never taken for gone.
+#[test]
+fn a_copy_its_folder_doesn_t_list_yet_is_never_taken_for_gone() -> Result<()> {
+    let mut fx = files();
+    let was = before(&fx);
+    // A crash once A.NEF is copied whole, its companion part way.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 1, Fault::CrashMid)],
+        ..far_as(&fx, Far::Direct)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let batch = plan.batch().clone();
+    crashes(|| {
+        drop(
+            execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &trash,
+                &Default::default(),
+                &disk,
+            )
+            .unwrap(),
+        );
+    });
+    fx.reopen();
+    let copy = fx.root.join("far/A.NEF");
+    assert_eq!(std::fs::read(&copy)?, bytes("A.NEF"));
+    let lagging = Faulty {
+        unlisted: vec![copy.clone()],
+        ..far_as(&fx, Far::Direct)
+    };
+    let recovery = fx.recover_with(&lagging, &trash);
+    check(&fx, &was, &recovery, &batch);
+    assert_eq!(recovery.unfinished.len(), 1, "{recovery:?}");
+    assert_eq!(std::fs::read(&copy)?, bytes("A.NEF"));
+    assert_eq!(std::fs::read(fx.root.join("A.NEF"))?, bytes("A.NEF"));
+    Ok(())
+}
+
 #[test]
 fn a_move_between_exfat_drives_proves_its_originals_by_names() -> Result<()> {
     let mut fx = files();

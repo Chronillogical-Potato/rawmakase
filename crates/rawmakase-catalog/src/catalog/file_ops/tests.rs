@@ -582,6 +582,9 @@ pub(super) struct Faulty {
     /// `elsewhere` keeps the names it is given decomposed (NFD), as HFS+
     /// does, and finds a file by any normalisation form of its name.
     pub decompose: bool,
+    /// Files there, and found by name, that their folder's listing leaves
+    /// out, as an SMB share's listing lags a file another computer made.
+    pub unlisted: Vec<PathBuf>,
     /// `elsewhere` gives a file a new number once it is written and closed,
     /// as FAT does.
     pub renumber_on_close: bool,
@@ -784,7 +787,8 @@ impl Disk for Faulty {
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
         use unicode_normalization::UnicodeNormalization;
         self.calls.borrow_mut().push(Call::List(dir.into()));
-        let names = Real.list(&self.found(dir))?;
+        let mut names = Real.list(&self.found(dir))?;
+        names.retain(|n| !self.unlisted.iter().any(|u| *u == dir.join(n)));
         match self.lists_decomposed && self.fat(dir) {
             true => Ok(names
                 .into_iter()

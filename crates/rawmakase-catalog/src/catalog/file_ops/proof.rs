@@ -158,14 +158,17 @@ pub(super) fn decomposed_path(path: &Path) -> PathBuf {
 /// Whether a file is at `path`, by its exact name: [`Presence::Here`] when
 /// its folder's listing has that name, composed (case and all), and no
 /// other `sidecar::caseless` takes for it; [`Presence::Absent`] when it has
-/// none of them; and [`Presence::Unknown`] otherwise.
+/// none of them and looking the name up finds nothing (an SMB share's
+/// listing lags a file another computer made, by 2 to 3 s as measured,
+/// while a lookup finds it); and [`Presence::Unknown`] otherwise.
 pub(super) fn presence(disk: &dyn Disk, path: &Path) -> Presence {
     let Some(alike) = alike(disk, path) else {
         return Presence::Unknown;
     };
     let wanted = path.file_name().map(composed);
     match alike.as_slice() {
-        [] => Presence::Absent,
+        [] if matches!(disk.entry(path), Err(FsError::NotFound)) => Presence::Absent,
+        [] => Presence::Unknown,
         [one] if Some(composed(one)) == wanted => Presence::Here,
         _ => Presence::Unknown,
     }
@@ -184,9 +187,9 @@ pub(super) fn spelled(disk: &dyn Disk, path: &Path) -> Result<PathBuf, FsError> 
 
 /// Whether nothing is at `path` by any spelling: its folder lists whole
 /// with no name `sidecar::caseless` takes for it, and looking it up finds
-/// nothing.
+/// nothing ([`presence`]).
 pub(super) fn gone(disk: &dyn Disk, path: &Path) -> bool {
-    presence(disk, path) == Presence::Absent && matches!(disk.entry(path), Err(FsError::NotFound))
+    presence(disk, path) == Presence::Absent
 }
 
 /// Whether the file at `path` (found by [`presence`]) holds the bytes
