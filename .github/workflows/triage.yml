@@ -23,10 +23,12 @@ concurrency:
 jobs:
   triage:
     if: github.event.sender.type != 'Bot' && !github.event.issue.pull_request
+    # Persist muted threads and prior replies on issue and comment events.
+    cache-mode: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: crmne/copilot-triage@8d7000f426cee56fb60567108ca082d9bc1520a1 # v0.16.1
+      - uses: crmne/copilot-triage@f99b390350c35f44f1cca240c9b25c08eb9ad4db # v0.18.0
         with:
           copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           kind: issue
