@@ -165,6 +165,7 @@ impl Editor {
         // interface, now and when it changes. The whole interface zooms rather
         // than only its fonts, so panels sized for their labels grow with them.
         follow_text_scale(&cc.egui_ctx);
+        library::remember_drives_in(crate::storage::data_dir().join("drives.json"));
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,

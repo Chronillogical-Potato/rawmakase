@@ -457,7 +457,7 @@ fn move_lines(s: &file_ops::Summary) -> Vec<String> {
 fn across_line(across: &file_ops::Across) -> String {
     let (files, companions) = (across.files, across.companions);
     let what = files_and_sidecars(files, companions);
-    let drive = crate::platform::volume::volume_of(&across.volume).name;
+    let drive = crate::platform::volume::name_of_mount(&across.volume);
     let (copied, free) = (size(across.bytes), size(across.available));
     if across.originals_stay > 0 && across.originals_stay >= files {
         let stay = match files + companions {
@@ -490,7 +490,7 @@ fn across_line(across: &file_ops::Across) -> String {
 /// checks it, then puts the folder in the Trash; one on a network share,
 /// which has no Trash, stays there.
 fn folder_across_line(across: &file_ops::Across) -> String {
-    let drive = crate::platform::volume::volume_of(&across.volume).name;
+    let drive = crate::platform::volume::name_of_mount(&across.volume);
     let stays = across.originals_stay > 0;
     let then = match stays {
         true => ". The folder stays on the network share: it has no Trash.",

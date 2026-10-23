@@ -623,6 +623,40 @@ fn a_move_to_another_drive_says_it_copies_there_and_trashes_the_originals() {
     );
 }
 
+/// A drive mounted outside /Volumes (a disk image under /tmp) is named by
+/// its mount point, not taken for the startup disk.
+#[test]
+#[cfg(unix)]
+fn a_move_names_a_drive_mounted_anywhere() {
+    let across = crate::catalog::file_ops::Across {
+        files: 1,
+        companions: 0,
+        bytes: 1_000_000,
+        volume: "/tmp/rmk590-mnt".into(),
+        available: 26_000_000_000,
+        originals_stay: 0,
+    };
+    assert!(
+        across_line(&across).contains("copied to “rmk590-mnt”"),
+        "{}",
+        across_line(&across)
+    );
+    assert!(folder_across_line(&across).contains("copied to “rmk590-mnt”"));
+    // A separate partition holding the home folder (Linux's /home) is the
+    // startup disk, as the Folders panel shows it.
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    let above_home = crate::catalog::file_ops::Across {
+        volume: home.parent().unwrap_or(&home).into(),
+        ..across
+    };
+    let startup = crate::platform::volume::name_of_mount(std::path::Path::new("/"));
+    assert!(
+        across_line(&above_home).contains(&format!("copied to “{startup}”")),
+        "{}",
+        across_line(&above_home)
+    );
+}
+
 #[test]
 fn a_folder_moved_to_another_drive_says_it_copies_all_of_it_there() {
     let across = crate::catalog::file_ops::Across {

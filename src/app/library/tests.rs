@@ -702,27 +702,24 @@ fn a_stuck_volume_check_is_not_started_again() {
     let online = Arc::new(Mutex::new(HashMap::new()));
     let busy = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (release, stalled) = mpsc::channel::<()>();
-    let stalled = Mutex::new(stalled);
     let (changed_tx, changed) = mpsc::channel();
-    let mounts = || vec![PathBuf::from("/Volumes/Stalled")];
+    let stalled_mount = || HashMap::from([(PathBuf::from("/Volumes/Stalled"), (true, None))]);
     // A probe that hangs, as `is_dir` can on a stalled mount.
     assert!(volumes::spawn_volume_check(
         &online,
         &busy,
-        mounts(),
         move || changed_tx.send(()).unwrap(),
-        move |_| {
-            stalled.lock().unwrap().recv().unwrap();
-            (true, None)
+        move || {
+            stalled.recv().unwrap();
+            stalled_mount()
         },
     ));
     for _ in 0..3 {
         assert!(!volumes::spawn_volume_check(
             &online,
             &busy,
-            mounts(),
             || {},
-            |_| unreachable!("a second check started"),
+            || -> HashMap<PathBuf, volumes::VolumeState> { unreachable!("a second check started") },
         ));
     }
     release.send(()).unwrap();
@@ -745,9 +742,8 @@ fn a_stuck_volume_check_is_not_started_again() {
     assert!(volumes::spawn_volume_check(
         &online,
         &busy,
-        mounts(),
         || {},
-        |_| (false, None)
+        HashMap::new
     ));
 }
 #[test]
@@ -2587,6 +2583,9 @@ fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
         output.textures_delta.clear();
         library.sidebar_trees.clone().expect("the sidebar's trees")
     };
+    // Once the drives the roots are on are found, which may move them.
+    frame(&mut library);
+    library.volumes.wait();
     let first = frame(&mut library);
     assert!(std::sync::Arc::ptr_eq(&first, &frame(&mut library)));
     // A photo added to a collection, which reads no lists again, shows.
@@ -2600,6 +2599,32 @@ fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
     // So does a read of the lists, whatever it changed.
     library.session.reload()?;
     assert!(!std::sync::Arc::ptr_eq(&changed, &frame(&mut library)));
+    Ok(())
+}
+
+#[test]
+fn the_folders_panel_groups_roots_by_the_drive_found_for_them() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.RAF"])?;
+    let ctx = library.ctx.clone();
+    let frame = |library: &mut Library| {
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            egui::Panel::left("sidebar").show(ui, |ui| library.sidebar(ui));
+        });
+        output.textures_delta.clear();
+        let trees = library.sidebar_trees.clone().expect("the sidebar's trees");
+        trees.drives()
+    };
+    frame(&mut library);
+    library.volumes.wait();
+    let root = library.root_paths().remove(0);
+    let image = crate::platform::volume::Volume {
+        name: "RMK590".into(),
+        mount: Some(root.parent().unwrap().into()),
+    };
+    library
+        .volumes
+        .set_seen(volumes::Seen::from([(root, image.clone())]));
+    assert_eq!(frame(&mut library), vec![image]);
     Ok(())
 }
 

@@ -1393,6 +1393,7 @@ mod thumbnails;
 mod tree;
 mod views;
 mod volumes;
+pub(crate) use volumes::remember_drives_in;
 mod zoom;
 use thumbnails::thumbnail;
 #[cfg(test)]
