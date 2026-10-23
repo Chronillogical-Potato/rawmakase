@@ -346,6 +346,10 @@ impl Lut3d {
         self.shaper.as_ref().map(|s| s.input_range)
     }
 
+    pub(super) fn shaper_size(&self) -> Option<usize> {
+        self.shaper.as_ref().map(|s| s.table.len())
+    }
+
     /// The colour at a grid node, red index fastest.
     pub fn node(&self, r: usize, g: usize, b: usize) -> [f32; 3] {
         self.data[r + g * self.size + b * self.size * self.size]

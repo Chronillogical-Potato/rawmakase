@@ -20,7 +20,7 @@ use std::{
 pub enum Fidelity {
     /// Within 16-bit rounding everywhere.
     Exact,
-    /// Further off somewhere: by at most `max_levels` 8-bit levels (of 255), because
+    /// Approximation with a sampled maximum of `max_levels` 8-bit levels (of 255), because
     /// the cube was resampled from `resampled` divisions, its 1D shaper was baked into
     /// the table (`shaper`), its outputs outside 0–1 were clamped, or several of these.
     Approximated {
@@ -40,7 +40,10 @@ impl std::fmt::Display for Fidelity {
                 shaper,
                 clamped,
             } => {
-                write!(f, "approximated, up to {max_levels:.1} 8-bit levels off")?;
+                write!(
+                    f,
+                    "approximated, sampled error {max_levels:.1} 8-bit levels"
+                )?;
                 let mut why = Vec::new();
                 if let Some(size) = resampled {
                     why.push(format!("resampled from {size} divisions"));
@@ -136,7 +139,7 @@ fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
     if divisions != size {
         grids.push(points(divisions));
     }
-    let worst = match cube {
+    let mut worst = match cube {
         // A 1D table's channels are independent, so the gray axis tries each curve.
         Cube::One(_) => grids
             .iter()
@@ -163,8 +166,18 @@ fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
                 .fold(0f32, f32::max)
         }
     };
+    // A shaper can have narrow features between all of the 3D probe points.
+    // Include its own breakpoints along the gray axis, but do not infer exactness:
+    // cross-channel features may still fall between the sampled inputs.
+    if let Cube::Three(lut) = cube
+        && let Some(size) = lut.shaper_size()
+    {
+        for v in points(size) {
+            worst = worst.max(error([v; 3]));
+        }
+    }
     // 16-bit rounding is half a step; a step allows for the arithmetic around it.
-    if worst <= 1. / 65535. {
+    if !shaper && worst <= 1. / 65535. {
         Fidelity::Exact
     } else {
         Fidelity::Approximated {
@@ -570,6 +583,20 @@ pub(super) mod tests {
             ),
             "{:?}",
             converted.fidelity
+        );
+    }
+
+    #[test]
+    fn a_shaper_feature_between_baking_nodes_is_not_reported_exact() {
+        let mut text = String::from("LUT_1D_SIZE 1025\nLUT_3D_SIZE 2\n");
+        for i in 0..1025 {
+            text.push_str(if i == 1 { "1 1 1\n" } else { "0 0 0\n" });
+        }
+        text.push_str(cube_text(2, |p| p).split_once("LUT_3D_SIZE 2\n").unwrap().1);
+        let (table, converted) = converted_table(&text);
+        assert_eq!(table.lookup([1. / 1024.; 3]), [0.; 3]);
+        assert!(
+            matches!(converted.fidelity, Fidelity::Approximated { shaper: true, max_levels, .. } if max_levels == 255.)
         );
     }
 

@@ -95,6 +95,17 @@ def reference(args):
     if not looks:
         sys.exit(f'no look XMPs in {args.looks}')
     out = (args.out / args.set).resolve()
+    inputs = dict(schema=1, edge=EDGE, photos=photos, cases=cases,
+                  looks={p.name: digest(p) for p in looks})
+    stamp = out / 'inputs.json'
+    if stamp.exists():
+        if json.loads(stamp.read_text()) != inputs:
+            raise ValueError('reference inputs changed: use a new --set')
+    elif out.exists() and any(out.iterdir()):
+        raise ValueError('reference inputs were not recorded: use a new --set')
+    else:
+        out.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(json.dumps(inputs, indent=1))
     (out / 'references').mkdir(parents=True, exist_ok=True)
     (out / 'looks').mkdir(exist_ok=True)
     jobs, plan = [], []
