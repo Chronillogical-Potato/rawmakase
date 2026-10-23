@@ -947,6 +947,8 @@ fn rgb_table(rgb: vec3<f32>) -> vec3<f32> {
     var out = q + amount * (looked - q);
     if p(P_RGB + 4u) != 0.0 {
         out += full - q;
+    } else {
+        out = clamp(out, vec3(0.0), vec3(1.0));
     }
     for (var k = 0; k < 3; k++) {
         out[k] = sign(out[k]) * rgb_decode(abs(out[k]), gamma);

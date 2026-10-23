@@ -615,7 +615,7 @@ impl CameraProfile {
     pub fn with_test_rgb_tables(self) -> Vec<Self> {
         rgb_table::tests::variety()
             .into_iter()
-            .zip([0.7, 1., 1.5])
+            .zip([0.7, 1., 1.5, 2.])
             .map(|(table, amount)| {
                 let mut p = self.clone();
                 let look = p.enhanced.as_mut().expect("a profile with a look");

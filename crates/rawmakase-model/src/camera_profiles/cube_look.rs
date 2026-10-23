@@ -20,12 +20,13 @@ use std::{
 pub enum Fidelity {
     /// Within 16-bit rounding everywhere.
     Exact,
-    /// Further off somewhere: by at most `max_levels` 8-bit levels (of 255), because
-    /// the cube was resampled from `resampled` divisions, its outputs outside 0–1 were
-    /// clamped, or both.
+    /// Approximation with a sampled maximum of `max_levels` 8-bit levels (of 255), because
+    /// the cube was resampled from `resampled` divisions, its 1D shaper was baked into
+    /// the table (`shaper`), its outputs outside 0–1 were clamped, or several of these.
     Approximated {
         max_levels: f32,
         resampled: Option<usize>,
+        shaper: bool,
         clamped: bool,
     },
 }
@@ -36,12 +37,19 @@ impl std::fmt::Display for Fidelity {
             Self::Approximated {
                 max_levels,
                 resampled,
+                shaper,
                 clamped,
             } => {
-                write!(f, "approximated, up to {max_levels:.1} 8-bit levels off")?;
+                write!(
+                    f,
+                    "approximated, sampled error {max_levels:.1} 8-bit levels"
+                )?;
                 let mut why = Vec::new();
                 if let Some(size) = resampled {
                     why.push(format!("resampled from {size} divisions"));
+                }
+                if *shaper {
+                    why.push("1D shaper baked in".into());
                 }
                 if *clamped {
                     why.push("outputs outside 0–1 clamped".into());
@@ -95,6 +103,7 @@ pub(super) fn convert(bytes: &[u8]) -> Result<Converted> {
 /// How far the table is from the cube, measured in table space.
 fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
     let divisions = table.divisions();
+    let shaper = matches!(cube, Cube::Three(lut) if lut.has_shaper());
     let (size, clamped) = match cube {
         Cube::Three(lut) => {
             let n = lut.size();
@@ -130,7 +139,7 @@ fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
     if divisions != size {
         grids.push(points(divisions));
     }
-    let worst = match cube {
+    let mut worst = match cube {
         // A 1D table's channels are independent, so the gray axis tries each curve.
         Cube::One(_) => grids
             .iter()
@@ -157,13 +166,25 @@ fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
                 .fold(0f32, f32::max)
         }
     };
+    // A shaper can have narrow features between all of the 3D probe points.
+    // Include its own breakpoints along the gray axis, but do not infer exactness:
+    // cross-channel features may still fall between the sampled inputs.
+    if let Cube::Three(lut) = cube
+        && let Some(size) = lut.shaper_size()
+    {
+        for v in points(size) {
+            worst = worst.max(error([v; 3]));
+        }
+    }
     // 16-bit rounding is half a step; a step allows for the arithmetic around it.
-    if worst <= 1. / 65535. {
+    if !shaper && worst <= 1. / 65535. {
         Fidelity::Exact
     } else {
         Fidelity::Approximated {
             max_levels: worst * 255.,
-            resampled: (divisions != size).then_some(size),
+            // A shaped cube is always sampled anew; its own grid is not the table's.
+            resampled: (divisions != size && !shaper).then_some(size),
+            shaper,
             clamped,
         }
     }
@@ -187,11 +208,11 @@ pub(super) fn look_xmp(converted: &Converted, name: &str, group: &str) -> String
         ("UUID", id),
         ("SupportsAmount", "True"),
         ("SupportsColor", "True"),
-        ("SupportsMonochrome", "False"),
+        ("SupportsMonochrome", "True"),
         ("SupportsHighDynamicRange", "True"),
         ("SupportsNormalDynamicRange", "True"),
         ("SupportsSceneReferred", "True"),
-        ("SupportsOutputReferred", "False"),
+        ("SupportsOutputReferred", "True"),
         ("CameraModelRestriction", ""),
         ("Copyright", ""),
         ("ContactInfo", ""),
@@ -498,6 +519,7 @@ pub(super) mod tests {
         let Fidelity::Approximated {
             max_levels,
             resampled,
+            shaper: false,
             clamped,
         } = converted.fidelity
         else {
@@ -520,6 +542,7 @@ pub(super) mod tests {
         let Fidelity::Approximated {
             max_levels,
             resampled,
+            shaper: false,
             clamped,
         } = table_fidelity(&cube_text(9, over))
         else {
@@ -563,21 +586,85 @@ pub(super) mod tests {
         );
     }
 
-    /// What the table cannot hold yet is refused with the reason, not approximated.
     #[test]
-    fn shapers_other_domains_and_non_text_are_refused() {
-        let mut shaper = String::from("LUT_1D_SIZE 2\nLUT_3D_SIZE 2\n0 0 0\n1 1 1\n");
-        for i in 0..8 {
-            shaper += &format!("{} {} {}\n", i & 1, i >> 1 & 1, i >> 2 & 1);
+    fn a_shaper_feature_between_baking_nodes_is_not_reported_exact() {
+        let mut text = String::from("LUT_1D_SIZE 1025\nLUT_3D_SIZE 2\n");
+        for i in 0..1025 {
+            text.push_str(if i == 1 { "1 1 1\n" } else { "0 0 0\n" });
         }
-        let error = convert(shaper.as_bytes()).err().unwrap().to_string();
-        assert!(error.contains("shaper"), "{error}");
+        text.push_str(cube_text(2, |p| p).split_once("LUT_3D_SIZE 2\n").unwrap().1);
+        let (table, converted) = converted_table(&text);
+        assert_eq!(table.lookup([1. / 1024.; 3]), [0.; 3]);
+        assert!(
+            matches!(converted.fidelity, Fidelity::Approximated { shaper: true, max_levels, .. } if max_levels == 255.)
+        );
+    }
+
+    /// A 1D shaper in front of the 3D table is baked in: the table samples the shaper
+    /// and the cube together on 64 divisions, and the report says so. (Camera Raw 18.7's
+    /// Create Profile accepts such a file but drops the shaper; see
+    /// docs/lightroom-profiles.md#cube-luts.)
+    #[test]
+    fn a_shaper_is_baked_into_64_divisions() {
+        // A log-like shaper spending the 17 nodes on the shadows, as Resolve writes them.
+        let curve = |v: f32| (1. + 15. * v).log2() / 4.;
+        let mut text = String::from("TITLE \"Shaped\"\nLUT_1D_SIZE 256\nLUT_3D_SIZE 17\n");
+        for i in 0..256 {
+            let v = curve(i as f32 / 255.);
+            text += &format!("{v:.6} {v:.6} {v:.6}\n");
+        }
+        text += cube_text(17, sharp)
+            .split_once("LUT_3D_SIZE 17\n")
+            .unwrap()
+            .1;
+        let cube = Cube::parse(&text).unwrap();
+        assert!(matches!(&cube, Cube::Three(lut) if lut.has_shaper()));
+        let (table, converted) = converted_table(&text);
+        assert_eq!(table.divisions(), 64);
+        let Fidelity::Approximated {
+            max_levels,
+            resampled,
+            shaper,
+            clamped,
+        } = converted.fidelity
+        else {
+            panic!("{:?}", converted.fidelity);
+        };
+        assert_eq!((resampled, shaper, clamped), (None, true, false));
+        assert!(max_levels > 0.01 && max_levels < 40., "{max_levels}");
+        assert!(converted.fidelity.to_string().contains("shaper baked in"));
+        // The table follows the shaped cube, not the 3D table read on its own.
+        let Cube::Three(lut) = cube else {
+            unreachable!()
+        };
+        let p = [0.1, 0.3, 0.6];
+        let (got, want) = (table.lookup(p), lut.lookup(p));
+        assert!(
+            (0..3).all(|c| (got[c] - want[c]).abs() < 0.02),
+            "{got:?} {want:?}"
+        );
+        assert!(
+            (0..3).any(|c| (got[c] - sharp(p)[c]).abs() > 0.05),
+            "{got:?}"
+        );
+    }
+
+    /// What the table cannot hold is refused with the reason, not approximated.
+    #[test]
+    fn other_domains_and_non_text_are_refused() {
         let domain = cube_text(2, |p| p).replace(
             "LUT_3D_SIZE 2",
             "LUT_3D_SIZE 2\nDOMAIN_MAX 2 2 2\nDOMAIN_MIN 0 0 0",
         );
         let error = convert(domain.as_bytes()).err().unwrap().to_string();
         assert!(error.contains("domain"), "{error}");
+        // A shaper reading another range than 0–1 is a cube for log or scene-linear
+        // input, as a 3D domain other than 0–1 is.
+        let mut shaped =
+            String::from("LUT_1D_SIZE 2\nLUT_1D_INPUT_RANGE 0 2\nLUT_3D_SIZE 2\n0 0 0\n1 1 1\n");
+        shaped += cube_text(2, |p| p).split_once("LUT_3D_SIZE 2\n").unwrap().1;
+        let error = convert(shaped.as_bytes()).err().unwrap().to_string();
+        assert!(error.contains("shaper reads"), "{error}");
         // A macOS AppleDouble file beside the cube, as zips carry them.
         let apple_double = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        \xff\xfe";
         let error = convert(apple_double).err().unwrap().to_string();
@@ -598,6 +685,10 @@ pub(super) mod tests {
         assert!(xml.contains(&format!("crs:RGBTable=\"{}\"", a.uuid)));
         assert!(xml.contains(&format!("crs:Table_{}=", a.uuid)));
         assert!(xml.contains(&format!("crs:UUID=\"{}\"", a.uuid)));
+        // Offered for B&W and for rendered (JPEG, TIFF) photos in Lightroom, as Camera
+        // Raw 18.7's Create Profile marks the looks it makes from cubes.
+        assert!(xml.contains("crs:SupportsMonochrome=\"True\""), "{xml}");
+        assert!(xml.contains("crs:SupportsOutputReferred=\"True\""), "{xml}");
         assert!(xml.contains("Warm &amp; &lt;Bright&gt;</rdf:li>"));
         let look = LookFile::parse(&xml).unwrap();
         assert_eq!(look.name, "Portra");

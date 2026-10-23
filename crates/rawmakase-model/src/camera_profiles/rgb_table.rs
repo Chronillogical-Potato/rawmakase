@@ -219,7 +219,8 @@ impl RgbTable {
         let out: [f32; 3] = std::array::from_fn(|c| {
             let v = encoded[c] + amount * (looked[c] - encoded[c]);
             match self.gamut {
-                Gamut::Clip => v,
+                // Over 100% the blend can leave 0–1; Camera Raw clips it per channel.
+                Gamut::Clip => v.clamp(0., 1.),
                 Gamut::Extend => v + full[c] - encoded[c],
             }
         });
@@ -316,36 +317,52 @@ pub(super) fn encode_table(
     bytes
 }
 impl RgbTable {
-    /// A `.cube` as an RGB table, as Camera Raw's Create Profile makes one, with the
-    /// table's bytes (which name it). A 3D cube of up to 64 divisions keeps its grid,
-    /// node for node: resampling onto another grid is measurably lossy. A larger one
-    /// (65 is common) is sampled onto 64, the most the table holds, by tetrahedral
-    /// lookup in the cube; a 1D cube over 4096 entries onto 4096. Outputs are clamped
-    /// to 0–1. Cubes over another domain than 0–1, or with a shaper, are refused until
-    /// it is known what Camera Raw makes of them.
+    /// A `.cube` as an RGB table in the space Camera Raw 18.7's Create Profile gives
+    /// one by default (sRGB primaries and encoding, clipped, amounts 0–2), with the
+    /// table's bytes (which name it). Create Profile samples every 3D cube onto at most
+    /// 32 divisions; here one of up to 64 keeps its grid, node for node, since
+    /// resampling onto another grid is measurably lossy. A larger one (65 is common;
+    /// Create Profile refuses it) is sampled onto 64, the most a table holds, by
+    /// tetrahedral lookup in the cube, as Create Profile resamples; so is a cube with a
+    /// 1D shaper, which is baked in (Create Profile drops it). A 1D cube over 4096
+    /// entries is sampled onto 4096. Outputs are clamped to 0–1. A cube over another
+    /// domain than 0–1 is refused, as Create Profile refuses it, and so is a shaper
+    /// reading another input range.
     pub(super) fn from_cube(cube: &Cube) -> Result<(Self, Vec<u8>)> {
         let (dimensions, divisions, samples) = match cube {
             Cube::Three(lut) => {
                 ensure!(
-                    !lut.has_shaper(),
-                    "the cube has a 1D shaper table in front of its 3D one, which RAWmakase \
-                     cannot import yet"
-                );
-                ensure!(
                     lut.domain() == ([0.; 3], [1.; 3]),
                     "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
-                     cannot import yet",
+                     cannot import (nor can Camera Raw)",
                     lut.domain().0,
                     lut.domain().1
                 );
-                let n = lut.size().min(MAX_3D);
+                if let Some(range) = lut.shaper_input_range() {
+                    ensure!(
+                        range == [0., 1.],
+                        "the cube's shaper reads inputs from {} to {} rather than 0–1, as a \
+                         cube for log or scene-linear input does, which RAWmakase cannot import",
+                        range[0],
+                        range[1]
+                    );
+                }
+                // A shaper bends the input before the 3D table, so the cube's grid is
+                // not a grid in table space: shaper and cube are sampled together on
+                // the most divisions a table holds.
+                let n = if lut.has_shaper() {
+                    MAX_3D
+                } else {
+                    lut.size().min(MAX_3D)
+                };
+                let keep = n == lut.size() && !lut.has_shaper();
                 let at = |i: usize| i as f32 / (n - 1) as f32;
                 let mut samples = Vec::with_capacity(n.pow(3));
                 // Red outermost here, red fastest in the cube.
                 for r in 0..n {
                     for g in 0..n {
                         for b in 0..n {
-                            samples.push(if n == lut.size() {
+                            samples.push(if keep {
                                 lut.node(r, g, b)
                             } else {
                                 lut.lookup([at(r), at(g), at(b)])
@@ -359,7 +376,7 @@ impl RgbTable {
                 ensure!(
                     lut.domain() == ([0.; 3], [1.; 3]),
                     "the cube's domain is {:?} to {:?} rather than 0–1, which RAWmakase \
-                     cannot import yet",
+                     cannot import",
                     lut.domain().0,
                     lut.domain().1
                 );
@@ -460,7 +477,8 @@ pub mod tests {
     }
     pub(crate) const ADOBE: Tail = (1, 3, 0, [0., 2.]);
     /// Tables of every kind for GPU tests: a 3D Adobe RGB table, a 3D linear ProPhoto
-    /// one that extends the gamut, and a 1D sRGB one.
+    /// one that extends the gamut, a 1D sRGB one, and a 3D sRGB one whose blend leaves
+    /// 0–1 at amounts over 1 (`clips_over_one`).
     pub(crate) fn variety() -> Vec<RgbTable> {
         let curves = |v: f32| {
             [
@@ -473,10 +491,15 @@ pub mod tests {
             table_bytes(17, fade, ADOBE),
             table_bytes(9, fade, (2, 0, 1, [0., 2.])),
             table_bytes_1d(64, curves, (0, 1, 0, [0., 2.])),
+            table_bytes(9, clips_over_one, (0, 1, 0, [0., 2.])),
         ]
         .iter()
         .map(|b| RgbTable::decode(&encode(b)).unwrap())
         .collect()
+    }
+    /// Red quartered and blue lifted by half: at amount 2 red goes below 0 and blue above 1.
+    pub(crate) fn clips_over_one([r, g, b]: [f32; 3]) -> [f32; 3] {
+        [0.25 * r, g, (b + 0.5).min(1.)]
     }
     /// A smooth creative grade, as `fade` in scripts/corpus/synthetic-looks.py.
     pub(crate) fn fade([r, g, b]: [f32; 3]) -> [f32; 3] {
@@ -535,6 +558,21 @@ pub mod tests {
                 assert!((got[c] - want).abs() < 1e-4, "{amount}: {got:?}");
             }
         }
+        // Over 1 the blend can leave 0–1; a clipping table clips it there per channel,
+        // as Camera Raw 18.7 renders `cube-creative-33-200` (whose dark grays lose
+        // red and green, not their hue). A sRGB table keeps the encoding visible.
+        let srgb = RgbTable::decode(&encode(&table_bytes(
+            5,
+            clips_over_one,
+            (0, 1, 0, [0., 2.]),
+        )))?;
+        let x = 0.4f32;
+        let got = srgb.apply([srgb_decode(x); 3], 2.);
+        let want = [0., x, 1.].map(srgb_decode);
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4),
+            "{got:?} {want:?}"
+        );
         // Profile Amount times the look's own amount, within the table's bounds.
         let bounded = RgbTable::decode(&encode(&table_bytes(5, fade, (1, 3, 0, [0.5, 1.5]))))?;
         assert_eq!(bounded.amount(0.5, 2.), 1.);
