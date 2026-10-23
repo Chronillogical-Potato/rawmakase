@@ -111,13 +111,35 @@ Measured with Camera Raw 18.7's **Create Profile** (Option-click Create Preset) 
 | Gamut, amounts | Clip; Min 0%, Amount 100%, Max 200% (bounds 0–2). | The same. |
 | Flags | `SupportsMonochrome` and `SupportsOutputReferred` true, so Lightroom offers the look for B&W and for JPEG and TIFF photos. | The same. |
 
-The profiles third-party LUT packs ship beside their cubes were made by Create Profile in Camera Raw 10.3 and 10.4: 32-division tables in sRGB, clipped, with bounds 0–2, as above.
-
 ### Parity with Camera Raw
 
 The chart cases `cube-*` render the synthetic cubes' looks, as RAWmakase imports them, on the synthetic chart, each look embedded in Camera Raw's sidecar as `synthetic-looks.py`'s are (`tests/corpus/camera-raw/synthetic-d65.json`, checked by `camera_raw_parity_does_not_regress`). Every one sits at mean ΔE00 0.21–0.35 from Camera Raw 18.7, the chart's default render being 0.28: identity, channel swap, hue rotation, posterize, black and white, clamped outputs, a 1D cube, 32, 33 and 65 divisions, Amount 0, 50, 100 and 200%, and Color Grading on top (0.30–0.33). A point curve under the look is 0.47, and Saturation +50 1.28, Saturation's own difference (the same table without a cube, `rgb-table-saturation+50`, is 1.27).
 
-One difference is left: Camera Raw renders a photo whose sidecar has both a look and `ConvertToGrayscale` in colour, whatever the look's flags say, and writes no `ConvertToGrayscale` back, while RAWmakase renders it in black and white over the look (`cube-creative-33-bw`, 18.1). This holds for every look, not only cubes.
+One observed chart difference remains: Camera Raw renders a photo whose sidecar has both a look and `ConvertToGrayscale` in colour in the tested cases, and writes no `ConvertToGrayscale` back, while RAWmakase renders it in black and white over the look (`cube-creative-33-bw`, 18.1). This was also observed with non-cube looks.
+
+On 12 CC0 raw.pixls.us photos, four synthetic looks at 100% were also rendered over
+Adobe Standard and compared at 1024 px (48 pairs, Camera Raw 18.7). The table reports
+the median across photos of each photo's median pixel ΔE00, and its full range.
+These are descriptive measurements, not a passed photographic regression gate.
+
+| Synthetic look | Median ΔE00 | Per-photo range |
+|---|---:|---:|
+| Black and white, 33³ | 0.58 | 0.08–16.11 |
+| Creative, 33³ | 1.37 | 0.18–23.84 |
+| Creative, 65³ sampled onto 64³ | 1.38 | 0.18–23.85 |
+| Hue rotation, 33³ | 1.13 | 0.23–16.33 |
+
+The same photos without a look already differ from Camera Raw by 0.25–17.03
+median ΔE00. Subtracting that default distance from the distance with a look is
+not an isolated measure of LUT error: a look can amplify or suppress an existing
+rendering difference. The photo results therefore do not establish the plan's
+no-regression acceptance criterion. The chart covers Amount 0/50/100/200 and the
+slider interactions above; the photographic synthetic set covers 100% only.
+
+The importer currently assumes sRGB. Offering Adobe RGB and ProPhoto RGB input
+choices, as planned after inspecting Create Profile, remains unimplemented;
+Display P3 and Rec. 2020 also require table-decoder support. Together with the
+B&W interaction above, these are limits on claiming complete Camera Raw parity.
 
 ## Settings inside looks
 
