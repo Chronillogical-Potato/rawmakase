@@ -4,7 +4,7 @@
 //! that fails before the catalog follows is undone, and recovery decides
 //! whatever a crash leaves at any step. On one volume, the test disk takes
 //! `far/` for another volume's.
-use super::copy_tests::{Far, far_as};
+use super::copy_tests::{Far, far_as, trash_as};
 use super::recover_tests::{before, check};
 use super::tests::{
     FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results, tagged,
@@ -472,7 +472,7 @@ fn proven_as(
     check(fx, was, recovery, batch);
     where_it_says(fx, tree, batch, what);
     let clean = far_as(fx, kind);
-    let trash = FakeTrash::new(fx);
+    let trash = trash_as(fx, kind);
     *trash.calls.borrow_mut() = 100;
     for u in &recovery.unfinished {
         let back = recover::resolve_with(
@@ -539,6 +539,57 @@ fn every_fault_at_every_step_of_a_folder_built_at_its_name_ends_proven() {
     assert!(every_fault(Far::Direct) >= 50);
 }
 
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn every_fault_at_every_step_of_a_folder_copy_to_an_smb_share_ends_proven() {
+    assert!(every_fault(Far::Share) >= 50);
+}
+
+#[test]
+fn a_folder_to_an_smb_share_is_refused_but_on_macos() {
+    let fx = files();
+    let disk = far_as(&fx, Far::Share);
+    let planned = fx.plan_on(to_far(&fx), &disk);
+    assert_eq!(planned.is_ok(), cfg!(target_vendor = "apple"));
+    if let Err(e) = planned {
+        assert!(e.to_string().contains("this kind of drive"), "{e}");
+    }
+}
+
+/// A folder moved off a share stays there once copied: macOS has no Trash
+/// on an SMB share. The question says so before, and nothing is deleted.
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn a_folder_moved_from_an_smb_share_stays_there_as_its_trash_can_t_take_it() -> Result<()> {
+    let mut fx = files();
+    // The fixture's volume and `far/`'s both shares.
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        share: true,
+        no_exclusive_rename: true,
+        lists_decomposed: true,
+        ..far(&fx)
+    };
+    let tree = tree_of(&fx.root.join("day"));
+    let plan = fx.plan_on(to_far(&fx), &disk)?;
+    let across = plan.summary().across.clone().expect("it copies");
+    assert_eq!(across.originals_stay, 1);
+    let mut trash = FakeTrash::new(&fx);
+    trash.fail_from = Some(1);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{outcome:?}");
+    assert_eq!(tree_of(&fx.root.join("far/day")), tree);
+    assert_eq!(tree_of(&fx.root.join("day")), tree);
+    Ok(())
+}
+
 /// Every fault at every step of moving `day/` to `far/` as `kind`, then
 /// recovery: each ends proven. Returns how many runs it made.
 fn every_fault(kind: Far) -> usize {
@@ -546,7 +597,7 @@ fn every_fault(kind: Far) -> usize {
     // A run without faults says how many steps there are.
     let mut clean = small();
     let counting = far_as(&clean, kind);
-    let trash = FakeTrash::new(&clean);
+    let trash = trash_as(&clean, kind);
     let op = to_far(&clean);
     let outcome = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
     assert_eq!(results(&outcome), [ItemResult::FolderMoved], "{kind:?}");
@@ -557,7 +608,7 @@ fn every_fault(kind: Far) -> usize {
         faults: vec![(Op::Copy, 2, Fault::Fail)],
         ..far_as(&undone, kind)
     };
-    let trash = FakeTrash::new(&undone);
+    let trash = trash_as(&undone, kind);
     let op = to_far(&undone);
     let _ = run(&mut undone, op, &trash, &failing, &AtomicBool::new(false));
     let mut runs = 0;
@@ -611,7 +662,7 @@ fn every_fault(kind: Far) -> usize {
                         faults: with,
                         ..far_as(&fx, kind)
                     };
-                    let trash = FakeTrash::new(&fx);
+                    let trash = trash_as(&fx, kind);
                     let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, kind);
                     let what = format!("{kind:?} {op:?} {nth} {fault:?} undo {undo}");
                     proven_as(&mut fx, &tree, &recovery, &batch, &was, &what, kind);
@@ -627,7 +678,7 @@ fn every_fault(kind: Far) -> usize {
             let was = before(&fx);
             let tree = tree_of(&fx.root.join("day"));
             let disk = far_as(&fx, kind);
-            let mut trash = FakeTrash::new(&fx);
+            let mut trash = trash_as(&fx, kind);
             match crash {
                 true => trash.crash_after = Some(n),
                 false => trash.fail_from = Some(n),
@@ -675,6 +726,40 @@ fn every_failed_journal_write_of_a_folder_copy_ends_proven() -> Result<()> {
         assert!(recovery.unfinished.is_empty(), "{when}: {recovery:?}");
         proven(&mut fx, &tree, &recovery, &batch, &was, when);
     }
+    Ok(())
+}
+
+/// A folder built at its name on a share, whose undo stops part way (a
+/// copy that can't be removed just then), is put back in the end: what
+/// is left of it goes a copy at a time, as the rest went.
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn a_folder_on_a_share_undone_part_way_is_put_back_later() -> Result<()> {
+    let mut fx = files();
+    let was = before(&fx);
+    let tree = tree_of(&fx.root.join("day"));
+    // The catalog can't follow, so the whole copy is undone, and one of
+    // its files can't be removed.
+    fx.fail_journal("BEFORE UPDATE ON folders");
+    let disk = Faulty {
+        faults: vec![(Op::RemoveFile, 1, Fault::Fail)],
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, Far::Share);
+    proven_as(
+        &mut fx,
+        &tree,
+        &recovery,
+        &batch,
+        &was,
+        "part way",
+        Far::Share,
+    );
+    assert!(!fx.root.join("far/day").exists());
     Ok(())
 }
 
@@ -1365,7 +1450,7 @@ fn copy_ids(fx: &Fx, batch: &BatchId) -> Vec<Option<String>> {
 
 #[test]
 fn a_folder_moves_to_exfat_proven_by_names_and_journals_no_real_id() -> Result<()> {
-    for kind in [Far::Names, Far::Direct] {
+    for kind in Far::by_names() {
         let mut fx = files();
         let b = fx.photo("day/sub/b.NEF");
         let tree = tree_of(&fx.root.join("day"));
@@ -1390,7 +1475,7 @@ fn a_folder_moves_to_exfat_proven_by_names_and_journals_no_real_id() -> Result<(
             "{kind:?}: {ids:?}"
         );
         // Built at its name where the volume can't rename exclusively.
-        assert_eq!(disk.renames().is_empty(), kind == Far::Direct, "{kind:?}");
+        assert_eq!(disk.renames().is_empty(), kind != Far::Names, "{kind:?}");
         assert!(partials(&fx).is_empty(), "{kind:?}: {:?}", partials(&fx));
     }
     Ok(())
@@ -1451,7 +1536,7 @@ fn accented_names_stored_either_way_move_with_a_folder_to_and_from_exfat() -> Re
         "far/",
     ];
     // To exFAT: made there composed.
-    for kind in [Far::Names, Far::Direct] {
+    for kind in Far::by_names() {
         let mut fx = fixture(&names);
         let disk = far_as(&fx, kind);
         let trash = FakeTrash::new(&fx);
@@ -1472,7 +1557,7 @@ fn accented_names_stored_either_way_move_with_a_folder_to_and_from_exfat() -> Re
         );
         // And renamed there, by the spelling it was made in, as FAT renames
         // only so (exFAT, which can't rename exclusively, renames nothing).
-        if kind == Far::Direct {
+        if kind != Far::Names {
             continue;
         }
         let op = FileOp::RenameFolder {
@@ -1569,7 +1654,7 @@ fn a_folder_named_as_an_apple_double_file_moves_with_its_folder() -> Result<()> 
 #[test]
 fn a_file_named_as_anothers_apple_double_file_is_not_copied_to_fat_or_exfat() {
     // There macOS would take it for `a.NEF`'s, and write over it.
-    for kind in [Far::Names, Far::Direct] {
+    for kind in Far::by_names() {
         let fx = fixture(&["day/a.NEF", "day/._a.NEF", "far/"]);
         let refused = fx.plan_on(to_far(&fx), &far_as(&fx, kind));
         assert!(

@@ -70,7 +70,17 @@ fn errno(e: rustix::io::Errno) -> FsError {
 }
 
 pub(super) fn sync_dir(dir: &Path) -> Result<(), FsError> {
-    Ok(std::fs::File::open(dir)?.sync_all()?)
+    let folder = std::fs::File::open(dir)?;
+    match folder.sync_all() {
+        // macOS's SMB shares take no full sync of a folder (measured on
+        // macOS 15), whose names the server made as they were made; there
+        // `fsync(2)` is all there is.
+        #[cfg(target_vendor = "apple")]
+        Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOTSUP.raw_os_error()) => {
+            rustix::fs::fsync(&folder).map_err(|e| std::io::Error::from(e).into())
+        }
+        synced => Ok(synced?),
+    }
 }
 
 pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
@@ -114,7 +124,7 @@ fn case_sensitive(_path: &Path) -> bool {
 
 /// macOS names the file system.
 #[cfg(target_vendor = "apple")]
-fn kind(path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     let name: Vec<u8> = fs
         .f_fstypename
@@ -126,7 +136,7 @@ fn kind(path: &Path) -> Result<VolumeKind, FsError> {
 }
 
 /// The kind of macOS's file system `name` (`f_fstypename`): FSKit's and the
-/// kernel's FAT and exFAT have the same names.
+/// kernel's FAT and exFAT have the same names; `smbfs` is an SMB share.
 #[cfg(target_vendor = "apple")]
 pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
     match name {
@@ -134,13 +144,14 @@ pub(super) fn kind_of(name: &[u8]) -> VolumeKind {
         b"hfs" => VolumeKind::Hfs,
         b"msdos" => VolumeKind::Fat,
         b"exfat" => VolumeKind::Exfat,
+        b"smbfs" => VolumeKind::Smb,
         _ => VolumeKind::Other,
     }
 }
 
 /// Linux numbers the file system type.
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn kind(path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(path: &Path) -> Result<VolumeKind, FsError> {
     let fs = rustix::fs::statfs(path).map_err(|e| FsError::from(std::io::Error::from(e)))?;
     #[allow(
         clippy::unnecessary_cast,
@@ -151,7 +162,7 @@ fn kind(path: &Path) -> Result<VolumeKind, FsError> {
 }
 
 /// The kind of Linux's file system type `magic` (`f_type`). FUSE (exFAT
-/// through exfat-fuse among others) is another kind.
+/// through exfat-fuse and GVFS's shares among others) is another kind.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub(super) fn kind_of(magic: u64) -> VolumeKind {
     match magic {
@@ -160,13 +171,15 @@ pub(super) fn kind_of(magic: u64) -> VolumeKind {
         0x9123_683e => VolumeKind::Btrfs,
         0x4d44 => VolumeKind::Fat,
         0x2011_bab0 => VolumeKind::Exfat,
+        // CIFS, SMB2 and the old SMB.
+        0xff53_4d42 | 0xfe53_4d42 | 0x517b => VolumeKind::Smb,
         _ => VolumeKind::Other,
     }
 }
 
 /// Elsewhere the file system can't be told.
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
-fn kind(_path: &Path) -> Result<VolumeKind, FsError> {
+pub(super) fn kind(_path: &Path) -> Result<VolumeKind, FsError> {
     Ok(VolumeKind::Other)
 }
 

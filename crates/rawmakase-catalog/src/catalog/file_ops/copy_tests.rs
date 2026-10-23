@@ -42,6 +42,20 @@ pub(super) enum Far {
     /// exFAT on macOS, which can't rename exclusively either: copies are
     /// made at their names.
     Direct,
+    /// An SMB share, as `Direct` but on the network and with no Trash of
+    /// its own: proven by names on macOS, refused elsewhere.
+    Share,
+}
+
+impl Far {
+    /// The kinds proven by names here.
+    pub(super) fn by_names() -> Vec<Far> {
+        let mut kinds = vec![Far::Names, Far::Direct];
+        if cfg!(target_vendor = "apple") {
+            kinds.push(Far::Share);
+        }
+        kinds
+    }
 }
 
 /// The test disk, with `far/` on another volume of `kind`.
@@ -52,13 +66,24 @@ pub(super) fn far_as(fx: &Fx, kind: Far) -> Faulty {
         disk.names_only = vec![dir];
         disk.renumber_on_close = true;
         disk.renumber_on_rename = true;
-        disk.no_exclusive_rename = kind == Far::Direct;
+        disk.no_exclusive_rename = matches!(kind, Far::Direct | Far::Share);
+        disk.share = kind == Far::Share;
         // As macOS's drivers list names, and keep what the drive can't
         // (only macOS makes AppleDouble files).
         disk.lists_decomposed = true;
         disk.apple_double = cfg!(target_vendor = "apple");
     }
     disk
+}
+
+/// The Trash as it is beside a drive of `kind`: none on an SMB share
+/// (macOS's answers `Unsupported` there).
+pub(super) fn trash_as(fx: &Fx, kind: Far) -> FakeTrash {
+    let mut trash = FakeTrash::new(fx);
+    if kind == Far::Share {
+        trash.refuses = vec![fx.root.join("far")];
+    }
+    trash
 }
 
 fn to_far(fx: &Fx, names: &[&str]) -> FileOp {
@@ -243,7 +268,7 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
     let fx = files();
     let (here, there) = (fx.root.clone(), fx.root.join("far"));
-    let why = "Moving photos to or from this kind of drive (network and others)";
+    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac, and others)";
     for unstable in [
         vec![there.clone()],
         vec![here.clone()],
@@ -996,15 +1021,16 @@ fn not_enough_room_there_refuses_the_whole_move() -> Result<()> {
         }) => assert_eq!((n, available), (needed, 1000)),
         other => panic!("{other:?}"),
     }
-    // Room for it, but not for it and the spare the volume keeps.
+    // Room for it, but not for it and the spare the volume keeps; the
+    // refusal says so, rather than seem to have room.
     let disk = Faulty {
         space: Some(needed + 1),
         ..far(&fx)
     };
-    assert!(matches!(
-        fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk),
-        Err(FileOpError::NoSpace { .. })
-    ));
+    let refused = fx.plan_on(to_far(&fx, &["A.NEF", "b.NEF"]), &disk);
+    assert!(matches!(refused, Err(FileOpError::NoSpace { .. })));
+    let message = refused.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(message.contains("33.6 MB must stay free"), "{message}");
     Ok(())
 }
 
@@ -1091,7 +1117,7 @@ fn proven(fx: &mut Fx, was: &Before, batch: &BatchId, recovery: &Recovery, what:
         );
     }
     let clean = far_as(fx, kind);
-    let trash = FakeTrash::new(fx);
+    let trash = trash_as(fx, kind);
     *trash.calls.borrow_mut() = 100;
     for u in &recovery.unfinished {
         let back = recover::resolve_with(
@@ -1171,6 +1197,15 @@ fn every_fault_at_every_step_of_a_copy_made_at_its_name_ends_proven() {
     assert!(every_fault(Far::Direct) >= 60);
 }
 
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn every_fault_at_every_step_of_a_copy_to_an_smb_share_ends_proven() {
+    assert!(every_fault(Far::Share) >= 60);
+}
+
 /// Every fault at every step of moving A.NEF and b.NEF to `far/` as `kind`,
 /// then recovery: each ends proven. Returns how many runs it made.
 fn every_fault(kind: Far) -> usize {
@@ -1178,7 +1213,7 @@ fn every_fault(kind: Far) -> usize {
     // A run without faults says how many steps there are.
     let mut clean = files();
     let counting = far_as(&clean, kind);
-    let trash = FakeTrash::new(&clean);
+    let trash = trash_as(&clean, kind);
     let op = to_far(&clean, &["A.NEF", "b.NEF"]);
     let outcome = run(&mut clean, op, &trash, &counting, &AtomicBool::new(false));
     assert!(
@@ -1194,7 +1229,7 @@ fn every_fault(kind: Far) -> usize {
         faults: vec![(Op::Copy, 1, Fault::Fail)],
         ..far_as(&undone, kind)
     };
-    let trash = FakeTrash::new(&undone);
+    let trash = trash_as(&undone, kind);
     let op = to_far(&undone, &["A.NEF", "b.NEF"]);
     let _ = run(&mut undone, op, &trash, &failing, &AtomicBool::new(false));
     let mut runs = 0;
@@ -1230,7 +1265,7 @@ fn every_fault(kind: Far) -> usize {
                         faults,
                         ..far_as(&fx, kind)
                     };
-                    let trash = FakeTrash::new(&fx);
+                    let trash = trash_as(&fx, kind);
                     let (batch, recovery) =
                         scenario_of(&mut fx, &["A.NEF", "b.NEF"], &trash, &disk, kind);
                     let what = format!("{kind:?} {op:?} {nth} {fault:?} undo {undo}");
@@ -1246,7 +1281,7 @@ fn every_fault(kind: Far) -> usize {
             let mut fx = files();
             let was = before(&fx);
             let disk = far_as(&fx, kind);
-            let mut trash = FakeTrash::new(&fx);
+            let mut trash = trash_as(&fx, kind);
             match crash {
                 true => trash.crash_after = Some(n),
                 false => trash.fail_from = Some(n),
@@ -1819,6 +1854,181 @@ fn a_move_to_a_drive_without_an_exclusive_rename_makes_each_copy_at_its_name() -
     Ok(())
 }
 
+/// A share's listing lags a file another computer made (measured on an
+/// SMB share: 2 to 3 s), while looking a name up finds it: a copy left out
+/// of the listing is never taken for gone.
+#[test]
+fn a_copy_its_folder_doesn_t_list_yet_is_never_taken_for_gone() -> Result<()> {
+    let mut fx = files();
+    let was = before(&fx);
+    // A crash once A.NEF is copied whole, its companion part way.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 1, Fault::CrashMid)],
+        ..far_as(&fx, Far::Direct)
+    };
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    let batch = plan.batch().clone();
+    crashes(|| {
+        drop(
+            execute::execute_with(
+                &mut fx.cat,
+                plan.confirm(),
+                &trash,
+                &Default::default(),
+                &disk,
+            )
+            .unwrap(),
+        );
+    });
+    fx.reopen();
+    let copy = fx.root.join("far/A.NEF");
+    assert_eq!(std::fs::read(&copy)?, bytes("A.NEF"));
+    let lagging = Faulty {
+        unlisted: vec![copy.clone()],
+        ..far_as(&fx, Far::Direct)
+    };
+    let recovery = fx.recover_with(&lagging, &trash);
+    check(&fx, &was, &recovery, &batch);
+    assert_eq!(recovery.unfinished.len(), 1, "{recovery:?}");
+    assert_eq!(std::fs::read(&copy)?, bytes("A.NEF"));
+    assert_eq!(std::fs::read(fx.root.join("A.NEF"))?, bytes("A.NEF"));
+    Ok(())
+}
+
+#[test]
+fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_refused_elsewhere() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    let disk = far_as(&fx, Far::Share);
+    let trash = FakeTrash::new(&fx);
+    let plan = fx.plan_on(to_far(&fx, &["A.NEF"]), &disk)?;
+    if let Some(across) = &plan.summary().across {
+        // Its originals, on this drive, go to its Trash.
+        assert_eq!((across.files, across.originals_stay), (1, 0));
+    }
+    if !cfg!(target_vendor = "apple") {
+        assert!(plan.is_empty());
+        let reasons: Vec<_> = plan.skipped().iter().map(|s| s.reason.clone()).collect();
+        assert_eq!(reasons, [Skip::Refused(Refusal::FileIdsUnproven)]);
+        return Ok(());
+    }
+    let outcome = execute::execute_with(
+        &mut fx.cat,
+        plan.confirm(),
+        &trash,
+        &AtomicBool::new(false),
+        &disk,
+    )?;
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    assert_eq!(std::fs::read(fx.root.join("far/A.xmp"))?, bytes("A.xmp"));
+    // Made at their names: the share can't rename exclusively.
+    assert!(disk.renames().is_empty(), "{:?}", disk.renames());
+    assert_eq!(fx.files().get("trash/1-A.NEF"), Some(&bytes("A.NEF")));
+    Ok(())
+}
+
+/// A move onto a share that fails once a copy is whole is undone though
+/// the share has no Trash: each copy, made at its name, is removed while
+/// its original holds every byte it does, and nothing is left there.
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn a_move_onto_an_smb_share_that_fails_is_undone_without_a_trash_there() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    // A full share at the sidecar's copy, A.NEF's whole already.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 1, Fault::Fail)],
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert!(
+        matches!(results(&outcome)[..], [ItemResult::Unchanged(_)]),
+        "{outcome:?}"
+    );
+    assert_eq!(fx.rows()[&a], "A.NEF");
+    for name in ["A.NEF", "A.xmp"] {
+        assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name));
+    }
+    let left: Vec<_> = std::fs::read_dir(fx.root.join("far"))?
+        .map(|e| e.map(|e| e.file_name()))
+        .collect::<std::io::Result<_>>()?;
+    // What was there before.
+    assert_eq!(left, ["keep.dng"]);
+    assert!(
+        fx.recover_with(&far_as(&fx, Far::Share), &trash)
+            .unfinished
+            .is_empty()
+    );
+    Ok(())
+}
+
+/// A share has no Trash (macOS's answers NSFeatureUnsupportedError on an
+/// SMB share, measured): its originals stay where they were, beside their
+/// copies, which the catalog follows, and the outcome says why. Nothing is
+/// deleted instead.
+#[test]
+#[cfg_attr(
+    not(target_vendor = "apple"),
+    ignore = "SMB shares are proven by names only on macOS"
+)]
+fn a_move_from_an_smb_share_keeps_the_originals_its_trash_can_t_take() -> Result<()> {
+    let mut fx = files();
+    let a = fx.photo("A.NEF");
+    // The fixture's volume and `far/`'s both shares.
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        share: true,
+        no_exclusive_rename: true,
+        lists_decomposed: true,
+        ..far(&fx)
+    };
+    let mut trash = FakeTrash::new(&fx);
+    trash.fail_from = Some(1);
+    let op = to_far(&fx, &["A.NEF"]);
+    // The question says so before.
+    let across = fx.plan_on(op.clone(), &disk)?.summary().across.clone();
+    assert_eq!(across.map(|a| (a.files, a.originals_stay)), Some((1, 1)));
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::Moved {
+            to: fx.folder("far")
+        }]
+    );
+    assert_eq!(fx.rows()[&a], "far/A.NEF");
+    let why = TrashError::Unsupported.to_string();
+    let kept: Vec<(PathBuf, String)> = outcome.items[0]
+        .originals_kept
+        .iter()
+        .map(|k| (k.path.clone(), k.why.clone()))
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            (fx.root.join("A.NEF"), why.clone()),
+            (fx.root.join("A.xmp"), why)
+        ]
+    );
+    for name in ["A.NEF", "A.xmp"] {
+        assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name));
+        assert_eq!(std::fs::read(fx.root.join("far").join(name))?, bytes(name));
+    }
+    Ok(())
+}
+
 #[test]
 fn a_move_between_exfat_drives_proves_its_originals_by_names() -> Result<()> {
     let mut fx = files();
@@ -1968,7 +2178,7 @@ fn accented() -> Fx {
 
 #[test]
 fn an_accented_name_moves_to_exfat_whose_driver_lists_it_decomposed() -> Result<()> {
-    for kind in [Far::Names, Far::Direct] {
+    for kind in Far::by_names() {
         let mut fx = accented();
         let photo = fx.photo(CAFE);
         let disk = far_as(&fx, kind);
@@ -2057,7 +2267,7 @@ const CAFE_NFD: &str = "Cafe\u{301}.NEF";
 fn a_name_stored_decomposed_moves_to_and_from_fat_and_exfat() -> Result<()> {
     // To them: made there composed, the one spelling their drivers take
     // for what RAWmakase makes.
-    for kind in [Far::Names, Far::Direct] {
+    for kind in Far::by_names() {
         let mut fx = fixture(&[CAFE_NFD, "far/"]);
         let photo = fx.photo(CAFE_NFD);
         let disk = far_as(&fx, kind);

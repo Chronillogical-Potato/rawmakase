@@ -241,7 +241,7 @@ impl fmt::Display for Refusal {
             ),
             Self::CompanionName(n) => write!(f, "{n} can't be renamed to match it."),
             Self::FileIdsUnproven => f.write_str(
-                "Moving photos to or from this kind of drive (network and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
+                "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac, and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
             ),
         }
     }
@@ -298,6 +298,11 @@ pub struct Across {
     pub volume: PathBuf,
     /// The bytes free on it when planned.
     pub available: u64,
+    /// How many of what it copies keep their originals where they are:
+    /// photo files, with their companions, or the folder, which counts
+    /// once. They are on an SMB share, where macOS has no Trash; nothing is
+    /// deleted instead.
+    pub originals_stay: usize,
 }
 
 /// An operation planned and not yet confirmed. Nothing has changed.
@@ -455,8 +460,9 @@ impl fmt::Display for FileOpError {
             Self::Destination(why) => f.write_str(why),
             Self::NoSpace { needed, available } => write!(
                 f,
-                "The photos need {} on the other drive, which has {} free.",
+                "The photos need {} on the other drive, and {} must stay free there; it has {} free.",
                 size(*needed),
+                size(plan::SPARE),
                 size(*available)
             ),
             Self::Cancelled => f.write_str("Stopped."),

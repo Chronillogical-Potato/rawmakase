@@ -219,8 +219,8 @@ impl Editor {
             self.folder_sync.scan = None;
             self.status = "Synchronize Folder stopped unexpectedly".into();
         }
-        // The review opens on its own once the Library is in front and
-        // nothing else is asked.
+        // The review opens on its own in either mode once nothing else
+        // is asked.
         if self.folder_sync.review.is_some()
             && !self.folder_sync.showing
             && !self
@@ -228,7 +228,6 @@ impl Editor {
                 .review
                 .as_ref()
                 .is_some_and(|r| r.confirming)
-            && self.module == super::library::Module::Library
             && self.modal.is_none()
             && !self.command_modal()
             && self.folder_sync.review.as_ref().is_some_and(|r| !r.seen())
@@ -1987,6 +1986,32 @@ mod tests {
         let losses = review.removal_losses();
         assert_eq!(losses.len(), 1);
         assert!(losses[0].contains("Keywords"), "{losses:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn review_opens_in_both_modes_after_other_dialogs_close() -> anyhow::Result<()> {
+        for module in [Module::Library, Module::Develop] {
+            let (_dir, mut e, trip) = editor()?;
+            e.module = module;
+            e.preferences.open = true;
+            std::fs::remove_file(trip.join("a.dng"))?;
+            e.start_folder_sync(SyncScope::All, "trip".into());
+            scanned(&mut e);
+            assert!(e.folder_sync.review.is_some());
+            assert!(!e.folder_sync.showing);
+
+            e.preferences.open = false;
+            e.poll_folder_sync();
+            assert!(e.folder_sync.showing);
+            assert!(e.command_modal());
+            assert!(e.module == module);
+
+            // A dismissed review must not reopen on the next frame.
+            e.folder_sync.showing = false;
+            e.poll_folder_sync();
+            assert!(!e.folder_sync.showing);
+        }
         Ok(())
     }
 

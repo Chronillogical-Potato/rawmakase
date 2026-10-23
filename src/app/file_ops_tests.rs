@@ -587,6 +587,7 @@ fn a_move_to_another_drive_says_it_copies_there_and_trashes_the_originals() {
         bytes: 1_500_000_000,
         volume: DRIVE.0.into(),
         available: 26_000_000_000,
+        originals_stay: 0,
     };
     assert_eq!(
         across_line(&across),
@@ -633,6 +634,7 @@ fn a_move_names_a_drive_mounted_anywhere() {
         bytes: 1_000_000,
         volume: "/tmp/rmk590-mnt".into(),
         available: 26_000_000_000,
+        originals_stay: 0,
     };
     assert!(
         across_line(&across).contains("copied to “rmk590-mnt”"),
@@ -663,6 +665,7 @@ fn a_folder_moved_to_another_drive_says_it_copies_all_of_it_there() {
         bytes: 1_500_000_000,
         volume: DRIVE.0.into(),
         available: 26_000_000_000,
+        originals_stay: 0,
     };
     assert_eq!(
         folder_across_line(&across),
@@ -682,6 +685,85 @@ fn a_folder_moved_to_another_drive_says_it_copies_all_of_it_there() {
         folder_across_line(&empty),
         format!(
             "Its folders will be made on “{}”, and then the folder put in the Trash.",
+            DRIVE.1
+        )
+    );
+}
+
+/// macOS has no Trash on an SMB share: the question says what is moved
+/// off one keeps its originals there.
+#[test]
+fn a_move_off_a_network_share_says_its_originals_stay_there() {
+    let across = crate::catalog::file_ops::Across {
+        files: 2,
+        companions: 1,
+        bytes: 1_500_000_000,
+        volume: DRIVE.0.into(),
+        available: 26_000_000_000,
+        originals_stay: 2,
+    };
+    assert_eq!(
+        across_line(&across),
+        format!(
+            "2 files (and 1 sidecar file) will be copied to “{}” (1.5 GB of 26 GB free) \
+         and checked. Their originals stay on the network share: it has no Trash.",
+            DRIVE.1
+        )
+    );
+    let one = crate::catalog::file_ops::Across {
+        files: 1,
+        companions: 0,
+        bytes: 24_000_000,
+        originals_stay: 1,
+        ..across.clone()
+    };
+    assert_eq!(
+        across_line(&one),
+        format!(
+            "1 file will be copied to “{}” (24 MB of 26 GB free) and checked. \
+         Its original stays on the network share: it has no Trash.",
+            DRIVE.1
+        )
+    );
+    // Some from a share, some from a drive with a Trash.
+    let some = crate::catalog::file_ops::Across {
+        files: 3,
+        companions: 0,
+        originals_stay: 1,
+        ..across.clone()
+    };
+    assert_eq!(
+        across_line(&some),
+        format!(
+            "3 files will be copied to “{}” (1.5 GB of 26 GB free), checked, \
+         and then their originals put in the Trash. The original of 1 file stays \
+         on its network share: it has no Trash.",
+            DRIVE.1
+        )
+    );
+    let folder = crate::catalog::file_ops::Across {
+        files: 12,
+        companions: 0,
+        originals_stay: 1,
+        ..across
+    };
+    assert_eq!(
+        folder_across_line(&folder),
+        format!(
+            "Its 12 files will be copied to “{}” (1.5 GB of 26 GB free) and checked. \
+         The folder stays on the network share: it has no Trash.",
+            DRIVE.1
+        )
+    );
+    let empty = crate::catalog::file_ops::Across {
+        files: 0,
+        bytes: 0,
+        ..folder
+    };
+    assert_eq!(
+        folder_across_line(&empty),
+        format!(
+            "Its folders will be made on “{}”. The folder stays on the network share: it has no Trash.",
             DRIVE.1
         )
     );
@@ -720,6 +802,7 @@ fn a_move_from_two_drives_says_what_is_copied_and_what_is_moved() {
             bytes: 24_000_000,
             volume: DRIVE.0.into(),
             available: 26_000_000_000,
+            originals_stay: 0,
         }),
         ..Summary::default()
     };

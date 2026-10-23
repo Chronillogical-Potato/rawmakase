@@ -165,3 +165,21 @@ fn a_lightroom_catalog_is_detached_whatever_its_import_does() -> Result<()> {
     assert_eq!(rating(&db)?, 2);
     Ok(())
 }
+
+#[test]
+fn a_unit_test_catalog_does_not_flush_every_commit() -> Result<()> {
+    // Fault matrices rebuild a catalog per injected fault. The fault is a
+    // panic in this process, so synchronous=OFF (0) is enough on the
+    // connection that recovery reopens. FULL is what made those matrices
+    // take tens of minutes on NTFS. Shipping opens are compiled without
+    // `cfg(test)` and stay FULL; this test only runs as a unit test.
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("Flush.rawmakase");
+    Db::create(&path)?;
+    let db = Db::open(&CatalogLocation::File(path))?;
+    let mode: i64 = db
+        .connection()
+        .query_row("PRAGMA synchronous", [], |r| r.get(0))?;
+    assert_eq!(mode, 0);
+    Ok(())
+}
