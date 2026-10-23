@@ -221,6 +221,29 @@ mod tests {
         );
     }
 
+    /// An SMB share has no Trash on macOS (measured on macOS 15 against a
+    /// Synology share): the file stays, and nothing is deleted. Run when
+    /// `RAWMAKASE_TEST_NETWORK_SHARE` names a writable folder on one.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "needs RAWMAKASE_TEST_NETWORK_SHARE: a writable folder on an SMB share"]
+    fn a_file_on_an_smb_share_is_kept_as_its_volume_has_no_trash() {
+        let Some(share) = std::env::var_os("RAWMAKASE_TEST_NETWORK_SHARE") else {
+            return;
+        };
+        let dir = tempfile::tempdir_in(share).unwrap();
+        let path = dir.path().join("rawmakase-trash-test.jpg");
+        std::fs::write(&path, b"RAWmakase trash test, synthetic").unwrap();
+        // macOS 15 can't tell before trying: Unknown, never Yes.
+        assert_ne!(SystemTrash.supports(&path), TrashSupport::Yes);
+        let got = SystemTrash.trash(&path);
+        assert!(matches!(got, Err(TrashError::Unsupported)), "{got:?}");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"RAWmakase trash test, synthetic"
+        );
+    }
+
     /// Nothing to trash: an error, and no Trash is touched.
     #[test]
     fn a_missing_file_fails() {

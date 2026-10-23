@@ -47,7 +47,6 @@ use super::super::locations::{join, logical_from_os, names};
 use super::super::sidecar::caseless;
 use super::super::value::row;
 use super::super::{FolderId, PhotoId};
-use super::FileOpError;
 use super::companions::is_legacy_edit;
 use super::conflicts::Names;
 use super::copy::{self, Cx, Failed, Originals, Problem, copy_at, extras_differ, original_here};
@@ -58,6 +57,7 @@ use super::preconditions::CHANGED;
 use super::proof::{self, Proof, Proofs};
 use super::recover::NOT_BACK;
 use super::tree::TreeMove;
+use super::{FileOpError, TrashError};
 use crate::storage::Identity;
 use crate::storage::fsops::{EntryKind, FileId, FsError, VolumeId};
 use anyhow::{Context, Result};
@@ -111,6 +111,8 @@ pub(super) struct TreeCopy {
     pub photos: Vec<(PhotoId, usize)>,
     /// How its copies and originals are proven and made (#573).
     pub proofs: Proofs,
+    /// The folder stays where it is once copied ([`proof::no_trash`]).
+    pub originals_stay: bool,
 }
 
 impl TreeCopy {
@@ -337,6 +339,7 @@ pub(super) fn plan(
         folders: Vec::new(),
         photos: Vec::new(),
         proofs,
+        originals_stay: proof::no_trash(&here),
     })
 }
 
@@ -353,7 +356,7 @@ fn alike(
 
 /// Why a folder isn't copied to or from a drive whose file ids can't prove
 /// which file a name is.
-const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network and others) isn't available yet. Copy it in Finder, then add the folder.";
+const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network drives other than SMB shares on a Mac, and others) isn't available yet. Copy it in Finder, then add the folder.";
 
 /// The members `tree` journals, copied as `copy`: each name's original,
 /// where it goes, and where it is made inside the hidden folder.
@@ -1436,6 +1439,18 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             Ok(true)
         }
         Built::Unknown => Ok(false),
+        // Built at its name, and part of it undone a copy at a time
+        // already (its volume has no Trash): the rest goes so too, as what
+        // is left no longer matches what was made.
+        Built::Named(_)
+            if proofs.direct
+                && item
+                    .members
+                    .iter()
+                    .any(|m| m.state == MemberState::Discarded) =>
+        {
+            discard_each(cx, catalog, item, rule)
+        }
         Built::Named(at) => {
             // Undone on its own only with every original proven as copied;
             // on Put Back, the Trash keeps whatever it holds.
@@ -1443,8 +1458,14 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             if !ready || !as_made(disk, item, &at) {
                 return Ok(false);
             }
-            let Ok(receipt) = cx.trash.trash(&at) else {
-                return Ok(false);
+            // Built at its name on a volume with no Trash (an SMB share on
+            // macOS), each copy goes on its own, as one still being built.
+            let receipt = match cx.trash.trash(&at) {
+                Ok(receipt) => receipt,
+                Err(TrashError::Unsupported) if proofs.direct => {
+                    return discard_each(cx, catalog, item, rule);
+                }
+                Err(_) => return Ok(false),
             };
             if disk.sync_dir(parent(&at)).is_err() {
                 return Ok(false);
@@ -1452,103 +1473,107 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             gone_all(catalog, Some(&receipt.location))?;
             Ok(true)
         }
-        Built::Hidden => {
-            // Each copy on its own: a whole one whose original isn't
-            // proven as copied may be the one copy of those bytes left, so
-            // it stays (Put Back puts it in the Trash), with the folders
-            // holding it; what can't be told stays too.
-            let mut left = false;
-            for m in item.members.iter().rev() {
-                if m.state == MemberState::Discarded {
-                    continue;
-                }
-                let Some(copy) = &m.copy else {
-                    left = true;
-                    continue;
-                };
-                let dir = m.identity.is_none();
-                let found = match m.state {
-                    MemberState::Planned => unjournalled(
-                        disk,
-                        &copy.temp,
-                        dir,
-                        m.ordinal != 0,
-                        unjournalled_since(proofs),
-                    ),
-                    _ => match copy_found(disk, proofs, m, &copy.temp) {
-                        Some(Some(at)) => Made::Here(at),
-                        Some(None) => Made::Gone,
-                        None => Made::Unknown,
-                    },
-                };
-                let mut receipt = None;
-                let done = match found {
-                    Made::Gone => true,
-                    Made::Unknown => false,
-                    // Only while empty: one holding a copy left stays.
-                    Made::Here(at) if dir => disk
-                        .remove_dir(&at)
-                        .and_then(|()| disk.sync_dir(parent(&at)))
-                        .is_ok(),
-                    Made::Here(at)
-                        if copy.content.is_some() && !original_proven(disk, proofs, m) =>
-                    {
-                        match rule {
-                            Originals::AsCopied => false,
-                            Originals::Present => match cx.trash.trash(&at) {
-                                Ok(r) => {
-                                    receipt = Some(r.location);
-                                    disk.sync_dir(parent(&at)).is_ok()
-                                }
-                                Err(_) => false,
-                            },
-                        }
-                    }
-                    // Built at its name, a file is at a visible name from
-                    // the start: one a photo of the catalog is named as now
-                    // (Synchronize Folder may have added it) stays; any not
-                    // proven empty goes to the Trash.
-                    Made::Here(at)
-                        if proofs.direct
-                            && occupied(
-                                &catalog.db,
-                                cx.folders,
-                                None,
-                                parent(&at),
-                                at.file_name().unwrap_or_default(),
-                                item.photos(),
-                            )? =>
-                    {
-                        false
-                    }
-                    Made::Here(at)
-                        if proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0) =>
-                    {
-                        match cx.trash.trash(&at) {
-                            Ok(r) => {
-                                receipt = Some(r.location);
-                                disk.sync_dir(parent(&at)).is_ok()
-                            }
-                            Err(_) => false,
-                        }
-                    }
-                    Made::Here(at) => disk
-                        .remove_file(&at)
-                        .and_then(|()| disk.sync_dir(parent(&at)))
-                        .is_ok(),
-                };
-                if receipt.is_none() && !done {
-                    left = true;
-                    continue;
-                }
-                catalog
-                    .db
-                    .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
-                left |= !done;
-            }
-            Ok(!left)
-        }
+        Built::Hidden => discard_each(cx, catalog, item, rule),
     }
+}
+
+/// Discards each of folder `item`'s copies on its own, newest first: a
+/// file removed, one written whole only while its own original is proven
+/// as copied, else left, or on Put Back (`rule` `Present`) put in the
+/// Trash; a folder removed once empty. Returns whether all of it is gone.
+fn discard_each(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
+    let disk = cx.disk;
+    let proofs = proofs_of(item);
+    // Each copy on its own: a whole one whose original isn't
+    // proven as copied may be the one copy of those bytes left, so
+    // it stays (Put Back puts it in the Trash), with the folders
+    // holding it; what can't be told stays too.
+    let mut left = false;
+    for m in item.members.iter().rev() {
+        if m.state == MemberState::Discarded {
+            continue;
+        }
+        let Some(copy) = &m.copy else {
+            left = true;
+            continue;
+        };
+        let dir = m.identity.is_none();
+        let found = match m.state {
+            MemberState::Planned => unjournalled(
+                disk,
+                &copy.temp,
+                dir,
+                m.ordinal != 0,
+                unjournalled_since(proofs),
+            ),
+            _ => match copy_found(disk, proofs, m, &copy.temp) {
+                Some(Some(at)) => Made::Here(at),
+                Some(None) => Made::Gone,
+                None => Made::Unknown,
+            },
+        };
+        let mut receipt = None;
+        let done = match found {
+            Made::Gone => true,
+            Made::Unknown => false,
+            // Only while empty: one holding a copy left stays.
+            Made::Here(at) if dir => disk
+                .remove_dir(&at)
+                .and_then(|()| disk.sync_dir(parent(&at)))
+                .is_ok(),
+            Made::Here(at) if copy.content.is_some() && !original_proven(disk, proofs, m) => {
+                match rule {
+                    Originals::AsCopied => false,
+                    Originals::Present => match copy::trash_copy(cx, &at, &m.source) {
+                        Some(r) => {
+                            receipt = r;
+                            true
+                        }
+                        None => false,
+                    },
+                }
+            }
+            // Built at its name, a file is at a visible name from
+            // the start: one a photo of the catalog is named as now
+            // (Synchronize Folder may have added it) stays; any not
+            // proven empty goes to the Trash.
+            Made::Here(at)
+                if proofs.direct
+                    && occupied(
+                        &catalog.db,
+                        cx.folders,
+                        None,
+                        parent(&at),
+                        at.file_name().unwrap_or_default(),
+                        item.photos(),
+                    )? =>
+            {
+                false
+            }
+            Made::Here(at) if proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0) => {
+                match copy::trash_copy(cx, &at, &m.source) {
+                    Some(r) => {
+                        receipt = r;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            Made::Here(at) => disk
+                .remove_file(&at)
+                .and_then(|()| disk.sync_dir(parent(&at)))
+                .is_ok(),
+        };
+        if receipt.is_none() && !done {
+            left = true;
+            continue;
+        }
+        catalog
+            .db
+            .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
+        left |= !done;
+    }
+    Ok(!left)
 }
 
 /// Recovery of folder item `item` copied to another volume: one the

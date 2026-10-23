@@ -333,7 +333,6 @@ pub(super) fn write(
     let extras = disk.extras(source).map_err(problem)?;
     carry_extras(disk, source, &temp, extras)?;
     disk.copy_times(source, &temp).map_err(problem)?;
-    disk.sync_file(&temp).map_err(problem)?;
     // 3. Read back, and the original still what was copied.
     if disk.hash(&temp).map_err(problem)? != content {
         return Err(Problem::Mismatch(source.to_path_buf()).into());
@@ -860,13 +859,10 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                 if (copy.content.is_some() && rule == Originals::Present)
                     || (proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0)) =>
             {
-                let Ok(r) = cx.trash.trash(&at) else {
+                let Some(r) = trash_copy(cx, &at, &m.source) else {
                     return Ok(false);
                 };
-                if disk.sync_dir(parent(&at)).is_err() {
-                    return Ok(false);
-                }
-                receipt = Some(r.location);
+                receipt = r;
             }
             Partial::Ours(at) => {
                 let removed = disk
@@ -894,13 +890,10 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                             if !proven || named {
                                 return Ok(false);
                             }
-                            let Ok(r) = cx.trash.trash(at) else {
+                            let Some(r) = trash_copy(cx, at, &m.source) else {
                                 return Ok(false);
                             };
-                            if disk.sync_dir(parent(at)).is_err() {
-                                return Ok(false);
-                            }
-                            receipt = Some(r.location);
+                            receipt = r;
                         }
                     }
                 }
@@ -911,6 +904,24 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
     }
     Ok(true)
+}
+
+/// Puts copy `at` of original `source` in the Trash, as an undone copy
+/// goes. Where its volume has none (an SMB share on macOS) it is removed
+/// instead, only while `source` holds every byte it does, as many as it
+/// has ([`proof::begins`]): then nothing is lost. `Some` once it is gone,
+/// with the Trash's receipt if the Trash took it; `None` while it stays.
+pub(super) fn trash_copy(cx: &Cx<'_>, at: &Path, source: &Path) -> Option<Option<PathBuf>> {
+    let receipt = match cx.trash.trash(at) {
+        Ok(r) => Some(r.location),
+        Err(TrashError::Unsupported) if proof::begins(cx.disk, at, source) => {
+            cx.disk.remove_file(at).ok()?;
+            None
+        }
+        Err(_) => return None,
+    };
+    cx.disk.sync_dir(parent(at)).ok()?;
+    Some(receipt)
 }
 
 /// Recovery of copy item `item`: one the catalog follows is finished;

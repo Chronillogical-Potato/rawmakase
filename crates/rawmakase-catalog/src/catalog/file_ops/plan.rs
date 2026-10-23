@@ -52,6 +52,9 @@ pub(super) struct CopyTo {
     pub temps: Vec<PathBuf>,
     /// The bytes it copies.
     pub bytes: u64,
+    /// Its originals stay where they are once copied
+    /// ([`super::proof::no_trash`]).
+    pub originals_stay: bool,
 }
 
 /// What a move to another volume must leave free there, beyond what it
@@ -256,6 +259,7 @@ fn tree_plan(
             bytes: copy.bytes,
             volume: copy.top.clone(),
             available: copy.available,
+            originals_stay: usize::from(copy.originals_stay),
         }
     });
     let summary = Summary {
@@ -871,13 +875,13 @@ impl<'a> Files<'a> {
         // from a file put in its place, by file ids that stay, or on FAT and
         // exFAT by exact names and SHA-256 (#573).
         let mut proofs = super::proof::Proofs::default();
+        let mut originals_stay = false;
         if let Some(target) = target
             && target.volume != found.id.volume()
         {
-            let here = self
-                .volume(found.id.volume(), &dir)
-                .as_ref()
-                .and_then(super::proof::of);
+            let facts = self.volume(found.id.volume(), &dir);
+            originals_stay = facts.as_ref().is_some_and(super::proof::no_trash);
+            let here = facts.as_ref().and_then(super::proof::of);
             let (Some(originals), Some(copies)) = (here, target.proof) else {
                 return Err(refuse(Refusal::FileIdsUnproven));
             };
@@ -952,6 +956,7 @@ impl<'a> Files<'a> {
                 volume: t.volume,
                 temps: Vec::new(),
                 bytes: members.iter().map(|m| m.identity.size).sum(),
+                originals_stay,
             });
         Ok(Item {
             preconditions,
@@ -1044,12 +1049,13 @@ fn copies(
     target: &Target,
     items: &mut [Item],
 ) -> Result<Option<super::Across>, FileOpError> {
-    let (mut bytes, mut files, mut companions) = (0u64, 0, 0);
+    let (mut bytes, mut files, mut companions, mut originals_stay) = (0u64, 0, 0, 0);
     for (index, item) in items.iter_mut().enumerate() {
         let Some(copy) = &mut item.copy else {
             continue;
         };
         files += 1;
+        originals_stay += usize::from(copy.originals_stay);
         companions += item.members.len().saturating_sub(1);
         // Where its volume can't rename exclusively, each is made at its
         // name there (#573).
@@ -1089,6 +1095,7 @@ fn copies(
         bytes,
         volume: target.top.clone(),
         available,
+        originals_stay,
     }))
 }
 

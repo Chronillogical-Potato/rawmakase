@@ -301,6 +301,9 @@ pub(super) struct FakeTrash {
     /// The process ends just before the `n`-th file would go (from 1), if
     /// set.
     pub crash_before: Option<usize>,
+    /// Folders whose files and folders it can't take, as macOS's Trash
+    /// can't on an SMB share: it answers `Unsupported`, changing nothing.
+    pub refuses: Vec<PathBuf>,
     pub calls: RefCell<usize>,
 }
 
@@ -314,6 +317,7 @@ impl FakeTrash {
             crash_after: None,
             crash_before: None,
             stored_only: false,
+            refuses: Vec::new(),
             calls: RefCell::new(0),
         }
     }
@@ -338,7 +342,9 @@ impl Trash for FakeTrash {
         if self.stored_only && !stored_spelling(path) {
             return Err(TrashError::Failed("not found".into()));
         }
-        if self.fail_from.is_some_and(|from| n >= from) {
+        if self.fail_from.is_some_and(|from| n >= from)
+            || self.refuses.iter().any(|d| path.starts_with(d))
+        {
             return Err(TrashError::Unsupported);
         }
         let location = self.dir.join(format!(
@@ -568,6 +574,9 @@ pub(super) struct Faulty {
     /// The `names_only` volume can't rename exclusively, as macOS's exFAT
     /// can't: it says so, and refuses to.
     pub no_exclusive_rename: bool,
+    /// The `names_only` volume says it is an SMB share (on the network, not
+    /// renaming exclusively) rather than exFAT.
+    pub share: bool,
     /// Files the volume says were made long ago (1970).
     pub born_long_ago: Vec<PathBuf>,
     /// The `names_only` volume gets an AppleDouble file (`._name`) beside
@@ -582,6 +591,9 @@ pub(super) struct Faulty {
     /// `elsewhere` keeps the names it is given decomposed (NFD), as HFS+
     /// does, and finds a file by any normalisation form of its name.
     pub decompose: bool,
+    /// Files there, and found by name, that their folder's listing leaves
+    /// out, as an SMB share's listing lags a file another computer made.
+    pub unlisted: Vec<PathBuf>,
     /// `elsewhere` gives a file a new number once it is written and closed,
     /// as FAT does.
     pub renumber_on_close: bool,
@@ -784,7 +796,8 @@ impl Disk for Faulty {
     fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
         use unicode_normalization::UnicodeNormalization;
         self.calls.borrow_mut().push(Call::List(dir.into()));
-        let names = Real.list(&self.found(dir))?;
+        let mut names = Real.list(&self.found(dir))?;
+        names.retain(|n| !self.unlisted.iter().any(|u| *u == dir.join(n)));
         match self.lists_decomposed && self.fat(dir) {
             true => Ok(names
                 .into_iter()
@@ -861,10 +874,15 @@ impl Disk for Faulty {
         // real detection is `fsops`'s to test.
         facts.stable_ids = !self.unstable_ids.iter().any(|d| d == path);
         if self.fat(path) {
-            facts.kind = crate::storage::fsops::VolumeKind::Exfat;
-            facts.local = true;
+            use crate::storage::fsops::VolumeKind;
+            facts.kind = if self.share {
+                VolumeKind::Smb
+            } else {
+                VolumeKind::Exfat
+            };
+            facts.local = !self.share;
             facts.stable_ids = false;
-            facts.exclusive_rename = !self.no_exclusive_rename;
+            facts.exclusive_rename = !self.no_exclusive_rename && !self.share;
         } else if !facts.stable_ids {
             facts.kind = crate::storage::fsops::VolumeKind::Other;
         }
