@@ -841,7 +841,12 @@ impl Disk for Faulty {
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::Sync(dir.into()));
-        self.step(Op::Sync, || Real.sync_dir(&self.found(dir)))
+        // The fault is still injected here. These crashes are panics in this
+        // process, not power loss, so the durability flush is not what the
+        // matrix proves. `sync_file` is FlushFileBuffers on NTFS; `sync_dir`
+        // is an fsync on Unix and only an existence check on Windows.
+        // Opening still fails when the folder is missing, as `sync_dir` does.
+        self.step(Op::Sync, || opened_without_flush(&self.found(dir), false))
     }
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
         Real.canonical(&self.found(path))
@@ -937,7 +942,9 @@ impl Disk for Faulty {
     }
     fn sync_file(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::SyncFile(path.into()));
-        self.step(Op::SyncFile, || Real.sync_file(&self.found(path)))
+        self.step(Op::SyncFile, || {
+            opened_without_flush(&self.found(path), true)
+        })
     }
     fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::CopyExtras(to.into()));
@@ -1059,6 +1066,34 @@ pub(super) fn keeps_extras(dir: &Path) -> bool {
     use crate::storage::fsops::{VolumeKind, volume_facts};
     cfg!(target_vendor = "apple")
         || volume_facts(dir).is_ok_and(|f| !matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat))
+}
+
+/// Opens `path` the way the real sync does, and does not flush.
+///
+/// `file` follows `sync_file` (a read handle on Unix, a write handle on
+/// Windows, so a read-only copy still syncs where the real call would).
+/// A folder follows `sync_dir`: open it on Unix, and on Windows only check
+/// that it is a folder, because a folder cannot be opened there.
+fn opened_without_flush(path: &Path, file: bool) -> Result<(), FsError> {
+    if file {
+        #[cfg(unix)]
+        std::fs::File::open(path)?;
+        #[cfg(not(unix))]
+        std::fs::OpenOptions::new().write(true).open(path)?;
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        std::fs::File::open(path)?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        if !std::fs::metadata(path)?.is_dir() {
+            return Err(FsError::NotFound);
+        }
+        Ok(())
+    }
 }
 
 /// Runs `f`, which may "crash", and says whether it did.
