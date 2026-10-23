@@ -75,6 +75,91 @@ fn default_and_auto_match_the_lens() {
     other_lens.lens_profiles = library().for_photo(&other_lens);
     assert_eq!(used(&LensProfileChoice::default(), &other_lens), None);
 }
+
+#[test]
+fn canon_ef_mount_spacing_matches_without_confusing_lens_versions() {
+    // #610: a 5D Mark II records a space after EF; Adobe's LCP omits it.
+    // Synthetic coefficients: no Adobe profile data is needed for this test.
+    let original = test_profile("Canon", "EF24-105mm f/4L IS USM", "Original", -0.05, -0.3);
+    let second = test_profile("Canon", "EF24-105mm f/4L IS II USM", "Second", -0.02, -0.2);
+    let library = Library::from_texts([
+        ("original.lcp", original.as_str()),
+        ("second.lcp", second.as_str()),
+    ]);
+    for (lens, expected) in [
+        ("EF 24-105mm f/4L IS USM", Some("original.lcp")),
+        ("EF24-105mm f/4L IS USM", Some("original.lcp")),
+        ("EF 24-105mm f/4L IS II USM", Some("second.lcp")),
+        ("EF 24-105mm f/4L IS I I USM", None),
+        ("EF 24-105mm f/4L USM", None),
+        ("RF 24-105mm f/4L IS USM", None),
+    ] {
+        let mut m = Metadata {
+            make: "Canon".into(),
+            model: "EOS 5D Mark II".into(),
+            lens_model: lens.into(),
+            focal: 24.,
+            aperture: 11.,
+            width: 5634,
+            height: 3752,
+            ..Default::default()
+        };
+        m.lens_profiles = library.for_photo(&m);
+        for setup in [LensProfileSetup::Default, LensProfileSetup::Auto] {
+            let c = choice(setup, None);
+            assert_eq!(used(&c, &m).as_deref(), expected, "{lens}, {setup:?}");
+            let r = crate::model::recipe::Recipe {
+                lens_profile: true,
+                lens_profile_choice: c,
+                ..Default::default()
+            };
+            assert_eq!(r.missing_lens_profile(&m).is_none(), expected.is_some());
+        }
+    }
+}
+
+#[test]
+fn canon_ef_spacing_keeps_raw_and_non_raw_profiles_the_same_lens() {
+    let raw = crate::lens::lcp::test_profile_with_lens_id(
+        "Canon",
+        "EF24-105mm f/4L IS USM",
+        "Original",
+        Some("237"),
+        -0.05,
+        -0.3,
+    );
+    let jpeg = raw
+        .replace("EF24-105", "EF 24-105")
+        .replace(r#"CameraRawProfile="True""#, r#"CameraRawProfile="False""#);
+    let library = Library::from_texts([("raw.lcp", raw.as_str()), ("jpeg.lcp", jpeg.as_str())]);
+    let m = Metadata {
+        make: "Canon".into(),
+        lens_id: 237,
+        focal: 24.,
+        aperture: 11.,
+        width: 5634,
+        height: 3752,
+        ..Default::default()
+    };
+    let profiles = library.for_photo(&m);
+    assert_eq!(profiles.all().len(), 1);
+    assert_eq!(profiles.auto(&m).unwrap().profile.filename, "raw.lcp");
+}
+
+#[test]
+fn an_unmatched_imported_profile_is_not_reported_as_an_import_failure() {
+    let mut m = photo();
+    m.lens_model = "Unmatched 85mm F2".into();
+    m.lens_profiles = library().for_photo(&m);
+    let r = crate::model::recipe::Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        r.missing_lens_profile(&m).as_deref(),
+        Some("No matching imported Adobe lens profile for Unmatched 85mm F2; no lens correction")
+    );
+}
 #[test]
 fn an_edit_keeps_the_profile_it_names() {
     let m = photo();

@@ -610,17 +610,17 @@ impl Recipe {
             });
         }
         let profile = match (resolved.missing, m.lens_model.as_str()) {
-            (Some(id), _) => format!("Lens profile \"{}\"", id.label()),
+            (Some(id), _) => format!("Lens profile \"{}\" isn't imported", id.label()),
             (None, _) if resolved.used.is_some() => return None,
-            (None, "") => "Adobe lens profile for this lens".to_string(),
-            (None, lens) => format!("Adobe lens profile for {lens}"),
+            (None, "") => "No matching imported Adobe lens profile for this lens".to_string(),
+            (None, lens) => format!("No matching imported Adobe lens profile for {lens}"),
         };
         let instead = match (resolved.used, m.lens.as_ref().filter(|_| self.lens_builtin)) {
             (Some(used), _) => format!("using {}", used.profile.name),
             (None, Some(builtin)) => format!("using {}", builtin.source),
             (None, None) => "no lens correction".to_string(),
         };
-        Some(format!("{profile} isn't imported; {instead}"))
+        Some(format!("{profile}; {instead}"))
     }
     /// Adds a Heal or Clone operation.
     pub fn add_retouch(&mut self, op: crate::model::retouch::RetouchOp) {
