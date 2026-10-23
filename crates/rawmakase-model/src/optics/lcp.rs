@@ -13,7 +13,22 @@ use anyhow::{Context, Result, ensure};
 use std::sync::{Arc, OnceLock};
 
 /// A chromatic model: ScaleFactor and radial parameters.
-pub(crate) type Chromatic = (f32, [f32; 3]);
+pub(crate) type Chromatic = (f32, RadialModel);
+
+/// A polynomial and its own focal normalization. Nested models do not inherit
+/// PerspectiveModel's FocalLengthX: an omitted value uses the entry's focal length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RadialModel {
+    pub focal_x: Option<f32>,
+    pub params: [f32; 3],
+}
+
+fn radial_model(node: roxmltree::Node, prefix: &str) -> Option<RadialModel> {
+    Some(RadialModel {
+        focal_x: number(node, "FocalLengthX").filter(|v| *v > 0.),
+        params: params(node, prefix)?,
+    })
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -35,9 +50,8 @@ pub struct Entry {
     pub aperture: Option<f32>,
     pub distance: Option<f32>,
     pub(crate) sensor_factor: f32,
-    pub(crate) focal_x: Option<f32>,
-    pub(crate) distortion: Option<[f32; 3]>,
-    pub(crate) vignette: Option<[f32; 3]>,
+    pub(crate) distortion: Option<RadialModel>,
+    pub(crate) vignette: Option<RadialModel>,
     pub(crate) red: Option<Chromatic>,
     pub(crate) blue: Option<Chromatic>,
 }
@@ -119,7 +133,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
             let m = perspective.and_then(|p| model(p, name))?;
             Some((
                 number(m, "ScaleFactor").unwrap_or(1.),
-                params(m, "RadialDistortParam")?,
+                radial_model(m, "RadialDistortParam")?,
             ))
         };
         out.push(Entry {
@@ -137,11 +151,10 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
             aperture: number(d, "ApertureValue"),
             distance: number(d, "FocusDistance"),
             sensor_factor: number(d, "SensorFormatFactor").unwrap_or(1.),
-            focal_x: perspective.and_then(|p| number(p, "FocalLengthX")),
-            distortion: perspective.and_then(|p| params(p, "RadialDistortParam")),
+            distortion: perspective.and_then(|p| radial_model(p, "RadialDistortParam")),
             vignette: perspective
                 .and_then(|p| model(p, "VignetteModel"))
-                .and_then(|v| params(v, "VignetteModelParam")),
+                .and_then(|v| radial_model(v, "VignetteModelParam")),
             red: chromatic("ChromaticRedGreenModel"),
             blue: chromatic("ChromaticBlueGreenModel"),
         });

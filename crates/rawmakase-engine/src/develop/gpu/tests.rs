@@ -1491,3 +1491,197 @@ fn an_unsubmitted_pass_leaves_its_kept_colour_unwritten() -> Result<()> {
     assert_eq!(actual.pixels, expected.pixels);
     Ok(())
 }
+
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn imported_zoom_profile_matches_cpu_and_image_space_oracle() -> Result<()> {
+    use crate::{
+        camera_data::Metadata,
+        lens::lcp::Library,
+        optics::{LensCorrection, Radial},
+    };
+    let mut entries = String::new();
+    for (focal, fx) in [(36., 1f32), (144., 4.)] {
+        let q = fx * fx * 36. / 13.;
+        entries.push_str(&format!(r#"
+<rdf:li stCamera:Make="Synthetic" stCamera:Lens="Zoom" stCamera:FocalLength="{focal}">
+<stCamera:PerspectiveModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}">
+<stCamera:VignetteModel stCamera:FocalLengthX="{fx}" stCamera:VignetteModelParam1="{}" stCamera:VignetteModelParam2="{}" stCamera:VignetteModelParam3="{}"/>
+<stCamera:ChromaticRedGreenModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}"/>
+<stCamera:ChromaticBlueGreenModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}"/>
+</stCamera:PerspectiveModel></rdf:li>"#, 0.02*q, -0.6*q, 0.2*q*q, -0.1*q*q*q, 0.002*q, -0.002*q));
+    }
+    let text = format!(
+        r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">{entries}</rdf:RDF>"#
+    );
+    let library = Library::from_texts([("zoom.lcp", text.as_str())]);
+    let radial = |f: fn(f32) -> f32| Radial {
+        knots: (0..=32).map(|i| i as f32 / 32.).collect(),
+        values: (0..=32).map(|i| f(i as f32 / 32.)).collect(),
+    };
+    let oracle = LensCorrection {
+        distortion: Some(radial(|r| 1. + 0.02 * r * r)),
+        vignetting: Some(radial(|r| {
+            1. / (1. - 0.6 * r * r + 0.2 * r.powi(4) - 0.1 * r.powi(6))
+        })),
+        chromatic: Some([
+            radial(|r| 1. + 0.002 * r * r),
+            radial(|r| 1. - 0.002 * r * r),
+        ]),
+        ..Default::default()
+    };
+    for focal in [18., 36., 90., 144., 288.] {
+        let mut metadata = Metadata {
+            make: "Synthetic".into(),
+            lens_model: "Zoom".into(),
+            focal,
+            ..Default::default()
+        };
+        metadata.width = 150;
+        metadata.height = 100;
+        metadata.lens_profiles = library.for_photo(&metadata);
+        check_imported_profile_render(metadata, Some(oracle.clone()))?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires GPU and read-only local LCP; set RAWMAKASE_LCP"]
+fn installed_zoom_profile_cpu_gpu_agree() -> Result<()> {
+    use crate::{camera_data::Metadata, lens::lcp::Library, optics::lcp::parse};
+    let text =
+        std::fs::read_to_string(std::env::var_os("RAWMAKASE_LCP").expect("set RAWMAKASE_LCP"))?;
+    let entries = parse(&text)?;
+    let first = &entries[0];
+    let library = Library::from_texts([("local.lcp", text.as_str())]);
+    let min = entries
+        .iter()
+        .map(|e| e.focal)
+        .fold(f32::INFINITY, f32::min);
+    let max = entries.iter().map(|e| e.focal).fold(0., f32::max);
+    for focal in [min, (min + max) * 0.5, max] {
+        let mut metadata = Metadata {
+            make: first.make.clone(),
+            lens_model: first.lens[0].clone(),
+            focal,
+            aperture: 5.6,
+            width: 150,
+            height: 100,
+            ..Default::default()
+        };
+        metadata.lens_profiles = library.for_photo(&metadata);
+        check_imported_profile_render(metadata, None)?;
+    }
+    Ok(())
+}
+
+fn check_imported_profile_render(
+    mut metadata: crate::camera_data::Metadata,
+    oracle: Option<crate::optics::LensCorrection>,
+) -> Result<()> {
+    use crate::{
+        camera_data::CameraImage,
+        camera_profiles::CameraProfile,
+        develop::{PreviewRenderer, quality::Output},
+    };
+    metadata.wb = [1.; 3];
+    metadata.daylight_wb = [1.; 3];
+    metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    let (w, h) = (metadata.width, metadata.height);
+    let recipe = Recipe {
+        profile: Some(std::sync::Arc::new(
+            CameraProfile::camera_matrix_default(&metadata)
+                .unwrap()
+                .with_test_tables(),
+        )),
+        lens_profile: true,
+        effects: crate::model::effects::Effects {
+            clarity: 0.2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(
+        recipe.lens_correction(&metadata).is_some(),
+        "profile must be active"
+    );
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                let v = 0.1 + 0.03 * (i as f32 * 0.13).sin();
+                [v * 1.1, v, v * 0.9]
+            })
+            .collect(),
+        metadata,
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let cancel = AtomicBool::new(false);
+    let mut cpu = PreviewRenderer::default();
+    let mut gpu = PreviewRenderer::with_gpu();
+    for (max_edge, region) in [(75, None), (0, None), (0, Some([10, 10, 80, 60]))] {
+        let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
+        if let Some(ref oracle) = oracle {
+            // Recovery captures metadata with its pixels; use an independent
+            // source for the oracle rather than mutating an already rendered image.
+            let mut oracle_image = image.clone();
+            oracle_image.recovered = Default::default();
+            oracle_image.metadata.lens = Some(oracle.clone());
+            let oracle_recipe = Recipe {
+                lens_profile: false,
+                lens_builtin: true,
+                ..recipe.clone()
+            };
+            let direct = PreviewRenderer::default().render(
+                &oracle_image,
+                &oracle_recipe,
+                max_edge,
+                region,
+                &cancel,
+            )?;
+            let worst = expected
+                .pixels
+                .iter()
+                .flatten()
+                .zip(direct.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0f32, f32::max);
+            assert!(worst < 2e-5, "image-space oracle differs by {worst}");
+        }
+        let display = super::Display {
+            slot: if region.is_some() {
+                super::Slot::Region
+            } else {
+                super::Slot::Whole
+            },
+            clipping: crate::rendered::ClipOverlay::NONE,
+            monitor: None,
+            navigator: None,
+            thumbnail: None,
+            samples: false,
+            drawn: Vec::new(),
+        };
+        let Output::Frame(frame) =
+            gpu.render_to(&image, &recipe, max_edge, region, &cancel, Some(&display))?
+        else {
+            panic!("GPU fallback: {:?}", gpu.fallback_reason());
+        };
+        let processor = gpu.gpu().unwrap();
+        assert!(!processor.resident.as_ref().unwrap().samples.is_empty());
+        let actual = read_texture(processor, &frame.texture)?;
+        let expected = expected.rgb8();
+        assert_eq!(actual.len(), expected.len());
+        let worst = actual
+            .iter()
+            .zip(&expected)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(worst <= 1, "CPU/GPU differ by {worst}");
+    }
+    Ok(())
+}
