@@ -31,6 +31,9 @@ jobs:
       - uses: crmne/copilot-triage@f99b390350c35f44f1cca240c9b25c08eb9ad4db # v0.18.0
         with:
           copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          # Copilot Free supports automatic model selection only.
+          model: auto
+          reasoning-effort: default
           kind: issue
           number: ${{ inputs.number || github.event.issue.number }}
           # Manual runs preview a decision in the job summary; they still use Copilot credits.
