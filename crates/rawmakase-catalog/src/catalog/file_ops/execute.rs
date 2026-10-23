@@ -78,7 +78,8 @@ pub(super) fn execute_with(
         | Kind::CreateFolder
         | Kind::RenamePhotos
         | Kind::RenameFolder
-        | Kind::MoveFolder => {
+        | Kind::MoveFolder
+        | Kind::TrashFolder => {
             let lock = super::lock::acquire(catalog)?;
             super::recover::prune(catalog)?;
             let recovery = super::recover::run(catalog, disk, trash)?;
@@ -121,6 +122,18 @@ pub(super) fn execute_with(
     {
         stopped = Some(format!("{e:#}"));
     }
+    if let Some(tree) = &plan.trash_tree {
+        let cx = super::tree_trash::Cx {
+            batch: run.batch,
+            computer: run.computer,
+            disk,
+            trash,
+        };
+        let involved = tree.state.photos.iter().any(|p| busy.contains(p));
+        if let Err(e) = super::tree_trash::run(&cx, catalog, tree, involved, cancel) {
+            stopped = Some(format!("{e:#}"));
+        }
+    }
     for item in items {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -133,8 +146,8 @@ pub(super) fn execute_with(
                 Kind::MovePhotos | Kind::TrashPhotos | Kind::CreateFolder | Kind::RenamePhotos => {
                     run.files(catalog, &item, cancel)
                 }
-                // A folder rename or move has no photo items.
-                Kind::RenameFolder | Kind::MoveFolder => Ok(()),
+                // A folder rename, move or Trash has no photo items.
+                Kind::RenameFolder | Kind::MoveFolder | Kind::TrashFolder => Ok(()),
             }
         };
         // A catalog that can't be written stops the run; what was
@@ -874,6 +887,16 @@ pub(super) fn complete(
         Subject::Photos(pre) => pre,
         Subject::Folder(_) => return folder::complete(w, computer, disk, item),
         Subject::Tree(_) => return super::tree::complete(w, computer, disk, item),
+        // Completed only by `tree_trash`, from its receipt read before the
+        // transaction.
+        Subject::TrashTree(_) => {
+            return journal::set_state(
+                w,
+                item.id,
+                ItemState::NeedsRecovery,
+                Some("not a photo operation"),
+            );
+        }
     };
     let shared_now = match item.members.first() {
         Some(photo) => shared(
@@ -902,7 +925,7 @@ pub(super) fn complete(
                 None => Some("it may be in the Trash".into()),
             },
             Kind::MovePhotos | Kind::RenamePhotos => moved(w, computer, folders, disk, pre, item)?,
-            Kind::CreateFolder | Kind::RenameFolder | Kind::MoveFolder => {
+            Kind::CreateFolder | Kind::RenameFolder | Kind::MoveFolder | Kind::TrashFolder => {
                 Some("not a photo operation".into())
             }
         },

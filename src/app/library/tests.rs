@@ -3098,3 +3098,94 @@ fn a_folder_dropped_on_another_roots_folder_is_dropped_there() {
         Some((RootId(42), "2024/day1".into(), RootId(43), "trips".into()))
     );
 }
+/// The labels of `node`'s right-click menu, and the action a click on
+/// `choose` gives.
+fn tree_menu(node: &FolderNode, choose: &str) -> (Vec<String>, Option<TreeAction>) {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut action = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 400.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| action = folder_tree_row(ui, node, 0, &mut expanded, &Default::default()),
+        );
+        output.textures_delta.clear();
+        (action, output.platform_output.accesskit_update)
+    };
+    let click = |at: egui::Pos2, button: egui::PointerButton, pressed: bool| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    let row = egui::pos2(120., 10.);
+    frame(vec![]);
+    frame(click(row, egui::PointerButton::Secondary, true));
+    frame(click(row, egui::PointerButton::Secondary, false));
+    let (_, update) = frame(vec![]);
+    let update = update.expect("accessibility is on");
+    let buttons: Vec<(String, egui::Pos2)> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == egui::accesskit::Role::Button)
+        .filter_map(|(_, n)| {
+            let b = n.bounds()?;
+            Some((
+                n.label()?.to_string(),
+                egui::pos2(((b.x0 + b.x1) / 2.) as f32, ((b.y0 + b.y1) / 2.) as f32),
+            ))
+        })
+        .collect();
+    let labels = buttons.iter().map(|(l, _)| l.clone()).collect();
+    let Some((_, at)) = buttons.iter().find(|(l, _)| l == choose) else {
+        return (labels, None);
+    };
+    frame(click(*at, egui::PointerButton::Primary, true));
+    let (action, _) = frame(click(*at, egui::PointerButton::Primary, false));
+    (labels, action)
+}
+#[test]
+fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
+    use crate::catalog::FolderId;
+    let folder = FolderNode {
+        key: "root:42/2024".into(),
+        name: "2024".into(),
+        in_root: RootId(42),
+        logical: "2024".into(),
+        folder: Some(FolderId(1)),
+        ids: [FolderId(1)].into_iter().collect(),
+        ..Default::default()
+    };
+    let (labels, action) = tree_menu(&folder, "Move to Trash…");
+    assert!(labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    assert!(
+        matches!(&action, Some(TreeAction::TrashFolder { root: RootId(42), logical }) if logical == "2024"),
+        "not asked to trash it"
+    );
+    // A root with folders: neither Move to Trash nor its own removal.
+    let mut root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    root.ids.insert(FolderId(1));
+    let (labels, _) = tree_menu(&root, "");
+    assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    // A root with nothing left in the catalog can be removed.
+    let empty = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let (labels, action) = tree_menu(&empty, "Remove from Catalog…");
+    assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    assert!(
+        matches!(&action, Some(TreeAction::RemoveRoot(RootId(42), name)) if name == "Photos"),
+        "not asked to remove the root"
+    );
+}

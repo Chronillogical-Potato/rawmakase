@@ -34,6 +34,8 @@ pub(crate) struct FolderRemoval {
     pub(crate) folders: HashSet<FolderId>,
     /// Photos in it and its subfolders, as the panel counts them.
     pub(crate) photos: usize,
+    /// A root with no folder left in the catalog, removed on its own.
+    pub(crate) empty_root: Option<RootId>,
 }
 /// Where the Library was: its source, filter bar and selection, for undo to
 /// return to.
@@ -94,6 +96,11 @@ pub(crate) enum FileRequest {
     },
     /// Rename Folder… for the folder of `root` at logical path `logical`.
     RenameFolder {
+        root: crate::catalog::RootId,
+        logical: String,
+    },
+    /// Move to Trash… for the folder of `root` at logical path `logical`.
+    TrashFolder {
         root: crate::catalog::RootId,
         logical: String,
     },
@@ -860,6 +867,27 @@ impl Library {
             })
             .collect();
     }
+    /// After the folder of `root` at logical path `logical` went to the
+    /// Trash: a selection in it moves to the folder it was in, which the
+    /// catalog read again shows.
+    pub(in crate::app) fn folder_trashed(&mut self, root: crate::catalog::RootId, logical: &str) {
+        let key = format!("root:{root}/{logical}");
+        let inside = self
+            .selected_folders
+            .keys()
+            .iter()
+            .any(|k| folder_selection::rekeyed(k, &key).is_some());
+        if !inside {
+            return;
+        }
+        let parent = match logical.rsplit_once('/') {
+            Some((parent, _)) => format!("root:{root}/{parent}"),
+            None => format!("root:{root}"),
+        };
+        self.selected_folders = folder_selection::FolderSelection::one(&parent);
+        // Its folders as the catalog has them once read again; none until.
+        self.filters.folder_scope = Some(HashSet::new());
+    }
     /// Unfolds the folder New Folder Inside made a folder in, so the tree
     /// shows it.
     pub(in crate::app) fn unfold_new_folder(&mut self) {
@@ -993,6 +1021,32 @@ impl Library {
                 false
             }
         }
+    }
+    /// Removes root `root`, named `name`, which has no folder left in the
+    /// catalog; its folder stays on disk.
+    pub(in crate::app) fn remove_empty_root(
+        &mut self,
+        root: crate::catalog::RootId,
+        name: &str,
+    ) -> Result<()> {
+        let removed = self.session.remove_empty_root(root)?;
+        let key = format!("root:{root}");
+        if self
+            .selected_folders
+            .keys()
+            .iter()
+            .any(|k| folder_selection::rekeyed(k, &key).is_some())
+        {
+            self.selected_folders.clear();
+            self.filters.folder_scope = None;
+        }
+        if self.listed_after(&removed.listed, "Root removed") {
+            self.message = match removed.value {
+                true => format!("Removed {name} from the catalog. Its folder is still on disk."),
+                false => format!("{name} was not removed: it has folders in the catalog again."),
+            };
+        }
+        Ok(())
     }
     /// Removes `folders` and their photos from the catalog, leaving the files;
     /// returns the photos removed. The Library shows All Photographs if it

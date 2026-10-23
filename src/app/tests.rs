@@ -1869,6 +1869,7 @@ fn removing_a_folder_closes_its_photo_and_leaves_the_files() -> anyhow::Result<(
         name: "trip".into(),
         folders: trip.clone(),
         photos: 1,
+        empty_root: None,
     };
     let other = crate::catalog::CatalogLocation::File(dir.path().join("other.rawmakase"));
     editor.remove_folders(&removal(other));
@@ -6583,6 +6584,7 @@ fn a_change_still_waiting_for_the_undo_log_forgets_a_removed_folders_photos() ->
         name: "photos".into(),
         folders,
         photos: 1,
+        empty_root: None,
     });
     editor.sync_undo();
     // Its id may be the next photo's: nothing may undo onto it.
