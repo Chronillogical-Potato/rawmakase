@@ -33,15 +33,28 @@ fn key(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+/// Canon RAWs can spell the mount "EF 24-105mm" where an LCP says
+/// "EF24-105mm". Only join EF to a following focal length: keep the rest
+/// of the name, including mount and lens-version suffixes, distinct.
+fn lens_key(s: &str) -> String {
+    let mut name = key(s);
+    if name
+        .strip_prefix("ef ")
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+    {
+        name.remove(2);
+    }
+    name
+}
 /// Whether an entry describes the photo's lens: it names the lens the file records,
 /// or, for a file recording no lens at all, it carries the maker's lens ID. Nikon
 /// bodies that write no lens model (the D600 among them) leave `stCamera:LensID`
 /// and the maker note's `LensIDNumber` as the only identity, and they are the same
 /// number.
 fn lens_matches(e: &Entry, m: &Metadata) -> bool {
-    let lens = key(&m.lens_model);
+    let lens = lens_key(&m.lens_model);
     if !lens.is_empty() {
-        return e.lens.iter().any(|l| key(l) == lens);
+        return e.lens.iter().any(|l| lens_key(l) == lens);
     }
     lens_id_matches(e, m)
 }
@@ -309,7 +322,12 @@ impl Library {
             if maker(&e.make) != maker(&m.make) {
                 continue;
             }
-            let lens = e.lens.iter().map(|l| key(l)).collect::<Vec<_>>().join("|");
+            let lens = e
+                .lens
+                .iter()
+                .map(|l| lens_key(l))
+                .collect::<Vec<_>>()
+                .join("|");
             lenses.entry(id).or_default().insert(lens);
         }
         lenses
@@ -342,14 +360,14 @@ impl Library {
             .iter()
             .filter(|q| q.has_raw())
             .flat_map(|q| q.entries.iter().flat_map(|e| &e.lens))
-            .map(|l| key(l))
+            .map(|l| lens_key(l))
             .collect();
         let shadowed = |p: &ImportedProfile| {
             !p.has_raw()
                 && p.entries
                     .iter()
                     .flat_map(|e| &e.lens)
-                    .any(|k| raw_lenses.contains(&key(k)))
+                    .any(|k| raw_lenses.contains(&lens_key(k)))
         };
         let candidates: Vec<Candidate> = fits
             .iter()
