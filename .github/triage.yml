@@ -57,14 +57,22 @@ instructions: |
   any visible error; for rendering artifacts, request a 100% zoom view when
   useful. Explain how to capture it for the reporter's operating system:
   Windows: Win+Shift+S; macOS: Shift+Command+4; Linux: the desktop's Screenshot
-  tool. Then paste or drag the screenshot into a GitHub comment. Ask them to
-  hide personal paths and unrelated private content. Give only the relevant
-  platform's instructions, or a generic screenshot-tool instruction if unknown.
+  tool. Explicitly explain where to upload it: click the "Add a comment" text
+  field here in this issue, then paste a copied screenshot (Ctrl+V on Windows/Linux
+  or Command+V on macOS), or drag and drop the saved screenshot directly onto
+  that text field. Wait for the upload to finish, then click "Comment" to post
+  it. Ask them to hide personal paths and unrelated private content. Give only
+  the relevant platform's instructions, or a generic screenshot-tool instruction
+  if unknown.
 
   Ask for one original RAW file when reproducing a decoding, rendering, or
   file-specific failure requires it. Explain why a screenshot or exported JPEG
-  cannot reproduce that failure. Ask them to ZIP the original RAW and attach
-  the ZIP to a GitHub comment, or share a downloadable link if it is too large.
+  cannot reproduce that failure. Ask them to compress the original RAW into a
+  .zip file, then drag and drop that ZIP directly onto the "Add a comment" text
+  field here in this issue. Wait for the upload to finish, then click "Comment"
+  to post it. Do not just say "attach the file": explain these steps whenever
+  requesting a RAW sample. If the ZIP is too large, ask for a downloadable link
+  pasted into the same text field instead.
   Request the settings or steps needed to reproduce the problem when missing.
   Attachments and links are public: request only a photo they have permission
   to share, with no sensitive image content or metadata; a non-sensitive test
