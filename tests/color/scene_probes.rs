@@ -26,6 +26,117 @@ const DARK: f64 = 1. / 4096.;
 /// Scene blocks Camera Raw renders brighter than this may be clipped.
 const BRIGHT: f64 = 0.9;
 
+#[test]
+fn clarity_does_not_spread_a_bright_rail_into_its_dark_background() {
+    // Issue #601: a high-resolution edge crosses the 512px measurement grid.
+    // Camera Raw 18.7, PV15.4, linear embedded profile, all other Basic controls
+    // zero: at +100 the dark pixel beside these rails gets darker, not brighter.
+    // The old interpolated gain made the 4px rail's neighbour 0.396 sRGB instead
+    // of its default 0.305 (Camera Raw: 0.274). Keep this at the RAW/XMP boundary.
+    let (w, h) = (2048, 128);
+    let rails = [(256, 4), (768, 8), (1280, 16), (1792, 32)];
+    let scene: Vec<[f64; 3]> = (0..w * h)
+        .map(|i| {
+            let bright = rails
+                .iter()
+                .any(|(x, width)| (*x..x + width).contains(&(i % w)));
+            [if bright { 0.6 } else { 0.08 }; 3]
+        })
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("clarity-rails.dng");
+    std::fs::write(&path, dng::write_probe(w, h, &scene, 0.)).unwrap();
+    let im = develop(&path);
+    let profiles = embedded_profiles(&im);
+    let render = |clarity: i32| {
+        scene_output(
+            &im,
+            &profiles,
+            &xmp(&ProbeCase {
+                probe: String::new(),
+                settings: BTreeMap::from([("Clarity2012".into(), clarity.to_string())]),
+                mask: BTreeMap::new(),
+                camera_raw: Vec::new(),
+            }),
+        )
+    };
+    let base = render(0);
+    for amount in [25, 50, 100] {
+        let out = render(amount);
+        for (x, width) in rails {
+            for x in [x - 1, x + width] {
+                let i = (h / 2 * w + x) as usize;
+                assert!(
+                    out.pixels[i][1] <= base.pixels[i][1] * 1.01,
+                    "Clarity {amount}, x={x}: {} -> {}",
+                    base.pixels[i][1],
+                    out.pixels[i][1]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn clarity_does_not_turn_mask_color_or_exposure_into_detail() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("clarity-flat.dng");
+    std::fs::write(
+        &path,
+        dng::write_probe(64, 64, &vec![[0.08; 3]; 64 * 64], 0.),
+    )
+    .unwrap();
+    let im = develop(&path);
+    let profiles = embedded_profiles(&im);
+    for mask in [
+        BTreeMap::from([("LocalExposure2012".into(), "0.5".into())]),
+        BTreeMap::from([("LocalExposure2012".into(), "-0.5".into())]),
+        BTreeMap::from([("LocalTemperature".into(), "0.5".into())]),
+        BTreeMap::from([
+            ("LocalToningHue".into(), "30".into()),
+            ("LocalToningSaturation".into(), "0.8".into()),
+        ]),
+    ] {
+        let render = |clarity: i32, masked: bool| {
+            let mut mask = mask.clone();
+            if masked {
+                mask.insert(
+                    "LocalClarity2012".into(),
+                    (clarity as f32 / 100.).to_string(),
+                );
+            }
+            scene_output(
+                &im,
+                &profiles,
+                &xmp(&ProbeCase {
+                    probe: String::new(),
+                    settings: BTreeMap::from([(
+                        "Clarity2012".into(),
+                        (if masked { 0 } else { clarity }).to_string(),
+                    )]),
+                    mask,
+                    camera_raw: Vec::new(),
+                }),
+            )
+        };
+        let base = render(0, false);
+        for (amount, masked) in [(-100, false), (100, false), (-100, true), (100, true)] {
+            let out = render(amount, masked);
+            let max = out
+                .pixels
+                .iter()
+                .flatten()
+                .zip(base.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f32::max);
+            assert!(
+                max < 1e-5,
+                "Clarity {amount}, masked {masked}, {mask:?}: flat-scene difference {max}"
+            );
+        }
+    }
+}
+
 fn shadow_gap_scene(size: u32) -> Vec<[f64; 3]> {
     (0..size * size)
         .map(|i| {

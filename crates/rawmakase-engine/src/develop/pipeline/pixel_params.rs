@@ -224,7 +224,7 @@ fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
     p.set("LOCAL_SCALE", &local.scale);
     let grid = local.grid();
     let clarity = match &local.clarity {
-        Some(c) => p.push(c.iter().copied()),
+        Some(c) => p.push(c.values()),
         None => -1.,
     };
     p.set("LOCAL_A", &[0., grid.cells() as f32, clarity]);

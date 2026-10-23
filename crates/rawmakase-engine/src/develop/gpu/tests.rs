@@ -3,6 +3,126 @@ use crate::develop::masks::local::LocalDeltas;
 
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn gpu_clarity_reconstructs_fine_edges_like_the_cpu() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+    };
+    use crate::{
+        develop::masks::MaskWeights,
+        model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape},
+    };
+    use std::sync::Arc;
+    let (w, h) = (1024, 32);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                // A one-pixel rail is finer than the measurement grid. Both sides,
+                // different brightnesses and the floor exercise reconstruction.
+                let x = i % w;
+                let level = if x % 64 == 31 {
+                    0.6
+                } else if x < w / 2 {
+                    0.08
+                } else {
+                    0.00001
+                };
+                [level; 3]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let samples = Arc::new(Samples {
+        width: w,
+        height: h,
+        pixels: image.pixels.clone(),
+        positions: (0..w * h)
+            .map(|i| [(i % w) as f32, (i / w) as f32])
+            .collect(),
+    });
+    let mut recipe = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let source = Source::new(&image);
+    // Reusing the processor while crossing zero also checks the absent/present
+    // coefficient tables and changing slider positions in the cached path.
+    for amount in [1., 0., -1., -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.] {
+        recipe.effects.clarity = amount;
+        for adjust in [
+            None,
+            Some(LocalAdjust {
+                exposure: 2.,
+                ..Default::default()
+            }),
+            Some(LocalAdjust {
+                temperature: 0.5,
+                ..Default::default()
+            }),
+            Some(LocalAdjust {
+                color: [30. / 360., 0.8],
+                ..Default::default()
+            }),
+        ] {
+            recipe.masks = adjust
+                .map(|adjust| {
+                    vec![MaskGroup {
+                        adjust,
+                        components: vec![MaskComponent::new(MaskShape::Linear {
+                            from: [0.5, -2.],
+                            to: [0.5, -1.],
+                        })],
+                        ..Default::default()
+                    }]
+                })
+                .unwrap_or_default();
+            let weights = adjust.map(|adjust| MaskWeights {
+                deltas: vec![adjust.delta(1.)],
+                data: Arc::new(vec![255; image.pixels.len()]),
+            });
+            let mut params = pixel_params(source, &recipe).expect("supported recipe");
+            if let Some(weights) = &weights {
+                assert!(params.set_masks(source, &recipe, Some(weights)));
+            }
+            let expected = develop_samples(source, &recipe, &samples, &cancel, weights.as_ref())?;
+            let actual = gpu.develop(&samples, &params, &cancel)?;
+            let max = actual
+                .pixels
+                .iter()
+                .flatten()
+                .zip(expected.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f32::max);
+            assert!(
+                max < 1e-4,
+                "Clarity {amount}, {adjust:?}: CPU/GPU difference {max}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn gpu_measured_tails_match_cpu_globally_and_in_masks() -> Result<()> {
     use crate::{
         camera_data::{CameraImage, Metadata},

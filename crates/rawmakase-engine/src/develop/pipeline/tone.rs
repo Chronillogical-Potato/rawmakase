@@ -91,8 +91,8 @@ impl CurveSet {
                     .map(|(i, y)| {
                         let x = (i % small.width as usize) as f32 / map.scale[0];
                         let yy = (i / small.width as usize) as f32 / map.scale[1];
-                        (map.gain_with(x, yy, *y, [shadows, 0., 0.])
-                            / map.gain_with(x, yy, *y, [0., 0., 0.]))
+                        (map.gain_with(x, yy, *y, *y, [shadows, 0., 0.])
+                            / map.gain_with(x, yy, *y, *y, [0., 0., 0.]))
                         .log2()
                     })
                     .collect();

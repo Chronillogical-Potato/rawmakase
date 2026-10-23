@@ -108,8 +108,8 @@ pub(crate) struct LocalToneMap {
     /// Image keys of negative Shadows, Highlights and positive Shadows, for masks
     /// that evaluate them at their own slider values.
     pub(crate) keys: [f32; 3],
-    /// Clarity's log2 gain on this grid (`clarity.rs`).
-    pub(crate) clarity: Option<Vec<f32>>,
+    /// Clarity's measured gains and luminance guidance on this grid (`clarity.rs`).
+    pub(crate) clarity: Option<super::clarity::ClarityField>,
     /// Clarity's detail, when masks change Clarity and read it at their own amount.
     pub(crate) clarity_detail: Option<super::clarity::ClarityDetail>,
 }
@@ -444,8 +444,9 @@ impl LocalToneMap {
         }
     }
     /// Luminance gain for a pixel of scene luminance `lum` at camera-image sample
-    /// position `x`, `y`.
-    pub(crate) fn gain(&self, x: f32, y: f32, lum: f32) -> f32 {
+    /// position `x`, `y`. `clarity_lum` is the same pixel before mask colour and
+    /// Exposure, matching the measurement copy that supplied Clarity's blur.
+    pub(crate) fn gain(&self, x: f32, y: f32, lum: f32, clarity_lum: f32) -> f32 {
         let base = self.base(x, y, lum);
         let tb = self.tail_base(x, y, base);
         let mut ev = self.shadows.as_ref().map_or(0., |c| c.eval(base))
@@ -454,15 +455,22 @@ impl LocalToneMap {
             let k = self.bilinear(x, y, k);
             ev += detail.eval(base - k) + region.eval(k);
         }
-        (ev + self.clarity(x, y)).exp2()
+        (ev + self.clarity(x, y, clarity_lum)).exp2()
     }
     /// As [`Self::gain`], with Shadows, Highlights and Clarity at the given slider
     /// values (a mask's added to the recipe's).
-    pub(crate) fn gain_with(&self, x: f32, y: f32, lum: f32, sliders: [f32; 3]) -> f32 {
+    pub(crate) fn gain_with(
+        &self,
+        x: f32,
+        y: f32,
+        lum: f32,
+        clarity_lum: f32,
+        sliders: [f32; 3],
+    ) -> f32 {
         let base = self.base(x, y, lum);
         let clarity = match &self.clarity_detail {
-            Some(d) => d.at(|v| self.bilinear(x, y, v), sliders[2]),
-            None => self.clarity(x, y),
+            Some(d) => d.at(self.clarity_sample(x, y), sliders[2], level(clarity_lum)),
+            None => self.clarity(x, y, clarity_lum),
         };
         let lift = self.region().map_or(0., |k| {
             let k = self.bilinear(x, y, k);
@@ -502,8 +510,32 @@ impl LocalToneMap {
         self.bilinear(x, y, &self.base.a) * level(lum) + self.bilinear(x, y, &self.base.b)
     }
     /// The measured Clarity's log2 gain at sample position `x`, `y`.
-    fn clarity(&self, x: f32, y: f32) -> f32 {
-        self.clarity.as_ref().map_or(0., |c| self.bilinear(x, y, c))
+    fn clarity(&self, x: f32, y: f32, lum: f32) -> f32 {
+        self.clarity
+            .as_ref()
+            .map_or(0., |c| c.at(self.clarity_sample(x, y), level(lum)))
+    }
+    /// The same four neighbours used by bilinear reconstruction.
+    fn clarity_sample(&self, x: f32, y: f32) -> super::clarity::ClaritySample {
+        let fx = ((x + 0.5) * self.scale[0] - 0.5).clamp(0., (self.width - 1) as f32);
+        let fy = ((y + 0.5) * self.scale[1] - 0.5).clamp(0., (self.height - 1) as f32);
+        let (ix, iy) = (fx as usize, fy as usize);
+        let (jx, jy) = ((ix + 1).min(self.width - 1), (iy + 1).min(self.height - 1));
+        let (tx, ty) = (fx - ix as f32, fy - iy as f32);
+        super::clarity::ClaritySample {
+            indices: [
+                iy * self.width + ix,
+                iy * self.width + jx,
+                jy * self.width + ix,
+                jy * self.width + jx,
+            ],
+            weights: [
+                (1. - tx) * (1. - ty),
+                tx * (1. - ty),
+                (1. - tx) * ty,
+                tx * ty,
+            ],
+        }
     }
     /// `v` on this grid at camera-image sample position `x`, `y`.
     fn bilinear(&self, x: f32, y: f32, v: &[f32]) -> f32 {
@@ -699,8 +731,8 @@ mod tests {
         );
         let out = |x: usize| {
             let y = lum[120 * w + x];
-            let global = m.gain(x as f32, 120., y);
-            let masked = m.gain_with(x as f32, 120., y, [0., -1., 0.]);
+            let global = m.gain(x as f32, 120., y, y);
+            let masked = m.gain_with(x as f32, 120., y, y, [0., -1., 0.]);
             assert!((global - masked).abs() < 1e-5);
             y * global
         };
@@ -836,7 +868,7 @@ mod tests {
                 },
                 false,
             );
-            m.gain(128., 128., 1.).log2()
+            m.gain(128., 128., 1., 1.).log2()
         };
         let (flat, striped) = (pull(false), pull(true));
         assert!(flat < -5., "flat {flat}");
@@ -865,7 +897,7 @@ mod tests {
             },
             false,
         );
-        let at = |x: f32| m.gain(x, 128., 1.).log2();
+        let at = |x: f32| m.gain(x, 128., 1., 1.).log2();
         let inside = at(128.);
         for x in [88., 89., 90.] {
             assert!(at(x) < inside + 1., "x {x}: {}, inside {inside}", at(x));
@@ -901,7 +933,10 @@ mod tests {
         // less than a large dark area at the same level.
         let lum = scene(&[[20, 30, 100, 100], [190, 75, 8, 8]]);
         let m = map(&lum, 1., false);
-        let at = |x: usize, y: usize| m.gain(x as f32, y as f32, lum[y * 240 + x]).log2();
+        let at = |x: usize, y: usize| {
+            m.gain(x as f32, y as f32, lum[y * 240 + x], lum[y * 240 + x])
+                .log2()
+        };
         let (large, small) = (at(70, 80), at(194, 79));
         assert!(
             large > 1. && small < large - 0.2,
@@ -921,8 +956,8 @@ mod tests {
             for (x, y) in [(70, 80), (194, 79), (200, 20), (5, 155)] {
                 let l = lum[y * 240 + x];
                 let (x, y) = (x as f32, y as f32);
-                let a = global.gain(x, y, l);
-                let b = masked.gain_with(x, y, l, [s, 0., 0.]);
+                let a = global.gain(x, y, l, l);
+                let b = masked.gain_with(x, y, l, l, [s, 0., 0.]);
                 assert!((a - b).abs() < 1e-4 * a, "s {s}: {a} against {b}");
             }
         }
