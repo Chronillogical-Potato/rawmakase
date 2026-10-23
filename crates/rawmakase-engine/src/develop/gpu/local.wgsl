@@ -83,8 +83,13 @@ fn footprint_sample(x: f32, y: f32) -> vec3<f32> {
     }
     return sum;
 }
-// `pipeline::LensWarp::sample`.
-fn warp_sample(x: f32, y: f32) -> vec3<f32> {
+// Corrected colour and the decoded position used by local tone maps.
+struct LensSample {
+    color: vec3<f32>,
+    position: vec2<f32>,
+}
+// `pipeline::LensWarp::sample` and `LensMap::forward`.
+fn warp_sample(x: f32, y: f32) -> LensSample {
     let cx = s(S_CENTER);
     let cy = s(S_CENTER + 1u);
     let dx = (x + 0.5 - cx) * s(S_FILL);
@@ -124,14 +129,14 @@ fn warp_sample(x: f32, y: f32) -> vec3<f32> {
     if has(S_GAIN_MAP) {
         // After the opcode list's warp: the corrected position.
         if s(su(S_GAIN_MAP) + 13u) > 0.5 {
-            return p * gain * gain_map(cx + dx - 0.5, cy + dy - 0.5);
+            return LensSample(p * gain * gain_map(cx + dx - 0.5, cy + dy - 0.5), vec2(gx, gy));
         }
         // Before it: each channel where it samples the photo.
         let red = gain_map(cx + dx * scale.x - 0.5, cy + dy * scale.x - 0.5).x;
         let blue = gain_map(cx + dx * scale.z - 0.5, cy + dy * scale.z - 0.5).z;
-        return p * gain * vec3(red, gain_map(gx, gy).y, blue);
+        return LensSample(p * gain * vec3(red, gain_map(gx, gy).y, blue), vec2(gx, gy));
     }
-    return p * gain;
+    return LensSample(p * gain, vec2(gx, gy));
 }
 // `GainField::gain`: a DNG's OpcodeList3 GainMap, per channel, at the table that
 // `lens_gpu_params` appends.
@@ -246,11 +251,13 @@ fn sample_region(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocat
     var pos = vec2(OUTSIDE);
     if !outside {
         if s(S_LENS) != 0.0 {
-            p = warp_sample(at.x, at.y);
+            let corrected = warp_sample(at.x, at.y);
+            p = corrected.color;
+            pos = corrected.position;
         } else {
             p = footprint_sample(at.x, at.y);
+            pos = at;
         }
-        pos = at;
     }
     samples[3u * i] = p.x;
     samples[3u * i + 1u] = p.y;

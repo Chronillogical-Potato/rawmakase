@@ -323,11 +323,10 @@ fn sample_region(
             if g.outside(sx, sy) {
                 return ([1.; 3], [f32::NAN; 2]);
             }
-            let p = match &warp {
-                Some(w) => w.sample(im, sx, sy, r, spread),
-                None => footprint_sample(im, sx, sy, r, spread),
-            };
-            (p, [sx, sy])
+            match &warp {
+                Some(w) => (w.sample(im, sx, sy, r, spread), w.map.forward(sx, sy)),
+                None => (footprint_sample(im, sx, sy, r, spread), [sx, sy]),
+            }
         })
         .unzip();
     ensure!(
@@ -439,11 +438,11 @@ pub(super) fn render_region_inner(
         if g.outside(sx, sy) {
             return [1.; 3];
         }
-        let p = match &warp {
-            Some(w) => w.sample(im, sx, sy, r, spread),
-            None => footprint_sample(im, sx, sy, r, spread),
+        let (p, pos) = match &warp {
+            Some(w) => (w.sample(im, sx, sy, r, spread), w.map.forward(sx, sy)),
+            None => (footprint_sample(im, sx, sy, r, spread), [sx, sy]),
         };
-        process_pixel(p, r, &lut, camera, [sx, sy], None)
+        process_pixel(p, r, &lut, camera, pos, None)
     };
     pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
         if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -479,4 +478,96 @@ pub(super) fn render_region_inner(
         height: h,
         pixels,
     })
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+
+    fn lens_image() -> CameraImage {
+        use crate::optics::{LensCorrection, Radial};
+        let mut im = CameraImage {
+            width: 256,
+            height: 128,
+            pixels: vec![],
+            metadata: Metadata {
+                wb: [1.; 3],
+                daylight_wb: [1.; 3],
+                cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+                matrix: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+                ..Default::default()
+            },
+            recovered: Default::default(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        im.metadata.width = im.width;
+        im.metadata.height = im.height;
+        im.pixels = (0..im.width * im.height)
+            .map(|i| [i as f32 % im.width as f32 / im.width as f32; 3])
+            .collect();
+        im.metadata.lens = Some(LensCorrection {
+            source: "test".into(),
+            default_on: true,
+            distortion: Some(Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 1.15],
+            }),
+            vignetting: None,
+            chromatic: None,
+            gain_map: None,
+        });
+        im
+    }
+
+    /// Local tone maps are measured in decoded-image coordinates. A corrected sample
+    /// must carry the coordinate it actually read, not its position before lens warp.
+    #[test]
+    fn lens_samples_keep_their_decoded_positions() {
+        let im = lens_image();
+        let r = Recipe::for_metadata(&im.metadata);
+        let g = Geometry::new(&im, &r, 128);
+        let samples = sample_region(
+            (&im).into(),
+            &r,
+            &g,
+            [0, 0, g.width, g.height],
+            0.,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        for (p, pos) in samples.pixels.iter().zip(&samples.positions) {
+            let expected = pos[0].clamp(0., (im.width - 1) as f32) / im.width as f32;
+            assert!(
+                (p[1] - expected).abs() < 1e-5,
+                "sample {} disagrees with decoded position {:?}: {}",
+                p[1],
+                pos,
+                expected
+            );
+        }
+    }
+    #[test]
+    fn lens_uncached_render_matches_preview() {
+        let im = lens_image();
+        let mut r = Recipe::for_metadata(&im.metadata);
+        r.profile = Some(Arc::new(
+            crate::camera_profiles::CameraProfile::camera_matrix_default(&im.metadata).unwrap(),
+        ));
+        r.effects.clarity = 1.;
+        r.shadows = 0.5;
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let expected = crate::develop::PreviewRenderer::default()
+            .render(&im, &r, 0, None, &cancel)
+            .unwrap();
+        let actual = render(&im, &r.checked().unwrap(), 0).unwrap();
+        let max = actual
+            .pixels
+            .iter()
+            .zip(&expected.pixels)
+            .flat_map(|(a, b)| a.iter().zip(b).map(|(a, b)| (a - b).abs()))
+            .fold(0f32, f32::max);
+        assert!(max < 1e-5, "uncached/preview difference {max}");
+    }
 }
