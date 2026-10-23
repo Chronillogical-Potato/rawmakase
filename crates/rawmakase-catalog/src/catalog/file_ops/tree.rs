@@ -325,12 +325,12 @@ fn plan_to(
     let source =
         super::disk::spelled(disk, &source, found.id).map_err(|e| refuse(&e.to_string()))?;
     // On FAT and exFAT, whose drivers list names decomposed but rename (FAT)
-    // and trash a folder only as its name is stored: composed where that
-    // finds it, as RAWmakase names what it makes there (#573).
-    let fat = disk.volume_facts(&source).is_ok_and(|f| {
-        use crate::storage::fsops::VolumeKind;
-        matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat)
-    });
+    // and trash a folder only as its name is stored, and on the SMB shares
+    // names prove files on, which list them decomposed too: composed where
+    // that finds it, as RAWmakase names what it makes there (#573).
+    let fat = disk
+        .volume_facts(&source)
+        .is_ok_and(|f| super::proof::by_names(f.kind));
     let listed = source.clone();
     let source = match (fat, source.file_name()) {
         (true, Some(name)) => {
