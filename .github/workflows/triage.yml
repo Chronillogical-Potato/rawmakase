@@ -8,9 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       number:
-        description: Issue number to preview without changing labels or posting comments
+        description: Issue number to assess
         required: true
         type: string
+      dry_run:
+        description: Preview without changing labels or posting comments
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -36,5 +40,5 @@ jobs:
           api-key: ${{ secrets.OPENAI_API_KEY }}
           kind: issue
           number: ${{ inputs.number || github.event.issue.number }}
-          # Manual runs preview a decision in the job summary; they still incur API usage.
-          dry-run: ${{ github.event_name == 'workflow_dispatch' }}
+          # Manual runs default to preview; both modes incur API usage.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
