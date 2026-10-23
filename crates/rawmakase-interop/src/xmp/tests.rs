@@ -569,6 +569,32 @@ fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
     let r = preset("Test Creative", "0")?.apply(&base, &m, &profiles, None)?;
     assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
     assert_eq!(r.profile_amount, 0.);
+    // Camera Raw's photo sidecars use resource children instead of attributes.
+    let resource = |amount: &str, uuid: &str| {
+        parse(
+            Path::new("photo.xmp"),
+            &xml(
+                r#"c:Exposure2012="0""#,
+                &format!(
+                    r#"<c:Look r:parseType="Resource"><c:Name>Test Creative</c:Name><c:Amount>{amount}</c:Amount>{uuid}</c:Look>"#
+                ),
+            ),
+        )
+    };
+    for amount in [0., 0.5, 2.] {
+        let p = resource(&amount.to_string(), "")?;
+        let r = p.apply(&base, &m, &profiles, None)?;
+        assert_eq!(r.profile_amount, amount);
+    }
+    for invalid in ["-1", "2.5", "NaN", ""] {
+        assert!(resource(invalid, "").is_err());
+    }
+    let wrong_uuid = resource("0.5", "<c:UUID>not-the-installed-look</c:UUID>")?;
+    assert_eq!(
+        wrong_uuid.settings["RAWmakaseLookUUID"],
+        "not-the-installed-look"
+    );
+    assert!(!wrong_uuid.look_available(&m, &profiles));
     // A look without an Amount renders at 100%; a preset that names another profile
     // resets an earlier Amount.
     let earlier = Recipe {
