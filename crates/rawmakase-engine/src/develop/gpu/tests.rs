@@ -1605,7 +1605,7 @@ fn check_imported_profile_render(
         recipe.lens_correction(&metadata).is_some(),
         "profile must be active"
     );
-    let mut image = CameraImage {
+    let image = CameraImage {
         width: w,
         height: h,
         pixels: (0..w * h)
@@ -1626,14 +1626,18 @@ fn check_imported_profile_render(
     for (max_edge, region) in [(75, None), (0, None), (0, Some([10, 10, 80, 60]))] {
         let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
         if let Some(ref oracle) = oracle {
-            image.metadata.lens = Some(oracle.clone());
+            // Recovery captures metadata with its pixels; use an independent
+            // source for the oracle rather than mutating an already rendered image.
+            let mut oracle_image = image.clone();
+            oracle_image.recovered = Default::default();
+            oracle_image.metadata.lens = Some(oracle.clone());
             let oracle_recipe = Recipe {
                 lens_profile: false,
                 lens_builtin: true,
                 ..recipe.clone()
             };
             let direct = PreviewRenderer::default().render(
-                &image,
+                &oracle_image,
                 &oracle_recipe,
                 max_edge,
                 region,
@@ -1647,7 +1651,6 @@ fn check_imported_profile_render(
                 .map(|(a, b)| (a - b).abs())
                 .fold(0f32, f32::max);
             assert!(worst < 2e-5, "image-space oracle differs by {worst}");
-            image.metadata.lens = None;
         }
         let display = super::Display {
             slot: if region.is_some() {
