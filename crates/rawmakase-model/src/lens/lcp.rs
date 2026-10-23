@@ -5,7 +5,9 @@
 //! one that fits its lens best is the automatic choice. The profiles' data and the
 //! correction model are in `optics::lcp`; matching them to a photo is here.
 use crate::camera_data::Metadata;
-use crate::optics::lcp::{Candidate, Chromatic, Entry, ImportedProfile, PhotoProfiles, parse};
+use crate::optics::lcp::{
+    Candidate, Chromatic, Entry, ImportedProfile, PhotoProfiles, RadialModel, parse,
+};
 use crate::optics::{LensCorrection, Radial};
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -211,17 +213,27 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
     };
     let long = w.max(h);
     let half = (w * w + h * h).sqrt() * 0.5;
-    // The model is normalised to the profiled sensor; rescale to this one when
-    // their formats differ (a full-frame profile on an APS-C body).
-    let format = crop_factor(m)
-        .map(|c| c / first.sensor_factor)
-        .filter(|r| (r.ln()).abs() > 1.1f32.ln())
-        .unwrap_or(1.);
-    let fx = (first.focal_x.unwrap_or(focal * first.sensor_factor / 36.) * format).max(1e-3);
-    let to_model = half / (fx * long);
+    // Put every model in our half-diagonal coordinate before interpolating.
+    // Raw coefficients from different focal normalizations are not comparable:
+    // k_n * (r * scale)^(2n) becomes (k_n * scale^(2n)) * r^(2n).
+    // Use the calibration entry's focal length for missing FocalLengthX, including
+    // at clamped endpoints, never the requested photo focal length.
+    let normalized = |e: &Entry, model: RadialModel| {
+        let format = crop_factor(m)
+            .map(|c| c / e.sensor_factor)
+            .filter(|r| (r.ln()).abs() > 1.1f32.ln())
+            .unwrap_or(1.);
+        let fx = (model.focal_x.unwrap_or(e.focal * e.sensor_factor / 36.) * format).max(1e-3);
+        let scale2 = (half / (fx * long)).powi(2);
+        [
+            model.params[0] * scale2,
+            model.params[1] * scale2 * scale2,
+            model.params[2] * scale2 * scale2 * scale2,
+        ]
+    };
     let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
     let poly = |k: [f32; 3], r: f32| {
-        let r2 = (r * to_model).powi(2);
+        let r2 = r * r;
         1. + k[0] * r2 + k[1] * r2 * r2 + k[2] * r2 * r2 * r2
     };
     let curve = |f: &dyn Fn(f32) -> f32| Radial {
@@ -232,15 +244,31 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         Some(builtin) if first.prefer_metadata_distortion && builtin.distortion.is_some() => {
             builtin.distortion.clone()
         }
-        _ => interpolate(&found, focal, None, |e| e.distortion, mix3)
-            .map(|(k, _)| curve(&|r| poly(k, r))),
+        _ => interpolate(
+            &found,
+            focal,
+            None,
+            |e| e.distortion.map(|p| normalized(e, p)),
+            mix3,
+        )
+        .map(|(k, _)| curve(&|r| poly(k, r))),
     };
-    let vignetting = interpolate(&found, focal, av, |e| e.vignette, mix3)
-        .map(|(k, _)| curve(&|r| 1. / poly(k, r).max(0.2)));
+    let vignetting = interpolate(
+        &found,
+        focal,
+        av,
+        |e| e.vignette.map(|p| normalized(e, p)),
+        mix3,
+    )
+    .map(|(k, _)| curve(&|r| 1. / poly(k, r).max(0.2)));
     let chroma = |get: fn(&Entry) -> Option<Chromatic>| {
-        interpolate(&found, focal, None, get, |a, b, t| {
-            (a.0 + (b.0 - a.0) * t, mix3(a.1, b.1, t))
-        })
+        interpolate(
+            &found,
+            focal,
+            None,
+            |e| get(e).map(|(s, p)| (s, normalized(e, p))),
+            |a, b, t| (a.0 + (b.0 - a.0) * t, mix3(a.1, b.1, t)),
+        )
         .map(|((s, k), _)| curve(&|r| s * poly(k, r)))
     };
     let chromatic = chroma(|e| e.red)
@@ -975,3 +1003,7 @@ mod tests {
         assert_ne!(stamp(&dirs), before);
     }
 }
+
+#[cfg(test)]
+#[path = "lcp_normalization_tests.rs"]
+mod normalization_tests;

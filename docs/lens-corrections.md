@@ -165,6 +165,25 @@ A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` r
 
 Lightroom's Enable Profile Corrections uses an Adobe lens profile. RAWmakase reads the same `.lcp` files when the user imports them (`rawmakase import-lens-profiles FILE…`, or the app's import command); they are copied to `lens-profiles` in the data directory and never read from a Lightroom installation. Each file is imported on its own, so a file without usable entries (Adobe ships a few) is listed as skipped and the rest still import. `src/lens/lcp.rs` matches the photo's lens model, preferring raw profiles and profiles made on the photo's camera make, then on a make sharing the lens mount, as Adobe profiles some third-party lenses on one body only, and interpolates the model in focal length and aperture, taking the farthest focus distance. Canon EF lens names match with or without a space between EF and the focal length (`EF 24-105mm` / `EF24-105mm`); mount and version suffixes stay distinct. A file that records no lens model at all (Nikon bodies such as the D600, and Pentax bodies) is matched by the maker's lens ID instead: the maker note's `LensIDNumber` for Nikon, or the two `LensType` bytes for Pentax (`Metadata::lens_id`), against the profile's `stCamera:LensID`, which holds the same number (Pentax's written as the two bytes, "4 252"), and only against profiles of the photo's maker, as each maker numbers its own lenses; Ricoh's profiles count as Pentax's. Such a file takes its lens name from the profile that identifies it, so the Library and Develop show the lens only when its profile is imported: RAWmakase keeps no table of lens IDs of its own. An ID more than one lens carries matches nothing automatically: Adobe's files hold the maker's numbering and it is not unique (Nikon's 165 is the 105mm f/1.4E, the 35mm f/1.8G and the 28-300mm f/3.5-5.6 alike), so those profiles stay a manual choice rather than being applied to the wrong lens. It converts distortion, vignetting and chromatic models to the correction above. When the profile sets PreferMetadataDistort, the camera's own distortion is kept, as Lightroom does.
 
+Each distortion, vignette and chromatic polynomial keeps its own `FocalLengthX`.
+An omitted normalization uses that calibration entry's focal length and sensor
+factor, including for nested models; it does not borrow the first zoom entry's
+scale or the requested photo focal length. Before focal-length or APEX-aperture
+interpolation, coefficients are converted to the common half-diagonal radius
+(`k_n × scale^(2n)`). Vignetting interpolates attenuation before taking its
+reciprocal. Requests outside a model's calibration range hold its endpoint,
+including the endpoint's normalization. This prevents zoom profiles from producing
+rings or invalid corrections when their longer-focal-length coefficients are
+interpreted at a wide-angle scale (#614).
+
+The reader still uses a centred radial approximation: unequal X/Y focal scales,
+shifted optical centres, tangential distortion and the separate chromatic green
+model are not represented by the radial correction tables. This fix does not
+establish exact Camera Raw interpolation parity. Synthetic tests cover equivalent
+polynomials in different coordinates, zoom/aperture interpolation, sensor formats,
+frame orientation and CPU/GPU rendering. Optional read-only tests accept a local
+profile through `RAWMAKASE_LCP`; no installed profile data is included in fixtures.
+
 `Recipe::lens_profile` enables it, from `crs:LensProfileEnable`. `lens_distortion` and `lens_vignetting` are the profile's Distortion and Vignetting amounts (`crs:LensProfileDistortionScale` / `VignettingScale`, 0–200%): the distortion's radial scale moves from none at 0 to twice the profile's at 200, and the vignetting gain is raised to the amount (0 none, 200 the gain squared). With an imported profile in use, the profile replaces the built-in correction. Without one, the built-in correction applies when `lens_builtin` is set.
 
 ### Choosing a profile
