@@ -26,6 +26,72 @@ const DARK: f64 = 1. / 4096.;
 /// Scene blocks Camera Raw renders brighter than this may be clipped.
 const BRIGHT: f64 = 0.9;
 
+/// #600: imported Highlights and Dehaze together must retain a nonblack sky.
+/// The haze is measured before Highlights; subtracting it unchanged after the
+/// highlight reduction used to drive the whole bright patch below zero.
+#[test]
+fn dehaze_with_reduced_highlights_keeps_the_sky_nonblack() {
+    let (w, h) = (512, 128);
+    let scene: Vec<[f64; 3]> = (0..w * h)
+        .map(|i| {
+            [if i / w < 16 {
+                0.9
+            } else if i % w < 256 {
+                0.05
+            } else {
+                0.4
+            }; 3]
+        })
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dehaze-sky.dng");
+    std::fs::write(
+        &path,
+        dng::write_probe_black_render(w, h, &scene, 0., dng::BlackRender::None),
+    )
+    .unwrap();
+    let im = develop(&path);
+    let profiles = embedded_profiles(&im);
+    for highlights in [-67, -100] {
+        for dehaze in [50, 100] {
+            let mut case = ProbeCase {
+                probe: String::new(),
+                settings: BTreeMap::from([
+                    ("Highlights2012".into(), highlights.to_string()),
+                    ("Dehaze".into(), dehaze.to_string()),
+                ]),
+                mask: BTreeMap::new(),
+                camera_raw: Vec::new(),
+            };
+            let out = scene_output(&im, &profiles, &xmp(&case));
+            let sky = out.pixels[(80 * w + 350) as usize];
+            assert!(
+                sky.iter().all(|v| *v > 1e-4),
+                "Highlights {highlights}, Dehaze {dehaze}: {sky:?}"
+            );
+            // The same pair imported in a full-frame mask, including a mask's
+            // negative Exposure before the scene stage (Adobe's normalised units).
+            case.settings.clear();
+            for exposure in [0., -0.5] {
+                case.mask = BTreeMap::from([
+                    (
+                        "LocalHighlights2012".into(),
+                        (highlights as f32 / 100.).to_string(),
+                    ),
+                    ("LocalDehaze".into(), (dehaze as f32 / 100.).to_string()),
+                    ("LocalExposure2012".into(), exposure.to_string()),
+                ]);
+                let out = scene_output(&im, &profiles, &xmp(&case));
+                let sky = out.pixels[(80 * w + 350) as usize];
+                assert!(
+                    sky.iter().all(|v| *v > 1e-4),
+                    "mask Highlights {highlights}, Dehaze {dehaze}, Exposure {exposure}: {sky:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn clarity_does_not_spread_a_bright_rail_into_its_dark_background() {
     // Issue #601: a high-resolution edge crosses the 512px measurement grid.

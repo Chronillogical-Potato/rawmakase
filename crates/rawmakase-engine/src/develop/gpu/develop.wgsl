@@ -623,7 +623,7 @@ fn haze_omega(s_in: f32) -> f32 {
     return 0.45 + 0.75 * (s - 0.4);
 }
 // Dehazing::apply: the photo's haze removed at Dehaze `s` > 0.
-fn dehaze_positive(pro: vec3<f32>, s: f32, pos: vec2<f32>) -> vec3<f32> {
+fn dehaze_positive(pro: vec3<f32>, s: f32, pos: vec2<f32>, tone_gain: f32) -> vec3<f32> {
     let base = offset(P_HAZE);
     if base < 0 {
         return pro;
@@ -642,7 +642,9 @@ fn dehaze_positive(pro: vec3<f32>, s: f32, pos: vec2<f32>) -> vec3<f32> {
     let bottom = table(base + i32(jy * w + ix)) * (1.0 - tx) + table(base + i32(jy * w + jx)) * tx;
     let density = top * (1.0 - ty) + bottom * ty;
     let t = max(1.0 - haze_omega(s) * density, 0.3);
-    let air = vec3(p(P_HAZE_AIR), p(P_HAZE_AIR + 1u), p(P_HAZE_AIR + 2u));
+    var gain = tone_gain;
+    if (V_MASKS && masked) { gain *= exp2(delta[L_EXPOSURE]); }
+    let air = vec3(p(P_HAZE_AIR), p(P_HAZE_AIR + 1u), p(P_HAZE_AIR + 2u)) * gain;
     let j = (pro - air) / t + air;
     // haze.rs: no channel below half the colour scaled by the luminance's change.
     let lw = vec3(0.2880402, 0.7118741, 0.0000857);
@@ -1072,8 +1074,10 @@ fn exposure_stage(color: vec3<f32>, apply_local: bool) -> vec3<f32> {
 // S3: scene_stage.
 fn scene_stage(pro_in: vec3<f32>, pos: vec2<f32>, clarity_lum: f32) -> vec3<f32> {
     var pro = pro_in;
+    var tone_gain = 1.0;
     if V_LOCAL && p(P_LOCAL) != 0.0 {
-        pro *= local_gain(pos, dot(pro, vec3(0.2880402, 0.7118741, 0.0000857)), clarity_lum);
+        tone_gain = local_gain(pos, dot(pro, vec3(0.2880402, 0.7118741, 0.0000857)), clarity_lum);
+        pro *= tone_gain;
     }
     var dehaze = p(P_DEHAZE);
     if (V_MASKS && masked) {
@@ -1083,7 +1087,7 @@ fn scene_stage(pro_in: vec3<f32>, pos: vec2<f32>, clarity_lum: f32) -> vec3<f32>
         dehaze = 0.0;
     }
     if dehaze > 0.0 {
-        pro = dehaze_positive(pro, dehaze, pos);
+        pro = dehaze_positive(pro, dehaze, pos, tone_gain);
     } else if dehaze < 0.0 {
         let key = p(P_DEHAZE + 1u);
         for (var c = 0u; c < 3u; c++) {

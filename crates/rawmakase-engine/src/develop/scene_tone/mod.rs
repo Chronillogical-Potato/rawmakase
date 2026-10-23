@@ -66,18 +66,26 @@ impl SceneTone {
     /// S3's Dehaze and global curves on one pixel of linear ProPhoto RGB at camera-image
     /// sample position `pos`, with a mask's Dehaze added to the recipe's and its Whites
     /// and Blacks as their own curves after the global ones, as Camera Raw renders them.
+    /// `tone_gain` has already been applied to `pro`; positive Dehaze applies it to
+    /// its airlight too, along with a mask's Exposure from S2.
     pub(crate) fn apply(
         &self,
         pro: [f32; 3],
         pos: [f32; 2],
+        tone_gain: f32,
         local: Option<&LocalDelta>,
     ) -> [f32; 3] {
         let dehaze = self.dehaze + local.map_or(0., |d| d[slot::DEHAZE]);
         let pro = if dehaze > 0. {
             // The photo's haze, removed in proportion to the amount.
-            self.haze
-                .as_ref()
-                .map_or(pro, |haze| haze.apply(pro, dehaze, pos))
+            self.haze.as_ref().map_or(pro, |haze| {
+                haze.apply(
+                    pro,
+                    dehaze,
+                    pos,
+                    tone_gain * local.map_or(1., |d| d[slot::EXPOSURE].exp2()),
+                )
+            })
         } else if dehaze < 0. {
             // Each channel by its level relative to the photo's bright end.
             pro.map(|v| {
@@ -141,18 +149,18 @@ mod tests {
         };
         let (p, pos) = (scene[12 * w + 7], [7., 12.]);
         for (global, local) in [(0.3, 0.3), (0., 0.6), (0.4, -0.6), (-0.2, -0.3)] {
-            let masked = tone(global).apply(p, pos, Some(&mask(local)));
+            let masked = tone(global).apply(p, pos, 1., Some(&mask(local)));
             assert_eq!(
                 masked,
-                tone(global + local).apply(p, pos, None),
+                tone(global + local).apply(p, pos, 1., None),
                 "{global} {local}"
             );
         }
-        let removed = tone(0.6).apply(p, pos, None);
-        assert!(removed[1] < tone(0.).apply(p, pos, None)[1] - 0.01);
+        let removed = tone(0.6).apply(p, pos, 1., None);
+        assert!(removed[1] < tone(0.).apply(p, pos, 1., None)[1] - 0.01);
         assert_eq!(
-            tone(0.5).apply(p, pos, Some(&mask(-0.5))),
-            tone(0.).apply(p, pos, None)
+            tone(0.5).apply(p, pos, 1., Some(&mask(-0.5))),
+            tone(0.).apply(p, pos, 1., None)
         );
     }
 
@@ -172,7 +180,7 @@ mod tests {
                 whites: 1.,
                 ..Default::default()
             };
-            SceneTone::new(&r, &measures, None).apply([0.05; 3], [0.; 2], None)[1]
+            SceneTone::new(&r, &measures, None).apply([0.05; 3], [0.; 2], 1., None)[1]
         };
         let (specular, bulk) = (gray(1.), gray(-2.));
         assert!((specular / bulk - 1.).abs() < 0.01, "{specular} {bulk}");

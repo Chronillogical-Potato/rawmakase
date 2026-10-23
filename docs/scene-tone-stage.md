@@ -421,7 +421,11 @@ pixels on the long edge) at Exposure 0:
    filter with itself as the guide (box radius 2r, ε = 0.01).
 3. A pixel p at Dehaze s > 0 (the slider plus the masks' Dehaze there) becomes
    J = (p − g·A) / t + g·A, with t = max(1 − ω(s)·density, 0.3), the density read
-   bilinearly at the pixel's position and g = 2^Exposure. ω is linear between (0, 0),
+   bilinearly at the pixel's position. The gain g includes 2^Exposure, mask Exposure,
+   and the Shadows/Highlights/Clarity gain already applied to p. Transforming the
+   airlight consistently prevents negative Highlights from turning the sky black
+   when combined with positive Dehaze (#600). The density measurement and
+   interpolation stay independent of those tone edits. ω is linear between (0, 0),
    (+20, 0.3), (+40, 0.45) and (+100, 0.9). No channel falls below half of p scaled by
    the luminance's change, so weak channels of bright saturated colours are not driven
    to black (on the training photos: +100 3.06 → 3.04; a floor of 0.7 costs 3.18, 1.0

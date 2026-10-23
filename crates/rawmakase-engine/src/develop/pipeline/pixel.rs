@@ -135,7 +135,7 @@ pub(super) fn scene_stage(
     pos: [f32; 2],
     local: Option<Local>,
 ) -> [f32; 3] {
-    let pro = match &lut.local {
+    let gain = match &lut.local {
         Some(map) => {
             let lum = crate::develop::scene_tone::luminance(pro);
             let sliders = local
@@ -147,15 +147,15 @@ pub(super) fn scene_stage(
                         r.effects.clarity + l.delta[slot::CLARITY],
                     ]
                 });
-            let gain = match sliders {
+            match sliders {
                 Some(sliders) => map.gain_with(pos[0], pos[1], lum, clarity_lum, sliders),
                 None => map.gain(pos[0], pos[1], lum, clarity_lum),
-            };
-            pro.map(|v| v * gain)
+            }
         }
-        None => pro,
+        None => 1.,
     };
-    lut.scene.apply(pro, pos, local.map(|l| l.delta))
+    lut.scene
+        .apply(pro.map(|v| v * gain), pos, gain, local.map(|l| l.delta))
 }
 /// In place of S3 for Auto tone's measurement (`PixelOutput::AutoBasis`): the DNG SDK's
 /// exposure ramp at its default Shadows, with its black at 0.0015 × 2^exposure (none

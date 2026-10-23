@@ -105,7 +105,8 @@ impl Dehazing {
     /// Pixel `p` at camera-image sample position `pos` with Dehaze `s` > 0 removed:
     /// J = (p − A) / t + A, with t = 1 − ω(s) · density, at least `MIN_TRANSMISSION`,
     /// each channel at least `CHANNEL_FLOOR` of p scaled by the luminance's change.
-    pub(crate) fn apply(&self, p: [f32; 3], s: f32, pos: [f32; 2]) -> [f32; 3] {
+    /// `tone_gain` is the local tone and mask Exposure gain already applied to p.
+    pub(crate) fn apply(&self, p: [f32; 3], s: f32, pos: [f32; 2], tone_gain: f32) -> [f32; 3] {
         let density = crate::develop::local_tone::grid_sample(
             &self.haze.density,
             [self.haze.width, self.haze.height],
@@ -113,7 +114,11 @@ impl Dehazing {
             pos,
         );
         let t = (1. - omega(s) * density).max(MIN_TRANSMISSION);
-        let j: [f32; 3] = std::array::from_fn(|c| (p[c] - self.air[c]) / t + self.air[c]);
+        // Haze was measured before local tone and mask Exposure. Apply the same
+        // gain to its airlight as to the pixel, so negative Highlights cannot
+        // subtract an unchanged bright sky from a now darker one (#600).
+        let air = self.air.map(|v| v * tone_gain);
+        let j: [f32; 3] = std::array::from_fn(|c| (p[c] - air[c]) / t + air[c]);
         // No channel falls below half of the pixel's colour scaled by its luminance's
         // change: weak channels of bright, saturated colours are not driven to black.
         let ratio = super::luminance(j).max(0.) / super::luminance(p).max(1e-9);
@@ -164,6 +169,24 @@ fn guided(x: &[f32], w: usize, h: usize, r: usize, epsilon: f32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dehaze_transforms_airlight_with_prior_tone_and_mask_exposure() {
+        let (w, h) = (120, 80);
+        let scene = hazy(w, h);
+        let dehazing = Dehazing::new(Arc::new(Haze::of(&scene, w, h)), [w as u32, h as u32], 0.);
+        let (p, pos) = (scene[25 * w + 10], [10., 25.]);
+        for amount in [0.5, 1.] {
+            let base = dehazing.apply(p, amount, pos, 1.);
+            for gain in [0.125, 0.5, 2.] {
+                let adjusted = dehazing.apply(p.map(|v| v * gain), amount, pos, gain);
+                for c in 0..3 {
+                    assert!((adjusted[c] - base[c] * gain).abs() < 1e-6);
+                    assert!(adjusted[c] > 0.);
+                }
+            }
+        }
+    }
 
     /// A hazy scene: a dark-to-mid gradient of slightly coloured surfaces, seen through
     /// a veil of bright bluish air that thickens toward the top.
@@ -222,8 +245,9 @@ mod tests {
         let scene = hazy(w, h);
         let haze = Arc::new(Haze::of(&scene, w, h));
         let dehazing = Dehazing::new(haze.clone(), [w as u32, h as u32], 0.);
-        let at =
-            |x: usize, y: usize, s: f32| dehazing.apply(scene[y * w + x], s, [x as f32, y as f32]);
+        let at = |x: usize, y: usize, s: f32| {
+            dehazing.apply(scene[y * w + x], s, [x as f32, y as f32], 1.)
+        };
         let lum = super::super::luminance;
         // Denser haze at the top: more of it measured there.
         let density = |y: usize| haze.density[y * w + w / 2];
@@ -250,9 +274,9 @@ mod tests {
         let plain = Dehazing::new(haze.clone(), [w as u32, h as u32], 0.);
         let exposed = Dehazing::new(haze, [w as u32, h as u32], 1.);
         let p = scene[20 * w + 10];
-        assert_eq!(plain.apply(p, 0., [10., 20.]), p);
-        let a = plain.apply(p, 0.6, [10., 20.]);
-        let b = exposed.apply(p.map(|v| 2. * v), 0.6, [10., 20.]);
+        assert_eq!(plain.apply(p, 0., [10., 20.], 1.), p);
+        let a = plain.apply(p, 0.6, [10., 20.], 1.);
+        let b = exposed.apply(p.map(|v| 2. * v), 0.6, [10., 20.], 1.);
         for c in 0..3 {
             assert!((b[c] - 2. * a[c]).abs() < 1e-5, "{a:?} {b:?}");
         }
