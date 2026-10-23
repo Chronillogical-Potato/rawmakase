@@ -13,7 +13,7 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
 1. Highlight reconstruction in camera space.
 2. Vignetting gain in linear camera space, evaluated at the source pixel. Shadows, Highlights, Clarity and Texture measure local luminance after this gain.
-3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor.
+3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor. Each sample carries its decoded green-channel position to local tone and Texture maps, which are measured before the geometric remap. CPU and GPU sampling use this same coordinate; the pre-warp position would displace local contrast from the edge that produced it.
 
 The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm and DNG, not Sony). Recipes saved before the field existed lack it and never apply it.
 
