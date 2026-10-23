@@ -42,7 +42,68 @@ The charts are mosaics; flat patch interiors demosaic exactly.
 - `scene_probes_do_not_regress`: the scene tone stage's Tier 1 probes (docs/scene-tone-stage.md#testing): ramps (rebuilt by `dng::write_probe`) and the committed scenes rendered to the stage's output and compared with `camera-raw/scene-probes.json`. Fails when a case's encoded mean or largest error, or a scene setting's effect error in EV, exceeds `camera-raw/scene-probes-baseline.json` by more than 5% plus 0.0005, 0.003 or 0.005 EV. With `--nocapture` it prints every case against its baseline.
 - `camera_raw_parity_does_not_regress`: fails when a case gets further from Camera Raw than its baseline (mean +0.1 or p95 +0.3 ΔE00). With `--nocapture` it prints, per case, ΔE00, the tone offset on the gray ramp, the contrast (slope) ratio, the hue error and the chroma difference.
 
-When a color change is intended, run the tests with `RAWMAKASE_BLESS=1` and commit the diff of `snapshots/` (and `camera-raw/baseline.json` or `camera-raw/scene-probes-baseline.json` if parity moved), saying why in the commit message. Charts are regenerated the same way after a generator change.
+When a color change has been reviewed and accepted, run the relevant tests with
+`RAWMAKASE_BLESS=1` and inspect the diff of `snapshots/` (and accepted-distance
+baselines only for approved parity changes), saying why each changed case was
+accepted. This flag can update more than the failing case; do not accept unrelated
+baseline changes. Camera Raw reference values are never re-blessed to accommodate
+the engine. Charts are regenerated the same way after a generator change.
+
+### Interpreting failures and reviewing tradeoffs
+
+A snapshot failure measures change from RAWmakase's own earlier output. It says
+nothing about whether that change is closer to Camera Raw. A chart parity failure
+measures distance from the frozen Camera Raw output: at least one case exceeds its
+historically accepted mean by 0.1 or p95 by 0.3 ΔE00. It is evidence of a regression
+on that chart metric, not a verdict that the engine is worse on photographs overall.
+Neither a passing chart gate nor changed snapshots establish photographic parity.
+The accepted-distance baseline is a historical allowance, not necessarily the
+distance of the change's base revision. Attribute a change with paired base and
+candidate renders against the same reference; report the allowance separately.
+
+The chart score gives equal weight to each retained patch, not to pixels or photos.
+Of 344 retained patches, 216 belong to the hue grid; the 24 wide-gamut patches are
+excluded. The p95 is the nearest-rank percentile of patch errors, not a confidence
+interval. Cases and patches are correlated, and the limits are engineering budgets,
+not measured statistical significance thresholds. Pooling cases into one average
+would allow improvements to hide regressions and implicitly weight controls by how
+many cases happen to exist. Keep the per-case diagnostics.
+
+Spatial operators need additional evidence. Flat patch interiors and their fixed
+surrounds are useful controlled probes, but cannot stand in for textured scenes,
+sparse highlights, edges, halos or scale dependence. Use the stage and structural
+tests and the [photo gates](../../docs/scene-tone-stage.md#photo-gates), including
+reference-defined tonal regions and spatial windows. A few selected photos can
+demonstrate a fix or a tradeoff; they cannot establish the full gate's coverage.
+
+When an intended fix fails a chart budget:
+
+1. Keep the failed result and the unchanged references. Record the candidate and
+   comparison revisions, settings, render size, profile, metric policy and covered
+   cases. Check source/settings/reference compatibility before interpreting scores.
+   Chart reference metadata records Camera Raw version, profile and capture dates,
+   but does not cryptographically bind every case to its source and settings; Git
+   history and the capture scripts are part of that audit. Missing provenance is
+   an uncertainty to resolve, not permission to replace a reference.
+2. Use `RAWMAKASE_PARITY_DUMP` and `parity-report.py` (below) for patch diagnostics.
+   Compare baseline and candidate against the **same** Adobe reference. Report
+   absolute errors and signed changes per case, inspect affected patch groups and
+   crops, and distinguish current worst errors from patches that worsened most.
+   The report's `--previous` compares case/control summaries; its worst-patch list
+   ranks current absolute errors, not per-patch changes. It reads chart references
+   only; stage probes and highlight-spot fixtures have separate tests.
+3. Assess benefits and costs on representative photos and controlled spatial
+   probes, including unaffected settings, combinations and relevant masks/scales.
+   Keep structural failures, missing coverage and invalid comparisons separate
+   from measured parity tradeoffs. Do not subtract snapshot changes from parity
+   scores, or combine unlike chart/photo/region metrics into a new acceptance score.
+4. Keep the automated failure until the cause is fixed or the owner explicitly
+   approves a documented tradeoff: affected cases, before/after errors, benefit,
+   remaining defects and coverage limits. An accepted tradeoff may update only its
+   reviewed accepted-distance entries and snapshots, preserving Adobe references
+   and the original failed report. It does not mean the original candidate passed
+   the old gate, and does not establish overall parity. Do not raise general
+   thresholds or add candidate-specific bypasses to make a change pass.
 
 ## Private tier
 
