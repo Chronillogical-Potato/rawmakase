@@ -406,6 +406,8 @@ fn tree_locate_action_uses_the_clicked_root() {
         .find(|(_, node)| node.label() == Some("Locate root folder…"))
         .and_then(|(_, node)| node.bounds())
         .expect("the menu offers Locate");
+    assert_eq!(item.y1 - item.y0, 24., "use the filmstrip menu row height");
+    assert!(item.x1 - item.x0 >= 210., "use full-width menu rows");
     let at = egui::pos2(
         ((item.x0 + item.x1) / 2.) as f32,
         ((item.y0 + item.y1) / 2.) as f32,

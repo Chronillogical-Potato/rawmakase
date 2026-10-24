@@ -409,6 +409,62 @@ impl Library {
         self.filters.previous_import = false;
         self.filter();
     }
+    /// Resolve imported source rows on the import worker, where filesystem
+    /// access (including mapped symlinks and network volumes) may block.
+    pub(in crate::app) fn added_folder_keys(&self, paths: &[std::path::PathBuf]) -> Vec<String> {
+        fn collect(node: &FolderNode, paths: &[std::path::PathBuf], keys: &mut Vec<String>) {
+            let location = node
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| node.path.clone());
+            if paths.iter().any(|path| location.starts_with(path)) {
+                keys.push(node.key.clone());
+                // The chosen tree row already includes all its logical descendants.
+                return;
+            }
+            for child in node.children.values() {
+                collect(child, paths, keys);
+            }
+        }
+        let mut keys = Vec::new();
+        for (root, original, mapped) in &self.session.roots {
+            let path = std::path::PathBuf::from(mapped.as_deref().unwrap_or(original));
+            let mut node = FolderNode::root(*root, String::new(), path);
+            for folder in self.session.folders.iter().filter(|f| f.root == *root) {
+                node.insert(folder);
+            }
+            // Actual tree locations respect folder overrides; physical path depth
+            // cannot tell us the logical parent of a relocated folder.
+            collect(&node, paths, &mut keys);
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Focus the import's resolved source after restoring the Library layout.
+    pub(in crate::app) fn show_added_folders(&mut self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        self.selected_folders.clear();
+        for key in keys {
+            self.selected_folders.click(key, Click::Toggle, &[]);
+            let mut parent = key.as_str();
+            while let Some((above, _)) = parent.rsplit_once('/') {
+                self.expanded.insert(above.to_owned());
+                parent = above;
+            }
+        }
+        self.filters.clear_bar();
+        self.filters.only_missing = false;
+        self.filters.collection = None;
+        self.filters.previous_import = false;
+        self.filters.folder_scope = self.folders_scope(&self.selected_folders);
+        self.filter();
+        self.show_grid();
+    }
+
     /// The source shown: a folder tree key ("" is All Photographs) or
     /// `collection:<id>`. Of several folders, the one the others were chosen
     /// from: the session keeps one.

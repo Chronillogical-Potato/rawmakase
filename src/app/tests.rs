@@ -1740,6 +1740,123 @@ fn a_dropped_folder_is_added_itself_not_its_parent() -> anyhow::Result<()> {
 }
 
 #[test]
+fn dropping_a_folder_shows_it_instead_of_unrelated_catalog_photos() -> anyhow::Result<()> {
+    let (dir, mut editor, _) = editor_with_catalog(&["unrelated.ARW"])?;
+    let folder = dir.path().join("trip");
+    std::fs::create_dir_all(folder.join("day1"))?;
+    std::fs::write(folder.join("one.ARW"), b"one")?;
+    std::fs::write(folder.join("day1/two.ARW"), b"two")?;
+    let ctx = editor.context.clone();
+    editor.dropped(vec![folder.clone()]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    assert_eq!(library.session.photos.len(), 3);
+    let mut shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    shown.sort();
+    assert_eq!(shown, ["one.ARW", "two.ARW"]);
+    assert!(!library.source_key().is_empty());
+    // Dropping an already catalogued subfolder narrows the source too.
+    editor.dropped(vec![folder.join("day1")]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    assert_eq!(library.shown().len(), 1);
+    assert_eq!(
+        library.photo(library.shown()[0]).unwrap().filename,
+        "two.ARW"
+    );
+    Ok(())
+}
+
+#[test]
+fn dropping_a_relocated_folders_parent_does_not_select_its_logical_siblings() -> anyhow::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().join("photos");
+    for (folder, name) in [("a/b", "inside.ARW"), ("a/c", "outside.ARW")] {
+        std::fs::create_dir_all(root.join(folder))?;
+        std::fs::write(root.join(folder).join(name), name.as_bytes())?;
+    }
+    let path = dir.path().join("test.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(&root)?;
+    let moved = catalog
+        .folders()?
+        .into_iter()
+        .find(|f| f.relative == "a/b")
+        .unwrap()
+        .id;
+    let incoming = dir.path().join("incoming");
+    std::fs::create_dir(&incoming)?;
+    std::fs::rename(root.join("a/b"), incoming.join("x"))?;
+    catalog.relink_folder(moved, &incoming.join("x"))?;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+    editor.dropped(vec![incoming]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    let shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    assert_eq!(
+        shown,
+        ["inside.ARW"],
+        "source={} roots={:?} folders={:?} status={}",
+        library.source_key(),
+        library.session.roots,
+        library.session.folders,
+        editor.status
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn dropping_a_folder_mapped_through_a_symlink_selects_it_and_clears_old_filters()
+-> anyhow::Result<()> {
+    let (dir, mut editor, _) = editor_with_catalog(&["outside.ARW"])?;
+    let real = dir.path().join("real");
+    let alias = dir.path().join("alias");
+    std::fs::create_dir(&real)?;
+    std::fs::write(real.join("inside.ARW"), b"inside")?;
+    std::os::unix::fs::symlink(&real, &alias)?;
+    let library = editor.library.as_mut().unwrap();
+    let old_root = library.session.roots[0].0;
+    library.session.catalog.add_folder(&real)?;
+    let root = library
+        .session
+        .catalog
+        .folders()?
+        .into_iter()
+        .find(|f| f.path == real.canonicalize().unwrap())
+        .unwrap()
+        .root;
+    library.session.catalog.relink_root(root, &alias)?;
+    library.refresh()?;
+    library.click_folder_for_tests(&format!("root:{old_root}"));
+    editor.saved_layout.query = "outside".into();
+    let ctx = editor.context.clone();
+    editor.dropped(vec![alias]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    let shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    assert_eq!(shown, ["inside.ARW"]);
+    assert_eq!(library.source_key(), format!("root:{root}"));
+    Ok(())
+}
+
+#[test]
 fn dropping_several_folders_adds_each_of_them() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("photos.rawmakase");
@@ -1786,6 +1903,15 @@ fn dropping_several_folders_adds_each_of_them() -> anyhow::Result<()> {
     editor.dropped(vec![card.join("c1.ARW"), card.join("c2.ARW")]);
     settle_catalog(&mut editor, &ctx);
     assert_eq!(names(&editor), ["c1.ARW", "c2.ARW", "h.ARW", "t.ARW"]);
+    let library = editor.library.as_ref().unwrap();
+    let mut shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    shown.sort();
+    assert_eq!(shown, ["c1.ARW", "c2.ARW"]);
+
     assert!(editor.module == Module::Library);
     assert_eq!(editor.document.catalog_photo, None);
     Ok(())

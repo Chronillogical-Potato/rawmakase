@@ -21,6 +21,15 @@ impl Editor {
                     self.status = message.clone();
                     self.catalog_work = Some(message);
                 }
+                Event::FoldersAdded { result, source } => {
+                    let added = result.is_ok();
+                    self.catalog_work = None;
+                    self.catalog_ready(result);
+                    if added && let Some(library) = &mut self.library {
+                        library.show_added_folders(&source);
+                        let _ = self.save_session();
+                    }
+                }
                 Event::CatalogReady(result) => {
                     self.catalog_work = None;
                     self.catalog_ready(result);

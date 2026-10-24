@@ -163,7 +163,7 @@ impl Library {
             .or_else(|| self.visible[..at].iter().rev().find(|i| selected(i)))
             .map(|i| self.session.photos[*i].id)
     }
-    pub(super) fn select_all(&mut self) {
+    pub(in crate::app) fn select_all(&mut self) {
         self.selection.selected = self
             .visible
             .iter()

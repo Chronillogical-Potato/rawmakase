@@ -333,25 +333,22 @@ pub(super) fn folder_tree_row(
             action = Some(TreeAction::Select(node.key.clone(), click));
         }
     }
-    response.clone().on_hover_text(format!(
-        "{}\n{} photographs{}",
-        node.path.display(),
-        node.count,
-        if can_relink {
-            " including subfolders\nRight-click to locate, synchronize, make a folder inside or remove"
-        } else {
-            ""
-        }
-    ));
     crate::app::widgets::context_menu(&response, |ui| {
+        use crate::app::widgets::{menu_item, menu_separator};
+        ui.set_width(210.);
+        ui.spacing_mut().item_spacing.y = 0.;
         if can_relink
-            && ui
-                .button(if node.root.is_some() {
+            && menu_item(
+                ui,
+                if node.root.is_some() {
                     "Locate root folder…"
                 } else {
                     "Locate this folder…"
-                })
-                .clicked()
+                },
+                "",
+                true,
+                false,
+            )
         {
             action = relink();
             ui.close();
@@ -362,12 +359,15 @@ pub(super) fn folder_tree_row(
             _ => None,
         };
         if let Some(scope) = scope
-            && ui.button("Synchronize Folder…").clicked()
+            && menu_item(ui, "Synchronize Folder…", "", true, false)
         {
             action = Some(TreeAction::Synchronize(scope, node.name.clone()));
             ui.close();
         }
-        if ui.button("New Folder Inside…").clicked() {
+        if can_relink || scope.is_some() {
+            menu_separator(ui);
+        }
+        if menu_item(ui, "New Folder Inside…", "", true, false) {
             action = Some(TreeAction::NewFolder {
                 root: node.in_root,
                 parent: node.logical.clone(),
@@ -377,33 +377,28 @@ pub(super) fn folder_tree_row(
             ui.close();
         }
         // A root is renamed in Finder, then located again.
-        if movable && ui.button("Rename Folder…").clicked() {
+        if movable && menu_item(ui, "Rename Folder…", "", true, false) {
             action = Some(TreeAction::RenameFolder {
                 root: node.in_root,
                 logical: node.logical.clone(),
             });
             ui.close();
         }
-        if movable && ui.button("Move Folder…").clicked() {
+        if movable && menu_item(ui, "Move Folder…", "", true, false) {
             action = Some(TreeAction::MoveFolder {
                 root: node.in_root,
                 logical: node.logical.clone(),
             });
             ui.close();
         }
-        // A root is put in the Trash in Finder, once removed here.
-        if movable && ui.button("Move to Trash…").clicked() {
-            action = Some(TreeAction::TrashFolder {
-                root: node.in_root,
-                logical: node.logical.clone(),
-            });
-            ui.close();
-        }
-        if ui.button(crate::platform::reveal::LABEL).clicked() {
+        if menu_item(ui, crate::platform::reveal::LABEL, "", true, false) {
             action = Some(TreeAction::Reveal(node.path.clone()));
             ui.close();
         }
-        if !node.ids.is_empty() && ui.button("Remove from Catalog…").clicked() {
+        if movable || !node.ids.is_empty() || node.root.is_some() {
+            menu_separator(ui);
+        }
+        if !node.ids.is_empty() && menu_item(ui, "Remove from Catalog…", "", true, false) {
             action = Some(TreeAction::Remove(
                 node.name.clone(),
                 node.ids.clone(),
@@ -414,9 +409,17 @@ pub(super) fn folder_tree_row(
         // A root its last folder left (a folder put in the Trash, or moved
         // to another root), as Lightroom keeps a parent folder.
         if let (Some(root), true) = (node.root, node.ids.is_empty())
-            && ui.button("Remove from Catalog…").clicked()
+            && menu_item(ui, "Remove from Catalog…", "", true, false)
         {
             action = Some(TreeAction::RemoveRoot(root, node.name.clone()));
+            ui.close();
+        }
+        // A root is put in the Trash in Finder, once removed here.
+        if movable && menu_item(ui, "Move to Trash…", "", true, false) {
+            action = Some(TreeAction::TrashFolder {
+                root: node.in_root,
+                logical: node.logical.clone(),
+            });
             ui.close();
         }
     });

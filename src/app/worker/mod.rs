@@ -72,6 +72,11 @@ pub(crate) enum Event {
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
+    /// Source keys resolved by the import worker travel with its result.
+    FoldersAdded {
+        result: Result<Box<crate::app::library::Library>, String>,
+        source: Vec<String>,
+    },
     /// A Synchronize Folder scan finished, or failed.
     FolderSyncScanned(Box<crate::app::folder_sync::Scanned>),
     /// Applying a synchronization finished: the catalog opened again.

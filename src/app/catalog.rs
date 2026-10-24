@@ -312,6 +312,7 @@ impl Editor {
             tx,
             ctx.clone(),
             move |tx| {
+                let mut imported = Vec::new();
                 let result = (|| -> anyhow::Result<_> {
                     let mut catalog = crate::catalog::Catalog::open(&current)?;
                     let defaults = crate::catalog::MetadataDefaults::load();
@@ -331,6 +332,7 @@ impl Editor {
                         match catalog.import_folder(folder, &defaults, &[]) {
                             Ok(added) if !added.ambiguous.is_empty() => skipped.push(name),
                             Ok(added) => {
+                                imported.push(folder.clone());
                                 report.unreadable.extend(added.report.unreadable);
                                 report.ignored.extend(added.report.ignored);
                                 conflicts.extend(added.conflicts);
@@ -362,7 +364,11 @@ impl Editor {
                 })()
                 .map(Box::new)
                 .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(Event::CatalogReady(result));
+                let source = result
+                    .as_ref()
+                    .map(|library| library.added_folder_keys(&imported))
+                    .unwrap_or_default();
+                let _ = tx.send(Event::FoldersAdded { result, source });
             },
             |tx, error| {
                 let _ = tx.send(Event::CatalogReady(Err(error)));
@@ -448,7 +454,16 @@ impl Editor {
                 })()
                 .map(Box::new)
                 .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(Event::CatalogReady(result));
+                let event = if is_folder {
+                    let source = result
+                        .as_ref()
+                        .map(|library| library.added_folder_keys(&[folder]))
+                        .unwrap_or_default();
+                    Event::FoldersAdded { result, source }
+                } else {
+                    Event::CatalogReady(result)
+                };
+                let _ = tx.send(event);
             },
             |tx, error| {
                 let _ = tx.send(Event::CatalogReady(Err(error)));

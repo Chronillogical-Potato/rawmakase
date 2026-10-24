@@ -153,3 +153,8 @@ field being typed in the Library, which the close guard and the exit hook save
 through the catalog session before the edit, and the session file. Neither is
 expected to stall the way a photo's catalog on a network share can, but a catalog
 that stops answering mid-typing would still hold up closing.
+
+The macOS menu adapter owns no workers. At `on_exit` it disconnects native menu
+targets before releasing their main-thread owner; callbacks only enqueue typed
+actions and request a repaint. File > Close Window and the existing app-menu Quit
+both enter the window-close guard above.

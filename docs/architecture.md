@@ -84,6 +84,11 @@ private. UI and workflow methods have visibility limited to the app module, one
 file per tool, workflow or policy; the Develop adjustment panels currently share
 `inspector.rs`. The [code map](code-map.md#desktop-application) lists them.
 
+`platform::menu` owns the macOS menu objects and queues typed actions, waking the
+UI without reaching editor state. The AppKit objects stay on the main thread;
+`app::native_menu` owns availability and revalidates each action before calling
+the existing editor operations. Close and Quit retain the normal save guard.
+
 `Editor` deliberately remains the coordinator for state shared across panels.
 A panel should call the domain API responsible for an operation, rather than
 implementing file formats, SQL or pixel processing itself. Thumbnail decoding
@@ -111,6 +116,12 @@ compositor match the display, and on Windows converts to the display's assigned
 profile unless Windows manages color itself. sRGB and a chosen profile output
 device RGB and bypass compositor conversion. No mode changes the renderer's
 output color space or export profiles.
+
+Folder-drop workers resolve the imported folder tree keys against actual local
+locations (including mapped symlinks). The source keys travel with the reopened
+Library result; the UI applies them after restoring layout and filters, so the
+result's source cannot be replaced by the old view. Filesystem resolution stays
+on the worker.
 
 Each load/render task owns its generation, cancellation token and lifecycle.
 The single-slot mailbox replaces pending work. The app discards obsolete results,

@@ -18,6 +18,8 @@ use std::{
 };
 
 pub(crate) struct Editor {
+    #[cfg(target_os = "macos")]
+    native_menu: bool,
     activity: activity::Activity,
     load: task::Task,
     presets: PresetBrowser,
@@ -268,6 +270,8 @@ impl Editor {
             crate::catalog::preview_cache::PreviewCache::path(),
         );
         let mut app = Self {
+            #[cfg(target_os = "macos")]
+            native_menu: false,
             activity: Default::default(),
             load: Default::default(),
             presets: PresetBrowser {
@@ -539,6 +543,10 @@ impl eframe::App for Editor {
     }
     // fastframe-titlebar turns on eframe's glow feature, which adds the context.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        #[cfg(target_os = "macos")]
+        if self.native_menu {
+            crate::platform::menu::clear();
+        }
         self.exit();
     }
 }
@@ -625,7 +633,15 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         Box::new(move |cc| {
             // The event loop has built the app menu by now.
             crate::platform::quit::through_close_guard(cc);
-            Ok(Box::new(Editor::new(cc, path, session, launch)))
+            #[allow(unused_mut)]
+            let mut editor = Editor::new(cc, path, session, launch);
+            #[cfg(target_os = "macos")]
+            {
+                let ctx = cc.egui_ctx.clone();
+                editor.native_menu = crate::platform::menu::install(move || ctx.request_repaint());
+                editor.update_native_menu(&cc.egui_ctx);
+            }
+            Ok(Box::new(editor))
         }),
         &event_loop,
     ));
@@ -905,6 +921,8 @@ mod updates;
 mod user_presets;
 
 mod events;
+#[cfg(any(target_os = "macos", test))]
+mod native_menu;
 
 /// Zooms the interface to the desktop's text size, read through the portal
 /// under Wayland (1 elsewhere), and follows its changes on fastframe-text's

@@ -12,6 +12,17 @@ use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::time::{Duration, Instant};
 
 impl Editor {
+    pub(super) fn workspace_modal(&self) -> bool {
+        self.preferences.open
+            || self.export_modal()
+            || self.modal.is_some()
+            || self.not_editable.is_some()
+            || self.view.shortcuts
+            || self.curve_save_open()
+            || self.folder_sync.is_reviewing()
+            || self.file_ops.dialog_open()
+    }
+
     pub(super) fn metadata_shortcuts(&mut self, ctx: &egui::Context) {
         if self.activity.is_busy() {
             return;
@@ -62,14 +73,9 @@ impl Editor {
         }
         self.poll_preview_builds();
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open
-            || self.export_modal()
-            || self.modal.is_some()
-            || self.not_editable.is_some()
-            || self.view.shortcuts
-            || self.curve_save_open()
-            || self.folder_sync.is_reviewing()
-            || self.file_ops.dialog_open();
+        #[cfg(target_os = "macos")]
+        self.native_menu_actions(&ctx);
+        let modal = self.workspace_modal();
         if !modal {
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
@@ -206,6 +212,8 @@ impl Editor {
         #[cfg(feature = "telemetry")]
         self.usage_stats_notice(&ctx, modal || self.view.shortcuts);
         self.pending_work(&ctx);
+        #[cfg(target_os = "macos")]
+        self.update_native_menu(&ctx);
         super::panels::keep_resize_cursor(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(

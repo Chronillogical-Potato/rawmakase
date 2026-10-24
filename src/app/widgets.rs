@@ -1677,6 +1677,7 @@ pub(super) fn menu_item(
             Sense::hover()
         },
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     if enabled && response.hovered() {
         ui.painter().rect_filled(rect, 3., palette.accent());
     }
