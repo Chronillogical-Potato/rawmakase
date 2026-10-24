@@ -1777,7 +1777,7 @@ pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// `buttons`, the last one primary. Returns the choice clicked, `dismissed`
 /// when the window is closed, or None while it is open. Return confirms
 /// nothing unless a button has focus. A `truncated` detail stays on one line,
-/// e.g. a path.
+/// e.g. a path. Longer details scroll independently of the title and buttons.
 pub(super) fn confirm_modal<T: Copy>(
     ctx: &egui::Context,
     id: &str,
@@ -1804,7 +1804,20 @@ pub(super) fn confirm_modal<T: Copy>(
                     .size(12.)
                     .color(palette.gray(150)),
             );
-            ui.add(if truncated { detail.truncate() } else { detail });
+            if truncated {
+                ui.add(detail.truncate());
+            } else {
+                // Reserve room for the frame, heading and actions even on a
+                // short viewport. In particular, Synchronize Folder can list
+                // hundreds of missing photos here.
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 180.).clamp(0., 360.))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.add(detail.wrap());
+                    });
+            }
             ui.add_space(20.);
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::new(14., 6.);
@@ -1936,6 +1949,150 @@ pub(super) fn pretty_path(path: &std::path::Path) -> String {
             format!("~{}", &text[home.len()..])
         }
         _ => text,
+    }
+}
+
+#[cfg(test)]
+mod confirmation_tests {
+    use super::*;
+
+    fn frame(
+        ctx: &egui::Context,
+        size: Vec2,
+        detail: &str,
+        events: Vec<egui::Event>,
+    ) -> (Option<bool>, egui::accesskit::TreeUpdate) {
+        let mut choice = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                choice = confirm_modal(
+                    ui.ctx(),
+                    "folder-sync-remove",
+                    "Remove missing photos?",
+                    detail,
+                    false,
+                    &[("Cancel", false), ("Remove", true)],
+                    false,
+                );
+            },
+        );
+        output.textures_delta.clear();
+        (choice, output.platform_output.accesskit_update.unwrap())
+    }
+
+    #[test]
+    fn long_removal_confirmation_keeps_title_and_buttons_in_view() {
+        for size in [Vec2::new(1280., 720.), Vec2::new(640., 360.)] {
+            for count in [1, 30, 100] {
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                let detail = format!(
+                    "These photos are removed from the catalog with what they hold:\n{}",
+                    (0..count)
+                        .map(|i| format!("IMG_{i:04}.NEF: Edited, Keywords, 2 virtual copies"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                // Let the centered modal settle after its first sizing pass.
+                for _ in 0..3 {
+                    assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+                }
+                let (_, tree) = frame(&ctx, size, &detail, vec![]);
+                for label in ["Remove missing photos?", "Cancel", "Remove"] {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .map(|(_, node)| node)
+                        .find(|node| node.label() == Some(label) || node.value() == Some(label))
+                        .unwrap_or_else(|| panic!("missing {label}"));
+                    let b = node.bounds().expect("placed");
+                    assert!(
+                        b.x0 >= 0. && b.y0 >= 0. && b.x1 <= size.x as f64 && b.y1 <= size.y as f64,
+                        "{label} outside {size:?} with {count} photos: {b:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_confirmation_scrolls_to_the_last_photo_and_buttons_still_work() {
+        let size = Vec2::new(640., 360.);
+        let detail = (0..100)
+            .map(|i| format!("IMG_{i:04}.NEF: Edited, Keywords"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (button, expected) in [("Cancel", false), ("Remove", true)] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            for _ in 0..4 {
+                assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+            }
+            frame(
+                &ctx,
+                size,
+                &detail,
+                vec![egui::Event::PointerMoved(Pos2::new(320., 180.))],
+            );
+            let events = vec![
+                egui::Event::PointerMoved(Pos2::new(320., 180.)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: Vec2::new(0., -10_000.),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            assert_eq!(frame(&ctx, size, &detail, events).0, None);
+            for _ in 0..30 {
+                assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+            }
+            let (_, tree) = frame(&ctx, size, &detail, vec![]);
+            let last = tree
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.value() == Some("IMG_0099.NEF: Edited, Keywords"))
+                .expect("last photo")
+                .bounds()
+                .expect("placed");
+            let action = tree
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some(button))
+                .expect("action")
+                .bounds()
+                .expect("placed");
+            assert!(last.y0 > 0. && last.y1 < action.y0, "{last:?}");
+            let pos = Pos2::new(
+                ((action.x0 + action.x1) / 2.) as f32,
+                ((action.y0 + action.y1) / 2.) as f32,
+            );
+            for pressed in [true, false] {
+                let choice = frame(
+                    &ctx,
+                    size,
+                    &detail,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .0;
+                assert_eq!(choice, if pressed { None } else { Some(expected) });
+            }
+        }
     }
 }
 
