@@ -44,6 +44,8 @@ pub(crate) struct EditSession {
     /// An editor frame is open (see [`EditSession::begin`]): the settings may be
     /// changed in place, and the frame records the change when it finishes.
     frame_open: bool,
+    /// How many times the settings were set as a whole, see [`Self::replacements`].
+    replacements: u64,
 }
 impl EditSession {
     /// The settings.
@@ -91,7 +93,14 @@ impl EditSession {
     /// History state shown, settings read back. History and save state are the
     /// caller's to set alongside, as the case needs.
     pub(crate) fn replace(&mut self, recipe: Recipe) -> Recipe {
+        self.replacements += 1;
         std::mem::replace(&mut self.recipe, recipe)
+    }
+    /// Counts the times the settings were set as a whole (a photo, preset, snapshot
+    /// or History state shown, an Undo) rather than changed in place. A place in
+    /// them, such as a mask's index, may name something else once this moves.
+    pub(crate) fn replacements(&self) -> u64 {
+        self.replacements
     }
     /// Ends a gesture still held (a drag, a wheel scroll), as one History step
     /// to be saved.
@@ -131,6 +140,7 @@ impl EditSession {
     /// Returns the settings to `target`, the state History has at `at`, as the step
     /// `step` (Undo of a catalog command, say).
     pub(crate) fn restore(&mut self, at: history::Mark, target: &Recipe, step: Step) {
+        self.replacements += 1;
         let changed = self.recipe != *target;
         self.history.restore(at, target, &mut self.recipe, step);
         if changed {
@@ -139,6 +149,7 @@ impl EditSession {
     }
     /// Sets the settings to `target` as History step `step`, to be saved.
     pub(crate) fn set(&mut self, target: &Recipe, step: Step) {
+        self.replacements += 1;
         let changed = self.recipe != *target;
         self.history.set(target, &mut self.recipe, step);
         if changed {
@@ -162,11 +173,13 @@ impl EditSession {
     /// Undoes the latest History step on the settings.
     #[cfg(test)]
     pub(crate) fn undo(&mut self) -> bool {
+        self.replacements += 1;
         self.history.undo(&mut self.recipe)
     }
     /// Shows History state `applied` (steps applied), as a History click does,
     /// to be saved.
     pub(crate) fn jump(&mut self, applied: usize) -> bool {
+        self.replacements += 1;
         let moved = self.history.jump(applied, &mut self.recipe);
         if moved {
             self.save.mark_changed();

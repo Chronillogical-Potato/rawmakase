@@ -110,9 +110,10 @@ struct Renaming {
     /// The field takes the keyboard once, when renaming starts; taking it every
     /// frame would undo the Enter or click that ends the rename.
     focused: bool,
-    /// The mask as renaming found it: if an Undo or a History click has since put
-    /// another one at `mask`, the name is dropped rather than given to it.
-    original: MaskGroup,
+    /// The settings' identity when renaming started: once an Undo, a History click
+    /// or a preset has set them as a whole, `mask` may be another mask, so the name
+    /// is dropped rather than given to it. Edits in place, to this mask too, keep it.
+    settings: (u64, u64),
     /// The egui pass the field was last drawn in. A field no longer drawn (another
     /// tool, its mask gone) has lost the rename, which then must not hold the keys.
     shown: u64,
@@ -705,7 +706,7 @@ impl Editor {
                     if edit.lost_focus() {
                         // Enter or a click elsewhere keeps the name; Escape the old one.
                         if !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                            && self.document.edit.recipe().masks.get(i) == Some(&renaming.original)
+                            && renaming.settings == settings_identity(&self.document.edit)
                         {
                             let name: String = renaming.name.trim().chars().take(64).collect();
                             if let Some(m) = self.document.edit.recipe_mut().masks.get_mut(i) {
@@ -752,7 +753,7 @@ impl Editor {
                         mask: i,
                         name: mask.name.clone(),
                         focused: false,
-                        original: mask.clone(),
+                        settings: settings_identity(&self.document.edit),
                         shown: pass,
                     });
                 } else if response
@@ -1295,6 +1296,12 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
     );
 }
 
+/// Which settings a mask index belongs to: the History, and how many times the
+/// settings were set as a whole.
+fn settings_identity(edit: &crate::edit_session::EditSession) -> (u64, u64) {
+    (edit.history().id(), edit.replacements())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1357,7 +1364,7 @@ mod tests {
             mask: 0,
             name: String::new(),
             focused: false,
-            original: e.document.edit.recipe().masks[0].clone(),
+            settings: settings_identity(&e.document.edit),
             shown: e.context.cumulative_pass_nr(),
         });
         frame(e, vec![]);
@@ -1390,24 +1397,33 @@ mod tests {
     }
     #[test]
     fn a_name_typed_before_undo_does_not_go_to_another_mask() {
-        let mut e = editor(&["A", "B"]);
+        // Alike but for being two masks: their values cannot tell them apart.
+        let mut e = editor(&["", ""]);
         e.document.edit.change(None, |r| {
             r.masks.remove(0);
         });
         frame(&mut e, vec![]);
-        // Renaming B, now first; Undo (from a menu) brings A back in its place.
+        // Renaming the second, now first; Undo (from a menu) brings the first back
+        // in its place.
         rename_first(&mut e);
         e.undo();
-        assert_eq!(names(&e), ["A", "B"]);
+        assert_eq!(e.document.edit.recipe().masks.len(), 2);
         frame(&mut e, vec![key(egui::Key::Enter)]);
         assert!(!e.view.masking.is_renaming());
-        assert_eq!(names(&e), ["A", "B"]);
+        assert_eq!(names(&e), ["", ""]);
     }
     #[test]
-    fn an_edit_to_something_else_keeps_the_rename() {
+    fn edits_in_place_keep_the_rename() {
         let mut e = renaming(&["Old"]);
         // As an Auto result arriving while the name is typed.
         e.document.edit.change(None, |r| r.exposure = 0.5);
+        // And this mask's own settings changed, as a brush stroke dragged on the
+        // photo does without taking the keyboard from the field.
+        e.document.edit.change(None, |r| {
+            r.masks[0].adjust.exposure = 0.3;
+            let mask = &mut r.masks[0];
+            mask.components.push(mask.components[0].clone());
+        });
         frame(&mut e, vec![key(egui::Key::Enter)]);
         assert_eq!(names(&e), ["Sky"]);
     }
