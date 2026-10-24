@@ -11,7 +11,6 @@ use crate::develop::{
     ViewMapping,
     masks::{self, Space},
 };
-use crate::edit_session::history::Mark;
 use crate::model::masks::{
     BrushStroke, LocalAdjust, MAX_COMPONENTS, MAX_GROUPS, MAX_POINTS, MAX_STROKES, MaskComponent,
     MaskGroup, MaskOp, MaskShape,
@@ -111,9 +110,12 @@ struct Renaming {
     /// The field takes the keyboard once, when renaming starts; taking it every
     /// frame would undo the Enter or click that ends the rename.
     focused: bool,
-    /// Where History stood when renaming started: an Undo, a preset or a History
-    /// click since may have put another mask at `mask`, so the name is dropped.
-    history: (u64, Mark),
+    /// The mask as renaming found it: if an Undo or a History click has since put
+    /// another one at `mask`, the name is dropped rather than given to it.
+    original: MaskGroup,
+    /// The egui pass the field was last drawn in. A field no longer drawn (another
+    /// tool, its mask gone) has lost the rename, which then must not hold the keys.
+    shown: u64,
 }
 impl Default for MaskTool {
     fn default() -> Self {
@@ -133,6 +135,12 @@ impl MaskTool {
     /// A mask's name field is open, and the keyboard is its own.
     pub(super) fn is_renaming(&self) -> bool {
         self.renaming.is_some()
+    }
+    /// Ends a rename whose field the last pass did not draw, keeping the old name.
+    pub(super) fn expire_rename(&mut self, pass: u64) {
+        if self.renaming.as_ref().is_some_and(|r| r.shown + 1 < pass) {
+            self.renaming = None;
+        }
     }
     pub(super) fn clear_document(&mut self) {
         self.selected = None;
@@ -663,6 +671,8 @@ impl Editor {
         let mut select = None;
         let mut select_component = None;
         let masks = self.document.edit.recipe().masks.clone();
+        let pass = ui.ctx().cumulative_pass_nr();
+        self.view.masking.expire_rename(pass);
         for (i, mask) in masks.iter().enumerate() {
             indented(ui, |ui| {
                 let width = ui.available_width();
@@ -687,15 +697,15 @@ impl Editor {
                         egui::TextEdit::singleline(&mut renaming.name)
                             .font(egui::FontId::proportional(11.)),
                     );
+                    renaming.shown = pass;
                     if !renaming.focused {
                         edit.request_focus();
                         renaming.focused = true;
                     }
                     if edit.lost_focus() {
                         // Enter or a click elsewhere keeps the name; Escape the old one.
-                        let history = self.document.edit.history();
                         if !ui.input(|i| i.key_pressed(egui::Key::Escape))
-                            && renaming.history == (history.id(), history.mark())
+                            && self.document.edit.recipe().masks.get(i) == Some(&renaming.original)
                         {
                             let name: String = renaming.name.trim().chars().take(64).collect();
                             if let Some(m) = self.document.edit.recipe_mut().masks.get_mut(i) {
@@ -738,12 +748,12 @@ impl Editor {
                 {
                     self.document.edit.recipe_mut().masks[i].hidden ^= true;
                 } else if response.double_clicked() {
-                    let history = self.document.edit.history();
                     self.view.masking.renaming = Some(Renaming {
                         mask: i,
                         name: mask.name.clone(),
                         focused: false,
-                        history: (history.id(), history.mark()),
+                        original: mask.clone(),
+                        shown: pass,
                     });
                 } else if response
                     .on_hover_text("Click to select · double-click to rename")
@@ -1343,12 +1353,12 @@ mod tests {
     /// Opens the first mask's name field, as a double-click does, empties it and
     /// types "Sky".
     fn rename_first(e: &mut Editor) {
-        let history = e.document.edit.history();
         e.view.masking.renaming = Some(Renaming {
             mask: 0,
             name: String::new(),
             focused: false,
-            history: (history.id(), history.mark()),
+            original: e.document.edit.recipe().masks[0].clone(),
+            shown: e.context.cumulative_pass_nr(),
         });
         frame(e, vec![]);
         frame(e, vec![egui::Event::Text("Sky".into())]);
@@ -1392,5 +1402,32 @@ mod tests {
         frame(&mut e, vec![key(egui::Key::Enter)]);
         assert!(!e.view.masking.is_renaming());
         assert_eq!(names(&e), ["A", "B"]);
+    }
+    #[test]
+    fn an_edit_to_something_else_keeps_the_rename() {
+        let mut e = renaming(&["Old"]);
+        // As an Auto result arriving while the name is typed.
+        e.document.edit.change(None, |r| r.exposure = 0.5);
+        frame(&mut e, vec![key(egui::Key::Enter)]);
+        assert_eq!(names(&e), ["Sky"]);
+    }
+    #[test]
+    fn escape_closes_masking_once_the_name_field_is_gone() {
+        // Its mask undone away.
+        let mut e = renaming(&["Old"]);
+        e.document.edit.change(None, |r| r.masks.clear());
+        frame(&mut e, vec![]);
+        frame(&mut e, vec![key(egui::Key::Escape)]);
+        assert!(!e.view.is(Tool::Mask));
+        assert!(!e.view.masking.is_renaming());
+        // Another tool taken up meanwhile.
+        let mut e = renaming(&["Old"]);
+        e.view.tool = Tool::Remove;
+        frame(&mut e, vec![]);
+        frame(&mut e, vec![key(egui::Key::Escape)]);
+        assert_eq!(e.view.tool, Tool::None);
+        e.view.tool = Tool::Mask;
+        frame(&mut e, vec![key(egui::Key::Enter)]);
+        assert_eq!(names(&e), ["Old"]);
     }
 }

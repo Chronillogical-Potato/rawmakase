@@ -1183,6 +1183,7 @@ impl Editor {
         }
     }
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
+        self.view.masking.expire_rename(ctx.cumulative_pass_nr());
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
             self.develop_delete_key(ctx);
