@@ -776,9 +776,11 @@ impl Editor {
             .rect_filled(outer, 0., theme::palette(ui.ctx()).photo_backdrop());
         let area = outer.shrink(PHOTO_MARGIN);
         let before = self.view.zoom.on;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
-            self.viewport_ui(ui)
-        });
+        let response = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+                self.viewport_ui(ui)
+            })
+            .inner;
         let Some(library) = &mut self.library else {
             return;
         };
@@ -789,11 +791,9 @@ impl Editor {
         // As in Lightroom, a double-click goes back to the grid; its first
         // click's zoom is undone.
         // egui counts a click soon after a double-click as a triple one.
-        let double = ui.input(|i| {
-            let button = egui::PointerButton::Primary;
-            (i.pointer.button_double_clicked(button) || i.pointer.button_triple_clicked(button))
-                && i.pointer.interact_pos().is_some_and(|p| area.contains(p))
-        });
+        // Use the viewport's response so modals, overlapping windows and
+        // disabled UI keep their clicks instead of reaching the photo behind.
+        let double = response.double_clicked() || response.triple_clicked();
         if double && let Some(on) = library.loupe_double_click() {
             self.view.zoom.on = on;
         }

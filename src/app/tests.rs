@@ -329,7 +329,9 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
                 events,
                 ..Default::default()
             },
-            |ui| editor.viewport_ui(ui),
+            |ui| {
+                editor.viewport_ui(ui);
+            },
         );
         output.textures_delta.clear();
         (
@@ -1230,7 +1232,7 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
             },
             |ui| {
                 ctx.input(|i| editor.red_eye_keys(i));
-                editor.viewport_ui(ui)
+                editor.viewport_ui(ui);
             },
         );
         editor.finish_edit_frame(edit, &ctx);
@@ -1429,7 +1431,9 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
                 events,
                 ..Default::default()
             },
-            |ui| editor.viewport_ui(ui),
+            |ui| {
+                editor.viewport_ui(ui);
+            },
         );
         output.textures_delta.clear();
         editor.document.edit.recipe().red_eye.len()
@@ -3157,6 +3161,52 @@ fn double_click_in_the_loupe_goes_back_to_the_grid() -> anyhow::Result<()> {
         frame(&mut e, vec![click(pressed)], time);
     }
     frame(&mut e, vec![], 1.5);
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
+fn preferences_double_click_does_not_close_the_developed_loupe() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    e.library.as_mut().unwrap().open_loupe();
+    // Keep the online RAW on the Develop-backed Loupe path without decoding
+    // the fixture or racing a background load.
+    e.document.catalog_photo = Some(ids[0]);
+    e.loupe_tried = Some(ids[0]);
+    e.preferences.open = true;
+    let ctx = e.context.clone();
+    let at = Pos2::new(600., 300.);
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let frame = |e: &mut Editor, events: Vec<egui::Event>, time: f64| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| e.draw(ui),
+        );
+        output.textures_delta.clear();
+    };
+    frame(&mut e, vec![egui::Event::PointerMoved(at)], 0.0);
+    for (pressed, time) in [(true, 0.1), (false, 0.15), (true, 0.2), (false, 0.25)] {
+        frame(&mut e, vec![click(pressed)], time);
+    }
+    assert!(e.preferences.open);
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    // The same gesture still closes this Loupe once Preferences is gone.
+    e.preferences.open = false;
+    frame(&mut e, vec![], 1.0);
+    frame(&mut e, vec![], 1.05);
+    for (pressed, time) in [(true, 1.1), (false, 1.15), (true, 1.2), (false, 1.25)] {
+        frame(&mut e, vec![click(pressed)], time);
+    }
     assert!(!e.library.as_ref().unwrap().loupe_open());
     Ok(())
 }

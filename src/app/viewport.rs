@@ -273,7 +273,7 @@ impl Editor {
         let size = Vec2::new(g.width as f32, g.height as f32);
         self.view.zoom.photo_rect(area, size, ppp)
     }
-    pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let (whole, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         ui.painter()
@@ -320,7 +320,7 @@ impl Editor {
             } else {
                 self.loading_placeholder(ui, whole);
             }
-            return;
+            return response;
         };
         let geometry = self
             .document
@@ -685,6 +685,7 @@ impl Editor {
         if self.view.zoom.on && self.region() != self.preview.last_region {
             self.schedule();
         }
+        response
     }
     /// The crop guide overlay over the crop at `crop` on screen, when it shows: always;
     /// with the pointer over the photo (`photo`), while something is dragged or just after a new
