@@ -110,9 +110,10 @@ struct Renaming {
     /// The field takes the keyboard once, when renaming starts; taking it every
     /// frame would undo the Enter or click that ends the rename.
     focused: bool,
-    /// The settings' identity when renaming started: once an Undo, a History click
-    /// or a preset has set them as a whole, `mask` may be another mask, so the name
-    /// is dropped rather than given to it. Edits in place, to this mask too, keep it.
+    /// The mask list's identity when renaming started: once an Undo, a History
+    /// click or a preset has brought other masks, `mask` may be another one, so the
+    /// name is dropped rather than given to it. Edits in place, to this mask too,
+    /// keep it.
     settings: (u64, u64),
     /// The egui pass the field was last drawn in. A field no longer drawn (another
     /// tool, its mask gone) has lost the rename, which then must not hold the keys.
@@ -1296,10 +1297,10 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
     );
 }
 
-/// Which settings a mask index belongs to: the History, and how many times the
-/// settings were set as a whole.
+/// Which mask list a mask index belongs to: the History, and how many times
+/// setting the settings as a whole brought other masks.
 fn settings_identity(edit: &crate::edit_session::EditSession) -> (u64, u64) {
-    (edit.history().id(), edit.replacements())
+    (edit.history().id(), edit.mask_lists())
 }
 
 #[cfg(test)]
@@ -1413,7 +1414,7 @@ mod tests {
         assert_eq!(names(&e), ["", ""]);
     }
     #[test]
-    fn edits_in_place_keep_the_rename() {
+    fn edits_that_keep_the_masks_keep_the_rename() {
         let mut e = renaming(&["Old"]);
         // As an Auto result arriving while the name is typed.
         e.document.edit.change(None, |r| r.exposure = 0.5);
@@ -1424,6 +1425,11 @@ mod tests {
             let mask = &mut r.masks[0];
             mask.components.push(mask.components[0].clone());
         });
+        // And a preset's Amount dragged, which sets the settings as a whole but
+        // keeps their masks.
+        let mut amount = e.document.edit.recipe().clone();
+        amount.contrast = 20.;
+        e.document.edit.replace(amount);
         frame(&mut e, vec![key(egui::Key::Enter)]);
         assert_eq!(names(&e), ["Sky"]);
     }
