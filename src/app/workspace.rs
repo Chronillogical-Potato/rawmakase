@@ -1407,7 +1407,9 @@ impl Editor {
                 if i.key_pressed(egui::Key::T) && i.modifiers.shift && !i.modifiers.command {
                     self.toggle_guided_tool();
                 }
-                if i.key_pressed(egui::Key::Escape) {
+                // egui lets go of a text field on Escape before this runs; a mask's
+                // name field still takes that Escape to keep the old name.
+                if i.key_pressed(egui::Key::Escape) && !self.view.masking.is_renaming() {
                     self.view.tool = Tool::None;
                 }
                 if self.view.is(Tool::Crop) {

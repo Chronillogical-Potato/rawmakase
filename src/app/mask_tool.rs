@@ -11,6 +11,7 @@ use crate::develop::{
     ViewMapping,
     masks::{self, Space},
 };
+use crate::edit_session::history::Mark;
 use crate::model::masks::{
     BrushStroke, LocalAdjust, MAX_COMPONENTS, MAX_GROUPS, MAX_POINTS, MAX_STROKES, MaskComponent,
     MaskGroup, MaskOp, MaskShape,
@@ -110,6 +111,9 @@ struct Renaming {
     /// The field takes the keyboard once, when renaming starts; taking it every
     /// frame would undo the Enter or click that ends the rename.
     focused: bool,
+    /// Where History stood when renaming started: an Undo, a preset or a History
+    /// click since may have put another mask at `mask`, so the name is dropped.
+    history: (u64, Mark),
 }
 impl Default for MaskTool {
     fn default() -> Self {
@@ -126,6 +130,10 @@ impl Default for MaskTool {
     }
 }
 impl MaskTool {
+    /// A mask's name field is open, and the keyboard is its own.
+    pub(super) fn is_renaming(&self) -> bool {
+        self.renaming.is_some()
+    }
     pub(super) fn clear_document(&mut self) {
         self.selected = None;
         self.component = None;
@@ -685,7 +693,10 @@ impl Editor {
                     }
                     if edit.lost_focus() {
                         // Enter or a click elsewhere keeps the name; Escape the old one.
-                        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        let history = self.document.edit.history();
+                        if !ui.input(|i| i.key_pressed(egui::Key::Escape))
+                            && renaming.history == (history.id(), history.mark())
+                        {
                             let name: String = renaming.name.trim().chars().take(64).collect();
                             if let Some(m) = self.document.edit.recipe_mut().masks.get_mut(i) {
                                 m.name = name;
@@ -727,10 +738,12 @@ impl Editor {
                 {
                     self.document.edit.recipe_mut().masks[i].hidden ^= true;
                 } else if response.double_clicked() {
+                    let history = self.document.edit.history();
                     self.view.masking.renaming = Some(Renaming {
                         mask: i,
                         name: mask.name.clone(),
                         focused: false,
+                        history: (history.id(), history.mark()),
                     });
                 } else if response
                     .on_hover_text("Click to select · double-click to rename")
@@ -1275,8 +1288,10 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::state::Tool;
 
-    /// Draws the Masking panel for one frame with the given input.
+    /// One frame of Develop with Masking open: its shortcuts, then its panel, in
+    /// the order the workspace runs them.
     fn frame(e: &mut Editor, events: Vec<egui::Event>) {
         let ctx = e.context.clone();
         let edit = e.begin_edit_frame();
@@ -1286,7 +1301,12 @@ mod tests {
                 events,
                 ..Default::default()
             },
-            |ui| e.mask_panel(ui),
+            |ui| {
+                e.develop_shortcuts(ui.ctx());
+                if e.view.is(Tool::Mask) {
+                    e.mask_panel(ui);
+                }
+            },
         );
         output.textures_delta.clear();
         e.finish_edit_frame(edit, &ctx);
@@ -1300,37 +1320,77 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         }
     }
-    /// An editor with one mask, "Old", and "Sky" typed into its emptied name field.
-    fn renaming() -> Editor {
-        let ctx = egui::Context::default();
-        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-        e.document.edit.setup_mut().masks.push(MaskGroup {
-            name: "Old".into(),
+    fn mask(name: &str) -> MaskGroup {
+        MaskGroup {
+            name: name.into(),
             components: vec![MaskComponent::new(MaskShape::Brush { strokes: vec![] })],
             ..Default::default()
-        });
+        }
+    }
+    fn names(e: &Editor) -> Vec<&str> {
+        let masks = &e.document.edit.recipe().masks;
+        masks.iter().map(|m| m.name.as_str()).collect()
+    }
+    /// An editor in Masking with `masks`.
+    fn editor(masks: &[&str]) -> Editor {
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.document.edit.setup_mut().masks = masks.iter().map(|n| mask(n)).collect();
+        e.view.tool = Tool::Mask;
+        frame(&mut e, vec![]);
+        e
+    }
+    /// Opens the first mask's name field, as a double-click does, empties it and
+    /// types "Sky".
+    fn rename_first(e: &mut Editor) {
+        let history = e.document.edit.history();
         e.view.masking.renaming = Some(Renaming {
             mask: 0,
             name: String::new(),
             focused: false,
+            history: (history.id(), history.mark()),
         });
-        frame(&mut e, vec![]);
-        frame(&mut e, vec![egui::Event::Text("Sky".into())]);
+        frame(e, vec![]);
+        frame(e, vec![egui::Event::Text("Sky".into())]);
+    }
+    fn renaming(masks: &[&str]) -> Editor {
+        let mut e = editor(masks);
+        rename_first(&mut e);
         e
     }
 
     #[test]
     fn enter_keeps_a_typed_mask_name() {
-        let mut e = renaming();
+        let mut e = renaming(&["Old"]);
         frame(&mut e, vec![key(egui::Key::Enter)]);
-        assert!(e.view.masking.renaming.is_none());
-        assert_eq!(e.document.edit.recipe().masks[0].name, "Sky");
+        assert!(!e.view.masking.is_renaming());
+        assert_eq!(names(&e), ["Sky"]);
+        assert!(e.document.edit.history().can_undo());
     }
     #[test]
-    fn escape_keeps_the_old_mask_name() {
-        let mut e = renaming();
+    fn escape_keeps_the_old_mask_name_and_masking_open() {
+        let mut e = renaming(&["Old"]);
         frame(&mut e, vec![key(egui::Key::Escape)]);
-        assert!(e.view.masking.renaming.is_none());
-        assert_eq!(e.document.edit.recipe().masks[0].name, "Old");
+        assert!(!e.view.masking.is_renaming());
+        assert_eq!(names(&e), ["Old"]);
+        assert!(e.view.is(Tool::Mask));
+        // Nothing typed is kept for a later frame to commit.
+        frame(&mut e, vec![]);
+        assert_eq!(names(&e), ["Old"]);
+    }
+    #[test]
+    fn a_name_typed_before_undo_does_not_go_to_another_mask() {
+        let mut e = editor(&["A", "B"]);
+        e.document.edit.change(None, |r| {
+            r.masks.remove(0);
+        });
+        frame(&mut e, vec![]);
+        // Renaming B, now first; Undo (from a menu) brings A back in its place.
+        rename_first(&mut e);
+        e.undo();
+        assert_eq!(names(&e), ["A", "B"]);
+        frame(&mut e, vec![key(egui::Key::Enter)]);
+        assert!(!e.view.masking.is_renaming());
+        assert_eq!(names(&e), ["A", "B"]);
     }
 }
