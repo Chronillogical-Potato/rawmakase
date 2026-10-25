@@ -13,7 +13,7 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
         // Setup stays, so an edit naming a profile that isn't imported can go back to
         // Default or Auto.
         ui.add_enabled_ui(r.lens_profile, |ui| setup_row(ui, r, None));
-        let builtin = m.and_then(|m| m.lens.as_ref());
+        let builtin = m.and_then(|m| m.lens_stand_in.as_ref().or(m.lens.as_ref()));
         control_row(ui, "Profile", |ui| {
             muted(
                 ui,

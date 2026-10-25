@@ -566,7 +566,9 @@ impl Recipe {
     }
     /// Lightroom's Enable Profile Corrections: an imported Adobe lens profile, else the
     /// correction the camera stored in the RAW. Built-in data that is off by default
-    /// (Sony's) follows the switch; Fuji's and a DNG's stay on, as in Lightroom.
+    /// (Nikon's for lenses with an optional correction) follows the switch; Fuji's, a
+    /// DNG's and Sony's lateral CA stay on, as in Lightroom, while Sony's remaining
+    /// tables stand in for the profile (`builtin_correction`).
     pub fn set_profile_corrections(&mut self, m: &Metadata, state: ProfileCorrections) {
         self.lens_profile = state == ProfileCorrections::On;
         if m.lens.as_ref().is_some_and(|l| !l.default_on) {
@@ -602,7 +604,7 @@ impl Recipe {
             .as_ref()
             .filter(|id| id.embedded)
         {
-            return m.lens.as_ref().filter(|_| self.lens_builtin).is_none().then(|| {
+            return self.builtin_correction(m).is_none().then(|| {
                 format!(
                     "Lens profile \"{}\" comes with the camera, but this file has none; no lens correction",
                     id.label()
@@ -615,7 +617,7 @@ impl Recipe {
             (None, "") => "No matching imported Adobe lens profile for this lens".to_string(),
             (None, lens) => format!("No matching imported Adobe lens profile for {lens}"),
         };
-        let instead = match (resolved.used, m.lens.as_ref().filter(|_| self.lens_builtin)) {
+        let instead = match (resolved.used, self.builtin_correction(m)) {
             (Some(used), _) => format!("using {}", used.profile.name),
             (None, Some(builtin)) => format!("using {}", builtin.source),
             (None, None) => "no lens correction".to_string(),
@@ -643,6 +645,55 @@ impl Recipe {
         self.sharpening_detail = d.detail;
         self.sharpening_masking = d.masking;
     }
+    /// The built-in correction this edit renders when no Adobe profile is in use: with
+    /// Enable Profile Corrections on, the camera's fuller data where it has some (Sony's
+    /// tables, standing in for the Adobe profile Lightroom would use), else what the
+    /// camera applies; none with built-in corrections off.
+    pub fn builtin_correction<'a>(
+        &self,
+        m: &'a Metadata,
+    ) -> Option<&'a crate::optics::LensCorrection> {
+        if !self.lens_builtin {
+            return None;
+        }
+        (m.lens_stand_in.as_ref())
+            .filter(|_| self.lens_profile)
+            .or(m.lens.as_ref())
+    }
+    /// Lightroom's profile Distortion and Vignetting amounts (1 = 100%) as they apply
+    /// to the lens correction in use. They scale a profile: an imported Adobe one, or
+    /// the camera data standing in for it (Sony's tables, Nikon's optional "Camera
+    /// Settings" profile). A correction the camera always applies (a DNG's opcodes,
+    /// Fujifilm's, Olympus's, Panasonic's, Sony's CA and Nikon's required data)
+    /// renders in full whatever the amounts and the switch, as Camera Raw 18.7 renders
+    /// such files' opcodes, also where the stand-in repeats it (a Sony compact's
+    /// distortion).
+    pub fn lens_amounts(&self, m: &Metadata) -> [f32; 2] {
+        let amounts = [self.lens_distortion, self.lens_vignetting];
+        if self.lens_profile_in_use(m).used.is_some() {
+            return amounts;
+        }
+        if !self.lens_profile {
+            return [1., 1.];
+        }
+        match (&m.lens_stand_in, &m.lens) {
+            (Some(_), Some(always)) => [
+                if always.distortion.is_some() {
+                    1.
+                } else {
+                    amounts[0]
+                },
+                if always.vignetting.is_some() {
+                    1.
+                } else {
+                    amounts[1]
+                },
+            ],
+            (Some(_), None) => amounts,
+            (None, Some(lens)) if !lens.default_on => amounts,
+            _ => [1., 1.],
+        }
+    }
     /// The lens correction to apply: the Adobe profile in use, else the built-in
     /// correction if enabled and present in the file.
     pub fn lens_correction<'a>(
@@ -652,7 +703,7 @@ impl Recipe {
         self.lens_profile_in_use(m)
             .used
             .and_then(|c| c.correction(m))
-            .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
+            .or_else(|| self.builtin_correction(m))
     }
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
     /// and the default profile. A monochrome photo renders without white balance
@@ -668,7 +719,7 @@ impl Recipe {
             r.to_mut().wb = [1.; 3];
         }
         // A Lens Corrections panel switched off also turns off built-in data that is
-        // off by default (Sony's), which Enable Profile Corrections turned on; what a
+        // off by default (Nikon's optional), which Enable Profile Corrections turned on; what a
         // camera always applies (Fuji, DNG) stays, as the panel bypass leaves it.
         if self
             .panels
@@ -1069,5 +1120,76 @@ mod tests {
         );
         assert!(r.validate().is_ok());
         assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
+    }
+    /// Sony: Lightroom always applies the camera's lateral CA, while its other tables
+    /// stand in for an Adobe profile only with Enable Profile Corrections on.
+    #[test]
+    fn sony_ca_always_applies_and_its_tables_stand_in_for_a_profile() {
+        use crate::optics::{LensCorrection, Radial};
+        let ca = Radial::new(vec![0., 1.], vec![1., 1.001]).unwrap();
+        let full = LensCorrection {
+            source: LensCorrection::SONY_BUILTIN.into(),
+            default_on: true,
+            vignetting: Radial::new(vec![0., 1.], vec![1., 1.8]),
+            distortion: Radial::new(vec![0., 1.], vec![1., 1.02]),
+            chromatic: Some([ca.clone(), ca]),
+            gain_map: None,
+        };
+        let m = Metadata {
+            lens: Some(LensCorrection {
+                vignetting: None,
+                distortion: None,
+                ..full.clone()
+            }),
+            lens_stand_in: Some(full),
+            ..Default::default()
+        };
+        let mut r = Recipe::for_metadata(&m);
+        assert!(r.lens_builtin);
+        let vignetting = |r: &Recipe| r.lens_correction(&m).map(|c| c.vignetting.is_some());
+        assert!(r.lens_correction(&m).unwrap().chromatic.is_some());
+        assert_eq!(vignetting(&r), Some(false));
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert!(r.lens_builtin);
+        assert_eq!(vignetting(&r), Some(true));
+        assert!(
+            r.missing_lens_profile(&m)
+                .unwrap()
+                .ends_with("using Sony built-in")
+        );
+        r.set_profile_corrections(&m, ProfileCorrections::Off);
+        assert_eq!(vignetting(&r), Some(false));
+        // The profile's amounts scale the stand-in only: a Lightroom edit with profile
+        // corrections off keeps them for when they are turned on.
+        r.lens_distortion = 0.;
+        assert_eq!(r.lens_amounts(&m), [1., 1.]);
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert_eq!(r.lens_amounts(&m), [0., 1.]);
+        // A compact's distortion, which Lightroom always applies, ignores its amount
+        // with the stand-in in use too, while the stand-in's vignetting takes its own.
+        let compact = Metadata {
+            lens: Some(LensCorrection {
+                distortion: m.lens_stand_in.as_ref().unwrap().distortion.clone(),
+                ..m.lens.clone().unwrap()
+            }),
+            ..m.clone()
+        };
+        r.lens_vignetting = 0.5;
+        assert_eq!(r.lens_amounts(&compact), [1., 0.5]);
+        r.set_profile_corrections(&compact, ProfileCorrections::Off);
+        assert_eq!(r.lens_amounts(&compact), [1., 1.]);
+        r.set_profile_corrections(&compact, ProfileCorrections::On);
+        r.lens_vignetting = 1.;
+        // Without a stand-in, what the camera always applies ignores them either way.
+        let opcodes = Metadata {
+            lens_stand_in: None,
+            ..m.clone()
+        };
+        assert_eq!(r.lens_amounts(&opcodes), [1., 1.]);
+        r.set_profile_corrections(&m, ProfileCorrections::Off);
+        // An edit saved with built-in corrections off keeps them off.
+        r.lens_builtin = false;
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert!(r.lens_correction(&m).is_none());
     }
 }

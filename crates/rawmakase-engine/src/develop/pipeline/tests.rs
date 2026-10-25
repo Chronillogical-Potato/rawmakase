@@ -933,8 +933,9 @@ fn opcode_gain_maps_scale_each_channel_where_the_grid_says() {
         })
         .gain(w - 1., 0.)[0]
     };
-    assert_eq!(amount(0.), 1.);
-    assert!((amount(2.) - 4.).abs() < 1e-5);
+    // Camera Raw applies a file's opcodes whatever the profile's Vignetting amount.
+    assert!((amount(0.) - 2.).abs() < 1e-5);
+    assert!((amount(2.) - 2.).abs() < 1e-5);
     // Rendered: the right edge is brighter than the left, and nothing changes with the
     // built-in correction off.
     let off = Recipe {

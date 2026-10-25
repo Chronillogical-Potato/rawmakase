@@ -8,7 +8,9 @@
 //!   (distortion), signed shorts led by the number of values and padded with zeros
 //!   to a fixed length (ZV-1: 11 distortion knots in 16 slots). Knots are spread
 //!   evenly from the centre to the corner. Distortion is in 2^-14, CA in 2^-21
-//!   units; vignetting v restores 2^(2^(v/8192 - 1) - 0.5).
+//!   units; vignetting v restores 2^(2^(v/8192 - 1) - 0.5). Lightroom applies the CA,
+//!   and a fixed-lens compact's distortion, from them; all three stand in for an
+//!   Adobe profile ([`Builtin`]).
 //! - Olympus and OM System ORF: the maker note's ImageProcessing directory (0x2040),
 //!   tags 0x150A (distortion: k1, k2, k3 and a scale s, floats) and 0x150C (lateral
 //!   CA: three coefficients for red, then three for blue, floats). With radius 1 at
@@ -53,9 +55,36 @@ use std::{
     path::Path,
 };
 
-/// Returns `None` for unsupported files or when the camera stored no corrections.
-/// `m` is the decoded image the radii are fractions of: its size and default crop.
+/// The lens correction a RAW stores.
+#[derive(Debug, Default)]
+pub struct Builtin {
+    /// What Lightroom applies from the file whatever Enable Profile Corrections says
+    /// (or, for a correction that is not `default_on`, when it is on).
+    pub lens: Option<LensCorrection>,
+    /// The camera's fuller data, standing in for an Adobe lens profile when Enable
+    /// Profile Corrections is on and none is imported: Sony's tables, of which
+    /// Lightroom itself applies only the lateral CA (and a compact's distortion).
+    pub stand_in: Option<LensCorrection>,
+}
+
+/// The built-in correction that applies without Enable Profile Corrections; `None`
+/// for unsupported files or when the camera stored none. `m` is the decoded image the
+/// radii are fractions of: its size and default crop.
 pub fn read(path: &Path, m: &Metadata) -> Option<LensCorrection> {
+    read_builtin(path, m).lens
+}
+
+/// What `path` stores of the camera's lens correction ([`Builtin`]).
+pub fn read_builtin(path: &Path, m: &Metadata) -> Builtin {
+    let valid = |c: Option<LensCorrection>| c.filter(|c| !c.is_empty() && c.validate());
+    let b = read_any(path, m).unwrap_or_default();
+    Builtin {
+        lens: valid(b.lens),
+        stand_in: valid(b.stand_in),
+    }
+}
+
+fn read_any(path: &Path, m: &Metadata) -> Option<Builtin> {
     let mut f = File::open(path).ok()?;
     let mut head = [0u8; 108];
     f.read_exact(&mut head).ok()?;
@@ -67,7 +96,7 @@ pub fn read(path: &Path, m: &Metadata) -> Option<LensCorrection> {
         if make(&mut t).starts_with("nikon") {
             nikon(&mut t, m)
         } else {
-            sony(&mut t)
+            return sony(&mut t);
         }
     } else if [b"IIRO", b"IIRS", b"MMOR"]
         .iter()
@@ -79,7 +108,10 @@ pub fn read(path: &Path, m: &Metadata) -> Option<LensCorrection> {
     } else {
         None
     }?;
-    (!c.is_empty() && c.validate()).then_some(c)
+    Some(Builtin {
+        lens: Some(c),
+        stand_in: None,
+    })
 }
 
 const FUJI_VIGNETTE_STRENGTH: f32 = 0.85;
@@ -136,8 +168,19 @@ fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
     })
 }
 
-fn sony(t: &mut Tiff) -> Option<LensCorrection> {
+/// Sony models whose stored distortion Lightroom applies: the fixed-lens compacts
+/// (RX100, RX10, RX0, HX, ZV-1), not the RX1 series, which Adobe corrects with its own
+/// profile only, nor bodies with interchangeable lenses.
+fn sony_applies_distortion(model: &str) -> bool {
+    let m = (model.trim_matches(|c: char| c == '\0' || c.is_whitespace())).to_ascii_uppercase();
+    (m.starts_with("DSC-") && m != "DSC-RX1" && !m.starts_with("DSC-RX1R")) || m.starts_with("ZV-1")
+}
+
+fn sony(t: &mut Tiff) -> Option<Builtin> {
     let ifd0 = t.ifd(t.first)?;
+    let model = (ifd0.get(&0x0110).and_then(|e| t.raw(e)))
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     let sub = t.ifd(t.offset(ifd0.get(&0x14a)?)?)?;
     let mut numbers = |tag| sub.get(&tag).and_then(|e| t.numbers(e));
     let vignetting = numbers(0x7032);
@@ -165,7 +208,20 @@ fn sony(t: &mut Tiff) -> Option<LensCorrection> {
     };
     let vignetting = single(vignetting, &|v| (2f32.powf(v / 8192. - 1.) - 0.5).exp2())
         .filter(|r| r.values.iter().any(|v| (v - 1.).abs() > 1e-4));
-    let distortion = single(distortion, &|d| 1. + d / 16384.)
+    // A natural cubic spline through the knots, as the camera's correction is smooth:
+    // against Adobe's warp it halves the difference on the RX100 III to V and ZV-1.
+    let distortion = counted(distortion, 1)
+        .and_then(|v| {
+            let v: Vec<f64> = v.iter().map(|d| 1. + f64::from(*d) / 16384.).collect();
+            let at = spline(&v);
+            Radial::new(
+                self::knots(),
+                self::knots()
+                    .into_iter()
+                    .map(|r| at(f64::from(r)) as f32)
+                    .collect(),
+            )
+        })
         .filter(|r| r.values.iter().any(|v| (v - 1.).abs() > 1e-6));
     let chromatic = counted(chromatic, 2).and_then(|v| {
         let n = v.len() / 2;
@@ -175,15 +231,54 @@ fn sony(t: &mut Tiff) -> Option<LensCorrection> {
             Radial::new(knots(n), scale(&v[n..]))?,
         ])
     });
-    Some(LensCorrection {
+    let stand_in = LensCorrection {
         source: LensCorrection::SONY_BUILTIN.into(),
-        // Not yet compared with Lightroom, which may apply its own profile instead.
-        default_on: false,
+        default_on: true,
         vignetting,
         distortion,
         chromatic,
         gain_map: None,
+    };
+    // Adobe DNG Converter writes the lateral CA of every Sony body with tables, and a
+    // compact's distortion, as opcodes, which Lightroom always applies; never the
+    // vignetting.
+    let lens = LensCorrection {
+        vignetting: None,
+        distortion: (stand_in.distortion.clone()).filter(|_| sony_applies_distortion(&model)),
+        ..stand_in.clone()
+    };
+    Some(Builtin {
+        lens: Some(lens),
+        stand_in: Some(stand_in),
     })
+}
+
+/// A natural cubic spline through `v`, at knots spread evenly over [0, 1].
+fn spline(v: &[f64]) -> impl Fn(f64) -> f64 + '_ {
+    let n = v.len();
+    let h = 1. / (n - 1) as f64;
+    // Second derivatives, zero at both ends (Thomas algorithm).
+    let mut m = vec![0.; n];
+    if n > 2 {
+        let (mut c, mut d) = (vec![0.; n], vec![0.; n]);
+        for i in 1..n - 1 {
+            let rhs = 6. * (v[i + 1] - 2. * v[i] + v[i - 1]) / (h * h);
+            let w = 4. - c[i - 1];
+            c[i] = 1. / w;
+            d[i] = (rhs - d[i - 1]) / w;
+        }
+        for i in (1..n - 1).rev() {
+            m[i] = d[i] - c[i] * m[i + 1];
+        }
+    }
+    move |r: f64| {
+        let i = ((r / h) as usize).min(n - 2);
+        let t = r - i as f64 * h;
+        let u = h - t;
+        (m[i] * u * u * u + m[i + 1] * t * t * t) / (6. * h)
+            + (v[i] / h - m[i] * h / 6.) * u
+            + (v[i + 1] / h - m[i + 1] * h / 6.) * t
+    }
 }
 
 /// Radius samples from the centre to the decoded image's corner.
@@ -581,6 +676,11 @@ mod tests {
     fn read(p: &Path) -> Option<LensCorrection> {
         super::read(p, &Metadata::default())
     }
+    /// A Sony file's always-applied correction and the stand-in for a profile.
+    fn sony(p: &Path) -> (Option<LensCorrection>, LensCorrection) {
+        let b = super::read_builtin(p, &Metadata::default());
+        (b.lens, b.stand_in.unwrap())
+    }
     /// (tag, type, count, data)
     type Entry = (u16, u16, u32, Vec<u8>);
     /// Little-endian TIFF with the given directories, each pointed to by the previous one.
@@ -647,8 +747,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("a.arw");
         std::fs::write(&p, bytes).unwrap();
-        let c = read(&p).unwrap();
-        assert!(!c.default_on);
+        let (lens, c) = sony(&p);
+        // Lightroom applies the lateral CA, not this body's distortion or vignetting.
+        let lens = lens.unwrap();
+        assert!(lens.default_on && lens.vignetting.is_none() && lens.distortion.is_none());
+        assert_eq!(lens.chromatic, c.chromatic);
         let v = c.vignetting.as_ref().unwrap();
         assert!((v.eval(0.) - 1.).abs() < 1e-6);
         let corner = 2f32.powf(2f32.powf(12000. / 8192. - 1.) - 0.5);
@@ -664,9 +767,22 @@ mod tests {
         ca: &[i16],
         dist: &[i16],
     ) -> std::path::PathBuf {
+        sony_model_file(dir, "ZV-1", vig, ca, dist)
+    }
+    fn sony_model_file(
+        dir: &std::path::Path,
+        model: &str,
+        vig: &[i16],
+        ca: &[i16],
+        dist: &[i16],
+    ) -> std::path::PathBuf {
         let entry = |tag, v: &[i16]| (tag, 8, v.len() as u32, shorts(v));
+        let model = [model.as_bytes(), b"\0"].concat();
         let bytes = tiff(&[
-            vec![(0x14a, 4, 1, vec![0; 4])],
+            vec![
+                (0x14a, 4, 1, vec![0; 4]),
+                (0x0110, 2, model.len() as u32, model),
+            ],
             vec![entry(0x7032, vig), entry(0x7035, ca), entry(0x7037, dist)],
         ]);
         let p = dir.join("a.arw");
@@ -687,18 +803,53 @@ mod tests {
     #[test]
     fn reads_sony_tables_padded_to_fixed_slots() {
         let d = tempfile::tempdir().unwrap();
-        let c = read(&sony_file(d.path(), &ZV1_VIG, &ZV1_CA, &ZV1_DIST)).unwrap();
+        let (lens, c) = sony(&sony_file(d.path(), &ZV1_VIG, &ZV1_CA, &ZV1_DIST));
         let dist = c.distortion.as_ref().unwrap();
-        assert_eq!(dist.knots.len(), 11);
-        assert_eq!(dist.knots[1], 0.1);
-        assert!((dist.eval(0.) - (1. + 1265. / 16384.)).abs() < 1e-6);
+        // The 11 knots, through which a spline is sampled at 33.
+        for (i, v) in [1265., 1218., 1083., 860., 562., 209.]
+            .into_iter()
+            .enumerate()
+        {
+            let at = dist.eval(i as f32 / 10.);
+            assert!((at - (1. + v / 16384.)).abs() < 1e-4, "{i}: {at}");
+        }
         assert!((dist.eval(1.) - (1. - 1725. / 16384.)).abs() < 1e-6);
+        // A compact: Lightroom applies its distortion too, not its vignetting.
+        let lens = lens.unwrap();
+        assert_eq!(lens.distortion, c.distortion);
+        assert!(lens.vignetting.is_none());
         let [red, blue] = c.chromatic.as_ref().unwrap();
         assert_eq!(red.knots.len(), 11);
         assert!((red.eval(1.) - (1. + 1408. / 2_097_152.)).abs() < 1e-7);
         assert!((blue.eval(0.1) - (1. + 1280. / 2_097_152.)).abs() < 1e-7);
         assert!((blue.eval(1.) - (1. + 256. / 2_097_152.)).abs() < 1e-7);
         assert_eq!(c.vignetting.as_ref().unwrap().knots.len(), 16);
+    }
+    /// Adobe writes the stored distortion of Sony's fixed-lens compacts as an opcode, but
+    /// neither an interchangeable-lens body's nor the RX1 series'.
+    #[test]
+    fn sony_distortion_applies_on_compacts_only() {
+        let d = tempfile::tempdir().unwrap();
+        for (model, applies) in [
+            ("DSC-RX100M7", true),
+            ("DSC-RX10M4", true),
+            ("DSC-HX99", true),
+            ("ZV-1M2", true),
+            ("DSC-RX1RM3", false),
+            ("DSC-RX1", false),
+            ("ILCE-7M4", false),
+            ("ZV-E10", false),
+        ] {
+            let p = sony_model_file(d.path(), model, &ZV1_VIG, &ZV1_CA, &ZV1_DIST);
+            let (lens, c) = sony(&p);
+            let lens = lens.unwrap();
+            assert_eq!(lens.distortion.is_some(), applies, "{model}");
+            assert!(
+                lens.chromatic.is_some() && lens.vignetting.is_none(),
+                "{model}"
+            );
+            assert!(c.distortion.is_some() && c.vignetting.is_some(), "{model}");
+        }
     }
     #[test]
     fn rejects_malformed_sony_tables() {
@@ -720,11 +871,11 @@ mod tests {
             ),
             ("a single knot", with(ZV1_DIST, 0, 1), with(ZV1_CA, 0, 2)),
         ] {
-            let c = read(&sony_file(d.path(), &ZV1_VIG, &ca, &dist)).unwrap();
+            let (_, c) = sony(&sony_file(d.path(), &ZV1_VIG, &ca, &dist));
             assert!(c.distortion.is_none() && c.chromatic.is_none(), "{name}");
         }
         let odd = with(ZV1_CA, 0, 21);
-        let c = read(&sony_file(d.path(), &ZV1_VIG, &odd, &ZV1_DIST)).unwrap();
+        let (_, c) = sony(&sony_file(d.path(), &ZV1_VIG, &odd, &ZV1_DIST));
         assert!(c.chromatic.is_none(), "odd CA count");
     }
     #[test]
