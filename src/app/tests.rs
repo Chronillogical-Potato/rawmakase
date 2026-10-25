@@ -1591,6 +1591,8 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
         ctx.input(|i| editor.mask_keys(i));
     });
     assert_eq!(editor.overlay(), Overlay::None);
+    // Further strokes start away from the mask's pin, which a drag would move.
+    let (a, b) = (Pos2::new(20., 140.), Pos2::new(180., 140.));
     // An Undo while painting takes back the stroke so far and ends the painting.
     frame(
         &mut editor,
@@ -1667,6 +1669,215 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
     frame(&mut editor, vec![button(b, false)]);
     assert_eq!(points(&editor), started);
     editor.document.edit.recipe().validate().unwrap();
+}
+#[test]
+fn dragging_a_mask_pin_moves_the_mask() {
+    use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: vec![[0.2; 3]; 160000],
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    let frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let frame = editor.begin_edit_frame();
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut editor, vec![]);
+    // A brush mask with a stroke, and a radial gradient added to it.
+    let stroke = crate::model::masks::BrushStroke {
+        points: vec![[0.3, 0.3], [0.5, 0.3]].into(),
+        radius: 0.05,
+        feather: 0.5,
+        flow: 1.,
+        density: 1.,
+        erase: false,
+        auto_mask: false,
+    };
+    in_edit_frame(&ctx, &mut editor, |e| {
+        e.view.tool = state::Tool::Mask;
+        let mut radial = MaskComponent::new(MaskShape::Radial {
+            center: [0.7, 0.7],
+            radii: [0.1, 0.1],
+            angle: 0.,
+            feather: 0.5,
+        });
+        radial.op = crate::model::masks::MaskOp::Add;
+        e.document.edit.recipe_mut().masks.push(MaskGroup {
+            components: vec![
+                MaskComponent::new(MaskShape::Brush {
+                    strokes: vec![stroke],
+                }),
+                radial,
+            ],
+            ..Default::default()
+        });
+    });
+    frame(&mut editor, vec![]);
+    let steps = editor.document.edit.history().steps().0.len();
+    // The pin sits on the stroke's first dab; dragging it by a tenth of the photo
+    // moves every part of the mask with it, as one step.
+    let (a, b) = (Pos2::new(60., 60.), Pos2::new(80., 80.));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    for k in 1..=4 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 4.)],
+        );
+    }
+    frame(&mut editor, vec![button(b, false)]);
+    let m = &editor.document.edit.recipe().masks[0];
+    let near = |p: [f32; 2], q: [f32; 2]| (p[0] - q[0]).abs() < 0.01 && (p[1] - q[1]).abs() < 0.01;
+    let MaskShape::Brush { strokes } = &m.components[0].shape else {
+        panic!()
+    };
+    assert!(
+        near(strokes[0].points[0], [0.4, 0.4]),
+        "{:?}",
+        strokes[0].points
+    );
+    assert!(
+        near(strokes[0].points[1], [0.6, 0.4]),
+        "{:?}",
+        strokes[0].points
+    );
+    let MaskShape::Radial { center, .. } = m.components[1].shape else {
+        panic!()
+    };
+    assert!(near(center, [0.8, 0.8]), "{center:?}");
+    assert_eq!(strokes.len(), 1, "the drag painted nothing");
+    assert_eq!(editor.view.masking.selected, Some(0));
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
+    assert!(!editor.view.zoom.on);
+    // With its brush selected, as after painting, the pin still moves the mask.
+    assert!(editor.mask_brush_shown());
+    let c = Pos2::new(80., 100.);
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(b), button(b, true)],
+    );
+    for k in 1..=4 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(b + (c - b) * k as f32 / 4.)],
+        );
+    }
+    frame(&mut editor, vec![button(c, false)]);
+    let MaskShape::Brush { strokes } = &editor.document.edit.recipe().masks[0].components[0].shape
+    else {
+        panic!()
+    };
+    assert_eq!(strokes.len(), 1, "the drag painted nothing");
+    assert!(
+        near(strokes[0].points[0], [0.4, 0.5]),
+        "{:?}",
+        strokes[0].points
+    );
+    // Undo, Space or deleting the mask while moving it ends the move: the drag that
+    // goes on moves nothing.
+    let space = |pressed| egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let pin = c;
+    let d = Pos2::new(120., 120.);
+    let base = editor.document.edit.recipe().masks[0].clone();
+    for interruption in 0..5 {
+        // The mask with its pin at `pin`, and a second like it, which a Delete moves
+        // into its place.
+        in_edit_frame(&ctx, &mut editor, |e| {
+            let mut other = base.clone();
+            other.name = "Other".into();
+            e.document.edit.recipe_mut().masks = vec![base.clone(), other];
+            e.view.masking.selected = None;
+        });
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin), button(pin, true)],
+        );
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin + Vec2::new(4., 4.))],
+        );
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin + Vec2::new(8., 8.))],
+        );
+        match interruption {
+            0 => in_edit_frame(&ctx, &mut editor, |e| e.undo()),
+            1 => {
+                frame(&mut editor, vec![space(true)]);
+                frame(&mut editor, vec![space(false)]);
+            }
+            // Delete, as its key does; back where the drag started, so the mask that
+            // takes its place has the same shapes as the drag last left.
+            2 | 3 => {
+                if interruption == 3 {
+                    frame(&mut editor, vec![egui::Event::PointerMoved(pin)]);
+                }
+                in_edit_frame(&ctx, &mut editor, |e| {
+                    e.document.edit.recipe_mut().masks.remove(0);
+                    e.view.masking.selected = None;
+                });
+            }
+            // K starts another mask.
+            _ => in_edit_frame(&ctx, &mut editor, |e| {
+                e.create_mask(mask_tool::Kind::Brush, None)
+            }),
+        }
+        let before = editor.document.edit.recipe().masks.clone();
+        frame(&mut editor, vec![egui::Event::PointerMoved(d)]);
+        frame(&mut editor, vec![button(d, false)]);
+        assert_eq!(
+            editor.document.edit.recipe().masks,
+            before,
+            "interruption {interruption}"
+        );
+    }
 }
 #[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {

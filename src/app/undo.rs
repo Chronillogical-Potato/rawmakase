@@ -217,9 +217,9 @@ impl Editor {
             return false;
         }
         // A drag still held is the latest change, so it is what Undo takes back. A
-        // brush stroke ends there, so a Redo in the same frame cannot revive it.
+        // mask drag ends there, so a Redo in the same frame cannot revive it.
         self.finish_gesture();
-        self.view.masking.end_stroke();
+        self.view.masking.end_drag();
         let log = &mut self.undo_log;
         let command = match direction {
             Direction::Undo => log.undo.pop_back(),

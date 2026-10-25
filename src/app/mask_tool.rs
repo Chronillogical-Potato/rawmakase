@@ -82,6 +82,14 @@ enum Drag {
     Create([f32; 2]),
     /// A gradient handle moved from where the drag started.
     Handle(Handle, [f32; 2], MaskShape),
+    /// The mask at `mask` moved by its pin from `start`: its shapes then, and as
+    /// last moved.
+    Move {
+        mask: usize,
+        start: [f32; 2],
+        original: Vec<MaskShape>,
+        moved: Vec<MaskShape>,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Handle {
@@ -155,15 +163,9 @@ impl MaskTool {
         self.drag = Drag::None;
         self.renaming = None;
     }
-    /// Whether a brush stroke is being painted.
-    fn painting(&self) -> bool {
-        matches!(self.drag, Drag::Stroke { .. })
-    }
-    /// Ends a brush stroke where it is: what was painted stays.
-    pub(super) fn end_stroke(&mut self) {
-        if self.painting() {
-            self.drag = Drag::None;
-        }
+    /// Ends a drag on the photo where it is: what was painted or moved stays.
+    pub(super) fn end_drag(&mut self) {
+        self.drag = Drag::None;
     }
     /// Shows a mask a selection just made, with its overlay.
     pub(super) fn select_after_selection(&mut self, mask: usize, component: usize) {
@@ -366,9 +368,10 @@ impl Editor {
         let near_pin = |pos: Pos2| pins.iter().find(|(_, p)| p.distance(pos) < 9.).map(|p| p.0);
         let alt = ui.input(|i| i.modifiers.alt);
 
-        // An Undo, Redo or History click while painting ends the stroke, moving or not.
-        if self.view.masking.painting() && !self.stroke_kept() {
-            self.view.masking.end_stroke();
+        // An Undo, Redo, History click or Delete while painting or moving a mask ends
+        // the drag, the pointer moving or not.
+        if !self.drag_kept() {
+            self.view.masking.end_drag();
         }
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -380,6 +383,16 @@ impl Editor {
                 Drag::Create(at)
             } else if let (Some(h), Some(s)) = (near(origin), &shape) {
                 Drag::Handle(h, at, s.clone())
+            } else if let Some(i) = near_pin(origin).filter(|_| pending.is_none()) {
+                // Dragging a pin moves its mask, as in Lightroom.
+                let m = &self.document.edit.recipe().masks[i];
+                let shapes: Vec<MaskShape> = m.components.iter().map(|c| c.shape.clone()).collect();
+                Drag::Move {
+                    mask: i,
+                    start: at,
+                    original: shapes.clone(),
+                    moved: shapes,
+                }
             } else if brushing {
                 let erase = alt || t.brush == 2;
                 match self.begin_stroke(at, erase) {
@@ -392,6 +405,9 @@ impl Editor {
             } else {
                 Drag::None
             };
+            if let Drag::Move { mask, .. } = drag {
+                self.view.masking.select(Some(mask), Some(0));
+            }
             self.view.masking.drag = drag;
         }
         if response.dragged()
@@ -415,6 +431,22 @@ impl Editor {
                     let moved = move_handle(original, *h, space, *start, at);
                     if let Some((m, c)) = selected {
                         self.document.edit.recipe_mut().masks[m].components[c].shape = moved;
+                    }
+                }
+                Drag::Move {
+                    mask,
+                    start,
+                    original,
+                    moved,
+                } => {
+                    let delta = [at[0] - start[0], at[1] - start[1]];
+                    *moved = original.iter().map(|s| shifted(s, delta)).collect();
+                    let (mask, moved) = (*mask, moved.clone());
+                    // `drag_kept` found the mask as last moved this frame.
+                    if let Some(m) = self.document.edit.recipe_mut().masks.get_mut(mask) {
+                        for (c, shape) in m.components.iter_mut().zip(moved) {
+                            c.shape = shape;
+                        }
                     }
                 }
                 _ => {}
@@ -455,7 +487,9 @@ impl Editor {
             let preview = new_shape(p.kind, space, *start, to_image(pos));
             draw_shape(&painter, &preview, space, &to_screen);
         }
-        let on_handle = pointer.and_then(near).is_some() || pointer.and_then(near_pin).is_some();
+        let moving = matches!(self.view.masking.drag, Drag::Move { .. });
+        let on_handle =
+            pointer.and_then(near).is_some() || pointer.and_then(near_pin).is_some() || moving;
         if let Some(pos) = pointer.filter(|p| rect.contains(*p)) {
             if on_handle {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
@@ -554,25 +588,36 @@ impl Editor {
         self.view.masking.overlay = true;
         Some((m, c, strokes - 1))
     }
-    /// Whether the stroke being painted is still in the edit as painted so far.
-    fn stroke_kept(&self) -> bool {
-        let Drag::Stroke {
-            points,
-            stroke: (m, c, s),
-        } = &self.view.masking.drag
-        else {
-            return false;
-        };
+    /// Whether the stroke being painted, or the mask being moved, is still selected
+    /// and in the edit as the drag left it; any other drag is kept. Equal shapes alone
+    /// could be another mask a Delete moved into its place.
+    fn drag_kept(&self) -> bool {
         let masks = &self.document.edit.recipe().masks;
-        match masks.get(*m).and_then(|mask| mask.components.get(*c)) {
-            Some(MaskComponent {
-                shape: MaskShape::Brush { strokes },
-                ..
-            }) => strokes.get(*s).is_some_and(|k| *k.points == **points),
-            _ => false,
+        let t = &self.view.masking;
+        match &t.drag {
+            Drag::Stroke {
+                points,
+                stroke: (m, c, s),
+            } if t.selected == Some(*m) && t.component == Some(*c) => {
+                match masks.get(*m).and_then(|mask| mask.components.get(*c)) {
+                    Some(MaskComponent {
+                        shape: MaskShape::Brush { strokes },
+                        ..
+                    }) => strokes.get(*s).is_some_and(|k| *k.points == **points),
+                    _ => false,
+                }
+            }
+            Drag::Move { mask, moved, .. } if t.selected == Some(*mask) => {
+                masks.get(*mask).is_some_and(|m| {
+                    m.components.len() == moved.len()
+                        && m.components.iter().zip(moved).all(|(c, s)| c.shape == *s)
+                })
+            }
+            Drag::Stroke { .. } | Drag::Move { .. } => false,
+            _ => true,
         }
     }
-    /// Gives the stroke at `(m, c, s)`, which [`Self::stroke_kept`] found this frame,
+    /// Gives the stroke at `(m, c, s)`, which [`Self::drag_kept`] found this frame,
     /// its next `points`.
     fn extend_stroke(
         &mut self,
@@ -676,7 +721,7 @@ impl Editor {
     pub(super) fn close_masking(&mut self) {
         self.selection.end_prompting();
         self.view.masking.pending = None;
-        self.view.masking.end_stroke();
+        self.view.masking.end_drag();
         self.view.tool = super::state::Tool::None;
     }
     fn create_row(&mut self, ui: &mut egui::Ui) {
@@ -1138,6 +1183,25 @@ fn anchor(m: &MaskGroup) -> Option<[f32; 2]> {
         MaskShape::Radial { center, .. } => Some(*center),
         _ => None,
     })
+}
+/// `shape` moved by `delta` (image space); colour and tone ranges and bitmaps stay.
+fn shifted(shape: &MaskShape, delta: [f32; 2]) -> MaskShape {
+    let shift = |p: [f32; 2]| [p[0] + delta[0], p[1] + delta[1]];
+    let mut shape = shape.clone();
+    match &mut shape {
+        MaskShape::Brush { strokes } => {
+            for s in strokes {
+                s.points = s.points.iter().map(|p| shift(*p)).collect();
+            }
+        }
+        MaskShape::Linear { from, to } => {
+            *from = shift(*from);
+            *to = shift(*to);
+        }
+        MaskShape::Radial { center, .. } => *center = shift(*center),
+        _ => {}
+    }
+    shape
 }
 /// A gradient drawn by dragging from `start` to `end` (image space).
 fn new_shape(kind: Kind, space: Space, start: [f32; 2], end: [f32; 2]) -> MaskShape {
