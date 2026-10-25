@@ -222,6 +222,7 @@ impl Fixture {
             defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
             watermark: None,
             demosaic: Default::default(),
+            cache: Default::default(),
         }
     }
 }
@@ -700,6 +701,7 @@ fn exporting_a_jpeg_never_replaces_it() -> Result<()> {
             defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
             watermark: None,
             demosaic: Default::default(),
+            cache: Default::default(),
         };
         run_all(&batch)
     };

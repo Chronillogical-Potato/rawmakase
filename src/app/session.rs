@@ -84,6 +84,10 @@ pub(crate) struct Session {
     /// Preferences > Catalog: decoded-image disk cache limit in GiB.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decoded_cache_size_gib: Option<u32>,
+    /// Preferences > Performance: the folder chosen for decoded images; `None`
+    /// keeps them in the per-user cache directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded_cache_folder: Option<PathBuf>,
     /// Preferences > Automatically Discard 1:1 Previews, in days unused; 0 is
     /// Never.
     #[serde(default, skip_serializing_if = "Option::is_none")]

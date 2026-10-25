@@ -347,6 +347,8 @@ pub struct Batch {
     pub watermark: Option<crate::watermark::Watermark>,
     /// The demosaic each photo is decoded with.
     pub demosaic: crate::camera_data::Demosaic,
+    /// Where each full-size decode is looked up first.
+    pub cache: crate::decode_cache::DecodeCache,
 }
 
 /// How far a batch is: `done` photos of `total`, and how far the current one is.
@@ -526,7 +528,9 @@ fn render(
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     let image = Arc::new(match opened {
-        Opened::Raw(raw) => job::decode_full(raw, &photo.source, batch.demosaic, cancel)?,
+        Opened::Raw(raw) => {
+            job::decode_full(raw, &photo.source, batch.demosaic, &batch.cache, cancel)?
+        }
         // A JPEG, PNG or TIFF opens at full size: there is nothing to decode or cache.
         Opened::Rendered(image) => image,
     });
@@ -544,6 +548,7 @@ fn render(
             values: photo.values.clone(),
             watermark: batch.watermark.clone().filter(|_| preset.is_none()),
             demosaic: batch.demosaic,
+            cache: batch.cache.clone(),
         },
         &batch.settings,
         cancel,

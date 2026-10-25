@@ -5486,6 +5486,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
                 defaults: defaults.clone(),
                 watermark: None,
                 demosaic: Default::default(),
+                cache: editor.decode_cache.clone(),
             },
             &Default::default(),
             |_| {},

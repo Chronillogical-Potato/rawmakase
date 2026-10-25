@@ -428,11 +428,19 @@ Entries are keyed by the RAW file's identity (size, modification time and a hash
 its first 64 KB), the demosaic setting and the running executable's size and time,
 so a rebuilt or updated app never uses another build's pixels. The cache lives in
 `decoded/` under the per-user cache directory (`~/Library/Caches/RAWmakase` on macOS,
-`$XDG_CACHE_HOME/rawmakase` or `~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR`
-to override), defaults to a 4 GiB cap and drops the least recently used entries first.
+`%LOCALAPPDATA%\RAWmakase\Cache` on Windows, `$XDG_CACHE_HOME/rawmakase` or
+`~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR` to override), defaults to a 4 GiB cap and drops the least recently used entries first.
 Preferences > Catalog > Decoded images sets the cap from 1 GiB to 1 PiB (1,048,576 GiB), saved
 between launches. Changes reach Develop, neighbour prefetch and Reference View
 without restarting; a reduced cap is enforced on the next cache write.
+Preferences > Performance > Choose Folder… moves the cache to `RAWmakase Cache/` in
+a folder of the user's choice, such as another drive, and Use Default moves it back.
+Moving removes the old location's entries, and an entry being written during the move
+removes itself, so the old drive is freed. The folder must be writable when chosen;
+its subfolder is created only while the folder exists, so an unplugged drive is never
+recreated on the system disk, and photos are just not cached until it returns.
+Develop, prefetch, Reference View, export and preview builds share the app's cache,
+so they all follow the choice without restarting.
 An entry is the image's size in 32-bit floats: 278 MB for the X100F, 697 MB for the
 A7CR. RAW files, sidecars and catalogs are not touched.
 

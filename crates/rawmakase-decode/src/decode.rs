@@ -37,10 +37,7 @@ pub struct FullSize {
 }
 
 impl FullSize {
-    /// The photo at `path`, with `demosaic`.
-    pub fn new(path: &Path, demosaic: Demosaic) -> Self {
-        Self::with_cache(path, demosaic, DecodeCache::default())
-    }
+    /// The photo at `path`, with `demosaic`, cached in `cache`.
     pub fn with_cache(path: &Path, demosaic: Demosaic, cache: DecodeCache) -> Self {
         Self {
             demosaic,
