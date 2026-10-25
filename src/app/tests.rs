@@ -1489,6 +1489,186 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     editor.document.edit.recipe().validate().unwrap();
 }
 #[test]
+fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
+    use super::worker::Overlay;
+    use crate::model::masks::MaskShape;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: vec![[0.2; 3]; 160000],
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    let frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let frame = editor.begin_edit_frame();
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut editor, vec![]);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(mask_tool::Kind::Brush, None)
+    });
+    let steps = editor.document.edit.history().steps().0.len();
+    assert!(!editor.view.masking.overlay);
+    assert_eq!(editor.overlay(), Overlay::None);
+    let points = |editor: &Editor| match &editor.document.edit.recipe().masks[0].components[0].shape
+    {
+        MaskShape::Brush { strokes } => strokes.iter().map(|s| s.points.len()).collect::<Vec<_>>(),
+        shape => panic!("{shape:?}"),
+    };
+    let (a, b) = (Pos2::new(20., 100.), Pos2::new(180., 100.));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    let mut painted = 0;
+    for k in 1..=8 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 8.)],
+        );
+        // Mid-stroke, the photo already has the stroke so far, and the red overlay
+        // shows it, as in Lightroom.
+        let now = points(&editor);
+        assert_eq!(now.len(), 1, "one stroke while painting");
+        assert!(now[0] >= painted);
+        painted = now[0];
+        assert!(matches!(editor.overlay(), Overlay::Mask { index: 0, .. }));
+    }
+    assert!(painted > 3, "{painted}");
+    // Still one step to come, once the stroke ends.
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), vec![painted]);
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
+    // The overlay stays once the stroke ends, until O hides it.
+    assert!(matches!(editor.overlay(), Overlay::Mask { index: 0, .. }));
+    let o = egui::Event::Key {
+        key: egui::Key::O,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        ctx.input_mut(|i| i.events.push(o));
+        ctx.input(|i| editor.mask_keys(i));
+    });
+    assert_eq!(editor.overlay(), Overlay::None);
+    // An Undo while painting takes back the stroke so far and ends the painting.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    assert_eq!(points(&editor).len(), 2);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.undo());
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), vec![painted]);
+    // So does an Undo with the pointer held still: a Redo then brings the stroke back
+    // as far as it was painted, and the drag that goes on paints no more of it.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    let partial = points(&editor);
+    assert_eq!(partial.len(), 2);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.undo());
+    frame(&mut editor, vec![]);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.redo());
+    assert_eq!(points(&editor), partial);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), partial);
+    // Or Undo and Redo in one frame, before the photo is drawn again.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    let partial = points(&editor);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.undo();
+        editor.redo();
+    });
+    assert_eq!(points(&editor), partial);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), partial);
+    // Space taking over mid-stroke ends it: once Space is let go, the drag that goes
+    // on paints nothing more into it.
+    let space = |pressed| egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.25)],
+    );
+    let started = points(&editor);
+    assert_eq!(started.len(), partial.len() + 1);
+    frame(&mut editor, vec![space(true)]);
+    frame(&mut editor, vec![space(false)]);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), started);
+    editor.document.edit.recipe().validate().unwrap();
+}
+#[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
     use crate::model::masks::MaskShape;
     let ctx = egui::Context::default();
