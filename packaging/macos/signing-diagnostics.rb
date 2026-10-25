@@ -37,14 +37,19 @@ module SigningDiagnostics
 end
 
 # Apple's notary service sometimes fails a submission outright (notarytool
-# exits with no message). Submit again, a bounded number of times; a result
-# notarytool reports, accepted or not, is left to native-packages.
+# exits with no message), and stapling right after an accepted submission can
+# fail the same way while the ticket is not yet reachable (v0.4.5's Intel DMG,
+# four times; one log shows "The network connection was lost" from Apple's
+# ticket service).
+# Run those commands again, a bounded number of times; a result notarytool
+# reports, accepted or not, is left to native-packages.
 module NotaryRetry
   ATTEMPTS = 3
   DELAY = 60
+  RETRIED = [%w[xcrun notarytool submit], %w[xcrun stapler staple], %w[xcrun stapler validate]].freeze
 
   def execute(*arguments)
-    return super unless arguments.first(3) == ["xcrun", "notarytool", "submit"]
+    return super unless RETRIED.include?(arguments.first(3))
 
     attempt = 1
     begin
@@ -52,8 +57,8 @@ module NotaryRetry
     rescue NativePackages::Error => error
       raise if attempt >= ATTEMPTS
       # native-packages has already redacted the message.
-      warn "Notary submission failed (attempt #{attempt} of #{ATTEMPTS}): #{error.message.strip}"
-      warn "Submitting again in #{DELAY} s."
+      warn "#{arguments[1..2].join(' ')} failed (attempt #{attempt} of #{ATTEMPTS}): #{error.message.strip}"
+      warn "Running it again in #{DELAY} s."
       sleep DELAY
       attempt += 1
       retry

@@ -56,8 +56,12 @@ nested code and the app in a temporary keychain, creates and signs the DMG,
 submits it with `notarytool`, waits for acceptance, and staples the ticket.
 This runs in its own job, after the job that builds the app, which passes the
 unsigned bundle on as an artifact. A submission that fails outright is sent
-again up to twice (`packaging/macos/signing-diagnostics.rb`); if notarization
+again up to twice (`packaging/macos/signing-diagnostics.rb`), and so is
+stapling or validating the ticket, which can fail right after an accepted
+submission while Apple's ticket service is unreachable; if notarization
 still fails, **Re-run failed jobs** repeats only the signing job, not the build.
+For a tag already pushed, a fix to these packaging scripts reaches the tag by
+running **Release** from `main` with that tag (below).
 The subsequent check mounts the actual DMG, verifies its ticket, Gatekeeper
 acceptance, architecture and library paths, and runs the bundled CLI.
 Checksums are generated after signing and stapling.
