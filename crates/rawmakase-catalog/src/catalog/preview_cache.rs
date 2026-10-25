@@ -35,7 +35,9 @@ const VERSION: i64 = 1;
 // 11: lens corrections are centred on their optical centre and framed by green's
 //     samples for the photo's edge (Nikon Z, Olympus, OM System, Samsung, DNG
 //     opcodes, Adobe profiles).
-const GENERATION: i64 = 11;
+// 12: Fujifilm's distortion table is scaled as Adobe's warps of it are, so its photos
+//     frame as in Lightroom.
+const GENERATION: i64 = 12;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -51,7 +53,8 @@ const LIMIT: i64 = 512 * 1024 * 1024;
 // 8: Samsung's built-in lens corrections, as `GENERATION` 9.
 // 9: Canon's built-in lens correction, as `GENERATION` 10.
 // 10: optical centres and framing, as `GENERATION` 11.
-const SIZED_GENERATION: i64 = 10;
+// 11: Fujifilm's distortion framing, as `GENERATION` 12.
+const SIZED_GENERATION: i64 = 11;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.
