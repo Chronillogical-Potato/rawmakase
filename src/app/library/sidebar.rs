@@ -243,8 +243,8 @@ impl Library {
                                     clicked = Some((key, click));
                                 }
                                 Some(TreeAction::RelinkRoot(id)) => action = Action::RelinkRoot(id),
-                                Some(TreeAction::RelinkFolder(id)) => {
-                                    action = Action::RelinkFolder(id)
+                                Some(TreeAction::RelinkFolder { root, logical }) => {
+                                    action = Action::RelinkFolder(root, logical)
                                 }
                                 Some(TreeAction::Synchronize(scope, name)) => {
                                     self.sync_request = Some((scope, name));

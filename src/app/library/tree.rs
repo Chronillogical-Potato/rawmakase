@@ -82,7 +82,12 @@ pub(super) enum TreeAction {
     /// The folder's key, and how it was clicked.
     Select(String, Click),
     RelinkRoot(RootId),
-    RelinkFolder(FolderId),
+    /// Locate this folder…: the folder of `root` at logical path `logical`,
+    /// whether or not it has a catalog folder of its own.
+    RelinkFolder {
+        root: RootId,
+        logical: String,
+    },
     /// Remove from Catalog: the folder's name, it and its subfolders, and
     /// their photos' count.
     Remove(String, HashSet<FolderId>, usize),
@@ -282,7 +287,6 @@ pub(super) fn folder_tree_row(
         13.,
         palette.gray(145),
     );
-    let can_relink = node.root.is_some() || node.folder.is_some();
     let label_rect = Rect::from_min_max(
         Pos2::new(x + 26., rect.top()),
         Pos2::new(rect.right() - 44., rect.bottom()),
@@ -308,7 +312,10 @@ pub(super) fn folder_tree_row(
     let relink = || {
         node.root
             .map(TreeAction::RelinkRoot)
-            .or_else(|| node.folder.map(TreeAction::RelinkFolder))
+            .unwrap_or_else(|| TreeAction::RelinkFolder {
+                root: node.in_root,
+                logical: node.logical.clone(),
+            })
     };
     let mut action = None;
     // Photos are dragged only once the pointer went far enough (see
@@ -348,20 +355,18 @@ pub(super) fn folder_tree_row(
         use crate::app::widgets::{menu_item, menu_separator};
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
-        if can_relink
-            && menu_item(
-                ui,
-                if node.root.is_some() {
-                    "Locate root folder…"
-                } else {
-                    "Locate this folder…"
-                },
-                "",
-                true,
-                false,
-            )
-        {
-            action = relink();
+        if menu_item(
+            ui,
+            if node.root.is_some() {
+                "Locate root folder…"
+            } else {
+                "Locate this folder…"
+            },
+            "",
+            true,
+            false,
+        ) {
+            action = Some(relink());
             ui.close();
         }
         let scope = match (node.root, node.folder) {
@@ -375,9 +380,7 @@ pub(super) fn folder_tree_row(
             action = Some(TreeAction::Synchronize(scope, node.name.clone()));
             ui.close();
         }
-        if can_relink || scope.is_some() {
-            menu_separator(ui);
-        }
+        menu_separator(ui);
         if menu_item(ui, "New Folder Inside…", "", true, false) {
             action = Some(TreeAction::NewFolder {
                 root: node.in_root,

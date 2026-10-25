@@ -8,7 +8,7 @@ use super::theme;
 use super::widgets::{confirm_modal, form_row, pretty_path};
 use super::worker::Event;
 use crate::catalog::{
-    Ambiguity, Catalog, CatalogLocation, Choice, Conflict, FolderId, Override, Overrides, RootId,
+    Ambiguity, Catalog, CatalogLocation, Choice, Conflict, Override, Overrides, RootId,
     RootLocations,
 };
 use eframe::egui;
@@ -18,10 +18,12 @@ use std::sync::{Arc, Mutex};
 
 /// A question only the user can answer before a folder change is made.
 pub(crate) enum FolderQuestion {
-    /// A root moves while folders below it have their own locations here.
+    /// A root, or its folder at logical path `relative`, moves while folders
+    /// below it have their own locations here.
     Overrides {
         catalog: CatalogLocation,
         root: RootId,
+        relative: String,
         path: PathBuf,
         overrides: Vec<Override>,
     },
@@ -38,6 +40,7 @@ pub(crate) enum FolderQuestion {
 enum FolderJob {
     Relink {
         root: RootId,
+        relative: String,
         path: PathBuf,
         overrides: Overrides,
     },
@@ -55,8 +58,6 @@ enum FolderJob {
 #[derive(Default)]
 pub(super) struct LocationsView {
     roots: Vec<RootLocations>,
-    /// Folder ids by root and logical path, for Change….
-    folders: HashMap<(RootId, String), FolderId>,
     /// This computer's name, as typed.
     computer: String,
     /// Typed and not saved yet: saved when the field or the page is left.
@@ -77,12 +78,6 @@ impl LocationsView {
                 };
             }
         };
-        let folders = catalog
-            .folders()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| ((f.root, f.relative), f.id))
-            .collect();
         let found: Arc<Mutex<HashMap<PathBuf, bool>>> = Default::default();
         let paths: Vec<PathBuf> = roots
             .iter()
@@ -101,7 +96,6 @@ impl LocationsView {
         });
         Self {
             roots,
-            folders,
             computer: catalog.computer_name().unwrap_or_default(),
             computer_dirty: false,
             found,
@@ -188,7 +182,6 @@ impl Editor {
                             ui.add_space(16.);
                             ui.vertical(|ui| {
                                 let note = format!("Folder of {name}, located separately");
-                                let id = view.folders.get(&(root.root, over.relative.clone()));
                                 match entry(
                                     ui,
                                     &over.relative,
@@ -198,10 +191,10 @@ impl Editor {
                                     true,
                                 ) {
                                     Some(Button::Change) => {
-                                        if let Some(id) = id {
-                                            click =
-                                                Some(Click::Change(FolderAction::RelinkFolder(*id)))
-                                        }
+                                        click = Some(Click::Change(FolderAction::RelinkFolder(
+                                            root.root,
+                                            over.relative.clone(),
+                                        )))
                                     }
                                     Some(Button::Clear) => {
                                         click = Some(Click::Clear(root.root, over.relative.clone()))
@@ -291,6 +284,7 @@ impl Editor {
             FolderQuestion::Overrides {
                 catalog,
                 root,
+                relative,
                 path,
                 overrides,
             } => {
@@ -323,13 +317,15 @@ impl Editor {
                 ) else {
                     return;
                 };
-                let (catalog, root, path) = (catalog.clone(), *root, path.clone());
+                let (catalog, root, relative, path) =
+                    (catalog.clone(), *root, relative.clone(), path.clone());
                 self.modal = None;
                 if let Some(overrides) = choice {
                     self.folder_job(
                         catalog,
                         FolderJob::Relink {
                             root,
+                            relative,
                             path,
                             overrides,
                         },
@@ -444,10 +440,15 @@ fn change_folders(
     Ok(match job {
         FolderJob::Relink {
             root,
+            relative,
             path,
             overrides,
         } => {
-            cat.relink_root_with(root, &path, overrides)?;
+            if relative.is_empty() {
+                cat.relink_root_with(root, &path, overrides)?;
+            } else {
+                cat.relink_folder_at(root, &relative, &path, overrides)?;
+            }
             (true, Default::default(), Vec::new())
         }
         FolderJob::Clear { root, relative } => {

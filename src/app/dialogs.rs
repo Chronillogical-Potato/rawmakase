@@ -16,7 +16,7 @@ pub(super) enum FileDialog {
     DecodeCacheFolder,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum CatalogDialog {
     Create,
     Open,
@@ -24,11 +24,13 @@ pub(super) enum CatalogDialog {
     Folder(FolderAction),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum FolderAction {
     Add,
     RelinkRoot(crate::catalog::RootId),
-    RelinkFolder(crate::catalog::FolderId),
+    /// The folder of a root at a logical path, with or without a catalog
+    /// folder of its own.
+    RelinkFolder(crate::catalog::RootId, String),
 }
 
 impl Editor {

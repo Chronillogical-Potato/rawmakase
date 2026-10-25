@@ -1735,17 +1735,21 @@ fn a_strip_scrolled_past_a_shorter_list_draws_again() {
 }
 #[test]
 fn a_panel_with_nothing_to_do_keeps_an_earlier_panels_action() {
+    let then = |mut earlier: Action, later| {
+        earlier.then(later);
+        earlier
+    };
     // The strip's Open in Develop survives the sidebar drawn after it.
     assert_eq!(
-        Action::Develop(PhotoId(1)).then(Action::None),
+        then(Action::Develop(PhotoId(1)), Action::None),
         Action::Develop(PhotoId(1))
     );
     assert_eq!(
-        Action::Develop(PhotoId(1)).then(Action::AddFolder),
+        then(Action::Develop(PhotoId(1)), Action::AddFolder),
         Action::AddFolder
     );
     assert_eq!(
-        Action::None.then(Action::Develop(PhotoId(2))),
+        then(Action::None, Action::Develop(PhotoId(2))),
         Action::Develop(PhotoId(2))
     );
 }
@@ -3345,4 +3349,42 @@ fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
         matches!(&action, Some(TreeAction::RemoveRoot(RootId(42), name)) if name == "Photos"),
         "not asked to remove the root"
     );
+}
+#[test]
+fn a_folder_holding_only_folders_can_be_located() {
+    use crate::catalog::FolderId;
+    let mut root = FolderNode::root(RootId(42), "2026".into(), "/missing".into());
+    root.insert(&Folder {
+        id: FolderId(1),
+        root: RootId(42),
+        relative: "Wedding/RAW/Card 1".into(),
+        path: PathBuf::from("/missing/Wedding/RAW/Card 1"),
+        count: 3,
+    });
+    root.finish();
+    let wedding = &root.children["Wedding"];
+    assert!(wedding.folder.is_none(), "no catalog folder of its own");
+    let (labels, action) = tree_menu(wedding, "Locate this folder…", true);
+    assert!(
+        labels.iter().any(|l| l == "Locate this folder…"),
+        "{labels:?}"
+    );
+    assert!(
+        matches!(&action, Some(TreeAction::RelinkFolder { root: RootId(42), logical }) if logical == "Wedding"),
+        "not asked to locate it"
+    );
+    // A folder with photos of its own is located by its path too.
+    let card = &wedding.children["RAW"].children["Card 1"];
+    let (_, action) = tree_menu(card, "Locate this folder…", true);
+    assert!(
+        matches!(&action, Some(TreeAction::RelinkFolder { root: RootId(42), logical }) if logical == "Wedding/RAW/Card 1"),
+        "not asked to locate it"
+    );
+    // A root keeps its own entry.
+    let (labels, action) = tree_menu(&root, "Locate root folder…", true);
+    assert!(
+        !labels.iter().any(|l| l == "Locate this folder…"),
+        "{labels:?}"
+    );
+    assert!(matches!(action, Some(TreeAction::RelinkRoot(RootId(42)))));
 }

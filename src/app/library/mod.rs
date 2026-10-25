@@ -6,21 +6,21 @@ use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Action {
     None,
     Develop(PhotoId),
     RelinkRoot(RootId),
-    RelinkFolder(FolderId),
+    /// The folder of a root at a logical path.
+    RelinkFolder(RootId, String),
     AddFolder,
 }
 impl Action {
     /// Combines the actions of panels drawn in turn: a later panel's action
     /// replaces an earlier one, and none keeps it.
-    pub(crate) fn then(self, later: Action) -> Action {
-        match later {
-            Action::None => self,
-            later => later,
+    pub(crate) fn then(&mut self, later: Action) {
+        if later != Action::None {
+            *self = later;
         }
     }
 }
