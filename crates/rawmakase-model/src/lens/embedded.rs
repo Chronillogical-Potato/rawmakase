@@ -47,19 +47,27 @@
 //!   power of ten, of green's source radius over the output radius r in pixels,
 //!   c0 + c1 r² + c2 r⁴ + c3 r⁶. CA: a count of 7, the radii in pixels, then red's and
 //!   blue's scale relative to green at each, in 1/10⁴.
+//! - Canon CR3 (EOS R5 Mark II and R6 Mark III): record 14 of the timed metadata (the
+//!   `CTMD` track's sample), little-endian shorts: three counts of knots, then seven
+//!   arrays of 23 slots, vignetting (the light kept, in 2^-13) and its knots, red and
+//!   blue (their scale relative to green, 2^14 + 2^23·(s − 1)) and their knots,
+//!   distortion (green's source radius over the output radius, in 2^-14) and its
+//!   knots. Knots are radii in units of 5.314 µm on the sensor, from 0 at the centre.
+//!   The distortion is applied as Adobe fits it (`canon_distortion`).
 //!
 //! The Fujifilm vignetting agrees with the FixVignetteRadial opcode Adobe writes into
 //! DNGs of the same file to within 1%, and the Olympus and Panasonic distortion and
 //! CA with the WarpRectilinear opcodes (and, for newer bodies, the embedded lens
 //! profiles) Adobe DNG Converter 18.7 writes, to within a pixel, Nikon's with its
-//! opcodes and profiles to within 0.4 px, and Samsung's with its opcodes to within
-//! 0.15 px (see docs/lens-corrections.md).
+//! opcodes and profiles to within 0.4 px, Samsung's with its opcodes to within
+//! 0.15 px and Canon's with its profiles and warps to within 0.2 px (see
+//! docs/lens-corrections.md).
 use crate::camera_data::Metadata;
 use crate::optics::{LensCorrection, Radial};
 use crate::tiff::{Entry, Tiff, kind};
 use std::{
     fs::File,
-    io::{Cursor, Read},
+    io::{Cursor, Read, Seek, SeekFrom},
     path::Path,
 };
 
@@ -116,6 +124,8 @@ fn read_any(path: &Path, m: &Metadata) -> Option<Builtin> {
         olympus(path, &mut Tiff::open(f, 0)?, m)
     } else if head.starts_with(b"IIU\0") {
         panasonic(&mut Tiff::open(f, 0)?, m)
+    } else if head.get(4..12) == Some(b"ftypcrx ".as_slice()) {
+        canon(&mut f, m)
     } else {
         None
     }?;
@@ -864,6 +874,276 @@ fn samsung(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         chromatic,
         gain_map: None,
     })
+}
+
+/// Canon's metadata box in a CR3's `moov`.
+const CANON_UUID: [u8; 16] = [
+    0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b, 0x6a, 0x48,
+];
+/// The most of a CR3 read for its lens tables at once: its `moov` is some 50 kB, its
+/// timed metadata some 120 kB.
+const CR3_MAX: u64 = 4 << 20;
+/// The bodies whose CR3 lens tables Adobe applies, with the width in pixels of their
+/// full-frame image, 36 mm. DNG Converter 18.7 uses the tables of no other body, not
+/// even of an R50 V, which stores the same record.
+const CANON_BODIES: [(&str, f64); 2] =
+    [("Canon EOS R5m2", 8192.), ("Canon EOS R6 Mark III", 6960.)];
+/// The unit of Canon's knots in millimetres: Adobe's piecewise vignetting puts them at
+/// this many on both bodies, to 0.02%.
+const CANON_KNOT_MM: f64 = 0.005314;
+/// Adobe fits Canon's distortion table with its values limited to this.
+const CANON_DISTORTION_MAX: f64 = 1.0275;
+
+/// The ISO base media boxes in `b`: their kind and body.
+fn boxes(b: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+    let mut at = 0usize;
+    std::iter::from_fn(move || {
+        let head = b.get(at..at.checked_add(8)?)?;
+        let (start, len) = match u32::from_be_bytes(head[..4].try_into().ok()?) {
+            0 => (at + 8, b.len() - at),
+            1 => {
+                let large = b.get(at + 8..at + 16)?.try_into().ok()?;
+                (at + 16, usize::try_from(u64::from_be_bytes(large)).ok()?)
+            }
+            n => (at + 8, n as usize),
+        };
+        let body = b.get(start..at.checked_add(len)?)?;
+        at += len;
+        Some((&head[4..8], body))
+    })
+}
+
+/// The body of the first box of `kind` in `b`.
+fn child<'a>(b: &'a [u8], kind: &[u8]) -> Option<&'a [u8]> {
+    boxes(b).find(|(k, _)| *k == kind).map(|(_, body)| body)
+}
+
+/// `len` bytes of `f` from `at`, at most `CR3_MAX`.
+fn read_at(f: &mut File, at: u64, len: u64) -> Option<Vec<u8>> {
+    if len > CR3_MAX {
+        return None;
+    }
+    f.seek(SeekFrom::Start(at)).ok()?;
+    let mut b = vec![0; usize::try_from(len).ok()?];
+    f.read_exact(&mut b).ok()?;
+    Some(b)
+}
+
+/// The body of a CR3's `moov`, among its first top-level boxes.
+fn cr3_moov(f: &mut File) -> Option<Vec<u8>> {
+    let end = f.seek(SeekFrom::End(0)).ok()?;
+    let mut at = 0;
+    for _ in 0..16 {
+        let h = read_at(f, at, 16.min(end.checked_sub(at)?))?;
+        let (head, len) = match u32::from_be_bytes(h.get(..4)?.try_into().ok()?) {
+            0 => (8, end - at),
+            1 => (16, u64::from_be_bytes(h.get(8..16)?.try_into().ok()?)),
+            n => (8, u64::from(n)),
+        };
+        if len < head || at.checked_add(len)? > end {
+            return None;
+        }
+        if &h[4..8] == b"moov" {
+            return read_at(f, at + head, len - head);
+        }
+        at += len;
+    }
+    None
+}
+
+/// Where a track's one sample is, `(offset, length)`, when it is timed metadata.
+fn ctmd_sample(trak: &[u8]) -> Option<(u64, u64)> {
+    let stbl = child(child(child(trak, b"mdia")?, b"minf")?, b"stbl")?;
+    // A full box's version and flags, the entry count, then the first entry.
+    if child(stbl, b"stsd")?.get(12..16)? != b"CTMD" {
+        return None;
+    }
+    let be32 = |b: &[u8], at: usize| Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?));
+    let stsz = child(stbl, b"stsz")?;
+    let len = match be32(stsz, 4)? {
+        0 => be32(stsz, 12)?,
+        n => n,
+    };
+    let at = match child(stbl, b"co64") {
+        Some(c) => u64::from_be_bytes(c.get(8..16)?.try_into().ok()?),
+        None => u64::from(be32(child(stbl, b"stco")?, 8)?),
+    };
+    Some((at, u64::from(len)))
+}
+
+fn canon(f: &mut File, m: &Metadata) -> Option<LensCorrection> {
+    let moov = cr3_moov(f)?;
+    let (mut model, mut sample) = (None, None);
+    for (kind, body) in boxes(&moov) {
+        match kind {
+            b"uuid" if body.starts_with(&CANON_UUID) => {
+                // IFD0 of the TIFF in CMT1.
+                let mut t = Tiff::open(Cursor::new(child(&body[16..], b"CMT1")?), 0)?;
+                let ifd0 = t.ifd(t.first)?;
+                let name = t.raw(ifd0.get(&0x0110)?)?;
+                model = Some(
+                    String::from_utf8_lossy(&name)
+                        .trim_end_matches('\0')
+                        .to_owned(),
+                );
+            }
+            b"trak" => sample = sample.or_else(|| ctmd_sample(body)),
+            _ => {}
+        }
+    }
+    let model = model?;
+    let width = CANON_BODIES.iter().find(|(name, _)| *name == model)?.1;
+    let (at, len) = sample?;
+    let sample = read_at(f, at, len)?;
+    // Records: a little-endian length and kind, six more bytes, the data.
+    let mut at = 0usize;
+    let tables = std::iter::from_fn(|| {
+        let len = u32::from_le_bytes(sample.get(at..at + 4)?.try_into().ok()?) as usize;
+        let r = sample.get(at..at.checked_add(len)?).filter(|_| len >= 12)?;
+        at += len;
+        Some((u16::from_le_bytes([r[4], r[5]]), &r[12..]))
+    })
+    .find(|(kind, _)| *kind == 14)?
+    .1;
+    canon_tables(tables, width * CANON_KNOT_MM / 36., m)
+}
+
+/// Record 14 of a CR3's timed metadata: three counts of knots, then seven arrays of
+/// as many slots each: vignetting and its knots, red, blue and their knots,
+/// distortion and its knots. `unit` is a knot in pixels.
+fn canon_tables(t: &[u8], unit: f64, m: &Metadata) -> Option<LensCorrection> {
+    let v: Vec<f64> = (t.as_chunks::<2>().0.iter())
+        .map(|c| f64::from(u16::from_le_bytes(*c)))
+        .collect();
+    let (counts, arrays) = v.split_at_checked(3)?;
+    let slots = arrays.len() / 7;
+    if slots < 2 || arrays.len() != 7 * slots {
+        return None;
+    }
+    let half = f64::from(m.width).hypot(f64::from(m.height)) * 0.5;
+    if !(half > 0. && unit > 0.) {
+        return None;
+    }
+    // The `n` tables from array `first` and the knots after them, from the centre out.
+    let group = |count: f64, first: usize, n: usize| {
+        let count = count as usize;
+        if !(2..=slots).contains(&count) {
+            return None;
+        }
+        let array = |i: usize| &arrays[i * slots..i * slots + count];
+        let knots = array(first + n);
+        (knots[0] == 0. && knots.is_sorted_by(|a, b| a < b))
+            .then(|| (knots, (first..first + n).map(array).collect::<Vec<_>>()))
+    };
+    let radii = |knots: &[f64]| knots.iter().map(|k| (k * unit / half) as f32).collect();
+    let changes = |r: &Radial, by: f32| r.values.iter().any(|v| (v - 1.).abs() > by);
+    // The share of light kept, in 2^-13, straight lines between the knots as in Adobe's
+    // piecewise profile. The gain restores it at more radii in each interval, as many as
+    // Radial holds (two more for 17 knots): the RF135mm F1.8's falls to 0.24, and lines
+    // through the gains alone would be 0.0027 off between the knots.
+    let vignetting = group(counts[0], 0, 1)
+        .filter(|(_, t)| t[0].iter().all(|v| *v > 0.))
+        .and_then(|(k, t)| {
+            let parts = (63 / (k.len() - 1)).min(3);
+            let lines = k.windows(2).zip(t[0].windows(2)).flat_map(|(k, v)| {
+                (0..parts).map(move |i| {
+                    let f = i as f64 / parts as f64;
+                    (k[0] + (k[1] - k[0]) * f, v[0] + (v[1] - v[0]) * f)
+                })
+            });
+            let (at, kept): (Vec<f64>, Vec<f64>) =
+                lines.chain([(k[k.len() - 1], t[0][k.len() - 1])]).unzip();
+            Radial::new(
+                radii(&at),
+                kept.iter().map(|v| (8192. / v) as f32).collect(),
+            )
+        })
+        .filter(|r| changes(r, 1e-4));
+    // Red's and blue's scale relative to green, in 2^-23 from 2^14.
+    let chromatic = group(counts[1], 2, 2)
+        .and_then(|(k, t)| {
+            let scale = |t: &[f64]| {
+                t.iter()
+                    .map(|v| (1. + (v - 16384.) / 8_388_608.) as f32)
+                    .collect()
+            };
+            Some([
+                Radial::new(radii(k), scale(t[0]))?,
+                Radial::new(radii(k), scale(t[1]))?,
+            ])
+        })
+        .filter(|[a, b]| changes(a, 1e-7) || changes(b, 1e-7));
+    let distortion = group(counts[2], 5, 1)
+        .and_then(|(k, t)| canon_distortion(k, t[0], unit, half, m))
+        .filter(|r| changes(r, 1e-6));
+    Some(LensCorrection {
+        source: "Canon built-in".into(),
+        // A "Camera Settings" profile in Adobe's DNGs, which Enable Profile Corrections
+        // applies (Camera Raw 18.7 renders of an R6 Mark III photo).
+        default_on: false,
+        vignetting,
+        distortion,
+        chromatic,
+        gain_map: None,
+    })
+}
+
+/// Canon's distortion table, green's source radius over the output radius in 2^-14 at
+/// each knot (`at`, in knots), as Adobe turns it into its profile: a least-squares fit of 1, r², r⁴
+/// and r⁶ to the values past the centre, residuals weighted by the radius, the
+/// knots' radii scaled by the values' mean to the power 0.75; of which the change
+/// from 1 over the constant term, at 80%, is the profile's ratio, scaled so the
+/// default crop's corner stays in place. This matches the profiles DNG Converter
+/// 18.7 writes for edited copies of an R6 Mark III file (single knots raised or
+/// lowered by 1%, smooth tables, the real one scaled by -1 to 1.5) to within 0.15 px.
+fn canon_distortion(
+    at: &[f64],
+    values: &[f64],
+    unit: f64,
+    half: f64,
+    m: &Metadata,
+) -> Option<Radial> {
+    let d: Vec<f64> = values[1..]
+        .iter()
+        .map(|v| (v / 16384.).min(CANON_DISTORTION_MAX))
+        .collect();
+    if d.len() < 4 {
+        return None;
+    }
+    let last = at[at.len() - 1];
+    let spread = (d.iter().sum::<f64>() / d.len() as f64).powf(0.75);
+    let mut normal = [[0.; 5]; 4];
+    for (k, y) in at[1..].iter().zip(&d) {
+        let t2 = (k / last * spread).powi(2);
+        let row = [1., t2, t2 * t2, t2 * t2 * t2];
+        for (j, n) in normal.iter_mut().enumerate() {
+            for i in 0..4 {
+                n[i] += t2 * row[j] * row[i];
+            }
+            n[4] += t2 * row[j] * y;
+        }
+    }
+    let a = solve4(normal).filter(|a| a[0] > 0.)?;
+    let c = [1, 2, 3].map(|i| 0.8 * a[i] / a[0]);
+    let ratio = |px: f64| {
+        let t2 = (px / (last * unit)).powi(2);
+        1. + t2 * (c[0] + t2 * (c[1] + t2 * c[2]))
+    };
+    let (w, h) = match (m.crop_width, m.crop_height) {
+        (0, _) | (_, 0) => (m.width, m.height),
+        size => size,
+    };
+    // Adobe's ScaleFactor keeps the corner about 2·10⁻⁵ further in (0.1 px).
+    let scale = 1. / ratio(f64::from(w).hypot(f64::from(h)) * 0.5);
+    // Radial's most knots: with 33, an RF135mm F1.8's curve, which bends sharply near
+    // the corner, is 0.08 px off between them.
+    let radii: Vec<f32> = (0..64).map(|i| i as f32 / 63.).collect();
+    let values: Vec<f32> = (radii.iter())
+        .map(|r| (scale * ratio(f64::from(*r) * half)) as f32)
+        .collect();
+    // The source radius grows with the output radius.
+    let sources: Vec<f32> = radii.iter().zip(&values).map(|(r, v)| r * v).collect();
+    (sources.windows(2).all(|p| p[0] < p[1])).then(|| Radial::new(radii, values))?
 }
 
 #[cfg(test)]
@@ -2047,6 +2327,299 @@ mod tests {
         let [red, blue] = c.chromatic.as_ref().unwrap();
         assert!((red.eval(0.5) - 1.0005).abs() < 1e-6);
         assert!((blue.eval(0.9) - 0.99995).abs() < 1e-6);
+    }
+    /// An ISO base media box.
+    fn bx(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        [&(8 + body.len() as u32).to_be_bytes()[..], kind, body].concat()
+    }
+    /// A CR3 of `model` whose timed metadata (the CTMD track's one sample) is `records`.
+    fn cr3(model: &str, records: &[u8]) -> Vec<u8> {
+        let ftyp = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
+        let name = [model.as_bytes(), b"\0"].concat();
+        let cmt1 = tiff(&[vec![(0x0110, 2, name.len() as u32, name)]]);
+        let canon = [&super::CANON_UUID[..], &bx(b"CMT1", &cmt1)].concat();
+        let moov = |at: u64| {
+            let entry = bx(b"CTMD", &[0, 0, 0, 0, 0, 0, 0, 1]);
+            let stsd = [&[0, 0, 0, 0, 0, 0, 0, 1][..], &entry].concat();
+            let stsz = [
+                [0; 4],
+                (records.len() as u32).to_be_bytes(),
+                1u32.to_be_bytes(),
+            ]
+            .concat();
+            let co64 = [&[0, 0, 0, 0, 0, 0, 0, 1][..], &at.to_be_bytes()].concat();
+            let stbl = [bx(b"stsd", &stsd), bx(b"stsz", &stsz), bx(b"co64", &co64)].concat();
+            let trak = bx(b"trak", &bx(b"mdia", &bx(b"minf", &bx(b"stbl", &stbl))));
+            bx(b"moov", &[bx(b"uuid", &canon), trak].concat())
+        };
+        let at = (ftyp.len() + moov(0).len() + 8) as u64;
+        [ftyp, moov(at), bx(b"mdat", records)].concat()
+    }
+    /// The timed metadata's records: a time stamp, then record 14 holding `tables`.
+    fn ctmd(tables: &[u16]) -> Vec<u8> {
+        let record = |kind: u16, data: &[u8]| {
+            let len = (12 + data.len()) as u32;
+            [
+                &len.to_le_bytes()[..],
+                &kind.to_le_bytes(),
+                &[0, 0, 0, 1, 0xff, 0xff],
+                data,
+            ]
+            .concat()
+        };
+        let lens: Vec<u8> = tables.iter().flat_map(|v| v.to_le_bytes()).collect();
+        [record(1, &[0; 12]), record(14, &lens)].concat()
+    }
+    /// Record 14 of IMG_4241.CR3 (raw.pixls.us, EOS R6 Mark III, RF50mm F1.4 L VCM at
+    /// f/7.1): the counts, then seven arrays of 23 slots: vignetting and its knots, red,
+    /// blue and their knots, distortion and its knots.
+    const R6III: [u16; 164] = [
+        17, 17, 17, 8191, 8079, 7767, 7550, 7302, 7028, 6734, 6428, 6275, 6124, 5975, 5889, 5834,
+        5766, 5692, 5505, 5095, 0, 0, 0, 0, 0, 0, 0, 757, 1514, 1893, 2271, 2650, 3028, 3407, 3596,
+        3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0, 0, 0, 0, 0, 16384, 16398, 16409,
+        16416, 16426, 16441, 16465, 16502, 16531, 16566, 16612, 16646, 16671, 16704, 16738, 16773,
+        16807, 0, 0, 0, 0, 0, 0, 16384, 16442, 16499, 16520, 16531, 16526, 16499, 16436, 16384,
+        16316, 16226, 16158, 16108, 16038, 15959, 15881, 15803, 0, 0, 0, 0, 0, 0, 0, 757, 1514,
+        1893, 2271, 2650, 3028, 3407, 3596, 3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0,
+        0, 0, 0, 0, 16384, 16379, 16412, 16437, 16466, 16499, 16532, 16562, 16576, 16586, 16594,
+        16596, 16596, 16595, 16593, 16588, 16582, 0, 0, 0, 0, 0, 0, 0, 757, 1514, 1893, 2271, 2650,
+        3028, 3407, 3596, 3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0, 0, 0, 0, 0,
+    ];
+    /// Record 14 of RAW.CR3 (raw.pixls.us, EOS R5 Mark II, RF135mm F1.8 L IS USM at f/1.8).
+    const R5II: [u16; 164] = [
+        17, 17, 17, 8191, 8138, 7334, 6790, 6224, 5644, 5057, 4477, 4191, 3910, 3632, 3446, 3307,
+        3109, 2796, 2388, 1978, 0, 0, 0, 0, 0, 0, 0, 757, 1514, 1893, 2271, 2650, 3028, 3407, 3596,
+        3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0, 0, 0, 0, 0, 16384, 16277, 16174,
+        16121, 16065, 16010, 15957, 15911, 15894, 15884, 15885, 15894, 15906, 15916, 15927, 15939,
+        15950, 0, 0, 0, 0, 0, 0, 16384, 16487, 16574, 16615, 16660, 16707, 16754, 16795, 16811,
+        16821, 16814, 16798, 16778, 16759, 16739, 16720, 16700, 0, 0, 0, 0, 0, 0, 0, 757, 1514,
+        1893, 2271, 2650, 3028, 3407, 3596, 3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0,
+        0, 0, 0, 0, 16384, 16344, 16409, 16456, 16511, 16573, 16639, 16703, 16732, 16759, 16780,
+        16789, 16795, 16798, 16800, 16799, 16797, 0, 0, 0, 0, 0, 0, 0, 757, 1514, 1893, 2271, 2650,
+        3028, 3407, 3596, 3786, 3975, 4088, 4164, 4259, 4353, 4448, 4543, 0, 0, 0, 0, 0, 0,
+    ];
+    fn canon_file(dir: &Path, model: &str, tables: &[u16]) -> std::path::PathBuf {
+        let p = dir.join("a.cr3");
+        std::fs::write(&p, cr3(model, &ctmd(tables))).unwrap();
+        p
+    }
+    /// What Adobe DNG Converter 18.7 writes into a DNG of a Canon file: the "Camera
+    /// Settings" profile (focal length, sensor format factor, ScaleFactor, radial
+    /// distortion, piecewise vignetting) and the red and blue planes of its warp
+    /// (green's is the identity), whose radius 1 is the farthest corner of the DNG's
+    /// active area from its centre, which is the default crop's.
+    struct CanonAdobe {
+        focal: f64,
+        format_factor: f64,
+        scale: f64,
+        k: [f64; 3],
+        piecewise: &'static [(f64, f64)],
+        warp: [[f64; 4]; 2],
+        corner: [f64; 2],
+    }
+    /// The profile's source radius in pixels at output radius `px`, for a default crop
+    /// of `crop` pixels: its radius is in focal lengths, the crop's diagonal being
+    /// 43.2666 mm over the sensor format factor.
+    fn canon_profile(a: &CanonAdobe, crop: [u32; 2], px: f64) -> f64 {
+        let diagonal = f64::from(crop[0]).hypot(f64::from(crop[1]));
+        let rho = px / diagonal * 43.2666 / a.format_factor / a.focal;
+        let r2 = rho * rho;
+        px * a.scale * (1. + r2 * (a.k[0] + r2 * (a.k[1] + r2 * a.k[2])))
+    }
+    fn check_canon(c: &LensCorrection, m: &Metadata, a: &CanonAdobe, within: f64) {
+        assert!(!c.default_on);
+        assert_eq!(c.source, "Canon built-in");
+        let crop = [m.crop_width, m.crop_height];
+        let unit = a.corner[0].hypot(a.corner[1]);
+        let plane = |k: [f64; 4], px: f64| adobe(k, unit, px) / px;
+        let off = largest_difference(c, m, &|ch, px| {
+            let green = canon_profile(a, crop, px);
+            match ch {
+                0 => green * plane(a.warp[0], green),
+                2 => green * plane(a.warp[1], green),
+                _ => green,
+            }
+        });
+        assert!(off < within, "{off} px from Adobe's profile");
+        let half = f64::from(m.width).hypot(f64::from(m.height)) / 2.;
+        let diagonal = f64::from(crop[0]).hypot(f64::from(crop[1]));
+        for &(rho, kept) in a.piecewise {
+            let px = rho * a.focal * a.format_factor / 43.2666 * diagonal;
+            let ours = 1. / f64::from(c.vignetting_gain((px / half) as f32));
+            assert!((ours - kept).abs() < 0.001, "{rho}: {ours} against {kept}");
+        }
+    }
+    #[test]
+    fn reads_canon_r6_mark_iii_corrections_as_adobe_does() {
+        let d = tempfile::tempdir().unwrap();
+        let p = canon_file(d.path(), "Canon EOS R6 Mark III", &R6III);
+        let m = frame([6959, 4639], [0, 0, 6960, 4640]);
+        let c = super::read(&p, &m).unwrap();
+        let adobe = CanonAdobe {
+            focal: 50.,
+            format_factor: 1.,
+            scale: 0.989001,
+            k: [0.083019, 0.016376, -0.764324],
+            piecewise: &[
+                (0.080435, 0.986326),
+                (0.16087, 0.948236),
+                (0.241305, 0.891466),
+                (0.32174, 0.822122),
+                (0.402282, 0.74765),
+                (0.442446, 0.712245),
+                (0.482717, 0.622024),
+            ],
+            warp: [
+                [
+                    1.0000037075930996,
+                    -4.231126716690595e-06,
+                    2.083027506703311e-05,
+                    1.2193982455706968e-05,
+                ],
+                [
+                    1.0000062828295775,
+                    6.320382627848142e-05,
+                    -7.571489431295625e-05,
+                    -2.270913473936408e-05,
+                ],
+            ],
+            corner: [3492., 2332.],
+        };
+        check_canon(&c, &m, &adobe, 0.15);
+        // Without the correction, halfway to the corner is 15 px out.
+        assert!(canon_profile(&adobe, [6960, 4640], 2091.) < 2091. - 14.);
+    }
+    #[test]
+    fn reads_canon_r5_mark_ii_corrections_as_adobe_does() {
+        let d = tempfile::tempdir().unwrap();
+        let p = canon_file(d.path(), "Canon EOS R5m2", &R5II);
+        let m = frame([8222, 5488], [14, 14, 8192, 5464]);
+        let c = super::read(&p, &m).unwrap();
+        let adobe = CanonAdobe {
+            focal: 135.,
+            format_factor: 1.001926,
+            scale: 0.97803,
+            k: [1.135087, 0.747337, -422.990386],
+            piecewise: &[
+                (0.029741, 0.993529),
+                (0.059481, 0.895373),
+                (0.089222, 0.759858),
+                (0.118962, 0.617385),
+                (0.148742, 0.477353),
+                (0.163593, 0.403736),
+                (0.178483, 0.241485),
+            ],
+            warp: [
+                [
+                    0.9999888454181883,
+                    -0.00010766927304507836,
+                    5.443760114059718e-05,
+                    4.93985093601397e-06,
+                ],
+                [
+                    1.0000122089263515,
+                    7.45386255399043e-05,
+                    -5.82086411194138e-06,
+                    -3.114694366284039e-05,
+                ],
+            ],
+            corner: [4112., 2746.],
+        };
+        // 0.16 px at the corner, where Adobe's ScaleFactor frames 2·10⁻⁵ tighter.
+        check_canon(&c, &m, &adobe, 0.2);
+    }
+    /// Adobe DNG Converter's profiles of copies of IMG_4241.CR3 with edited distortion
+    /// tables: values above 1.0275 count as 1.0275, and a table's change from 1 is
+    /// fitted at 80% of its size.
+    #[test]
+    fn fits_canon_distortion_as_adobe_does() {
+        let d = tempfile::tempdir().unwrap();
+        let m = frame([6959, 4639], [0, 0, 6960, 4640]);
+        // The distortion's values and knots are the sixth and seventh arrays.
+        let (values, knots) = (3 + 5 * 23, 3 + 6 * 23);
+        let knots: [u16; 17] = R6III[knots..knots + 17].try_into().unwrap();
+        for (name, table, k) in [
+            (
+                "a quartic",
+                knots.map(|x| (16384. * (1. + 0.01 * (f64::from(x) / 4543.).powi(4))).round()),
+                [-0.000256, 0.147874, 0.000152],
+            ),
+            (
+                "a spike past the limit",
+                std::array::from_fn(|i| if i == 6 { 18024. } else { 16384. }),
+                [0.531223, -4.283277, 9.71879],
+            ),
+        ] {
+            let mut tables = R6III;
+            for (slot, v) in tables[values..values + 17].iter_mut().zip(table) {
+                *slot = v as u16;
+            }
+            let c =
+                super::read(&canon_file(d.path(), "Canon EOS R6 Mark III", &tables), &m).unwrap();
+            let scale = |px: f64| {
+                let rho = px / 6960f64.hypot(4640.) * 43.2666 / 50.;
+                let r2 = rho * rho;
+                1. + r2 * (k[0] + r2 * (k[1] + r2 * k[2]))
+            };
+            // Both framed to keep the default crop's corner.
+            let corner = 6960f64.hypot(4640.) / 2.;
+            let half = 6959f64.hypot(4639.) / 2.;
+            let ours = |px: f64| f64::from(c.radial_scale((px / half) as f32)[1]);
+            let off = (0..=100)
+                .map(|i| corner * f64::from(i) / 100.)
+                .map(|px| px * (ours(px) / ours(corner) - scale(px) / scale(corner)).abs())
+                .fold(0., f64::max);
+            assert!(off < 0.3, "{name}: {off} px from Adobe's profile");
+        }
+    }
+    /// Adobe applies no camera data for other bodies, although the R50 V stores the
+    /// same record.
+    #[test]
+    fn canon_tables_of_other_bodies_are_not_read() {
+        let d = tempfile::tempdir().unwrap();
+        let m = frame([6959, 4639], [0, 0, 6960, 4640]);
+        let p = canon_file(d.path(), "Canon EOS R50 V", &R6III);
+        assert!(super::read(&p, &m).is_none());
+    }
+    #[test]
+    fn malformed_canon_tables_are_not_read() {
+        let d = tempfile::tempdir().unwrap();
+        let m = frame([6959, 4639], [0, 0, 6960, 4640]);
+        let with = |i: usize, v: u16| {
+            let mut t = R6III;
+            t[i] = v;
+            t
+        };
+        for (name, t) in [
+            ("count past the slots", with(0, 24)),
+            ("single knot", with(2, 1)),
+            ("knots out of order", with(3 + 23 + 5, 9000)),
+        ] {
+            let c = super::read(&canon_file(d.path(), "Canon EOS R6 Mark III", &t), &m);
+            let c = c.unwrap_or_default();
+            let part = match name {
+                "single knot" => c.distortion.is_none(),
+                _ => c.vignetting.is_none(),
+            };
+            assert!(part, "{name}");
+        }
+        // Counts past the slots, of each group: the other groups are still read.
+        for (i, count) in [0, 1, 2].into_iter().flat_map(|i| [(i, 24), (i, u16::MAX)]) {
+            let p = canon_file(d.path(), "Canon EOS R6 Mark III", &with(i, count));
+            let c = super::read(&p, &m).unwrap();
+            let parts = [
+                c.vignetting.is_none(),
+                c.chromatic.is_none(),
+                c.distortion.is_none(),
+            ];
+            assert_eq!(
+                parts,
+                std::array::from_fn(|j| j == i),
+                "count {i} = {count}"
+            );
+        }
+        let short = &R6III[..100];
+        assert!(super::read(&canon_file(d.path(), "Canon EOS R6 Mark III", short), &m).is_none());
     }
     #[test]
     fn unsupported_or_truncated_files_have_no_correction() {
