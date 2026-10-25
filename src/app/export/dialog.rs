@@ -1,9 +1,9 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
-use super::Editor;
+use super::{Editor, Status};
 use crate::app::theme;
 use crate::export_settings::{
-    AfterExport, Destination, Existing, Format, Include, NameContext, Naming,
+    AfterExport, BUILTIN, Destination, Existing, Format, Include, NameContext, Naming, builtin,
 };
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
@@ -37,6 +37,8 @@ impl Editor {
             self.export_dialog(ctx);
         }
         self.watermark_editor(ctx);
+        self.name_editor_window(ctx);
+        self.export_waiting(ctx);
         self.export_report(ctx);
     }
 
@@ -47,12 +49,12 @@ impl Editor {
             self.exports.draft.destination = Destination::Folder;
         }
         // Names and folders are shown for the first photo.
-        let (source, captured, place) = self
+        let (source, fields, place) = self
             .exports
             .scope
             .photos
             .first()
-            .map(|p| (p.source.clone(), p.captured.clone(), p.place))
+            .map(|p| (p.source.clone(), p.fields.clone(), p.place))
             .unwrap_or_default();
         let count = self.exports.scope.photos.len();
         let chosen = self.exports.scope.chosen.max(count);
@@ -60,14 +62,22 @@ impl Editor {
         let at = NameContext {
             index: place,
             total: chosen,
-            captured: captured.as_deref(),
+            fields: &fields,
         };
+        // What the names need from the files is read once they need it
+        // (here, or once the Filename Template Editor adds it); Export waits
+        // for it, and says when it could not be read.
+        let template = self.exports.draft.name_template();
+        self.names_wait(&template);
+        let read = self.names_read_status(&template);
+        let reading = matches!(read, Some(Status::Reading { .. }));
         let left_out = self.exports.scope.left_out.clone();
         // Return is the Export button, as in Lightroom, also from a text field;
         // it is taken before the dialog draws so a focused control does not also
         // act on it. An open menu, or the Edit Watermark window on top, keeps it.
         let mut confirmed = (!egui::Popup::is_any_open(ctx)
             && self.exports.watermark_editor.is_none()
+            && self.exports.name_editor.is_none()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)))
         .then_some(true);
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
@@ -135,7 +145,7 @@ impl Editor {
                     .show(&mut content, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
                         ui.spacing_mut().interact_size.y = 26.;
-                        self.export_sections(ui, &source, &at);
+                        self.export_sections(ui, &source, &at, read.as_ref());
                     });
                 ui.painter().hline(
                     rect.x_range(),
@@ -152,7 +162,18 @@ impl Editor {
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
                 bar.spacing_mut().button_padding = Vec2::new(18., 6.);
-                if primary_button(&mut bar, "Export").clicked() {
+                let export = match &read {
+                    Some(Status::Reading { done, total }) => {
+                        format!("Reading photo info… {done} of {total}")
+                    }
+                    Some(Status::Failed(_)) => "Export without them".into(),
+                    _ => "Export".into(),
+                };
+                if bar
+                    .add_enabled_ui(!reading, |ui| primary_button(ui, &export))
+                    .inner
+                    .clicked()
+                {
                     confirmed = Some(true);
                 }
                 if bar
@@ -176,7 +197,15 @@ impl Editor {
                     });
                 }
             });
-        match confirmed.or(response.should_close().then_some(false)) {
+        // Escape closes one window at a time: a window opened from the
+        // dialog keeps it, also on the frame it opens, while the dialog is
+        // still the top one.
+        let close = self.exports.watermark_editor.is_none()
+            && self.exports.name_editor.is_none()
+            && response.should_close();
+        match confirmed.or(close.then_some(false)) {
+            // Return too waits for the names' files.
+            Some(true) if reading => {}
             Some(true) if self.exports.draft.target(&source).is_none() => {
                 self.status = "Choose a folder to export to".into();
             }
@@ -184,12 +213,21 @@ impl Editor {
                 self.exports.dialog = false;
                 self.export(self.exports.draft.clone());
             }
-            Some(false) => self.exports.dialog = false,
+            Some(false) => {
+                self.exports.dialog = false;
+                self.exports.read.cancel();
+            }
             None => {}
         }
     }
 
-    fn export_sections(&mut self, ui: &mut egui::Ui, source: &Path, example: &NameContext) {
+    fn export_sections(
+        &mut self,
+        ui: &mut egui::Ui,
+        source: &Path,
+        example: &NameContext,
+        read: Option<&Status>,
+    ) {
         let palette = theme::palette(ui.ctx());
         let picking = self.exports.picking.load(Ordering::Relaxed);
         let s = &mut self.exports.draft;
@@ -234,38 +272,88 @@ impl Editor {
         });
 
         section(ui, "File Naming");
-        let mut naming = s.naming();
+        let naming = s.naming();
+        let custom = s.custom_tokens().map(str::to_string);
+        let mut edit_names = false;
         form_row(ui, "Rename To", |ui| {
+            // Lightroom's presets, RAWmakase's own templates, the template
+            // made in the editor, and the editor.
+            let shown = match &custom {
+                Some(tokens) => builtin(tokens).map_or("Custom Settings", |b| b.name),
+                None => naming.label(),
+            };
             egui::ComboBox::from_id_salt("export-naming")
                 .width(220.)
-                .selected_text(naming.label())
+                .selected_text(shown)
                 .show_ui(ui, |ui| {
                     for n in Naming::ALL {
-                        ui.selectable_value(&mut naming, n, n.label());
+                        if ui
+                            .selectable_label(custom.is_none() && naming == n, n.label())
+                            .clicked()
+                        {
+                            s.choose_naming(n);
+                        }
                     }
+                    ui.separator();
+                    for b in &BUILTIN {
+                        if ui
+                            .selectable_label(custom.as_deref() == Some(b.tokens), b.name)
+                            .clicked()
+                        {
+                            s.choose_tokens(b.tokens);
+                        }
+                    }
+                    if custom.as_deref().is_some_and(|t| builtin(t).is_none()) {
+                        let _ = ui.selectable_label(true, "Custom Settings");
+                    }
+                    ui.separator();
+                    edit_names = ui.selectable_label(false, "Edit…").clicked();
                 });
         });
-        // Once chosen, the template is saved as chosen, whatever the older switch said.
-        if naming != s.naming() {
-            s.naming = Some(naming);
-        }
+        let template = s.name_template();
         form_row(ui, "Custom Text", |ui| {
             ui.add_enabled(
-                naming.uses_text(),
+                template.uses_text(),
                 egui::TextEdit::singleline(&mut s.custom_text).desired_width(220.),
             );
         });
         form_row(ui, "Start Number", |ui| {
             ui.add_enabled(
-                naming.uses_sequence(),
+                template.uses_sequence(),
                 egui::DragValue::new(&mut s.start_number).range(0..=999_999),
             );
         });
         form_row(ui, "Example", |ui| {
-            ui.label(
-                egui::RichText::new(s.file_name_for(source, example).0).color(palette.gray(225)),
-            );
+            let (name, notes) = s.file_name_for(source, example);
+            match read {
+                Some(Status::Reading { .. }) => {
+                    ui.label(egui::RichText::new("Reading photo info…").color(palette.gray(150)))
+                }
+                _ => ui.label(egui::RichText::new(name).color(palette.gray(225))),
+            };
+            if let Some(Status::Failed(why)) = read {
+                ui.label(
+                    egui::RichText::new(format!("Photo info could not be read: {why}"))
+                        .size(12.)
+                        .color(Color32::from_rgb(230, 170, 100)),
+                );
+            } else if !notes.is_empty() && !matches!(read, Some(Status::Reading { .. })) {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(notes.join(" · "))
+                            .size(12.)
+                            .color(palette.gray(140)),
+                    )
+                    .truncate(),
+                );
+            }
         });
+        if edit_names {
+            let tokens = custom.as_deref().unwrap_or(naming.tokens()).to_string();
+            self.exports.name_editor = Some(super::name_editor::NameEditor::new(&tokens));
+            return;
+        }
+        let s = &mut self.exports.draft;
         form_row(ui, "Extensions", |ui| {
             egui::ComboBox::from_id_salt("export-case")
                 .width(140.)

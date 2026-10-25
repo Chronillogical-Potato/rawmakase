@@ -39,6 +39,7 @@ mod location;
 pub mod locations;
 mod mask_assets;
 mod models;
+mod naming;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;

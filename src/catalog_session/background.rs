@@ -62,7 +62,7 @@ impl<T> Drop for Reader<T> {
 
 /// Whether the file can be read now: an offline file, one without
 /// permission or a network error is tried again later.
-pub(super) fn can_read(path: &Path) -> bool {
+pub(crate) fn can_read(path: &Path) -> bool {
     use std::io::Read as _;
     std::fs::File::open(path)
         .and_then(|mut f| f.read_exact(&mut [0; 1]))

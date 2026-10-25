@@ -6,7 +6,7 @@
 //! each file goes before anything renders; [`run`] then works out, renders and
 //! writes one photo at a time, so a batch of any size holds one photo's images.
 use super::{Replace, assemble::Values, job};
-use crate::export_settings::{Existing, ExportSettings};
+use crate::export_settings::{Existing, ExportSettings, NameFields};
 use crate::{
     edits::{self, EditRecord, Origin, PhotoRecord},
     model::recipe::Recipe,
@@ -33,8 +33,9 @@ pub struct BatchPhoto {
     pub name: String,
     pub edit: Edit,
     pub values: Values,
-    /// Its capture time, for Date - Filename.
-    pub captured: Option<String>,
+    /// What its name is made from, as read when Export was chosen: the
+    /// Export dialog's Example was made from the same.
+    pub naming: NameFields,
     /// Its place among the photos chosen, and how many were chosen, for the
     /// sequence numbers: a photo left out keeps its number. `None` numbers it by
     /// its place in the batch.
@@ -58,12 +59,17 @@ pub enum Edit {
 }
 
 impl BatchPhoto {
-    /// A photo of the batch from its catalog record.
-    pub fn from_record(record: PhotoRecord, source: PathBuf, name: String) -> Self {
+    /// A photo of the batch from its catalog record, named from `naming`.
+    pub fn from_record(
+        record: PhotoRecord,
+        source: PathBuf,
+        name: String,
+        naming: NameFields,
+    ) -> Self {
         Self {
             source,
             name,
-            captured: Some(record.captured).filter(|c| !c.is_empty()),
+            naming,
             place: None,
             edit: Edit::Catalog(record.edit),
             values: Values {
@@ -100,7 +106,7 @@ pub struct Planned {
     pub target: PathBuf,
     pub write: Write,
     /// What its name has to say, such as a missing capture date.
-    pub note: Option<String>,
+    pub notes: Vec<String>,
 }
 
 /// Where every photo of a batch goes, decided before anything renders.
@@ -232,7 +238,7 @@ pub fn plan(
     // Numbered in the order the photos were chosen, so a photo that fails or is
     // skipped keeps its number and the others theirs.
     let total = photos.len();
-    let (targets, notes): (Vec<PathBuf>, Vec<Option<String>>) = photos
+    let (targets, notes): (Vec<PathBuf>, Vec<Vec<String>>) = photos
         .iter()
         .enumerate()
         .map(|(index, p)| {
@@ -242,7 +248,7 @@ pub fn plan(
                 &crate::export_settings::NameContext {
                     index,
                     total,
-                    captured: p.captured.as_deref(),
+                    fields: &p.naming,
                 },
             )
         })
@@ -270,13 +276,13 @@ pub fn plan(
     let entries = targets
         .into_iter()
         .zip(notes)
-        .map(|(target, note)| {
+        .map(|(target, notes)| {
             if reserved.in_batch(&target) {
                 let target = reserved.unique(&target);
                 return Planned {
                     target,
                     write: Write::Create,
-                    note,
+                    notes,
                 };
             }
             if !reserved.on_disk(&target) {
@@ -284,7 +290,7 @@ pub fn plan(
                 return Planned {
                     target,
                     write: Write::Create,
-                    note,
+                    notes,
                 };
             }
             match choice {
@@ -296,18 +302,18 @@ pub fn plan(
                     Planned {
                         target,
                         write: Write::Overwrite,
-                        note,
+                        notes,
                     }
                 }
                 Existing::Unique => Planned {
                     target: reserved.unique(&target),
                     write: Write::Create,
-                    note,
+                    notes,
                 },
                 Existing::Skip | Existing::Ask => Planned {
                     target,
                     write: Write::Skip,
-                    note,
+                    notes,
                 },
             }
         })
@@ -442,7 +448,7 @@ fn export(
 ) -> Outcome {
     let result = (|| -> Result<(PathBuf, Vec<String>), Stop> {
         let (prepared, mut notes) = render(batch, photo, preset, cancel, progress)?;
-        notes.extend(planned.note.clone());
+        notes.extend(planned.notes.iter().cloned());
         if let Some(parent) = planned.target.parent() {
             std::fs::create_dir_all(parent).map_err(anyhow::Error::from)?;
         }

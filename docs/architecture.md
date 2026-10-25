@@ -54,7 +54,7 @@ files should preserve.
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
 | `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts and free space, and a copy's steps; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
-| `export_settings` | Export choices as values: the Export dialog's settings, a photo's saved `ExportOptions`, and the naming templates (`NameTemplate`) exports and renames name files by | `export_settings.rs` |
+| `export_settings` | Export choices as values: the Export dialog's settings, a photo's saved `ExportOptions`, and the naming templates (`NameTemplate`: Lightroom's presets and Filename Template Editor templates, `TokenTemplate`) exports and renames name files by, from the `NameFields` taken once per export | `export_settings.rs`, `export_settings/tokens.rs` |
 | `export` | JPEG, 16-bit TIFF and PNG encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `ids` | Typed catalog row ids (`PhotoId`, `FolderId`, `RootId`, `CollectionId`), stored and serialized as their integers; a leaf, so edit resolution and export use them below the catalog | `ids.rs` |
 | `metadata` | Photo metadata as values: descriptive fields (title, caption, copyright, creator, capture, location), keywords and camera settings; depends on nothing else | `metadata.rs` |
@@ -128,6 +128,13 @@ The single-slot mailbox replaces pending work. The app discards obsolete results
 and a failure only finishes its owning task. Worker messages use named fields;
 render stages are enums, independent of user-facing status text. Exports capture
 their recipe before starting, and overwrite confirmation holds the current photo.
+Choosing what to export commits Library typing and reads every chosen photo's
+name fields from the catalog in one snapshot; what only the files have (the
+camera's make and model, and a photo without a catalog's capture time and info)
+is read by one background read per scope, started only when the file-name
+template needs it. The dialog's Example and the planned names both come from
+these fields; a read of a replaced or cancelled scope is dropped, and Export
+waits for, or says it goes on without, what its names need.
 
 Document reset clears its edit history and decoded images together; a catalog
 photo's History then comes back from the catalog with its edit. A frame's

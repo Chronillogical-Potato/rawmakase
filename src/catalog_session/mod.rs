@@ -9,6 +9,9 @@ use crate::catalog::{
     Catalog, CatalogLocation, Collection, CollectionId, Folder, FolderId, Photo, PhotoId, RootId,
 };
 use anyhow::Result;
+/// A file's photo info as the catalog reads it for photos added from
+/// folders; export names read a photo's without a catalog the same way.
+pub(crate) use backfill::read_info as file_photo_info;
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};

@@ -720,6 +720,24 @@ mod tests {
         file
     }
 
+    /// Export names take the model the file writes, as Lightroom's Model
+    /// token does; the camera's identity keeps RAWmakase's name.
+    #[test]
+    fn the_file_names_its_camera_as_it_writes_it() {
+        let file = cr3(true);
+        assert_eq!(
+            crate::file_camera_names(&file).unwrap(),
+            crate::FileNames {
+                make: "Canon".into(),
+                model: "Canon EOS R6m2".into(),
+            }
+        );
+        assert_eq!(crate::open(&file).unwrap().model, "EOS R6 Mark II");
+        assert_eq!(crate::maker_name("SONY"), "Sony");
+        assert_eq!(crate::maker_name(" NIKON CORPORATION "), "Nikon");
+        assert_eq!(crate::maker_name("Acme Optics"), "Acme Optics");
+    }
+
     #[test]
     fn reads_the_header_facts_and_the_sensor_data() {
         let file = cr3(true);

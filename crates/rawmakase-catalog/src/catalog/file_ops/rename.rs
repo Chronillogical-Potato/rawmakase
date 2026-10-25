@@ -23,7 +23,7 @@ use super::disk::parent;
 use super::names::{FileName, Stem};
 use super::plan::{Family, Files, Item, PhotoRow, refuse_twice};
 use super::{FileOp, FileOpError, Plan, Refusal, Skip, Skipped};
-use crate::export_settings::{NameContext, NameTemplate};
+use crate::export_settings::{NameContext, NameFields, NameTemplate};
 use crate::storage::fsops::{self, FileId, FsError};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -487,12 +487,14 @@ pub fn rename_preview(
     let mut rows = Vec::new();
     let mut renames = Vec::new();
     for (index, o) in order.0.iter().enumerate() {
+        let fields = NameFields::captured(o.captured.clone());
         let at = NameContext {
             index,
             total,
-            captured: o.captured.as_deref(),
+            fields: &fields,
         };
-        let (stem, note) = template.stem(Path::new(&o.filename), &at);
+        let (stem, notes) = template.stem(Path::new(&o.filename), &at);
+        let note = (!notes.is_empty()).then(|| notes.join("; "));
         let new = match Path::new(&o.filename).extension() {
             Some(extension) => format!("{stem}.{}", extension.to_string_lossy()),
             None => stem.clone(),

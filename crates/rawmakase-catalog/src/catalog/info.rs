@@ -7,6 +7,39 @@ use super::{Catalog, PhotoId};
 use crate::metadata::PhotoInfo;
 use anyhow::Result;
 
+/// Photo `id`'s info; a virtual copy has its master's.
+pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<Option<PhotoInfo>> {
+    row! {
+        struct Info {
+            camera: Option<String>,
+            lens: Option<String>,
+            focal: Option<f64>,
+            aperture: Option<f64>,
+            exposure: Option<f64>,
+            iso: Option<f64>,
+            width: Option<u32>,
+            height: Option<u32>,
+        }
+    }
+    let info: Option<Info> = db.read_optional(
+        sql!(
+            "SELECT camera, lens, focal, aperture, exposure, iso, width, height
+             FROM photo_info
+             WHERE photo = (SELECT COALESCE(master_id, id) FROM photos WHERE id = ?)"
+        ),
+        &[&id],
+    )?;
+    Ok(info.map(|i| PhotoInfo {
+        camera: i.camera,
+        lens: i.lens,
+        focal: i.focal,
+        aperture: i.aperture,
+        exposure: i.exposure,
+        iso: i.iso,
+        dimensions: i.width.zip(i.height),
+    }))
+}
+
 /// Set in `meta` once photo info has been copied from the stored catalog.
 pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 /// The PNGs whose files are read once more, because their info was stored
@@ -40,35 +73,7 @@ impl Catalog {
     }
     /// A photo's info; a virtual copy has its master's.
     pub fn photo_info(&self, id: PhotoId) -> Result<Option<PhotoInfo>> {
-        row! {
-            struct Info {
-                camera: Option<String>,
-                lens: Option<String>,
-                focal: Option<f64>,
-                aperture: Option<f64>,
-                exposure: Option<f64>,
-                iso: Option<f64>,
-                width: Option<u32>,
-                height: Option<u32>,
-            }
-        }
-        let info: Option<Info> = self.db.read_optional(
-            sql!(
-                "SELECT camera, lens, focal, aperture, exposure, iso, width, height
-                 FROM photo_info
-                 WHERE photo = (SELECT COALESCE(master_id, id) FROM photos WHERE id = ?)"
-            ),
-            &[&id],
-        )?;
-        Ok(info.map(|i| PhotoInfo {
-            camera: i.camera,
-            lens: i.lens,
-            focal: i.focal,
-            aperture: i.aperture,
-            exposure: i.exposure,
-            iso: i.iso,
-            dimensions: i.width.zip(i.height),
-        }))
+        read(&self.db, id)
     }
     /// The cameras the catalog's photos were taken with, as photo info names
     /// them, in alphabetical order.

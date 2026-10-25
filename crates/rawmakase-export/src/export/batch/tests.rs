@@ -12,7 +12,7 @@ fn photo(source: &Path) -> BatchPhoto {
         name: source.file_name().unwrap().to_string_lossy().into(),
         edit: Edit::Catalog(Default::default()),
         values: Default::default(),
-        captured: None,
+        naming: Default::default(),
         place: None,
     }
 }
@@ -207,10 +207,11 @@ impl Fixture {
             .catalog
             .photo_records(&ids)?
             .into_iter()
+            .zip(self.catalog.name_fields(&ids)?)
             .zip(&self.photos)
-            .map(|(record, (_, path))| {
+            .map(|((record, naming), (_, path))| {
                 let name = path.file_name().unwrap().to_string_lossy().into();
-                BatchPhoto::from_record(record, path.clone(), name)
+                BatchPhoto::from_record(record, path.clone(), name, naming)
             })
             .collect())
     }
@@ -659,8 +660,8 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     );
     // Date - Filename: the capture date, or "undated" with a note, never the file's
     // modified date.
-    photos[0].captured = Some("2026-05-04 10:21:33.000".into());
-    photos[2].captured = None;
+    photos[0].naming.captured = Some("2026-05-04 10:21:33.000".into());
+    photos[2].naming.captured = None;
     let photos = vec![photos[0].clone(), photos[2].clone()];
     let mut s = settings(&f.out().join("dated"));
     s.naming = Some(crate::export_settings::Naming::DateFilename);
@@ -721,4 +722,47 @@ fn exporting_a_jpeg_never_replaces_it() -> Result<()> {
     assert_eq!(std::fs::read(&source)?, original);
     assert_eq!(listing(dir.path()), ["photo-2.jpg", "photo.jpg"]);
     Ok(())
+}
+
+/// A template from the Filename Template Editor names each photo from the
+/// fields taken when Export was chosen, and says what each name lacks.
+#[test]
+fn a_custom_template_names_from_the_fields_taken_at_export() {
+    use crate::export_settings::{CameraNames, NameFields};
+    let d = tempfile::tempdir().unwrap();
+    let mut photos = vec![
+        photo(Path::new("/one/DSC01.ARW")),
+        photo(Path::new("/one/DSC02.ARW")),
+    ];
+    photos[0].naming = NameFields {
+        captured: Some("2026-04-24T18:43:24.000".into()),
+        camera: CameraNames::Read {
+            make: Some("Sony".into()),
+            model: Some("ILCE-7RM6".into()),
+        },
+        ..Default::default()
+    };
+    // The same second, and no camera read: told apart, and said.
+    photos[1].naming = NameFields {
+        captured: Some("2026-04-24T18:43:24.000".into()),
+        ..Default::default()
+    };
+    let mut s = settings(d.path());
+    s.choose_tokens(crate::export_settings::BUILTIN[0].tokens);
+    let plan = plan(&photos, &s, None).unwrap();
+    assert_eq!(
+        names(&plan),
+        [
+            (
+                String::from("2026-04-24 18.43.24 ILCE-7RM6.tif"),
+                Write::Create
+            ),
+            (String::from("2026-04-24 18.43.24.tif"), Write::Create),
+        ]
+    );
+    assert!(plan.entries[0].notes.is_empty());
+    assert_eq!(
+        plan.entries[1].notes,
+        ["the camera's make and model were not read"]
+    );
 }

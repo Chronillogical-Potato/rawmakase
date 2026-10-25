@@ -45,6 +45,30 @@ pub fn open(bytes: &[u8]) -> Result<RawInfo> {
     variant::open(bytes)
 }
 
+/// A camera's make and model as its file writes them, before RAWmakase's
+/// naming: "Canon" and "Canon EOS R6m2" where [`RawInfo`] says "Canon" and
+/// "EOS R6 Mark II".
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileNames {
+    pub make: String,
+    pub model: String,
+}
+
+/// The make and model the RAW file in `bytes` writes, from its header.
+pub fn file_camera_names(bytes: &[u8]) -> Result<FileNames> {
+    let info = open(bytes)?;
+    Ok(FileNames {
+        make: info.file_make,
+        model: info.file_model,
+    })
+}
+
+/// The maker a file's make names, as RAWmakase spells it ("SONY" is
+/// "Sony", "NIKON CORPORATION" "Nikon"); another maker's name, trimmed.
+pub fn maker_name(file_make: &str) -> String {
+    names::make(file_make)
+}
+
 /// The embedded preview of the file `info` was read from, JPEG or JPEG XL
 /// ([`is_jpeg_xl`] tells which; a JPEG is copied when its start of image
 /// marker needs mending).

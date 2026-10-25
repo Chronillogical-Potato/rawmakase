@@ -99,6 +99,12 @@ fn strip_suffix(model: &str, canon: bool) -> &str {
 /// maker, the model without its prefix, the body a regional name is, and the
 /// canonical name.
 pub(crate) fn apply(info: &mut RawInfo) {
+    // The first naming sees the file's own names; a container that names
+    // its camera again (3FR) names it from RAWmakase's.
+    if info.file_make.is_empty() && info.file_model.is_empty() {
+        info.file_make = info.make.trim().to_string();
+        info.file_model = info.model.trim().to_string();
+    }
     let file_make = std::mem::take(&mut info.make);
     info.make = make(&file_make);
     // Ricoh Imaging's Pentax bodies are Pentax's.
