@@ -159,8 +159,15 @@ fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
         // three X100F photos match Camera Raw at exponent 0.85 (+0.08 EV at 1).
         .and_then(|v| pairs(&v, &|p| (100. / p).powf(FUJI_VIGNETTE_STRENGTH)))
         .filter(|r| r.values.iter().any(|v| (v - 1.).abs() > 1e-4));
+    // Scaled, as Adobe's warps of it are, so that its widest ratio is 1: the table
+    // carries no fill scale of its own (X-Pro2: Adobe's k₀ 0.99042, 1 / 1.0098 here).
     let distortion = distortion
         .and_then(|v| pairs(&v, &|p| 1. + p / 100.))
+        .map(|mut r| {
+            let widest = r.values.iter().copied().fold(1f32, f32::max);
+            r.values.iter_mut().for_each(|v| *v /= widest);
+            r
+        })
         .filter(|r| r.values.iter().any(|v| (v - 1.).abs() > 1e-6));
     // [scale, n knots, n red, n blue]
     let chromatic = chromatic.and_then(|v| {
@@ -1433,6 +1440,23 @@ mod tests {
         let gain = |p: f32| (100. / p).powf(super::FUJI_VIGNETTE_STRENGTH);
         assert!((v.eval(1.) - gain(60.4)).abs() < 1e-4);
         assert!((v.eval(0.85) - (gain(75.8) + gain(68.3)) / 2.).abs() < 1e-4);
+        // A pincushion correction is scaled so its corner samples the corner, as Adobe
+        // frames it, since the table has no fill scale.
+        let mut dist = vec![327.7];
+        dist.extend(&knots);
+        dist.extend((0..=10).map(|i| 0.98 * (i as f64 / 10.).powi(2)));
+        let fuji = tiff(&[
+            vec![(0xf000, 13, 1, vec![0; 4])],
+            vec![(0xf00b, 10, 23, rationals(&dist))],
+        ]);
+        let mut raf = b"FUJIFILMCCD-RAW 0201FF383501".to_vec();
+        raf.resize(128, 0);
+        raf[100..104].copy_from_slice(&128u32.to_be_bytes());
+        raf.extend(fuji);
+        std::fs::write(&p, raf).unwrap();
+        let d = read(&p).unwrap().distortion.unwrap();
+        assert!((d.eval(1.) - 1.).abs() < 1e-6);
+        assert!((d.eval(0.) - 1. / 1.0098).abs() < 1e-5, "{}", d.eval(0.));
     }
     /// Little-endian directory of `entries` (tag, type, count, data) at `at`, as a
     /// file's or maker note's offsets count; the data follows it.
