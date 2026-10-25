@@ -48,8 +48,8 @@ matrix-derived `pre_mul` (LibRaw's); `cameras::neutral_calibration` applies the 
 missing or invalid preset, or a camera without a row, keeps identity rather than
 borrowing another unit's correction, and there is no make-wide fallback.
 
-Evidence (Adobe DNG Converter 18.7, 2026-10-14): 683 samples, 465 public
-raw.pixls.us files and 218 anonymous local ones, including bodies of the same
+Evidence (Adobe DNG Converter 18.7, 2026-10-14 to 2026-10-24): 689 samples, 465 public
+raw.pixls.us files and 224 anonymous local ones, including bodies of the same
 model identified by serial number. For 61 models, bodies with different
 calibrations reproduce Adobe's four-decimal values exactly from one integer
 reference: 24 Sony and 31 Canon models with the Daylight preset, 3 Canon models
