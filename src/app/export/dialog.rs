@@ -63,7 +63,13 @@ impl Editor {
             captured: captured.as_deref(),
         };
         let left_out = self.exports.scope.left_out.clone();
-        let mut confirmed = None;
+        // Return is the Export button, as in Lightroom, also from a text field;
+        // it is taken before the dialog draws so a focused control does not also
+        // act on it. An open menu, or the Edit Watermark window on top, keeps it.
+        let mut confirmed = (!egui::Popup::is_any_open(ctx)
+            && self.exports.watermark_editor.is_none()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)))
+        .then_some(true);
         let response = egui::Modal::new(egui::Id::new("export-dialog"))
             .backdrop_color(Color32::from_black_alpha(140))
             .frame(modal_frame(&palette))
