@@ -259,3 +259,55 @@ fn a_cmyk_jpeg_is_exported_and_fails_with_why() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// Return is the Export button, as in Lightroom, but not while the Edit
+/// Watermark window, opened from the dialog, is on top of it.
+#[test]
+fn return_exports_from_the_dialog() -> anyhow::Result<()> {
+    let (_dir, mut e, ids, ctx) = editor()?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let return_key = |e: &mut Editor| {
+        let key = |pressed| egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [vec![key(true), key(false)], vec![]] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| e.export_windows(ui.ctx()),
+            );
+            output.textures_delta.clear();
+        }
+    };
+    // No folder chosen: what Export says, and nothing is exported or saved.
+    let open = |e: &mut Editor| {
+        e.exports.scope = e.export_scope().expect("a photo to export");
+        e.exports.draft = ExportSettings {
+            destination: Destination::Folder,
+            folder: None,
+            ..Default::default()
+        };
+        e.exports.dialog = true;
+        e.status.clear();
+    };
+    open(&mut e);
+    e.exports.watermark_editor = Some(super::watermark_editor::WatermarkEditor::new(
+        Default::default(),
+        &ctx,
+    ));
+    return_key(&mut e);
+    assert_eq!(e.status, "");
+    assert!(e.exports.dialog);
+    e.exports.watermark_editor = None;
+    open(&mut e);
+    return_key(&mut e);
+    assert_eq!(e.status, "Choose a folder to export to");
+    assert!(e.exports.dialog);
+    Ok(())
+}
