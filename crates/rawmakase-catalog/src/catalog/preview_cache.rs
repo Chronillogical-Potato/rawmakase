@@ -30,7 +30,9 @@ const VERSION: i64 = 1;
 // 8: Coolpix NRW lens tables apply.
 // 9: Samsung's built-in distortion and lateral CA apply, which saved edits of SRWs
 //    render differently.
-const GENERATION: i64 = 9;
+// 10: the EOS R5 Mark II's and R6 Mark III's built-in lens correction, which saved
+//     edits with Enable Profile Corrections on render with.
+const GENERATION: i64 = 10;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -44,7 +46,8 @@ const LIMIT: i64 = 512 * 1024 * 1024;
 // 6: built-in lens corrections, as `GENERATION` 7.
 // 7: Coolpix NRW lens tables, as `GENERATION` 8.
 // 8: Samsung's built-in lens corrections, as `GENERATION` 9.
-const SIZED_GENERATION: i64 = 8;
+// 9: Canon's built-in lens correction, as `GENERATION` 10.
+const SIZED_GENERATION: i64 = 9;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.
