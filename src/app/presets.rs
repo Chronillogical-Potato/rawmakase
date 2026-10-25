@@ -284,21 +284,22 @@ impl Editor {
                                 }
                                 continue;
                             }
-                            if enabled && response.clicked() {
+                            // Control-click opens the menu on macOS, as a right-click does.
+                            if enabled
+                                && response.clicked()
+                                && !super::widgets::context_clicked(&response)
+                            {
                                 clicked = Some(i);
                             }
-                            // Presets made here can be changed, as Lightroom's own.
-                            if user.owns(p) {
-                                response.context_menu(|ui| {
-                                    use super::user_presets::PresetAction;
-                                    if ui.button("Update with Current Settings").clicked() {
-                                        user_action = Some(PresetAction::Update(i));
-                                    }
-                                    if ui.button("Rename…").clicked() {
-                                        user_action = Some(PresetAction::StartRename(i));
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        user_action = Some(PresetAction::Delete(i));
+                            // Presets made here can be changed, as Lightroom's own;
+                            // imported ones renamed or deleted, and any preset file
+                            // shown where it is.
+                            if !p.builtin {
+                                super::widgets::context_menu(&response, |ui| {
+                                    if let Some(action) =
+                                        super::user_presets::preset_menu(ui, &user, p, i)
+                                    {
+                                        user_action = Some(action);
                                     }
                                 });
                             }
