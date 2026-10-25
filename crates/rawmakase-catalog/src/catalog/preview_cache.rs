@@ -27,7 +27,8 @@ const VERSION: i64 = 1;
 //    and Panasonic distortion and CA, Nikon Z, Sony's lateral CA), and correction
 //    the camera always applies ignores the profile amounts while profile corrections
 //    are off, which saved edits of those RAWs render differently.
-const GENERATION: i64 = 7;
+// 8: Coolpix NRW lens tables apply.
+const GENERATION: i64 = 8;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -39,7 +40,8 @@ const LIMIT: i64 = 512 * 1024 * 1024;
 // 4: OpcodeList3 GainMaps, as `GENERATION` 5.
 // 5: Highlights, as `GENERATION` 6.
 // 6: built-in lens corrections, as `GENERATION` 7.
-const SIZED_GENERATION: i64 = 6;
+// 7: Coolpix NRW lens tables, as `GENERATION` 8.
+const SIZED_GENERATION: i64 = 7;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.

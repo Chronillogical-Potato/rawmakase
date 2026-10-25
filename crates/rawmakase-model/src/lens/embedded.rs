@@ -39,6 +39,8 @@
 //!   count of 8 at 0x10: gain 1 + a·v(r), a at 0x60. CA, for red at 0x10 and blue at
 //!   0x34: a count of 3, the coefficients and a constant e, the channel's scale over
 //!   green's at r being 1 + e + c(r). The centre: x and y in pixels from the image's.
+//!   A Coolpix NRW's NEFInfo holds tables in records 2 and 3 instead
+//!   (`coolpix_tables`).
 //!
 //! The Fujifilm vignetting agrees with the FixVignetteRadial opcode Adobe writes into
 //! DNGs of the same file to within 1%, and the Olympus and Panasonic distortion and
@@ -581,11 +583,13 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         (dir.get(&tag).and_then(|e| n.raw(e))).filter(|b| b.len() >= len && b.starts_with(b"0100"))
     };
     let (d, v, ca, centre) = (
-        record(5, 0x48)?,
+        record(5, 0x48),
         record(6, 0x68),
         record(7, 0x58),
         record(8, 0x14),
     );
+    // Coolpix NRW files hold tables in records 2 and 3 instead.
+    let coolpix = (record(2, 8 + 8 * 17), record(3, 8 + 8 * 34));
     let little = n.little;
     let int = |b: &[u8], at: usize| {
         let c = b.get(at..at + 4)?.try_into().ok()?;
@@ -607,6 +611,12 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         (0..n as usize)
             .map(|i| rational(b, at + 4 + 8 * i))
             .collect()
+    };
+    let Some(d) = d else {
+        let (Some(distortion), Some(ca)) = coolpix else {
+            return None;
+        };
+        return coolpix_tables(&distortion, &ca, m, &rational);
     };
     // Bit 0 of the mode is the camera's Auto Distortion Control, bit 1 a lens that
     // needs the correction. Adobe applies nothing, not even vignetting, without the
@@ -661,6 +671,80 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         // Adobe writes a lens that needs it as its DNGs' opcodes, which always apply.
         default_on: mode & 2 != 0,
         vignetting,
+        distortion,
+        chromatic,
+        gain_map: None,
+    })
+}
+
+/// Red's and blue's displacement from green in a Coolpix CA table, as a fraction of
+/// the half diagonal: measured against Adobe's warps of the P950, P1000 and P1100,
+/// where it is the same to within 1% (`docs/lens-corrections.md`).
+const COOLPIX_CA_UNIT: f64 = 1. / 3792.;
+
+/// A Coolpix NRW's tables (P950, P1000, P1100): record 2, after "0100" and the
+/// header bytes 3 3 17 1, holds 17 rationals, the distortion in percent at radii
+/// spread evenly from the centre to the default crop's corner (green's source radius
+/// over the output radius is 1 + d/100, through a natural spline); record 3, after
+/// 3 34 1 0, red's and then blue's displacement from green at the same radii, 17
+/// each. The A1000's record 2 has another header and is not read.
+fn coolpix_tables(
+    distortion: &[u8],
+    ca: &[u8],
+    m: &Metadata,
+    rational: &dyn Fn(&[u8], usize) -> Option<f64>,
+) -> Option<LensCorrection> {
+    let table = |b: &[u8], header: [u8; 4], n: usize| -> Option<Vec<f64>> {
+        if b.get(4..8)? != header {
+            return None;
+        }
+        (0..n).map(|i| rational(b, 8 + 8 * i)).collect()
+    };
+    let d: Vec<f64> = table(distortion, [3, 3, 17, 1], 17)?
+        .iter()
+        .map(|d| 1. + d / 100.)
+        .collect();
+    let ca = table(ca, [3, 34, 1, 0], 34);
+    let (w, h) = match (m.crop_width, m.crop_height) {
+        (0, _) | (_, 0) => (m.width, m.height),
+        size => size,
+    };
+    let unit = f64::from(w).hypot(f64::from(h)) * 0.5;
+    let half = f64::from(m.width).hypot(f64::from(m.height)) * 0.5;
+    if !(half > 0. && unit > 0.) {
+        return None;
+    }
+    let curve = |f: &dyn Fn(f64) -> f64| {
+        let values = knots()
+            .into_iter()
+            .map(|r| f(f64::from(r) * half / unit) as f32);
+        Radial::new(knots(), values.collect())
+    };
+    let ratio = spline(&d);
+    // Scaled, as Adobe's warp is, so the widest ratio out to the corner is 1.
+    let widest = (0..=64)
+        .map(|i| ratio(f64::from(i) / 64.))
+        .fold(1., f64::max);
+    let changes = |r: &Radial, by: f32| r.values.iter().any(|v| (v - 1.).abs() > by);
+    let distortion = curve(&|q| ratio(q) / widest).filter(|r| changes(r, 1e-6));
+    // A displacement at green's source radius, as a scale of it at the output radius.
+    let chromatic = ca
+        .and_then(|ca| {
+            let plane = |t: &[f64]| {
+                let shift = spline(t);
+                curve(&|q| {
+                    let q = q.max(1. / 64.);
+                    1. + shift(q) * COOLPIX_CA_UNIT / (q * ratio(q))
+                })
+            };
+            Some([plane(&ca[..17])?, plane(&ca[17..])?])
+        })
+        .filter(|[a, b]| changes(a, 1e-7) || changes(b, 1e-7));
+    Some(LensCorrection {
+        source: "Nikon built-in".into(),
+        // Adobe writes them as its DNGs' opcodes, which always apply.
+        default_on: true,
+        vignetting: None,
         distortion,
         chromatic,
         gain_map: None,
@@ -1398,6 +1482,87 @@ mod tests {
             ],
             vec![(0xc7d5, 7, info.len() as u32, info)],
         ])
+    }
+    /// DSCN0173.NRW (raw.pixls.us, COOLPIX P1100): NEFInfo records 2 and 3.
+    const P1100: [&str; 2] = [
+        "30 31 30 30 03 03 11 01 00 00 00 00 a0 86 01 00 96 03 00 00 a0 86 01 00 58 0e 00 00
+         a0 86 01 00 4c 20 00 00 a0 86 01 00 77 39 00 00 a0 86 01 00 e3 59 00 00 a0 86 01 00
+         9d 81 00 00 a0 86 01 00 b2 b0 00 00 a0 86 01 00 33 e7 00 00 a0 86 01 00 33 25 01 00
+         a0 86 01 00 c7 6a 01 00 a0 86 01 00 06 b8 01 00 a0 86 01 00 06 0d 02 00 a0 86 01 00
+         e1 69 02 00 a0 86 01 00 b0 ce 02 00 a0 86 01 00 8d 3b 03 00 a0 86 01 00 90 b0 03 00
+         a0 86 01 00 00 00 07 91",
+        "30 31 30 30 03 22 01 00 00 00 00 00 64 00 00 00 11 00 00 00 64 00 00 00 23 00 00 00
+         64 00 00 00 34 00 00 00 64 00 00 00 45 00 00 00 64 00 00 00 56 00 00 00 64 00 00 00
+         67 00 00 00 64 00 00 00 78 00 00 00 64 00 00 00 89 00 00 00 64 00 00 00 9a 00 00 00
+         64 00 00 00 aa 00 00 00 64 00 00 00 bb 00 00 00 64 00 00 00 cc 00 00 00 64 00 00 00
+         dd 00 00 00 64 00 00 00 ed 00 00 00 64 00 00 00 ff 00 00 00 64 00 00 00 10 01 00 00
+         64 00 00 00 00 00 00 00 64 00 00 00 08 00 00 00 64 00 00 00 11 00 00 00 64 00 00 00
+         19 00 00 00 64 00 00 00 22 00 00 00 64 00 00 00 2b 00 00 00 64 00 00 00 34 00 00 00
+         64 00 00 00 3d 00 00 00 64 00 00 00 46 00 00 00 64 00 00 00 50 00 00 00 64 00 00 00
+         59 00 00 00 64 00 00 00 63 00 00 00 64 00 00 00 6d 00 00 00 64 00 00 00 77 00 00 00
+         64 00 00 00 80 00 00 00 64 00 00 00 8a 00 00 00 64 00 00 00 93 00 00 00 64 00 00 00
+         00 00 aa 73",
+    ];
+    /// An NRW whose raw SubIFD's NEFInfo holds `records` as its records 2 and 3.
+    fn nrw(records: &[Vec<u8>; 2]) -> Vec<u8> {
+        let entries: Vec<Entry> = [2u16, 3]
+            .into_iter()
+            .zip(records)
+            .map(|(tag, r)| (tag, 7, r.len() as u32, r.clone()))
+            .collect();
+        let mut info = b"Nikon\0\x01\x01\0\0II*\0\x08\0\0\0".to_vec();
+        info.extend(directory(8, &entries));
+        tiff(&[
+            vec![
+                (0x14a, 4, 1, vec![0; 4]),
+                (0x010f, 2, 18, b"NIKON CORPORATION\0".to_vec()),
+            ],
+            vec![(0xc7d5, 7, info.len() as u32, info)],
+        ])
+    }
+    /// Against the warp Adobe DNG Converter 18.7 writes for the P1100 file, radius 1 at
+    /// the 4624 × 3470 image's corner.
+    #[test]
+    fn reads_coolpix_tables_as_adobe_does() {
+        let records = P1100.map(hex);
+        let bytes = nrw(&records);
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.nrw");
+        std::fs::write(&p, bytes).unwrap();
+        let m = frame([4624, 3470], [8, 7, 4608, 3456]);
+        let c = super::read(&p, &m).unwrap();
+        assert!(c.default_on && c.vignetting.is_none());
+        // Only red's CA, past the corner as in Adobe's warp, zooms in at all.
+        assert!(c.fill_scale() > 0.999);
+        let warp = [
+            [
+                0.9770807182516118,
+                0.02199974273005716,
+                0.0017052145920701364,
+                9.575715160584196e-05,
+            ],
+            [
+                0.9763794594830819,
+                0.02202587112403992,
+                0.0016701011495196144,
+                0.00010085923996837375,
+            ],
+            [
+                0.9767193908434475,
+                0.022103375850249615,
+                0.0016335961178098911,
+                0.00010094050312599621,
+            ],
+        ];
+        let unit = 2312f64.hypot(1735.);
+        let off = largest_difference(&c, &m, &|ch, px| adobe(warp[ch], unit, px));
+        assert!(off < 0.75, "{off} px from Adobe's warp");
+        // The A1000's layout (header 3 2 17 1) is not read.
+        let a1000 = P1100[0].replacen("03 03 11 01", "03 02 11 01", 1);
+        let records = [hex(&a1000), records[1].clone()];
+        let bytes = nrw(&records);
+        std::fs::write(&p, bytes).unwrap();
+        assert!(super::read(&p, &m).is_none());
     }
     /// 1-Nikon-Z7-RAW-14bit-uncompressed-L.NEF (raw.pixls.us, Z 7, NIKKOR Z 24-70mm f/4 S
     /// at 56mm f/5.6): a lens that needs the correction (mode 3).
