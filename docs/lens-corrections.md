@@ -7,7 +7,7 @@ Many cameras store per-shot lens corrections in the RAW file. Lightroom applies 
 | Camera | Tables read | Default |
 |---|---|---|
 | Fujifilm RAF | FujiIFD 0xF00B distortion, 0xF00F lateral CA, 0xF010 vignetting | On |
-| Sony ARW | raw SubIFD 0x7032 vignetting, 0x7035 lateral CA, 0x7037 distortion | Off; follows Enable Profile Corrections ([below](#sony-built-in-corrections)) |
+| Sony ARW | raw SubIFD 0x7032 vignetting, 0x7035 lateral CA, 0x7037 distortion | Lateral CA on (and a compact's distortion); the rest with Enable Profile Corrections ([below](#sony-built-in-corrections)) |
 | Olympus and OM System ORF | maker note ImageProcessing 0x150A distortion, 0x150C lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
 | Panasonic RW2 (and Leica RWL) | IFD0 0x0119 distortion, 0x011B lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
 | Nikon NEF (Z bodies) | raw SubIFD 0xC7D5 (NEFInfo): distortion, vignetting, lateral CA | On for lenses that need it; others follow Enable Profile Corrections ([below](#nikon)) |
@@ -18,7 +18,7 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 2. Vignetting gain in linear camera space, evaluated at the source pixel. Shadows, Highlights, Clarity and Texture measure local luminance after this gain.
 3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor. Each sample carries its decoded green-channel position to local tone and Texture maps, which are measured before the geometric remap. CPU and GPU sampling use this same coordinate; the pre-warp position would displace local contrast from the edge that produced it.
 
-The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm, Olympus/OM System, Panasonic, DNG and Nikon lenses that need it; not Sony or Nikon's optional ones). Recipes saved before the field existed lack it and never apply it.
+The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm, Olympus/OM System, Panasonic, DNG, Sony's lateral CA and Nikon lenses that need it; not Nikon's optional ones). Recipes saved before the field existed lack it and never apply it.
 
 ### Reconstructed X-Trans fine detail
 
@@ -86,7 +86,7 @@ Full renders against Lightroom's Adobe Standard exports, encoded sRGB at 1200 px
 | DSCF7845 overall MAE | 0.0426 | 0.0300 |
 | DSCF7845 corner MAE | 0.0546 | 0.0241 |
 
-Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not enable profile corrections by default, and it has not been checked whether it applies Sony's embedded data, so Sony corrections start disabled until a Lightroom reference is available.
+Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not apply Sony's vignetting at all ([below](#sony-built-in-corrections)).
 
 ### Olympus, OM System and Panasonic
 
@@ -123,9 +123,13 @@ Known limits: RAWmakase centres the correction on the image, while Nikon's optic
 
 ### Sony built-in corrections
 
-Status 2026-10-03. Available, not measured. Sony's tables are read and render, but no Lightroom or Camera Raw render has been compared with them alone, and it is still unknown whether Lightroom applies Sony's stored data or only Adobe's own profiles. What is measured for Sony is the [imported Adobe profile](#adobe-lcp-profiles) path, and one unexplained observation under [Remove Chromatic Aberration](#validation--2026-10-01).
+Status 2026-10-25. Adobe DNG Converter 18.7 turns Sony's tables into WarpRectilinear opcodes, which Lightroom always applies, on 74 of 108 raw.pixls.us bodies (one photo each; the others, A-mount DSLRs, most SLT and the first NEX bodies, store no tables):
 
-So the correction is off by default (`default_on` is false), and in the Lens Corrections panel it follows Enable Profile Corrections: ticking the box turns it on, unticking turns it off, and the Profile row names "Sony built-in" when no imported Adobe profile matches. An imported Adobe profile replaces it whenever one matches. A Lightroom edit or preset with `crs:LensProfileEnable` set does what ticking the box does (`Recipe::set_profile_corrections`): it also turns Sony's built-in correction on or off. Without a matching imported Adobe profile the photo renders with Sony's data, which on the FE 55mm F1.8 ZA brightens the corners 1.95× where Adobe's profile does 1.81× (above). The import notice and the panel then say "No matching imported Adobe lens profile for …; using Sony built-in" (`Recipe::missing_lens_profile`), so the stand-in is never silent.
+- **Lateral CA on every body with tables**: E-mount (NEX-5N and later, α, FX, ZV-E), the SLT-A77 and A99, the compacts. The warp's red and blue planes match the tables within 0.25 px at full size on 62 of 66 photos, at most 0.7 px (RX100 II, III and V, ZV-1 II).
+- **Distortion only on the fixed-lens compacts** (RX100 II to VII, RX10 to RX10 IV, RX0, RX0 II, HX95, HX99, ZV-1, ZV-1 II): on every other body the warp's green plane is the identity, and so is it on the RX1 series, whose stored tables would move the corners 65 to 110 px; Adobe corrects that lens with its own profile only. Through a natural cubic spline over the knots, the green warp matches the table within 0.9 px on 13 of 17 compacts and within 2.6 to 6.2 px on the HX95, the RX0 and RX0 II, the RX100 V A and the ZV-1 II, whose curves Adobe's four-term polynomial cannot follow closely (linear interpolation was 1.4 px off on the RX100 III to V and ZV-1).
+- **Vignetting never.**
+
+Camera Raw 18.7 renders of an RX100 IV photo are identical with Enable Profile Corrections off and on. So RAWmakase reads two corrections (`lens::embedded::Builtin`): what Lightroom applies, on by default (`Metadata::lens`), and Sony's whole set of tables (`Metadata::lens_stand_in`), which stands in for an Adobe profile when Enable Profile Corrections is on and no imported one matches (`Recipe::builtin_correction`). The Profile row then names "Sony built-in", and the import notice and the panel say "No matching imported Adobe lens profile for …; using Sony built-in" (`Recipe::missing_lens_profile`), so the stand-in is never silent; on the FE 55mm F1.8 ZA it brightens the corners 1.95× where Adobe's profile does 1.81× (above). An imported Adobe profile replaces both, and a profile with PreferMetadataDistort keeps the distortion of the stand-in. Edits saved before 2026-10-25 with built-in corrections off keep them off, also for the CA. The first RX100, whose distortion Adobe also corrects, stores no SubIFD tables and gets none.
 
 Each table leads with its number of values and is padded with zeros to a fixed 16 (CA: 32) slots; a ZV-1 stores 11 distortion and 22 CA values. A table with non-zero data past its count is rejected. On a ZV-1 photo (#403) the corrected geometry matches the camera's own JPEG: 4,000 matched features keep a constant radius ratio from centre to corner (1.0757–1.0773), where the uncorrected render drifts from 1.075 to 0.924. That constant 1.077 was the fill scale, which treated the table's 1.077 at the centre as zoom to take back and made the corrected photo a tighter crop than the camera's (#531). Sony's built-in correction now has the scale that keeps only the photo's edge inside the sensor (`LensCorrection::fill_scale_within`): the edge of the camera's aspect-ratio crop when there is one, since the camera's 16:9 JPEG is a crop of the 3:2 sensor and samples beyond it. On the ZV-1 that scale is 1, the table's own framing, where the whole-frame fill was 0.928. Fujifilm, DNG (including a Sony DNG's opcodes) and Adobe profiles keep the whole-frame fill. Known limit: widening the crop beyond the camera's can show the sensor's edge smeared in a corner where a table pulls samples past it (the ZV-1's does not); Constrain Crop does not yet know about lens coverage. The crop is the camera crop in `Metadata::camera_crop`, so the framing does not depend on which decoder supplied it.
 
@@ -135,8 +139,8 @@ Which formats Adobe corrects from the camera's own data, from Adobe DNG Converte
 
 | Files | What Adobe applies from the camera's data | RAWmakase |
 |---|---|---|
-| Sony E-mount bodies (NEX-5N and later, α, FX, ZV-E) | Lateral CA only, as a warp whose green plane is the identity; no distortion or vignetting | Reads all three tables, off by default ([above](#sony-built-in-corrections)) |
-| Sony fixed-lens compacts (RX100, RX10, ZV-1, HX95/99, RX0; RX1: CA only) | Distortion and lateral CA | As above |
+| Sony E-mount bodies (NEX-5N and later, α, FX, ZV-E) | Lateral CA only, as a warp whose green plane is the identity; no distortion or vignetting | Applies the CA; the other tables stand in for a profile ([above](#sony-built-in-corrections)) |
+| Sony fixed-lens compacts (RX100, RX10, ZV-1, HX95/99, RX0; RX1: CA only) | Distortion and lateral CA | Applies them (the first RX100 stores no tables) |
 | Sony A-mount DSLRs, most SLT, NEX-3, NEX-5, NEX-C3 | Nothing | — |
 | Canon R5 Mark II and R6 Mark III (CR3, RF lenses) | A "Camera Settings" profile (distortion, piecewise vignetting) and CA as a warp | Not read yet; the data's place in the CR3 is unknown |
 | Canon EOS R, RP, R3, R5, R6, R6 Mark II, R7, R8, R10, R50, R50 V, R100 (RF and EF lenses), EOS DSLRs, EOS M | Nothing | — |
@@ -183,7 +187,7 @@ The same measurement on rendered sRGB output (Adobe Standard, full size) of 13 p
 
 Output-space figures are only comparable with each other: the colour matrix mixes channels, so they differ from the camera-space ones above.
 
-Camera Raw renders with the setting off also show Sony's lateral CA corrected, as RAWmakase does only with built-in corrections on; this was seen on two A7 II photos and has not been investigated further.
+Camera Raw renders with the setting off also show Sony's lateral CA corrected: Lightroom always applies Sony's stored CA ([above](#sony-built-in-corrections)), as RAWmakase now does.
 
 ## Manual distortion
 
@@ -216,7 +220,7 @@ The Fringe Color Selector (the eyedropper at the Defringe heading) reads the sho
 
 ## DNG files
 
-A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` reads FixVignetteRadial from OpcodeList2 and WarpRectilinear from OpcodeList3 (radial terms, per plane, when centred) into the same correction model, enabled by default. It also reads the embedded camera profile (offered as the file's own profile, as in Lightroom), BaselineExposure and DefaultCrop. The Lightroom-made DNG of DSCF7853 renders at 0.020 MAE against Lightroom's export with no imported files, against 0.030 before. GainMap opcodes (used by phone DNGs for lens shading) in OpcodeList1 and 2 are applied while decoding ([RAW decoding](raw-decoding.md)). OpcodeList3's GainMaps, which DJI and Hasselblad drones and the Sigma fp write for their lens shading (gains up to 2.8 in the corners, different per channel), are read into the correction as a gain per channel on a grid (`GainGrid`) and applied with the vignetting while sampling, on the CPU and the GPU, before the warp, at the profile's Vignetting amount. They need to cover the whole image, every row and column; others are not read. On the dataset's two Hasselblad L1D-20c validation photos the default render's median ΔE00 to Camera Raw 18.7 went from 3.82 and 2.95 to 0.37 and 0.59: without it their corners were up to 11 L* too dark.
+A DNG records the corrections Lightroom applies to its raw image. `src/dng.rs` reads FixVignetteRadial from OpcodeList2 and WarpRectilinear from OpcodeList3 (radial terms, per plane, when centred) into the same correction model, enabled by default. It also reads the embedded camera profile (offered as the file's own profile, as in Lightroom), BaselineExposure and DefaultCrop. The Lightroom-made DNG of DSCF7853 renders at 0.020 MAE against Lightroom's export with no imported files, against 0.030 before. GainMap opcodes (used by phone DNGs for lens shading) in OpcodeList1 and 2 are applied while decoding ([RAW decoding](raw-decoding.md)). OpcodeList3's GainMaps, which DJI and Hasselblad drones and the Sigma fp write for their lens shading (gains up to 2.8 in the corners, different per channel), are read into the correction as a gain per channel on a grid (`GainGrid`) and applied with the vignetting while sampling, on the CPU and the GPU, before the warp, in full: like Camera Raw, which renders a file's opcodes whatever the profile amounts, the Vignetting amount does not scale them (`Recipe::lens_amounts`). They need to cover the whole image, every row and column; others are not read. On the dataset's two Hasselblad L1D-20c validation photos the default render's median ΔE00 to Camera Raw 18.7 went from 3.82 and 2.95 to 0.37 and 0.59: without it their corners were up to 11 L* too dark.
 
 ## Adobe LCP profiles
 
@@ -241,7 +245,7 @@ polynomials in different coordinates, zoom/aperture interpolation, sensor format
 frame orientation and CPU/GPU rendering. Optional read-only tests accept a local
 profile through `RAWMAKASE_LCP`; no installed profile data is included in fixtures.
 
-`Recipe::lens_profile` enables it, from `crs:LensProfileEnable`. `lens_distortion` and `lens_vignetting` are the profile's Distortion and Vignetting amounts (`crs:LensProfileDistortionScale` / `VignettingScale`, 0–200%): the distortion's radial scale moves from none at 0 to twice the profile's at 200, and the vignetting gain is raised to the amount (0 none, 200 the gain squared). With an imported profile in use, the profile replaces the built-in correction. Without one, the built-in correction applies when `lens_builtin` is set.
+`Recipe::lens_profile` enables it, from `crs:LensProfileEnable`. `lens_distortion` and `lens_vignetting` are the profile's Distortion and Vignetting amounts (`crs:LensProfileDistortionScale` / `VignettingScale`, 0–200%). They scale a profile: an imported one, or camera data standing in for it (Sony's tables, Nikon's optional profile) while Enable Profile Corrections is on (`Recipe::lens_amounts`). A built-in correction the camera always applies renders in full whatever the amounts and the switch: Camera Raw 18.7 renders a Z 6 NEF and an RX100 IV ARW identically with both amounts at 0, profile corrections off or on, and an X100F RAF identically with them at 0 and profile corrections off: the distortion's radial scale moves from none at 0 to twice the profile's at 200, and the vignetting gain is raised to the amount (0 none, 200 the gain squared). With an imported profile in use, the profile replaces the built-in correction. Without one, the built-in correction applies when `lens_builtin` is set.
 
 ### Choosing a profile
 

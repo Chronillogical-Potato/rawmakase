@@ -210,6 +210,7 @@ impl Raw {
             matrix: h.matrix,
             cam_xyz: h.cam_xyz,
             lens: None,
+            lens_stand_in: None,
             lens_model: h.lens.trim().to_string(),
             lens_id: h.lens_id,
             adobe_names,

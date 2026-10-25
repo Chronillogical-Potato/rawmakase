@@ -44,8 +44,8 @@ impl<'a> LensMap<'a> {
             chromatic,
             center: [w * 0.5, h * 0.5],
             half: (w * w + h * h).sqrt() * 0.5,
-            fill: Self::fill(im, lens, r.lens_distortion),
-            amount: r.lens_distortion,
+            fill: Self::fill(im, lens, r.lens_amounts(&im.metadata)[0]),
+            amount: r.lens_amounts(&im.metadata)[0],
         })
     }
     /// The scale that keeps corrected samples inside the decoded image. Sony's built-in
@@ -289,5 +289,30 @@ mod tests {
             ..correction
         });
         assert_eq!(LensMap::new(&im, &r).unwrap().fill, whole);
+    }
+    /// A correction the camera always applies renders in full whatever profile Distortion
+    /// amount an edit has, with profile corrections off or on (Camera Raw 18.7).
+    #[test]
+    fn profile_amount_scales_only_a_profile() {
+        let mut im = image(0);
+        im.metadata.lens = Some(crate::optics::LensCorrection {
+            source: "Olympus built-in".into(),
+            default_on: true,
+            distortion: Some(crate::optics::Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 0.92],
+            }),
+            ..Default::default()
+        });
+        let mut r = Recipe {
+            lens_distortion: 0.,
+            ..Recipe::default()
+        };
+        assert_eq!(LensMap::new(&im, &r).unwrap().amount, 1.);
+        r.lens_profile = true;
+        assert_eq!(LensMap::new(&im, &r).unwrap().amount, 1.);
+        // Data that stands in for a profile, only with the switch on, takes them.
+        im.metadata.lens.as_mut().unwrap().default_on = false;
+        assert_eq!(LensMap::new(&im, &r).unwrap().amount, 0.);
     }
 }

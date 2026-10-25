@@ -32,14 +32,14 @@ impl<'a> VignetteField<'a> {
                 (
                     VignetteTable::Combined(crate::develop::effects::combined_table(
                         lens,
-                        r.lens_vignetting,
+                        r.lens_amounts(&im.metadata)[1],
                         &manual,
                         half / frame,
                     )),
                     1.,
                 )
             }
-            (Some(lens), None) => (VignetteTable::Lens(lens), r.lens_vignetting),
+            (Some(lens), None) => (VignetteTable::Lens(lens), r.lens_amounts(&im.metadata)[1]),
             (None, None) => return None,
         };
         Some(Self {
@@ -83,7 +83,7 @@ impl<'a> GainField<'a> {
         Some(Self {
             grid: r.lens_correction(&im.metadata)?.gain_map.as_ref()?,
             size: [im.width as f32, im.height as f32],
-            amount: r.lens_vignetting,
+            amount: r.lens_amounts(&im.metadata)[1],
         })
     }
     /// The gain of each channel at sample position `x`, `y` (pixel `i` centred at `i`),

@@ -24,9 +24,17 @@ impl Entry {
         self.distortion.is_some()
             || self.vignette.is_some()
             || (self.red.is_some() && self.blue.is_some())
-            || (self.prefer_metadata_distortion
-                && m.lens.as_ref().is_some_and(|l| l.distortion.is_some()))
+            || (self.prefer_metadata_distortion && camera_distortion(m).is_some())
     }
+}
+
+/// The distortion the camera stores, which a profile with PreferMetadataDistort keeps:
+/// from its fuller data where the file has some (Sony's, of which Lightroom otherwise
+/// applies only the lateral CA).
+fn camera_distortion(m: &Metadata) -> Option<&crate::optics::Radial> {
+    (m.lens_stand_in.as_ref().or(m.lens.as_ref()))?
+        .distortion
+        .as_ref()
 }
 
 fn key(s: &str) -> String {
@@ -240,10 +248,8 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         knots: knots.clone(),
         values: knots.iter().map(|r| f(*r)).collect(),
     };
-    let distortion = match &m.lens {
-        Some(builtin) if first.prefer_metadata_distortion && builtin.distortion.is_some() => {
-            builtin.distortion.clone()
-        }
+    let distortion = match camera_distortion(m) {
+        Some(builtin) if first.prefer_metadata_distortion => Some(builtin.clone()),
         _ => interpolate(
             &found,
             focal,
