@@ -114,6 +114,10 @@ pub(super) struct MaskTool {
     pending: Option<Pending>,
     drag: Drag,
     renaming: Option<Renaming>,
+    /// The mask whose pin, or row in the mask list, the pointer is over, as found
+    /// while they are drawn; each editor frame starts with neither.
+    hovered_pin: Option<usize>,
+    hovered_row: Option<usize>,
 }
 /// A mask's name as it is being typed.
 struct Renaming {
@@ -142,6 +146,8 @@ impl Default for MaskTool {
             pending: None,
             drag: Drag::None,
             renaming: None,
+            hovered_pin: None,
+            hovered_row: None,
         }
     }
 }
@@ -162,10 +168,21 @@ impl MaskTool {
         self.pending = None;
         self.drag = Drag::None;
         self.renaming = None;
+        self.leave();
     }
     /// Ends a drag on the photo where it is: what was painted or moved stays.
     pub(super) fn end_drag(&mut self) {
         self.drag = Drag::None;
+    }
+    /// The mask whose overlay shows while the pointer is over its pin or its row in
+    /// the mask list, as in Lightroom, whether or not Show Overlay is on.
+    pub(super) fn hovered(&self) -> Option<usize> {
+        self.hovered_pin.or(self.hovered_row)
+    }
+    /// Forgets what the pointer was over.
+    pub(super) fn leave(&mut self) {
+        self.hovered_pin = None;
+        self.hovered_row = None;
     }
     /// Shows a mask a selection just made, with its overlay.
     pub(super) fn select_after_selection(&mut self, mask: usize, component: usize) {
@@ -367,6 +384,7 @@ impl Editor {
         };
         let near_pin = |pos: Pos2| pins.iter().find(|(_, p)| p.distance(pos) < 9.).map(|p| p.0);
         let alt = ui.input(|i| i.modifiers.alt);
+        self.view.masking.hovered_pin = pointer.and_then(near_pin);
 
         // An Undo, Redo, History click or Delete while painting or moving a mask ends
         // the drag, the pointer moving or not.
@@ -722,6 +740,7 @@ impl Editor {
         self.selection.end_prompting();
         self.view.masking.pending = None;
         self.view.masking.end_drag();
+        self.view.masking.leave();
         self.view.tool = super::state::Tool::None;
     }
     fn create_row(&mut self, ui: &mut egui::Ui) {
@@ -790,6 +809,9 @@ impl Editor {
                 let width = ui.available_width();
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(width, 24.), Sense::click());
+                if response.hovered() {
+                    self.view.masking.hovered_row = Some(i);
+                }
                 let active = selected == Some(i);
                 ui.painter().rect_filled(
                     rect,
@@ -1441,7 +1463,7 @@ mod tests {
     /// the order the workspace runs them.
     fn frame(e: &mut Editor, events: Vec<egui::Event>) {
         let ctx = e.context.clone();
-        let edit = e.begin_edit_frame();
+        let edit = e.begin_develop_frame();
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 900.))),
@@ -1473,6 +1495,52 @@ mod tests {
             components: vec![MaskComponent::new(MaskShape::Brush { strokes: vec![] })],
             ..Default::default()
         }
+    }
+    #[test]
+    fn hovering_a_masks_row_shows_its_overlay_until_the_row_is_gone() {
+        let mut e = Editor::with_context(
+            &egui::Context::default(),
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
+        e.view.tool = Tool::Mask;
+        e.document.edit.change(None, |r| r.masks.push(mask("Sky")));
+        frame(&mut e, vec![]);
+        assert_eq!(e.overlay(), crate::app::worker::Overlay::None);
+        // Down the panel until the pointer is over the mask's row.
+        let row = (0..90)
+            .map(|k| Pos2::new(100., k as f32 * 10.))
+            .find(|&p| {
+                frame(&mut e, vec![egui::Event::PointerMoved(p)]);
+                e.view.masking.hovered_row.is_some()
+            })
+            .expect("the mask's row");
+        assert!(!e.view.masking.overlay);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        frame(&mut e, vec![egui::Event::PointerMoved(row)]);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        // A command (a dial, the API) changes the edit in a frame that draws
+        // nothing: the hover stays, so the overlay does not go and come back.
+        let ctx = e.context.clone();
+        let edit = e.begin_edit_frame();
+        e.document.edit.recipe_mut().exposure = 0.5;
+        e.finish_edit_frame(edit, &ctx);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        // The panel hidden (Tab, F8): the row is not drawn, nor its hover.
+        let edit = e.begin_develop_frame();
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        e.finish_edit_frame(edit, &ctx);
+        assert_eq!(e.overlay(), crate::app::worker::Overlay::None);
     }
     fn names(e: &Editor) -> Vec<&str> {
         let masks = &e.document.edit.recipe().masks;

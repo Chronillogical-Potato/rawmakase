@@ -1753,6 +1753,22 @@ fn dragging_a_mask_pin_moves_the_mask() {
     });
     frame(&mut editor, vec![]);
     let steps = editor.document.edit.history().steps().0.len();
+    // Over the pin, the mask's overlay shows though Show Overlay is off; it goes when
+    // the pointer leaves.
+    assert!(!editor.view.masking.overlay);
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(Pos2::new(62., 61.))],
+    );
+    assert!(matches!(
+        editor.overlay(),
+        super::worker::Overlay::Mask { index: 0, .. }
+    ));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(Pos2::new(150., 40.))],
+    );
+    assert_eq!(editor.overlay(), super::worker::Overlay::None);
     // The pin sits on the stroke's first dab; dragging it by a tenth of the photo
     // moves every part of the mask with it, as one step.
     let (a, b) = (Pos2::new(60., 60.), Pos2::new(80., 80.));

@@ -105,7 +105,7 @@ impl Editor {
             self.left_develop();
             self.library_workspace(ui, sidebar);
         } else {
-            let mut frame = self.begin_edit_frame();
+            let mut frame = self.begin_develop_frame();
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
