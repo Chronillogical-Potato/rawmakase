@@ -16,7 +16,8 @@ const TILES: usize = 1200;
 /// Shifts smaller than this are not worth correcting, in pixels of a 6000 × 4000 image.
 const MIN_SHIFT: f32 = 0.08;
 
-/// One tile's measurement: radius (fraction of the half diagonal), radius in pixels,
+/// One tile's measurement: radius from the optical centre (fraction of the half
+/// diagonal), radius in pixels,
 /// red and blue shift along the radius in pixels, and weight.
 #[derive(Clone, Copy, Debug)]
 struct Shift {
@@ -28,11 +29,20 @@ struct Shift {
 
 /// Measures `im` once for every image made from the same decode (pyramid levels,
 /// reduced copies), which share its metadata. Renders call this with the decoded
-/// image before sampling, so the measurement never comes from a reduced copy.
+/// image before sampling, so the measurement never comes from a reduced copy. Radii
+/// are measured from the optical centre of the camera's own correction, which lens
+/// corrections are evaluated about, else from the image centre.
 pub fn prime(im: &crate::camera_data::CameraImage) {
-    im.metadata
-        .lateral_ca
-        .get_or_init(|| estimate(&im.pixels, im.width, im.height));
+    let m = &im.metadata;
+    m.lateral_ca
+        .get_or_init(|| estimate(&im.pixels, im.width, im.height, centre(m)));
+}
+/// The optical centre [`prime`] measures about, in fractions of the decoded image: the
+/// camera's own correction's, whether or not an edit applies it, else the image
+/// centre. A measurement applied without lens data is evaluated about it.
+pub fn centre(m: &crate::camera_data::Metadata) -> [f32; 2] {
+    (m.lens.as_ref().or(m.lens_stand_in.as_ref()))
+        .map_or(crate::optics::LensCorrection::image_centre(), |l| l.centre)
 }
 /// The measurement made by [`prime`], if any.
 pub fn measured(im: &crate::camera_data::CameraImage) -> Option<&[Radial; 2]> {
@@ -40,14 +50,21 @@ pub fn measured(im: &crate::camera_data::CameraImage) -> Option<&[Radial; 2]> {
 }
 
 /// Red and blue source-radius scale relative to green, or `None` when the photo shows
-/// no measurable lateral chromatic aberration. `pixels` are linear camera values.
-pub fn estimate(pixels: &[[f32; 3]], width: u32, height: u32) -> Option<[Radial; 2]> {
+/// no measurable lateral chromatic aberration. `pixels` are linear camera values;
+/// radii are measured from `centre`, in fractions of the image's width and height.
+pub fn estimate(
+    pixels: &[[f32; 3]],
+    width: u32,
+    height: u32,
+    centre: [f32; 2],
+) -> Option<[Radial; 2]> {
     let (w, h) = (width as usize, height as usize);
     if w < 64 || h < 64 || pixels.len() != w * h {
         return None;
     }
     let half = ((w * w + h * h) as f32).sqrt() * 0.5;
-    let shifts = measure(pixels, w, h, half);
+    let centre = [centre[0] * w as f32, centre[1] * h as f32];
+    let shifts = measure(pixels, w, h, half, centre);
     let fit = |c: usize| fit_scale(&shifts, c);
     let (red, blue) = (fit(0)?, fit(1)?);
     // Corner tiles are few, so beyond the radius that 80% of the measurements lie
@@ -75,7 +92,7 @@ fn poly(k: &[f32; 3], r: f32) -> f32 {
     k[0] + k[1] * r2 + k[2] * r2 * r2
 }
 
-fn measure(pixels: &[[f32; 3]], w: usize, h: usize, half: f32) -> Vec<Shift> {
+fn measure(pixels: &[[f32; 3]], w: usize, h: usize, half: f32, centre: [f32; 2]) -> Vec<Shift> {
     // Tiles of about 1/90 of the long edge: 64 px on a 6000 px photo.
     let tile = (w.max(h) / 90).clamp(24, 64);
     let margin = (SEARCH as f32 * w.max(h) as f32 / 6000.).ceil() as usize + 3;
@@ -90,7 +107,7 @@ fn measure(pixels: &[[f32; 3]], w: usize, h: usize, half: f32) -> Vec<Shift> {
             || [0.; 3],
             |a, b| [a[0].max(b[0]), a[1].max(b[1]), a[2].max(b[2])],
         );
-    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    let [cx, cy] = centre;
     // A very narrow image has no room for a tile inside the search margin.
     let rows = h.saturating_sub(2 * margin) / tile;
     let columns = w.saturating_sub(2 * margin) / tile;
@@ -171,7 +188,7 @@ struct Window<'a> {
     x0: usize,
     y0: usize,
     size: usize,
-    /// Unit vector pointing away from the image centre.
+    /// Unit vector pointing away from the optical centre.
     u: [f32; 2],
 }
 impl Window<'_> {
@@ -370,9 +387,14 @@ fn fit_scale(shifts: &[Shift], c: usize) -> Option<[f32; 3]> {
 mod tests {
     use super::*;
 
+    const CENTRE: [f32; 2] = [0.5, 0.5];
     /// A grid of soft-edged discs, with red and blue scaled about the centre.
     fn scene(w: u32, h: u32, red: f32, blue: f32) -> Vec<[f32; 3]> {
-        let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+        scene_about(w, h, red, blue, CENTRE)
+    }
+    /// As `scene`, with red and blue scaled about `centre` (fractions of the image).
+    fn scene_about(w: u32, h: u32, red: f32, blue: f32, centre: [f32; 2]) -> Vec<[f32; 3]> {
+        let (cx, cy) = (w as f32 * centre[0], h as f32 * centre[1]);
         let value = |x: f32, y: f32| {
             let (gx, gy) = ((x / 37.).fract() - 0.5, (y / 37.).fract() - 0.5);
             let d = (gx * gx + gy * gy).sqrt() * 37.;
@@ -394,7 +416,22 @@ mod tests {
         let (w, h) = (1500, 1000);
         // Red magnified by 0.08% and blue shrunk by 0.05%: 0.72 and 0.45 px at the corner.
         let px = scene(w, h, 1.0008, 0.9995);
-        let [red, blue] = estimate(&px, w, h).expect("aberration found");
+        let [red, blue] = estimate(&px, w, h, CENTRE).expect("aberration found");
+        for r in [0.3, 0.6, 0.9] {
+            assert!((red.eval(r) - 1.0008).abs() < 0.0001, "{}", red.eval(r));
+            assert!((blue.eval(r) - 0.9995).abs() < 0.0001, "{}", blue.eval(r));
+        }
+    }
+
+    /// Lens corrections are evaluated about the optical centre, so the aberration is
+    /// measured about it too: measured about the image centre, a scale about a centre
+    /// 5% off it looks like a radius-dependent one.
+    #[test]
+    fn measures_about_the_optical_centre() {
+        let (w, h) = (1500, 1000);
+        let centre = [0.45, 0.54];
+        let px = scene_about(w, h, 1.0008, 0.9995, centre);
+        let [red, blue] = estimate(&px, w, h, centre).expect("aberration found");
         for r in [0.3, 0.6, 0.9] {
             assert!((red.eval(r) - 1.0008).abs() < 0.0001, "{}", red.eval(r));
             assert!((blue.eval(r) - 0.9995).abs() < 0.0001, "{}", blue.eval(r));
@@ -404,12 +441,12 @@ mod tests {
     #[test]
     fn narrow_images_have_no_tiles() {
         let (w, h) = (30_000, 64);
-        assert!(estimate(&vec![[0.5; 3]; w * h], w as u32, h as u32).is_none());
+        assert!(estimate(&vec![[0.5; 3]; w * h], w as u32, h as u32, CENTRE).is_none());
     }
 
     #[test]
     fn finds_nothing_in_a_corrected_scene() {
         let (w, h) = (1500, 1000);
-        assert!(estimate(&scene(w, h, 1., 1.), w, h).is_none());
+        assert!(estimate(&scene(w, h, 1., 1.), w, h, CENTRE).is_none());
     }
 }

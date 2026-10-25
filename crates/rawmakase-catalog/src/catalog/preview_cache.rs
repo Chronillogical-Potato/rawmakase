@@ -32,7 +32,10 @@ const VERSION: i64 = 1;
 //    render differently.
 // 10: the EOS R5 Mark II's and R6 Mark III's built-in lens correction, which saved
 //     edits with Enable Profile Corrections on render with.
-const GENERATION: i64 = 10;
+// 11: lens corrections are centred on their optical centre and framed by green's
+//     samples for the photo's edge (Nikon Z, Olympus, OM System, Samsung, DNG
+//     opcodes, Adobe profiles).
+const GENERATION: i64 = 11;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -47,7 +50,8 @@ const LIMIT: i64 = 512 * 1024 * 1024;
 // 7: Coolpix NRW lens tables, as `GENERATION` 8.
 // 8: Samsung's built-in lens corrections, as `GENERATION` 9.
 // 9: Canon's built-in lens correction, as `GENERATION` 10.
-const SIZED_GENERATION: i64 = 9;
+// 10: optical centres and framing, as `GENERATION` 11.
+const SIZED_GENERATION: i64 = 10;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.

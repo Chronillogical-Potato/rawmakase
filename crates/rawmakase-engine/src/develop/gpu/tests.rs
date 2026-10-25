@@ -785,6 +785,12 @@ fn check_presented_previews(w: u32, h: u32, ca_only: bool) -> Result<()> {
                     .flat_map(|i| [1. + i as f32 * 0.05, 1.1, 1.3 - i as f32 * 0.02])
                     .collect(),
             }),
+            // Off the image centre, as Nikon's and DNG opcodes' centres are. This image's
+            // three-pixel stripes, with colour noise reduction and sharpening, turn the
+            // GPU's rounding of sample positions (a few ulps, 4e-5 px at x = 144) into
+            // up to 7 levels at single pixels for some centres left of the middle (0.46,
+            // 0.47), where the samples themselves agree within 2e-5.
+            centre: [0.53, 0.47],
             ..Default::default()
         }),
         wb: [2.02, 1., 1.89],

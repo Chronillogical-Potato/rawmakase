@@ -2,7 +2,8 @@
 //! from the file, an imported profile, and the profiles a photo can choose from.
 //! Matching them to a photo and evaluating their correction is `lens::lcp`'s.
 //!
-//! Model: with x, y the offset from the image centre in units of FocalLengthX × the
+//! Model: with x, y the offset from the optical centre (ImageXCenter, ImageYCenter:
+//! fractions of the image's width and height) in units of FocalLengthX × the
 //! long edge (FocalLength × SensorFormatFactor / 36 when not given), r² = x² + y²,
 //! distortion maps ideal to observed radius by 1 + k1 r² + k2 r⁴ + k3 r⁶, vignetting
 //! darkens by 1 + a1 r² + a2 r⁴ + a3 r⁶, and the red/blue chromatic models scale the
@@ -54,6 +55,9 @@ pub struct Entry {
     pub(crate) vignette: Option<RadialModel>,
     pub(crate) red: Option<Chromatic>,
     pub(crate) blue: Option<Chromatic>,
+    /// PerspectiveModel's optical centre (ImageXCenter, ImageYCenter), in fractions of
+    /// the profiled image's width and height.
+    pub(crate) centre: Option<[f32; 2]>,
 }
 
 fn attr(node: roxmltree::Node, name: &str) -> Option<String> {
@@ -157,6 +161,9 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
                 .and_then(|v| radial_model(v, "VignetteModelParam")),
             red: chromatic("ChromaticRedGreenModel"),
             blue: chromatic("ChromaticBlueGreenModel"),
+            centre: perspective
+                .and_then(|p| Some([number(p, "ImageXCenter")?, number(p, "ImageYCenter")?]))
+                .filter(|c| c.iter().all(|v| (0.25..=0.75).contains(v))),
         });
     }
     ensure!(

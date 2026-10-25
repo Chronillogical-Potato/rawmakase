@@ -684,6 +684,7 @@ mod tests {
             }),
             chromatic: None,
             gain_map: None,
+            ..Default::default()
         });
         let r = Recipe::for_metadata(&im.metadata);
         assert!(r.lens_correction(&im.metadata).is_some());
