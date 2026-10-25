@@ -28,7 +28,9 @@ const VERSION: i64 = 1;
 //    the camera always applies ignores the profile amounts while profile corrections
 //    are off, which saved edits of those RAWs render differently.
 // 8: Coolpix NRW lens tables apply.
-const GENERATION: i64 = 8;
+// 9: Samsung's built-in distortion and lateral CA apply, which saved edits of SRWs
+//    render differently.
+const GENERATION: i64 = 9;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
 // 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
@@ -41,7 +43,8 @@ const LIMIT: i64 = 512 * 1024 * 1024;
 // 5: Highlights, as `GENERATION` 6.
 // 6: built-in lens corrections, as `GENERATION` 7.
 // 7: Coolpix NRW lens tables, as `GENERATION` 8.
-const SIZED_GENERATION: i64 = 7;
+// 8: Samsung's built-in lens corrections, as `GENERATION` 9.
+const SIZED_GENERATION: i64 = 8;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.

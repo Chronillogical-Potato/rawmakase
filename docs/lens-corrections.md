@@ -12,6 +12,7 @@ Many cameras store per-shot lens corrections in the RAW file. Lightroom applies 
 | Panasonic RW2 (and Leica RWL) | IFD0 0x0119 distortion, 0x011B lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
 | Nikon NEF (Z bodies) | raw SubIFD 0xC7D5 (NEFInfo): distortion, vignetting, lateral CA | On for lenses that need it; others follow Enable Profile Corrections ([below](#nikon)) |
 | Nikon Coolpix NRW (P950, P1000, P1100) | raw SubIFD 0xC7D5 (NEFInfo): distortion and lateral CA tables | On ([below](#nikon-coolpix)) |
+| Samsung SRW (NX200 and later, NX mini, Galaxy NX, EX2F) | maker note 0xA050 distortion, 0xA051 lateral CA | On ([below](#samsung)) |
 
 Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
@@ -19,7 +20,7 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 2. Vignetting gain in linear camera space, evaluated at the source pixel. Shadows, Highlights, Clarity and Texture measure local luminance after this gain.
 3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor. Each sample carries its decoded green-channel position to local tone and Texture maps, which are measured before the geometric remap. CPU and GPU sampling use this same coordinate; the pre-warp position would displace local contrast from the edge that produced it.
 
-The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm, Olympus/OM System, Panasonic, DNG, Sony's lateral CA and Nikon lenses that need it; not Nikon's optional ones). Recipes saved before the field existed lack it and never apply it.
+The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm, Olympus/OM System, Panasonic, Samsung, DNG, Sony's lateral CA and Nikon lenses that need it; not Nikon's optional ones). Recipes saved before the field existed lack it and never apply it.
 
 ### Reconstructed X-Trans fine detail
 
@@ -131,6 +132,25 @@ The Coolpix P950, P1000 and P1100 store tables in records 2 and 3 of the same NE
 
 Against Adobe's warps of one photo per body, the green plane matches within 0.55 px (P1000), 0.8 px (P1100) and 1.2 px (P950), and the test checks the P1100's records against its warp within 0.7 px on all three planes. Record 4 holds a vignetting table, which Adobe does not apply. The A1000 writes record 2 with another header (3 2 17 1) and 15 values, which do not fit Adobe's warp of its single sample photo, so it is not read; older Coolpix NRW files (P7000–P7800, P330/P340) get nothing from Adobe either.
 
+### Samsung
+
+Samsung SRW files store the camera's distortion and lateral CA models in the maker note: Distortion (0xA050, eight signed longs) and ChromaticAberration (0xA051, 22 shorts), in ExifTool's names. Each value is offset by one of the eleven values of the note's EncryptionKey (0xA020): the Distortion values have it added, value i getting key i mod 11, and the CA values after the first have it subtracted, value i getting key (i − 1) mod 11. Adobe DNG Converter 18.7 writes them into its DNGs as a WarpRectilinear opcode (`src/lens/embedded.rs` has the exact layout), which RAWmakase compared on all 27 raw.pixls.us SRWs from 22 bodies:
+
+- Distortion: four pairs of a mantissa and a power of ten, c₀ to c₃; green's source radius over the output radius is c₀ + c₁r² + c₂r⁴ + c₃r⁶, r in pixels from the default crop's centre. Adobe's warp is this polynomial exactly, rescaled to its radius unit. A model whose c₀ is zero is none: Adobe then writes the CA alone.
+- Lateral CA: a count (7), seven radii in pixels, then red's and blue's scale relative to green at each, in 1/10,000. On every surveyed file each channel stores one value at all radii, apart from blue's seventh, which Adobe ignores, as it does the seventh radius. Adobe applies half of each scale's change on the interchangeable-lens bodies (10,010 is 1.0005), and on the EX2F three quarters of red's and a quarter of blue's.
+- No vignetting: the NX200 and later store none (all 1000), and Adobe applies none, nor the first bodies' tables.
+
+The warp's green plane matches Adobe's within 0.07 px at full size on the 11 photos whose distortion Adobe corrects (it moves their corners by up to 260 px), and within 0.15 px on four more whose lens type was relabelled to make Adobe correct them; the CA matches exactly (Adobe corrects up to 1.7 px of it). The tests check three files' tags (NX200, EX2F, and the little-endian NX mini) against Adobe's numbers.
+
+Adobe does not use the camera's data, and nor does RAWmakase, for:
+
+- lenses it has its own profiles for: LensType (0xA003) 1, 2 and 3, the NX 30mm F2, 18-55mm and 50-200mm, on any body (an NX200 file relabelled as the 18-55mm gets no warp, an NX20 file relabelled as the 16mm gets one), and the EX1 and WB2000 compacts. Enable Profile Corrections applies Adobe's profile there, which RAWmakase uses when it is imported ([Adobe LCP profiles](#adobe-lcp-profiles)).
+- the first bodies, NX5, NX10, NX100 and NX11, even with a lens Adobe corrects on later ones (an NX10 or NX5 file relabelled as the 16mm gets no warp).
+
+Lightroom applies the warp whatever Enable Profile Corrections says, so the correction is on by default. Camera Raw 18.7 renders of the NX200 photo (NX 16mm) are identical with Enable Profile Corrections off and on, and differ from the same file with its distortion model zeroed by 38 to 73 px at the corners; an NX20 photo with the 18-55mm changes only when the setting is on, as Adobe's profile applies.
+
+Known limits: the CA was verified on constant tables only. Adobe fits a smooth polynomial through the first six values of a table that varies with the radius (a single changed value moves its warp around neighbouring radii too); RAWmakase interpolates between them at green's source radius. On modified files, that is within 0.17 px of Adobe's warp for red rising steadily by 60/10,000 across the radii (7.7 px of CA), but up to 3 px off for a single value 40/10,000 above its neighbours. The correction is centred on the decoded image, while Adobe centres it on the default crop: 1 px apart on the NX200, more on bodies whose decoded image has uneven margins. The EX2F's CA shares are Adobe's for that one compact; other SRW compacts were not available.
+
 ### Sony built-in corrections
 
 Status 2026-10-25. Adobe DNG Converter 18.7 turns Sony's tables into WarpRectilinear opcodes, which Lightroom always applies, on 74 of 108 raw.pixls.us bodies (one photo each; the others, A-mount DSLRs, most SLT and the first NEX bodies, store no tables):
@@ -155,7 +175,8 @@ Which formats Adobe corrects from the camera's own data, from Adobe DNG Converte
 | Canon R5 Mark II and R6 Mark III (CR3, RF lenses) | A "Camera Settings" profile (distortion, piecewise vignetting) and CA as a warp | Not read yet; the data's place in the CR3 is unknown |
 | Canon EOS R, RP, R3, R5, R6, R6 Mark II, R7, R8, R10, R50, R50 V, R100 (RF and EF lenses), EOS DSLRs, EOS M | Nothing | — |
 | Canon PowerShot compacts (G1 X II/III, G3 X, G5 X, G7 X, G9 X, G15/16, S90–S120, SX60/70, V1) | Distortion and lateral CA (warp) | Not read yet |
-| Samsung NX (NX200 and later), NX mini, EX2F, Galaxy NX | Lateral CA, and distortion for some lenses and compacts (warp) | Not read yet |
+| Samsung NX (NX200 and later), NX mini, EX2F, Galaxy NX | Lateral CA, and distortion where the camera stores it (warp); nothing for lenses Adobe has profiles for (NX 30mm, 18-55mm, 50-200mm), EX1 and WB2000 | Read, on by default ([above](#samsung)) |
+| Samsung NX5, NX10, NX100, NX11 | Nothing | — |
 | Nikon Coolpix P950, P1000, P1100 (A1000) | Distortion and lateral CA (warp) | Applied ([above](#nikon-coolpix)); the A1000's other format is not read |
 | Nikon DSLRs, Nikon 1, older Coolpix (P7000–P7800, P330/P340, A) | Nothing | — |
 | Leica Q, Q2, CL, SL, SL2, X2 DNGs | The camera's own warp in its DNG (distortion and CA, centred) | The [DNG reader](#dng-files) applies it |
