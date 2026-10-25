@@ -122,6 +122,8 @@ pub(crate) enum Event {
         Box<Result<crate::catalog::file_ops::ItemOutcome, String>>,
     ),
     Monitor(PathBuf),
+    /// The folder chosen for decoded images.
+    DecodeCacheFolder(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),
     Imported(Box<crate::app::bulk_import::Summary>),

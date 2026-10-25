@@ -90,9 +90,6 @@ fn lens_profiles_dir() -> PathBuf {
 fn presets_dir() -> PathBuf {
     crate::storage::data_dir().join("xmp-presets")
 }
-fn decode_cache_dir() -> PathBuf {
-    crate::decode_cache::cache_dir().join("decoded")
-}
 
 /// Files under `dir` (with one of `extensions`, if any) and their total size.
 fn files(dir: &Path, extensions: &[&str]) -> (usize, u64) {
@@ -154,7 +151,7 @@ impl Editor {
         self.preferences.usage = Usage {
             camera_profiles: files(&camera_profiles_dir(), &["dcp", "xmp"]).0,
             lens_profiles: files(&lens_profiles_dir(), &["lcp"]).0,
-            decode_cache: files(&decode_cache_dir(), &["decoded"]),
+            decode_cache: files(&self.decode_cache.dir(), &["decoded"]),
             previews: std::fs::metadata(PreviewCache::path()).map_or(0, |m| m.len()),
             preview_kinds: PreviewCache::open(&PreviewCache::path())
                 .and_then(|cache| cache.usage())
@@ -265,7 +262,12 @@ impl Editor {
                             .auto_shrink(false)
                             .show(&mut content, |ui| self.profiles_page(ui));
                     }
-                    Tab::Performance => self.performance_page(&mut content),
+                    // Taller than the window while a chosen folder is missing.
+                    Tab::Performance => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.performance_page(ui));
+                    }
                     Tab::Display => self.display_page(&mut content),
                     Tab::Automation => {
                         egui::ScrollArea::vertical()
@@ -674,45 +676,89 @@ impl Editor {
     fn performance_page(&mut self, ui: &mut egui::Ui) {
         group(ui, "Decoded photo cache");
         let (entries, size) = self.preferences.usage.decode_cache;
-        let dir = decode_cache_dir();
+        let dir = self.decode_cache.dir();
+        let folder = self.decode_cache.folder();
         form_row(ui, "Location", |ui| path_value(ui, &dir));
         form_row(ui, "Size", |ui| {
             value(
                 ui,
                 &format!(
-                    "{} of 4 GB · {}",
+                    "{} of {} GiB · {}",
                     bytes(size),
+                    self.decode_cache.limit() >> 30,
                     plural(entries, "photo", "photos")
                 ),
             );
         });
-        let mut purge = false;
+        let (mut purge, mut choose, mut default) = (false, false, false);
+        form_row(ui, "", |ui| {
+            choose = ui.button("Choose Folder…").clicked();
+            default = ui
+                .add_enabled(folder.is_some(), egui::Button::new("Use Default"))
+                .clicked();
+        });
         form_row(ui, "", |ui| {
             purge = ui
                 .add_enabled(entries > 0, egui::Button::new("Purge Cache"))
                 .clicked();
             reveal_button(ui, &dir);
         });
+        if let Some(folder) = folder.as_deref().filter(|f| !f.is_dir()) {
+            form_row(ui, "", |ui| {
+                hint(
+                    ui,
+                    &format!(
+                        "{} is not available, so photos are not cached until it is.",
+                        pretty_path(folder)
+                    ),
+                );
+            });
+        }
         form_row(ui, "", |ui| {
             hint(
                 ui,
-                "Reopening a photo skips decoding while it is cached. Purging only removes decoded copies, never photos or edits.",
+                "Reopening a photo skips decoding while it is cached. Choose a folder on another drive to save space on this one; moving the cache removes the decoded copies in the old location. Purging only removes decoded copies, never photos or edits.",
             );
         });
         if purge {
-            let removed = std::fs::read_dir(&dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|e| e.path().extension().is_some_and(|x| x == "decoded"))
-                .filter(|e| std::fs::remove_file(e.path()).is_ok())
-                .count();
+            let removed = self.decode_cache.purge();
             self.status = format!(
                 "Purged {} from the cache",
                 plural(removed, "photo", "photos")
             );
             self.measure_usage();
         }
+        if choose {
+            self.dialog(FileDialog::DecodeCacheFolder, &ui.ctx().clone());
+        }
+        if default {
+            self.move_decode_cache(None);
+        }
+    }
+    /// Caches decoded images in `folder`, or the default directory for `None`,
+    /// and removes those in the old location: moving is usually meant to free
+    /// that drive. A folder that cannot be written keeps the cache where it is.
+    pub(super) fn move_decode_cache(&mut self, folder: Option<PathBuf>) {
+        let removed = match self.decode_cache.relocate(folder.as_deref()) {
+            Ok(removed) => removed,
+            Err(e) => {
+                self.status = format!("The cache can't be moved there: {e}");
+                return;
+            }
+        };
+        self.status = match self.save_session() {
+            Ok(()) if removed > 0 => format!(
+                "Photos are now cached in {}; {} removed from the old location",
+                self.decode_cache.dir().display(),
+                plural(removed, "decoded photo", "decoded photos")
+            ),
+            Ok(()) => format!(
+                "Photos are now cached in {}",
+                self.decode_cache.dir().display()
+            ),
+            Err(e) => format!("Cache folder not saved: {e:#}"),
+        };
+        self.measure_usage();
     }
 
     fn display_page(&mut self, ui: &mut egui::Ui) {
@@ -887,6 +933,68 @@ mod tests {
         let saved: crate::app::session::Session =
             serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         assert_eq!(saved.decoded_cache_size_gib(), 1_048_576);
+    }
+
+    /// Issue 609: decoded images can move to another drive. The old location's
+    /// entries go, the choice reaches the workers' cache and survives a restart,
+    /// and Use Default moves them back.
+    #[test]
+    fn the_decoded_cache_moves_to_a_chosen_folder_and_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.session_file = Some(path.clone());
+        // Set, not relocated: relocating would purge the user's real cache.
+        let old = dir.path().join("old");
+        e.decode_cache.set_folder(Some(&old));
+        std::fs::create_dir(&old).unwrap();
+        std::fs::create_dir(e.decode_cache.dir()).unwrap();
+        let entry = e.decode_cache.dir().join("0123456789abcdef.decoded");
+        std::fs::write(&entry, "pixels").unwrap();
+        let worker = e.decode_cache.clone();
+        let chosen = dir.path().join("other drive");
+        std::fs::create_dir(&chosen).unwrap();
+        e.move_decode_cache(Some(chosen.clone()));
+        assert!(!entry.exists(), "{}", e.status);
+        assert_eq!(
+            worker.dir(),
+            chosen.join(crate::decode_cache::CHOSEN_SUBFOLDER)
+        );
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved.decoded_cache_folder.as_deref(),
+            Some(chosen.as_path())
+        );
+        let restarted = Editor::with_context(&ctx, None, saved, None);
+        assert_eq!(restarted.decode_cache.dir(), worker.dir());
+
+        // Moving back purges only the chosen folder, never the default one.
+        e.move_decode_cache(None);
+        assert_eq!(worker.folder(), None);
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.decoded_cache_folder, None);
+    }
+
+    /// A folder that cannot be written keeps the cache, and its entries, where
+    /// they are.
+    #[test]
+    fn an_unwritable_cache_folder_keeps_the_cache_where_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = Editor::with_context(
+            &egui::Context::default(),
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
+        let current = dir.path().join("current");
+        std::fs::create_dir(&current).unwrap();
+        e.decode_cache.set_folder(Some(&current));
+        e.move_decode_cache(Some(dir.path().join("missing")));
+        assert_eq!(e.decode_cache.folder(), Some(current));
+        assert!(e.status.contains("can't be moved"), "{}", e.status);
     }
 
     #[test]

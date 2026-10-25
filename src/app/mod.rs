@@ -258,6 +258,7 @@ impl Editor {
         let (tx, rx) = mpsc::channel();
         let decode_cache = crate::decode_cache::DecodeCache::default();
         decode_cache.set_limit(u64::from(session.decoded_cache_size_gib()) << 30);
+        decode_cache.set_folder(session.decoded_cache_folder.as_deref());
         let loader = worker::Loader::new(tx.clone(), ctx.clone(), decode_cache.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
         let reference_loader =
@@ -420,6 +421,7 @@ impl Editor {
                     raw_defaults: self.raw_defaults.settings().clone(),
                     standard_preview_size: Some(self.preview_builds.standard_size),
                     decoded_cache_size_gib: Some((self.decode_cache.limit() >> 30) as u32),
+                    decoded_cache_folder: self.decode_cache.folder(),
                     one_to_one_discard_days: Some(
                         self.preview_builds.discard_one_to_one_after.unwrap_or(0),
                     ),

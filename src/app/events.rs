@@ -61,6 +61,10 @@ impl Editor {
                     let _ = self.save_session();
                     self.schedule();
                 }
+                Event::DecodeCacheFolder(folder) => {
+                    self.activity.finish_dialog();
+                    self.move_decode_cache(Some(folder));
+                }
                 Event::PresetLoad(p) => {
                     self.activity.finish_dialog();
                     let loaded = crate::presets::load_preset(&p).and_then(|preset| {

@@ -8,6 +8,8 @@
 //! modification time, so a rebuilt or updated app never reads another build's output.
 //! The directory is capped; the least recently used entries are removed first. Only
 //! derived pixels are stored: RAW files, sidecars and catalogs are never touched.
+//! The user can move the directory to a folder of their choice, such as another
+//! drive.
 use crate::camera_data::{CameraImage, Demosaic, Metadata};
 use anyhow::{Context, Result, ensure};
 use rayon::prelude::*;
@@ -17,7 +19,7 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicU64, Ordering},
     },
     time::SystemTime,
@@ -26,10 +28,13 @@ use std::{
 const MAGIC: &[u8; 8] = b"RMKDEC\0\x01";
 /// Default size cap of the cache directory.
 pub const DEFAULT_LIMIT: u64 = 4 << 30;
+/// The subfolder of a chosen folder that holds the entries.
+pub const CHOSEN_SUBFOLDER: &str = "RAWmakase Cache";
 
 /// The per-user cache directory: ~/Library/Caches/RAWmakase on macOS,
 /// %LOCALAPPDATA%\RAWmakase\Cache on Windows and $XDG_CACHE_HOME/rawmakase (default
-/// ~/.cache/rawmakase) elsewhere. RAWMAKASE_CACHE_DIR overrides all of them.
+/// ~/.cache/rawmakase) elsewhere. RAWMAKASE_CACHE_DIR overrides all of them. A
+/// folder chosen with [`DecodeCache::set_folder`] overrides this for decoded images.
 pub fn cache_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("RAWMAKASE_CACHE_DIR") {
         return PathBuf::from(dir);
@@ -50,8 +55,39 @@ pub fn cache_dir() -> PathBuf {
 
 #[derive(Clone, Debug)]
 pub struct DecodeCache {
-    dir: PathBuf,
+    dir: Arc<RwLock<Dir>>,
     limit: Arc<AtomicU64>,
+}
+#[derive(Clone, Debug, PartialEq)]
+struct Dir {
+    path: PathBuf,
+    /// The folder the user chose, if any. Its subfolder is created only while
+    /// it exists, so an unplugged drive's mount point is never recreated on
+    /// the system disk; the default directory is created with its parents.
+    chosen: Option<PathBuf>,
+}
+impl Dir {
+    fn of(folder: Option<&Path>) -> Self {
+        match folder {
+            None => Self {
+                path: cache_dir().join("decoded"),
+                chosen: None,
+            },
+            Some(folder) => Self {
+                path: folder.join(CHOSEN_SUBFOLDER),
+                chosen: Some(folder.to_path_buf()),
+            },
+        }
+    }
+    fn create(&self) -> std::io::Result<()> {
+        if self.chosen.is_none() {
+            return fs::create_dir_all(&self.path);
+        }
+        match fs::create_dir(&self.path) {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && self.path.is_dir() => Ok(()),
+            result => result,
+        }
+    }
 }
 #[derive(Serialize, Deserialize, PartialEq)]
 struct Header {
@@ -72,9 +108,50 @@ impl Default for DecodeCache {
 impl DecodeCache {
     pub fn new(dir: PathBuf, limit: u64) -> Self {
         Self {
-            dir,
+            dir: Arc::new(RwLock::new(Dir {
+                path: dir,
+                chosen: None,
+            })),
             limit: Arc::new(AtomicU64::new(limit)),
         }
+    }
+    fn location(&self) -> Dir {
+        self.dir.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+    /// The directory holding the entries, shared with clones.
+    pub fn dir(&self) -> PathBuf {
+        self.location().path
+    }
+    /// The folder chosen with [`set_folder`](Self::set_folder); `None` for the
+    /// default directory.
+    pub fn folder(&self) -> Option<PathBuf> {
+        self.location().chosen
+    }
+    /// Keeps entries in [`CHOSEN_SUBFOLDER`] of `folder`, or in the default
+    /// directory for `None`, for this cache and its clones. Entries already in
+    /// the previous directory stay there.
+    pub fn set_folder(&self, folder: Option<&Path>) {
+        *self.dir.write().unwrap_or_else(|e| e.into_inner()) = Dir::of(folder);
+    }
+    /// [`set_folder`](Self::set_folder), then removes the previous directory's
+    /// entries, which nothing reads any more. Returns how many were removed.
+    /// The new directory is created and written to first: if either fails,
+    /// the cache and its entries stay where they are.
+    pub fn relocate(&self, folder: Option<&Path>) -> std::io::Result<usize> {
+        let next = Dir::of(folder);
+        next.create()?;
+        tempfile::tempfile_in(&next.path)?;
+        let previous = self.dir();
+        *self.dir.write().unwrap_or_else(|e| e.into_inner()) = next;
+        if previous == self.dir() {
+            return Ok(0);
+        }
+        Ok(purge(&previous))
+    }
+    /// Removes every entry, and nothing else in the directory. Returns how
+    /// many were removed.
+    pub fn purge(&self) -> usize {
+        purge(&self.dir())
     }
     /// The size cap in bytes, shared with clones used by existing workers.
     pub fn limit(&self) -> u64 {
@@ -105,8 +182,7 @@ impl DecodeCache {
         ))
     }
     fn file(&self, key: &str) -> PathBuf {
-        let hash = crate::storage::fnv1a(crate::storage::FNV_OFFSET, key.as_bytes());
-        self.dir.join(format!("{hash:016x}.decoded"))
+        file_in(&self.dir(), key)
     }
     pub fn contains(&self, key: &str) -> bool {
         self.file(key).is_file()
@@ -221,8 +297,9 @@ impl DecodeCache {
             scale_clipped: image.scale_clipped,
             recovered: changes.len() as u64,
         })?;
-        fs::create_dir_all(&self.dir)?;
-        let mut file = tempfile::NamedTempFile::new_in(&self.dir)?;
+        let dir = self.location();
+        dir.create()?;
+        let mut file = tempfile::NamedTempFile::new_in(&dir.path)?;
         {
             let mut out = std::io::BufWriter::new(file.as_file_mut());
             out.write_all(MAGIC)?;
@@ -232,12 +309,19 @@ impl DecodeCache {
             out.write_all(bytemuck::cast_slice(&changes))?;
             out.flush()?;
         }
-        file.persist(self.file(key))?;
-        self.trim()
+        let path = file_in(&dir.path, key);
+        file.persist(&path)?;
+        // Moved meanwhile: the old directory's entries were removed, or are
+        // about to be, and this one goes too, so none outlives the move.
+        if self.location() != dir {
+            let _ = fs::remove_file(&path);
+            return Ok(());
+        }
+        self.trim(&dir.path)
     }
-    /// Removes the least recently used entries until the directory fits the cap.
-    fn trim(&self) -> Result<()> {
-        let mut entries: Vec<(SystemTime, u64, PathBuf)> = fs::read_dir(&self.dir)?
+    /// Removes the least recently used entries until `dir` fits the cap.
+    fn trim(&self, dir: &Path) -> Result<()> {
+        let mut entries: Vec<(SystemTime, u64, PathBuf)> = fs::read_dir(dir)?
             .filter_map(|e| {
                 let e = e.ok()?;
                 let path = e.path();
@@ -259,6 +343,19 @@ impl DecodeCache {
         }
         Ok(())
     }
+}
+fn file_in(dir: &Path, key: &str) -> PathBuf {
+    let hash = crate::storage::fnv1a(crate::storage::FNV_OFFSET, key.as_bytes());
+    dir.join(format!("{hash:016x}.decoded"))
+}
+fn purge(dir: &Path) -> usize {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "decoded"))
+        .filter(|e| fs::remove_file(e.path()).is_ok())
+        .count()
 }
 /// Fills `buf` from `offset`, in parallel chunks: one reader leaves most of an SSD's
 /// bandwidth unused on a 700 MB image.
@@ -316,6 +413,61 @@ mod tests {
         worker.store("b", &image(40, 30, 0.4))?;
         assert!(!cache.contains("a"));
         assert!(!cache.contains("b"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_chosen_folder_reaches_existing_workers_and_relocating_removes_old_entries() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().join("default"), u64::MAX);
+        let worker = cache.clone();
+        cache.store("a", &image(40, 30, 0.2))?;
+        fs::write(dir.path().join("default/notes.txt"), "kept")?;
+        let chosen = dir.path().join("other drive");
+        fs::create_dir(&chosen)?;
+        assert_eq!(cache.relocate(Some(&chosen))?, 1);
+        assert_eq!(worker.dir(), chosen.join(CHOSEN_SUBFOLDER));
+        assert_eq!(worker.folder(), Some(chosen.clone()));
+        assert!(!worker.contains("a"));
+        assert!(dir.path().join("default/notes.txt").is_file());
+        worker.store("b", &image(40, 30, 0.4))?;
+        assert!(cache.contains("b"));
+        assert!(fs::read_dir(chosen.join(CHOSEN_SUBFOLDER))?.count() == 1);
+        // Choosing the same folder again removes nothing.
+        assert_eq!(cache.relocate(Some(&chosen))?, 0);
+        assert!(cache.contains("b"));
+        Ok(())
+    }
+
+    /// A chosen folder whose cache subfolder cannot be made or written keeps
+    /// the cache, and its entries, where they are.
+    #[test]
+    fn relocating_to_an_unusable_folder_changes_nothing() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().join("default"), u64::MAX);
+        cache.store("a", &image(40, 30, 0.2))?;
+        let blocked = dir.path().join("blocked");
+        fs::create_dir(&blocked)?;
+        fs::write(blocked.join(CHOSEN_SUBFOLDER), "a file, not a folder")?;
+        for folder in [blocked, dir.path().join("missing")] {
+            assert!(cache.relocate(Some(&folder)).is_err());
+            assert_eq!(cache.dir(), dir.path().join("default"));
+            assert!(cache.contains("a"));
+        }
+        Ok(())
+    }
+
+    /// An unplugged drive's folder is not recreated on the system disk: storing
+    /// fails and nothing is written.
+    #[test]
+    fn a_missing_chosen_folder_is_not_created() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().join("default"), u64::MAX);
+        let unplugged = dir.path().join("Volumes/Photos SSD");
+        cache.set_folder(Some(&unplugged));
+        assert!(cache.store("a", &image(40, 30, 0.2)).is_err());
+        assert!(!dir.path().join("Volumes").exists());
+        assert!(!cache.contains("a"));
         Ok(())
     }
 

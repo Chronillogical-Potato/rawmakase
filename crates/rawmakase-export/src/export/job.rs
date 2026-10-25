@@ -8,6 +8,7 @@ use crate::export_settings::ExportSettings;
 use crate::{
     camera_data::{CameraImage, Demosaic},
     decode::{DecodePolicy, FullSize},
+    decode_cache::DecodeCache,
     exif,
     model::recipe::Recipe,
     raw::Raw,
@@ -34,6 +35,8 @@ pub struct Photo {
     pub watermark: Option<crate::watermark::Watermark>,
     /// The demosaic for a full-size decode, if `image` is a draft.
     pub demosaic: Demosaic,
+    /// Where a full-size decode is looked up first.
+    pub cache: DecodeCache,
 }
 
 /// Exports `photo` to `target`, reporting progress from 0 to 1. Stops between
@@ -112,7 +115,13 @@ pub fn prepare(
         Some(w) => Some(w.ready()?),
         None => None,
     };
-    let image = full_size(photo.image.clone(), &photo.source, photo.demosaic, cancel)?;
+    let image = full_size(
+        photo.image.clone(),
+        &photo.source,
+        photo.demosaic,
+        &photo.cache,
+        cancel,
+    )?;
     cancelled()?;
     progress(0.4);
     let options = settings.options();
@@ -154,9 +163,10 @@ pub fn decode_full(
     raw: Raw,
     source: &Path,
     demosaic: Demosaic,
+    cache: &DecodeCache,
     cancel: &AtomicBool,
 ) -> Result<CameraImage> {
-    let full = FullSize::new(source, demosaic);
+    let full = FullSize::with_cache(source, demosaic, cache.clone());
     match full.cached(&raw.metadata) {
         Some(image) => Ok(image),
         None => full.decode(raw, DecodePolicy::Export, cancel),
@@ -168,12 +178,13 @@ fn full_size(
     image: Arc<CameraImage>,
     source: &Path,
     demosaic: Demosaic,
+    cache: &DecodeCache,
     cancel: &AtomicBool,
 ) -> Result<Arc<CameraImage>> {
     if !image.fast {
         return Ok(image);
     }
-    let full = FullSize::new(source, demosaic);
+    let full = FullSize::with_cache(source, demosaic, cache.clone());
     Ok(Arc::new(match full.cached(&image.metadata) {
         Some(cached) => cached,
         None => full.decode(crate::photo::open(source)?, DecodePolicy::Export, cancel)?,
@@ -216,4 +227,41 @@ fn xmp(
             )),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Export reads the full-size image from the cache it is given, which
+    /// follows the folder chosen in Preferences, not the default directory.
+    #[test]
+    fn a_full_size_decode_reads_the_given_cache() -> Result<()> {
+        let chart = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/corpus/charts/synthetic-d65.dng");
+        let dir = tempfile::tempdir()?;
+        let cache = DecodeCache::new(dir.path().to_path_buf(), u64::MAX);
+        let raw = crate::photo::open(&chart)?;
+        let cached = CameraImage {
+            width: 4,
+            height: 3,
+            recovered: Default::default(),
+            pixels: vec![[0.5; 3]; 12],
+            metadata: raw.metadata.clone(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        let _ = cached.recovered.set(Arc::new(cached.clone()));
+        cache.store(&DecodeCache::key(&chart, Demosaic::default())?, &cached)?;
+        let image = decode_full(
+            raw,
+            &chart,
+            Demosaic::default(),
+            &cache,
+            &AtomicBool::new(false),
+        )?;
+        assert_eq!((image.width, image.height), (4, 3));
+        Ok(())
+    }
 }

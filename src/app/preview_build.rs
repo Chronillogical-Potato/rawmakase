@@ -91,6 +91,8 @@ pub(super) struct Item {
     pub record: EditRecord,
     pub defaults: Arc<DevelopDefaults>,
     pub demosaic: Demosaic,
+    /// Where a full-size decode is looked up first.
+    pub decode_cache: crate::decode_cache::DecodeCache,
     pub identity: String,
     pub kind: PreviewKind,
     /// The long edge asked for; 0 for full size.
@@ -197,7 +199,13 @@ pub(super) fn render(item: &Item, cancel: &AtomicBool) -> anyhow::Result<image::
     let mut recipe = item_recipe(item, opened.metadata(), &profiles)?;
     let image = match opened {
         Opened::Raw(raw) if needs_full(&recipe, &raw.metadata, item.edge) => {
-            crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
+            crate::export::job::decode_full(
+                raw,
+                &item.path,
+                item.demosaic,
+                &item.decode_cache,
+                cancel,
+            )?
         }
         Opened::Raw(raw) => raw.develop(Decode::Half, cancel)?,
         // A JPEG, PNG or TIFF opens at full size: there is no smaller decode.
@@ -814,6 +822,7 @@ impl Editor {
                 path,
                 defaults: self.raw_defaults.clone(),
                 demosaic: self.demosaic,
+                decode_cache: self.decode_cache.clone(),
                 kind,
                 edge,
             });

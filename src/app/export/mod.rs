@@ -320,6 +320,7 @@ impl Editor {
             values,
             watermark: None,
             demosaic: self.demosaic,
+            cache: self.decode_cache.clone(),
         })
     }
 
@@ -422,6 +423,7 @@ impl Editor {
                     defaults: self.raw_defaults.clone(),
                     watermark: pending.watermark,
                     demosaic: self.demosaic,
+                    cache: self.decode_cache.clone(),
                 };
                 let ticket = self.export_queue().submit(batch);
                 self.exports.queued.insert(
