@@ -371,7 +371,7 @@ fn tree_locate_action_uses_the_clicked_root() {
             },
             |ui| {
                 let top = ui.cursor().top();
-                action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default());
+                action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default(), true);
                 row = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
             },
         );
@@ -446,7 +446,7 @@ fn tree_click_modifiers_choose_how_the_folder_is_selected() {
                 events,
                 ..Default::default()
             },
-            |ui| action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default()),
+            |ui| action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default(), true),
         );
         output.textures_delta.clear();
         action
@@ -464,6 +464,126 @@ fn tree_click_modifiers_choose_how_the_folder_is_selected() {
             "{modifiers:?}"
         );
     }
+}
+/// Library > Show Photos in Subfolders off, as in Lightroom: a folder shows
+/// only the photos directly in it, its count says so, and the setting is
+/// kept with the layout.
+#[test]
+fn a_folder_can_show_only_its_own_photos() -> Result<()> {
+    use super::folder_selection::Click;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("photos");
+    for (sub, name) in [
+        ("", "top.RAF"),
+        ("day1", "one.RAF"),
+        ("day1/raw", "deep.RAF"),
+    ] {
+        std::fs::create_dir_all(root.join(sub))?;
+        std::fs::write(root.join(sub).join(name), b"synthetic raw")?;
+    }
+    // A folder holding only a folder.
+    std::fs::create_dir_all(root.join("trip/day"))?;
+    std::fs::write(root.join("trip/day/trip.RAF"), b"synthetic raw")?;
+    let path = directory.path().join("days.rawmakase");
+    Catalog::create(&path)?.add_folder(&root)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let root_key = format!("root:{}", library.session.roots[0].0);
+    let key = |sub: &str| format!("{root_key}/{sub}");
+    let shown = |library: &Library| {
+        let mut names: Vec<&str> = visible_names(library);
+        names.sort();
+        names.join(" ")
+    };
+    library.click_folder(&root_key, Click::Replace, &[]);
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF trip.RAF");
+    assert!(library.subfolders_shown());
+
+    library.show_subfolders(false);
+    assert_eq!(
+        shown(&library),
+        "top.RAF",
+        "the folder shown follows at once"
+    );
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    assert_eq!(shown(&library), "one.RAF");
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    assert_eq!(shown(&library), "", "a folder of folders shows none");
+    // Several folders: each one's own photos.
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    library.click_folder(&key("day1/raw"), Click::Toggle, &[]);
+    assert_eq!(shown(&library), "deep.RAF one.RAF");
+    // Reading the catalog again and going back to a place keep it.
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    let place = library.place();
+    library.refresh()?;
+    assert_eq!(shown(&library), "one.RAF");
+    library.click_folder(&root_key, Click::Replace, &[]);
+    library.go_to_place(&place);
+    assert_eq!(shown(&library), "one.RAF");
+    // A place kept while subfolders showed shows a folder of folders empty.
+    library.show_subfolders(true);
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    let trip = library.place();
+    assert_eq!(shown(&library), "trip.RAF");
+    library.show_subfolders(false);
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    library.go_to_place(&trip);
+    assert_eq!(shown(&library), "");
+    library.refresh()?;
+    assert_eq!(shown(&library), "");
+    // All Photographs is every photo still.
+    library.filters.folder_scope = None;
+    library.selected_folders.clear();
+    library.filter();
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF trip.RAF");
+
+    // Removing a folder of folders shown alone shows All Photographs.
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    let trip_folders = library.folder_ids(&key("trip"), true).unwrap();
+    library.remove_folders(&trip_folders, "trip")?;
+    assert_eq!(library.source_key(), "");
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF");
+
+    // Kept across launches: the session's source comes back as it was shown.
+    let layout = library.layout();
+    let saved: crate::app::session::LibraryLayout =
+        serde_json::from_str(&serde_json::to_string(&layout)?)?;
+    let mut restored = Library::load(&path, egui::Context::default())?;
+    restored.restore_source(&key("day1"), None);
+    restored.apply_layout(&saved);
+    assert!(!restored.subfolders_shown());
+    assert_eq!(shown(&restored), "one.RAF");
+    // A layout saved before the setting shows subfolders.
+    let old: crate::app::session::LibraryLayout = serde_json::from_str(r#"{"sort": "rating"}"#)?;
+    restored.apply_layout(&old);
+    assert!(restored.subfolders_shown());
+    assert_eq!(shown(&restored), "deep.RAF one.RAF");
+    Ok(())
+}
+#[test]
+fn a_folder_s_menu_turns_subfolders_off_and_its_count_follows() {
+    use crate::catalog::FolderId;
+    let mut root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let folder = |id: i64, relative: &str, count: usize| Folder {
+        id: FolderId(id),
+        root: RootId(42),
+        relative: relative.into(),
+        path: PathBuf::from("/missing").join(relative),
+        count,
+    };
+    root.insert(&folder(1, "", 2));
+    root.insert(&folder(2, "day1", 3));
+    root.finish();
+    let (labels, action) = tree_menu(&root, "Show Photos in Subfolders", true);
+    assert!(
+        labels.iter().any(|l| l == "Show Photos in Subfolders"),
+        "{labels:?}"
+    );
+    assert!(matches!(action, Some(TreeAction::ShowSubfolders(false))));
+    let (_, action) = tree_menu(&root, "Show Photos in Subfolders", false);
+    assert!(matches!(action, Some(TreeAction::ShowSubfolders(true))));
+    assert_eq!(super::tree::shown_count(&root, true), 5);
+    assert_eq!(super::tree::shown_count(&root, false), 2);
 }
 #[test]
 fn several_folders_show_their_photos_together() -> Result<()> {
@@ -2709,7 +2829,7 @@ fn photos_dragged_past_8_points_onto_a_folder_are_dropped_there() {
                 ..Default::default()
             },
             |ui| {
-                action = folder_tree_row(ui, &node, 0, &mut expanded, &Default::default());
+                action = folder_tree_row(ui, &node, 0, &mut expanded, &Default::default(), true);
                 let cell = ui.allocate_rect(source, egui::Sense::click_and_drag());
                 super::grid::drag_payload(&cell, || vec![PhotoId(1), PhotoId(2)]);
             },
@@ -2877,6 +2997,7 @@ fn a_folder_dragged_onto_another_of_its_root_is_dropped_there() {
                         0,
                         &mut expanded,
                         &Default::default(),
+                        true,
                     ));
                 }
             },
@@ -2946,7 +3067,7 @@ fn a_dragged_folder_follows_the_pointer_by_name() {
             },
             |ui| {
                 for n in [&day1, &y2025] {
-                    folder_tree_row(ui, n, 0, &mut expanded, &Default::default());
+                    folder_tree_row(ui, n, 0, &mut expanded, &Default::default(), true);
                 }
             },
         );
@@ -3023,6 +3144,7 @@ fn a_folder_with_no_catalog_folder_of_its_own_is_dragged_too() {
                         0,
                         &mut expanded,
                         &Default::default(),
+                        true,
                     ));
                 }
             },
@@ -3086,6 +3208,7 @@ fn a_folder_dropped_on_another_roots_folder_is_dropped_there() {
                         0,
                         &mut expanded,
                         &Default::default(),
+                        true,
                     ));
                 }
             },
@@ -3127,7 +3250,11 @@ fn a_folder_dropped_on_another_roots_folder_is_dropped_there() {
 }
 /// The labels of `node`'s right-click menu, and the action a click on
 /// `choose` gives.
-fn tree_menu(node: &FolderNode, choose: &str) -> (Vec<String>, Option<TreeAction>) {
+fn tree_menu(
+    node: &FolderNode,
+    choose: &str,
+    subfolders: bool,
+) -> (Vec<String>, Option<TreeAction>) {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     let mut expanded = HashSet::new();
@@ -3142,7 +3269,10 @@ fn tree_menu(node: &FolderNode, choose: &str) -> (Vec<String>, Option<TreeAction
                 events,
                 ..Default::default()
             },
-            |ui| action = folder_tree_row(ui, node, 0, &mut expanded, &Default::default()),
+            |ui| {
+                action =
+                    folder_tree_row(ui, node, 0, &mut expanded, &Default::default(), subfolders)
+            },
         );
         output.textures_delta.clear();
         (action, output.platform_output.accesskit_update)
@@ -3196,7 +3326,7 @@ fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
         ids: [FolderId(1)].into_iter().collect(),
         ..Default::default()
     };
-    let (labels, action) = tree_menu(&folder, "Move to Trash…");
+    let (labels, action) = tree_menu(&folder, "Move to Trash…", true);
     assert!(labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
     assert!(
         matches!(&action, Some(TreeAction::TrashFolder { root: RootId(42), logical }) if logical == "2024"),
@@ -3205,11 +3335,11 @@ fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
     // A root with folders: neither Move to Trash nor its own removal.
     let mut root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
     root.ids.insert(FolderId(1));
-    let (labels, _) = tree_menu(&root, "");
+    let (labels, _) = tree_menu(&root, "", true);
     assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
     // A root with nothing left in the catalog can be removed.
     let empty = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
-    let (labels, action) = tree_menu(&empty, "Remove from Catalog…");
+    let (labels, action) = tree_menu(&empty, "Remove from Catalog…", true);
     assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
     assert!(
         matches!(&action, Some(TreeAction::RemoveRoot(RootId(42), name)) if name == "Photos"),

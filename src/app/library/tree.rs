@@ -132,6 +132,16 @@ pub(super) enum TreeAction {
         name: String,
         photos: Vec<PhotoId>,
     },
+    /// Show Photos in Subfolders turned on or off.
+    ShowSubfolders(bool),
+}
+/// The photos a row counts: its own, and its subfolders' while they're shown.
+pub(super) fn shown_count(node: &FolderNode, subfolders: bool) -> usize {
+    if subfolders {
+        node.count
+    } else {
+        node.own_count
+    }
 }
 /// What of type `P` was dropped on `response` this frame. egui's own
 /// `dnd_release_payload` takes whatever is dragged, of any type, so a row
@@ -184,6 +194,7 @@ pub(super) fn folder_tree_row(
     depth: usize,
     expanded: &mut HashSet<String>,
     selected: &FolderSelection,
+    subfolders: bool,
 ) -> Option<TreeAction> {
     let palette = theme::palette(ui.ctx());
     use egui::{Align2, FontId, Pos2, Rect, Sense};
@@ -290,7 +301,7 @@ pub(super) fn folder_tree_row(
     painter.text(
         Pos2::new(rect.right() - 10., y),
         Align2::RIGHT_CENTER,
-        node.count.to_string(),
+        shown_count(node, subfolders).to_string(),
         FontId::proportional(10.),
         palette.gray(125),
     );
@@ -395,6 +406,11 @@ pub(super) fn folder_tree_row(
             action = Some(TreeAction::Reveal(node.path.clone()));
             ui.close();
         }
+        menu_separator(ui);
+        if menu_item(ui, "Show Photos in Subfolders", "", true, subfolders) {
+            action = Some(TreeAction::ShowSubfolders(!subfolders));
+            ui.close();
+        }
         if movable || !node.ids.is_empty() || node.root.is_some() {
             menu_separator(ui);
         }
@@ -425,7 +441,7 @@ pub(super) fn folder_tree_row(
     });
     if expanded.contains(&node.key) {
         for child in node.children.values() {
-            if let Some(a) = folder_tree_row(ui, child, depth + 1, expanded, selected) {
+            if let Some(a) = folder_tree_row(ui, child, depth + 1, expanded, selected, subfolders) {
                 action = Some(a)
             }
         }

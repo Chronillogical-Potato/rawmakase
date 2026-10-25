@@ -152,6 +152,8 @@ pub(crate) struct LibraryLayout {
     pub kind: String,
     /// Cmd+L turned the filter bar off.
     pub filters_off: bool,
+    /// Show Photos in Subfolders turned off.
+    pub subfolders_hidden: bool,
 }
 pub(crate) fn load_session() -> Session {
     read_json_or_default(&data_dir().join("session.json"))

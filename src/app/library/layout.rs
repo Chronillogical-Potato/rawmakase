@@ -1,5 +1,5 @@
-//! The Library's layout kept across launches: its view, filter bar, sort
-//! and grid (see `app::session::LibraryLayout`). Each setting is saved under a
+//! The Library's layout kept across launches: its view, filter bar, sort,
+//! grid and whether folders show their subfolders' photos (see `app::session::LibraryLayout`). Each setting is saved under a
 //! stable key, so renaming one in the interface keeps what was saved.
 use super::Library;
 use super::cell::Style;
@@ -111,6 +111,7 @@ impl Library {
             labels: filters.labels.iter().map(label_key).collect(),
             kind: filters.kind.key().into(),
             filters_off: !filters.enabled,
+            subfolders_hidden: !self.subfolders_shown,
         }
     }
     /// Returns to a layout kept from last time, after the source and
@@ -134,6 +135,11 @@ impl Library {
         self.cell_style = Style::from_key(&layout.cell_style);
         if let Some(size) = layout.thumb_size.filter(|s| (110. ..=360.).contains(s)) {
             self.thumb_size = size;
+        }
+        // The folders shown follow, and are filtered once with the rest.
+        self.subfolders_shown = !layout.subfolders_hidden;
+        if !self.selected_folders.is_empty() {
+            self.filters.folder_scope = self.folders_scope(&self.selected_folders);
         }
         self.filter();
         // A view of one photo or more opens only on a photo still shown.
