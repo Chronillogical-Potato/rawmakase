@@ -846,7 +846,7 @@ impl Editor {
         // The filmstrip runs under the right panel, as in Develop. Hidden,
         // the views are still brought up to date.
         if let Some(library) = &mut self.library {
-            action = action.then(if filmstrip {
+            action.then(if filmstrip {
                 library.library_filmstrip(ui)
             } else {
                 library.prepare(ui.ctx());
@@ -859,13 +859,13 @@ impl Editor {
         }
         self.loupe_stored_preview();
         if self.panel_shown(WorkspacePanel::Right) {
-            action = action.then(self.library_right_panel(ui, develops));
+            action.then(self.library_right_panel(ui, develops));
         }
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| match &mut self.library {
                 Some(l) if !l.session.photos.is_empty() => {
-                    action = action.then(l.grid(ui, &mut self.view.zoom));
+                    action.then(l.grid(ui, &mut self.view.zoom));
                     if let Some(id) = l.loupe_develops() {
                         self.loupe_viewport(ui, id);
                     }
@@ -893,9 +893,10 @@ impl Editor {
                 crate::app::library::Action::RelinkRoot(id) => {
                     self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), ctx)
                 }
-                crate::app::library::Action::RelinkFolder(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), ctx)
-                }
+                crate::app::library::Action::RelinkFolder(root, logical) => self.catalog_dialog(
+                    CatalogDialog::Folder(FolderAction::RelinkFolder(root, logical)),
+                    ctx,
+                ),
                 crate::app::library::Action::AddFolder => {
                     self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx)
                 }
@@ -978,7 +979,7 @@ impl Editor {
                     self.open_export_dialog();
                 }
                 if let Some(library) = &mut self.library {
-                    action = action.then(library.sidebar(ui));
+                    action.then(library.sidebar(ui));
                 } else {
                     ui.add_space(12.);
                     // On the catalog name's column.
@@ -1084,7 +1085,7 @@ impl Editor {
                 }
                 match &mut self.library {
                     Some(library) => {
-                        action = action.then(library.info_panel(ui, |ui| {
+                        action.then(library.info_panel(ui, |ui| {
                             if !pinned {
                                 navigator(ui);
                             }

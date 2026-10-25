@@ -580,3 +580,18 @@ fn a_folder_the_catalog_has_no_folder_of_its_own_for_is_renamed_with_those_below
     assert_eq!(fx.folder("2024 trip/day1"), day1, "the same folder");
     Ok(())
 }
+
+#[test]
+fn a_folder_inside_a_located_folder_of_folders_is_renamed() -> Result<()> {
+    let mut fx = fixture(&["2024/day1/", "2024/day2/"]);
+    let root = fx.cat.roots()?[0].0;
+    // "2024" holds only folders; located on its own, the folders in it
+    // still resolve through it.
+    let at = fx.root.join("2024");
+    fx.cat
+        .relink_folder_at(root, "2024", &at, crate::catalog::Overrides::Keep)?;
+    assert!(plan(&fx.cat, rename_folder(&fx, "2024/day1", "day 1")).is_ok());
+    let why = refusal(&fx, rename_folder(&fx, "2024", "Year"));
+    assert!(why.contains("located on its own"), "{why}");
+    Ok(())
+}
