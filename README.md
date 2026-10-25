@@ -55,6 +55,13 @@ omarchy pkg add rawmakase-bin
 
 It updates with the rest of the system.
 
+Omarchy makes windows slightly transparent by default, which changes how photos look. To keep RAWmakase fully opaque, add this to your Hyprland `looknfeel.lua`:
+
+```lua
+-- Keep RAWmakase fully opaque (opt out of Omarchy's default window opacity)
+o.window("^RAWmakase$", { tag = "-default-opacity", opacity = "1 1" })
+```
+
 ### macOS (15 or newer)
 
 Install with Homebrew:
