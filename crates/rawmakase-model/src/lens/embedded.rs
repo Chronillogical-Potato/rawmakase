@@ -20,13 +20,18 @@
 //!   value 12 is the radius unit N in pixels, and values 8, 4 and 11 over 2^15 are
 //!   a, b and c of the camera's own correction, source radius s to output radius
 //!   s·(1 + a s² + b s⁴ + c s⁶). Value 5 scales it: the output radius r samples the
-//!   source radius that this maps to r·(1 + v5/2^15). The CA the camera stores
-//!   (tag 0x011B) is not read.
+//!   source radius that this maps to r·(1 + v5/2^15).
+//! - Panasonic RW2 lateral CA: IFD0 tag 0x011B, 32 signed shorts. Value 14 is 256 when
+//!   the table holds data (0 for lenses without). Values 17, 16, 4 and 11 are four
+//!   source radii in pixels, the last about the half diagonal; values 12, 23, 8 and 26
+//!   (red) and 27, 10, 20 and 29 (blue) are the channel's displacement from green at
+//!   those radii in −1/1000 px, so red and blue sample green's source radius plus it.
+//!   The other values, many of which change from shot to shot, are not used.
 //!
 //! The Fujifilm vignetting agrees with the FixVignetteRadial opcode Adobe writes into
 //! DNGs of the same file to within 1%, and the Olympus and Panasonic distortion and
-//! the Olympus CA with the WarpRectilinear opcodes (and, for newer bodies, the
-//! embedded lens profiles) Adobe DNG Converter 18.7 writes, to within a pixel (see
+//! CA with the WarpRectilinear opcodes (and, for newer bodies, the embedded lens
+//! profiles) Adobe DNG Converter 18.7 writes, to within a pixel (see
 //! docs/lens-corrections.md).
 use crate::camera_data::Metadata;
 use crate::optics::{LensCorrection, Radial};
@@ -282,23 +287,106 @@ fn olympus(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
     })
 }
 
-fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
-    let ifd0 = t.ifd(t.first)?;
-    let b = t.raw(ifd0.get(&0x0119)?)?;
-    let v: Vec<f64> = b
-        .get(..32)?
-        .as_chunks::<2>()
-        .0
-        .iter()
+/// The values of an IFD0 entry of `n` signed shorts.
+fn shorts<const N: usize>(t: &mut Tiff, e: &Entry) -> Option<[f64; N]> {
+    let b = t.raw(e)?;
+    let v: Vec<f64> = (b.get(..2 * N)?.as_chunks::<2>().0.iter())
         .map(|c| f64::from(t.u16(c) as i16))
         .collect();
-    let flags = t.u16(&b[14..16]);
-    let unit = v[12];
-    if flags & 0xf != 1 || unit <= 0. {
+    v.try_into().ok()
+}
+
+/// Panasonic's lateral CA (IFD0 0x011B) as red's and blue's scale relative to green,
+/// each a function of green's source radius in pixels. `half` is the decoded image's
+/// half diagonal.
+fn panasonic_ca(v: [f64; 32], half: f64) -> Option<[impl Fn(f64) -> f64; 2]> {
+    let knots = [v[17], v[16], v[4], v[11]];
+    if v[14] != 256. || knots[0] <= 0. || !knots.is_sorted_by(|a, b| a < b) || half <= 0. {
         return None;
     }
-    let [a, b, c] = [v[8], v[4], v[11]].map(|x| x / 32768.);
-    let scale = 1. + v[5] / 32768.;
+    let at = |i: [usize; 4]| i.map(|i| -v[i] / 1000.);
+    let (red, blue) = (at([12, 23, 8, 26]), at([27, 10, 20, 29]));
+    if red.iter().chain(&blue).all(|d| *d == 0.) {
+        return None;
+    }
+    // Displacement in pixels at a source radius: straight lines between the knots,
+    // from none at the centre, held past the last knot.
+    let lines = |d: [f64; 4], g: f64| {
+        let i = knots.iter().position(|k| g < *k).unwrap_or(4);
+        let (k0, d0) = if i == 0 {
+            (0., 0.)
+        } else {
+            (knots[i - 1], d[i - 1])
+        };
+        match knots.get(i) {
+            Some(k1) => d0 + (d[i] - d0) * (g - k0) / (k1 - k0),
+            None => d0,
+        }
+    };
+    // Adobe applies a smooth fit of those lines in its warp's form, 1 + c0 + c1 s² +
+    // c2 s⁴ + c3 s⁶ with s = g / half. Least squares with residuals weighted by s, out
+    // to the half diagonal, matches the CA in its DNGs of 309 photos from 111 bodies
+    // to within 0.15 px (median 0.015 px); the lines themselves differ by up to 0.86 px.
+    let fit = |d: [f64; 4]| {
+        let mut normal = [[0.; 5]; 4];
+        for i in 1..=256 {
+            let s = f64::from(i) / 256.;
+            let s2 = s * s;
+            let row = [s, s * s2, s * s2 * s2, s * s2 * s2 * s2];
+            let y = lines(d, s * half) / half;
+            for (j, n) in normal.iter_mut().enumerate() {
+                for k in 0..4 {
+                    n[k] += row[j] * row[k];
+                }
+                n[4] += row[j] * y;
+            }
+        }
+        let c = solve4(normal)?;
+        Some(move |g: f64| {
+            let s2 = (g / half).powi(2);
+            1. + c[0] + s2 * (c[1] + s2 * (c[2] + s2 * c[3]))
+        })
+    };
+    Some([fit(red)?, fit(blue)?])
+}
+
+/// Solves the 4×4 system in the augmented matrix `m` by Gaussian elimination with
+/// partial pivoting, or `None` when it is singular.
+fn solve4(mut m: [[f64; 5]; 4]) -> Option<[f64; 4]> {
+    for col in 0..4 {
+        let pivot = (col..4).max_by(|a, b| m[*a][col].abs().total_cmp(&m[*b][col].abs()))?;
+        m.swap(col, pivot);
+        if m[col][col].abs() < 1e-300 {
+            return None;
+        }
+        let top = m[col];
+        for row in &mut m[col + 1..] {
+            let f = row[col] / top[col];
+            for (x, t) in row.iter_mut().zip(top).skip(col) {
+                *x -= f * t;
+            }
+        }
+    }
+    let mut x = [0.; 4];
+    for row in (0..4).rev() {
+        let rest: f64 = (row + 1..4).map(|k| m[row][k] * x[k]).sum();
+        x[row] = (m[row][4] - rest) / m[row][row];
+    }
+    x.iter().all(|v| v.is_finite()).then_some(x)
+}
+
+fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
+    let ifd0 = t.ifd(t.first)?;
+    let info = ifd0.get(&0x0119).and_then(|e| shorts::<16>(t, e));
+    let ca = ifd0.get(&0x011b).and_then(|e| shorts::<32>(t, e));
+    let half = f64::from(m.width).hypot(f64::from(m.height)) * 0.5;
+    let ca = ca.and_then(|v| panasonic_ca(v, half));
+    // Value 7's low four bits switch the distortion correction on.
+    let info = info.filter(|v| (v[7] as i16 as u16) & 0xf == 1 && v[12] > 0.);
+    // Radii in the distortion model's unit, or in pixels without it.
+    let unit = info.map_or(1., |v| v[12]);
+    let [a, b, c] = info.map_or([0.; 3], |v| [v[8], v[4], v[11]].map(|x| x / 32768.));
+    let scale = info.map_or(1., |v| 1. + v[5] / 32768.);
     // The camera's correction maps the source radius to the output radius; its
     // inverse, by Newton's method, is green's source radius for an output radius.
     let forward = |s: f64| {
@@ -321,7 +409,18 @@ fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         }
         ((forward(s) - target).abs() < 1e-9 && s > 0.).then_some(s)
     };
-    let (distortion, _) = maker_model(m, unit, &green, None);
+    // The CA applies at green's source radius, in the sensor's pixels.
+    let [red, blue] = match &ca {
+        Some([red, blue]) => [Some(red), Some(blue)],
+        None => [None, None],
+    };
+    let red = |rho: f64| red.map_or(1., |f| f(rho * unit));
+    let blue = |rho: f64| blue.map_or(1., |f| f(rho * unit));
+    let chromatic = ca.is_some().then_some([&red as &dyn Fn(f64) -> f64, &blue]);
+    if info.is_none() && chromatic.is_none() {
+        return None;
+    }
+    let (distortion, chromatic) = maker_model(m, unit, &green, chromatic);
     let make = ifd0
         .get(&0x010f)
         .and_then(|e| t.raw(e))
@@ -337,7 +436,7 @@ fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         default_on: true,
         vignetting: None,
         distortion,
-        chromatic: None,
+        chromatic,
         gain_map: None,
     })
 }
@@ -695,17 +794,20 @@ mod tests {
     }
     /// An RW2 with DistortionInfo `info`.
     fn rw2(info: &[i16]) -> Vec<u8> {
+        rw2_with(Some(info), None)
+    }
+    /// An RW2 with DistortionInfo `info` and the lateral CA table `ca` (0x011B).
+    fn rw2_with(info: Option<&[i16]>, ca: Option<&[i16]>) -> Vec<u8> {
         let mut out = b"IIU\0\x08\0\0\0".to_vec();
-        let info = info.iter().flat_map(|v| v.to_le_bytes()).collect();
-        out.extend(directory(
-            8,
-            &[
-                (0x010f, 2, 10, b"Panasonic\0".to_vec()),
-                (0x0119, 7, 32, info),
-            ],
-        ));
-        // As long as the header `read` reads.
-        out.resize(128, 0);
+        let mut entries = vec![(0x010f, 2, 10, b"Panasonic\0".to_vec())];
+        for (tag, v) in [(0x0119, info), (0x011b, ca)] {
+            if let Some(v) = v {
+                entries.push((tag, 7, 2 * v.len() as u32, shorts(v)));
+            }
+        }
+        out.extend(directory(8, &entries));
+        // At least as long as the header `read` reads.
+        out.resize(out.len().max(128), 0);
         out
     }
     /// gx9_3_2.RW2 (raw.pixls.us, DC-GX9, LUMIX G 25/F1.7): its DistortionInfo, against
@@ -754,6 +856,229 @@ mod tests {
         let unit = 2304f64.hypot(1540.);
         let off = largest_difference(&c, &m, &|_, px| adobe(green, unit, px));
         assert!(off < 0.1, "{off} px from Adobe's warp");
+    }
+    /// Largest difference in pixels, out to the default crop's corner, between red's
+    /// and blue's displacement from green in `c` and in Adobe's warp, and Adobe's
+    /// largest displacement.
+    fn largest_ca_difference(
+        c: &LensCorrection,
+        m: &Metadata,
+        adobe: &dyn Fn(usize, f64) -> f64,
+    ) -> (f64, f64) {
+        let half = f64::from(m.width).hypot(f64::from(m.height)) / 2.;
+        let corner = f64::from(m.crop_width).hypot(f64::from(m.crop_height)) / 2.;
+        (0..=200)
+            .flat_map(|i| {
+                let px = corner * f64::from(i) / 200.;
+                let scale = c.radial_scale((px / half) as f32);
+                [0, 2].map(|ch| {
+                    let ours = px * f64::from(scale[ch] - scale[1]);
+                    let theirs = adobe(ch, px) - adobe(1, px);
+                    ((ours - theirs).abs(), theirs.abs())
+                })
+            })
+            .fold((0., 0.), |(a, b), (x, y)| (a.max(x), b.max(y)))
+    }
+    /// Raw.pixls.us photos: their DistortionInfo and lateral CA tags, the decoded
+    /// image's size and default crop, and the red, green and blue planes of the warp
+    /// Adobe DNG Converter 18.7 writes for them, whose radius 1 is the farthest corner
+    /// of the DNG's image from its optical centre.
+    struct PanasonicCa {
+        info: [i16; 16],
+        ca: [i16; 32],
+        frame: ([u32; 2], [u32; 4]),
+        warp: [[f64; 4]; 3],
+        /// The corner's offsets from the centre, in pixels.
+        corner: [f64; 2],
+    }
+    /// gx9_3_2.RW2 (DC-GX9, LUMIX G 25/F1.7).
+    const GX9_CA: PanasonicCa = PanasonicCa {
+        info: GX9,
+        ca: [
+            -30167, -1805, 16569, 17920, 2730, 1024, 128, 21439, -246, 2184, -170, 3276, -473,
+            18937, 256, 21168, 2184, 1092, 18608, 16640, -738, 0, -22016, -464, 2760, -464, 643,
+            189, 17408, -2007, 17139, 15825,
+        ],
+        frame: ([5200, 3904], [8, 8, 5184, 3888]),
+        warp: [
+            [
+                1.0004682282802129,
+                -0.01451169102033667,
+                -0.019598127970462897,
+                0.004331191680153168,
+            ],
+            [
+                1.0000012404328427,
+                -0.013760663120671701,
+                -0.02015800015496616,
+                0.004736213335729822,
+            ],
+            [
+                0.9998048878471808,
+                -0.01311285159727582,
+                -0.0202450377845782,
+                0.004896631126171336,
+            ],
+        ],
+        corner: [2608., 1952.],
+    };
+    #[test]
+    fn reads_panasonic_chromatic_aberration_as_adobe_does() {
+        // P1000403.RW2 (DMC-G80, SIGMA 60mm F2.8 DN): distortion correction off.
+        let g80 = PanasonicCa {
+            info: [
+                8820, 0, 0, 0, 0, 0, 0, 0, 0, 0, 516, 0, 2870, 0, -12432, -15201,
+            ],
+            ca: [
+                -2493, -15813, 1160, 12032, 2407, 256, 0, 14334, -633, 1408, 748, 2888, -230, -19,
+                256, 1536, 1926, 963, 1376, 8320, 953, 96, 22912, -485, 10182, -485, -806, 361,
+                512, 1175, -843, -17923,
+            ],
+            frame: ([4608, 3464], [8, 8, 4592, 3448]),
+            warp: [
+                [
+                    1.0002378144655706,
+                    2.9725538808200724e-05,
+                    9.90484904583866e-06,
+                    1.8099946004213052e-06,
+                ],
+                [1., 0., 0., 0.],
+                [
+                    0.9996276377798108,
+                    -4.8152284437108506e-05,
+                    3.178458018560093e-05,
+                    -1.8260554076832136e-05,
+                ],
+            ],
+            corner: [2304., 1732.],
+        };
+        // P1000416.RW2 (DC-TZ202): strong distortion, CA knots at 2/7, 4/7 and 6/7 of
+        // the radius, and up to 3.9 px of CA. Adobe's polynomial departs from the
+        // straight lines between the knots by up to 0.85 px here.
+        let tz202 = PanasonicCa {
+            info: [
+                24343, 1775, 408, 0, 1460, 0, 631, 1, 6781, 189, 508, 587, 3288, 689, 24841, -25795,
+            ],
+            ca: [
+                -18496, 12507, 4424, -25296, 2808, 384, -2560, 13819, 234, 832, -963, 3276, -586,
+                -26642, 256, 8520, 1872, 936, -32280, 4416, -3385, 2112, 0, -859, -14384, -347,
+                3085, -325, -22528, -8437, -18839, 17586,
+            ],
+            frame: ([5488, 3664], [8, 8, 5472, 3648]),
+            warp: [
+                [
+                    0.9998364018762427,
+                    -0.2003806248746034,
+                    0.05753545636529678,
+                    -0.00963193389561301,
+                ],
+                [
+                    0.9991955093872854,
+                    -0.1997130260581652,
+                    0.057697840880385876,
+                    -0.009660068321890813,
+                ],
+                [
+                    0.9995507528793499,
+                    -0.19942467462750102,
+                    0.05834188670640916,
+                    -0.009773256243380768,
+                ],
+            ],
+            corner: [2744., 1832.],
+        };
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.rw2");
+        for (name, case) in [("GX9", &GX9_CA), ("G80", &g80), ("TZ202", &tz202)] {
+            std::fs::write(&p, rw2_with(Some(&case.info), Some(&case.ca))).unwrap();
+            let m = frame(case.frame.0, case.frame.1);
+            let c = super::read(&p, &m).unwrap();
+            assert!(c.chromatic.is_some(), "{name}");
+            let unit = case.corner[0].hypot(case.corner[1]);
+            let adobe = |ch: usize, px| adobe(case.warp[ch], unit, px);
+            let (off, ca) = largest_ca_difference(&c, &m, &adobe);
+            assert!(ca > 1., "{name}: Adobe corrects {ca} px");
+            assert!(off < 0.1, "{name}: {off} px from Adobe's CA");
+        }
+        // The G80's lens needs no distortion correction, only the CA.
+        std::fs::write(&p, rw2_with(Some(&g80.info), Some(&g80.ca))).unwrap();
+        let c = super::read(&p, &frame(g80.frame.0, g80.frame.1)).unwrap();
+        assert!(c.distortion.is_none());
+    }
+    /// Newer bodies, whose DNGs carry the distortion in an embedded profile, keep the CA
+    /// in the warp, on the sensor's radius: P1002296.RW2 (DC-GH7, LEICA DG 12-35/F2.8 at
+    /// 12mm).
+    #[test]
+    fn reads_panasonic_chromatic_aberration_on_the_sensor_radius() {
+        let info = [
+            18216, -26703, 241, 0, -399, 0, 124, 1, 4495, 436, 354, -1062, 3611, 936, -23617,
+            -17367,
+        ];
+        let ca = [
+            27551, 1983, 18, 15368, 3032, 32, -5888, 6654, -1268, 338, -546, 3638, -725, -1, 256,
+            2064, 2426, 1213, 18128, 0, -1086, 384, -3584, -1268, -4230, -1268, -676, -159, -17152,
+            -2148, -15798, -17015,
+        ];
+        let warp = [
+            [
+                1.000588699784562,
+                -2.5632476810422133e-05,
+                -0.00029661560319560465,
+                -8.09482177484e-05,
+            ],
+            [1., 0., 0., 0.],
+            [
+                1.0001421369447667,
+                1.0062062321125609e-05,
+                0.0005116995869975938,
+                -7.363913965363622e-05,
+            ],
+        ];
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.rw2");
+        std::fs::write(&p, rw2_with(Some(&info), Some(&ca))).unwrap();
+        let m = frame([5792, 4352], [8, 8, 5776, 4336]);
+        let c = super::read(&p, &m).unwrap();
+        assert!(c.distortion.is_some());
+        let half = 5792f64.hypot(4352.) / 2.;
+        // Adobe's warp applies at the sensor radius green samples after distortion.
+        let sensor = |px: f64| px * f64::from(c.radial_scale((px / half) as f32)[1]);
+        let unit = 2896f64.hypot(2176.);
+        let (off, most) =
+            largest_ca_difference(&c, &m, &|ch, px| adobe(warp[ch], unit, sensor(px)));
+        assert!(most > 1., "Adobe corrects {most} px");
+        assert!(off < 0.1, "{off} px from Adobe's CA");
+    }
+    /// Lenses without CA data store an empty table; malformed tables are not read.
+    #[test]
+    fn panasonic_chromatic_tables_without_data_are_not_read() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.rw2");
+        let m = frame(GX9_CA.frame.0, GX9_CA.frame.1);
+        let mut empty = [0; 32];
+        // A DMC-G6's: only the values that change with each shot are set.
+        [empty[0], empty[1], empty[2], empty[7], empty[13], empty[31]] =
+            [-5508, 3276, 4624, -26724, 24178, 852];
+        let mut unordered = GX9_CA.ca;
+        unordered.swap(16, 17);
+        let mut unknown = GX9_CA.ca;
+        unknown[14] = 512;
+        for (name, ca) in [
+            ("empty", &empty[..]),
+            ("unordered", &unordered[..]),
+            ("unknown layout", &unknown[..]),
+            ("short", &GX9_CA.ca[..31]),
+        ] {
+            std::fs::write(&p, rw2_with(Some(&GX9), Some(ca))).unwrap();
+            let c = super::read(&p, &m).unwrap();
+            assert!(c.chromatic.is_none() && c.distortion.is_some(), "{name}");
+            std::fs::write(&p, rw2_with(None, Some(ca))).unwrap();
+            assert!(super::read(&p, &m).is_none(), "{name}");
+        }
+        // Without DistortionInfo the CA is still read.
+        std::fs::write(&p, rw2_with(None, Some(&GX9_CA.ca))).unwrap();
+        let c = super::read(&p, &m).unwrap();
+        assert!(c.chromatic.is_some() && c.distortion.is_none());
     }
     /// A model whose correction folds back on itself has no inverse to sample.
     #[test]
