@@ -316,7 +316,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [side_tabs.rs](../src/app/side_tabs.rs) | Develop's tab panel beside the adjustments (Presets, or Snapshots over History) and the rail that switches the adjustments between Edit (which also folds them) and the Crop, Remove, Red Eye and Masking drawers, then switches and folds the tab panel. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
-| [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset, and Update, Rename and Delete for presets made here (`presets/user.rs`, written by `xmp/preset_write.rs`). |
+| [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset; a preset's menu: Update, Rename and Delete for presets made here and imported ones, an imported one backed up before its first update (`presets/user.rs`, written by `xmp/preset_write.rs`), and Reveal in Finder for any preset file. |
 | [photo_metadata.rs](../src/app/photo_metadata.rs) | Rating, color label and pick/reject controls and shortcuts. |
 | [native_menu.rs](../src/app/native_menu.rs), [platform/menu.rs](../src/platform/menu.rs) | macOS application, File, Edit, View, Window and Help menus: AppKit transports typed actions; the editor checks current availability and runs existing commands. Native targets are disconnected at exit. |
 | [widgets.rs](../src/app/widgets.rs) | Shared buttons, adjustment sections (with Lightroom's panel switches and per-side Solo Mode), sliders (Up/Down over a hovered slider), curve editor, workspace tabs, and the confirmations: `confirm_modal`, and `destructive_confirm`, where Cancel has the focus and keys held from before do nothing. |
@@ -394,6 +394,7 @@ What each long-lived worker blocks on, how it stops and whether exit may wait fo
 | Native preset / exported photo | User-selected JSON / JPEG / TIFF / PNG destination. |
 | Session preferences | `session.json` in the data directory; last path, monitor ICC path and whether the window was maximized (not on macOS). UI tests inject a temporary destination or disable writes. |
 | Preset favorites | `preset-favorites.json` in the data directory. |
+| Imported preset backups | `preset-backups/` in the data directory: an imported preset as it was before its first Update with Current Settings, at its path under `xmp-presets/Imported/`. |
 | Saved point curves | `curves/` in the data directory: one XMP file per curve, named by the curve. |
 | Installed assets | `xmp-presets/` and `camera-profiles/` under asset roots; shared discovery also checks the legacy XDG/Linux data location. Imported XMP files go to `xmp-presets/Imported/` under the current data directory. |
 | Library previews | `previews.sqlite3` in the data directory; disposable cache, not a source of edits. |

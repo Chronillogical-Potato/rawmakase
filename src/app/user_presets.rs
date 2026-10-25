@@ -1,5 +1,6 @@
 //! Presets made here: New Develop Preset, and Update, Rename and Delete in a preset's
-//! menu, for presets in the user library's "User Presets" folder only.
+//! menu, for presets in the user library's "User Presets" folder and those imported
+//! into it; and Reveal in Finder for any preset file.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, settings_transfer::PresetForm, theme};
 use crate::model::settings_groups::GroupSelection;
@@ -13,6 +14,33 @@ pub(super) enum PresetAction {
     Update(usize),
     StartRename(usize),
     Delete(usize),
+    Reveal(usize),
+}
+
+/// The menu of preset `i`, `p`, and what was chosen in it: only what `p` allows.
+pub(super) fn preset_menu(
+    ui: &mut egui::Ui,
+    user: &UserPresets,
+    p: &crate::xmp::Preset,
+    i: usize,
+) -> Option<PresetAction> {
+    let mut action = None;
+    if user.manages(p) {
+        if ui.button("Update with Current Settings").clicked() {
+            action = Some(PresetAction::Update(i));
+        }
+        if ui.button("Rename…").clicked() {
+            action = Some(PresetAction::StartRename(i));
+        }
+        if ui.button("Delete").clicked() {
+            action = Some(PresetAction::Delete(i));
+        }
+        ui.separator();
+    }
+    if ui.button(crate::platform::reveal::LABEL).clicked() {
+        action = Some(PresetAction::Reveal(i));
+    }
+    action
 }
 
 /// A preset being renamed: its file, which stays put while the library reloads,
@@ -70,7 +98,14 @@ impl Editor {
                     .zip(self.document.full())
                     .map(|(p, im)| {
                         user.update(p, self.document.edit.recipe(), &im.metadata)
-                            .map(|()| format!("Preset {} updated", p.name))
+                            .map(|backup| match backup {
+                                None => format!("Preset {} updated", p.name),
+                                Some(b) => format!(
+                                    "Preset {} updated; the imported original is kept as {}",
+                                    p.name,
+                                    b.display()
+                                ),
+                            })
                     })
             }
             PresetAction::Delete(i) => library.presets.get(i).map(|p| {
@@ -83,6 +118,16 @@ impl Editor {
                     format!("Preset {} deleted", p.name)
                 })
             }),
+            PresetAction::Reveal(i) => {
+                if let Some(Err(e)) = library
+                    .presets
+                    .get(i)
+                    .map(|p| crate::platform::reveal::reveal(&p.path))
+                {
+                    self.status = format!("Couldn't show the preset: {e:#}");
+                }
+                return;
+            }
             PresetAction::StartRename(i) => {
                 if let Some(p) = library.presets.get(i) {
                     self.modal = Some(super::Modal::RenamePreset(PresetRename {
@@ -191,6 +236,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let user = UserPresets {
             dir: d.path().join("User Presets"),
+            imported: d.path().join("Imported"),
+            backups: d.path().join("preset-backups"),
         };
         // Without a loaded photo there is nothing to save.
         let form = PresetForm {
