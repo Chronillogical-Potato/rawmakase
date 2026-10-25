@@ -762,7 +762,12 @@ impl Editor {
             if let Some(angle) = super::crop_tool::ruler_angle(from, to, current)
                 && angle != current
             {
-                self.document.edit.recipe_mut().straighten = angle;
+                crate::model::edit::change_setting(
+                    self.document.edit.recipe_mut(),
+                    crate::model::params::ParameterId::Straighten,
+                    None,
+                    |r| r.straighten = angle,
+                );
                 self.document.edit.name_next_step(super::history::Step::new(
                     "Straighten",
                     format!("{angle:+.2}"),

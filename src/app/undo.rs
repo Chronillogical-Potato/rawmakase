@@ -343,7 +343,7 @@ impl Editor {
                     // Not a change of its own for the log.
                     self.document.edit.take_recorded();
                     self.document.edit.save_state_mut().mark_changed();
-                    self.ensure_upright();
+                    self.ensure_analysis();
                     self.schedule();
                     self.status = format!("{verb} in Develop");
                     return true;

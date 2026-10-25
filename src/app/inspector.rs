@@ -266,7 +266,9 @@ impl Editor {
                         });
                 });
             });
-            setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.);
+            crate::model::edit::change_setting(r, ParameterId::Straighten, None, |r| {
+                setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.)
+            });
             control_row(ui, "Straighten", |ui| {
                 let w = (ui.available_width() - 4.) / 2.;
                 let armed = self.view.ruler == Ruler::Armed;
@@ -364,7 +366,9 @@ impl Editor {
                     .clicked()
                 {
                     r.crop = [0., 0., 1., 1.];
+                    // An angle Reset sets is not Auto's, even when Auto's was 0.
                     r.straighten = 0.;
+                    r.straighten_auto = None;
                     r.rotation = 0;
                     r.flip_x = false;
                     r.flip_y = false;

@@ -155,6 +155,32 @@ impl UprightMode {
         Self::ALL.get(code).copied()
     }
 }
+/// The Crop panel's Auto straighten, which RAWmakase keeps beside the angle (Lightroom
+/// keeps only the angle). Each holds the angle it is about, so changing Straighten in
+/// any other way (the slider, the ruler, Reset) ends it without anyone clearing it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoStraighten {
+    /// Auto measured this angle on this photo.
+    Measured(f32),
+    /// Copied from a photo whose angle was Auto: this photo's own angle is measured
+    /// once it is developed. Until then it keeps the angle it had, this one.
+    Pending(f32),
+}
+impl AutoStraighten {
+    pub fn angle(self) -> f32 {
+        match self {
+            Self::Measured(a) | Self::Pending(a) => a,
+        }
+    }
+    /// The same, for the photo flipped: its angle turns the other way.
+    pub fn mirrored(self) -> Self {
+        match self {
+            Self::Measured(a) => Self::Measured(-a),
+            Self::Pending(a) => Self::Pending(-a),
+        }
+    }
+}
 /// Lightroom's Upright: the chosen mode and the correction for each mode, as Lightroom
 /// stores them so that switching modes needs no new analysis.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]

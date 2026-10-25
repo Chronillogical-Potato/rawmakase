@@ -203,7 +203,7 @@ impl Editor {
             .edit
             .name_next_step(Step::new(format!("Snapshot: {name}"), ""));
         self.document.edit.replace(recipe);
-        self.ensure_upright();
+        self.ensure_analysis();
     }
     /// A snapshot's settings for this photo; one from Lightroom is converted, and
     /// what it could not render is said in the status line.

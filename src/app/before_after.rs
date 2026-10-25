@@ -224,6 +224,8 @@ fn framed_like(mut before: Recipe, edit: &Recipe) -> Recipe {
     before.flip_x = edit.flip_x;
     before.flip_y = edit.flip_y;
     before.straighten = edit.straighten;
+    // Whether that angle is Auto's goes with it.
+    before.straighten_auto = edit.straighten_auto;
     before
 }
 
@@ -288,7 +290,7 @@ impl Editor {
         if let Some(edit) = edit.filter(|e| *e != *self.document.edit.recipe()) {
             self.document.edit.name_next_step(Step::new(step, ""));
             self.document.edit.replace(edit);
-            self.ensure_upright();
+            self.ensure_analysis();
         }
         self.schedule();
     }
@@ -706,9 +708,15 @@ mod tests {
             e.document.edit.setup_mut().exposure = value;
             e.commit_edit(before, None);
         }
-        e.document.edit.setup_mut().straighten = 2.;
+        e.document.edit.setup_mut().set_auto_straighten(Some(2.));
         assert_eq!(e.before_settings().exposure, start.exposure);
         assert_eq!(e.before_settings().straighten, 2.);
+        // Framed as the edit, Before's angle is Auto's as the edit's is, so copying
+        // Before to After keeps it Auto.
+        assert_eq!(
+            e.before_settings().auto_straighten(),
+            e.document.edit.recipe().auto_straighten()
+        );
         // Copy History Step Settings to Before, from the first step.
         let edit = e.document.edit.recipe().clone();
         e.before_from_history(1);

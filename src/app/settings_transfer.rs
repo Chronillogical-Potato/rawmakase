@@ -248,7 +248,7 @@ impl Editor {
             .edit
             .name_next_step(super::history::Step::new(step, ""));
         self.document.edit.replace(out.recipe);
-        self.ensure_upright();
+        self.ensure_analysis();
         self.status = if out.notes.is_empty() {
             "Settings pasted".into()
         } else {

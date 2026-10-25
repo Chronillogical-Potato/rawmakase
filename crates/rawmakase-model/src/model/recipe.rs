@@ -109,6 +109,11 @@ pub struct Recipe {
     pub sharpening: f32,
     pub crop: [f32; 4],
     pub straighten: f32,
+    /// Whether `straighten` is the Crop panel's Auto, which Copy, Paste and Sync of the
+    /// Crop measure on each photo again; see [`Recipe::auto_straighten`]. Omitted
+    /// when none, so releases that predate it read the recipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub straighten_auto: Option<crate::model::transform::AutoStraighten>,
     /// Lightroom's Constrain Crop (`crs:CropConstrainToWarp`): the crop as rendered
     /// shrinks, keeping its aspect, to leave out the white areas Upright, the Transform
     /// sliders and manual Distortion uncover. `crop` stays as the user set it. Omitted
@@ -220,6 +225,7 @@ impl Default for Recipe {
             sharpening: 0.35,
             crop: [0., 0., 1., 1.],
             straighten: 0.,
+            straighten_auto: None,
             constrain_crop: false,
             transform: Default::default(),
             upright: Default::default(),
@@ -745,6 +751,32 @@ impl Recipe {
     pub fn profile_changed(&mut self, m: &Metadata) {
         self.use_camera_baseline(m);
         self.sync_white_balance_controls(m);
+    }
+    /// The Crop panel's Auto straighten, while Straighten still has the angle it is
+    /// about.
+    pub fn auto_straighten(&self) -> Option<crate::model::transform::AutoStraighten> {
+        self.straighten_auto
+            .filter(|auto| auto.angle() == self.straighten)
+    }
+    /// Whether Straighten waits to be measured on this photo (see
+    /// [`crate::model::transform::AutoStraighten::Pending`]).
+    pub fn straighten_pending(&self) -> bool {
+        matches!(
+            self.auto_straighten(),
+            Some(crate::model::transform::AutoStraighten::Pending(_))
+        )
+    }
+    /// Sets the angle Auto straighten measured on this photo. Without one (no horizon
+    /// or verticals to go by) the angle stays as it is, no longer Auto.
+    pub fn set_auto_straighten(&mut self, measured: Option<f32>) {
+        match measured {
+            Some(angle) => {
+                self.straighten = angle;
+                self.straighten_auto =
+                    Some(crate::model::transform::AutoStraighten::Measured(angle));
+            }
+            None => self.straighten_auto = None,
+        }
     }
     pub fn use_camera_baseline(&mut self, m: &Metadata) {
         self.camera_exposure = crate::camera_profiles::reference::baseline_exposure(m);

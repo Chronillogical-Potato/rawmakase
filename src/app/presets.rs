@@ -468,7 +468,7 @@ impl Editor {
             .map(|(_, used)| used);
         this_photos_upright(&mut r, self.document.edit.recipe());
         let before = self.document.edit.replace(r);
-        self.ensure_upright();
+        self.ensure_analysis();
         // The settings before it are kept once, and every Amount is computed
         // from them again, so dragging never drifts.
         let full = self.document.edit.recipe().clone();

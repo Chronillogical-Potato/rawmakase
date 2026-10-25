@@ -146,6 +146,8 @@ fn stage_recipes(r: &Recipe) -> StageRecipes {
         crop,
         rotation,
         straighten,
+        // Whether the angle is Auto's: rendering reads only the angle.
+        straighten_auto: _,
         constrain_crop,
         flip_x,
         flip_y,

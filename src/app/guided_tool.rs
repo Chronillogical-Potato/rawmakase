@@ -132,7 +132,7 @@ impl Editor {
             }
             // Solved when the analysis lands.
             _ => {
-                self.ensure_upright();
+                self.ensure_analysis();
                 None
             }
         };

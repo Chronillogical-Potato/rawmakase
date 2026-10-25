@@ -270,6 +270,8 @@ impl Editor {
             Some("camera profiles are still being imported")
         } else if d.upright.is_running() || d.edit.recipe().upright.needs_analysis() {
             Some("Upright is still analysing it")
+        } else if d.straighten.is_running() || d.edit.recipe().straighten_pending() {
+            Some("Auto straighten is still measuring it")
         } else {
             None
         }
