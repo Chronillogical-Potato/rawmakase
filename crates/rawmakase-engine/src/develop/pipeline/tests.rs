@@ -863,6 +863,7 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
         }),
         chromatic: None,
         gain_map: None,
+        ..Default::default()
     });
     let on = Recipe::for_metadata(&im.metadata);
     assert!(on.lens_builtin);
@@ -2182,6 +2183,7 @@ fn lens_ca_stripe_error(period: f32, phase: f32) -> f32 {
             },
         ]),
         gain_map: None,
+        ..Default::default()
     });
     let r = Recipe::for_metadata(&im.metadata);
     let warp = LensWarp::new(&im, &r).unwrap();
@@ -2220,6 +2222,7 @@ fn stripe_ca_guard_keeps_isolated_edges_resolved_colour_and_noise() {
             },
         ]),
         gain_map: None,
+        ..Default::default()
     });
     for case in 0..5 {
         let mut seed = 0x23456789u32;

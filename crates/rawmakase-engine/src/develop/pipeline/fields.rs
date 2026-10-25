@@ -3,8 +3,9 @@ use super::*;
 use crate::develop::recipe::RenderedRecipe;
 
 /// Vignetting over the camera image: the lens profile's at its Vignetting amount, and
-/// measured manual Vignetting. Radius 1 is the half diagonal; `x`, `y` use sample
-/// coordinates, where pixel `i` is centred at `i`.
+/// measured manual Vignetting. Radius 1 is the half diagonal, from the lens
+/// correction's optical centre (the image centre without one), which `LensMap` also
+/// uses; `x`, `y` use sample coordinates, where pixel `i` is centred at `i`.
 pub(crate) struct VignetteField<'a> {
     table: VignetteTable<'a>,
     pub(super) center: [f32; 2],
@@ -19,11 +20,11 @@ enum VignetteTable<'a> {
 }
 impl<'a> VignetteField<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
-        let lens = r
-            .lens_correction(&im.metadata)
-            .and_then(|l| l.vignetting.as_ref());
+        let correction = r.lens_correction(&im.metadata);
+        let lens = correction.and_then(|l| l.vignetting.as_ref());
         let (w, h) = (im.width as f32, im.height as f32);
         let half = (w * w + h * h).sqrt() * 0.5;
+        let [cx, cy] = crate::develop::image_space::LensMap::centre(im, r);
         let (table, amount) = match (lens, r.manual_vignette()) {
             (_, Some(manual)) => {
                 // Manual Vignetting spans the photo frame, inside the camera's default crop.
@@ -35,6 +36,7 @@ impl<'a> VignetteField<'a> {
                         r.lens_amounts(&im.metadata)[1],
                         &manual,
                         half / frame,
+                        crate::optics::reach([cx, cy], [w, h]),
                     )),
                     1.,
                 )
@@ -44,7 +46,7 @@ impl<'a> VignetteField<'a> {
         };
         Some(Self {
             table,
-            center: [w * 0.5, h * 0.5],
+            center: [cx * w, cy * h],
             half,
             amount,
         })
@@ -309,6 +311,60 @@ fn stripe_ca_sample(im: Source, x: f32, y: f32, samples: [[f32; 3]; 3]) -> [f32;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Vignetting, a GainMap after the warp and the warp itself all centre on the
+    /// correction's optical centre, the same one `LensMap` uses.
+    #[test]
+    fn vignetting_is_centred_on_the_optical_centre() {
+        use crate::camera_data::{CameraImage, Metadata};
+        let lens = crate::optics::LensCorrection {
+            default_on: true,
+            vignetting: Some(crate::optics::Radial {
+                knots: vec![0., 1.2],
+                values: vec![1., 2.],
+            }),
+            centre: [0.3, 0.6],
+            ..Default::default()
+        };
+        let im = CameraImage {
+            width: 100,
+            height: 50,
+            pixels: vec![[0.2; 3]; 5000],
+            metadata: Metadata {
+                width: 100,
+                height: 50,
+                lens: Some(lens),
+                ..Default::default()
+            },
+            recovered: Default::default(),
+            fast: false,
+            scale_factor: 1.,
+            scale_clipped: 0,
+        };
+        let r = Recipe {
+            lens_builtin: true,
+            ..Default::default()
+        };
+        let v = VignetteField::new(&im, &r).unwrap();
+        let map = crate::develop::image_space::LensMap::new(&im, &r).unwrap();
+        assert!((v.center[0] - 30.).abs() < 1e-4 && (v.center[1] - 30.).abs() < 1e-4);
+        assert_eq!(v.center, map.center);
+        assert!((v.gain(29.5, 29.5) - 1.).abs() < 1e-5);
+        assert!((v.gain(29.5 - 20., 29.5) - v.gain(29.5 + 20., 29.5)).abs() < 1e-5);
+        assert!(v.gain(99., 0.) > v.gain(0., 49.));
+        // With the correction off, manual Vignetting alone keeps the centre the map
+        // uses for a measured aberration: the camera's.
+        let mut manual = Recipe {
+            lens_builtin: false,
+            ..Default::default()
+        };
+        manual.effects.lens_vignette = 0.4;
+        assert!(manual.lens_correction(&im.metadata).is_none());
+        let v = VignetteField::new(&im, &manual).unwrap();
+        let map = crate::develop::image_space::LensMap::new(&im, &manual).unwrap();
+        assert_eq!(v.center, map.center);
+        assert!((v.center[0] - 30.).abs() < 1e-4);
+    }
 
     #[test]
     fn stripe_window_centres_match_gpu_at_halfway_positions() {

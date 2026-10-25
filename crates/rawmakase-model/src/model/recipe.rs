@@ -1166,6 +1166,7 @@ mod tests {
             distortion: Radial::new(vec![0., 1.], vec![1., 1.02]),
             chromatic: Some([ca.clone(), ca]),
             gain_map: None,
+            ..Default::default()
         };
         let m = Metadata {
             lens: Some(LensCorrection {

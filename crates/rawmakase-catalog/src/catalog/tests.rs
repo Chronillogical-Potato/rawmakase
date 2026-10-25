@@ -1272,6 +1272,7 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
             distortion: None,
             chromatic: None,
             gain_map: None,
+            ..Default::default()
         }),
         ..Default::default()
     };

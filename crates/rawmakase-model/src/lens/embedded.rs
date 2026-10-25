@@ -185,7 +185,7 @@ fn fuji(t: &mut Tiff) -> Option<LensCorrection> {
         vignetting,
         distortion,
         chromatic,
-        gain_map: None,
+        ..Default::default()
     })
 }
 
@@ -236,8 +236,8 @@ fn sony(t: &mut Tiff) -> Option<Builtin> {
             let v: Vec<f64> = v.iter().map(|d| 1. + f64::from(*d) / 16384.).collect();
             let at = spline(&v);
             Radial::new(
-                self::knots(),
-                self::knots()
+                self::knots(1.),
+                self::knots(1.)
                     .into_iter()
                     .map(|r| at(f64::from(r)) as f32)
                     .collect(),
@@ -258,7 +258,7 @@ fn sony(t: &mut Tiff) -> Option<Builtin> {
         vignetting,
         distortion,
         chromatic,
-        gain_map: None,
+        ..Default::default()
     };
     // Adobe DNG Converter writes the lateral CA of every Sony body with tables, and a
     // compact's distortion, as opcodes, which Lightroom always applies; never the
@@ -302,17 +302,32 @@ fn spline(v: &[f64]) -> impl Fn(f64) -> f64 + '_ {
     }
 }
 
-/// Radius samples from the centre to the decoded image's corner.
-fn knots() -> Vec<f32> {
-    (0..=32).map(|i| i as f32 / 32.).collect()
+/// Radius samples from the centre out to `reach`, the decoded image's corner farthest
+/// from it (`optics::reach`).
+fn knots(reach: f32) -> Vec<f32> {
+    (0..=32).map(|i| i as f32 / 32. * reach).collect()
 }
 
-/// A maker's radial model in its own radius unit, `unit` pixels, sampled at the
-/// decoded image's radii: `green` maps an output radius to green's source radius,
-/// `chromatic` red's and blue's scale relative to green at green's source radius.
+/// The centre of the camera's default crop, in fractions of the decoded image (its
+/// centre without a crop).
+fn crop_centre(m: &Metadata) -> [f32; 2] {
+    if m.crop_width == 0 || m.crop_height == 0 || m.width == 0 || m.height == 0 {
+        return LensCorrection::image_centre();
+    }
+    [
+        (m.crop_left as f32 + m.crop_width as f32 * 0.5) / m.width as f32,
+        (m.crop_top as f32 + m.crop_height as f32 * 0.5) / m.height as f32,
+    ]
+}
+
+/// A maker's radial model in its own radius unit, `unit` pixels, from the optical
+/// `centre` (fractions of the decoded image), sampled at the decoded image's radii:
+/// `green` maps an output radius to green's source radius, `chromatic` red's and
+/// blue's scale relative to green at green's source radius.
 fn maker_model(
     m: &Metadata,
     unit: f64,
+    centre: [f32; 2],
     green: &dyn Fn(f64) -> Option<f64>,
     chromatic: Option<[&dyn Fn(f64) -> f64; 2]>,
 ) -> (Option<Radial>, Option<[Radial; 2]>) {
@@ -320,6 +335,12 @@ fn maker_model(
     if !(half > 0. && unit > 0.) {
         return (None, None);
     }
+    let knots = || {
+        knots(crate::optics::reach(
+            centre,
+            [m.width as f32, m.height as f32],
+        ))
+    };
     // The ratio's limit at the centre is its value just beside it.
     let x = |r: f32| (f64::from(r) * half / unit).max(1e-4);
     let sources: Option<Vec<f64>> = knots().into_iter().map(|r| green(x(r))).collect();
@@ -410,7 +431,10 @@ fn olympus(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         size => size,
     };
     let unit = f64::from(w).hypot(f64::from(h)) * 0.5;
-    let (distortion, chromatic) = maker_model(m, unit, &green, chromatic);
+    // Centred on the default crop, as Adobe's warps are: the decoded image has more
+    // unused columns on one side (the E-M10 Mark III's centre is 8 px off).
+    let centre = crop_centre(m);
+    let (distortion, chromatic) = maker_model(m, unit, centre, &green, chromatic);
     Some(LensCorrection {
         source: source.into(),
         // Adobe applies it as the photo's lens profile: written into its DNGs as
@@ -420,6 +444,7 @@ fn olympus(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         distortion,
         chromatic,
         gain_map: None,
+        centre,
     })
 }
 
@@ -556,7 +581,9 @@ fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
     if info.is_none() && chromatic.is_none() {
         return None;
     }
-    let (distortion, chromatic) = maker_model(m, unit, &green, chromatic);
+    // Adobe's warps are centred on the default crop.
+    let centre = crop_centre(m);
+    let (distortion, chromatic) = maker_model(m, unit, centre, &green, chromatic);
     let source = if make(t).starts_with("leica") {
         "Leica built-in"
     } else {
@@ -569,6 +596,7 @@ fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         distortion,
         chromatic,
         gain_map: None,
+        centre,
     })
 }
 
@@ -646,19 +674,30 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
     }
     let k = coefficients(&d, 0x10, 4)?;
     let scale = 1. / (1. + rational(&d, 0x40)?);
-    // The radius is 1 at the default crop's corner farthest from the optical centre,
-    // which tag 8 places in pixels from the image centre. RAWmakase centres the
-    // correction on the image.
+    // The optical centre, which tag 8 places in pixels from the image centre, as
+    // Adobe's opcodes do (Z 6 DSC_0750: −7.52, +26.30). The radius is 1 at the default
+    // crop's corner farthest from it.
     let [dx, dy] = [4, 12].map(|at| centre.as_ref().and_then(|c| rational(c, at)).unwrap_or(0.));
-    let (w, h) = match (m.crop_width, m.crop_height) {
-        (0, _) | (_, 0) => (m.width, m.height),
-        size => size,
+    let (iw, ih) = (f64::from(m.width), f64::from(m.height));
+    let (cx, cy) = (iw * 0.5 + dx, ih * 0.5 + dy);
+    let (left, top, w, h) = match (m.crop_width, m.crop_height) {
+        (0, _) | (_, 0) => (0., 0., iw, ih),
+        _ => (
+            f64::from(m.crop_left),
+            f64::from(m.crop_top),
+            f64::from(m.crop_width),
+            f64::from(m.crop_height),
+        ),
     };
-    let unit = (f64::from(w) * 0.5 + dx.abs()).hypot(f64::from(h) * 0.5 + dy.abs());
-    let half = f64::from(m.width).hypot(f64::from(m.height)) * 0.5;
+    let unit = (cx - left)
+        .max(left + w - cx)
+        .hypot((cy - top).max(top + h - cy));
+    let half = iw.hypot(ih) * 0.5;
     if !(half > 0. && unit > 0. && scale.is_finite() && scale > 0.) {
         return None;
     }
+    let centre = [(cx / iw) as f32, (cy / ih) as f32];
+    let knots = || knots(crate::optics::reach(centre, [iw as f32, ih as f32]));
     let curve = |f: &dyn Fn(f64) -> f64| {
         let values = knots()
             .into_iter()
@@ -693,6 +732,7 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         distortion,
         chromatic,
         gain_map: None,
+        centre,
     })
 }
 
@@ -734,10 +774,10 @@ fn coolpix_tables(
         return None;
     }
     let curve = |f: &dyn Fn(f64) -> f64| {
-        let values = knots()
+        let values = knots(1.)
             .into_iter()
             .map(|r| f(f64::from(r) * half / unit) as f32);
-        Radial::new(knots(), values.collect())
+        Radial::new(knots(1.), values.collect())
     };
     let ratio = spline(&d);
     // Scaled, as Adobe's warp is, so the widest ratio out to the corner is 1.
@@ -766,7 +806,7 @@ fn coolpix_tables(
         vignetting: None,
         distortion,
         chromatic,
-        gain_map: None,
+        ..Default::default()
     })
 }
 
@@ -864,7 +904,10 @@ fn samsung(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
     };
     let (red, blue) = (|g| scale(8, g), |g| scale(15, g));
     let chromatic = ca.is_some().then_some([&red as &dyn Fn(f64) -> f64, &blue]);
-    let (distortion, chromatic) = maker_model(m, 1., &green, chromatic);
+    // Adobe's warps are centred on the default crop (NX1000: 7 px right of and 4 px
+    // below the active area's centre).
+    let centre = crop_centre(m);
+    let (distortion, chromatic) = maker_model(m, 1., centre, &green, chromatic);
     Some(LensCorrection {
         source: "Samsung built-in".into(),
         // Adobe writes it into its DNGs as their warp, which always applies.
@@ -873,6 +916,7 @@ fn samsung(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         distortion,
         chromatic,
         gain_map: None,
+        centre,
     })
 }
 
@@ -1084,7 +1128,7 @@ fn canon_tables(t: &[u8], unit: f64, m: &Metadata) -> Option<LensCorrection> {
         vignetting,
         distortion,
         chromatic,
-        gain_map: None,
+        ..Default::default()
     })
 }
 
@@ -1462,15 +1506,20 @@ mod tests {
             ..Default::default()
         }
     }
-    /// Largest difference in pixels, out to the default crop's corner, between the
-    /// source radii of `c` and Adobe's warp.
+    /// Largest difference in pixels, out to the default crop's corner farthest from the
+    /// optical centre, between the source radii of `c` and Adobe's warp.
     fn largest_difference(
         c: &LensCorrection,
         m: &Metadata,
         adobe: &dyn Fn(usize, f64) -> f64,
     ) -> f64 {
         let half = f64::from(m.width).hypot(f64::from(m.height)) / 2.;
-        let corner = f64::from(m.crop_width).hypot(f64::from(m.crop_height)) / 2.;
+        let [cx, cy] = c
+            .centre_in([m.width as f32, m.height as f32])
+            .map(f64::from);
+        let (l, t) = (f64::from(m.crop_left), f64::from(m.crop_top));
+        let (r, b) = (l + f64::from(m.crop_width), t + f64::from(m.crop_height));
+        let corner = (cx - l).max(r - cx).hypot((cy - t).max(b - cy));
         (0..=200)
             .flat_map(|i| {
                 let px = corner * f64::from(i) / 200.;
@@ -1493,6 +1542,8 @@ mod tests {
         let c = super::read(&p, &m).unwrap();
         assert!(c.default_on && c.vignetting.is_none());
         assert_eq!(c.source, "Olympus built-in");
+        // The default crop's centre, as Adobe's warp has it: 8 px left of the image's.
+        assert_eq!(c.centre_in([4640., 3472.]), [2312., 1736.]);
         let warp = [
             [
                 1.000663065655637,
@@ -1927,8 +1978,10 @@ mod tests {
         let m = frame([4624, 3470], [8, 7, 4608, 3456]);
         let c = super::read(&p, &m).unwrap();
         assert!(c.default_on && c.vignetting.is_none());
-        // Only red's CA, past the corner as in Adobe's warp, zooms in at all.
-        assert!(c.fill_scale() > 0.999);
+        // Red's CA reaches past the corner, as in Adobe's warp, but only green frames
+        // the photo: no zoom.
+        let size = [4624., 3470.];
+        assert_eq!(c.fill_scale(1., size, [8., 7., 4616., 3463.]), 1.);
         let warp = [
             [
                 0.9770807182516118,
@@ -2009,6 +2062,12 @@ mod tests {
         let c = super::read(&nikon_file(d.path(), Z7), &m).unwrap();
         assert!(c.default_on);
         assert_eq!(c.source, "Nikon built-in");
+        // Record 8's optical centre, where Adobe's opcodes have theirs.
+        let centre = c.centre_in([8288., 5520.]);
+        assert!(
+            (centre[0] - 4143.2).abs() < 0.05 && (centre[1] - 2762.).abs() < 0.05,
+            "{centre:?}"
+        );
         let warp = [
             [
                 0.9417050022703349,
@@ -2241,6 +2300,8 @@ mod tests {
         let c = super::read(&samsung_file(d.path(), &NX200), &m).unwrap();
         assert!(c.default_on && c.vignetting.is_none());
         assert_eq!(c.source, "Samsung built-in");
+        // The default crop's centre, where Adobe's warp has its centre.
+        assert_eq!(c.centre_in([5530., 3694.]), [2764., 1846.]);
         let warp = [
             [
                 1.0005000000000004,

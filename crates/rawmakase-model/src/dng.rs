@@ -103,19 +103,9 @@ pub fn read(path: &Path) -> Option<Dng> {
     {
         dng.user_crop = Some([left, top, right, bottom]);
     }
-    let vignetting = raw
-        .get(&51009)
-        .and_then(|e| t.raw(e))
-        .and_then(|b| opcode(&b, 3))
-        .and_then(|p| vignette(&p));
-    let list3 = raw.get(&51022).and_then(|e| t.raw(e));
-    let warp = list3
-        .as_deref()
-        .and_then(|b| opcode(b, 1))
-        .and_then(|p| warp(&p));
-    let (distortion, chromatic) = warp.unwrap_or((None, None));
-    // OpcodeList3 applies to the demosaiced image: the active area (or the whole
-    // stored image), whose size its GainMaps must cover.
+    // OpcodeList2 and 3 apply to the active area (or the whole stored image), which
+    // their optical centres are fractions of, whose size OpcodeList3's GainMaps must
+    // cover and which the decoder decodes.
     let area = raw.get(&50829).and_then(|e| t.numbers(e));
     let size = match area.as_deref() {
         Some(&[top, left, bottom, right]) if bottom > top && right > left => {
@@ -126,10 +116,31 @@ pub fn read(path: &Path) -> Option<Dng> {
             dim(&mut t, 257).zip(dim(&mut t, 256)).map(|(h, w)| [h, w])
         }
     };
+    let frame = size.map(|[h, w]| [w as f32, h as f32]);
+    let vignetting = raw
+        .get(&51009)
+        .and_then(|e| t.raw(e))
+        .and_then(|b| opcode(&b, 3))
+        .and_then(|p| vignette(&p, frame));
+    let list3 = raw.get(&51022).and_then(|e| t.raw(e));
+    let warp = list3
+        .as_deref()
+        .and_then(|b| opcode(b, 1))
+        .and_then(|p| warp(&p, frame));
     let gain_map = list3
         .as_deref()
         .zip(size)
         .and_then(|(b, size)| gain_grid(b, size));
+    // One centre for the correction: the warp's, which moves the image. A vignette
+    // centred elsewhere (no file seen) is left out rather than moved.
+    let centre = match (&warp, &vignetting) {
+        (Some((_, _, c)), _) | (None, Some((_, c))) => *c,
+        (None, None) => LensCorrection::image_centre(),
+    };
+    let vignetting = vignetting
+        .filter(|(_, c)| frame.is_none_or(|[w, h]| same_centre(*c, centre, [w, h])))
+        .map(|(v, _)| v);
+    let (distortion, chromatic) = warp.map_or((None, None), |(d, c, _)| (d, c));
     let lens = LensCorrection {
         source: "DNG opcodes".into(),
         default_on: true,
@@ -137,6 +148,7 @@ pub fn read(path: &Path) -> Option<Dng> {
         distortion,
         chromatic,
         gain_map,
+        centre,
     };
     dng.lens = (!lens.is_empty() && lens.validate()).then_some(lens);
     Some(dng)
@@ -392,53 +404,69 @@ fn doubles(p: &[u8]) -> Vec<f64> {
         .map(|c| f64::from_be_bytes(*c))
         .collect()
 }
-/// Radius samples; the opcode radius, like ours, is 1 at the farthest corner from
-/// the optical centre, which must be near the image centre.
-fn knots() -> Vec<f32> {
-    (0..=32).map(|i| i as f32 / 32.).collect()
-}
-fn centred(cx: f64, cy: f64) -> bool {
-    (cx - 0.5).abs() < 0.02 && (cy - 0.5).abs() < 0.02
-}
-/// FixVignetteRadial: gain 1 + k0 r² + k1 r⁴ + k2 r⁶ + k3 r⁸ + k4 r¹⁰.
-fn vignette(p: &[u8]) -> Option<Radial> {
-    let v = doubles(p);
-    if v.len() != 7 || !centred(v[5], v[6]) {
+/// An opcode's optical centre (fractions of the image of `frame` pixels) and the
+/// factor from our radius, 1 at the half diagonal, to the opcode's, 1 at the image's
+/// corner farthest from that centre (the DNG SDK's normalization), with our knots out
+/// to that corner. Without the image's size only a centred opcode is read.
+fn opcode_frame(cx: f64, cy: f64, frame: Option<[f32; 2]>) -> Option<([f32; 2], f32, Vec<f32>)> {
+    let centre = [cx as f32, cy as f32];
+    let Some(size) = frame else {
+        return ((cx - 0.5).abs() < 0.02 && (cy - 0.5).abs() < 0.02)
+            .then(|| (LensCorrection::image_centre(), 1., knots(1.)));
+    };
+    if !centre.iter().all(|c| (0. ..=1.).contains(c)) {
         return None;
     }
-    let values = knots()
+    let reach = crate::optics::reach(centre, size);
+    Some((centre, 1. / reach, knots(reach)))
+}
+fn knots(reach: f32) -> Vec<f32> {
+    (0..=32).map(|i| i as f32 / 32. * reach).collect()
+}
+/// Two optical centres within half a pixel of each other on an image of `size`.
+fn same_centre(a: [f32; 2], b: [f32; 2], size: [f32; 2]) -> bool {
+    ((a[0] - b[0]) * size[0]).hypot((a[1] - b[1]) * size[1]) <= 0.5
+}
+/// FixVignetteRadial: gain 1 + k0 r² + k1 r⁴ + k2 r⁶ + k3 r⁸ + k4 r¹⁰, and its centre.
+fn vignette(p: &[u8], frame: Option<[f32; 2]>) -> Option<(Radial, [f32; 2])> {
+    let v = doubles(p);
+    if v.len() != 7 {
+        return None;
+    }
+    let (centre, to_opcode, knots) = opcode_frame(v[5], v[6], frame)?;
+    let values = knots
         .iter()
         .map(|r| {
-            let r2 = f64::from(*r * *r);
+            let r2 = f64::from(*r * to_opcode).powi(2);
             (1. + (0..5).map(|i| v[i] * r2.powi(i as i32 + 1)).sum::<f64>()) as f32
         })
         .collect();
-    let r = Radial {
-        knots: knots(),
-        values,
-    };
-    r.values.iter().any(|g| (g - 1.).abs() > 1e-4).then_some(r)
+    let r = Radial { knots, values };
+    r.values
+        .iter()
+        .any(|g| (g - 1.).abs() > 1e-4)
+        .then_some((r, centre))
 }
-/// WarpRectilinear: source radius ratio kr0 + kr1 r² + kr2 r⁴ + kr3 r⁶ per plane.
-/// Tangential terms are ignored.
-fn warp(p: &[u8]) -> Option<(Option<Radial>, Option<[Radial; 2]>)> {
+/// The distortion and lateral CA of a WarpRectilinear warp, whose source radius ratio
+/// is kr0 + kr1 r² + kr2 r⁴ + kr3 r⁶ per plane, and its centre. Tangential terms are
+/// ignored.
+type Warp = (Option<Radial>, Option<[Radial; 2]>, [f32; 2]);
+fn warp(p: &[u8], frame: Option<[f32; 2]>) -> Option<Warp> {
     let planes = u32::from_be_bytes(p.get(..4)?.try_into().ok()?) as usize;
     let v = doubles(p.get(4..)?);
-    if !matches!(planes, 1 | 3)
-        || v.len() != planes * 6 + 2
-        || !centred(v[planes * 6], v[planes * 6 + 1])
-    {
+    if !matches!(planes, 1 | 3) || v.len() != planes * 6 + 2 {
         return None;
     }
+    let (centre, to_opcode, knots) = opcode_frame(v[planes * 6], v[planes * 6 + 1], frame)?;
     let ratio = |plane: usize, r: f32| {
         let k = &v[plane * 6..plane * 6 + 4];
-        let r2 = f64::from(r * r);
+        let r2 = f64::from(r * to_opcode).powi(2);
         (k[0] + k[1] * r2 + k[2] * r2 * r2 + k[3] * r2 * r2 * r2) as f32
     };
     let green = if planes == 3 { 1 } else { 0 };
     let curve = |f: &dyn Fn(f32) -> f32| Radial {
-        knots: knots(),
-        values: knots().into_iter().map(f).collect(),
+        knots: knots.clone(),
+        values: knots.iter().map(|r| f(*r)).collect(),
     };
     let distortion = curve(&|r| ratio(green, r));
     let chromatic = (planes == 3).then(|| {
@@ -451,6 +479,7 @@ fn warp(p: &[u8]) -> Option<(Option<Radial>, Option<[Radial; 2]>)> {
     Some((
         Some(distortion).filter(changes),
         chromatic.filter(|[a, b]| changes(a) || changes(b)),
+        centre,
     ))
 }
 
@@ -534,7 +563,7 @@ mod tests {
     fn decodes_vignette_and_warp_opcodes() {
         // DSCF7853's FixVignetteRadial from Lightroom's DNG.
         let p = be(&[0.2599, 0.3424, 0.0630, 0.0346, -0.0300, 0.5, 0.5]);
-        let v = vignette(&opcode(&list(3, &p), 3).unwrap()).unwrap();
+        let (v, _) = vignette(&opcode(&list(3, &p), 3).unwrap(), None).unwrap();
         assert!((v.eval(1.) - 1.67).abs() < 0.01);
         assert!((v.eval(0.5) - 1.087).abs() < 0.002);
         assert!(opcode(&list(3, &p), 1).is_none());
@@ -543,13 +572,46 @@ mod tests {
         w.extend(be(&[1., 0., 0., 0., 0., 0.]));
         w.extend(be(&[1., 0., 0., 0., 0., 0.]));
         w.extend(be(&[0.5, 0.5]));
-        let (distortion, chromatic) = warp(&w).unwrap();
+        let (distortion, chromatic, _) = warp(&w, None).unwrap();
         assert!(distortion.is_none());
         let [red, blue] = chromatic.unwrap();
         assert!((red.eval(1.) - 1.0007).abs() < 1e-5);
         assert_eq!(blue.eval(1.), 1.);
-        // Off-centre corrections are not representable and are skipped.
-        assert!(vignette(&be(&[0.2, 0., 0., 0., 0., 0.3, 0.5])).is_none());
+        // Off-centre corrections need the image's size, to normalize the radius.
+        assert!(vignette(&be(&[0.2, 0., 0., 0., 0., 0.3, 0.5]), None).is_none());
+    }
+    /// An optical centre off the image's: the radius is 1 at the image's corner farthest
+    /// from it, as the DNG SDK normalizes it (Adobe's DNG of a Panasonic LX100, whose
+    /// warp is centred 8 px left of its 4144 px active area's centre; a Z 6's 7.5 px
+    /// left and 26 px down).
+    #[test]
+    fn reads_off_centre_opcodes_about_their_centre() {
+        let size = [4144f32, 3104.];
+        let (cx, cy) = (0.4980694980694981, 0.5);
+        let mut w = 1u32.to_be_bytes().to_vec();
+        w.extend(be(&[0.99995, -0.19355, 0.07209, -0.01145, 0., 0.]));
+        w.extend(be(&[cx, cy]));
+        let (distortion, _, centre) = warp(&w, Some(size)).unwrap();
+        assert_eq!(centre, [cx as f32, cy as f32]);
+        let distortion = distortion.unwrap();
+        let half = 4144f64.hypot(3104.) / 2.;
+        let far = (cx * 4144.).max((1. - cx) * 4144.).hypot(1552.);
+        let opcode = |q: f64| 0.99995 - 0.19355 * q * q + 0.07209 * q.powi(4) - 0.01145 * q.powi(6);
+        for px in [500., 1500., 2500., far] {
+            let ours = f64::from(distortion.eval((px / half) as f32));
+            assert!((ours - opcode(px / far)).abs() < 2e-4, "{px}: {ours}");
+        }
+        // Knots reach the far corner.
+        assert!(*distortion.knots.last().unwrap() as f64 >= far / half - 1e-4);
+        let p = be(&[0.3, 0.1, 0., 0., 0., 0.46, 0.53]);
+        let (v, centre) = vignette(&p, Some([6000., 4000.])).unwrap();
+        assert_eq!(centre, [0.46, 0.53]);
+        let far = (0.54f64 * 6000.).hypot(0.53 * 4000.);
+        let half = 6000f64.hypot(4000.) / 2.;
+        let at = f64::from(v.eval((far / half) as f32));
+        assert!((at - 1.4).abs() < 1e-3, "{at}");
+        // A centre outside the image is not one.
+        assert!(vignette(&be(&[0.2, 0., 0., 0., 0., 1.3, 0.5]), Some(size)).is_none());
     }
     /// A GainMap opcode's parameters: `area` (top, left, bottom, right), its planes,
     /// a `rows` × `columns` map over the whole area and `map_planes` gains per point.

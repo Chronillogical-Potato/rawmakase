@@ -32,9 +32,14 @@ impl Entry {
 /// from its fuller data where the file has some (Sony's, of which Lightroom otherwise
 /// applies only the lateral CA).
 fn camera_distortion(m: &Metadata) -> Option<&crate::optics::Radial> {
-    (m.lens_stand_in.as_ref().or(m.lens.as_ref()))?
-        .distortion
-        .as_ref()
+    camera_lens(m)?.distortion.as_ref()
+}
+/// The centre of the camera's own correction, which its distortion is measured from.
+fn camera_centre(m: &Metadata) -> [f32; 2] {
+    camera_lens(m).map_or(LensCorrection::image_centre(), |l| l.centre)
+}
+fn camera_lens(m: &Metadata) -> Option<&LensCorrection> {
+    (m.lens_stand_in.as_ref().or(m.lens.as_ref())).filter(|l| l.distortion.is_some())
 }
 
 fn key(s: &str) -> String {
@@ -213,14 +218,38 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
     let first = *found.first()?;
     let focal = if m.focal > 0. { m.focal } else { first.focal };
     let av = (m.aperture > 0.).then(|| 2. * m.aperture.log2());
-    // Convert our radius (1 = half diagonal) to the model's.
-    let (w, h) = if m.crop_width > 0 && m.crop_height > 0 {
+    // Convert our radius (1 = the decoded image's half diagonal) to the model's, whose
+    // unit is a fraction of the photo's long edge, the camera's default crop.
+    let cropped = m.crop_width > 0 && m.crop_height > 0;
+    let (w, h) = if cropped {
         (m.crop_width as f32, m.crop_height as f32)
     } else {
         (m.width as f32, m.height as f32)
     };
     let long = w.max(h);
-    let half = (w * w + h * h).sqrt() * 0.5;
+    let size = [m.width as f32, m.height as f32];
+    let half = size[0].hypot(size[1]) * 0.5;
+    // The profile's optical centre is a fraction of the photo; ours of the decoded
+    // image. Distortion the camera keeps (PreferMetadataDistort) brings its own.
+    let builtin = camera_distortion(m).filter(|_| first.prefer_metadata_distortion);
+    let centre = match builtin {
+        Some(_) => camera_centre(m),
+        None => interpolate(
+            &found,
+            focal,
+            None,
+            |e| e.centre,
+            |a, b, t| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t),
+        )
+        .map_or(LensCorrection::image_centre(), |(c, _)| {
+            let (left, top) = if cropped {
+                (m.crop_left as f32, m.crop_top as f32)
+            } else {
+                (0., 0.)
+            };
+            [(left + c[0] * w) / size[0], (top + c[1] * h) / size[1]]
+        }),
+    };
     // Put every model in our half-diagonal coordinate before interpolating.
     // Raw coefficients from different focal normalizations are not comparable:
     // k_n * (r * scale)^(2n) becomes (k_n * scale^(2n)) * r^(2n).
@@ -239,7 +268,8 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
             model.params[2] * scale2 * scale2 * scale2,
         ]
     };
-    let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
+    let reach = crate::optics::reach(centre, size);
+    let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32. * reach).collect();
     let poly = |k: [f32; 3], r: f32| {
         let r2 = r * r;
         1. + k[0] * r2 + k[1] * r2 * r2 + k[2] * r2 * r2 * r2
@@ -248,9 +278,9 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         knots: knots.clone(),
         values: knots.iter().map(|r| f(*r)).collect(),
     };
-    let distortion = match camera_distortion(m) {
-        Some(builtin) if first.prefer_metadata_distortion => Some(builtin.clone()),
-        _ => interpolate(
+    let distortion = match builtin {
+        Some(builtin) => Some(builtin.clone()),
+        None => interpolate(
             &found,
             focal,
             None,
@@ -287,6 +317,7 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         distortion,
         chromatic,
         gain_map: None,
+        centre,
     };
     (!c.is_empty() && c.validate()).then_some(c)
 }
@@ -765,6 +796,39 @@ mod tests {
         let crop = correction(&entries, &aps_c).unwrap();
         assert!((crop.vignetting_gain(1.) - c.vignetting_gain(2. / 3.)).abs() < 0.01);
         assert!(parse("<x/>").is_err());
+    }
+    /// The profile's optical centre is a fraction of the photo, the default crop; the
+    /// correction's of the decoded image. Distortion the camera keeps keeps its centre.
+    #[test]
+    fn a_profiles_optical_centre_is_kept() {
+        let text = SAMPLE.replace(
+            "stCamera:RadialDistortParam1=\"0.111952\"",
+            "stCamera:ImageXCenter=\"0.46\" stCamera:ImageYCenter=\"0.52\" stCamera:RadialDistortParam1=\"0.111952\"",
+        );
+        let entries = parse(&text).unwrap();
+        assert_eq!(entries[0].centre, Some([0.46, 0.52]));
+        let mut m = a7ii(1.8);
+        m.width = 6048;
+        m.height = 4024;
+        m.crop_left = 8;
+        m.crop_top = 4;
+        m.crop_width = 6000;
+        m.crop_height = 4000;
+        let c = correction(&entries, &m).unwrap();
+        let [x, y] = c.centre_in([6048., 4024.]);
+        assert!(
+            (x - 2768.).abs() < 0.01 && (y - 2084.).abs() < 0.01,
+            "{x} {y}"
+        );
+        // The knots reach the decoded image's corner farthest from it.
+        let far = crate::optics::reach(c.centre, [6048., 4024.]);
+        assert!(*c.vignetting.as_ref().unwrap().knots.last().unwrap() >= far - 1e-5);
+        // Without a centre, the image's.
+        assert_eq!(parse(SAMPLE).unwrap()[0].centre, None);
+        assert_eq!(
+            correction(&parse(SAMPLE).unwrap(), &m).unwrap().centre,
+            [0.5, 0.5]
+        );
     }
     #[test]
     fn a_lens_id_matches_when_the_file_records_no_lens() {

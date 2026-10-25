@@ -39,35 +39,41 @@ impl<'a> LensMap<'a> {
             }
         };
         let (w, h) = (im.width as f32, im.height as f32);
+        let amount = r.lens_amounts(&im.metadata)[0];
+        let [cx, cy] = Self::centre(im, r);
         Some(Self {
             lens,
             chromatic,
-            center: [w * 0.5, h * 0.5],
+            center: [cx * w, cy * h],
             half: (w * w + h * h).sqrt() * 0.5,
-            fill: Self::fill(im, lens, r.lens_amounts(&im.metadata)[0]),
-            amount: r.lens_amounts(&im.metadata)[0],
+            fill: Self::fill(im, lens, amount),
+            amount,
         })
     }
-    /// The scale that keeps corrected samples inside the decoded image. Sony's built-in
-    /// correction is the camera's own, which zooms by no more than its table does: the
-    /// camera's JPEG samples the sensor beyond its aspect-ratio crop (the ZV-1's 16:9 of
-    /// 3:2), so only the photo's edge, the crop's when there is one, has to stay inside.
-    /// Any other correction keeps the whole frame's corners inside, as Lightroom's
-    /// profiles do.
+    /// The optical centre, in fractions of the decoded image: the applied correction's,
+    /// else the one Remove Chromatic Aberration measured about (the camera's, also when
+    /// an edit leaves its correction off). Vignetting shares it (`VignetteField`).
+    pub(crate) fn centre(im: &CameraImage, r: &Recipe) -> [f32; 2] {
+        r.lens_correction(&im.metadata)
+            .map_or_else(|| crate::lens::auto_ca::centre(&im.metadata), |l| l.centre)
+    }
+    /// The scale that keeps green's samples for the photo's edge inside the decoded
+    /// image: the camera's default crop. Sony's built-in correction is the camera's
+    /// own, whose JPEG is its aspect-ratio crop of the sensor (the ZV-1's 16:9 of 3:2),
+    /// so only that crop's edge has to stay inside.
     fn fill(im: &CameraImage, lens: &crate::optics::LensCorrection, amount: f32) -> f32 {
         let m = &im.metadata;
-        let sony = lens.source == crate::optics::LensCorrection::SONY_BUILTIN;
-        if !(sony && m.make.eq_ignore_ascii_case("sony")) {
-            return lens.fill_scale_with(amount);
-        }
+        let sony = lens.source == crate::optics::LensCorrection::SONY_BUILTIN
+            && m.make.eq_ignore_ascii_case("sony");
         let inset = ImageFrame::new(im).inset;
-        let [l, t, rt, b] = m.camera_crop.unwrap_or([0., 0., 1., 1.]);
+        let [l, t, rt, b] = m.camera_crop.filter(|_| sony).unwrap_or([0., 0., 1., 1.]);
         let (w, h) = (im.width as f32, im.height as f32);
         let x = |v: f32| (inset[0] + v * inset[2]) * w;
         let y = |v: f32| (inset[1] + v * inset[3]) * h;
-        lens.fill_scale_within(amount, [w, h], [x(l), y(t), x(rt), y(b)])
+        lens.fill_scale(amount, [w, h], [x(l), y(t), x(rt), y(b)])
     }
-    /// Offset from the centre, scaled by the fill, and the per-channel radial scale.
+    /// Offset from the optical centre, scaled by the fill, and the per-channel radial
+    /// scale.
     pub(crate) fn scales(&self, x: f32, y: f32) -> ([f32; 2], [f32; 3]) {
         let dx = (x + 0.5 - self.center[0]) * self.fill;
         let dy = (y + 0.5 - self.center[1]) * self.fill;
@@ -251,6 +257,87 @@ mod tests {
             assert!((bx - x).abs() < 1e-2 && (by - y).abs() < 1e-2, "{x} {y}");
         }
     }
+    /// A correction centred off the image centre: the optical centre samples itself,
+    /// the map inverts there too, and the far corner sets the fill.
+    #[test]
+    fn lens_map_is_centred_on_the_optical_centre() {
+        let mut im = image(0);
+        im.metadata.lens = Some(crate::optics::LensCorrection {
+            source: "Nikon built-in".into(),
+            default_on: true,
+            distortion: Some(crate::optics::Radial {
+                knots: vec![0., 0.6, 1.2],
+                values: vec![1., 1.02, 1.08],
+            }),
+            centre: [0.4, 0.55],
+            ..Default::default()
+        });
+        let map = LensMap::new(&im, &Recipe::default()).unwrap();
+        assert_eq!(map.center, [120., 110.]);
+        // Pixel 119.5 is centred on the axis: it samples itself.
+        let [x, y] = map.forward(119.5, 109.5);
+        assert!(
+            (x - 119.5).abs() < 1e-4 && (y - 109.5).abs() < 1e-4,
+            "{x} {y}"
+        );
+        // Points the same distance either side of the axis move by the same amount.
+        let [a, _] = map.forward(119.5 - 60., 109.5);
+        let [b, _] = map.forward(119.5 + 60., 109.5);
+        assert!(((119.5 - a) - (b - 119.5)).abs() < 1e-3, "{a} {b}");
+        for (x, y) in [(10., 20.), (290., 190.), (40., 170.), (119.5, 109.5)] {
+            let [fx, fy] = map.forward(x, y);
+            let [bx, by] = map.inverse(fx, fy);
+            assert!((bx - x).abs() < 1e-2 && (by - y).abs() < 1e-2, "{x} {y}");
+        }
+        // The photo's corners sample inside the decoded image, the binding one at its
+        // edge.
+        let corners = [(10., 6.), (290., 6.), (10., 196.), (290., 196.)].map(|(x, y)| {
+            let [sx, sy] = map.forward(x - 0.5, y - 0.5);
+            (sx + 0.5, sy + 0.5)
+        });
+        for (x, y) in corners {
+            assert!(
+                (-0.01..=300.01).contains(&x) && (-0.01..=200.01).contains(&y),
+                "{x} {y}"
+            );
+        }
+        let margin = |(x, y): (f32, f32)| x.min(300. - x).min(y).min(200. - y);
+        assert!(corners.iter().any(|c| margin(*c) < 0.05), "{corners:?}");
+    }
+    /// Remove Chromatic Aberration measures about the camera's optical centre, also when
+    /// the edit leaves the camera's correction off: the map is centred there.
+    #[test]
+    fn measured_aberration_alone_keeps_the_cameras_centre() {
+        let mut im = image(0);
+        im.metadata.lens = Some(crate::optics::LensCorrection {
+            source: "Nikon built-in".into(),
+            distortion: Some(crate::optics::Radial {
+                knots: vec![0., 1.4],
+                values: vec![1., 1.05],
+            }),
+            centre: [0.3, 0.5],
+            ..Default::default()
+        });
+        let ca = crate::optics::Radial {
+            knots: vec![0., 1.],
+            values: vec![1., 1.001],
+        };
+        let _ = im.metadata.lateral_ca.set(Some([ca.clone(), ca]));
+        let mut r = Recipe {
+            lens_ca: true,
+            lens_builtin: false,
+            ..Default::default()
+        };
+        r.effects.lens_vignette = 0.4;
+        assert!(r.lens_correction(&im.metadata).is_none());
+        let map = LensMap::new(&im, &r).unwrap();
+        assert!((map.center[0] - 90.).abs() < 1e-3 && (map.center[1] - 100.).abs() < 1e-3);
+        // The optical centre's pixel samples itself in every channel.
+        let ([dx, dy], _) = map.scales(89.5, 99.5);
+        assert!(dx.abs() < 1e-4 && dy.abs() < 1e-4);
+        let (_, scale) = map.scales(280., 190.);
+        assert!(scale[0] > scale[1]);
+    }
     #[test]
     fn sony_builtin_fill_follows_the_cameras_crop_of_a_wider_sensor() {
         // A 16:9 camera crop of a 3:2 frame: the built-in correction may sample the
@@ -271,12 +358,9 @@ mod tests {
         im.metadata.make = "SONY".into();
         im.metadata.lens = Some(correction.clone());
         let r = Recipe::default();
-        let whole = correction.fill_scale_with(1.);
+        let whole = correction.fill_scale(1., [300., 200.], [0., 0., 300., 200.]);
         let uncropped = LensMap::new(&im, &r).unwrap().fill;
-        assert!(
-            uncropped >= whole && uncropped < whole + 0.01,
-            "{whole} {uncropped}"
-        );
+        assert_eq!(uncropped, whole);
         im.metadata.camera_crop = Some([0., 0.0625, 1., 0.9375]);
         let cropped = LensMap::new(&im, &r).unwrap().fill;
         assert!(cropped > uncropped + 0.001, "{uncropped} {cropped}");

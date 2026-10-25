@@ -137,11 +137,21 @@ fn zoom_normalization_is_independent_of_entry_order_and_frame_orientation() {
         assert!((a - b).abs() < 2e-6);
     }
     let portrait = correction(&entries, &m).unwrap();
-    m.width = 6200;
-    m.height = 4200;
+    // The profile's unit is the photo's, the default crop; ours the decoded image's
+    // half diagonal, which the renderer measures radii in.
+    m.width = 4200;
+    m.height = 6200;
+    m.crop_left = 100;
+    m.crop_top = 100;
     m.crop_width = 4000;
     m.crop_height = 6000;
-    assert_eq!(correction(&entries, &m).unwrap(), portrait);
+    let cropped = correction(&entries, &m).unwrap();
+    assert_eq!(cropped.centre, [0.5, 0.5]);
+    let ratio = 4200f32.hypot(6200.) / 4000f32.hypot(6000.);
+    let (a, b) = (portrait.distortion.unwrap(), cropped.distortion.unwrap());
+    for r in [0.2, 0.5, 0.9] {
+        assert!((a.eval(r) - b.eval(r / ratio)).abs() < 2e-5, "{r}");
+    }
 }
 
 #[test]

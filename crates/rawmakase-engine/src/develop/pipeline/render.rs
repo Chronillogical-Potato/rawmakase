@@ -517,6 +517,7 @@ mod sampling_tests {
             vignetting: None,
             chromatic: None,
             gain_map: None,
+            ..Default::default()
         });
         im
     }

@@ -7,8 +7,10 @@ pub mod lcp;
 
 use serde::{Deserialize, Serialize};
 
-/// A radial function sampled at increasing radii. Radius 0 is the image centre and
-/// 1 is half of the image diagonal. Values are linearly interpolated and held constant
+/// A radial function sampled at increasing radii. Radius 0 is the correction's optical
+/// centre ([`LensCorrection::centre`]) and 1 is half of the decoded image's diagonal,
+/// so an off-centre correction's farthest corner lies beyond 1
+/// ([`LensCorrection::reach`]). Values are linearly interpolated and held constant
 /// beyond the outermost knots.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -126,7 +128,7 @@ impl GainGrid {
 }
 
 /// Built-in lens correction for one photo.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct LensCorrection {
     /// Where the data came from, for display, e.g. "Fujifilm built-in".
@@ -145,6 +147,28 @@ pub struct LensCorrection {
     /// GainMap applies it (1 = none).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gain_map: Option<GainGrid>,
+    /// The optical centre the radial functions are measured from, in fractions of the
+    /// decoded image's width and height: where the camera's data or Adobe's own output
+    /// places it, the decoded image's centre (0.5, 0.5) when they record none. Data
+    /// saved before it existed has the image centre.
+    #[serde(
+        default = "LensCorrection::image_centre",
+        skip_serializing_if = "LensCorrection::is_image_centre"
+    )]
+    pub centre: [f32; 2],
+}
+impl Default for LensCorrection {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            default_on: false,
+            vignetting: None,
+            distortion: None,
+            chromatic: None,
+            gain_map: None,
+            centre: Self::image_centre(),
+        }
+    }
 }
 /// No correction, for applying measured chromatic aberration alone.
 pub static NO_CORRECTION: LensCorrection = LensCorrection {
@@ -154,8 +178,37 @@ pub static NO_CORRECTION: LensCorrection = LensCorrection {
     distortion: None,
     chromatic: None,
     gain_map: None,
+    centre: [0.5, 0.5],
 };
+/// The distance from `centre` (fractions of `size`'s width and height) to the farthest
+/// corner of an image of `size` pixels, in units of its half diagonal: 1 for the image
+/// centre, more off it.
+pub fn reach(centre: [f32; 2], size: [f32; 2]) -> f32 {
+    let [w, h] = size;
+    let x = centre[0].max(1. - centre[0]) * w;
+    let y = centre[1].max(1. - centre[1]) * h;
+    if w > 0. && h > 0. {
+        x.hypot(y) / (w.hypot(h) * 0.5)
+    } else {
+        1.
+    }
+}
 impl LensCorrection {
+    pub const fn image_centre() -> [f32; 2] {
+        [0.5, 0.5]
+    }
+    fn is_image_centre(c: &[f32; 2]) -> bool {
+        *c == Self::image_centre()
+    }
+    /// The optical centre in pixels of an image of `size`.
+    pub fn centre_in(&self, size: [f32; 2]) -> [f32; 2] {
+        [self.centre[0] * size[0], self.centre[1] * size[1]]
+    }
+    /// The radius of the farthest corner of an image of `size` from the optical
+    /// centre, in units of its half diagonal ([`reach`]).
+    pub fn reach(&self, size: [f32; 2]) -> f32 {
+        reach(self.centre, size)
+    }
     /// The `source` of the correction read from a Sony file's own tables (a DNG's
     /// opcodes are another source, with Lightroom's framing).
     pub const SONY_BUILTIN: &'static str = "Sony built-in";
@@ -166,7 +219,8 @@ impl LensCorrection {
             && self.gain_map.is_none()
     }
     pub fn validate(&self) -> bool {
-        self.vignetting.iter().all(Radial::valid)
+        self.centre.iter().all(|c| (0. ..=1.).contains(c))
+            && self.vignetting.iter().all(Radial::valid)
             && self.distortion.iter().all(Radial::valid)
             && self.chromatic.iter().flatten().all(Radial::valid)
             && self.gain_map.iter().all(GainGrid::valid)
@@ -204,47 +258,48 @@ impl LensCorrection {
             (None, None) => [g; 3],
         }
     }
-    /// As `fill_scale_with` at 100%.
-    #[cfg(test)]
-    pub fn fill_scale(&self) -> f32 {
-        if self.distortion.is_none() && self.chromatic.is_none() {
+    /// The scale output offsets from the optical centre take so that green's sample for
+    /// every point of the photo's edge, the rectangle `frame` (`[left, top, right,
+    /// bottom]`, in pixels) of the decoded image of `size`, lies inside the decoded
+    /// image, with Lightroom's Distortion amount (1 = 100%): as Lightroom frames the
+    /// corrected photo, never zooming out. Only green frames it, as in Adobe's warps,
+    /// whose red and blue planes may reach a little past the image's edge; samplers clamp
+    /// them there. Where the corrected radius grows with the output radius, as it does
+    /// for any real lens, the interior samples nearer the centre than the edge along the
+    /// same ray, so it stays inside too; a correction that folds back keeps every radius
+    /// out to the farthest corner inside instead.
+    pub fn fill_scale(&self, amount: f32, size: [f32; 2], frame: [f32; 4]) -> f32 {
+        let Some(distortion) = &self.distortion else {
             return 1.;
-        }
-        self.fill_scale_with(1.)
-    }
-    /// Output radii are scaled by this factor so every corrected corner samples inside
-    /// the sensor, as Lightroom crops the undefined border after distortion correction,
-    /// with Lightroom's Distortion amount (1 = 100%).
-    pub fn fill_scale_with(&self, amount: f32) -> f32 {
-        if self.distortion.is_none() && self.chromatic.is_none() {
-            return 1.;
-        }
-        let widest = (0..=64)
-            .flat_map(|i| self.radial_scale_with(i as f32 / 64., amount))
-            .fold(1f32, f32::max);
-        1. / widest
-    }
-    /// As `fill_scale_with`, for a photo that is only the rectangle `crop` (`[left, top,
-    /// right, bottom]`, in pixels) of the decoded image of `size`: the scale keeps every
-    /// corrected sample of the crop's edge inside the decoded image, which can reach
-    /// beyond the crop (a camera's aspect-ratio crop of a wider sensor). Never below
-    /// the scale for the whole image.
-    pub fn fill_scale_within(&self, amount: f32, size: [f32; 2], crop: [f32; 4]) -> f32 {
-        let whole = self.fill_scale_with(amount);
-        if whole >= 1. {
-            return whole;
-        }
+        };
         let [w, h] = size;
         let half = w.hypot(h) * 0.5;
-        let [left, top, right, bottom] = crop.map(|v| v.max(0.));
-        let (x0, x1) = (left - w * 0.5, right.min(w) - w * 0.5);
-        let (y0, y1) = (top - h * 0.5, bottom.min(h) - h * 0.5);
+        if half.is_nan() || half <= 0. {
+            return 1.;
+        }
+        let green = |r: f32| 1. + (distortion.eval(r) - 1.) * amount;
+        let reach = self.reach(size);
+        // Every radius out to the farthest corner sampling at or inside its own keeps
+        // every sample inside the image, which is convex around the centre.
+        let radii = (0..=256).map(|i| reach * i as f32 / 256.);
+        let whole = 1. / radii.clone().map(green).fold(1f32, f32::max);
+        let mut previous = 0f32;
+        let monotonic = radii.skip(1).all(|r| {
+            let s = r * green(r);
+            let rising = s > previous;
+            previous = s;
+            rising
+        });
+        if !monotonic {
+            return whole;
+        }
+        let [cx, cy] = self.centre_in(size);
+        let [left, top, right, bottom] = frame;
+        let (x0, x1) = (left.max(0.) - cx, right.min(w) - cx);
+        let (y0, y1) = (top.max(0.) - cy, bottom.min(h) - cy);
         let inside = |dx: f32, dy: f32, fill: f32| {
-            let s = self
-                .radial_scale_with(dx.hypot(dy) * fill / half, amount)
-                .into_iter()
-                .fold(0f32, f32::max);
-            dx.abs() * fill * s <= w * 0.5 && dy.abs() * fill * s <= h * 0.5
+            let s = fill * green(dx.hypot(dy) * fill / half);
+            (0. ..=w).contains(&(cx + dx * s)) && (0. ..=h).contains(&(cy + dy * s))
         };
         // About one sample per pixel along the edge, so no extremum between samples
         // leaves the image by more than a fraction of a pixel.
@@ -286,16 +341,141 @@ mod tests {
         assert!(Radial::new(vec![0., 0.], vec![1., 1.]).is_none());
         assert!(Radial::new(vec![0., 1.], vec![1., f32::NAN]).is_none());
     }
+    /// The fill for the whole decoded image of `size` as its frame.
+    fn fill(c: &LensCorrection, size: [f32; 2]) -> f32 {
+        c.fill_scale(1., size, [0., 0., size[0], size[1]])
+    }
+    /// How far green's sample for any pixel of the image's edge lies outside it.
+    fn worst_outside(c: &LensCorrection, size: [f32; 2], fill: f32) -> f32 {
+        let [w, h] = size;
+        let [cx, cy] = c.centre_in(size);
+        let half = w.hypot(h) * 0.5;
+        let mut worst = f32::NEG_INFINITY;
+        let edge = (0..w as usize)
+            .flat_map(|i| [(i as f32 + 0.5, 0.), (i as f32 + 0.5, h)])
+            .chain((0..h as usize).flat_map(|i| [(0., i as f32 + 0.5), (w, i as f32 + 0.5)]));
+        for (px, py) in edge {
+            let (dx, dy) = (px - cx, py - cy);
+            let s = fill * c.radial_scale_with(dx.hypot(dy) * fill / half, 1.)[1];
+            let (x, y) = (cx + dx * s, cy + dy * s);
+            worst = worst.max(-x).max(x - w).max(-y).max(y - h);
+        }
+        worst
+    }
     #[test]
     fn fill_scale_keeps_corners_inside() {
         let c = LensCorrection {
             distortion: Radial::new(vec![0., 1.], vec![1., 1.02]),
             ..Default::default()
         };
-        let s = c.fill_scale();
+        let size = [300., 200.];
+        let s = fill(&c, size);
         assert!(s < 1. && s > 0.97);
         assert!(c.radial_scale(s)[1] * s <= 1.0001);
-        assert_eq!(LensCorrection::default().fill_scale(), 1.);
+        assert!(worst_outside(&c, size, s) < 0.01);
+        assert_eq!(fill(&LensCorrection::default(), size), 1.);
+    }
+    /// Only the photo's edge can leave the image. Adobe's warp of a Z5 II photo
+    /// (24-70mm f/4 S at 24mm in DX crop, 4000 × 2672) has green's ratio 1.0149 at the
+    /// centre and 0.9725 at the corner, and no zoom: the edge samples just inside.
+    #[test]
+    fn a_ratio_above_one_inside_the_edges_needs_no_zoom() {
+        let k = [1.01488, -0.05341, 0.012095, -0.0010548];
+        let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
+        let values = knots
+            .iter()
+            .map(|r| {
+                let r2 = r * r;
+                k[0] + k[1] * r2 + k[2] * r2 * r2 + k[3] * r2 * r2 * r2
+            })
+            .collect();
+        let c = LensCorrection {
+            distortion: Radial::new(knots, values),
+            ..Default::default()
+        };
+        assert_eq!(fill(&c, [4000., 2672.]), 1.);
+    }
+    /// Adobe frames by green: red reaching just past the corner (a Coolpix P1100's
+    /// 1.0009) does not zoom, and neither does lateral CA alone.
+    #[test]
+    fn chromatic_aberration_does_not_frame() {
+        let ca = [
+            Radial::new(vec![0., 1.], vec![1., 1.0009]).unwrap(),
+            Radial::new(vec![0., 1.], vec![1., 0.9995]).unwrap(),
+        ];
+        let alone = LensCorrection {
+            chromatic: Some(ca.clone()),
+            ..Default::default()
+        };
+        assert_eq!(fill(&alone, [6000., 4000.]), 1.);
+        let barrel = LensCorrection {
+            distortion: Radial::new(vec![0., 1.], vec![1., 0.97]),
+            chromatic: Some(ca),
+            ..Default::default()
+        };
+        assert_eq!(fill(&barrel, [6000., 4000.]), 1.);
+    }
+    /// An off-centre optical centre: the corner farthest from it sets the zoom, and every
+    /// edge sample stays inside without zooming more than that needs.
+    #[test]
+    fn fill_around_an_off_centre_axis_keeps_the_far_corner_inside() {
+        let size = [6000f32, 4000.];
+        let distortion = Radial::new(
+            (0..=12).map(|i| i as f32 / 10.).collect(),
+            (0..=12)
+                .map(|i| 1. + 0.03 * (i as f32 / 10.).powi(2))
+                .collect(),
+        );
+        let centred = LensCorrection {
+            distortion: distortion.clone(),
+            ..Default::default()
+        };
+        let off = LensCorrection {
+            distortion,
+            centre: [0.46, 0.53],
+            ..Default::default()
+        };
+        assert!(off.reach(size) > 1.05 && centred.reach(size) == 1.);
+        let (a, b) = (fill(&centred, size), fill(&off, size));
+        assert!(b < a, "{a} {b}");
+        let worst = worst_outside(&off, size, b);
+        assert!((-0.5..0.01).contains(&worst), "{worst}");
+        // With the centred fill, the far corner would sample outside.
+        assert!(worst_outside(&off, size, a) > 5.);
+    }
+    /// A correction that folds back has no edge to test; every radius out to the
+    /// farthest corner keeps inside instead.
+    #[test]
+    fn a_folding_correction_keeps_every_radius_inside() {
+        let c = LensCorrection {
+            distortion: Radial::new(vec![0., 0.5, 1.], vec![1.2, 1., 0.6]),
+            ..Default::default()
+        };
+        let s = fill(&c, [300., 200.]);
+        assert!((s - 1. / 1.2).abs() < 1e-4, "{s}");
+    }
+    #[test]
+    fn saved_corrections_without_a_centre_have_the_image_centre() {
+        let c: LensCorrection = serde_json::from_str(
+            r#"{"source":"x","vignetting":null,"distortion":null,"chromatic":null}"#,
+        )
+        .unwrap();
+        assert_eq!(c.centre, [0.5, 0.5]);
+        assert!(!serde_json::to_string(&c).unwrap().contains("centre"));
+        let off = LensCorrection {
+            centre: [0.4, 0.5],
+            ..c
+        };
+        let back: LensCorrection =
+            serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
+        assert_eq!(back.centre, [0.4, 0.5]);
+        assert!(
+            !LensCorrection {
+                centre: [1.2, 0.5],
+                ..back
+            }
+            .validate()
+        );
     }
     #[test]
     fn fill_within_a_crop_of_a_wider_sensor_is_looser_and_still_inside() {
@@ -306,9 +486,9 @@ mod tests {
         let size = [6000., 4000.];
         // A 16:9 crop of the 3:2 image.
         let crop = [0., 437.5, 6000., 3812.5];
-        let whole = c.fill_scale_with(1.);
-        let within = c.fill_scale_within(1., size, crop);
-        assert!(within > whole + 0.005 && within <= 1., "{whole} {within}");
+        let whole = fill(&c, size);
+        let within = c.fill_scale(1., size, crop);
+        assert!(within > whole && within <= 1., "{whole} {within}");
         let half = 6000f32.hypot(4000.) * 0.5;
         for (x, y) in [
             (3000f32, 1562.5f32),
@@ -322,16 +502,10 @@ mod tests {
                 "{x} {y}"
             );
         }
-        // The whole image is never tighter than its own scale; no distortion needs none.
-        let all = c.fill_scale_within(1., size, [0., 0., 6000., 4000.]);
-        assert!(all >= whole && all < whole + 0.01, "{whole} {all}");
-        assert_eq!(
-            LensCorrection::default().fill_scale_within(1., size, crop),
-            1.
-        );
+        assert_eq!(LensCorrection::default().fill_scale(1., size, crop), 1.);
     }
     #[test]
-    fn fill_within_leaves_no_edge_pixel_outside_between_samples() {
+    fn fill_leaves_no_edge_pixel_outside_between_samples() {
         // A table with bumps, the kind Sony's signed values give.
         let c = LensCorrection {
             distortion: Radial::new(
@@ -342,18 +516,8 @@ mod tests {
             ),
             ..Default::default()
         };
-        let (w, h) = (6000f32, 4000f32);
-        let fill = c.fill_scale_within(1., [w, h], [0., 0., w, h]);
-        let half = w.hypot(h) * 0.5;
-        let mut worst = 0f32;
-        for i in 0..6000 {
-            for (px, py) in [(i as f32 + 0.5, 0.5), (i as f32 + 0.5, h - 0.5)] {
-                let (dx, dy) = (px - w * 0.5, py - h * 0.5);
-                let s = c.radial_scale_with(dx.hypot(dy) * fill / half, 1.)[1];
-                worst = worst.max((dx * fill * s).abs() - w * 0.5);
-                worst = worst.max((dy * fill * s).abs() - h * 0.5);
-            }
-        }
+        let size = [6000f32, 4000f32];
+        let worst = worst_outside(&c, size, fill(&c, size));
         assert!(worst < 0.5, "{worst}");
     }
 }
