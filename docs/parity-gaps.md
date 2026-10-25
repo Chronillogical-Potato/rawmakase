@@ -4,7 +4,7 @@ Status: 2026-10-05; tone research updated 2026-10-16 for the [scene tone stage](
 
 ## Measured and matched (for reference)
 
-These controls were fitted to Camera Raw renders and match within the default-render error, or close to it: default look without Adobe files (DNG ColorMatrix + ACR tone curve), Contrast, color mixer, Saturation, color grading at default Blending/Balance, Transform sliders, built-in Fujifilm and DNG lens corrections, imported Adobe lens profiles (on Sony A7 II photos), DNG embedded profile/exposure/crop, and Fujifilm default crop.
+These controls were fitted to Camera Raw renders and match within the default-render error, or close to it: default look without Adobe files (DNG ColorMatrix + ACR tone curve), Contrast, color mixer, Saturation, color grading at default Blending/Balance, Transform sliders, built-in Fujifilm, Olympus/OM System, Panasonic and DNG lens corrections, imported Adobe lens profiles (on Sony A7 II photos), DNG embedded profile/exposure/crop, and Fujifilm default crop.
 
 ## Tone
 

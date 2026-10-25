@@ -46,7 +46,7 @@ pub fn open_source(path: &Path, cancel: &AtomicBool) -> Result<Opened> {
 pub fn open(path: &Path) -> Result<Raw> {
     let mut raw = Raw::open_file(path)?;
     let metadata = &mut raw.metadata;
-    metadata.lens = crate::lens::embedded::read(path);
+    metadata.lens = crate::lens::embedded::read(path, metadata);
     if let Some(dng) = crate::dng::read(path) {
         // 0 is the DNG default; the camera table is for other raw formats.
         metadata.baseline_exposure = Some(dng.baseline_exposure.unwrap_or(0.));

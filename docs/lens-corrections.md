@@ -8,6 +8,8 @@ Many cameras store per-shot lens corrections in the RAW file. Lightroom applies 
 |---|---|---|
 | Fujifilm RAF | FujiIFD 0xF00B distortion, 0xF00F lateral CA, 0xF010 vignetting | On |
 | Sony ARW | raw SubIFD 0x7032 vignetting, 0x7035 lateral CA, 0x7037 distortion | Off; follows Enable Profile Corrections ([below](#sony-built-in-corrections)) |
+| Olympus and OM System ORF | maker note ImageProcessing 0x150A distortion, 0x150C lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
+| Panasonic RW2 (and Leica RWL) | IFD0 0x0119 distortion | On ([below](#olympus-om-system-and-panasonic)) |
 
 Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
@@ -15,7 +17,7 @@ Radius is normalized to the half diagonal of the decoded image. Rendering order:
 2. Vignetting gain in linear camera space, evaluated at the source pixel. Shadows, Highlights, Clarity and Texture measure local luminance after this gain.
 3. Distortion and lateral CA as a per-channel radial remap while sampling, scaled so corrected corners stay inside the sensor. Each sample carries its decoded green-channel position to local tone and Texture maps, which are measured before the geometric remap. CPU and GPU sampling use this same coordinate; the pre-warp position would displace local contrast from the edge that produced it.
 
-The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm and DNG, not Sony). Recipes saved before the field existed lack it and never apply it.
+The recipe field `lens_builtin` controls it. New recipes enable it when the file's correction is marked `default_on` (Fujifilm, Olympus/OM System, Panasonic and DNG, not Sony). Recipes saved before the field existed lack it and never apply it.
 
 ### Reconstructed X-Trans fine detail
 
@@ -84,6 +86,19 @@ Full renders against Lightroom's Adobe Standard exports, encoded sRGB at 1200 px
 | DSCF7845 corner MAE | 0.0546 | 0.0241 |
 
 Sony's embedded vignetting for the FE 55mm F1.8 ZA at f/1.8 restores 1.95× at the corner. Adobe's LCP profile for that lens predicts 1.81×. Lightroom does not enable profile corrections by default, and it has not been checked whether it applies Sony's embedded data, so Sony corrections start disabled until a Lightroom reference is available.
+
+### Olympus, OM System and Panasonic
+
+Micro Four Thirds lenses rely on software distortion correction, and Adobe has no LCP profiles for many of them: Lightroom uses the model the camera writes into every RAW (#636). Adobe DNG Converter 18.7 writes it into its DNGs in one of two forms, which RAWmakase compared with the files' own tags on 68 raw.pixls.us photos from 28 bodies: older bodies (E-M10 Mark III, E-M1 Mark II, E-M5 Mark III, E-M1X, TG-6, GX9, GX8, GX85, G9, GH5, GM5, LX100, LX100 II, TZ202) get a WarpRectilinear opcode, newer ones (E-P7, OM-1, OM-1 Mark II, OM-5, G9 II, GH6, GH7, G100, S5) a "Camera Settings" lens profile embedded in the DNG's XMP for distortion, with the lateral CA still in the opcode. Both forms carry the same model, so RAWmakase reads it from the RAW for every body (`src/lens/embedded.rs` has the exact formulas):
+
+- **Olympus and OM System**: ImageProcessing 0x150A holds three radial coefficients and a scale, with radius 1 at the half diagonal of the camera's default crop; 0x150C holds red's and blue's scale relative to green, as a polynomial in green's source radius. Distortion and CA match Adobe's opcodes within 0.03 px on 20 of 22 photos (0.4 px on an E-M5 Mark III high-resolution shot; 0.6 px on the TG-6, where Adobe leaves out the CA the file stores), and the newer bodies' distortion matches their embedded profiles within 0.2 px (OM-5: 0.8 px). A lens that needs no correction stores zeros in 0x150A and only the CA in 0x150C; 0x1510 holds a second distortion model that neither Adobe form uses.
+- **Panasonic**: 0x0119 (ExifTool's DistortionInfo) holds the camera's own correction, from source radius to output radius, in units of a radius it also stores, and a scale. RAWmakase inverts it numerically. Against Adobe the green warp matches within 0.4 px on all 27 older-body photos (within 0.01 px on 18 of them; the larger differences are on the strongly distorting LX100, LX100 II and TZ202, whose inverse Adobe fits with a polynomial), and the newer bodies' profiles within 0.4 px. Panasonic's lateral CA is stored too (tag 0x011B), but its format is not understood, so it is not applied; Adobe corrects it: 0.5 to 3.9 px at full size on the photos measured, mostly 1 to 2 px. Remove Chromatic Aberration corrects it from the image instead.
+
+Neither Adobe form contains vignetting: Lightroom does not correct Olympus or Panasonic vignetting without an Adobe profile, and neither does RAWmakase.
+
+The correction is on by default, as Lightroom applies it, and is scaled to fill the frame as a DNG's opcodes are. Rendering a photo and Adobe's DNG of it with RAWmakase gives the same geometry within 0.4 px at 2400 px on six pairs (E-M10 Mark III, E-M1 Mark II, E-M1X, GX9, LX100 II, G9), but not on the LX100, whose DNG states an optical centre 48 px left of its image centre: RAWmakase's DNG path centres the warp on the image, while the RW2's frame is centred on the optical axis. Against the dataset's Camera Raw 18.7 renders (2048 px, Enable Profile Corrections off) of an E-M1X photo (M.12-40mm at 12mm) and an OM-1 photo (M.7-14mm at 14mm), the corrected geometry agrees within about 1 px, while the correction itself moves the corner patches by about 13 px on the OM-1 and more on the E-M1X: Camera Raw applies the newer bodies' embedded correction too when profile corrections are off, as the older bodies' warp.
+
+Known limits: the correction is centred on the decoded image, which for Olympus includes more unused columns on one side than the other: the E-M10 Mark III's centre is 8 px (0.3% of the width) from the default crop's, which Adobe uses; for a strongly distorting lens that moves corner geometry by up to about 2 px at full size.
 
 ### Sony built-in corrections
 
