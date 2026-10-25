@@ -96,7 +96,7 @@ impl Editor {
             // A resize still being grouped is a step before the jump, so it isn't lost.
             self.finish_wheel_gesture();
             if self.document.edit.jump(n) {
-                self.ensure_upright();
+                self.ensure_analysis();
             }
         }
         if let Some((i, use_step)) = lightroom

@@ -262,6 +262,24 @@ fn resolved_photo_white_balance_differs_from_as_shot_preset() -> Result<()> {
     assert_ne!(result.wb, [1.; 3]);
     Ok(())
 }
+/// An angle a preset or sidecar gives is not the Crop panel's Auto, even when it is
+/// Auto's own number; one that gives none leaves Auto as it was.
+#[test]
+fn a_crop_angle_from_xmp_is_not_auto() -> Result<()> {
+    use crate::model::transform::AutoStraighten;
+    let m = Metadata::default();
+    let mut auto = Recipe::default();
+    auto.set_auto_straighten(Some(0.));
+    let angle = parse(Path::new("preset.xmp"), &xml(r#"c:CropAngle="0""#, ""))?;
+    assert_eq!(angle.apply(&auto, &m, &[], None)?.straighten_auto, None);
+    let exposure = parse(Path::new("preset.xmp"), &xml(r#"c:Exposure2012="0.5""#, ""))?;
+    assert_eq!(
+        exposure.apply(&auto, &m, &[], None)?.auto_straighten(),
+        Some(AutoStraighten::Measured(0.))
+    );
+    Ok(())
+}
+
 #[test]
 fn named_white_balance_presets_apply_their_values() -> Result<()> {
     let m = Metadata {

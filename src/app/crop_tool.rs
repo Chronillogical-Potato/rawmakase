@@ -434,6 +434,15 @@ impl super::Editor {
             ctx.request_repaint();
         });
     }
+    /// Measures the photo when its Straighten waits for Auto, as after pasting or
+    /// undoing to the Crop of a photo whose angle was Auto.
+    pub(super) fn ensure_straighten(&mut self) {
+        if self.document.edit.recipe().straighten_pending()
+            && !self.document.straighten.is_running()
+        {
+            self.start_auto_straighten();
+        }
+    }
     /// Sets the angle Auto straighten found as one History step. One measured before the
     /// photo was turned, flipped or its lens corrections changed no longer fits it, so the
     /// photo is measured again.
@@ -447,6 +456,10 @@ impl super::Editor {
             return;
         }
         self.document.straighten.finish(generation);
+        if analysed.straighten_pending() {
+            self.pending_straighten_measured(analysed, result);
+            return;
+        }
         if super::upright::inputs(analysed) != super::upright::inputs(self.document.edit.recipe()) {
             self.start_auto_straighten();
             return;
@@ -467,8 +480,48 @@ impl super::Editor {
             self.document.edit.finish_gesture();
         }
         self.change_edit(Some(super::history::Step::new("Straighten", "Auto")), |r| {
-            r.straighten = angle;
+            r.set_auto_straighten(Some(angle));
         });
+    }
+    /// A Straighten Auto copied from another photo, measured on this one. As Upright's
+    /// analysis, it is part of the photo rather than an edit: every state in History
+    /// still waiting for it, on the photo as measured, gets it, so undoing the Paste
+    /// leaves nothing half-applied. One that found nothing leaves the angle as it was.
+    fn pending_straighten_measured(
+        &mut self,
+        analysed: &Recipe,
+        result: Result<Option<f32>, String>,
+    ) {
+        let (measured, failure) = match result {
+            Ok(measured) => (measured, None),
+            Err(e) => (None, Some(e)),
+        };
+        let fits = |r: &Recipe| {
+            r.straighten_pending() && super::upright::inputs(r) == super::upright::inputs(analysed)
+        };
+        let mut shown = false;
+        for (i, r) in self
+            .document
+            .edit
+            .states_mut()
+            // A Before copied from the edit before the measurement arrived.
+            .chain(self.document.before.as_mut())
+            .enumerate()
+        {
+            if fits(r) {
+                r.set_auto_straighten(measured);
+                shown |= i == 0;
+            }
+        }
+        // Only the photo as shown speaks in the status line.
+        if shown && measured.is_none() {
+            self.status = failure
+                .unwrap_or_else(|| "Auto straighten found no horizon or verticals to level".into());
+        }
+        self.document.edit.save_state_mut().mark_changed();
+        self.schedule();
+        // Turned or flipped meanwhile: measured again as it is now.
+        self.ensure_straighten();
     }
 }
 

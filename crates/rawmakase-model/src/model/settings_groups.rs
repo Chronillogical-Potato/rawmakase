@@ -348,6 +348,7 @@ impl SettingGroup {
             Crop => {
                 to.crop = from.crop;
                 to.straighten = from.straighten;
+                to.straighten_auto = from.auto_straighten();
                 to.constrain_crop = from.constrain_crop;
             }
             Masking => to.masks = from.masks.clone(),
@@ -544,6 +545,14 @@ pub fn transfer(
         // A new profile maps the same gains to other Temperature and Tint values.
         recipe.sync_white_balance_controls(m);
     }
+    // An angle Auto measured on the source is measured on this photo too, which keeps
+    // its own until then. Lightroom copies the source's angle.
+    if selection.contains(SettingGroup::Crop) && from.auto_straighten().is_some() {
+        recipe.straighten = to.straighten;
+        recipe.straighten_auto = Some(crate::model::transform::AutoStraighten::Pending(
+            to.straighten,
+        ));
+    }
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
     let exact = selection.contains(SettingGroup::UprightTransforms);
@@ -626,6 +635,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         sharpening: _,
         crop: _,
         straighten: _,
+        straighten_auto: _,
         constrain_crop: _,
         transform: _,
         upright: _,
@@ -714,6 +724,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("sharpening", Group(Sharpening)),
         ("crop", Group(Crop)),
         ("straighten", Group(Crop)),
+        ("straighten_auto", Group(Crop)),
         ("constrain_crop", Group(Crop)),
         ("transform", Group(TransformAdjustments)),
         // The mode transfers; its corrections are analysed for each photo.

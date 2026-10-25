@@ -293,10 +293,10 @@ fn prepare(
     let mut notes = starting_warnings;
     notes.extend(transferred.notes);
     let mut after = transferred.recipe;
-    // Upright's corrections are analysed from each photo; the open photo's editor
-    // does it on Paste, and here the photo is developed for it.
+    // Upright's corrections and a Straighten Auto are measured on each photo; the
+    // open photo's editor does it on Paste, and here the photo is developed for it.
     // Guided solves this photo's own guides beside that analysis.
-    if after.upright.needs_analysis() {
+    if after.upright.needs_analysis() || after.straighten_pending() {
         let cancel = std::sync::atomic::AtomicBool::new(false);
         let image = match opened {
             crate::photo::Opened::Raw(raw) => {
@@ -762,6 +762,70 @@ mod tests {
         let saved = c.load_edit(id, &jpeg)?.unwrap().recipe;
         assert_eq!(saved.exposure, 0.5);
         assert!(saved.profile.is_some_and(|p| p.is_embedded()));
+        Ok(())
+    }
+
+    /// Issue 594: an angle the Crop panel's Auto measured is measured on each photo
+    /// synchronized, not copied as Lightroom copies it.
+    #[test]
+    fn sync_measures_an_auto_straighten_on_each_photo() -> Result<()> {
+        let Fixture {
+            _dir,
+            catalog: mut c,
+            photos,
+        } = catalog()?;
+        // Stripes falling 3° to the right, which Auto levels at about −3°.
+        let folder = photos[0].1.parent().unwrap().to_path_buf();
+        let png = folder.join("e.png");
+        let (s, cos) = 3f32.to_radians().sin_cos();
+        image::RgbImage::from_fn(600, 400, |x, y| {
+            // Supersampled, so edges are smooth rather than level pixel steps.
+            let mut sum = 0.;
+            for j in 0..4 {
+                let x = x as f32 + (j % 2) as f32 * 0.5 - 299.75;
+                let y = y as f32 + (j / 2) as f32 * 0.5 - 199.75;
+                let across = -s * x + cos * y;
+                sum += if (across / 70.).rem_euclid(2.) < 1. {
+                    200.
+                } else {
+                    25.
+                };
+            }
+            image::Rgb([(sum / 4.) as u8; 3])
+        })
+        .save(&png)?;
+        c.add_folder(&folder)?;
+        let id = c.photos()?.into_iter().find(|p| p.path == png).unwrap().id;
+        let metadata = crate::photo::open_source(&png, &Default::default())?
+            .metadata()
+            .clone();
+        let mut source = Recipe::with_profiles(&metadata, &[]);
+        source.set_auto_straighten(Some(5.));
+        let mut crop = GroupSelection::none();
+        crop.set(
+            settings_groups::SettingGroup::Crop,
+            settings_groups::GroupInclusion::Included,
+        );
+        let result = synchronize(
+            &mut c,
+            &SyncSource::Open(Box::new(Settings {
+                recipe: source,
+                metadata,
+            })),
+            &BatchChange::Settings(crop),
+            &[target(id, &png)],
+            &DevelopDefaults::default(),
+            crate::camera_data::Demosaic::default(),
+        );
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        let saved = c.load_edit(id, &png)?.unwrap().recipe;
+        assert!((saved.straighten + 3.).abs() < 0.3, "{}", saved.straighten);
+        assert_eq!(
+            saved.auto_straighten(),
+            Some(crate::model::transform::AutoStraighten::Measured(
+                saved.straighten
+            ))
+        );
         Ok(())
     }
 

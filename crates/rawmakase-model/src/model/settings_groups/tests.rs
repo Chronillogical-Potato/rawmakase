@@ -72,6 +72,7 @@ fn everything_changed() -> Recipe {
         sharpening: 0.5,
         crop: [0.1, 0.1, 0.9, 0.9],
         straighten: 2.,
+        straighten_auto: Some(crate::model::transform::AutoStraighten::Measured(2.)),
         constrain_crop: true,
         rotation: 1,
         flip_x: true,
@@ -222,6 +223,11 @@ fn each_group_transfers_exactly_its_settings() {
             SettingGroup::TreatmentAndProfile => {
                 expected.extend(["camera_exposure", "temperature", "tint", "wb"].map(String::from));
             }
+            // The source's angle is Auto's: it is measured on the target, which keeps
+            // its own until then.
+            SettingGroup::Crop => {
+                expected.remove("straighten");
+            }
             // The whole of Upright, its mode with it.
             SettingGroup::UprightTransforms => {
                 expected.insert("upright".into());
@@ -366,6 +372,50 @@ fn upright_moves_its_mode_and_guided_needs_this_photos_guides() {
     let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
     assert_eq!(out.recipe.upright.mode, UprightMode::Level);
     assert_eq!(out.recipe.upright.corrections, to.upright.corrections);
+}
+
+/// Lightroom copies the angle the Crop panel's Auto measured; here each photo is
+/// measured instead, keeping its own angle until it is. An angle changed since Auto
+/// is copied as it is.
+#[test]
+fn an_auto_straighten_is_measured_again_on_each_photo() {
+    use crate::model::transform::AutoStraighten;
+    let m = camera("Fujifilm", "X100F");
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let mut crop = GroupSelection::none();
+    crop.set(SettingGroup::Crop, GroupInclusion::Included);
+    let mut source = Recipe::default();
+    source.set_auto_straighten(Some(2.5));
+    assert_eq!(source.straighten, 2.5);
+    let to = Recipe {
+        straighten: -1.,
+        ..Default::default()
+    };
+    let out = transfer(from(&source, &m), &to, &crop, target).recipe;
+    assert_eq!(out.straighten, -1.);
+    assert_eq!(out.straighten_auto, Some(AutoStraighten::Pending(-1.)));
+    assert!(out.straighten_pending());
+    // Paste's default groups include the Crop.
+    let pasted = transfer(from(&source, &m), &to, &GroupSelection::default(), target).recipe;
+    assert!(pasted.straighten_pending());
+    // A photo pasted to and not yet measured passes it on.
+    let again = transfer(from(&out, &m), &Recipe::default(), &crop, target).recipe;
+    assert_eq!(again.straighten_auto, Some(AutoStraighten::Pending(0.)));
+    // Without the Crop, nothing moves.
+    let out = transfer(from(&source, &m), &to, &GroupSelection::none(), target).recipe;
+    assert_eq!(out, to);
+    // Moved since Auto: an angle like any other, copied as Lightroom does.
+    source.straighten = 3.;
+    assert_eq!(source.auto_straighten(), None);
+    let out = transfer(from(&source, &m), &to, &crop, target).recipe;
+    assert_eq!((out.straighten, out.straighten_auto), (3., None));
+    // A waiting photo's angle changed by hand is no longer waiting.
+    let mut moved = again;
+    moved.straighten = 4.;
+    assert!(!moved.straighten_pending());
 }
 
 #[test]

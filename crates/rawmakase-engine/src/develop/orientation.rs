@@ -50,6 +50,8 @@ pub fn mirror(r: &mut Recipe, mirror: Mirror) {
         }
     }
     r.straighten = -r.straighten;
+    // The mirrored photo measures as the mirrored angle; Auto stays Auto.
+    r.straighten_auto = r.straighten_auto.map(|auto| auto.mirrored());
 }
 
 #[cfg(test)]
@@ -168,6 +170,26 @@ mod tests {
                     "{what}: {a:?} {b:?}"
                 );
             }
+        }
+    }
+
+    /// A flip turns the angle the other way, and Auto's angle with it: a Straighten
+    /// waiting to be measured still waits.
+    #[test]
+    fn mirroring_keeps_an_auto_straighten_auto() {
+        use crate::model::transform::AutoStraighten;
+        for m in [Mirror::Horizontal, Mirror::Vertical] {
+            let mut r = Recipe {
+                straighten: 1.,
+                straighten_auto: Some(AutoStraighten::Pending(1.)),
+                ..Default::default()
+            };
+            mirror(&mut r, m);
+            assert_eq!(r.straighten, -1.);
+            assert!(r.straighten_pending(), "{m:?}");
+            r.set_auto_straighten(Some(2.));
+            mirror(&mut r, m);
+            assert_eq!(r.auto_straighten(), Some(AutoStraighten::Measured(-2.)));
         }
     }
 

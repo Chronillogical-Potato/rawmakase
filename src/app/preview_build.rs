@@ -224,7 +224,8 @@ fn item_recipe(
     Ok(crate::edits::resolve(&item.record, &item.path, m, profiles, &item.defaults)?.recipe)
 }
 
-/// `recipe` rendered on the decoded photo at `edge`, its Upright completed first.
+/// `recipe` rendered on the decoded photo at `edge`, its Upright and Straighten Auto
+/// completed first.
 fn develop(
     recipe: &mut Recipe,
     image: &crate::camera_data::CameraImage,
@@ -237,11 +238,11 @@ fn develop(
 }
 
 /// Whether the photo needs its full-size decode for `edge`: the half-size one,
-/// cropped and transformed as `recipe` says, falls short of it. Upright still to
-/// be worked out always takes the full decode, as completing it can shrink the
-/// photo (Constrain Crop).
+/// cropped and transformed as `recipe` says, falls short of it. Upright or a
+/// Straighten Auto still to be worked out always takes the full decode, which
+/// Develop measures on, and completing it can shrink the photo (Constrain Crop).
 pub(super) fn needs_full(recipe: &Recipe, m: &Metadata, edge: u32) -> bool {
-    if edge == 0 || recipe.upright.needs_analysis() {
+    if edge == 0 || recipe.upright.needs_analysis() || recipe.straighten_pending() {
         return true;
     }
     let g = crate::develop::Geometry::for_metadata(m, recipe);

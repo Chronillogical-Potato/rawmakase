@@ -82,7 +82,7 @@ impl Editor {
                         Ok(r) => {
                             let old = self.document.edit.replace(r);
                             // Before the step is taken, as the Presets panel does.
-                            self.ensure_upright();
+                            self.ensure_analysis();
                             self.commit_edit(old.clone(), None);
                         }
                         Err(e) => self.status = e.to_string(),
@@ -224,7 +224,7 @@ impl Editor {
                     self.document.set_image(full);
                     self.load.finish(id);
                     // An Upright mode chosen before the photo decoded still needs analysing.
-                    self.ensure_upright();
+                    self.ensure_analysis();
                     if !self.document.edit.save_state().is_protected() {
                         // A raw default that could not be used stays explained.
                         self.status = match self.defaults_note() {

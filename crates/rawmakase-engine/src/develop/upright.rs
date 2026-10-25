@@ -673,11 +673,15 @@ pub fn store(
     }
 }
 
-/// Completes the Upright corrections `r` needs and lacks, from the developed photo:
-/// analyses it, or only solves Guided's guides when the other modes' corrections are
-/// already there. What Develop does in the background once a photo is open, for a
-/// photo developed without being opened.
+/// Completes what `r` needs measured on the developed photo and lacks: a Straighten
+/// Auto copied from another photo, and Upright's corrections, analysing the photo or
+/// only solving Guided's guides when the other modes' corrections are already there.
+/// What Develop does in the background once a photo is open, for a photo developed
+/// without being opened.
 pub fn complete(r: &mut Recipe, im: &CameraImage) -> Option<super::guided::Issue> {
+    if r.straighten_pending() {
+        r.set_auto_straighten(straighten_angle(im, r));
+    }
     if !r.upright.needs_analysis() {
         return None;
     }
@@ -1008,6 +1012,40 @@ mod tests {
         // A flat photo has nothing to go by.
         let flat = photo(&[100.; 600 * 400], 600, 400);
         assert_eq!(straighten_angle(&flat, &neutral), None);
+    }
+
+    /// A Straighten Auto copied from another photo is measured on this one when it is
+    /// developed without being opened; one with nothing to go by keeps its angle.
+    #[test]
+    fn completing_measures_a_copied_auto_straighten() {
+        use crate::model::transform::AutoStraighten;
+        let pending = Recipe {
+            wb: [1.; 3],
+            straighten: 1.,
+            straighten_auto: Some(AutoStraighten::Pending(1.)),
+            ..Default::default()
+        };
+        let mut r = pending.clone();
+        assert!(complete(&mut r, &tilted_horizon(3.)).is_none());
+        assert!((r.straighten + 3.).abs() < 0.2, "{}", r.straighten);
+        assert_eq!(
+            r.auto_straighten(),
+            Some(AutoStraighten::Measured(r.straighten))
+        );
+        // Measured: nothing left to complete.
+        let done = r.clone();
+        complete(&mut r, &tilted_horizon(-4.));
+        assert_eq!(r, done);
+        let mut flat = pending.clone();
+        complete(&mut flat, &photo(&[100.; 600 * 400], 600, 400));
+        assert_eq!((flat.straighten, flat.straighten_auto), (1., None));
+        // Changed by hand since it was copied: not measured.
+        let mut moved = Recipe {
+            straighten: 2.,
+            ..pending
+        };
+        complete(&mut moved, &tilted_horizon(3.));
+        assert_eq!(moved.straighten, 2.);
     }
 
     #[test]

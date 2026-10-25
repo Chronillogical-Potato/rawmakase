@@ -921,6 +921,10 @@ impl Preset {
     ) -> Result<()> {
         let v = settings.values;
         settings.assign("CropAngle", &mut r.straighten, 1., -45., 45.)?;
+        // An angle the settings give is theirs, not Auto's, even Auto's own number.
+        if v.contains_key("CropAngle") {
+            r.straighten_auto = None;
+        }
         settings.seen.insert("LensProfileEnable".into());
         // Which Adobe profile the edit uses. Whether Lightroom took it from the RAW
         // instead does not change which profile is named.
