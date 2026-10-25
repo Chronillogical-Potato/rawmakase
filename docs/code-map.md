@@ -174,7 +174,7 @@ standalone `rawmakase-ctl`). The last two build without the app.
 | [optics/mod.rs](../crates/rawmakase-model/src/optics/mod.rs) | Radial correction model: vignetting gain, distortion and lateral CA scales, fill scale. Shared by the lens readers, DNG and the renderer. |
 | [optics/lcp.rs](../crates/rawmakase-model/src/optics/lcp.rs) | Adobe lens profiles as data: parsed LCP entries, an imported profile, and the profiles a photo can choose from. |
 | [lens/auto_ca.rs](../crates/rawmakase-model/src/lens/auto_ca.rs) | Remove Chromatic Aberration: lateral CA measured from the decoded image as red and blue radial scales. |
-| [lens/embedded.rs](../crates/rawmakase-model/src/lens/embedded.rs) | Bounded reader for Fujifilm and Sony built-in correction tables in the RAW container. See [lens corrections](lens-corrections.md). |
+| [lens/embedded.rs](../crates/rawmakase-model/src/lens/embedded.rs) | Bounded reader for the built-in correction data in the RAW container: Fujifilm's and Sony's tables, Olympus/OM System's and Panasonic's distortion models (and Olympus's lateral CA), sampled at the decoded image's radii. See [lens corrections](lens-corrections.md). |
 | [lens/lcp.rs](../crates/rawmakase-model/src/lens/lcp.rs) | Adobe lens profiles (LCP), imported explicitly into `lens-profiles`, cached, listed for the photo's camera and matched to its lens; their data is in `optics::lcp`. |
 | [lens/choice.rs](../crates/rawmakase-model/src/lens/choice.rs) | Lightroom's lens profile Setup (Default, Auto, Custom), the profile an edit names, which one renders, and the Make/Model/Profile menus. |
 
