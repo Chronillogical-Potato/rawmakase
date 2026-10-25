@@ -478,7 +478,7 @@ impl Editor {
         }
         Ok(())
     }
-    fn require_develop(&self) -> Result<()> {
+    pub(super) fn require_develop(&self) -> Result<()> {
         if self.module == Module::Library || self.document.metadata.is_none() {
             return Err(Error::new("no_document", "Open a photo in Develop first"));
         }

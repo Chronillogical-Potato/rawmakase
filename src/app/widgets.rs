@@ -905,6 +905,8 @@ pub(super) enum SliderEvent {
     None,
     /// Double-clicked back to its default.
     Reset,
+    /// Its label clicked: the slider the Basic panel's keys step.
+    LabelClicked,
 }
 /// `display` overrides the shown scale and decimals, e.g. Sharpening's 0–150.
 /// Whether a slider shows a tick at its fill's origin.
@@ -970,6 +972,8 @@ pub(super) struct SliderStyle {
     /// descriptor's valid range, as Exposure's ±8 EV beside its ±5 rail. `None`
     /// keeps typing to the rail's range.
     pub typed: Option<(f32, f32)>,
+    /// The label stands out: the slider the Basic panel's keys step.
+    pub selected: bool,
 }
 /// The Temp slider's rail, blue to yellow.
 pub(super) const TEMPERATURE_GRADIENT: (Color32, Color32) = (
@@ -988,6 +992,17 @@ pub(super) fn setting_slider(
     value: &mut f32,
     default: f32,
 ) -> SliderEvent {
+    keyed_setting_slider(ui, id, value, default, false)
+}
+/// [`setting_slider`] for a slider the Basic panel's keys step: its label stands
+/// out while `selected`, and a click on it selects it.
+pub(super) fn keyed_setting_slider(
+    ui: &mut egui::Ui,
+    id: ParameterId,
+    value: &mut f32,
+    default: f32,
+    selected: bool,
+) -> SliderEvent {
     let gradient = match id {
         ParameterId::Temperature | ParameterId::IncrementalTemperature => {
             Some(TEMPERATURE_GRADIENT)
@@ -997,7 +1012,7 @@ pub(super) fn setting_slider(
         }
         _ => None,
     };
-    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+    descriptor_slider(ui, id.descriptor(), value, default, gradient, selected)
 }
 /// The slider for a mask's adjustment, as its descriptor describes it.
 pub(super) fn local_setting_slider(
@@ -1011,7 +1026,7 @@ pub(super) fn local_setting_slider(
         LocalParameterId::Tint => Some(TINT_GRADIENT),
         _ => None,
     };
-    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+    descriptor_slider(ui, id.descriptor(), value, default, gradient, false)
 }
 fn descriptor_slider<Id>(
     ui: &mut egui::Ui,
@@ -1019,6 +1034,7 @@ fn descriptor_slider<Id>(
     value: &mut f32,
     default: f32,
     gradient: Option<(Color32, Color32)>,
+    selected: bool,
 ) -> SliderEvent {
     let style = SliderStyle {
         display: Some((d.display.scale, d.display.decimals)),
@@ -1027,6 +1043,7 @@ fn descriptor_slider<Id>(
         drag_step: d.drag_step,
         hue_rail: false,
         typed: Some((*d.valid.start(), *d.valid.end())),
+        selected,
     };
     slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
 }
@@ -1069,6 +1086,7 @@ pub(super) fn slider_styled(
         drag_step: step,
         hue_rail,
         typed,
+        selected,
     } = style;
     let mut event = SliderEvent::None;
     let start = *range.start();
@@ -1110,13 +1128,29 @@ pub(super) fn slider_styled(
             Pos2::new(row.left() + label_column(ui), row.bottom()),
         );
         let label_response = ui.interact(label_rect, ui.id().with("label"), Sense::click());
-        ui.painter().text(
-            label_rect.right_center() - Vec2::new(5., 0.),
-            egui::Align2::RIGHT_CENTER,
-            label,
-            egui::FontId::proportional(11.),
-            palette.gray(190),
-        );
+        let label_pos = label_rect.right_center() - Vec2::new(5., 0.);
+        let font = egui::FontId::proportional(11.);
+        if selected {
+            // A lit label marks the slider the keys step, as in Lightroom.
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label.to_string(), font, palette.gray(245));
+            let text = egui::Align2::RIGHT_CENTER.anchor_size(label_pos, galley.size());
+            ui.painter()
+                .rect_filled(text.expand2(Vec2::new(3., 1.)), 2., palette.gray(66));
+            ui.painter().galley(text.min, galley, palette.gray(245));
+        } else {
+            ui.painter().text(
+                label_pos,
+                egui::Align2::RIGHT_CENTER,
+                label,
+                font,
+                palette.gray(190),
+            );
+        }
+        if label_response.clicked() {
+            event = SliderEvent::LabelClicked;
+        }
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
             event = SliderEvent::Reset;

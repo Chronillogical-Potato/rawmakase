@@ -5,12 +5,12 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, adjustment_section, label_column, name_history_step, parametric_curve_ui,
-    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, keyed_setting_slider, label_column, name_history_step,
+    parametric_curve_ui, segmented, setting_slider, slider, slider_with, switched_section,
+    tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
-use super::{Editor, bulk_import::ImportKind};
+use super::{Editor, basic_keys, bulk_import::ImportKind};
 use crate::app::icons::{self, Icon};
 use crate::model::panels::{Panel, PanelState};
 use crate::model::params::ParameterId;
@@ -595,8 +595,8 @@ impl Editor {
             });
             let photo = metadata.as_ref();
             // A monochrome photo has no white balance: Lightroom disables it.
-            let monochrome = photo.is_some_and(|m| m.monochrome);
-            ui.add_enabled_ui(!monochrome, |ui| {
+            let white_balance = basic_keys::enabled(ParameterId::Temperature, photo);
+            ui.add_enabled_ui(white_balance, |ui| {
                 control_row(ui, "WB", |ui| {
                     // A rendered file's white balance is relative Temp and Tint, which
                     // Auto records too; As Shot is 0 and 0.
@@ -697,12 +697,17 @@ impl Editor {
                             );
                         });
                 });
+                let selected = &mut view.selected_setting;
                 if rendered {
-                    setting_control(ui, r, ParameterId::IncrementalTemperature, 0., photo);
-                    setting_control(ui, r, ParameterId::IncrementalTint, 0., photo);
+                    let (temp, tint) = (
+                        ParameterId::IncrementalTemperature,
+                        ParameterId::IncrementalTint,
+                    );
+                    basic_control(ui, r, temp, 0., photo, selected);
+                    basic_control(ui, r, tint, 0., photo, selected);
                 } else {
-                    setting_control(ui, r, ParameterId::Temperature, 6500., photo);
-                    setting_control(ui, r, ParameterId::Tint, 0., photo);
+                    basic_control(ui, r, ParameterId::Temperature, 6500., photo, selected);
+                    basic_control(ui, r, ParameterId::Tint, 0., photo, selected);
                 }
             });
             subheading(ui, "Tone");
@@ -714,7 +719,7 @@ impl Editor {
                 ParameterId::Whites,
                 ParameterId::Blacks,
             ] {
-                setting_control(ui, r, id, 0., photo);
+                basic_control(ui, r, id, 0., photo, &mut view.selected_setting);
             }
             subheading(ui, "Presence");
             for id in [
@@ -724,7 +729,7 @@ impl Editor {
                 ParameterId::Vibrance,
                 ParameterId::Saturation,
             ] {
-                setting_control(ui, r, id, 0., photo);
+                basic_control(ui, r, id, 0., photo, &mut view.selected_setting);
             }
         }) {
             r.wb = [1.; 3];
@@ -1836,6 +1841,27 @@ enum GuidedAction {
     Clear,
 }
 
+/// [`setting_control`] for a Basic slider, which the `.` and `,` keys select for
+/// `+` and `-` to step (`basic_keys`): its label lights up while it is the
+/// `selected` one, and a click on the label selects it.
+fn basic_control(
+    ui: &mut egui::Ui,
+    r: &mut Recipe,
+    id: ParameterId,
+    default: f32,
+    photo: Option<&crate::camera_data::Metadata>,
+    selected: &mut Option<ParameterId>,
+) {
+    let canonical = basic_keys::canonical(id);
+    let lit = *selected == Some(canonical) && basic_keys::enabled(id, photo);
+    let event = crate::model::edit::change_setting(r, id, photo, |r| {
+        keyed_setting_slider(ui, id, id.value_mut(r), default, lit)
+    });
+    if event == SliderEvent::LabelClicked {
+        *selected = Some(canonical);
+        ui.ctx().request_repaint();
+    }
+}
 /// The slider for develop setting `id`, and what changing it implies for the rest
 /// of the recipe (`model::edit`).
 fn setting_control(

@@ -342,6 +342,9 @@ pub(super) struct ViewState {
     /// A Targeted Adjustment Tool drag in progress.
     pub(super) targeted: Option<super::targeted_tool::TargetDrag>,
     pub(super) shortcuts: bool,
+    /// The Basic slider the `.` and `,` keys selected for `+` and `-`, named as on
+    /// a RAW file (see `basic_keys`); kept across photos and modules.
+    pub(super) selected_setting: Option<crate::model::params::ParameterId>,
     pub(super) zoom_key: (bool, f32),
     pub(super) zoom_anim: Option<(f64, egui::Rect)>,
     pub(super) shown_rect: Option<egui::Rect>,
@@ -379,6 +382,7 @@ impl Default for ViewState {
             point_color: Default::default(),
             targeted: None,
             shortcuts: false,
+            selected_setting: None,
             zoom_key: (false, 1.),
             zoom_anim: None,
             shown_rect: None,

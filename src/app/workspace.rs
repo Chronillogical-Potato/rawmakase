@@ -57,6 +57,8 @@ impl Editor {
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        // Before any field takes this frame's keys, or gives them up.
+        let typing = ctx.text_edit_focused();
         self.control_commands(&ctx);
         self.events(&ctx);
         self.poll_updates(&ctx);
@@ -211,6 +213,8 @@ impl Editor {
         self.update_notice(&ctx, modal || self.view.shortcuts);
         #[cfg(feature = "telemetry")]
         self.usage_stats_notice(&ctx, modal || self.view.shortcuts);
+        // Last, after whatever else this frame opened or asked: see its docs.
+        self.develop_key_steps(&ctx, typing);
         self.pending_work(&ctx);
         #[cfg(target_os = "macos")]
         self.update_native_menu(&ctx);
