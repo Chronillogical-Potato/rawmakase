@@ -11,6 +11,7 @@ Many cameras store per-shot lens corrections in the RAW file. Lightroom applies 
 | Olympus and OM System ORF | maker note ImageProcessing 0x150A distortion, 0x150C lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
 | Panasonic RW2 (and Leica RWL) | IFD0 0x0119 distortion, 0x011B lateral CA | On ([below](#olympus-om-system-and-panasonic)) |
 | Nikon NEF (Z bodies) | raw SubIFD 0xC7D5 (NEFInfo): distortion, vignetting, lateral CA | On for lenses that need it; others follow Enable Profile Corrections ([below](#nikon)) |
+| Nikon Coolpix NRW (P950, P1000, P1100) | raw SubIFD 0xC7D5 (NEFInfo): distortion and lateral CA tables | On ([below](#nikon-coolpix)) |
 
 Radius is normalized to the half diagonal of the decoded image. Rendering order:
 
@@ -119,7 +120,16 @@ Against Adobe on the 24 distinct mode-3 corrections, green matches the warp with
 
 Lightroom applies the opcodes whatever Enable Profile Corrections says, so a mode-3 correction is on by default (`default_on`). A mode-1 profile is the one Enable Profile Corrections uses when no Adobe profile matches the lens, so it is off by default and follows the switch, as Sony's built-in data does ([below](#sony-built-in-corrections)); an imported Adobe profile replaces it. Camera Raw 18.7 renders with Enable Profile Corrections off and on confirm both: a Z 6 photo (24-70mm f/4 S, mode 3) renders identically either way, while a Z 8 photo (14-24mm f/2.8 S) and a Z fc photo (18-70mm through the FTZ, both mode 1) are corrected only with it on, the corners moving 10 to 25 px and brightening 1.3 to 1.5×.
 
-Known limits: RAWmakase centres the correction on the image, while Nikon's optical centre is up to 27 px from it on the mode-3 samples (66 px on a Tamron mode-1 one); that moves corrected geometry by up to 2.5 px at full size (6 px on that Tamron photo). A correction whose green ratio rises above 1 mid-frame and falls at the corners (the Z5 II's 24-70mm f/4 at 24mm in DX crop) is zoomed by RAWmakase's fill scale to keep that ratio inside, 1.5% tighter than Adobe frames it, as for DNG warps. Coolpix NRW files (P950, P1000, P1100, A1000), whose distortion and CA Adobe also corrects, store them elsewhere and are not read.
+Known limits: RAWmakase centres the correction on the image, while Nikon's optical centre is up to 27 px from it on the mode-3 samples (66 px on a Tamron mode-1 one); that moves corrected geometry by up to 2.5 px at full size (6 px on that Tamron photo). A correction whose green ratio rises above 1 mid-frame and falls at the corners (the Z5 II's 24-70mm f/4 at 24mm in DX crop) is zoomed by RAWmakase's fill scale to keep that ratio inside, 1.5% tighter than Adobe frames it, as for DNG warps. Coolpix NRW files keep their correction in other records of the same tag ([below](#nikon-coolpix)).
+
+### Nikon Coolpix
+
+The Coolpix P950, P1000 and P1100 store tables in records 2 and 3 of the same NEFInfo tag, which Adobe DNG Converter 18.7 writes as a WarpRectilinear opcode (distortion and lateral CA, no vignetting), so they apply by default. Each record starts "0100" and four header bytes, then signed rationals:
+
+- Record 2 (header 3 3 17 1): the distortion in percent at 17 radii spread evenly from the centre to the default crop's corner. Through a natural cubic spline, 1 + d/100 is green's source radius over the output radius, scaled like Adobe's warp so that its widest value is 1 (Adobe's k₀ is 1/(1 + d/100) at the corner to five digits).
+- Record 3 (header 3 34 1 0): red's and then blue's displacement from green at the same radii, 17 each, in units of 1/3792 of the half diagonal: that unit fits Adobe's red and blue planes on all three bodies within 1% (residual at most 0.02 px).
+
+Against Adobe's warps of one photo per body, the green plane matches within 0.55 px (P1000), 0.8 px (P1100) and 1.2 px (P950), and the test checks the P1100's records against its warp within 0.7 px on all three planes. Record 4 holds a vignetting table, which Adobe does not apply. The A1000 writes record 2 with another header (3 2 17 1) and 15 values, which do not fit Adobe's warp of its single sample photo, so it is not read; older Coolpix NRW files (P7000–P7800, P330/P340) get nothing from Adobe either.
 
 ### Sony built-in corrections
 
@@ -146,6 +156,7 @@ Which formats Adobe corrects from the camera's own data, from Adobe DNG Converte
 | Canon EOS R, RP, R3, R5, R6, R6 Mark II, R7, R8, R10, R50, R50 V, R100 (RF and EF lenses), EOS DSLRs, EOS M | Nothing | — |
 | Canon PowerShot compacts (G1 X II/III, G3 X, G5 X, G7 X, G9 X, G15/16, S90–S120, SX60/70, V1) | Distortion and lateral CA (warp) | Not read yet |
 | Samsung NX (NX200 and later), NX mini, EX2F, Galaxy NX | Lateral CA, and distortion for some lenses and compacts (warp) | Not read yet |
+| Nikon Coolpix P950, P1000, P1100 (A1000) | Distortion and lateral CA (warp) | Applied ([above](#nikon-coolpix)); the A1000's other format is not read |
 | Nikon DSLRs, Nikon 1, older Coolpix (P7000–P7800, P330/P340, A) | Nothing | — |
 | Leica Q, Q2, CL, SL, SL2, X2 DNGs | The camera's own warp in its DNG (distortion and CA, centred) | The [DNG reader](#dng-files) applies it |
 | Leica M8 to M10-R DNGs | Nothing | — |
