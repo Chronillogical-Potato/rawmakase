@@ -165,6 +165,9 @@ pub(crate) struct Library {
     filters: filter::Filters,
     /// The folders shown, as tree keys (none is All Photographs).
     selected_folders: folder_selection::FolderSelection,
+    /// Show Photos in Subfolders: whether a folder shows its subfolders'
+    /// photos too; see `show_subfolders`.
+    subfolders_shown: bool,
     expanded: HashSet<String>,
     /// The tree key of the folder New Folder Inside was last asked in,
     /// unfolded once the folder is made.
@@ -292,6 +295,7 @@ impl Library {
             sidebar_trees: None,
             filters: Default::default(),
             selected_folders: Default::default(),
+            subfolders_shown: true,
             expanded: HashSet::new(),
             new_folder_in: None,
             thumb_size: 190.,
@@ -432,10 +436,7 @@ impl Library {
         }
         // The folders shown as the catalog has them now: one may have
         // gained a catalog folder (photos moved into it) or subfolders.
-        if let Some(scope) = self
-            .folders_scope(&self.selected_folders)
-            .filter(|scope| !scope.is_empty())
-        {
+        if let Some(scope) = self.current_scope(&self.selected_folders) {
             self.filters.folder_scope = Some(scope);
         }
         // Copy commands save a name being typed before they run, and so
@@ -677,10 +678,7 @@ impl Library {
         self.selected_folders = place.folders.clone();
         // The source as the catalog has it now, e.g. after a folder gained
         // subfolders since.
-        if let Some(scope) = self
-            .folders_scope(&place.folders)
-            .filter(|scope| !scope.is_empty())
-        {
+        if let Some(scope) = self.current_scope(&place.folders) {
             self.filters.folder_scope = Some(scope);
         }
         if let Some(id) = self.filters.collection {
@@ -1072,14 +1070,18 @@ impl Library {
                 self.screen.forget(photo.id);
             }
         }
+        // The folders chosen with their subfolders, shown or not: a folder
+        // of folders shown alone has no photos of its own to tell.
+        let shown_going = self
+            .selected_folders
+            .keys()
+            .iter()
+            .filter_map(|key| self.folder_ids(key, true))
+            .flatten()
+            .any(|f| folders.contains(&f));
         let ids: Vec<FolderId> = folders.iter().copied().collect();
         let removed = self.session.remove_folders(&ids)?;
-        if self
-            .filters
-            .folder_scope
-            .as_ref()
-            .is_some_and(|scope| scope.iter().any(|f| folders.contains(f)))
-        {
+        if shown_going {
             self.selected_folders.clear();
             self.filters.folder_scope = None;
         }

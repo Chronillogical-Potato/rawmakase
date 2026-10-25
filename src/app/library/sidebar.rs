@@ -237,6 +237,7 @@ impl Library {
                                 0,
                                 &mut self.expanded,
                                 &self.selected_folders,
+                                self.subfolders_shown,
                             ) {
                                 Some(TreeAction::Select(key, click)) => {
                                     clicked = Some((key, click));
@@ -310,6 +311,9 @@ impl Library {
                                         photos,
                                         empty_root: None,
                                     })
+                                }
+                                Some(TreeAction::ShowSubfolders(shown)) => {
+                                    self.show_subfolders(shown)
                                 }
                                 None => {}
                             }
@@ -474,27 +478,53 @@ impl Library {
             None => self.selected_folders.anchor().to_string(),
         }
     }
-    /// Shows a folder saved with `source_key` again, including its subfolders,
-    /// and selects `photo` if it is in it.
-    /// The folders a folder key covers now: the folder and its subfolders.
-    /// None for a key that names no folder in the catalog.
+    /// Whether a folder shows the photos in its subfolders too (Show Photos
+    /// in Subfolders), as it does unless turned off.
+    #[cfg(test)]
+    pub(in crate::app) fn subfolders_shown(&self) -> bool {
+        self.subfolders_shown
+    }
+    /// Turns Show Photos in Subfolders on or off; the folders shown follow.
+    pub(in crate::app) fn show_subfolders(&mut self, shown: bool) {
+        if shown == self.subfolders_shown {
+            return;
+        }
+        self.subfolders_shown = shown;
+        if !self.selected_folders.is_empty() {
+            self.filters.folder_scope = self.folders_scope(&self.selected_folders);
+            self.filter();
+        }
+    }
+    /// The folders a folder key covers now: the folder, and its subfolders
+    /// while they're shown. None for a key that names no folder in the
+    /// catalog, Some of none for a folder of folders shown alone.
     pub(super) fn folder_scope(&self, key: &str) -> Option<HashSet<FolderId>> {
+        self.folder_ids(key, self.subfolders_shown)
+    }
+    /// [`Self::folder_scope`], with `subfolders` or without.
+    pub(super) fn folder_ids(&self, key: &str, subfolders: bool) -> Option<HashSet<FolderId>> {
         let rest = key.strip_prefix("root:")?;
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
         let root = root.parse::<i64>().ok().map(RootId)?;
         let below = format!("{relative}/");
-        let ids: HashSet<FolderId> = self
+        let within: Vec<(FolderId, bool)> = self
             .session
             .folders
             .iter()
-            .filter(|f| {
+            .filter(|f| f.root == root)
+            .filter_map(|f| {
                 let path = f.relative.trim_end_matches('/');
-                f.root == root
-                    && (relative.is_empty() || path == relative || path.starts_with(&below))
+                let own = path == relative;
+                (own || relative.is_empty() || path.starts_with(&below)).then_some((f.id, own))
             })
-            .map(|f| f.id)
             .collect();
-        (!ids.is_empty()).then_some(ids)
+        (!within.is_empty()).then(|| {
+            within
+                .into_iter()
+                .filter(|(_, own)| subfolders || *own)
+                .map(|(id, _)| id)
+                .collect()
+        })
     }
     /// The folders several folder keys cover now; none for none chosen (All
     /// Photographs). A chosen folder no longer in the catalog adds none.
@@ -507,6 +537,21 @@ impl Library {
                 .flatten()
                 .collect()
         })
+    }
+    /// Shows a folder saved with `source_key` again, as folders are shown,
+    /// and selects `photo` if it is in it.
+    /// The folders `folders` cover now, if any of them is still in the
+    /// catalog; what was shown stays shown while none is.
+    pub(super) fn current_scope(&self, folders: &FolderSelection) -> Option<HashSet<FolderId>> {
+        let mut named = false;
+        let mut ids = HashSet::new();
+        for key in folders.keys() {
+            if let Some(scope) = self.folder_scope(key) {
+                named = true;
+                ids.extend(scope);
+            }
+        }
+        named.then_some(ids)
     }
     pub(in crate::app) fn restore_source(&mut self, key: &str, photo: Option<PhotoId>) {
         if let Some(id) = key
