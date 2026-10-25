@@ -458,6 +458,12 @@ source = "adobe-dng"
 
 [[matrix]]
 make = "Canon"
+model = "EOS R8 Mark II"
+xyz = [9539, -2795, -1224, -4175, 11998, 2458, -465, 1755, 6048]
+source = "adobe-dng"
+
+[[matrix]]
+make = "Canon"
 model = "EOS RP"
 xyz = [8608, -2097, -1178, -5425, 13265, 2383, -1149, 2238, 5680]
 source = "adobe-dng"

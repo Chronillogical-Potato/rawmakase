@@ -548,6 +548,16 @@ sample = "raw.pixls.us, 1 photo at ISO 200; Adobe +1.27 with Highlight Tone Prio
 
 [[camera]]
 make = "Canon"
+model = "EOS R8 Mark II"
+baseline_exposure = 0.25
+levels = [512, 16384, 16383]
+unit_calibration = { preset = "daylight", reference = [1938, 1024, 1533] }
+source = "adobe-dng"
+checked = "2026-10-24"
+sample = "6 local photos, RAW and C-RAW, ISO 100 to 25600; BaselineExposure +0.27 at ISO 100, +0.34 where black is 2048 (ISO 400 and up)"
+
+[[camera]]
+make = "Canon"
 model = "EOS RP"
 baseline_exposure = 0.3
 levels = [513, 14558, 16383]

@@ -4,7 +4,9 @@
 //! (LightingOpt) and the lens.
 //!
 //! Sources: ExifTool's Canon tag documentation (ColorData9 to ColorData12,
-//! AspectInfo, LightingOpt, LensModel), and our own measurements.
+//! AspectInfo, LightingOpt, LensModel), and our own measurements (ColorData
+//! version 67, which ExifTool 13.55 does not decode, against Adobe DNG
+//! Converter 18.7's AsShotNeutral, BlackLevel and CameraCalibration).
 use crate::container::tiff::{Ifd, TiffFile};
 use crate::info::Presets;
 
@@ -24,8 +26,9 @@ fn color_data_layout(version: u32) -> Option<(usize, usize, usize)> {
         32 | 33 => Some((85, 150, 155)),
         34 | 48 => Some((105, 205, 210)),
         // Version 64's arrays are longer and their presets earlier; versions
-        // 65 and 66 keep version 48's layout (our measurement).
-        64 => Some((105, 110, 115)),
+        // 65 and 66 keep version 48's layout, version 67 (EOS R8 Mark II)
+        // version 64's (our measurement).
+        64 | 67 => Some((105, 110, 115)),
         65 | 66 => Some((105, 205, 210)),
         _ => None,
     }
@@ -58,7 +61,7 @@ pub(crate) fn black(t: &TiffFile, ifd: &Ifd) -> Option<[u32; 4]> {
         16..=19 => 329,
         32 | 33 => 343,
         34 | 48 => 363,
-        64..=66 => 383,
+        64..=67 => 383,
         _ => return None,
     };
     let v = cd.get(at..at + 4)?;
@@ -74,7 +77,7 @@ pub(crate) fn white(t: &TiffFile, ifd: &Ifd) -> Option<u32> {
         16..=19 => 797,
         32 | 33 => 811,
         34 | 48 => 641,
-        64..=66 => 661,
+        64..=67 => 661,
         _ => return None,
     };
     cd.get(at).copied()
@@ -97,7 +100,21 @@ pub(crate) fn highlight_tone_priority(t: &TiffFile, ifd: &Ifd) -> i32 {
 #[cfg(test)]
 mod tests {
     use crate::container::cr2::tests::{put_ifd, shorts};
-    use crate::container::tiff::TiffFile;
+    use crate::container::tiff::{Ifd, TiffFile};
+    use crate::info::Presets;
+
+    /// `read` applied to a maker note holding the ColorData record `cd`.
+    fn with_color_data<R>(cd: &[u16], read: impl FnOnce(&TiffFile, &Ifd) -> R) -> R {
+        let mut f = b"II*\0\0\0\0\0".to_vec();
+        let ifd = put_ifd(
+            &mut f,
+            &[(super::COLOR_DATA, 3, cd.len() as u32, shorts(cd))],
+            0,
+        );
+        f[4..8].copy_from_slice(&ifd.to_le_bytes());
+        let t = TiffFile::parse(&f, 0).unwrap();
+        read(&t, &t.ifds[0])
+    }
 
     /// The black of a ColorData `version` whose ColorData11 place (word 363)
     /// holds `black11` and whose ColorData12 place (383) holds `black12`,
@@ -107,15 +124,7 @@ mod tests {
         cd[0] = version;
         cd[363..367].copy_from_slice(&black11);
         cd[383..387].copy_from_slice(&black12);
-        let mut f = b"II*\0\0\0\0\0".to_vec();
-        let ifd = put_ifd(
-            &mut f,
-            &[(super::COLOR_DATA, 3, cd.len() as u32, shorts(&cd))],
-            0,
-        );
-        f[4..8].copy_from_slice(&ifd.to_le_bytes());
-        let t = TiffFile::parse(&f, 0).unwrap();
-        super::black(&t, &t.ifds[0])
+        with_color_data(&cd, super::black)
     }
 
     /// The EOS R6 Mark III (version 66) and R50 V (65) keep ColorData12's
@@ -135,5 +144,38 @@ mod tests {
             Some([511, 512, 514, 513])
         );
         assert_eq!(black(99, [511; 4], [512; 4]), None);
+    }
+
+    /// The EOS R8 Mark II's version 67 keeps version 64's white balance
+    /// (as shot, then Daylight and Shade) and version 66's levels. Values
+    /// from one of its files at ISO 25600, which Adobe DNG Converter reads
+    /// as AsShotNeutral 0.620982 1 0.563566 and BlackLevel 2047 2048 2048
+    /// 2048. Words 205 and 210, where versions 65 and 66 keep their presets,
+    /// hold other entries of the white balance table.
+    #[test]
+    fn reads_color_data_version_67() {
+        let mut cd = vec![0u16; super::COLOR_DATA_USED];
+        cd[0] = 67;
+        cd[105..110].copy_from_slice(&[1649, 1024, 1024, 1817, 4103]);
+        cd[110..115].copy_from_slice(&[1931, 1024, 1024, 1533, 5200]);
+        cd[115..120].copy_from_slice(&[2241, 1024, 1024, 1322, 7000]);
+        cd[205..215].copy_from_slice(&[1827, 1024, 1024, 1686, 4273, 1824, 1024, 1024, 1683, 4273]);
+        cd[383..387].copy_from_slice(&[2047, 2048, 2048, 2048]);
+        cd[660..662].copy_from_slice(&[13535, 14888]);
+        let (shot, presets) = with_color_data(&cd, super::white_balance).unwrap();
+        assert_eq!(shot, [1649., 1024., 1817., 1024.]);
+        assert_eq!(
+            presets,
+            Presets {
+                daylight: [1931., 1024., 1533.],
+                shade: [2241., 1024., 1322.],
+                ..Presets::default()
+            }
+        );
+        assert_eq!(
+            with_color_data(&cd, super::black),
+            Some([2047, 2048, 2048, 2048])
+        );
+        assert_eq!(with_color_data(&cd, super::white), Some(14888));
     }
 }
