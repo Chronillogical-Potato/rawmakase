@@ -3253,6 +3253,56 @@ fn fitting_a_crop_dragged_to_its_smallest_keeps_it_valid() {
     editor.document.edit.recipe().validate().unwrap();
 }
 #[test]
+fn the_chosen_aspect_is_its_own_edit_before_the_next_operation() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session {
+            crop_aspect: "1x1".into(),
+            ..Default::default()
+        },
+        None,
+    );
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    editor.document.edit.change(None, |r| r.exposure = 1.25);
+    editor.sync_command_revision();
+    let revision = editor.automation.revision;
+    let steps = editor.document.edit.history().steps().0.len();
+    // A queued command opens Crop; the next command's frame (a Navigate, say, which
+    // drops its frame with the photo) finds the photo uncropped.
+    editor.view.toggle(state::Tool::Crop);
+    let frame = editor.begin_edit_frame();
+    drop(frame);
+    // The crop is already recorded and to be saved, and an Undo takes back the crop
+    // rather than the edit before it.
+    let c = editor.document.edit.recipe().crop;
+    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.).abs() < 1e-3);
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
+    assert!(editor.document.edit.save_state().needs_save());
+    // Commands see the cropped settings as a revision of their own, before the
+    // frame's command reads them.
+    assert_eq!(editor.automation.revision, revision + 1);
+    editor.sync_command_revision();
+    assert_eq!(editor.automation.revision, revision + 1);
+    assert!(editor.document.edit.undo());
+    assert_eq!(editor.document.edit.recipe().crop, [0., 0., 1., 1.]);
+    assert_eq!(editor.document.edit.recipe().exposure, 1.25);
+}
+#[test]
 fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let session = dir.path().join("session.json");
