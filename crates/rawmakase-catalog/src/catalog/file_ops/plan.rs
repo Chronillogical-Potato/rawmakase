@@ -10,7 +10,7 @@ use super::super::locations::{join, logical_anchored, logical_location};
 use super::super::sidecar::caseless;
 use super::super::value::row;
 use super::super::{Catalog, FolderId, PhotoId, RootId};
-use super::companions::{self, Companions};
+use super::companions::{Companions, Listing};
 use super::conflicts::{Destination, Names};
 use super::disk::Disk;
 use super::folder::{FolderState, NewFolder, folder_name_problem};
@@ -22,6 +22,7 @@ use crate::storage::fsops::{self, Containment, EntryKind, FileId, FsError, Volum
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// One item of a plan: a family (or a lone virtual copy, for Remove from
 /// Catalog) and the files it touches.
@@ -469,27 +470,68 @@ pub(super) fn shared(
     file: Option<FileId>,
     family: &[PhotoId],
 ) -> anyhow::Result<bool> {
-    row! {
-        struct Named {
-            id: PhotoId,
-            filename: String,
-        }
-    }
     let name = caseless(filename);
     for folder in folders.over(dir) {
-        let masters: Vec<Named> = db.read(
-            sql!("SELECT id, filename FROM photos WHERE folder=? AND master_id IS NULL"),
-            &[&folder],
-        )?;
-        let same = |p: &Named| {
-            caseless(OsStr::new(&p.filename)) == name
-                || file.is_some_and(|f| folders.file_at(&dir.join(&p.filename)) == Some(f))
-        };
-        if masters.iter().any(|p| !family.contains(&p.id) && same(p)) {
+        let masters = Masters::read(db, folders, folder, dir, file.is_some())?;
+        if masters.share(&name, file, family) {
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+/// The masters of a catalog folder over a directory, by name (by
+/// `sidecar::caseless`) and, when asked, by the file object each name is
+/// there: read once, for [`shared`].
+pub(super) struct Masters {
+    by_name: HashMap<String, Vec<PhotoId>>,
+    by_file: HashMap<FileId, Vec<PhotoId>>,
+}
+
+impl Masters {
+    fn read(
+        db: &impl Reads,
+        folders: &Folders,
+        folder: FolderId,
+        dir: &Path,
+        files: bool,
+    ) -> anyhow::Result<Self> {
+        row! {
+            struct Named {
+                id: PhotoId,
+                filename: String,
+            }
+        }
+        let masters: Vec<Named> = db.read(
+            sql!("SELECT id, filename FROM photos WHERE folder=? AND master_id IS NULL"),
+            &[&folder],
+        )?;
+        let mut out = Self {
+            by_name: HashMap::new(),
+            by_file: HashMap::new(),
+        };
+        for p in masters {
+            out.by_name
+                .entry(caseless(OsStr::new(&p.filename)))
+                .or_default()
+                .push(p.id);
+            if files && let Some(f) = folders.file_at(&dir.join(&p.filename)) {
+                out.by_file.entry(f).or_default().push(p.id);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether a master outside `family` is named `name` (by
+    /// `sidecar::caseless`) or is file object `file`.
+    fn share(&self, name: &str, file: Option<FileId>, family: &[PhotoId]) -> bool {
+        let named = self.by_name.get(name).into_iter().flatten();
+        let same = file
+            .and_then(|f| self.by_file.get(&f))
+            .into_iter()
+            .flatten();
+        named.chain(same).any(|p| !family.contains(p))
+    }
 }
 
 /// Whether a photo outside `family`, in catalog folder `to` or another over
@@ -564,7 +606,13 @@ pub(super) struct Files<'a> {
     located: &'a HashMap<FolderId, Located>,
     disk: &'a dyn Disk,
     pub folders: Folders,
-    listings: HashMap<PathBuf, Result<Vec<OsString>, String>>,
+    listings: HashMap<PathBuf, Result<Rc<Listing>, String>>,
+    /// A listing whose names are used composed where that finds them (#573).
+    composed: HashMap<PathBuf, Rc<Listing>>,
+    /// How each folder compares names, probed once.
+    rules: HashMap<PathBuf, Names>,
+    /// The masters of each catalog folder, over the directory they are read in.
+    masters: HashMap<(FolderId, PathBuf), Masters>,
     volumes: HashMap<VolumeId, Option<fsops::VolumeFacts>>,
 }
 
@@ -580,15 +628,71 @@ impl<'a> Files<'a> {
             disk,
             folders: Folders::index(located),
             listings: HashMap::new(),
+            composed: HashMap::new(),
+            rules: HashMap::new(),
+            masters: HashMap::new(),
             volumes: HashMap::new(),
         }
     }
 
-    pub fn listing(&mut self, dir: &Path) -> Result<Vec<OsString>, String> {
+    /// The names in `dir`, listed once.
+    pub fn listing(&mut self, dir: &Path) -> Result<Rc<Listing>, String> {
         self.listings
             .entry(dir.to_path_buf())
-            .or_insert_with(|| fsops::list(dir).map_err(|e| e.to_string()))
+            .or_insert_with(|| {
+                fsops::list(dir)
+                    .map(|names| Rc::new(Listing::new(names)))
+                    .map_err(|e| e.to_string())
+            })
             .clone()
+    }
+
+    /// `listing`, of `dir`, with each name as [`super::proof::usable`] takes it.
+    fn composed(&mut self, dir: &Path, listing: &Listing) -> Rc<Listing> {
+        let disk = self.disk;
+        self.composed
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| {
+                let names = listing.names().iter();
+                let usable = names.map(|n| super::proof::usable(disk, dir, n));
+                Rc::new(Listing::new(usable.collect()))
+            })
+            .clone()
+    }
+
+    /// How `dir`, whose names are `listing`, compares names.
+    pub fn rules(&mut self, dir: &Path, listing: &Listing) -> Names {
+        *self
+            .rules
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| Names(fsops::probe(dir, listing.names())))
+    }
+
+    /// [`shared`], with each folder's masters read once.
+    fn shared(
+        &mut self,
+        dir: &Path,
+        filename: &OsStr,
+        file: FileId,
+        family: &[PhotoId],
+    ) -> anyhow::Result<bool> {
+        let name = caseless(filename);
+        for folder in self.folders.over(dir) {
+            let masters = match self.masters.entry((folder, dir.to_path_buf())) {
+                std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::hash_map::Entry::Vacant(e) => e.insert(Masters::read(
+                    &self.catalog.db,
+                    &self.folders,
+                    folder,
+                    dir,
+                    true,
+                )?),
+            };
+            if masters.share(&name, Some(file), family) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The facts of `volume`, which `path` is on; `None` when they can't be
@@ -752,6 +856,7 @@ impl<'a> Files<'a> {
             return Err(refuse("The folder's volume is read-only."));
         }
         let names = self.listing(&dir).map_err(FileOpError::Destination)?;
+        let names = names.names().to_vec();
         let mut over = self.folders.over(&dir);
         over.extend(to);
         let mut catalog = HashSet::new();
@@ -826,22 +931,24 @@ impl<'a> Files<'a> {
         // is journalled is matched byte for byte, so it must be the disk's.
         let dir = std::fs::canonicalize(super::disk::parent(&file))
             .map_err(|e| refuse(Refusal::Unreadable(e.to_string())))?;
-        let names = self
+        let listing = self
             .listing(&dir)
             .map_err(|e| refuse(Refusal::Unreadable(e)))?;
-        let wanted = caseless(file.file_name().unwrap_or_default());
-        let mut spelled = names.iter().filter(|n| {
-            caseless(n) == wanted
-                && self
-                    .disk
+        let spelled: Vec<&OsString> = listing
+            .alike(file.file_name().unwrap_or_default())
+            .filter(|n| {
+                self.disk
                     .entry(&dir.join(n))
                     .is_ok_and(|e| e.id == found.id)
-        });
-        let (Some(filename), None) = (spelled.next().cloned(), spelled.next()) else {
+            })
+            .take(2)
+            .collect();
+        let [filename] = spelled[..] else {
             return Err(refuse(Refusal::Unreadable(
                 "its name in its folder can't be told".into(),
             )));
         };
+        let filename = filename.clone();
         // Copied from FAT or exFAT, whose drivers list names decomposed but
         // rename and remove them only by their stored spelling, its names
         // are journalled and used composed where that finds them (#573).
@@ -860,27 +967,18 @@ impl<'a> Files<'a> {
             true => super::proof::composed(name),
             false => name.to_os_string(),
         };
-        let (filename, names) = match composed {
+        let (filename, listing) = match composed {
             true => (
                 super::proof::usable(self.disk, &dir, &filename),
-                names
-                    .iter()
-                    .map(|n| super::proof::usable(self.disk, &dir, n))
-                    .collect(),
+                self.composed(&dir, &listing),
             ),
-            false => (filename, names),
+            false => (filename, listing),
         };
         let file = dir.join(&filename);
         let rows = &f.preconditions.rows;
-        let shared = shared(
-            &self.catalog.db,
-            &self.folders,
-            &dir,
-            &filename,
-            Some(found.id),
-            rows,
-        )
-        .map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
+        let shared = self
+            .shared(&dir, &filename, found.id, rows)
+            .map_err(|e| refuse(Refusal::Unreadable(format!("{e:#}"))))?;
         if shared {
             return Err(refuse(Refusal::Shared));
         }
@@ -927,7 +1025,7 @@ impl<'a> Files<'a> {
             (Ok(a), Ok(b)) => a.id == b.id,
             _ => false,
         };
-        let Companions { carried, shared } = companions::of(&filename, &names, &same_file);
+        let Companions { carried, shared } = listing.companions(&filename, &same_file);
         let mut members = vec![NewMember {
             destination: target.map(|t| t.dir.join(there(&filename))),
             source: file,
@@ -1026,12 +1124,14 @@ fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &m
             *uses.entry(target.rules.key(&name)).or_default() += 1;
         }
     }
-    let projected: Vec<OsString> = target
-        .names
-        .iter()
-        .cloned()
-        .chain(items.iter().flat_map(names_of))
-        .collect();
+    let projected = Listing::new(
+        target
+            .names
+            .iter()
+            .cloned()
+            .chain(items.iter().flat_map(names_of))
+            .collect(),
+    );
     let text = |n: &OsString| n.to_string_lossy().into_owned();
     items.retain(|item| {
         let names = names_of(item);
@@ -1049,7 +1149,8 @@ fn arrivals(disk: &dyn Disk, target: &Target, items: &mut Vec<Item>, skipped: &m
                     .map(|n| Refusal::NameTwice(text(n)))
             })
             .or_else(|| {
-                companions::arrival_conflict(photo, carried, &projected)
+                projected
+                    .arrival_conflict(photo, carried, &|_| false)
                     .map(|n| Refusal::CompanionClash(text(&n)))
             });
         match refusal {

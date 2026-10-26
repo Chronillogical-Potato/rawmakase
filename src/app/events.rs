@@ -45,6 +45,7 @@ impl Editor {
                 Event::RenameOrdered(catalog, cancel, ordered) => {
                     self.rename_ordered(catalog, cancel, *ordered)
                 }
+                Event::RenamePlanned(planned) => self.rename_planned(*planned),
                 Event::FileOpDone(batch, done) => self.file_op_done(batch, *done),
                 Event::FileOpsRecovered(catalog, recovered) => {
                     self.file_ops_recovered(catalog, *recovered)

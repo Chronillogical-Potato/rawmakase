@@ -42,6 +42,7 @@ mod dialogs;
 use dialogs::{Choosing, Naming};
 #[path = "file_ops_rename.rs"]
 mod rename;
+pub(crate) use rename::RenamePlanned;
 use rename::{Renaming, RenamingFolder};
 #[path = "file_ops_folders.rs"]
 mod folders;
@@ -161,6 +162,10 @@ pub(super) struct FileOps {
     /// Tests stop a run before its worker looks, to see it obeys Stop.
     #[cfg(test)]
     stop_first: bool,
+    /// Tests answer the rename dialog's plans themselves, to choose the
+    /// frame an answer lands in.
+    #[cfg(test)]
+    hold_plans: bool,
 }
 
 #[derive(Default)]
@@ -244,6 +249,8 @@ impl Default for FileOps {
             reopen: None,
             #[cfg(test)]
             stop_first: false,
+            #[cfg(test)]
+            hold_plans: false,
         }
     }
 }

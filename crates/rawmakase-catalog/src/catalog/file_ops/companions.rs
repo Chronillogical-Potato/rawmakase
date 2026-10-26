@@ -15,7 +15,8 @@
 //! looser sense.
 use super::super::folder_sync::folded;
 use super::super::legacy_sidecar::companion_paths;
-use super::super::sidecar::{caseless, readers_of, sidecar_names, sidecar_names_caseless};
+use super::super::sidecar::{caseless, sidecar_names, sidecar_names_caseless};
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
@@ -30,25 +31,174 @@ fn names_of(photo: &OsStr) -> Vec<String> {
     names
 }
 
-/// Whether `photo` would read the file named `name` as a companion.
-fn reads(photo: &OsStr, name: &OsStr) -> bool {
-    photo != name && name.to_str().is_some() && names_of(photo).contains(&caseless(name))
+/// A folder's names, each folded once, so what a plan asks of each photo
+/// there is looked up rather than asked of every name again: which names
+/// are alike (by `folder_sync::folded`, by `sidecar::caseless`) and which
+/// would read a file as their companion.
+pub(super) struct Listing {
+    names: Vec<OsString>,
+    folded: HashMap<String, Vec<usize>>,
+    caseless: HashMap<String, Vec<usize>>,
+    /// By a companion's `caseless` name, the names reading it as their
+    /// sidecar (by `sidecar::sidecar_names_caseless`), and those reading it
+    /// as their earlier releases' edit file; in listing order.
+    sidecar_readers: HashMap<String, Vec<usize>>,
+    legacy_readers: HashMap<String, Vec<usize>>,
+}
+
+impl Listing {
+    pub fn new(names: Vec<OsString>) -> Self {
+        let mut listing = Self {
+            folded: HashMap::new(),
+            caseless: HashMap::new(),
+            sidecar_readers: HashMap::new(),
+            legacy_readers: HashMap::new(),
+            names: Vec::new(),
+        };
+        let add = |map: &mut HashMap<String, Vec<usize>>, key: String, i: usize| {
+            let at = map.entry(key).or_default();
+            if at.last() != Some(&i) {
+                at.push(i);
+            }
+        };
+        for (i, name) in names.iter().enumerate() {
+            add(&mut listing.folded, folded(name), i);
+            add(&mut listing.caseless, caseless(name), i);
+            if name.to_str().is_some() {
+                for sidecar in sidecar_names_caseless(Path::new(name)) {
+                    add(&mut listing.sidecar_readers, sidecar, i);
+                }
+            }
+            for legacy in companion_paths(Path::new(name)) {
+                add(&mut listing.legacy_readers, caseless(legacy.as_os_str()), i);
+            }
+        }
+        listing.names = names;
+        listing
+    }
+
+    pub fn names(&self) -> &[OsString] {
+        &self.names
+    }
+
+    fn at<'a>(map: &'a HashMap<String, Vec<usize>>, key: &str) -> &'a [usize] {
+        map.get(key).map_or(&[], Vec::as_slice)
+    }
+
+    /// The names there `sidecar::caseless` takes for `name`, in listing order.
+    pub fn alike(&self, name: &OsStr) -> impl Iterator<Item = &OsString> {
+        Self::at(&self.caseless, &caseless(name))
+            .iter()
+            .map(|&i| &self.names[i])
+    }
+
+    /// The names there that would read the file named `companion` as
+    /// theirs ([`readers`]), but for those `left_out` says are not there.
+    fn readers(&self, companion: &OsStr, left_out: &dyn Fn(usize) -> bool) -> Vec<&OsString> {
+        if companion.to_str().is_none() {
+            return Vec::new();
+        }
+        let key = caseless(companion);
+        let mut found: Vec<&OsString> = Self::at(&self.sidecar_readers, &key)
+            .iter()
+            .filter(|&&i| !left_out(i) && self.names[i] != companion)
+            .map(|&i| &self.names[i])
+            .collect();
+        for &i in Self::at(&self.legacy_readers, &key) {
+            let name = &self.names[i];
+            if !left_out(i) && !found.contains(&name) {
+                found.push(name);
+            }
+        }
+        found
+    }
+
+    /// The companions of the file named `photo` there ([`of`]).
+    pub fn companions(
+        &self,
+        photo: &OsStr,
+        same_file: &dyn Fn(&OsStr, &OsStr) -> bool,
+    ) -> Companions {
+        let mut candidates = sidecar_names(Path::new(photo));
+        candidates.extend(
+            companion_paths(Path::new(photo))
+                .into_iter()
+                .map(|p| p.into_os_string()),
+        );
+        let mut found = BTreeSet::new();
+        for c in &candidates {
+            found.extend(Self::at(&self.folded, &folded(c)));
+            found.extend(
+                Self::at(&self.caseless, &caseless(c))
+                    .iter()
+                    .filter(|&&i| same_file(&self.names[i], c)),
+            );
+        }
+        let mut out = Companions::default();
+        for name in found.into_iter().map(|i: usize| &self.names[i]) {
+            if name == photo || name.to_str().is_none() {
+                continue;
+            }
+            if self
+                .readers(name, &|_| false)
+                .iter()
+                .all(|r| r.as_os_str() == photo)
+            {
+                out.carried.push(name.clone());
+            } else {
+                out.shared.push(name.clone());
+            }
+        }
+        out.carried.sort();
+        out.shared.sort();
+        out
+    }
+
+    /// Why the file named `photo` and its `carried` companions can't arrive
+    /// in a folder whose names, once everything arriving there is in, are
+    /// these but for those `left_out` says are gone ([`arrival_conflict`]).
+    pub fn arrival_conflict(
+        &self,
+        photo: &OsStr,
+        carried: &[OsString],
+        left_out: &dyn Fn(usize) -> bool,
+    ) -> Option<OsString> {
+        // Something already there, or arriving with another photo, the photo
+        // would take for its own.
+        let read: BTreeSet<usize> = names_of(photo)
+            .iter()
+            .flat_map(|n| Self::at(&self.caseless, n))
+            .copied()
+            .collect();
+        let theirs = read.into_iter().find(|&i| {
+            let name = &self.names[i];
+            !left_out(i) && !carried.contains(name) && name != photo && name.to_str().is_some()
+        });
+        if let Some(i) = theirs {
+            return Some(self.names[i].clone());
+        }
+        // Its own companions, which another file there would read too.
+        for companion in carried {
+            let others = self
+                .readers(companion, left_out)
+                .into_iter()
+                .find(|r| r.as_os_str() != photo);
+            if let Some(other) = others {
+                return Some(other.clone());
+            }
+        }
+        None
+    }
 }
 
 /// The names in `names` that would read the file named `companion` as
 /// theirs: its sidecar readers, and the file a legacy edit file is named
 /// after.
-pub(super) fn readers<'a>(companion: &OsStr, names: &'a [OsString]) -> Vec<&'a OsString> {
-    let mut found = readers_of(companion, names);
-    for name in names {
-        let legacy = companion_paths(Path::new(name))
-            .iter()
-            .any(|p| caseless(p.as_os_str()) == caseless(companion));
-        if legacy && companion.to_str().is_some() && !found.contains(&name) {
-            found.push(name);
-        }
-    }
-    found
+#[cfg(test)]
+pub(super) fn readers(companion: &OsStr, names: &[OsString]) -> Vec<OsString> {
+    let listing = Listing::new(names.to_vec());
+    let found = listing.readers(companion, &|_| false);
+    found.into_iter().cloned().collect()
 }
 
 /// Whether the file named `name` is an edit file an earlier release saved
@@ -69,43 +219,16 @@ pub(super) struct Companions {
     pub shared: Vec<OsString>,
 }
 
-/// Whether the file named `name` is a companion of the file named `photo`:
-/// one of the names its companions have, in another case or normalisation
-/// form at most, or a name `same_file` says the volume takes for one of
-/// them.
-fn is_companion(photo: &OsStr, name: &OsStr, same_file: &dyn Fn(&OsStr, &OsStr) -> bool) -> bool {
-    if photo == name || name.to_str().is_none() {
-        return false;
-    }
-    let mut candidates = sidecar_names(Path::new(photo));
-    candidates.extend(
-        companion_paths(Path::new(photo))
-            .into_iter()
-            .map(|p| p.into_os_string()),
-    );
-    candidates
-        .iter()
-        .any(|c| folded(name) == folded(c) || (caseless(name) == caseless(c) && same_file(name, c)))
-}
-
 /// The companions of the file named `photo` in a folder whose listing is
-/// `names`; `same_file` says whether two names there are one file object.
+/// `names`: the files named as its companions are, in another case or
+/// normalisation form at most, or by a name `same_file` (whether two names
+/// there are one file object) says the volume takes for one of them.
 pub(super) fn of(
     photo: &OsStr,
     names: &[OsString],
     same_file: &dyn Fn(&OsStr, &OsStr) -> bool,
 ) -> Companions {
-    let mut found = Companions::default();
-    for name in names.iter().filter(|n| is_companion(photo, n, same_file)) {
-        if readers(name, names).iter().all(|r| r.as_os_str() == photo) {
-            found.carried.push(name.clone());
-        } else {
-            found.shared.push(name.clone());
-        }
-    }
-    found.carried.sort();
-    found.shared.sort();
-    found
+    Listing::new(names.to_vec()).companions(photo, same_file)
 }
 
 /// The name companion `companion` of the file named `photo` takes when the
@@ -153,24 +276,5 @@ pub(super) fn arrival_conflict(
     carried: &[OsString],
     projected: &[OsString],
 ) -> Option<OsString> {
-    // Something already there, or arriving with another photo, the photo
-    // would take for its own.
-    let theirs = projected
-        .iter()
-        .filter(|n| !carried.contains(n) && n.as_os_str() != photo);
-    for name in theirs {
-        if reads(photo, name) {
-            return Some(name.clone());
-        }
-    }
-    // Its own companions, which another file there would read too.
-    for companion in carried {
-        let others = readers(companion, projected)
-            .into_iter()
-            .find(|r| r.as_os_str() != photo);
-        if let Some(other) = others {
-            return Some(other.clone());
-        }
-    }
-    None
+    Listing::new(projected.to_vec()).arrival_conflict(photo, carried, &|_| false)
 }

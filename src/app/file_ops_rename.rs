@@ -4,11 +4,16 @@
 //!
 //! Renaming photos holds the catalog while its dialog is open, as a
 //! confirmation does: the open edit is saved and `Activity::ChangingFiles`
-//! taken first, and the photos' order is read once, on a worker, then kept.
-//! What the dialog would do is planned as it is typed, so a name taken, or
-//! one the system can't have, is said at once; Rename runs that plan, which
-//! is its confirmation (a rename keeps every byte, and is undone by another
-//! rename). Rename Folder… holds nothing until Rename, which plans and runs.
+//! taken first, and the photos' order is read once, on a worker, from the
+//! catalog's capture times, then kept. What the dialog would do is planned
+//! on a worker as it is typed, one plan at a time, the latest input next,
+//! so a name taken, or one the system can't have, is said as soon as it is
+//! known while typing goes on (#681); a plan for input since changed is
+//! only shown until the next. Rename runs the plan of exactly what is
+//! typed, which is its confirmation (a rename keeps every byte, and is
+//! undone by another rename): asked before that plan is in, it runs once it
+//! is, if nothing was typed meanwhile. Rename Folder… holds nothing until
+//! Rename, which plans and runs.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::catalog::file_ops::{self, FileOp, Plan, RenameOrder, Skip};
@@ -16,7 +21,7 @@ use crate::catalog::{CatalogLocation, PhotoId, RootId};
 use crate::export_settings::{NameTemplate, Naming};
 use eframe::egui::{self, Vec2};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Rename Photo or Rename Photos, open.
 pub(super) struct Renaming {
@@ -24,25 +29,63 @@ pub(super) struct Renaming {
     /// The session's when it opened: a catalog read again since may have
     /// given its photos' ids to others.
     generation: u64,
-    order: RenameOrder,
+    order: Arc<RenameOrder>,
     /// One photo: its new name before the extension, and the extension.
     stem: String,
     extension: String,
     /// Several: how they are named.
     template: NameTemplate,
+    /// The names last planned, which may be for input changed since.
     planned: Option<Planned>,
+    /// The plan under way on a worker, and the input it plans.
+    planning: Option<(u64, Inputs)>,
+    /// The catalog plans read, between plans: each takes it to its worker
+    /// and gives it back, so typing opens it once.
+    reader: Option<crate::catalog::Catalog>,
+    /// Rename asked for this input before its plan was in.
+    submitted: Option<Inputs>,
     focused: bool,
 }
 
-/// What the dialog's names would do, planned for the inputs they came from.
-struct Planned {
+/// What the dialog's names are planned from.
+#[derive(Clone, Debug, PartialEq)]
+struct Inputs {
     stem: String,
     template: NameTemplate,
+}
+
+/// What the dialog's names would do, planned for the input they came from.
+struct Planned {
+    inputs: Inputs,
     rows: Vec<Row>,
     /// The plan of exactly these names, when it renames anything and
     /// nothing blocks it.
     plan: Option<Plan>,
 }
+
+/// A plan of the dialog's names, back from its worker.
+pub(crate) struct RenamePlanned {
+    request: u64,
+    reader: Option<crate::catalog::Catalog>,
+    /// The rows and plan; `Err` when the catalog could not be opened or the
+    /// worker stopped.
+    planned: Result<(Vec<Row>, Option<Plan>), String>,
+}
+
+#[cfg(test)]
+impl RenamePlanned {
+    /// The answer of plan `request` when its worker failed with `message`.
+    pub(super) fn failed(request: u64, message: &str) -> Self {
+        Self {
+            request,
+            reader: None,
+            planned: Err(message.into()),
+        }
+    }
+}
+
+/// Tells each plan of a rename dialog's names from every other.
+static PLANS: AtomicU64 = AtomicU64::new(0);
 
 /// A photo's name now and as renamed, and why it can't be.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,7 +95,7 @@ struct Row {
     problem: Option<String>,
 }
 
-/// What a rename dialog shows, for tests.
+/// What a rename dialog shows, for tests: once the names typed are planned.
 #[cfg(test)]
 pub(super) struct RenameShown {
     pub title: String,
@@ -83,93 +126,123 @@ impl Renaming {
         }
     }
 
-    /// Plans what the inputs name, unless they are what was planned.
-    fn replan(&mut self, catalog: &crate::catalog::Catalog) {
-        if self
-            .planned
-            .as_ref()
-            .is_some_and(|p| p.stem == self.stem && p.template == self.template)
-        {
-            return;
-        }
-        let (rows, plan) = if self.one() {
-            self.plan_one(catalog)
-        } else {
-            self.plan_several(catalog)
-        };
-        self.planned = Some(Planned {
+    fn inputs(&self) -> Inputs {
+        Inputs {
             stem: self.stem.clone(),
             template: self.template.clone(),
-            rows,
-            plan,
-        });
-    }
-
-    fn plan_one(&self, catalog: &crate::catalog::Catalog) -> (Vec<Row>, Option<Plan>) {
-        let photo = &self.order.photos()[0];
-        let new = if self.extension.is_empty() {
-            self.stem.clone()
-        } else {
-            format!("{}.{}", self.stem, self.extension)
-        };
-        let row = |problem: Option<String>| Row {
-            old: photo.filename.clone(),
-            new: new.clone(),
-            problem,
-        };
-        if let Some(problem) = file_ops::photo_name_problem(&self.stem) {
-            return (vec![row(Some(problem.to_string()))], None);
-        }
-        let op = FileOp::RenamePhotos {
-            renames: vec![(photo.photo, self.stem.clone())],
-        };
-        match file_ops::plan(catalog, op) {
-            Ok(plan) => match plan.skipped().first() {
-                Some(s) => (vec![row(Some(s.reason.to_string()))], None),
-                None if plan.is_empty() => (vec![row(None)], None),
-                None => (vec![row(None)], Some(plan)),
-            },
-            Err(e) => (vec![row(Some(e.to_string()))], None),
         }
     }
 
-    fn plan_several(&self, catalog: &crate::catalog::Catalog) -> (Vec<Row>, Option<Plan>) {
-        match file_ops::rename_preview(catalog, &self.order, &self.template) {
-            Ok(preview) => {
-                let rows: Vec<Row> = preview
-                    .rows
-                    .iter()
-                    .map(|r| Row {
-                        old: r.old.clone(),
-                        new: r.new.clone(),
-                        problem: r
-                            .problem
-                            .as_ref()
-                            .filter(|p| **p != Skip::SameName)
-                            .map(ToString::to_string)
-                            .or_else(|| r.note.clone()),
-                    })
-                    .collect();
-                let blocked = preview
-                    .rows
-                    .iter()
-                    .any(|r| r.problem.as_ref().is_some_and(|p| *p != Skip::SameName));
-                let plan = (!blocked && !preview.plan.is_empty()).then_some(preview.plan);
-                (rows, plan)
-            }
-            Err(e) => {
-                let rows = self
-                    .order
-                    .photos()
-                    .iter()
-                    .map(|o| Row {
-                        old: o.filename.clone(),
-                        new: o.filename.clone(),
-                        problem: Some(e.to_string()),
-                    })
-                    .collect();
-                (rows, None)
-            }
+    /// The plan of what is typed now, once it is in.
+    fn current(&self) -> Option<&Planned> {
+        let inputs = self.inputs();
+        self.planned.as_ref().filter(|p| p.inputs == inputs)
+    }
+
+    /// Each photo with `problem`, as nothing could be planned.
+    fn unplanned(&self, inputs: &Inputs, problem: &str) -> Vec<Row> {
+        let new = |old: &str| match (self.one(), self.extension.is_empty()) {
+            (false, _) => old.to_string(),
+            (true, true) => inputs.stem.clone(),
+            (true, false) => format!("{}.{}", inputs.stem, self.extension),
+        };
+        self.order
+            .photos()
+            .iter()
+            .map(|o| Row {
+                old: o.filename.clone(),
+                new: new(&o.filename),
+                problem: Some(problem.to_string()),
+            })
+            .collect()
+    }
+}
+
+/// Plans the names `inputs` give the photos of `order`, one photo's with
+/// `extension`, in `catalog`.
+fn plan_names(
+    catalog: &crate::catalog::Catalog,
+    order: &RenameOrder,
+    extension: &str,
+    inputs: &Inputs,
+) -> (Vec<Row>, Option<Plan>) {
+    match order.photos() {
+        [one] => plan_one(catalog, one, extension, &inputs.stem),
+        _ => plan_several(catalog, order, &inputs.template),
+    }
+}
+
+fn plan_one(
+    catalog: &crate::catalog::Catalog,
+    photo: &file_ops::Ordered,
+    extension: &str,
+    stem: &str,
+) -> (Vec<Row>, Option<Plan>) {
+    let new = if extension.is_empty() {
+        stem.to_string()
+    } else {
+        format!("{stem}.{extension}")
+    };
+    let row = |problem: Option<String>| Row {
+        old: photo.filename.clone(),
+        new: new.clone(),
+        problem,
+    };
+    if let Some(problem) = file_ops::photo_name_problem(stem) {
+        return (vec![row(Some(problem.to_string()))], None);
+    }
+    let op = FileOp::RenamePhotos {
+        renames: vec![(photo.photo, stem.to_string())],
+    };
+    match file_ops::plan(catalog, op) {
+        Ok(plan) => match plan.skipped().first() {
+            Some(s) => (vec![row(Some(s.reason.to_string()))], None),
+            None if plan.is_empty() => (vec![row(None)], None),
+            None => (vec![row(None)], Some(plan)),
+        },
+        Err(e) => (vec![row(Some(e.to_string()))], None),
+    }
+}
+
+fn plan_several(
+    catalog: &crate::catalog::Catalog,
+    order: &RenameOrder,
+    template: &NameTemplate,
+) -> (Vec<Row>, Option<Plan>) {
+    match file_ops::rename_preview(catalog, order, template) {
+        Ok(preview) => {
+            let rows: Vec<Row> = preview
+                .rows
+                .iter()
+                .map(|r| Row {
+                    old: r.old.clone(),
+                    new: r.new.clone(),
+                    problem: r
+                        .problem
+                        .as_ref()
+                        .filter(|p| **p != Skip::SameName)
+                        .map(ToString::to_string)
+                        .or_else(|| r.note.clone()),
+                })
+                .collect();
+            let blocked = preview
+                .rows
+                .iter()
+                .any(|r| r.problem.as_ref().is_some_and(|p| *p != Skip::SameName));
+            let plan = (!blocked && !preview.plan.is_empty()).then_some(preview.plan);
+            (rows, plan)
+        }
+        Err(e) => {
+            let rows = order
+                .photos()
+                .iter()
+                .map(|o| Row {
+                    old: o.filename.clone(),
+                    new: o.filename.clone(),
+                    problem: Some(e.to_string()),
+                })
+                .collect();
+            (rows, None)
         }
     }
 }
@@ -224,13 +297,7 @@ impl Editor {
                 let ordered = crate::catalog::Catalog::open(&location)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|catalog| {
-                        file_ops::rename_order(
-                            &catalog,
-                            &photos,
-                            &cancel,
-                            crate::catalog_session::file_capture_time,
-                        )
-                        .map_err(|e| e.to_string())
+                        file_ops::rename_order(&catalog, &photos).map_err(|e| e.to_string())
                     });
                 let _ = tx.send(super::super::worker::Event::RenameOrdered(
                     location,
@@ -298,7 +365,7 @@ impl Editor {
         self.file_ops.state = State::Renaming(Box::new(Renaming {
             catalog,
             generation,
-            order,
+            order: Arc::new(order),
             stem,
             extension,
             template: NameTemplate {
@@ -309,8 +376,133 @@ impl Editor {
                 tokens: None,
             },
             planned: None,
+            planning: None,
+            reader: None,
+            submitted: None,
             focused: false,
         }));
+    }
+
+    /// Plans what the rename dialog's names are now on a worker, unless
+    /// that is planned, or another plan is under way: its input is planned
+    /// once that one is in.
+    fn plan_rename(&mut self) {
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
+        let inputs = r.inputs();
+        if r.planning.is_some() || r.current().is_some() {
+            return;
+        }
+        let request = PLANS.fetch_add(1, Ordering::Relaxed);
+        r.planning = Some((request, inputs.clone()));
+        let (location, order, extension) =
+            (r.catalog.clone(), r.order.clone(), r.extension.clone());
+        #[cfg(test)]
+        if self.file_ops.hold_plans {
+            return;
+        }
+        let reader = r.reader.take();
+        super::super::task::spawn(
+            self.tx.clone(),
+            self.context.clone(),
+            move |tx| {
+                let catalog = match reader {
+                    Some(catalog) => Ok(catalog),
+                    None => crate::catalog::Catalog::open(&location).map_err(|e| format!("{e:#}")),
+                };
+                let done = match catalog {
+                    Ok(catalog) => RenamePlanned {
+                        request,
+                        planned: Ok(plan_names(&catalog, &order, &extension, &inputs)),
+                        reader: Some(catalog),
+                    },
+                    Err(e) => RenamePlanned {
+                        request,
+                        planned: Err(e),
+                        reader: None,
+                    },
+                };
+                let _ = tx.send(super::super::worker::Event::RenamePlanned(Box::new(done)));
+            },
+            move |tx, message| {
+                let failed = RenamePlanned {
+                    request,
+                    planned: Err(message),
+                    reader: None,
+                };
+                let _ = tx.send(super::super::worker::Event::RenamePlanned(Box::new(failed)));
+            },
+        );
+    }
+
+    /// A plan of the rename dialog's names came back: it is shown, unless
+    /// the dialog it was for is gone.
+    pub(in crate::app) fn rename_planned(&mut self, done: RenamePlanned) {
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
+        let Some((_, inputs)) = r.planning.take_if(|(request, _)| *request == done.request) else {
+            return;
+        };
+        r.reader = done.reader;
+        let (rows, plan) = match done.planned {
+            Ok(planned) => planned,
+            Err(e) => (r.unplanned(&inputs, &e), None),
+        };
+        // Rename asked for it runs in the dialog's next frame, after what
+        // that frame types or cancels: never from here.
+        r.planned = Some(Planned { inputs, rows, plan });
+        // What was typed meanwhile.
+        self.plan_rename();
+    }
+
+    /// The answer to the plan under way, planned here, for tests that
+    /// hold plans back from their workers.
+    #[cfg(test)]
+    pub(super) fn rename_answer_now(&self) -> Option<RenamePlanned> {
+        let State::Renaming(r) = &self.file_ops.state else {
+            return None;
+        };
+        let (request, inputs) = r.planning.clone()?;
+        let catalog = &self.library.as_ref()?.session.catalog;
+        Some(RenamePlanned {
+            request,
+            reader: None,
+            planned: Ok(plan_names(catalog, &r.order, &r.extension, &inputs)),
+        })
+    }
+
+    /// Rename: runs the plan of what is typed, which is in and can be had.
+    fn run_rename(&mut self) {
+        let State::Renaming(r) = std::mem::take(&mut self.file_ops.state) else {
+            return;
+        };
+        let inputs = r.inputs();
+        let Some(Planned {
+            plan: Some(plan),
+            rows,
+            ..
+        }) = r.planned.filter(|p| p.inputs == inputs)
+        else {
+            // Not reached (callers check); the catalog is let go anyway.
+            self.release_files();
+            return;
+        };
+        let verb = Verb::Rename {
+            one: match rows.as_slice() {
+                [one] => Some((one.old.clone(), one.new.clone())),
+                _ => None,
+            },
+        };
+        self.file_ops.state = State::Confirming {
+            plan: Box::new(plan),
+            trash: None,
+            catalog: r.catalog,
+            generation: r.generation,
+            verb,
+        };
+        self.confirm_file_op();
     }
 
     /// While the photos' order is read: Cancel (or Escape) stops it and
@@ -357,11 +549,11 @@ impl Editor {
             self.release_files();
             return;
         }
-        r.replan(&library.session.catalog);
         let palette = super::super::theme::palette(ctx);
         let mut rename = false;
         let mut cancel = false;
-        let can_rename = r.planned.as_ref().is_some_and(|p| p.plan.is_some());
+        let can_rename = r.current().is_some_and(|p| p.plan.is_some());
+        let checking = r.current().is_none();
         let title = r.title();
         let response = egui::Modal::new(egui::Id::new("rename-photos"))
             .frame(widgets::modal_frame(&palette).inner_margin(24))
@@ -424,13 +616,17 @@ impl Editor {
                     state.store(ui.ctx(), field.response.id);
                     r.focused = true;
                 }
-                if field.response.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    && can_rename
-                {
+                if field.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     rename = true;
                 }
                 ui.add_space(8.);
+                if checking {
+                    ui.label(
+                        egui::RichText::new("Checking the names…")
+                            .size(12.)
+                            .color(palette.gray(140)),
+                    );
+                }
                 if let Some(planned) = &r.planned {
                     let rows = |ui: &mut egui::Ui| {
                         for row in &planned.rows {
@@ -496,45 +692,29 @@ impl Editor {
             self.release_files();
             return;
         }
-        if rename {
-            // What this frame typed is planned before it is run: Return may
-            // come with the last of the text.
-            if let (State::Renaming(r), Some(library)) = (&mut self.file_ops.state, &self.library) {
-                r.replan(&library.session.catalog);
-                // What it typed last can't be had: the dialog stays, and
-                // says why.
-                if r.planned.as_ref().is_none_or(|p| p.plan.is_none()) {
-                    return;
-                }
-            }
-            let State::Renaming(r) = std::mem::take(&mut self.file_ops.state) else {
-                return;
-            };
-            let Some(Planned {
-                plan: Some(plan),
-                rows,
-                ..
-            }) = r.planned
-            else {
-                // Not reached (checked above); the catalog is let go anyway.
-                self.release_files();
-                return;
-            };
-            let verb = Verb::Rename {
-                one: match rows.as_slice() {
-                    [one] => Some((one.old.clone(), one.new.clone())),
-                    _ => None,
-                },
-            };
-            self.file_ops.state = State::Confirming {
-                plan: Box::new(plan),
-                trash: None,
-                catalog: r.catalog,
-                generation: r.generation,
-                verb,
-            };
-            self.confirm_file_op();
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
+        // Typed since Rename was asked: it waits for another.
+        if r.submitted.as_ref().is_some_and(|s| *s != r.inputs()) {
+            r.submitted = None;
         }
+        if rename {
+            // Return may come with the last of the text: what this frame
+            // typed is what is renamed, once planned.
+            r.submitted = Some(r.inputs());
+        }
+        // Asked for what is typed, and its plan is in.
+        if r.submitted.is_some()
+            && let Some(runs) = r.current().map(|p| p.plan.is_some())
+        {
+            r.submitted = None;
+            // What can't be had keeps the dialog, which says why.
+            if runs {
+                return self.run_rename();
+            }
+        }
+        self.plan_rename();
     }
 
     /// Rename Folder… for the folder of `root` at logical path `logical`:
@@ -678,13 +858,26 @@ impl super::FileOps {
             _ => None,
         }
     }
-    /// The open rename dialog, as it shows.
+    /// Whether the open rename dialog's names are being planned.
+    #[cfg(test)]
+    pub(super) fn rename_planning(&self) -> bool {
+        self.rename_request().is_some()
+    }
+    /// The plan of the open rename dialog's names under way.
+    #[cfg(test)]
+    pub(super) fn rename_request(&self) -> Option<u64> {
+        match &self.state {
+            State::Renaming(r) => r.planning.as_ref().map(|(request, _)| *request),
+            _ => None,
+        }
+    }
+    /// The open rename dialog, as it shows once what is typed is planned.
     #[cfg(test)]
     pub(super) fn rename_shown(&self) -> Option<RenameShown> {
         let State::Renaming(r) = &self.state else {
             return None;
         };
-        let planned = r.planned.as_ref()?;
+        let planned = r.current()?;
         Some(RenameShown {
             title: r.title(),
             rows: planned

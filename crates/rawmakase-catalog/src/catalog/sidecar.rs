@@ -128,20 +128,6 @@ pub(super) fn sidecar_names_caseless(file: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The names in a folder's listing `names` that would read the file named
-/// `sidecar` as their sidecar, by [`sidecar_candidates`], compared as
-/// [`sidecar_names_caseless`] does: every file there, in the catalog or not.
-pub(super) fn readers_of<'a>(sidecar: &OsStr, names: &'a [OsString]) -> Vec<&'a OsString> {
-    let Some(wanted) = sidecar.to_str().map(|s| caseless(OsStr::new(s))) else {
-        return Vec::new();
-    };
-    names
-        .iter()
-        .filter(|n| n.as_os_str() != sidecar && n.to_str().is_some())
-        .filter(|n| sidecar_names_caseless(Path::new(n)).contains(&wanted))
-        .collect()
-}
-
 /// The sidecars of `file`, the one used first (see [`sidecar_candidates`]).
 pub fn sidecars(file: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = sidecar_candidates(file)

@@ -35,12 +35,12 @@ fn f2_renames_one_photo_and_its_sidecar_and_the_open_photo_follows() -> anyhow::
     e.document.set_image(decoded(false));
     tap(&mut e, Key::F2, Modifiers::NONE);
     settle(&mut e);
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().expect("Rename Photo is open");
     assert_eq!(shown.title, "Rename Photo “a.RAF”");
     // The name, not its extension, is what is typed over.
     type_text(&mut e, "Keeper");
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().unwrap();
     assert_eq!(shown.rows, [("a.RAF".into(), "Keeper.RAF".into(), None)]);
     assert!(shown.can_rename);
@@ -66,7 +66,7 @@ fn a_name_taken_there_is_said_at_once_and_renames_nothing() -> anyhow::Result<()
     settle(&mut e);
     frame(&mut e, Vec::new());
     type_text(&mut e, "B");
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().unwrap();
     assert!(!shown.can_rename);
     assert!(shown.rows[0].2.is_some(), "{:?}", shown.rows);
@@ -95,11 +95,11 @@ fn several_photos_are_renamed_in_the_order_they_were_taken() -> anyhow::Result<(
     select(&mut e, &ids);
     tap(&mut e, Key::F2, Modifiers::NONE);
     settle(&mut e);
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().expect("Rename Photos is open");
     assert_eq!(shown.title, "Rename 3 Photos");
     type_text(&mut e, "Trip");
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().unwrap();
     let names: Vec<(&str, &str)> = shown
         .rows
@@ -134,7 +134,7 @@ fn a_batch_with_one_name_taken_renames_none() -> anyhow::Result<()> {
     settle(&mut e);
     frame(&mut e, Vec::new());
     type_text(&mut e, "Trip");
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().unwrap();
     assert!(!shown.can_rename);
     assert!(shown.rows.iter().all(|r| r.2.is_some()), "{:?}", shown.rows);
@@ -221,12 +221,7 @@ fn reading_the_photos_order_can_be_cancelled_and_its_answer_is_then_dropped() ->
         .catalog
         .location()
         .clone();
-    let order = file_ops::rename_order(
-        &e.library.as_ref().unwrap().session.catalog,
-        &ids,
-        &Default::default(),
-        crate::catalog_session::file_capture_time,
-    )?;
+    let order = file_ops::rename_order(&e.library.as_ref().unwrap().session.catalog, &ids)?;
     e.request_rename(ids);
     assert!(e.activity.is_busy(), "the catalog is held while it reads");
     let cancel = e.file_ops.ordering_cancel().expect("reading");
@@ -282,7 +277,7 @@ fn a_name_made_invalid_in_the_frame_it_is_returned_keeps_the_dialog() -> anyhow:
             super::tests::key(Key::Enter, false, false, Modifiers::NONE),
         ],
     );
-    frame(&mut e, Vec::new());
+    settle(&mut e);
     let shown = e.file_ops.rename_shown().expect("still asking");
     assert!(!shown.can_rename);
     assert!(shown.rows[0].2.is_some(), "{:?}", shown.rows);
@@ -290,5 +285,138 @@ fn a_name_made_invalid_in_the_frame_it_is_returned_keeps_the_dialog() -> anyhow:
     tap(&mut e, Key::Escape, Modifiers::NONE);
     frame(&mut e, Vec::new());
     assert!(!e.activity.is_busy(), "the catalog is let go");
+    Ok(())
+}
+
+#[test]
+fn a_plan_answering_other_input_a_failed_one_or_one_for_a_closed_dialog_runs_nothing()
+-> anyhow::Result<()> {
+    use super::rename::RenamePlanned;
+    let (d, mut e, _) = editor_with_folders(&["a.RAF"])?;
+    let a = photo(&e, &d, "a.RAF");
+    select(&mut e, &[a]);
+    tap(&mut e, Key::F2, Modifiers::NONE);
+    settle(&mut e);
+    // The name as it opened, planned.
+    settle(&mut e);
+    assert!(e.file_ops.rename_shown().is_some());
+    // Typing plans on a worker; the frame does not wait for it.
+    type_text(&mut e, "Keeper");
+    let keeper = e.file_ops.rename_request().expect("planned on a worker");
+    assert!(e.file_ops.rename_shown().is_none(), "not planned yet");
+    // An answer to another plan is dropped.
+    e.rename_planned(RenamePlanned::failed(keeper + 1000, "another dialog's"));
+    assert_eq!(e.file_ops.rename_request(), Some(keeper));
+    // Its worker failing says so, and renames nothing.
+    e.rename_planned(RenamePlanned::failed(keeper, "Stopped unexpectedly: boom"));
+    let shown = e.file_ops.rename_shown().expect("answered");
+    assert!(!shown.can_rename);
+    assert_eq!(
+        shown.rows,
+        [(
+            "a.RAF".into(),
+            "Keeper.RAF".into(),
+            Some("Stopped unexpectedly: boom".into())
+        )]
+    );
+    // Its real answer, coming after, is dropped too.
+    settle(&mut e);
+    assert!(!e.file_ops.rename_shown().unwrap().can_rename);
+    // Typed again, and closed before that plan is in.
+    type_text(&mut e, "2");
+    let late = e.file_ops.rename_request().expect("planned on a worker");
+    tap(&mut e, Key::Escape, Modifiers::NONE);
+    assert!(e.file_ops.rename_shown().is_none());
+    assert!(!e.activity.is_busy(), "the catalog is let go");
+    e.rename_planned(RenamePlanned::failed(late, "late"));
+    settle(&mut e);
+    assert!(e.file_ops.rename_shown().is_none(), "nothing opens again");
+    assert!(!e.activity.is_busy());
+    assert!(d.path().join("photos/a.RAF").is_file());
+    Ok(())
+}
+
+/// Rename Photo open on `a.RAF` with "Keeper" typed and Return pressed
+/// before its plan is in, plans held back from their workers.
+fn returned_before_planned(
+    names: &[&str],
+) -> anyhow::Result<(tempfile::TempDir, crate::app::Editor)> {
+    let (d, mut e, _) = editor_with_folders(names)?;
+    let a = photo(&e, &d, "a.RAF");
+    select(&mut e, &[a]);
+    tap(&mut e, Key::F2, Modifiers::NONE);
+    settle(&mut e);
+    settle(&mut e);
+    e.file_ops.hold_plans = true;
+    type_text(&mut e, "Keeper");
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    assert!(e.file_ops.rename_planning());
+    assert!(e.file_ops.rename_shown().is_none(), "not planned yet");
+    Ok((d, e))
+}
+
+#[test]
+fn escape_in_the_frame_a_rename_asked_for_is_planned_cancels_it() -> anyhow::Result<()> {
+    let (d, mut e) = returned_before_planned(&["a.RAF"])?;
+    // The plan lands, and the frame it is read in brings Escape.
+    let answer = e.rename_answer_now().expect("planning");
+    e.rename_planned(answer);
+    assert!(e.file_ops.rename_shown().unwrap().can_rename);
+    assert!(
+        d.path().join("photos/a.RAF").is_file(),
+        "not run on arrival"
+    );
+    tap(&mut e, Key::Escape, Modifiers::NONE);
+    settle(&mut e);
+    assert!(e.file_ops.rename_shown().is_none());
+    assert!(!e.activity.is_busy());
+    assert!(d.path().join("photos/a.RAF").is_file());
+    assert!(!d.path().join("photos/Keeper.RAF").exists());
+    Ok(())
+}
+
+#[test]
+fn a_rename_asked_for_before_its_plan_runs_in_the_frame_after_it_lands() -> anyhow::Result<()> {
+    let (d, mut e) = returned_before_planned(&["a.RAF"])?;
+    let answer = e.rename_answer_now().expect("planning");
+    e.rename_planned(answer);
+    assert!(
+        d.path().join("photos/a.RAF").is_file(),
+        "not run on arrival"
+    );
+    e.file_ops.hold_plans = false;
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert!(d.path().join("photos/Keeper.RAF").is_file());
+    Ok(())
+}
+
+#[test]
+fn typing_in_the_frame_a_rename_asked_for_is_planned_waits_for_another_return() -> anyhow::Result<()>
+{
+    let (d, mut e) = returned_before_planned(&["a.RAF"])?;
+    // Back in the field while its plan is still under way.
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    assert!(e.file_ops.rename_planning());
+    // The plan lands, and the frame it is read in types more.
+    let answer = e.rename_answer_now().expect("planning");
+    e.rename_planned(answer);
+    type_text(&mut e, "2");
+    assert!(
+        d.path().join("photos/a.RAF").is_file(),
+        "what was asked is not run"
+    );
+    let answer = e.rename_answer_now().expect("Keeper2 planned");
+    e.rename_planned(answer);
+    frame(&mut e, Vec::new());
+    let shown = e.file_ops.rename_shown().expect("still asking");
+    assert_eq!(shown.rows[0].1, "Keeper2.RAF");
+    assert!(d.path().join("photos/a.RAF").is_file(), "waits for Return");
+    // Asked again, it renames what was typed.
+    e.file_ops.hold_plans = false;
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert!(d.path().join("photos/Keeper2.RAF").is_file());
     Ok(())
 }
