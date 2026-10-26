@@ -900,8 +900,13 @@ fn discard(
                     Err(left) => return Ok(Some(left)),
                 };
             }
+            // Never removed there; the user's to delete only while its
+            // original begins with its bytes (as many as it has).
             Partial::Ours(at) if proof::removes_nothing(disk, &at) => {
-                on_share = true;
+                match proof::begins(disk, &at, &m.source) {
+                    true => on_share = true,
+                    false => return Ok(Some(NOT_BACK)),
+                }
                 continue;
             }
             Partial::Ours(at) => {

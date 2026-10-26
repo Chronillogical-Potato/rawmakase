@@ -1598,8 +1598,12 @@ fn discard_each(
                     }
                 }
             }
+            // Never removed there; the user's to delete only while its
+            // original begins with its bytes (as many as it has).
             Made::Here(at) if proof::removes_nothing(disk, &at) => {
-                why = copy::LEFT_ON_SHARE;
+                if proof::begins(disk, &at, &m.source) {
+                    why = copy::LEFT_ON_SHARE;
+                }
                 false
             }
             Made::Here(at) => disk
@@ -1628,8 +1632,9 @@ fn discard_each(
 
 /// Whether folder `dir`, listing `names`, holds only what is in
 /// `deletable` (paths with their names composed), by its names composed
-/// as name proofs take them, each once, and the AppleDouble files
-/// (`._name`) macOS keeps beside those.
+/// as name proofs take them, each once. An AppleDouble file (`._name`)
+/// macOS may keep beside a copy is not among them: what it holds can't be
+/// told from another computer's file of that name.
 fn only_deletable(
     dir: &Path,
     names: &[std::ffi::OsString],
@@ -1637,10 +1642,7 @@ fn only_deletable(
 ) -> bool {
     let names: Vec<std::ffi::OsString> = names.iter().map(|n| proof::composed(n)).collect();
     let once = names.iter().collect::<std::collections::HashSet<_>>().len() == names.len();
-    once && names.iter().all(|n| {
-        let beside = n.to_str().and_then(|n| n.strip_prefix("._"));
-        deletable.contains(&dir.join(n)) || beside.is_some_and(|b| deletable.contains(&dir.join(b)))
-    })
+    once && names.iter().all(|n| deletable.contains(&dir.join(n)))
 }
 
 /// Recovery of folder item `item` copied to another volume: one the

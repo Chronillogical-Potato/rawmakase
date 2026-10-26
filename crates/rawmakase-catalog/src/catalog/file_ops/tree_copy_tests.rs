@@ -1779,23 +1779,88 @@ fn a_folder_left_on_a_share_with_another_file_in_it_isnt_said_to_be_deletable() 
 
 /// A folder left on a share holding only the move's copies is the user's
 /// to delete however the share lists their names (decomposed, as macOS's
-/// smbfs does) and with what macOS keeps beside them (`._name`) (review
-/// of #675).
+/// smbfs does); not while it holds an AppleDouble file (`._name`), which
+/// can't be told from another computer's file (review of #675).
 #[test]
 #[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_left_on_a_share_is_deletable_however_its_names_are_listed() -> Result<()> {
-    let mut fx = fixture(&["day/a.NEF", "day/.h\u{ed}dden", "day/sub/b.NEF", "far/"]);
+    for apple_double in [false, true] {
+        let mut fx = fixture(&["day/a.NEF", "day/.h\u{ed}dden", "day/sub/b.NEF", "far/"]);
+        let disk = Faulty {
+            faults: vec![(Op::Copy, 2, Fault::Fail)],
+            apple_double,
+            ..far_as(&fx, Far::Share)
+        };
+        let trash = trash_as(&fx, Far::Share);
+        let op = to_far(&fx);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        let why = match apple_double {
+            false => super::copy::LEFT_ON_SHARE,
+            true => super::recover::NOT_BACK,
+        };
+        assert_eq!(
+            results(&outcome),
+            [ItemResult::NeedsRecovery(why.into())],
+            "AppleDouble {apple_double}"
+        );
+    }
+    Ok(())
+}
+
+/// A partial copy of a folder's file left where its volume can't say what
+/// it is is said to be the user's to delete only while its original still
+/// begins with its bytes (review of #675).
+#[test]
+fn a_folder_copy_left_on_an_unknown_volume_isnt_said_deletable_once_its_originals_changed()
+-> Result<()> {
+    fn written(dir: &Path) -> bool {
+        std::fs::read_dir(dir).is_ok_and(|names| {
+            names.flatten().any(|e| {
+                let p = e.path();
+                match p.is_dir() {
+                    true => written(&p),
+                    false => std::fs::metadata(&p).is_ok_and(|m| m.len() > 0),
+                }
+            })
+        })
+    }
+    let mut fx = small();
+    let fail = Arc::new(AtomicBool::new(false));
+    let (dir, day) = (fx.root.join("far"), fx.root.join("day"));
+    let failing = fail.clone();
+    // A full drive part way through the first file; as the copy is
+    // undone, another app rewrites the originals and the drive can't be
+    // told any more.
     let disk = Faulty {
-        faults: vec![(Op::Copy, 2, Fault::Fail)],
-        apple_double: true,
-        ..far_as(&fx, Far::Share)
+        faults: vec![(Op::Copy, 0, Fault::Fail)],
+        facts_fail: Some(fail.clone()),
+        watch: Some(Box::new(move |call: &super::tests::Call| {
+            if matches!(call, super::tests::Call::List(d) if d.starts_with(&dir))
+                && !failing.load(std::sync::atomic::Ordering::Relaxed)
+                && std::fs::read_dir(&dir).is_ok_and(|names| {
+                    names.flatten().any(|e| {
+                        e.file_name().to_string_lossy().ends_with(".rawmakase-part")
+                            && written(&e.path())
+                    })
+                })
+            {
+                for name in [".hidden", "a.NEF", "sub/b.NEF"] {
+                    std::fs::write(day.join(name), b"rewritten").unwrap();
+                }
+                failing.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        })),
+        ..far(&fx)
     };
-    let trash = trash_as(&fx, Far::Share);
     let op = to_far(&fx);
-    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
-    assert_eq!(
-        results(&outcome),
-        [ItemResult::NeedsRecovery(super::copy::LEFT_ON_SHARE.into())]
+    let outcome = run(&mut fx, op, &NoTrash, &disk, &AtomicBool::new(false));
+    assert!(
+        fail.load(std::sync::atomic::Ordering::Relaxed),
+        "{outcome:?}"
     );
+    let [ItemResult::NeedsRecovery(why)] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_ne!(why, super::copy::LEFT_ON_SHARE);
     Ok(())
 }

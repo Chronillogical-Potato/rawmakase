@@ -74,9 +74,11 @@ pub(super) fn far_at(dir: &Path, kind: Far) -> Faulty {
         disk.no_exclusive_rename = matches!(kind, Far::Direct | Far::Share);
         disk.share = kind == Far::Share;
         // As macOS's drivers list names, and keep what the drive can't
-        // (only macOS makes AppleDouble files).
+        // (only macOS makes AppleDouble files): not on a share, whose
+        // server keeps extended attributes as named streams (a Synology,
+        // as measured for #573).
         disk.lists_decomposed = true;
-        disk.apple_double = cfg!(target_vendor = "apple");
+        disk.apple_double = cfg!(target_vendor = "apple") && kind != Far::Share;
     }
     disk
 }
@@ -2588,5 +2590,49 @@ fn a_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable() -> Res
     };
     assert_ne!(why, super::copy::LEFT_ON_SHARE);
     assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
+    Ok(())
+}
+
+/// A partial copy left where its volume can't say what it is (so nothing
+/// is removed, as on a share) is said to be the user's to delete only
+/// while its original still begins with its bytes (review of #675).
+#[test]
+fn a_partial_copy_left_on_an_unknown_volume_isnt_said_deletable_once_its_original_changed()
+-> Result<()> {
+    let mut fx = files();
+    let fail = Arc::new(AtomicBool::new(false));
+    let (dir, original) = (fx.root.join("far"), fx.root.join("A.NEF"));
+    let failing = fail.clone();
+    // A full drive part way through A.NEF; as the copy is undone, another
+    // app rewrites the original and the drive can't be told any more.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 0, Fault::Fail)],
+        facts_fail: Some(fail.clone()),
+        watch: Some(Box::new(move |call: &super::tests::Call| {
+            if matches!(call, super::tests::Call::List(d) if *d == dir)
+                && !failing.load(std::sync::atomic::Ordering::Relaxed)
+                && std::fs::read_dir(&dir).unwrap().any(|e| {
+                    e.unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .ends_with(".rawmakase-part")
+                })
+            {
+                std::fs::write(&original, b"rewritten").unwrap();
+                failing.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        })),
+        ..far(&fx)
+    };
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &NoTrash, &disk, &AtomicBool::new(false));
+    assert!(
+        fail.load(std::sync::atomic::Ordering::Relaxed),
+        "{outcome:?}"
+    );
+    let [ItemResult::NeedsRecovery(why)] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_ne!(why, super::copy::LEFT_ON_SHARE);
     Ok(())
 }

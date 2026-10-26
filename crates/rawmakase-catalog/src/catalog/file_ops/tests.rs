@@ -632,6 +632,8 @@ pub(super) struct Faulty {
     /// (another computer, on a share), the file there moved aside; where,
     /// is kept in `swapped`.
     pub swap_before: Option<(Op, Vec<u8>)>,
+    /// Once set, `elsewhere`'s volume can't say what it is.
+    pub facts_fail: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Folders whose volume says its file ids can't be proven, as network
@@ -976,6 +978,12 @@ impl Disk for Faulty {
         Real.canonical(&self.found(path))
     }
     fn volume_facts(&self, path: &Path) -> Result<crate::storage::fsops::VolumeFacts, FsError> {
+        if self.far(path)
+            && let Some(fail) = &self.facts_fail
+            && fail.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(FsError::Io(std::io::Error::other("injected: no facts")));
+        }
         let mut facts = Real.volume_facts(&self.found(path))?;
         if let Some(space) = self.space {
             facts.available = space;
