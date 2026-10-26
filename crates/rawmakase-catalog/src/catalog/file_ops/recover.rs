@@ -50,7 +50,8 @@
 //!    only while its original is proven at its source as it was copied
 //!    (on Put Back it goes to the Trash, as a complete copy). A name held by
 //!    another file object than the journalled one is never taken for the
-//!    copy gone.
+//!    copy gone. Nothing is removed from an SMB share: a copy there stays
+//!    for the user (#675).
 //! 9. Finished items are forgotten after 30 days.
 use super::super::folder_sync::locate_folders;
 use super::super::{Catalog, PhotoId};

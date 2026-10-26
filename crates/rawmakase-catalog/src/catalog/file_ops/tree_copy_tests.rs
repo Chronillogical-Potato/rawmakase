@@ -4,7 +4,7 @@
 //! that fails before the catalog follows is undone, and recovery decides
 //! whatever a crash leaves at any step. On one volume, the test disk takes
 //! `far/` for another volume's.
-use super::copy_tests::{Far, far_as, trash_as};
+use super::copy_tests::{Far, far_as, put_back, removed_far, trash_as};
 use super::recover_tests::{before, check};
 use super::tests::{
     FakeTrash, Fault, Faulty, Fx, NoTrash, Op, bytes, crashes, fixture, results, tagged,
@@ -475,18 +475,7 @@ fn proven_as(
     let trash = trash_as(fx, kind);
     *trash.calls.borrow_mut() = 100;
     for u in &recovery.unfinished {
-        let back = recover::resolve_with(
-            &mut fx.cat,
-            u.operation,
-            Resolution::PutBack,
-            &clean,
-            &trash,
-        )
-        .unwrap();
-        assert!(
-            matches!(back.result, ItemResult::Unchanged(_)),
-            "{what}: {back:?}"
-        );
+        put_back(fx, u.operation, &clean, &trash, what, kind);
     }
     where_it_says(fx, tree, batch, what);
 }
@@ -660,6 +649,9 @@ fn every_fault(kind: Far) -> usize {
                     let trash = trash_as(&fx, kind);
                     let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, kind);
                     let what = format!("{kind:?} {op:?} {nth} {fault:?} undo {undo}");
+                    if kind == Far::Share {
+                        assert_eq!(removed_far(&fx, &disk), [] as [PathBuf; 0], "{what}");
+                    }
                     proven_as(&mut fx, &tree, &recovery, &batch, &was, &what, kind);
                     runs += 1;
                 }
@@ -721,37 +713,6 @@ fn every_failed_journal_write_of_a_folder_copy_ends_proven() -> Result<()> {
         assert!(recovery.unfinished.is_empty(), "{when}: {recovery:?}");
         proven(&mut fx, &tree, &recovery, &batch, &was, when);
     }
-    Ok(())
-}
-
-/// A folder built at its name on a share, whose undo stops part way (a
-/// copy that can't be removed just then), is put back in the end: what
-/// is left of it goes a copy at a time, as the rest went.
-#[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
-fn a_folder_on_a_share_undone_part_way_is_put_back_later() -> Result<()> {
-    let mut fx = files();
-    let was = before(&fx);
-    let tree = tree_of(&fx.root.join("day"));
-    // The catalog can't follow, so the whole copy is undone, and one of
-    // its files can't be removed.
-    fx.fail_journal("BEFORE UPDATE ON folders");
-    let disk = Faulty {
-        faults: vec![(Op::RemoveFile, 1, Fault::Fail)],
-        ..far_as(&fx, Far::Share)
-    };
-    let trash = trash_as(&fx, Far::Share);
-    let (batch, recovery) = scenario_as(&mut fx, &trash, &disk, Far::Share);
-    proven_as(
-        &mut fx,
-        &tree,
-        &recovery,
-        &batch,
-        &was,
-        "part way",
-        Far::Share,
-    );
-    assert!(!fx.root.join("far/day").exists());
     Ok(())
 }
 
@@ -1691,5 +1652,46 @@ fn a_folder_holding_the_catalog_is_refused_by_either_spelling() -> Result<()> {
         matches!(&refused, Err(FileOpError::Destination(why)) if why.contains("catalog")),
         "{refused:?}"
     );
+    Ok(())
+}
+
+/// A folder move onto a share that fails leaves what it copied there,
+/// never removed (#675): removing a copy by its name could remove a file
+/// another computer put at that name just then, as the test disk does.
+#[test]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+fn a_folder_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Result<()> {
+    let mut fx = small();
+    let tree = tree_of(&fx.root.join("day"));
+    let rows = fx.rows();
+    // A full share at the last file, the others whole already.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 2, Fault::Fail)],
+        swap_before: Some((Op::RemoveFile, b"theirs".to_vec())),
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let theirs = disk.swapped.borrow().clone();
+    assert_eq!(theirs.map(|p| std::fs::read(p).ok()), None, "{outcome:?}");
+    assert_eq!(tree_of(&fx.root.join("day")), tree);
+    // What was copied, as it was copied.
+    let left = tree_of(&fx.root.join("far/day"));
+    assert_eq!(left.len(), tree.len(), "{left:?}");
+    let [ItemResult::NeedsRecovery(why)] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(why, super::copy::LEFT_ON_SHARE);
+    assert_eq!(fx.rows(), rows);
+    // Deleted by the user, it is gone, and so is the item.
+    std::fs::remove_dir_all(fx.root.join("far/day"))?;
+    fx.reopen();
+    assert!(
+        fx.recover_with(&far_as(&fx, Far::Share), &trash)
+            .unfinished
+            .is_empty()
+    );
+    assert_eq!(fx.rows(), rows);
     Ok(())
 }

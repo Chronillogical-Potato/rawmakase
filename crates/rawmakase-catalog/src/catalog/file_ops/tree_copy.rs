@@ -40,7 +40,9 @@
 //! journalled, by their name inside the hidden folder and only while
 //! empty). Already named, the whole copy goes to the Trash, and only while
 //! it holds exactly what was made, each copy read back. Otherwise it is
-//! left for the user. Recovery does the same ([`decide`]).
+//! left for the user, as is every file of it on an SMB share, where nothing
+//! is removed ([`copy::LEFT_ON_SHARE`]). Recovery does the same
+//! ([`decide`]).
 use super::super::Catalog;
 use super::super::db::{Reads, Write, sql};
 use super::super::locations::{join, logical_from_os, names};
@@ -1280,8 +1282,8 @@ fn undo_as(
         .write(|w| journal::set_state(w, id, ItemState::Restoring, Some(why)))?;
     let item = journal::item(&catalog.db, id)?.context("the journalled item is gone")?;
     let state = match discard(cx, catalog, &item, rule)? {
-        true => (ItemState::NoChange, None),
-        false => (ItemState::Restoring, Some(NOT_BACK)),
+        None => (ItemState::NoChange, None),
+        Some(left) => (ItemState::Restoring, Some(left)),
     };
     catalog
         .db
@@ -1409,8 +1411,13 @@ fn unjournalled(disk: &dyn Disk, temp: &Path, dir: bool, inside: bool, since: Op
 /// `Present`) put in the Trash; a folder removed once empty); named, the
 /// whole copy to the Trash, only while it holds exactly what was made and,
 /// unless on Put Back, every original is proven as copied. Each copy gone
-/// is journalled `discarded`. Returns whether all of it is gone.
-fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
+/// is journalled `discarded`. Returns why not, unless all of it is gone.
+fn discard(
+    cx: &Cx<'_>,
+    catalog: &mut Catalog,
+    item: &Item,
+    rule: Originals,
+) -> Result<Option<&'static str>> {
     let disk = cx.disk;
     let proofs = proofs_of(item);
     let proven = originals(disk, item);
@@ -1431,9 +1438,9 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
     match built(disk, item) {
         Built::Gone => {
             gone_all(catalog, None)?;
-            Ok(true)
+            Ok(None)
         }
-        Built::Unknown => Ok(false),
+        Built::Unknown => Ok(Some(NOT_BACK)),
         // Built at its name, and part of it undone a copy at a time
         // already (its volume has no Trash): the rest goes so too, as what
         // is left no longer matches what was made.
@@ -1451,7 +1458,7 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             // on Put Back, the Trash keeps whatever it holds.
             let ready = proven || rule == Originals::Present;
             if !ready || !as_made(disk, item, &at) {
-                return Ok(false);
+                return Ok(Some(NOT_BACK));
             }
             // Built at its name on a volume with no Trash (an SMB share),
             // each copy goes on its own, as one still being built.
@@ -1460,13 +1467,13 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                 Err(TrashError::Unsupported) if proofs.direct => {
                     return discard_each(cx, catalog, item, rule);
                 }
-                Err(_) => return Ok(false),
+                Err(_) => return Ok(Some(NOT_BACK)),
             };
             if disk.sync_dir(parent(&at)).is_err() {
-                return Ok(false);
+                return Ok(Some(NOT_BACK));
             }
             gone_all(catalog, Some(&receipt.location))?;
-            Ok(true)
+            Ok(None)
         }
         Built::Hidden => discard_each(cx, catalog, item, rule),
     }
@@ -1475,21 +1482,28 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
 /// Discards each of folder `item`'s copies on its own, newest first: a
 /// file removed, one written whole only while its own original is proven
 /// as copied, else left, or on Put Back (`rule` `Present`) put in the
-/// Trash; a folder removed once empty. Returns whether all of it is gone.
-fn discard_each(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
+/// Trash; a folder removed once empty; on an SMB share no file removed
+/// ([`copy::LEFT_ON_SHARE`]). Returns why not, unless all of it is gone:
+/// that some are left on a share, if any are.
+fn discard_each(
+    cx: &Cx<'_>,
+    catalog: &mut Catalog,
+    item: &Item,
+    rule: Originals,
+) -> Result<Option<&'static str>> {
     let disk = cx.disk;
     let proofs = proofs_of(item);
     // Each copy on its own: a whole one whose original isn't
     // proven as copied may be the one copy of those bytes left, so
     // it stays (Put Back puts it in the Trash), with the folders
     // holding it; what can't be told stays too.
-    let mut left = false;
+    let mut left = None;
     for m in item.members.iter().rev() {
         if m.state == MemberState::Discarded {
             continue;
         }
         let Some(copy) = &m.copy else {
-            left = true;
+            left = left.or(Some(NOT_BACK));
             continue;
         };
         let dir = m.identity.is_none();
@@ -1508,6 +1522,8 @@ fn discard_each(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals
             },
         };
         let mut receipt = None;
+        // Why it stays, if it does.
+        let mut why = NOT_BACK;
         let done = match found {
             Made::Gone => true,
             Made::Unknown => false,
@@ -1520,11 +1536,14 @@ fn discard_each(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals
                 match rule {
                     Originals::AsCopied => false,
                     Originals::Present => match copy::trash_copy(cx, &at, &m.source) {
-                        Some(r) => {
+                        Ok(r) => {
                             receipt = r;
                             true
                         }
-                        None => false,
+                        Err(left) => {
+                            why = left;
+                            false
+                        }
                     },
                 }
             }
@@ -1547,28 +1566,38 @@ fn discard_each(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals
             }
             Made::Here(at) if proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0) => {
                 match copy::trash_copy(cx, &at, &m.source) {
-                    Some(r) => {
+                    Ok(r) => {
                         receipt = r;
                         true
                     }
-                    None => false,
+                    Err(left) => {
+                        why = left;
+                        false
+                    }
                 }
+            }
+            Made::Here(at) if proof::removes_nothing(disk, &at) => {
+                why = copy::LEFT_ON_SHARE;
+                false
             }
             Made::Here(at) => disk
                 .remove_file(&at)
                 .and_then(|()| disk.sync_dir(parent(&at)))
                 .is_ok(),
         };
-        if receipt.is_none() && !done {
-            left = true;
+        if !done {
+            // Left on a share says what the user can do, so it is said.
+            left = match left {
+                Some(copy::LEFT_ON_SHARE) => left,
+                _ => Some(why),
+            };
             continue;
         }
         catalog
             .db
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
-        left |= !done;
     }
-    Ok(!left)
+    Ok(left)
 }
 
 /// Recovery of folder item `item` copied to another volume: one the

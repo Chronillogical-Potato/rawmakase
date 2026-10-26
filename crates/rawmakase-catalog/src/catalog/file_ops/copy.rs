@@ -27,7 +27,9 @@
 //! `done`. A drive that can't keep an original's extras undoes the item.
 //!
 //! Anything that fails before the commit undoes the item: partial copies
-//! are removed, complete ones put in the Trash, and nothing else changes.
+//! are removed, complete ones put in the Trash, and nothing else changes;
+//! on an SMB share, which has no Trash, copies stay, for the user to
+//! delete ([`LEFT_ON_SHARE`]).
 //! The partial copy is journalled as the disk spells its name (HFS+ keeps
 //! names decomposed) and found by any spelling of it with its file object.
 //! Recovery does the same for an item a crash left before its commit
@@ -110,6 +112,12 @@ impl fmt::Display for Problem {
         }
     }
 }
+
+/// Why an undone item is unfinished: copies of it are left on an SMB share
+/// (#675). Nothing removes a name there only while it is still the file
+/// proven ours, and another computer could put its own file at it between
+/// the proof and the removal.
+pub(super) const LEFT_ON_SHARE: &str = "its copies on the network share were left there for you to delete: removing one could remove a file another computer had just put at its name";
 
 /// Why an original whose extras aren't its copy's stays.
 pub(super) const EXTRAS_DIFFER: &str =
@@ -678,8 +686,8 @@ fn undo_as(
         .write(|w| journal::set_state(w, id, ItemState::Restoring, Some(why)))?;
     let item = journal::item(&catalog.db, id)?.context("the journalled item is gone")?;
     let state = match discard(cx, catalog, &item, rule)? {
-        true => (ItemState::NoChange, None),
-        false => (ItemState::Restoring, Some(NOT_BACK)),
+        None => (ItemState::NoChange, None),
+        Some(left) => (ItemState::Restoring, Some(left)),
     };
     catalog
         .db
@@ -824,8 +832,14 @@ pub(super) fn copy_at(disk: &dyn Disk, at: &Path, id: FileId) -> Option<Option<P
 /// Trash instead on the user's Put Back); a complete one goes to the
 /// Trash, only while it is proven the copy (its file object, its bytes the
 /// original's), no photo of the catalog is named so there, and every
-/// original is proven at its source. Returns whether every one is gone.
-fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
+/// original is proven at its source; on an SMB share none is removed
+/// ([`LEFT_ON_SHARE`]). Returns why not, unless every one is gone.
+fn discard(
+    cx: &Cx<'_>,
+    catalog: &mut Catalog,
+    item: &Item,
+    rule: Originals,
+) -> Result<Option<&'static str>> {
     let disk = cx.disk;
     let proofs = proofs_of(item);
     let originals = originals(disk, item, rule);
@@ -836,19 +850,19 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
     };
     for m in item.members.iter().rev() {
         let Some(copy) = &m.copy else {
-            return Ok(false);
+            return Ok(Some(NOT_BACK));
         };
         match m.state {
             MemberState::Discarded => continue,
             MemberState::Planned | MemberState::Copying | MemberState::Copied => {}
-            _ => return Ok(false),
+            _ => return Ok(Some(NOT_BACK)),
         }
         let mut receipt = None;
         match partial(disk, m, &copy.temp, proofs) {
             // Never renamed, so nothing of it is at its destination. One
             // written whole stays while its original can't be proven: it
             // may be the one copy of those bytes left.
-            Partial::Ours(_) if copy.content.is_some() && !originals => return Ok(false),
+            Partial::Ours(_) if copy.content.is_some() && !originals => return Ok(Some(NOT_BACK)),
             // Put Back with an original changed since: written whole, it has
             // the bytes the original had, perhaps the only ones left, so it
             // goes to the Trash, never unlinked; as does one made at its name
@@ -868,31 +882,34 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                         rows,
                     )? =>
             {
-                return Ok(false);
+                return Ok(Some(NOT_BACK));
             }
             Partial::Ours(at)
                 if (copy.content.is_some() && rule == Originals::Present)
                     || (proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0)) =>
             {
-                let Some(r) = trash_copy(cx, &at, &m.source) else {
-                    return Ok(false);
+                receipt = match trash_copy(cx, &at, &m.source) {
+                    Ok(r) => r,
+                    Err(left) => return Ok(Some(left)),
                 };
-                receipt = r;
+            }
+            Partial::Ours(at) if proof::removes_nothing(disk, &at) => {
+                return Ok(Some(LEFT_ON_SHARE));
             }
             Partial::Ours(at) => {
                 let removed = disk
                     .remove_file(&at)
                     .and_then(|()| disk.sync_dir(parent(&at)));
                 if removed.is_err() {
-                    return Ok(false);
+                    return Ok(Some(NOT_BACK));
                 }
             }
-            Partial::Unknown => return Ok(false),
+            Partial::Unknown => return Ok(Some(NOT_BACK)),
             Partial::Gone => {
                 if let Some(asked) = m.destination.as_deref() {
                     match complete_at(disk, asked, copy, proofs) {
                         Some(None) => {}
-                        None => return Ok(false),
+                        None => return Ok(Some(NOT_BACK)),
                         Some(Some(at)) => {
                             let at = at.as_path();
                             let proven = originals
@@ -903,12 +920,12 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                             let named =
                                 occupied(&catalog.db, cx.folders, to, parent(at), filename, rows)?;
                             if !proven || named {
-                                return Ok(false);
+                                return Ok(Some(NOT_BACK));
                             }
-                            let Some(r) = trash_copy(cx, at, &m.source) else {
-                                return Ok(false);
+                            receipt = match trash_copy(cx, at, &m.source) {
+                                Ok(r) => r,
+                                Err(left) => return Ok(Some(left)),
                             };
-                            receipt = r;
                         }
                     }
                 }
@@ -918,25 +935,34 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             .db
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
     }
-    Ok(true)
+    Ok(None)
 }
 
 /// Puts copy `at` of original `source` in the Trash, as an undone copy
-/// goes. Where its volume has none (an SMB share) it is removed
-/// instead, only while `source` holds every byte it does, as many as it
-/// has ([`proof::begins`]): then nothing is lost. `Some` once it is gone,
-/// with the Trash's receipt if the Trash took it; `None` while it stays.
-pub(super) fn trash_copy(cx: &Cx<'_>, at: &Path, source: &Path) -> Option<Option<PathBuf>> {
+/// goes. Where its volume has none it is removed instead, only while
+/// `source` holds every byte it does, as many as it has
+/// ([`proof::begins`]): then nothing is lost; but never on an SMB share
+/// ([`proof::removes_nothing`]), where it stays ([`LEFT_ON_SHARE`]).
+/// `Ok` once it is gone, with the Trash's receipt if the Trash took it;
+/// why not while it stays.
+pub(super) fn trash_copy(
+    cx: &Cx<'_>,
+    at: &Path,
+    source: &Path,
+) -> Result<Option<PathBuf>, &'static str> {
     let receipt = match cx.trash.trash(at) {
         Ok(r) => Some(r.location),
+        Err(TrashError::Unsupported) if proof::removes_nothing(cx.disk, at) => {
+            return Err(LEFT_ON_SHARE);
+        }
         Err(TrashError::Unsupported) if proof::begins(cx.disk, at, source) => {
-            cx.disk.remove_file(at).ok()?;
+            cx.disk.remove_file(at).map_err(|_| NOT_BACK)?;
             None
         }
-        Err(_) => return None,
+        Err(_) => return Err(NOT_BACK),
     };
-    cx.disk.sync_dir(parent(at)).ok()?;
-    Some(receipt)
+    cx.disk.sync_dir(parent(at)).map_err(|_| NOT_BACK)?;
+    Ok(receipt)
 }
 
 /// Recovery of copy item `item`: one the catalog follows is finished;

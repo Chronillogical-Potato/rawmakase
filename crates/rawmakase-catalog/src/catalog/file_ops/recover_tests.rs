@@ -73,7 +73,8 @@ pub(super) fn check_files(fx: &Fx, before: &Before, recovery: &Recovery, batch: 
     is.sort();
     if copies {
         // A move to another volume may also leave copies of originals: in
-        // the Trash, or beside an original it couldn't put there.
+        // the Trash, or beside an original it couldn't put there; and, for
+        // an unfinished item, part of one, at its name on a share (#675).
         let mut extra = is.clone();
         for w in &was {
             let at = extra.iter().position(|v| v == w);
@@ -81,7 +82,8 @@ pub(super) fn check_files(fx: &Fx, before: &Before, recovery: &Recovery, batch: 
             extra.remove(at);
         }
         for e in extra {
-            assert!(was.contains(&e), "a new file: {:?}", now.keys());
+            let part = !recovery.unfinished.is_empty() && was.iter().any(|w| w.starts_with(e));
+            assert!(was.contains(&e) || part, "a new file: {:?}", now.keys());
         }
     } else {
         assert_eq!(was, is, "files: {:?}", now.keys().collect::<Vec<_>>());
