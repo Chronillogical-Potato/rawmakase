@@ -224,8 +224,13 @@ impl Editor {
                 let ordered = crate::catalog::Catalog::open(&location)
                     .map_err(|e| format!("{e:#}"))
                     .and_then(|catalog| {
-                        file_ops::rename_order(&catalog, &photos, &cancel)
-                            .map_err(|e| e.to_string())
+                        file_ops::rename_order(
+                            &catalog,
+                            &photos,
+                            &cancel,
+                            crate::catalog_session::file_capture_time,
+                        )
+                        .map_err(|e| e.to_string())
                     });
                 let _ = tx.send(super::super::worker::Event::RenameOrdered(
                     location,

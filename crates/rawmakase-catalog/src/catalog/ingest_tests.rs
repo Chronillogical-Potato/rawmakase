@@ -30,11 +30,14 @@ fn folder() -> Result<(tempfile::TempDir, PathBuf, Catalog, Recipe)> {
     Ok((dir, folder, cat, edit))
 }
 
-fn defaults() -> MetadataDefaults {
-    MetadataDefaults {
-        creator: "Default Creator".into(),
-        copyright: "© Default".into(),
-    }
+fn defaults() -> NewPhotoDefaults {
+    NewPhotoDefaults::new(
+        MetadataDefaults {
+            creator: "Default Creator".into(),
+            copyright: "© Default".into(),
+        },
+        crate::exif::read,
+    )
 }
 
 /// Everything adding `folder` should have given its photos.

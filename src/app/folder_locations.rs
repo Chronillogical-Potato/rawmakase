@@ -456,8 +456,11 @@ fn change_folders(
             (true, Default::default(), Vec::new())
         }
         FolderJob::Import { folder, choices } => {
-            let added =
-                cat.import_folder(&folder, &crate::catalog::MetadataDefaults::load(), &choices)?;
+            let added = cat.import_folder(
+                &folder,
+                &crate::catalog_session::new_photo_defaults(),
+                &choices,
+            )?;
             anyhow::ensure!(
                 added.ambiguous.is_empty(),
                 "The folders changed meanwhile; add the folder again"

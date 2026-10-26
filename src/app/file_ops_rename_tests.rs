@@ -225,6 +225,7 @@ fn reading_the_photos_order_can_be_cancelled_and_its_answer_is_then_dropped() ->
         &e.library.as_ref().unwrap().session.catalog,
         &ids,
         &Default::default(),
+        crate::catalog_session::file_capture_time,
     )?;
     e.request_rename(ids);
     assert!(e.activity.is_busy(), "the catalog is held while it reads");

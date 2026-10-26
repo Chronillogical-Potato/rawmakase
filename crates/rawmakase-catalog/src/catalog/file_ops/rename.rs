@@ -379,14 +379,18 @@ impl RenameOrder {
 }
 
 /// `photos`, given in the Library's order, in the order a batch rename
-/// numbers them: by capture time (the catalog's, else read from the file,
-/// and kept nowhere), photos taken at one time in the order given; then
-/// those whose time isn't known, by filename. A virtual copy goes with its
-/// master when that is given too. Stops between files once `cancel` is set.
+/// numbers them: by capture time (the catalog's, else read from the file by
+/// `capture_time` and kept nowhere), photos taken at one time in the order
+/// given; then those whose time isn't known, by filename. A virtual copy
+/// goes with its master when that is given too. Stops between files once
+/// `cancel` is set. `capture_time` is the app's reader, which dates the RAW
+/// containers the catalog can't read (a CR3, CRW, MRW or X3F) as the
+/// capture-time backfill does.
 pub fn rename_order(
     catalog: &Catalog,
     photos: &[PhotoId],
     cancel: &AtomicBool,
+    capture_time: fn(&Path) -> Option<String>,
 ) -> Result<RenameOrder, FileOpError> {
     row! {
         struct Dated {
@@ -431,7 +435,7 @@ pub fn rename_order(
                 folders
                     .get(&row.folder)
                     .and_then(|f| f.path.as_ref())
-                    .and_then(|dir| crate::exif::capture_time(&dir.join(&row.filename)))
+                    .and_then(|dir| capture_time(&dir.join(&row.filename)))
             }
             text => Some(text.to_string()),
         };

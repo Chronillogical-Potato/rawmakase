@@ -49,7 +49,7 @@ pub use crate::xmp::descriptive::Read as FileMetadata;
 #[doc(hidden)]
 pub use checksums::ReadChecksum;
 pub use db::assert_shape as assert_sql_shape;
-pub use defaults::MetadataDefaults;
+pub use defaults::{CameraExifReader, MetadataDefaults, NewPhotoDefaults};
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};

@@ -668,7 +668,10 @@ fn sync_folder(
         &plan.default_accepted(),
         &online,
         None,
-        &rawmakase::catalog::MetadataDefaults::load(),
+        &rawmakase::catalog::NewPhotoDefaults::new(
+            rawmakase::catalog::MetadataDefaults::load(),
+            rawmakase::photo::camera_exif,
+        ),
     )?;
     for s in &applied.skipped {
         println!("skipped: {} ({})", shown(&s.path), s.reason);
