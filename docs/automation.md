@@ -91,7 +91,10 @@ Library the grid takes the window first and, applied again, the photo (the
 Loupe) does; in Develop the photo has it from the first application. Applied
 once more, or after a module switch, the chrome and the panels are back. A
 `panels:` action while it is applied brings them back too, as they were, and
-changes no panel. The window itself is not changed.
+changes no panel. The window itself is not changed. `state.chrome` is `hidden`
+while it is applied, and `state.panels` then reports every panel `hidden`. In
+the Library, a Copy Name or metadata field still being typed is saved first; if
+it cannot be, the action fails with `save_failed` and the chrome stays.
 
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.

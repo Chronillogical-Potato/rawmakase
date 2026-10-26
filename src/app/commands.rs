@@ -424,7 +424,12 @@ impl Editor {
                 }),
             auto_running: self.document.auto.is_running(),
             treatment_pending: self.document.pending_treatment.is_some(),
-            panels: self.panels.of(self.module),
+            panels: self.shown_panels(),
+            chrome: if self.chrome.hidden(self.module) {
+                "hidden"
+            } else {
+                "shown"
+            },
             save_state: match self.document.edit.save_state() {
                 super::save_state::SaveState::Clean => "saved",
                 super::save_state::SaveState::Pending(_) => "pending",
@@ -913,9 +918,9 @@ impl Editor {
                 }
             }
             Chrome => {
-                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
-                let view = self.chrome.toggle(self.module, loupe);
-                self.chrome_view(view);
+                if !self.toggle_chrome() {
+                    return Err(Error::new("save_failed", self.status.clone()));
+                }
             }
             Loupe => {
                 self.command_module(false)?;

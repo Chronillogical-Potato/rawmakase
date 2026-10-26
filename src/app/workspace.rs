@@ -76,7 +76,8 @@ impl Editor {
         self.poll_preview_builds();
         // Entering a module draws its chrome: the whole-window mode belongs to
         // the module it was turned on in.
-        let entered = self.chrome.entered(self.module);
+        let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+        let entered = self.chrome.follow(self.module, loupe);
         self.chrome_view(entered);
         // Preferences is modal: keys go to it, not to the photo behind.
         #[cfg(target_os = "macos")]
@@ -86,8 +87,9 @@ impl Editor {
             // Escape leaves the whole-window mode, as it does in Lightroom. It
             // is taken here, before the Library's views and Develop's tools, so
             // they keep it while the chrome is up and the photo is the way out
-            // while it is not.
+            // while it is not. A menu open over the view closes first.
             if self.chrome.hidden(self.module)
+                && !egui::Popup::is_any_open(&ctx)
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 let shown = self.chrome.show();
@@ -441,9 +443,7 @@ impl Editor {
                     })
                 });
             if hide {
-                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
-                let view = self.chrome.toggle(self.module, loupe);
-                self.chrome_view(view);
+                self.toggle_chrome();
             }
             if plain(egui::Key::D) {
                 if self.module == Module::Library {
@@ -457,6 +457,22 @@ impl Editor {
         }
     }
 
+    /// F: hides the open module's chrome, or brings it back (see `chrome`).
+    /// The Library's info panel goes with the chrome, so a field still being
+    /// typed in it is saved first, as hiding the panel does; false, with the
+    /// chrome still up, if it could not be.
+    pub(super) fn toggle_chrome(&mut self) -> bool {
+        if self.chrome.shown(self.module)
+            && self.module == Module::Library
+            && !self.commit_library_drafts()
+        {
+            return false;
+        }
+        let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+        let view = self.chrome.toggle(self.module, loupe);
+        self.chrome_view(view);
+        true
+    }
     /// Applies what the whole-window mode did to the Library's view: the photo
     /// takes the window, or the grid takes it back.
     pub(super) fn chrome_view(&mut self, view: super::chrome::View) {

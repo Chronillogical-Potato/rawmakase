@@ -229,6 +229,21 @@ impl Editor {
     pub(super) fn panel_shown(&self, panel: WorkspacePanel) -> bool {
         self.chrome.shown(self.module) && self.panels.of(self.module).shown(panel)
     }
+    /// The open module's panels as drawn: all hidden while the whole-window
+    /// mode is on, whatever the layout kept for them.
+    pub(super) fn shown_panels(&self) -> PanelLayout {
+        if self.chrome.hidden(self.module) {
+            let hidden = Visibility::Hidden;
+            return PanelLayout {
+                left: hidden,
+                right: hidden,
+                filmstrip: hidden,
+                presets: hidden,
+                adjustments: hidden,
+            };
+        }
+        self.panels.of(self.module)
+    }
     /// Changes the open module's panels. A panel being hidden first lets go of
     /// what it was doing: the Library's info panel saves a field still being
     /// typed, and stays if that fails (the status line says why); Develop's

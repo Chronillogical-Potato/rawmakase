@@ -68,12 +68,18 @@ impl Chrome {
             View::Unchanged
         }
     }
-    /// Enters `module`, whose chrome is drawn again: the mode belongs to the
-    /// module it was turned on in, so G and D always land on a window with
-    /// its bars, not on a hidden one.
-    pub(super) fn entered(&mut self, module: Module) -> View {
+    /// Follows the window to `module`, with the Library's Loupe open or not.
+    /// Another module's chrome is drawn again: the mode belongs to the module
+    /// it was turned on in, so G and D always land on a window with its bars,
+    /// not on a hidden one. A Loupe closed while the mode is on gives the
+    /// window back to the grid, and one opened later is not the mode's.
+    pub(super) fn follow(&mut self, module: Module, loupe: bool) -> View {
         if self.hidden.is_some_and(|hidden| hidden != module) {
             return self.show();
+        }
+        if self.hidden == Some(Module::Library) && !loupe {
+            self.photo = false;
+            self.opened = false;
         }
         View::Unchanged
     }

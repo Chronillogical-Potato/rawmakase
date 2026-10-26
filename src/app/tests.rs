@@ -7019,6 +7019,127 @@ fn panel_keys_bring_the_hidden_chrome_back_as_it_was() {
     }
 }
 #[test]
+fn a_loupe_reopened_by_hand_in_the_mode_stays_on_leaving_it() -> anyhow::Result<()> {
+    let (_d, mut e, _ids) = editor_with_catalog(&["a.RAF"])?;
+    e.onboarding.visible = false;
+    let press = |e: &mut Editor, key| {
+        panel_frame(e, key_down(key, egui::Modifiers::NONE), FocusedButton::No);
+        panel_frame(e, key_up(key), FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    // The mode opens the Loupe, and the user goes back to the grid and opens
+    // it again: that Loupe is the user's, and leaving the mode keeps it.
+    press(&mut e, egui::Key::F);
+    press(&mut e, egui::Key::F);
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    e.library.as_mut().unwrap().close_loupe();
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    press(&mut e, egui::Key::E);
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    press(&mut e, egui::Key::F);
+    assert!(!e.chrome.hidden(e.module));
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
+fn hiding_the_chrome_saves_a_library_field_being_typed_first() -> anyhow::Result<()> {
+    use super::commands::Action;
+    use super::panels::WorkspacePanel;
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.onboarding.visible = false;
+    let copy = e
+        .library
+        .as_mut()
+        .unwrap()
+        .create_virtual_copy(ids[0])?
+        .value;
+    e.library.as_mut().unwrap().select(Some(copy));
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    // The info panel goes with the chrome, as hiding it does: what is being
+    // typed in it is saved first.
+    e.library
+        .as_mut()
+        .unwrap()
+        .set_copy_name_draft(copy, "Typed name");
+    e.execute_action(Action::Chrome, None).unwrap();
+    assert!(!e.panel_shown(WorkspacePanel::Right));
+    assert_eq!(
+        e.library.as_ref().unwrap().photo(copy).unwrap().copy_name,
+        "Typed name"
+    );
+    let view = e.chrome.show();
+    e.chrome_view(view);
+    // A field that cannot be saved keeps the panel, and the command says why.
+    let library = e.library.as_mut().unwrap();
+    library.session.catalog.remove_virtual_copy(copy)?;
+    library.set_copy_name_draft(copy, "Unsaved name");
+    let refused = e.execute_action(Action::Chrome, None).unwrap_err();
+    assert_eq!(refused.code, "save_failed");
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    Ok(())
+}
+#[test]
+fn state_reports_the_panels_the_chrome_hides() {
+    use super::commands::Action;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let state = serde_json::to_value(e.command_state()).unwrap();
+    assert_eq!(state["panels"]["left"], "shown");
+    assert_eq!(state["chrome"], "shown");
+    e.execute_action(Action::Chrome, None).unwrap();
+    let state = serde_json::to_value(e.command_state()).unwrap();
+    for panel in ["left", "right", "filmstrip", "presets"] {
+        assert_eq!(state["panels"][panel], "hidden", "{panel}");
+    }
+    assert_eq!(state["chrome"], "hidden");
+}
+#[test]
+fn escape_closes_a_menu_before_it_leaves_the_mode() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.onboarding.visible = false;
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::F, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    panel_frame(&mut e, key_up(egui::Key::F), FocusedButton::No);
+    let ctx = e.context.clone();
+    let cell = ctx
+        .read_response(egui::Id::new(("catalog-photo-cell", ids[0])))
+        .unwrap();
+    let pos = cell.rect.center();
+    panel_frame(
+        &mut e,
+        vec![egui::Event::PointerMoved(pos)],
+        FocusedButton::No,
+    );
+    for pressed in [true, false] {
+        panel_frame(
+            &mut e,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            FocusedButton::No,
+        );
+    }
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(egui::Popup::is_any_open(&ctx));
+    // The photo's menu takes Escape first, and the mode stays.
+    panel_frame(
+        &mut e,
+        key_down(egui::Key::Escape, egui::Modifiers::NONE),
+        FocusedButton::No,
+    );
+    assert!(!egui::Popup::is_any_open(&ctx));
+    assert!(e.chrome.hidden(e.module));
+    Ok(())
+}
+#[test]
 fn tab_moves_the_focus_on_while_a_control_has_it() {
     use super::panels::WorkspacePanel;
     let ctx = egui::Context::default();
