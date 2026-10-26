@@ -683,6 +683,46 @@ fn the_reader_takes_the_files_own_names() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An X3F, which RAWmakase doesn't decode, names its export from its
+/// preview's EXIF, else its property list; opened without a catalog, it
+/// gets its photo info too, not "can't be read" (#671).
+#[test]
+fn an_x3f_names_its_export_from_its_exif_or_property_list() -> anyhow::Result<()> {
+    use crate::exif::{CameraExif, Field, tag};
+    use crate::export::exif::{Container, camera_raw, x3f_with_properties};
+    let dir = tempfile::tempdir()?;
+    let quattro = dir.path().join("SDIM4388.X3F");
+    let camera = CameraExif {
+        main: vec![
+            Field::ascii(tag::MAKE, "SIGMA"),
+            Field::ascii(tag::MODEL, "sd Quattro"),
+        ],
+        ..Default::default()
+    };
+    std::fs::write(&quattro, camera_raw(Container::X3f, camera))?;
+    let sd10 = dir.path().join("RAW_SIGMA_SD10.X3F");
+    std::fs::write(
+        &sd10,
+        x3f_with_properties(&[("CAMMANUF", "SIGMA"), ("CAMMODEL", "SIGMA SD10")]),
+    )?;
+    for (path, model, camera) in [
+        (&quattro, "sd Quattro", "SIGMA sd Quattro"),
+        (&sd10, "SIGMA SD10", "SIGMA SD10"),
+    ] {
+        let read = name_read::read_path(path, true).unwrap();
+        assert_eq!(
+            read.camera,
+            crate::export_settings::CameraNames::Read {
+                make: Some("Sigma".into()),
+                model: Some(model.into()),
+            },
+            "{model}"
+        );
+        assert_eq!(read.info.and_then(|i| i.camera).as_deref(), Some(camera));
+    }
+    Ok(())
+}
+
 /// Return belongs to the Filename Template Editor while it is open over the
 /// dialog: it is Done, keeping the template, and nothing is exported. With a
 /// mistake in the template it does nothing, and never types a line break.

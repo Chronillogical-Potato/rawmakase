@@ -1,6 +1,8 @@
 //! Files whose metadata records declare gigantic lengths: `open` reads only
 //! what its readers use, so it allocates far less than the file's size
-//! however many records point at the same megabytes.
+//! however many records point at the same megabytes; and an X3F whose
+//! properties all name one long value, of which `x3f_metadata` decodes only
+//! what it asks for.
 //!
 //! The allocations are counted by a global allocator that forwards to the
 //! system's, so the whole check is one test: no other test thread
@@ -52,15 +54,68 @@ static ALLOCATOR: Counting = Counting;
 
 /// The bytes `open` allocates in all, and at most at once, on `file`.
 fn allocations(file: &[u8]) -> (usize, usize) {
+    measured(|| drop(rawmakase_raw::open(file)))
+}
+
+/// The bytes `read` allocates in all, and at most at once.
+fn measured(read: impl Fn()) -> (usize, usize) {
     // Once first: tables parsed on first use are not the file's doing.
-    let _ = rawmakase_raw::open(file);
+    read();
     let base = LIVE.load(Relaxed);
     PEAK.store(base, Relaxed);
     TOTAL.store(0, Relaxed);
-    let result = rawmakase_raw::open(file);
-    let (total, peak) = (TOTAL.load(Relaxed), PEAK.load(Relaxed) - base);
-    drop(result);
-    (total, peak)
+    read();
+    (TOTAL.load(Relaxed), PEAK.load(Relaxed) - base)
+}
+
+/// An X3F whose property list names its model 4001 times, each pointing at
+/// one value of 32768 characters, then its make.
+fn x3f() -> Vec<u8> {
+    let long = vec![u16::from(b'9'); 32_768];
+    let mut text: Vec<u16> = Vec::new();
+    let mut entries = Vec::new();
+    let mut add = |name: &str, value: Option<&[u16]>, text: &mut Vec<u16>| {
+        entries.extend((text.len() as u32).to_le_bytes());
+        text.extend(name.encode_utf16());
+        text.push(0);
+        match value {
+            Some(value) => {
+                entries.extend((text.len() as u32).to_le_bytes());
+                text.extend(value);
+                text.push(0);
+            }
+            // The first value, the long one.
+            None => entries.extend(9u32.to_le_bytes()),
+        }
+    };
+    add("CAMMODEL", Some(&long), &mut text);
+    for _ in 0..4000 {
+        add("CAMMODEL", None, &mut text);
+    }
+    add(
+        "CAMMANUF",
+        Some(&"SIGMA".encode_utf16().collect::<Vec<_>>()),
+        &mut text,
+    );
+    let mut prop = b"SECp".to_vec();
+    for v in [0x0001_0000, 4002, 0, 0, text.len() as u32] {
+        prop.extend(v.to_le_bytes());
+    }
+    prop.extend(entries);
+    prop.extend(text.iter().flat_map(|c| c.to_le_bytes()));
+    let mut out = b"FOVb".to_vec();
+    out.extend(0x0002_0003u32.to_le_bytes());
+    out.resize(232, 0);
+    let at = out.len() as u32;
+    out.extend(&prop);
+    let directory = out.len() as u32;
+    out.extend(b"SECd");
+    for v in [0x0002_0000, 1, at, prop.len() as u32] {
+        out.extend(v.to_le_bytes());
+    }
+    out.extend(b"PROP");
+    out.extend(directory.to_le_bytes());
+    out
 }
 
 /// The shared record: four megabytes, its first bytes `prefix`.
@@ -339,4 +394,18 @@ fn gigantic_records_cost_open_less_than_the_file() {
         );
         assert!(peak <= total);
     }
+    // An X3F's property list: only the values asked for are decoded, not
+    // the long one once for every name pointing at it.
+    let file = x3f();
+    let read = || {
+        let m = rawmakase_raw::x3f_metadata(&mut std::io::Cursor::new(&file));
+        assert_eq!(m.map(|m| m.properties.make).as_deref(), Some("SIGMA"));
+    };
+    let (total, peak) = measured(read);
+    eprintln!("X3F: {total} bytes allocated, {peak} at most at once");
+    assert!(
+        total < 4 * file.len(),
+        "X3F: its properties allocated {total} bytes for a file of {}",
+        file.len()
+    );
 }

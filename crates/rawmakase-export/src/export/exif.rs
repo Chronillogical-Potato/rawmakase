@@ -186,27 +186,69 @@ pub fn camera_raw(container: Container, camera: CameraExif) -> Vec<u8> {
             jpeg.extend(b"Exif\0\0");
             jpeg.extend(tiff);
             jpeg.extend([0xff, 0xd9]);
-            // The header, an image section (its mark, then its version,
-            // type, format, columns, rows and row size) and the directory.
-            let mut out = b"FOVb".to_vec();
-            out.extend(0x0002_0003u32.to_le_bytes());
-            out.resize(232, 0);
-            let image = out.len() as u32;
-            out.extend(b"SECi");
+            // An image section: its mark, then its version, type, format,
+            // columns, rows and row size.
+            let mut image = b"SECi".to_vec();
             for v in [0x0001_0000u32, 2, 18, 4, 4, 0] {
-                out.extend(v.to_le_bytes());
+                image.extend(v.to_le_bytes());
             }
-            out.extend(&jpeg);
-            let directory = out.len() as u32;
-            out.extend(b"SECd");
-            for v in [0x0002_0000u32, 1, image, 28 + jpeg.len() as u32] {
-                out.extend(v.to_le_bytes());
-            }
-            out.extend(b"IMA2");
-            out.extend(directory.to_le_bytes());
-            out
+            image.extend(&jpeg);
+            x3f(&[(b"IMA2", image)])
         }
     }
+}
+
+/// An X3F of an SD9's or SD10's kind: no preview EXIF, its camera and
+/// exposure in its property list alone, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn x3f_with_properties(properties: &[(&str, &str)]) -> Vec<u8> {
+    // Each property's name and value offsets into UTF-16 text.
+    let mut text: Vec<u16> = Vec::new();
+    let mut entries = Vec::new();
+    for (name, value) in properties {
+        for s in [name, value] {
+            entries.extend((text.len() as u32).to_le_bytes());
+            text.extend(s.encode_utf16());
+            text.push(0);
+        }
+    }
+    // The mark, a version, the count, the text's format (UTF-16), a
+    // reserved word and the text's length.
+    let mut prop = b"SECp".to_vec();
+    for v in [
+        0x0001_0000,
+        properties.len() as u32,
+        0,
+        0,
+        text.len() as u32,
+    ] {
+        prop.extend(v.to_le_bytes());
+    }
+    prop.extend(entries);
+    prop.extend(text.iter().flat_map(|c| c.to_le_bytes()));
+    x3f(&[(b"PROP", prop)])
+}
+
+/// An X3F's header, then `sections` of their types, then the directory.
+#[cfg(any(test, feature = "test-support"))]
+fn x3f(sections: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+    let mut out = b"FOVb".to_vec();
+    out.extend(0x0002_0003u32.to_le_bytes());
+    out.resize(232, 0);
+    let mut entries = Vec::new();
+    for (kind, body) in sections {
+        entries.extend((out.len() as u32).to_le_bytes());
+        entries.extend((body.len() as u32).to_le_bytes());
+        entries.extend(*kind);
+        out.extend(body);
+    }
+    let directory = out.len() as u32;
+    out.extend(b"SECd");
+    out.extend(0x0002_0000u32.to_le_bytes());
+    out.extend((sections.len() as u32).to_le_bytes());
+    out.extend(entries);
+    out.extend(directory.to_le_bytes());
+    out
 }
 
 /// A CRW (CIFF) whose only record is its TimeStamp, `seconds` since 1970
