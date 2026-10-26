@@ -7,5 +7,6 @@ app -> platform
 app -> stats
 app -> updates
 catalog_session -> platform
+diagnostics -> updates
+stats -> diagnostics
 stats -> platform
-stats -> updates

@@ -35,6 +35,7 @@ pub use rawmakase_model::{
 pub mod app;
 pub(crate) mod catalog_session;
 pub mod comparison;
+pub mod diagnostics;
 pub(crate) mod edit_session;
 pub(crate) mod platform;
 /// For headless commands: whether a path's volume is mounted.
