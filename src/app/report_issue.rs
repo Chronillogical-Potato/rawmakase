@@ -49,6 +49,7 @@ struct Dialog {
 #[derive(Clone, Debug, PartialEq)]
 enum Note {
     Copied,
+    /// The browser's launcher started; it may still fail to open one.
     Opened,
     /// The browser couldn't be opened; the report was copied anyway.
     NotOpened(String),
@@ -222,10 +223,14 @@ impl Editor {
                 if let Some(note) = &dialog.note {
                     let (text, color) = match note {
                         Note::Copied => ("Copied.".to_string(), palette.gray(170)),
+                        // The launcher only starts: whether a browser
+                        // then opens isn't known, so the address is given.
                         Note::Opened => (
-                            "Copied. Paste it into \u{201c}System information\u{201d} \
-                             in the issue."
-                                .to_string(),
+                            format!(
+                                "Copied. Paste it into \u{201c}System information\u{201d} \
+                                 in the issue. If no browser opened, go to {}",
+                                diagnostics::new_issue_url(self.report_issue.build.version)
+                            ),
                             palette.gray(170),
                         ),
                         Note::NotOpened(error) => (
@@ -385,7 +390,8 @@ mod tests {
     /// Where `label` was drawn, from the shapes egui laid out.
     fn find(e: &mut Editor, label: &str) -> Option<egui::Pos2> {
         let ctx = e.context.clone();
-        let output = ctx.run_ui(input(vec![]), |ui| e.draw(ui));
+        let mut output = ctx.run_ui(input(vec![]), |ui| e.draw(ui));
+        output.textures_delta.clear();
         output
             .shapes
             .iter()
@@ -521,6 +527,18 @@ mod tests {
         assert_eq!(
             e.report_issue.dialog.as_ref().unwrap().note,
             Some(Note::Opened)
+        );
+        // A launcher can start and still open no browser: the address shows.
+        let url = diagnostics::new_issue_url(env!("CARGO_PKG_VERSION"));
+        let ctx = e.context.clone();
+        let mut output = ctx.run_ui(input(vec![]), |ui| e.draw(ui));
+        output.textures_delta.clear();
+        assert!(
+            output.shapes.iter().any(|clipped| matches!(
+                &clipped.shape,
+                egui::Shape::Text(text) if text.galley.text().contains(&url)
+            )),
+            "the issue address is shown"
         );
         Ok(())
     }
