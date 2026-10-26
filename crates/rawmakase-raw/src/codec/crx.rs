@@ -1232,20 +1232,32 @@ pub(crate) mod tests {
         let (h, s) = craw2_large(64, 32);
         assert_eq!(decode(&h, &s, &no()).unwrap(), vec![8192; 64 * 32]);
         let (h, s) = craw2_large(4096, 2048);
-        let cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let setter = {
-            let cancel = cancel.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(30));
-                cancel.store(true, Ordering::Relaxed);
-                std::time::Instant::now()
-            })
-        };
-        let result = decode(&h, &s, &cancel);
-        let returned = std::time::Instant::now();
-        let set = setter.join().unwrap();
-        assert_eq!(result, Err(Error::Cancelled));
-        assert!(returned.duration_since(set) < std::time::Duration::from_millis(250));
+        // On a fast or busy machine the timer can fire after the decode
+        // finishes, which tests nothing: try again with a shorter delay. The
+        // delay never reaches zero, so the decode is past its first check.
+        let cancelled = [30, 10, 5, 2].into_iter().any(|delay| {
+            let cancel = std::sync::Arc::new(AtomicBool::new(false));
+            let setter = {
+                let cancel = cancel.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    cancel.store(true, Ordering::Relaxed);
+                    std::time::Instant::now()
+                })
+            };
+            let result = decode(&h, &s, &cancel);
+            let returned = std::time::Instant::now();
+            let set = setter.join().unwrap();
+            match result {
+                Ok(_) => false,
+                Err(e) => {
+                    assert_eq!(e, Error::Cancelled);
+                    assert!(returned.duration_since(set) < std::time::Duration::from_millis(250));
+                    true
+                }
+            }
+        });
+        assert!(cancelled, "every decode finished before its cancel");
     }
 
     #[test]
