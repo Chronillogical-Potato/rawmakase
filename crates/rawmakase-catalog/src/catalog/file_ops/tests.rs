@@ -985,8 +985,10 @@ impl Disk for Faulty {
         if let Some(theirs) = &self.swap_after_create
             && self.swapped.borrow().is_none()
         {
+            // Moved aside rather than removed: Windows keeps a removed
+            // file's name while a handle to it is open.
             let at = self.stored(path);
-            std::fs::remove_file(&at).unwrap();
+            std::fs::rename(&at, at.with_extension("aside")).unwrap();
             std::fs::write(&at, theirs).unwrap();
             *self.swapped.borrow_mut() = Some(at);
         }
