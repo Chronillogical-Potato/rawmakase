@@ -597,7 +597,14 @@ fn windows_window_icon() -> Option<egui::IconData> {
     })
 }
 
+/// Runs the desktop app. A panic that ends it is an error, and every panic is
+/// recorded in the crash log; see [`crash_log`].
 pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
+    crash_log::install();
+    crash_log::run_catching(|| run_window(path, launch))
+}
+
+fn run_window(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
     let session = crate::app::session::load_session();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -849,6 +856,7 @@ mod catalog;
 mod clipping;
 mod color_grading;
 mod commands;
+mod crash_log;
 mod crop_tool;
 mod curve_menu;
 mod dialogs;

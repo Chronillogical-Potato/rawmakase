@@ -137,7 +137,7 @@ body:
     attributes:
       label: Error messages and diagnostics
       description: |
-        Paste relevant terminal output or attach an available crash report. If you use the command line, include the exact command. For a RAW-file problem, output from `rawmakase inspect "sample.dng"` may help (replace the filename with your sample). Review output for personal paths or metadata before posting. Skip if unavailable.
+        Paste relevant terminal output or attach an available crash report. If RAWmakase closed unexpectedly, attach `crash.log` from `%LOCALAPPDATA%\RAWmakase` on Windows, `~/Library/Application Support/RAWmakase` on macOS or `~/.local/share/rawmakase` on Linux, if it exists. If you use the command line, include the exact command. For a RAW-file problem, output from `rawmakase inspect "sample.dng"` may help (replace the filename with your sample). Review output for personal paths or metadata before posting. Skip if unavailable.
 
   - type: textarea
     id: additional-context

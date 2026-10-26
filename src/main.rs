@@ -173,12 +173,15 @@ fn attach_console() {
     }
 }
 /// Started from the Start menu there is no console to print a failure to, so
-/// the app would vanish without a word.
+/// the app would vanish without a word. The failure may come at startup or, as a
+/// panic, later on.
 #[cfg(windows)]
 fn show_error(error: &anyhow::Error) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
     let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let text = wide(&format!("RAWmakase could not start.\n\n{error:#}"));
+    let text = wide(&format!(
+        "RAWmakase stopped because of an error.\n\n{error:#}"
+    ));
     let title = wide("RAWmakase");
     // SAFETY: both strings are NUL-terminated and outlive the call.
     unsafe {

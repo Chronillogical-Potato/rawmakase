@@ -258,6 +258,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | File | Responsibility |
 | --- | --- |
 | [app/mod.rs](../src/app/mod.rs) | `Editor`, initialization, lifecycle, worker connections and explicit session-write destination. |
+| [app/crash_log.rs](../src/app/crash_log.rs) | Every panic appended to `crash.log` in the local data folder (moved to `crash.old.log` past 1 MB), and a panic that ends the desktop app returned as an error, which Windows shows in a dialog (#623). |
 | [state.rs](../src/app/state.rs) | Separate document, decoded-image pair, preview, viewport and preset-browser state; centralized document reset. |
 | [edit_session/history.rs](../src/edit_session/history.rs) | Bounded undo/redo, redo-branch invalidation, one transaction per editing gesture, and saving and restoring History with the edit. |
 | [editing.rs](../src/app/editing.rs) | Before/after frame snapshots bound to a document generation so navigation cannot mix histories. |
