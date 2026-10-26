@@ -1601,6 +1601,41 @@
    }
   },
   {
+   "name": "cube-identity-33-prophoto-rgb-100",
+   "look": {
+    "file": "cube-identity-33-prophoto-rgb.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-adobe-rgb-100",
+   "look": {
+    "file": "cube-creative-33-adobe-rgb.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-prophoto-rgb-100",
+   "look": {
+    "file": "cube-creative-33-prophoto-rgb.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-prophoto-rgb-200",
+   "look": {
+    "file": "cube-creative-33-prophoto-rgb.xmp",
+    "amount": 2
+   }
+  },
+  {
+   "name": "cube-hue-rotation-33-adobe-rgb-100",
+   "look": {
+    "file": "cube-hue-rotation-33-adobe-rgb.xmp",
+    "amount": 1
+   }
+  },
+  {
    "name": "cube-creative-33-saturation+50",
    "look": {
     "file": "cube-creative-33.xmp",

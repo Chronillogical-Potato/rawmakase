@@ -139,7 +139,7 @@ mod tests {
             std::fs::write(&path, text).unwrap();
             picks.push(path);
         }
-        crate::camera_profiles::import_into_dir(&picks, &library).unwrap();
+        crate::camera_profiles::import_into_dir(&picks, &library, Default::default()).unwrap();
         let photo = crate::camera_data::Metadata {
             make: "Test".into(),
             model: "Camera".into(),

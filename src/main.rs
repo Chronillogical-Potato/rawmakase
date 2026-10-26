@@ -26,6 +26,10 @@ enum Command {
     /// Import Lightroom DCP and look XMP profiles and .cube LUTs (as looks), or the
     /// folders holding them, into RAWmakase's profile library.
     ImportProfiles {
+        /// The colour space the .cube LUTs expect, as Camera Raw's Create Profile
+        /// asks; keep sRGB unless the LUT's maker says otherwise.
+        #[arg(long, value_enum, default_value_t = LutSpace::Srgb)]
+        lut_space: LutSpace,
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
@@ -148,6 +152,23 @@ enum Command {
 fn parse_reference(json: &str) -> Result<rawmakase::half_check::Reference, String> {
     serde_json::from_str(json).map_err(|e| e.to_string())
 }
+/// An `import-profiles --lut-space`.
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum LutSpace {
+    Srgb,
+    AdobeRgb,
+    #[value(name = "prophoto-rgb")]
+    ProPhotoRgb,
+}
+impl From<LutSpace> for rawmakase::camera_profiles::LutSpace {
+    fn from(space: LutSpace) -> Self {
+        match space {
+            LutSpace::Srgb => Self::Srgb,
+            LutSpace::AdobeRgb => Self::AdobeRgb,
+            LutSpace::ProPhotoRgb => Self::ProPhotoRgb,
+        }
+    }
+}
 /// A stage `render --tap` writes.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum Tap {
@@ -214,10 +235,10 @@ fn main() -> Result<()> {
             }
             anyhow::ensure!(!done.imported.is_empty(), "No lens profiles imported");
         }
-        Some(Command::ImportProfiles { files }) => {
+        Some(Command::ImportProfiles { lut_space, files }) => {
             // Files and folders, imported as the app's Import does: a file that
             // can't be imported is reported and leaves the rest importing.
-            let summary = rawmakase::app::import_profiles(&files);
+            let summary = rawmakase::app::import_profiles(&files, lut_space.into());
             for line in summary.lines() {
                 println!("{line}");
             }

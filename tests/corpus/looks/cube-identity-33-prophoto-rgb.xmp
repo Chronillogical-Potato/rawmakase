@@ -1,0 +1,40 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   crs:PresetType="Look"
+   crs:Cluster=""
+   crs:UUID="180FB81C211FC4E141663675B7686C9B"
+   crs:SupportsAmount="True"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="True"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="True"
+   crs:CameraModelRestriction=""
+   crs:Copyright=""
+   crs:ContactInfo=""
+   crs:Version="18.7"
+   crs:ProcessVersion="15.4"
+   crs:ConvertToGrayscale="False"
+   crs:RGBTable="180FB81C211FC4E141663675B7686C9B"
+   crs:Table_180FB81C211FC4E141663675B7686C9B="l`t00s$J%.9'hoa:R0:DUVB1@N}dHm/MKWn!]v4*21000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000eIjSJLI0{t|Ozb">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">identity-33</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:Group>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Synthetic</rdf:li>
+    </rdf:Alt>
+   </crs:Group>
+   <crs:Description>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Identity</rdf:li>
+    </rdf:Alt>
+   </crs:Description>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

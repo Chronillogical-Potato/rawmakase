@@ -19,8 +19,13 @@ fn cube(size: usize, f: impl Fn([f32; 3]) -> [f32; 3]) -> String {
 }
 
 fn import(data: &Path, picks: &[&Path]) -> Result<(bool, String)> {
+    import_with(data, &[], picks)
+}
+
+fn import_with(data: &Path, flags: &[&str], picks: &[&Path]) -> Result<(bool, String)> {
     let output = Command::new(env!("CARGO_BIN_EXE_rawmakase"))
         .arg("import-profiles")
+        .args(flags)
         .args(picks)
         .env("RAWMAKASE_DATA_DIR", data)
         .output()?;
@@ -114,5 +119,77 @@ fn a_folder_of_cubes_imports_as_looks() -> Result<()> {
     // An AppleDouble file chosen by name is refused by what it is.
     let (ok, out) = import(&data, &[&pack.join("._Warm.cube")])?;
     assert!(!ok && out.contains("not text"), "{out}");
+    Ok(())
+}
+
+/// `--lut-space` imports the run's cubes for that space: each line names it, and the
+/// look's table is in its primaries and encoding. A space RAWmakase does not offer
+/// is refused before anything is imported.
+#[test]
+fn lut_space_chooses_the_space_cubes_expect() -> Result<()> {
+    use rawmakase::camera_profiles::{Gamma, Primaries};
+    let temp = tempfile::tempdir()?;
+    let pack = temp.path().join("Pack");
+    fs::create_dir_all(&pack)?;
+    let warm = pack.join("Warm.cube");
+    fs::write(&warm, cube(9, |[r, g, b]| [r, g * 0.95, b * 0.8]))?;
+    let data = temp.path().join("data");
+    let library = data.join("camera-profiles");
+
+    let (ok, out) = import_with(&data, &["--lut-space", "display-p3"], &[&warm])?;
+    assert!(!ok, "{out}");
+    assert!(
+        out.contains("display-p3") && out.contains("srgb, adobe-rgb, prophoto-rgb"),
+        "{out}"
+    );
+    assert!(!library.exists() || fs::read_dir(&library)?.next().is_none());
+
+    let (ok, out) = import_with(&data, &["--lut-space", "adobe-rgb"], &[&warm])?;
+    assert!(ok, "{out}");
+    assert!(
+        out.contains("Warm.cube: imported as look \"Warm\" in Adobe RGB (1998): exact"),
+        "{out}"
+    );
+    let (ok, out) = import_with(&data, &["--lut-space", "prophoto-rgb"], &[&warm])?;
+    assert!(ok, "{out}");
+    assert!(
+        out.contains(
+            "Warm.cube: imported as look \"Warm (Pack)\" in ProPhoto RGB, as another \
+             profile is named \"Warm\": exact"
+        ),
+        "{out}"
+    );
+    // Without the flag, as before: sRGB, which goes unsaid.
+    let (ok, out) = import(&data, &[&warm])?;
+    assert!(ok, "{out}");
+    assert!(
+        out.contains(
+            "Warm.cube: imported as look \"Warm (Pack 2)\", as another profile is named \
+             \"Warm\": exact"
+        ),
+        "{out}"
+    );
+    let photo = rawmakase::camera_data::Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+        ..Default::default()
+    };
+    let listed = rawmakase::camera_profiles::listed_from(&[library], &photo);
+    assert!(listed.errors.is_empty(), "{:?}", listed.errors);
+    for (name, codes) in [
+        ("Warm", (Primaries::AdobeRgb, Gamma::Power22)),
+        ("Warm (Pack)", (Primaries::ProPhoto, Gamma::Power18)),
+        ("Warm (Pack 2)", (Primaries::Srgb, Gamma::Srgb)),
+    ] {
+        let look = listed.profiles.iter().find(|p| p.name == name).expect(name);
+        let table = look
+            .enhanced
+            .as_ref()
+            .and_then(|e| e.rgb())
+            .expect(name)
+            .table();
+        assert_eq!((table.primaries(), table.gamma()), codes, "{name}");
+    }
     Ok(())
 }
