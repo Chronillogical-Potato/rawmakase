@@ -13,40 +13,52 @@ impl Editor {
     /// Constrains the crop to the chosen aspect: negative keeps the photo's
     /// own ratio, zero is free, and presets follow the photo's orientation.
     pub(super) fn fit_aspect(&mut self) {
-        if self.view.aspect == 0. {
-            return;
-        }
-        if let Some(im) = self.document.full().cloned() {
-            let mut r = self.document.edit.recipe().clone();
-            r.crop = [0., 0., 1., 1.];
-            let g = Geometry::new(&im, &r, 0);
-            let portrait = g.oriented_height > g.oriented_width;
-            let aspect = if self.view.aspect < 0. {
-                g.oriented_width / g.oriented_height
-            } else if portrait {
-                1. / self.view.aspect
-            } else {
-                self.view.aspect
-            };
-            let ratio = aspect * g.oriented_height / g.oriented_width;
-            let c = &mut self.document.edit.recipe_mut().crop;
-            let cx = (c[0] + c[2]) / 2.;
-            let cy = (c[1] + c[3]) / 2.;
-            let mut w = c[2] - c[0];
-            let mut h = c[3] - c[1];
-            if w / h > ratio {
-                w = h * ratio;
-            } else {
-                h = w / ratio;
-            }
-            let w = w.max(0.01);
-            let h = h.max(0.01);
-            *c = [cx - w / 2., cy - h / 2., cx + w / 2., cy + h / 2.];
+        if let Some(crop) = self.fitted_crop() {
+            self.document.edit.recipe_mut().crop = crop;
         }
     }
+    /// The crop [`Self::fit_aspect`] makes, when it changes it.
+    fn fitted_crop(&self) -> Option<[f32; 4]> {
+        if self.view.aspect == 0. {
+            return None;
+        }
+        let im = self.document.full()?;
+        let mut r = self.document.edit.recipe().clone();
+        let c = r.crop;
+        r.crop = [0., 0., 1., 1.];
+        let g = Geometry::new(im, &r, 0);
+        let portrait = g.oriented_height > g.oriented_width;
+        let aspect = if self.view.aspect < 0. {
+            g.oriented_width / g.oriented_height
+        } else if portrait {
+            1. / self.view.aspect
+        } else {
+            self.view.aspect
+        };
+        let ratio = aspect * g.oriented_height / g.oriented_width;
+        let cx = (c[0] + c[2]) / 2.;
+        let cy = (c[1] + c[3]) / 2.;
+        let mut w = c[2] - c[0];
+        let mut h = c[3] - c[1];
+        // A crop already at the aspect and size stays exactly as it is: rounding
+        // would otherwise nudge an uncropped photo's crop off the whole frame.
+        if (w / h / ratio - 1.).abs() < 1e-5 && w >= 0.01 && h >= 0.01 {
+            return None;
+        }
+        if w / h > ratio {
+            w = h * ratio;
+        } else {
+            h = w / ratio;
+        }
+        let w = w.max(0.01);
+        let h = h.max(0.01);
+        Some([cx - w / 2., cy - h / 2., cx + w / 2., cy + h / 2.])
+    }
     /// Opening the Crop tool shows the photo's own aspect, as Lightroom does,
-    /// rather than the last photo's: Original when uncropped or at the photo's
-    /// ratio, a preset it matches, or else its exact ratio as Custom.
+    /// rather than the last photo's: Original at the photo's ratio, a preset it
+    /// matches, or else its exact ratio as Custom. An uncropped photo takes the
+    /// aspect last chosen from the menu, and a preset crops it as an edit of its
+    /// own, recorded before any frame or command that follows.
     pub(super) fn read_aspect(&mut self) {
         if !self.view.is(Tool::Crop) || self.view.aspect_read {
             return;
@@ -57,7 +69,12 @@ impl Editor {
         self.view.aspect_read = true;
         let c = self.document.edit.recipe().crop;
         if c == [0., 0., 1., 1.] {
-            self.view.aspect = -1.;
+            self.view.aspect = self.view.chosen_aspect;
+            if let Some(crop) = self.fitted_crop() {
+                // A drag still held (R pressed mid-drag) is a step of its own first.
+                self.document.edit.finish_gesture();
+                self.document.edit.change(None, |r| r.crop = crop);
+            }
             return;
         }
         let mut r = self.document.edit.recipe().clone();
@@ -78,7 +95,7 @@ impl Editor {
         } else {
             super::inspector::ASPECTS
                 .iter()
-                .map(|(a, _)| *a)
+                .map(|(a, ..)| *a)
                 .filter(|a| *a > 0.)
                 .flat_map(|a| [a, 1. / a])
                 .find(|a| near(aspect, *a))

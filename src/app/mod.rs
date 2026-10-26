@@ -282,6 +282,7 @@ impl Editor {
                     session.monitor_srgb,
                 ),
                 crop_guides: crop_tool::CropGuides::from_session(&session.crop_guides),
+                chosen_aspect: inspector::aspect_from_key(&session.crop_aspect),
                 ..Default::default()
             },
             preview: Default::default(),
@@ -416,6 +417,7 @@ impl Editor {
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
                     crop_guides: self.view.crop_guides.to_session(),
+                    crop_aspect: inspector::aspect_key(self.view.chosen_aspect).into(),
                     raw_defaults: self.raw_defaults.settings().clone(),
                     standard_preview_size: Some(self.preview_builds.standard_size),
                     decoded_cache_size_gib: Some((self.decode_cache.limit() >> 30) as u32),

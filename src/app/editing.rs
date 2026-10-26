@@ -43,9 +43,10 @@ impl Editor {
         }
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
-        self.sync_command_revision();
-        // Before the frame looks at it, so reading it changes no crop.
+        // Before the frame and any command look at the settings: an uncropped photo
+        // taking the chosen aspect is an edit of its own, not part of what follows.
         self.read_aspect();
+        self.sync_command_revision();
         let frame = EditFrame {
             command_adjust: false,
             generation: self.load.id(),
