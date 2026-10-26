@@ -404,6 +404,7 @@ impl Editor {
         let mut import_profiles = false;
         let mut import_lens = false;
         let mut import_folder = None;
+        let mut import_luts = false;
         let mut import_adobe = false;
         // Cached per camera: this scans Adobe's profile folders.
         let adobe_key = self
@@ -540,6 +541,14 @@ impl Editor {
                             .clicked()
                         {
                             import_folder = Some(ImportKind::CameraProfiles);
+                            ui.close();
+                        }
+                        if ui
+                            .button("Import .cube LUTs…")
+                            .on_hover_text("Import .cube LUTs as looks, choosing the colour space they expect first")
+                            .clicked()
+                        {
+                            import_luts = true;
                             ui.close();
                         }
                     });
@@ -1512,6 +1521,9 @@ impl Editor {
         }
         if let Some(kind) = import_folder {
             self.dialog(FileDialog::ImportFolder(kind), &ui.ctx().clone());
+        }
+        if import_luts {
+            self.open_lut_import();
         }
         if import_adobe && let Some(m) = self.document.metadata.clone() {
             let result = crate::camera_profiles::import_readable(&adobe);

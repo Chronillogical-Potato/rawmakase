@@ -629,6 +629,7 @@ impl Editor {
         let (cameras, lenses) = (usage.camera_profiles, usage.lens_profiles);
         let presets = self.presets.library.presets.len();
         let mut chosen = None;
+        let mut luts = false;
         group(ui, "Camera profiles");
         form_row(ui, "Imported", |ui| {
             value(ui, &plural(cameras, "profile", "profiles"));
@@ -638,6 +639,13 @@ impl Editor {
                 chosen = Some(FileDialog::CameraProfile);
             }
             reveal_button(ui, &camera_profiles_dir());
+        });
+        // On a row of its own: with the folder's button beside it, the row is too
+        // wide where that button is "Show in File Manager".
+        form_row(ui, "", |ui| {
+            if ui.button("Import LUTs…").clicked() {
+                luts = true;
+            }
         });
         gap(ui);
         group(ui, "Lens profiles");
@@ -669,6 +677,10 @@ impl Editor {
         });
         if let Some(kind) = chosen {
             self.dialog(kind, &ctx);
+            self.preferences.stale = true;
+        }
+        if luts {
+            self.open_lut_import();
             self.preferences.stale = true;
         }
     }

@@ -3,6 +3,7 @@
 //! imported are skipped quietly, and what can't be imported is reported
 //! instead of failing the rest.
 use super::{Editor, worker::Event};
+use crate::camera_profiles::LutSpace;
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
@@ -12,7 +13,10 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ImportKind {
+    /// DCPs, look XMPs and `.cube` LUTs, the LUTs at the sRGB default.
     CameraProfiles,
+    /// `.cube` LUTs only, expecting colours in this space (Import .cube LUTs).
+    Luts(LutSpace),
     LensProfiles,
     Presets,
 }
@@ -20,6 +24,7 @@ impl ImportKind {
     fn extensions(self) -> &'static [&'static str] {
         match self {
             Self::CameraProfiles => &["dcp", "xmp", "cube"],
+            Self::Luts(_) => &["cube"],
             Self::LensProfiles => &["lcp"],
             Self::Presets => &["xmp"],
         }
@@ -28,6 +33,8 @@ impl ImportKind {
         match (self, count == 1) {
             (Self::CameraProfiles, true) => "profile",
             (Self::CameraProfiles, false) => "profiles",
+            (Self::Luts(_), true) => "LUT",
+            (Self::Luts(_), false) => "LUTs",
             (Self::LensProfiles, true) => "lens profile",
             (Self::LensProfiles, false) => "lens profiles",
             (Self::Presets, true) => "preset",
@@ -38,6 +45,7 @@ impl ImportKind {
     pub(super) fn filter(self) -> (&'static str, &'static [&'static str]) {
         match self {
             Self::CameraProfiles => ("Camera profiles and .cube LUTs", &["dcp", "xmp", "cube"]),
+            Self::Luts(_) => ("LUTs (.cube)", &["cube"]),
             Self::LensProfiles => ("Adobe lens profiles", &["lcp"]),
             Self::Presets => ("Lightroom presets", &["xmp"]),
         }
@@ -161,6 +169,12 @@ impl Summary {
             return format!("No {} found there", self.kind.noun(2));
         }
         let mut parts = vec![format!("Imported {imported} {}", self.kind.noun(imported))];
+        // A LUT import names its space, unless it is the sRGB default.
+        if let ImportKind::Luts(space) = self.kind
+            && space != LutSpace::Srgb
+        {
+            parts[0] += &format!(" in {space}");
+        }
         if already > 0 {
             parts.push(format!("{already} already imported"));
         }
@@ -175,8 +189,13 @@ impl Summary {
             .filter(|c| c.fidelity != crate::camera_profiles::Fidelity::Exact)
             .count();
         if approximated > 0 {
-            let luts = if approximated == 1 { "LUT" } else { "LUTs" };
-            parts.push(format!("{approximated} {luts} approximated"));
+            let luts = match (self.kind, approximated) {
+                // Imported LUTs, said already.
+                (ImportKind::Luts(_), _) => "",
+                (_, 1) => " LUT",
+                _ => " LUTs",
+            };
+            parts.push(format!("{approximated}{luts} approximated"));
         }
         let renamed = fresh().filter(|c| c.renamed()).count();
         if renamed > 0 {
@@ -316,14 +335,15 @@ fn check_name(
     true
 }
 
-/// Imports the profiles and LUTs `found` holds, the LUTs as expecting colours in
-/// `space`.
+/// Imports the profiles and LUTs `found` holds for `kind` (camera profiles or LUTs
+/// only), the LUTs as expecting colours in `space`.
 fn import_camera_profiles(
     found: &[Found],
     progress: &ImportProgress,
-    space: crate::camera_profiles::LutSpace,
+    kind: ImportKind,
+    space: LutSpace,
 ) -> Summary {
-    let mut summary = Summary::new(ImportKind::CameraProfiles);
+    let mut summary = Summary::new(kind);
     let destination = crate::storage::data_dir().join("camera-profiles");
     let mut names = BTreeMap::new();
     let (mut dcps, mut looks, mut cubes) = (Vec::new(), Vec::new(), Vec::new());
@@ -339,6 +359,12 @@ fn import_camera_profiles(
                 .is_some_and(|x| x.eq_ignore_ascii_case(e))
         };
         let xmp = extension("xmp");
+        // A LUT import takes cubes only; a folder's other files are left out when
+        // found, and a profile chosen by name is said to be the wrong kind.
+        if matches!(kind, ImportKind::Luts(_)) && !extension("cube") {
+            summary.fail(&file.path, "not a .cube LUT");
+            continue;
+        }
         if extension("cube") {
             // Its look's name is the import's to choose, so it is checked by its
             // table rather than its file name (`camera_profiles::import_files`).
@@ -554,10 +580,11 @@ fn run(kind: ImportKind, picks: &[PathBuf], progress: &ImportProgress) -> Summar
     progress.set(format!("Looking for {}…", kind.noun(2)));
     let found = gather(kind, picks);
     match kind {
-        // The app's imports take LUTs at the sRGB default.
+        // Imported as profiles, LUTs take the sRGB default.
         ImportKind::CameraProfiles => {
-            import_camera_profiles(&found, progress, crate::camera_profiles::LutSpace::Srgb)
+            import_camera_profiles(&found, progress, kind, LutSpace::Srgb)
         }
+        ImportKind::Luts(space) => import_camera_profiles(&found, progress, kind, space),
         ImportKind::LensProfiles => import_lens_profiles(&found, progress),
         ImportKind::Presets => import_presets(
             &found,
@@ -571,9 +598,14 @@ fn run(kind: ImportKind, picks: &[PathBuf], progress: &ImportProgress) -> Summar
 /// The `import-profiles` command: imports `picks` (files and folders) as the app's
 /// Import does, waiting for it, with the `.cube` LUTs among them expecting colours in
 /// `space`.
-pub fn import_profiles(picks: &[PathBuf], space: crate::camera_profiles::LutSpace) -> Summary {
-    let found = gather(ImportKind::CameraProfiles, picks);
-    import_camera_profiles(&found, &ImportProgress::default(), space)
+pub fn import_profiles(picks: &[PathBuf], space: LutSpace) -> Summary {
+    let kind = ImportKind::CameraProfiles;
+    import_camera_profiles(
+        &gather(kind, picks),
+        &ImportProgress::default(),
+        kind,
+        space,
+    )
 }
 
 impl Editor {
@@ -611,7 +643,7 @@ impl Editor {
         self.importing = None;
         if summary.imported > 0 {
             match summary.kind {
-                ImportKind::CameraProfiles => {
+                ImportKind::CameraProfiles | ImportKind::Luts(_) => {
                     if let Some(m) = &self.document.metadata {
                         let listed = crate::camera_profiles::listed(m);
                         self.document.profiles = listed.profiles;
@@ -718,7 +750,7 @@ mod tests {
             stem: "Portra".into(),
             already: false,
             fidelity,
-            space: crate::camera_profiles::LutSpace::Srgb,
+            space: LutSpace::Srgb,
         };
         summary.imported = 1;
         summary
@@ -736,6 +768,110 @@ mod tests {
             summary.details(8),
             "Portra.cube: imported as look \"Portra (Cool)\", as another profile is named \"Portra\": exact"
         );
+    }
+
+    /// Import .cube LUTs takes only the `.cube` files of a folder that holds profiles
+    /// too, as LUT packs ship Lightroom profiles beside their cubes; a profile chosen
+    /// by name is reported as the wrong kind, and nothing is written for it.
+    #[test]
+    fn a_lut_import_takes_only_cubes() {
+        let temp = tempfile::tempdir().unwrap();
+        let pack = temp.path().join("Pack");
+        std::fs::create_dir_all(pack.join("Lightroom")).unwrap();
+        for file in [
+            "A.cube",
+            "Sub.CUBE",
+            "Lightroom/A.xmp",
+            "Camera.dcp",
+            "notes.txt",
+        ] {
+            std::fs::write(pack.join(file), "").unwrap();
+        }
+        let kind = ImportKind::Luts(LutSpace::AdobeRgb);
+        let names = |found: &[Found]| -> Vec<String> {
+            found
+                .iter()
+                .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+        assert_eq!(
+            names(&gather(kind, std::slice::from_ref(&pack))),
+            ["A.cube", "Sub.CUBE"]
+        );
+        let chosen = gather(
+            kind,
+            &[pack.join("Camera.dcp"), pack.join("Lightroom/A.xmp")],
+        );
+        let summary = import_camera_profiles(
+            &chosen,
+            &ImportProgress::default(),
+            kind,
+            LutSpace::AdobeRgb,
+        );
+        assert_eq!(summary.imported, 0);
+        assert_eq!(
+            summary.lines(),
+            ["Camera.dcp: not a .cube LUT", "A.xmp: not a .cube LUT"]
+        );
+        assert_eq!(
+            summary.message(),
+            "Imported 0 LUTs in Adobe RGB (1998) · 2 skipped"
+        );
+        assert_eq!(kind.filter(), ("LUTs (.cube)", &["cube"][..]));
+    }
+
+    /// The status line names a LUT import's space unless it is sRGB, and a profile
+    /// import's line is as it was; the detail lines name the space too.
+    #[test]
+    fn a_lut_imports_status_names_its_space() {
+        use crate::camera_profiles::{CubeImport, Fidelity};
+        let cube = |name: &str, space, fidelity| CubeImport {
+            name: name.into(),
+            stem: "Portra".into(),
+            already: false,
+            fidelity,
+            space,
+        };
+        let rough = || Fidelity::Approximated {
+            max_levels: 1.,
+            resampled: Some(65),
+            shaper: false,
+            clamped: false,
+        };
+        let summary = |kind, space| {
+            let mut summary = Summary::new(kind);
+            summary.imported = 2;
+            summary.cubes = vec![
+                ("Portra.cube".into(), cube("Portra", space, rough())),
+                (
+                    "Cool/Portra.cube".into(),
+                    cube("Portra (Cool)", space, Fidelity::Exact),
+                ),
+            ];
+            summary
+        };
+        let pro = summary(
+            ImportKind::Luts(LutSpace::ProPhotoRgb),
+            LutSpace::ProPhotoRgb,
+        );
+        assert_eq!(
+            pro.message(),
+            "Imported 2 LUTs in ProPhoto RGB · 1 approximated · 1 renamed"
+        );
+        assert!(pro.details(8).contains(
+            "Portra.cube: imported as look \"Portra (Cool)\" in ProPhoto RGB, as another"
+        ));
+        let srgb = summary(ImportKind::Luts(LutSpace::Srgb), LutSpace::Srgb);
+        assert_eq!(
+            srgb.message(),
+            "Imported 2 LUTs · 1 approximated · 1 renamed"
+        );
+        let profiles = summary(ImportKind::CameraProfiles, LutSpace::Srgb);
+        assert_eq!(
+            profiles.message(),
+            "Imported 2 profiles · 1 LUT approximated · 1 renamed"
+        );
+        assert!(!profiles.details(8).contains(" in "));
     }
 
     #[test]

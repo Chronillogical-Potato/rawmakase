@@ -274,7 +274,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [catalog.rs](../src/app/catalog.rs) | UI workflows for native catalogs (including the default one in the data folder), Lightroom import, folder addition, relinking and applying imported edits. |
 | [folder_sync.rs](../src/app/folder_sync.rs) | Synchronize Folder in the app: the scan on its own thread (top bar progress and stop), the review dialog, applying as a folder change, and the open photo following a verified move of its file. |
 | [folder_locations.rs](../src/app/folder_locations.rs) | Preferences › Catalog › Folder locations, and the questions changing a root or adding a folder can raise. |
-| [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported. |
+| [bulk_import.rs](../src/app/bulk_import.rs) | Importing camera profiles, lens profiles and presets from chosen files or whole folders, reporting what could not be imported; `ImportKind::Luts` imports `.cube` LUTs only, for the colour space chosen in [lut_import.rs](../src/app/lut_import.rs). |
 | [upright.rs](../src/app/upright.rs) | Runs the Transform panel's Upright analysis off the UI thread. |
 | [stats.rs](../src/app/stats.rs) | The one-time question about sharing usage stats and its Preferences row; the report itself is in `src/stats.rs`. |
 | [updates.rs](../src/app/updates.rs) | The update notice under the toolbar and the About rows in Preferences; the checks and downloads themselves are in `src/updates.rs`. |
@@ -320,6 +320,7 @@ above rather than implementing SQL, file formats or pixel processing.
 | [presets.rs](../src/app/presets.rs) | Preset search, groups, favorites, compatibility, application, the Amount slider and temporary hover previews. |
 | [side_tabs.rs](../src/app/side_tabs.rs) | Develop's tab panel beside the adjustments (Presets, or Snapshots over History) and the rail that switches the adjustments between Edit (which also folds them) and the Crop, Remove, Red Eye and Masking drawers, then switches and folds the tab panel. |
 | [snapshots.rs](../src/app/snapshots.rs) | Develop's Snapshots panel: named states of the open photo's edit, kept per photo in the catalog (`catalog/snapshots.rs`, including Lightroom's imported snapshots). |
+| [lut_import.rs](../src/app/lut_import.rs) | The Import .cube LUTs window: the colour space a batch of LUTs expects (`LutSpace`), chosen before the files, at sRGB every time it opens. |
 | [curve_menu.rs](../src/app/curve_menu.rs) | The Tone Curve panel's Point Curve menu: choosing a curve as one History step, and the Save Point Curve window. |
 | [user_presets.rs](../src/app/user_presets.rs) | New Develop Preset; a preset's menu: Update, Rename and Delete for presets made here and imported ones, an imported one backed up before its first update (`presets/user.rs`, written by `xmp/preset_write.rs`), and Reveal in Finder for any preset file. |
 | [photo_metadata.rs](../src/app/photo_metadata.rs) | Rating, color label and pick/reject controls and shortcuts. |

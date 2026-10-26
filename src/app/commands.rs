@@ -447,6 +447,7 @@ impl Editor {
             || self.view.shortcuts
             || self.onboarding.visible
             || self.curve_save_open()
+            || self.lut_import_open()
             || self.folder_sync.is_reviewing()
             || self.file_ops.dialog_open()
     }

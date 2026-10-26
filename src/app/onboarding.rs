@@ -428,7 +428,7 @@ impl Editor {
                 let found = &self.onboarding.found;
                 let paths = match kind {
                     // Yours first: an Adobe profile of the same name wins.
-                    ImportKind::CameraProfiles => {
+                    ImportKind::CameraProfiles | ImportKind::Luts(_) => {
                         let mut paths = found.user_profiles.clone();
                         paths.extend(found.adobe_profiles.iter().cloned());
                         paths
@@ -452,6 +452,7 @@ impl Editor {
                 self.dialog(
                     match kind {
                         ImportKind::CameraProfiles => FileDialog::CameraProfile,
+                        ImportKind::Luts(space) => FileDialog::Luts(space),
                         ImportKind::LensProfiles => FileDialog::LensProfile,
                         ImportKind::Presets => FileDialog::ImportXmp,
                     },
@@ -527,7 +528,7 @@ impl Editor {
         let shared = shared_camera_raw();
         let user = user_camera_raw();
         let (title, detail, n, hover) = match kind {
-            ImportKind::CameraProfiles => (
+            ImportKind::CameraProfiles | ImportKind::Luts(_) => (
                 "Camera profiles",
                 "Starting looks such as Adobe Color, for your cameras.",
                 found.adobe_profiles.len() + found.user_profiles.len(),
@@ -547,7 +548,7 @@ impl Editor {
             ),
         };
         let noun = match kind {
-            ImportKind::CameraProfiles => "profile",
+            ImportKind::CameraProfiles | ImportKind::Luts(_) => "profile",
             ImportKind::LensProfiles => "lens profile",
             ImportKind::Presets => "preset",
         };
