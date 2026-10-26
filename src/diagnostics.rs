@@ -57,21 +57,17 @@ pub enum Field {
 }
 
 impl Field {
-    /// Text from outside the app, on one line, without control characters,
-    /// paths or the user's login name, and at most `max` characters long;
-    /// unavailable when nothing is left.
+    /// Text from outside the app, on one line, without control characters
+    /// and at most `max` characters long; unavailable when nothing is left.
+    /// A value that looks like it names a path is withheld whole: cutting
+    /// the path out of it can't be done reliably.
     pub fn untrusted(text: &str, max: usize) -> Self {
-        let user = ["USER", "USERNAME", "LOGNAME"]
-            .into_iter()
-            .find_map(|name| std::env::var(name).ok().filter(|u| !u.is_empty()));
-        Self::untrusted_for(text, max, user.as_deref())
-    }
-
-    fn untrusted_for(text: &str, max: usize, user: Option<&str>) -> Self {
-        let words: Vec<String> = text
+        if names_a_path(text) {
+            return Self::Unavailable("withheld: looked like a path");
+        }
+        let words: Vec<&str> = text
             .split(|c: char| c.is_whitespace() || c.is_control())
             .filter(|word| !word.is_empty())
-            .map(|word| redact(word, user))
             .collect();
         let line = words.join(" ");
         if line.is_empty() {
@@ -83,6 +79,15 @@ impl Field {
         let mut cut: String = line.chars().take(max.saturating_sub(1)).collect();
         cut.push('…');
         Self::Value(cut)
+    }
+
+    /// `untrusted`, for a value the user's environment sets, which could
+    /// also hold their login name: such a value is withheld whole.
+    fn from_environment(text: &str, max: usize, user: Option<&str>) -> Self {
+        if user.is_some_and(|user| holds_word(text, user)) {
+            return Self::Unavailable("withheld: held the user name");
+        }
+        Self::untrusted(text, max)
     }
 
     fn known(value: Option<String>, missing: &'static str) -> Self {
@@ -99,43 +104,45 @@ impl fmt::Display for Field {
     }
 }
 
-/// `word` with each part that names a place on disk (starting with `/`,
-/// `~` or `\\`, as `XDG_CURRENT_DESKTOP=GNOME:/home/alice/x` or a driver
-/// path would) replaced by `[path]`, and each that holds the login name by
-/// `[user]`. Parts are split at `:`, `;`, `,`, `=` and brackets, so a name
-/// like `GNU/Linux` stays as it is.
-fn redact(word: &str, user: Option<&str>) -> String {
-    let user = user
-        .filter(|user| user.chars().count() >= 3)
-        .map(str::to_lowercase);
-    let mut out = String::with_capacity(word.len());
-    let mut part = String::new();
-    let flush = |part: &mut String, out: &mut String| {
-        if part.starts_with(['/', '~', '\\']) {
-            out.push_str("[path]");
-        } else if user
-            .as_deref()
-            .is_some_and(|user| part.to_lowercase().contains(user))
-        {
-            out.push_str("[user]");
-        } else {
-            out.push_str(part);
-        }
-        part.clear();
-    };
-    for c in word.chars() {
-        if matches!(
-            c,
-            ':' | ';' | ',' | '=' | '(' | ')' | '[' | ']' | '"' | '\''
-        ) {
-            flush(&mut part, &mut out);
-            out.push(c);
-        } else {
-            part.push(c);
-        }
+/// Whether `text` may name a place on disk: a part that starts with `/`
+/// (after a separator, unlike `GNU/Linux`), `~`, a backslash, a URL, a
+/// drive letter (`C:`) or a percent-escape.
+fn names_a_path(text: &str) -> bool {
+    if text.contains(['\\', '~', '%']) || text.contains("://") {
+        return true;
     }
-    flush(&mut part, &mut out);
-    out
+    let chars: Vec<char> = text.chars().collect();
+    let separator =
+        |c: Option<&char>| c.is_none_or(|c| c.is_whitespace() || ":;,=([{\"'<".contains(*c));
+    chars.iter().enumerate().any(|(i, c)| {
+        let before = i.checked_sub(1).and_then(|i| chars.get(i));
+        match c {
+            '/' => separator(before),
+            // C:Users, C:/x: a lone letter, then a colon and a name.
+            ':' => {
+                let letter = before.is_some_and(char::is_ascii_alphabetic);
+                let lone = separator(i.checked_sub(2).and_then(|i| chars.get(i)));
+                let next = chars
+                    .get(i + 1)
+                    .is_some_and(|c| c.is_alphanumeric() || *c == '/');
+                letter && lone && next
+            }
+            _ => false,
+        }
+    })
+}
+
+/// Whether `text` holds `word` whole, in any case: not inside a longer
+/// word, so the login `ian` is not found in `Debian`.
+fn holds_word(text: &str, word: &str) -> bool {
+    let (text, word) = (text.to_lowercase(), word.to_lowercase());
+    if word.is_empty() {
+        return false;
+    }
+    let edge = |c: Option<char>| c.is_none_or(|c| !c.is_alphanumeric());
+    text.match_indices(&word).any(|(at, _)| {
+        edge(text[..at].chars().next_back()) && edge(text[at + word.len()..].chars().next())
+    })
 }
 
 /// This build.
@@ -605,8 +612,12 @@ fn kernel() -> Field {
 /// `XDG_CURRENT_DESKTOP`, e.g. `GNOME` or `Hyprland`.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn desktop(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Field {
+    let user = ["USER", "USERNAME", "LOGNAME"]
+        .into_iter()
+        .find_map(|name| var(name).map(|u| u.to_string_lossy().into_owned()))
+        .filter(|u| !u.is_empty());
     match var("XDG_CURRENT_DESKTOP") {
-        Some(value) => Field::untrusted(&value.to_string_lossy(), 64),
+        Some(value) => Field::from_environment(&value.to_string_lossy(), 64, user.as_deref()),
         None => Field::Unavailable("not set"),
     }
 }
@@ -799,43 +810,73 @@ Background task: none
     }
 
     #[test]
-    fn untrusted_text_names_no_path_or_user() {
-        let clean = |text| Field::untrusted_for(text, 96, Some("alice")).to_string();
-        assert_eq!(
-            clean("Hyprland:/home/alice/private.conf"),
-            "Hyprland:[path]"
-        );
-        assert_eq!(clean("GNOME ~/x"), "GNOME [path]");
-        assert_eq!(
-            clean("radv (loaded from /home/bob/lib/driver.so)"),
-            "radv (loaded from [path])"
-        );
-        assert_eq!(clean(r"C:\Users\Bob\driver.dll"), "C:[path]");
-        assert_eq!(clean("file:///srv/x"), "file:[path]");
-        assert_eq!(clean("Alice's GPU"), "[user]'s GPU");
-        assert_eq!(clean("built-by=alice"), "built-by=[user]");
-        // What isn't a path stays.
-        assert_eq!(
-            clean("Debian GNU/Linux 13 (trixie)"),
-            "Debian GNU/Linux 13 (trixie)"
-        );
-        assert_eq!(clean("Mesa 25.2.4-arch1.1"), "Mesa 25.2.4-arch1.1");
-        assert_eq!(clean("ubuntu:GNOME"), "ubuntu:GNOME");
-        // A short login matches too much to be redacted.
-        assert_eq!(
-            Field::untrusted_for("Intel Arc", 96, Some("ar")).to_string(),
-            "Intel Arc"
-        );
-        // Through the adapter and the environment.
+    fn withholds_values_that_may_name_a_path() {
+        for text in [
+            "Hyprland:/home/alice/Private Photos/secret.ARW",
+            "Hyprland:/home/alice/private(Secret).conf",
+            "GNOME ~/x",
+            "radv (loaded from /home/bob/lib/driver.so)",
+            r"C:\Users\Bob\driver.dll",
+            r"\\server\share\x",
+            "C:Users",
+            "file:///srv/x",
+            "%USERPROFILE%",
+            "%2Fhome%2Falice",
+        ] {
+            assert_eq!(
+                Field::untrusted(text, 96),
+                Field::Unavailable("withheld: looked like a path"),
+                "{text}"
+            );
+        }
+        // What isn't a path stays as it is.
+        for text in [
+            "Debian GNU/Linux 13 (trixie)",
+            "Mesa 25.2.4-arch1.1",
+            "NVIDIA 580.95.05",
+            "ubuntu:GNOME",
+            "AMD Radeon 780M Graphics (RADV PHOENIX)",
+            "7.2.8-9-omarchy",
+            "Intel(R) Arc(TM) A770 Graphics",
+        ] {
+            assert_eq!(
+                Field::untrusted(text, 96),
+                Field::Value(text.into()),
+                "{text}"
+            );
+        }
+        // Through the adapter.
         let mut adapter = adapter();
-        adapter.driver_info = "Mesa /home/alice/private/driver.so".into();
+        adapter.driver_info = "Mesa /home/alice/Private Photos/driver.so".into();
         let driver = Gpu::from_adapter(&adapter).driver.to_string();
-        assert!(!driver.contains("/home"), "{driver}");
-        let desktop = desktop(env(&[(
-            "XDG_CURRENT_DESKTOP",
-            "Hyprland:/home/alice/p.conf",
-        )]));
-        assert!(!desktop.to_string().contains("/home"), "{desktop}");
+        assert!(!driver.contains("Photos"), "{driver}");
+    }
+
+    #[test]
+    fn withholds_a_desktop_that_holds_the_login_name() {
+        let desktop_for = |user: &str, value: &str| {
+            desktop(env(&[("USER", user), ("XDG_CURRENT_DESKTOP", value)]))
+        };
+        let withheld = Field::Unavailable("withheld: held the user name");
+        assert_eq!(desktop_for("al", "Hyprland:al"), withheld);
+        assert_eq!(desktop_for("alice", "Alice's-session"), withheld);
+        assert_eq!(desktop_for("john.doe", "GNOME:John.Doe"), withheld);
+        // Only whole words: the login ian isn't in Debian.
+        assert_eq!(
+            desktop_for("ian", "Debian:GNOME"),
+            Field::Value("Debian:GNOME".into())
+        );
+        assert_eq!(
+            desktop_for("alice", "Hyprland:/home/x"),
+            Field::Unavailable("withheld: looked like a path")
+        );
+        // System files aren't the user's: the login arch leaves Arch Linux.
+        assert_eq!(
+            linux_name("PRETTY_NAME=\"Arch Linux\"\n")
+                .map(|f| f.to_string())
+                .as_deref(),
+            Some("Arch Linux")
+        );
     }
 
     #[test]
