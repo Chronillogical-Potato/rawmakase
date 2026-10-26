@@ -1684,8 +1684,11 @@ fn a_folder_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Resul
     };
     assert_eq!(why, super::copy::LEFT_ON_SHARE);
     assert_eq!(fx.rows(), rows);
-    // Deleted by the user, it is gone, and so is the item.
-    std::fs::remove_dir_all(fx.root.join("far/day"))?;
+    // Its files deleted by the user, the item clears, and the folders it
+    // made, empty, go with it (review of #675: a folder named there was
+    // taken for one not as made, and stayed unfinished).
+    super::copy_tests::deleted_by_the_user(&fx, outcome.items[0].operation);
+    assert!(fx.root.join("far/day/sub").is_dir());
     fx.reopen();
     assert!(
         fx.recover_with(&far_as(&fx, Far::Share), &trash)
@@ -1693,5 +1696,55 @@ fn a_folder_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Resul
             .is_empty()
     );
     assert_eq!(fx.rows(), rows);
+    Ok(())
+}
+
+/// A copy left on a share whose original changed meanwhile, which may hold
+/// the only bytes left, is never said to be the user's to delete, whatever
+/// else is left there (review of #675).
+#[test]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+fn a_folder_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable() -> Result<()> {
+    let mut fx = small();
+    let (day, far) = (fx.root.join("day"), fx.root.join("far/day"));
+    // As each file's copy is made, another app rewrites the originals of
+    // those copied whole before it, and the share fills at the last.
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 2, Fault::Fail)],
+        watch: Some(Box::new(move |call: &super::tests::Call| {
+            let super::tests::Call::Entry(at) = call else {
+                return;
+            };
+            let Ok(rel) = at.strip_prefix(&far) else {
+                return;
+            };
+            // Only as a file's copy is just made, before the share fills.
+            if !std::fs::metadata(at).is_ok_and(|m| m.is_file() && m.len() == 0) {
+                return;
+            }
+            for other in [".hidden", "a.NEF", "sub/b.NEF"] {
+                let (original, copy) = (day.join(other), far.join(other));
+                if Path::new(other) != rel
+                    && std::fs::read(&copy).ok() == std::fs::read(&original).ok()
+                    && copy.is_file()
+                {
+                    std::fs::write(&original, b"rewritten").unwrap();
+                }
+            }
+        })),
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let [ItemResult::NeedsRecovery(why)] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_ne!(why, super::copy::LEFT_ON_SHARE);
+    let rewritten = ["day/.hidden", "day/a.NEF", "day/sub/b.NEF"]
+        .iter()
+        .filter(|n| std::fs::read(fx.root.join(n)).unwrap() == b"rewritten")
+        .count();
+    assert!(rewritten > 0);
     Ok(())
 }

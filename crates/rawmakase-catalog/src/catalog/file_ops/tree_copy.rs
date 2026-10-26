@@ -1443,13 +1443,16 @@ fn discard(
         Built::Unknown => Ok(Some(NOT_BACK)),
         // Built at its name, and part of it undone a copy at a time
         // already (its volume has no Trash): the rest goes so too, as what
-        // is left no longer matches what was made.
-        Built::Named(_)
+        // is left no longer matches what was made. On a share, where
+        // nothing goes whole, always so: what the user deleted of it is
+        // then found gone, and its folders go once empty.
+        Built::Named(at)
             if proofs.direct
-                && item
-                    .members
-                    .iter()
-                    .any(|m| m.state == MemberState::Discarded) =>
+                && (proof::removes_nothing(disk, &at)
+                    || item
+                        .members
+                        .iter()
+                        .any(|m| m.state == MemberState::Discarded)) =>
         {
             discard_each(cx, catalog, item, rule)
         }
@@ -1484,7 +1487,8 @@ fn discard(
 /// as copied, else left, or on Put Back (`rule` `Present`) put in the
 /// Trash; a folder removed once empty; on an SMB share no file removed
 /// ([`copy::LEFT_ON_SHARE`]). Returns why not, unless all of it is gone:
-/// that some are left on a share, if any are.
+/// that some are left on a share only when every one left is so, and is
+/// safe to delete.
 fn discard_each(
     cx: &Cx<'_>,
     catalog: &mut Catalog,
@@ -1527,11 +1531,16 @@ fn discard_each(
         let done = match found {
             Made::Gone => true,
             Made::Unknown => false,
-            // Only while empty: one holding a copy left stays.
-            Made::Here(at) if dir => disk
-                .remove_dir(&at)
-                .and_then(|()| disk.sync_dir(parent(&at)))
-                .is_ok(),
+            // Only while empty: one holding a copy left stays, on a share
+            // for as long as the copies left there.
+            Made::Here(at) if dir => {
+                if proof::removes_nothing(disk, &at) {
+                    why = copy::LEFT_ON_SHARE;
+                }
+                disk.remove_dir(&at)
+                    .and_then(|()| disk.sync_dir(parent(&at)))
+                    .is_ok()
+            }
             Made::Here(at) if copy.content.is_some() && !original_proven(disk, proofs, m) => {
                 match rule {
                     Originals::AsCopied => false,
@@ -1586,9 +1595,10 @@ fn discard_each(
                 .is_ok(),
         };
         if !done {
-            // Left on a share says what the user can do, so it is said.
+            // Left on a share says the user may delete it, so only while
+            // nothing else stays, which may be the only copy of its bytes.
             left = match left {
-                Some(copy::LEFT_ON_SHARE) => left,
+                Some(NOT_BACK) => left,
                 _ => Some(why),
             };
             continue;

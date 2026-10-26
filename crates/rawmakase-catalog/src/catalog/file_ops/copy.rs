@@ -848,6 +848,9 @@ fn discard(
         Subject::Photos(pre) => pre.to.as_ref().map(|(to, _)| *to),
         _ => None,
     };
+    // Copies left on a share, the user's to delete: said only once no
+    // other copy stays, which may hold the only bytes left.
+    let mut on_share = false;
     for m in item.members.iter().rev() {
         let Some(copy) = &m.copy else {
             return Ok(Some(NOT_BACK));
@@ -890,11 +893,16 @@ fn discard(
             {
                 receipt = match trash_copy(cx, &at, &m.source) {
                     Ok(r) => r,
+                    Err(LEFT_ON_SHARE) => {
+                        on_share = true;
+                        continue;
+                    }
                     Err(left) => return Ok(Some(left)),
                 };
             }
             Partial::Ours(at) if proof::removes_nothing(disk, &at) => {
-                return Ok(Some(LEFT_ON_SHARE));
+                on_share = true;
+                continue;
             }
             Partial::Ours(at) => {
                 let removed = disk
@@ -924,6 +932,10 @@ fn discard(
                             }
                             receipt = match trash_copy(cx, at, &m.source) {
                                 Ok(r) => r,
+                                Err(LEFT_ON_SHARE) => {
+                                    on_share = true;
+                                    continue;
+                                }
                                 Err(left) => return Ok(Some(left)),
                             };
                         }
@@ -935,14 +947,15 @@ fn discard(
             .db
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
     }
-    Ok(None)
+    Ok(on_share.then_some(LEFT_ON_SHARE))
 }
 
 /// Puts copy `at` of original `source` in the Trash, as an undone copy
 /// goes. Where its volume has none it is removed instead, only while
 /// `source` holds every byte it does, as many as it has
 /// ([`proof::begins`]): then nothing is lost; but never on an SMB share
-/// ([`proof::removes_nothing`]), where it stays ([`LEFT_ON_SHARE`]).
+/// ([`proof::removes_nothing`]), where it stays, the user's to delete
+/// ([`LEFT_ON_SHARE`]) only when that holds.
 /// `Ok` once it is gone, with the Trash's receipt if the Trash took it;
 /// why not while it stays.
 pub(super) fn trash_copy(
@@ -952,8 +965,12 @@ pub(super) fn trash_copy(
 ) -> Result<Option<PathBuf>, &'static str> {
     let receipt = match cx.trash.trash(at) {
         Ok(r) => Some(r.location),
+        // The user's to delete only while nothing would be lost.
         Err(TrashError::Unsupported) if proof::removes_nothing(cx.disk, at) => {
-            return Err(LEFT_ON_SHARE);
+            return Err(match proof::begins(cx.disk, at, source) {
+                true => LEFT_ON_SHARE,
+                false => NOT_BACK,
+            });
         }
         Err(TrashError::Unsupported) if proof::begins(cx.disk, at, source) => {
             cx.disk.remove_file(at).map_err(|_| NOT_BACK)?;

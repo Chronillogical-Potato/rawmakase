@@ -1166,18 +1166,17 @@ pub(super) fn put_back(
 }
 
 /// What item `operation` left on a share, deleted as its user would: each
-/// of its copies, and the folders it made.
+/// of its copies, leaving the folders it made, which recovery removes
+/// once empty.
 pub(super) fn deleted_by_the_user(fx: &Fx, operation: OperationId) {
     let item = journal::item(&fx.cat.db, operation).unwrap().unwrap();
-    for m in item.members.iter().rev() {
+    for m in &item.members {
         let made = [
             m.destination.clone(),
             m.copy.as_ref().map(|c| c.temp.clone()),
         ];
         for at in made.into_iter().flatten() {
-            if at.is_dir() {
-                std::fs::remove_dir_all(&at).unwrap();
-            } else if at.is_file() {
+            if at.is_file() {
                 std::fs::remove_file(&at).unwrap();
             }
         }
@@ -2556,5 +2555,38 @@ fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Resu
             }
         }
     }
+    Ok(())
+}
+
+/// A copy left on a share is said to be the user's to delete only while
+/// its original holds every byte of it: a whole copy kept because its
+/// original changed meanwhile may hold the only bytes left, and that is
+/// said over any other copy left there (review of #675).
+#[test]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+fn a_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable() -> Result<()> {
+    let mut fx = files();
+    let original = fx.root.join("A.NEF");
+    // A.NEF is copied whole; once its sidecar's copy is made, another app
+    // rewrites it, and the share fills.
+    let watched = original.clone();
+    let (sidecar, copied) = (fx.root.join("far/A.xmp"), fx.root.join("far/A.NEF"));
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 1, Fault::Fail)],
+        watch: Some(Box::new(move |call: &super::tests::Call| {
+            if matches!(call, super::tests::Call::Entry(at) if *at == sidecar) && copied.exists() {
+                std::fs::write(&watched, b"rewritten").unwrap();
+            }
+        })),
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx, &["A.NEF"]);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let [ItemResult::NeedsRecovery(why)] = &results(&outcome)[..] else {
+        panic!("{outcome:?}")
+    };
+    assert_ne!(why, super::copy::LEFT_ON_SHARE);
+    assert_eq!(std::fs::read(fx.root.join("far/A.NEF"))?, bytes("A.NEF"));
     Ok(())
 }
