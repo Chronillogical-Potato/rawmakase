@@ -286,14 +286,19 @@ pub(super) fn write(
     // is found by its name, empty. Not made, nothing of it is there: what
     // is (a file another program made at its name, which may be the
     // photo's own name where copies are made at it) is never taken for it.
-    if let Err(e) = disk.create_file(temp) {
-        journal(catalog, &|w| journal::set_discarded(w, id, ordinal, None))?;
-        return Err(match e {
-            FsError::AlreadyExists => Problem::NameTaken(name(temp)),
-            e => problem(e),
+    // Copied through the handle it was made through: into this file,
+    // whatever another computer puts at its name meanwhile (on a share).
+    let mut into = match disk.create_file(temp) {
+        Ok(into) => into,
+        Err(e) => {
+            journal(catalog, &|w| journal::set_discarded(w, id, ordinal, None))?;
+            return Err(match e {
+                FsError::AlreadyExists => Problem::NameTaken(name(temp)),
+                e => problem(e),
+            }
+            .into());
         }
-        .into());
-    }
+    };
     let made = disk.entry(temp).map_err(problem)?;
     if made.kind != EntryKind::File || made.links != 1 {
         return Err(Problem::Disk(format!("{} isn't the file made", temp.display())).into());
@@ -316,7 +321,7 @@ pub(super) fn write(
     })?;
     // 2. Copied, durable, with the original's time.
     let content = disk
-        .copy_into(source, &temp, file, &mut |_| {
+        .copy_into(source, &temp, &mut into, &mut |_| {
             !cancel.load(Ordering::Relaxed)
         })
         .map_err(|e| match e {
@@ -324,6 +329,7 @@ pub(super) fn write(
             CopyError::NotTheFile => Problem::Disk(e.to_string()),
             CopyError::Fs(e) => problem(e),
         })?;
+    drop(into);
     // Written whole: from here it is never removed while its original
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;

@@ -348,9 +348,9 @@ fn a_copy_has_every_byte_and_the_hash_of_what_was_read() {
     let (a, b) = (d.path().join("a.NEF"), d.path().join(".a.part"));
     let bytes = big();
     fs::write(&a, &bytes).unwrap();
-    create_file(&b).unwrap();
+    let mut into = create_file(&b).unwrap();
     let mut seen = Vec::new();
-    let hash = copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |n| {
+    let hash = copy_into(&a, &mut into, &mut |n| {
         seen.push(n);
         true
     })
@@ -377,9 +377,9 @@ fn a_copy_stops_between_chunks_when_asked() {
     let d = dir();
     let (a, b) = (d.path().join("a.NEF"), d.path().join(".a.part"));
     fs::write(&a, big()).unwrap();
-    create_file(&b).unwrap();
+    let mut into = create_file(&b).unwrap();
     let mut calls = 0;
-    let stopped = copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |_| {
+    let stopped = copy_into(&a, &mut into, &mut |_| {
         calls += 1;
         false
     });
@@ -391,40 +391,34 @@ fn a_copy_stops_between_chunks_when_asked() {
 #[test]
 fn a_copy_goes_only_into_the_empty_file_it_was_given() {
     let d = dir();
-    let (a, b, c) = (
-        d.path().join("a.NEF"),
-        d.path().join(".b.part"),
-        d.path().join(".c.part"),
-    );
+    let (a, b) = (d.path().join("a.NEF"), d.path().join(".b.part"));
     fs::write(&a, b"synthetic raw").unwrap();
-    create_file(&b).unwrap();
-    create_file(&c).unwrap();
-    // Another file object than the one given.
-    let other = entry(&c).unwrap().id;
-    assert!(matches!(
-        copy_into(&a, &b, Some(other), &mut |_| true),
-        Err(CopyError::NotTheFile)
-    ));
     // A file with bytes in it already.
+    let mut into = create_file(&b).unwrap();
     fs::write(&b, b"x").unwrap();
-    let id = entry(&b).unwrap().id;
     assert!(matches!(
-        copy_into(&a, &b, Some(id), &mut |_| true),
-        Err(CopyError::NotTheFile)
-    ));
-    // Nor, on a volume whose ids can't be proven, by any id.
-    assert!(matches!(
-        copy_into(&a, &b, None, &mut |_| true),
+        copy_into(&a, &mut into, &mut |_| true),
         Err(CopyError::NotTheFile)
     ));
     assert_eq!(fs::read(&b).unwrap(), b"x");
-    // Nothing is made where there was nothing.
-    let gone = d.path().join(".gone.part");
-    assert!(matches!(
-        copy_into(&a, &gone, Some(id), &mut |_| true),
-        Err(CopyError::Fs(FsError::NotFound))
-    ));
-    assert!(!gone.exists());
+}
+
+/// What is copied goes into the file made, never into one another program
+/// or computer put at its name since (two mounts of an SMB share, where
+/// names prove files, showed one's bytes overwritten, #573). Unix only:
+/// Windows may keep a removed file's name while a handle to it is open.
+#[cfg(unix)]
+#[test]
+fn a_copy_goes_into_the_file_made_whatever_is_put_at_its_name() {
+    let d = dir();
+    let (a, b) = (d.path().join("a.NEF"), d.path().join(".b.part"));
+    fs::write(&a, b"synthetic raw").unwrap();
+    let mut into = create_file(&b).unwrap();
+    fs::remove_file(&b).unwrap();
+    fs::write(&b, b"another's").unwrap();
+    let copied = copy_into(&a, &mut into, &mut |_| true);
+    assert!(copied.is_ok(), "{copied:?}");
+    assert_eq!(fs::read(&b).unwrap(), b"another's");
 }
 
 #[test]
@@ -444,8 +438,8 @@ fn a_copy_takes_the_sources_time_and_permissions() {
         use std::os::unix::fs::PermissionsExt as _;
         fs::set_permissions(&a, fs::Permissions::from_mode(0o440)).unwrap();
     }
-    create_file(&b).unwrap();
-    copy_into(&a, &b, Some(entry(&b).unwrap().id), &mut |_| true).unwrap();
+    let mut into = create_file(&b).unwrap();
+    copy_into(&a, &mut into, &mut |_| true).unwrap();
     sync_file(&b).unwrap();
     copy_times(&a, &b).unwrap();
     // Read-only now, and still synced.
@@ -606,9 +600,10 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     let source = local.path().join("s.NEF");
     fs::write(&source, b"synthetic raw").unwrap();
     let copy = d.path().join("s.NEF");
-    create_file(&copy).unwrap();
+    let mut into = create_file(&copy).unwrap();
     set_extra(&source, "com.rawmakase.test", b"synthetic").unwrap();
-    let content = copy_into(&source, &copy, None, &mut |_| true).unwrap();
+    let content = copy_into(&source, &mut into, &mut |_| true).unwrap();
+    drop(into);
     sync_file(&copy).unwrap();
     // Its extras, as a move gives them, between the two.
     copy_extras(&source, &copy).unwrap();

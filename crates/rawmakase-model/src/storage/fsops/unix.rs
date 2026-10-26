@@ -32,15 +32,6 @@ pub(super) fn entry(path: &Path) -> Result<Entry, FsError> {
     })
 }
 
-/// The file object an open file is.
-pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
-    let m = file.metadata()?;
-    Ok(FileId {
-        volume: VolumeId(m.dev()),
-        index: m.ino(),
-    })
-}
-
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     use rustix::fs::{CWD, RenameFlags, renameat_with};
@@ -50,7 +41,8 @@ pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     // file every time (Linux 7.2 against Samba 4.22). macOS's smbfs
     // answers ENOTSUP itself.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    if kind(from.parent().unwrap_or(Path::new(".")))? == VolumeKind::Smb {
+    let dir = from.parent().filter(|d| !d.as_os_str().is_empty());
+    if kind(dir.unwrap_or(Path::new(".")))? == VolumeKind::Smb {
         return Err(FsError::Unsupported);
     }
     renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(errno)

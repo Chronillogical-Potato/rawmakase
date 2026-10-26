@@ -436,17 +436,17 @@ macro_rules! passes_on {
         fn create_file(
             &self,
             path: &std::path::Path,
-        ) -> Result<(), crate::storage::fsops::FsError> {
+        ) -> Result<std::fs::File, crate::storage::fsops::FsError> {
             self.$inner.create_file(path)
         }
         fn copy_into(
             &self,
             from: &std::path::Path,
             to: &std::path::Path,
-            to_id: Option<crate::storage::fsops::FileId>,
+            into: &mut std::fs::File,
             go_on: &mut dyn FnMut(u64) -> bool,
         ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
-            self.$inner.copy_into(from, to, to_id, go_on)
+            self.$inner.copy_into(from, to, into, go_on)
         }
         fn hash_prefix(
             &self,
@@ -787,15 +787,6 @@ impl Faulty {
             .copied()
             .unwrap_or_else(|| real.elsewhere())
     }
-    /// The real file object `elsewhere` numbers `fake`.
-    fn real(&self, fake: crate::storage::fsops::FileId) -> crate::storage::fsops::FileId {
-        self.numbers
-            .borrow()
-            .iter()
-            .find(|(_, f)| **f == fake)
-            .map(|(r, _)| *r)
-            .unwrap_or_else(|| fake.elsewhere())
-    }
     /// Gives the file at `path`, if `elsewhere`, a number never given yet.
     fn renumber(&self, path: &Path) {
         if !self.far(path) {
@@ -971,7 +962,7 @@ impl Disk for Faulty {
         facts.read_only |= self.read_only;
         Ok(facts)
     }
-    fn create_file(&self, path: &Path) -> Result<(), FsError> {
+    fn create_file(&self, path: &Path) -> Result<std::fs::File, FsError> {
         self.calls.borrow_mut().push(Call::CreateFile(path.into()));
         if let Some((at, bytes)) = &self.occupy_on_create
             && at == path
@@ -984,7 +975,7 @@ impl Disk for Faulty {
         &self,
         from: &Path,
         to: &Path,
-        to_id: Option<crate::storage::fsops::FileId>,
+        into: &mut std::fs::File,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
         use crate::storage::fsops::CopyError;
@@ -992,27 +983,21 @@ impl Disk for Faulty {
             .borrow_mut()
             .push(Call::Copy(from.into(), to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
-        // The file object as the real disk numbers it.
-        let to_id = match self.far(to) {
-            true => to_id.map(|id| self.real(id)),
-            false => to_id,
-        };
         let (n, fault) = self.fault(Op::Copy);
-        // Part of it: the first chunk.
-        let part = || Real.copy_into(from, to, to_id, &mut |_| false);
         match fault {
             Some(Fault::CrashBefore) => panic!("injected crash before copy {n}"),
+            // Part of it: the first chunk.
             Some(Fault::Fail) => {
-                let _part = part();
+                let _part = Real.copy_into(from, to, into, &mut |_| false);
                 return Err(CopyError::Fs(FsError::NoSpace));
             }
             Some(Fault::CrashMid) => {
-                let _part = part();
+                let _part = Real.copy_into(from, to, into, &mut |_| false);
                 panic!("injected crash in copy {n}")
             }
             Some(Fault::CrashAfter) | None => {}
         }
-        let copied = Real.copy_into(from, to, to_id, &mut |written| {
+        let copied = Real.copy_into(from, to, into, &mut |written| {
             self.calls.borrow_mut().push(Call::Chunk(written));
             if let Some(stop) = &self.stop {
                 stop.store(true, std::sync::atomic::Ordering::Relaxed);
