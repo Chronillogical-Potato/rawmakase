@@ -9,6 +9,7 @@ use std::{
     io::Write,
     panic::{self, AssertUnwindSafe},
     path::{Path, PathBuf},
+    sync::{Mutex, PoisonError},
 };
 
 /// Past this size the log moves to `crash.old.log`, so a panic repeated on
@@ -61,7 +62,12 @@ fn record(time: &str, thread: &str, message: &str, location: &str, backtrace: &s
     )
 }
 
+/// Appends `text`, first moving a full log aside. Threads panicking at once
+/// take turns, so none checks the size of a log another is moving aside.
 fn append(path: &Path, text: &str) -> std::io::Result<()> {
+    static WRITING: Mutex<()> = Mutex::new(());
+    // A poisoned lock still serializes; panicking here would abort.
+    let _turn = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -122,6 +128,32 @@ mod tests {
             fs::metadata(dir.path().join("logs/crash.old.log"))?.len(),
             LIMIT + 1
         );
+        Ok(())
+    }
+
+    #[test]
+    fn records_from_threads_at_once_all_survive_moving_a_full_log_aside() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let log = dir.path().join("crash.log");
+        let barrier = std::sync::Barrier::new(16);
+        for _round in 0..20 {
+            fs::write(&log, vec![b'x'; LIMIT as usize + 1])?;
+            let _ = fs::remove_file(dir.path().join("crash.old.log"));
+            std::thread::scope(|s| {
+                for n in 0..16 {
+                    let (log, barrier) = (&log, &barrier);
+                    s.spawn(move || {
+                        barrier.wait();
+                        append(log, &format!("record {n}\n")).unwrap();
+                    });
+                }
+            });
+            let kept = fs::read_to_string(&log)?
+                + &String::from_utf8_lossy(&fs::read(dir.path().join("crash.old.log"))?);
+            for n in 0..16 {
+                assert!(kept.contains(&format!("record {n}\n")), "lost record {n}");
+            }
+        }
         Ok(())
     }
 }
