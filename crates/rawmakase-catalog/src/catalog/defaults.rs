@@ -30,18 +30,40 @@ impl MetadataDefaults {
     }
 }
 
-impl MetadataDefaults {
-    /// What of these defaults a photo added from `file` gets: each one the
-    /// metadata read from its files (`read`) and its EXIF both lack.
+/// Reads the camera's EXIF of a photo's file. The catalog can't read it
+/// from every RAW itself (a CR3's, MRW's or X3F's is found by RAWmakase's
+/// RAW decoders), so the app passes its reader in: `photo::camera_exif`.
+pub type CameraExifReader = fn(&Path) -> Option<crate::exif::CameraExif>;
+
+/// What photos added from folders get where their files have none: the
+/// Preferences' Creator and Copyright, which give way to the camera's own,
+/// read by the reader given. The default is none, which reads nothing.
+#[derive(Clone, Debug, Default)]
+pub struct NewPhotoDefaults {
+    metadata: MetadataDefaults,
+    camera_exif: Option<CameraExifReader>,
+}
+impl NewPhotoDefaults {
+    /// `metadata` where `camera_exif` finds no Artist or Copyright of the
+    /// camera's.
+    pub fn new(metadata: MetadataDefaults, camera_exif: CameraExifReader) -> Self {
+        Self {
+            metadata,
+            camera_exif: Some(camera_exif),
+        }
+    }
+    /// What of the defaults a photo added from `file` gets: each one the
+    /// metadata read from its files (`read`) and its camera's EXIF both lack.
     pub(super) fn for_file(&self, file: &Path, read: Option<&Read>) -> Fill {
-        let (creator, copyright) = (self.creator.trim(), self.copyright.trim());
+        let defaults = &self.metadata;
+        let (creator, copyright) = (defaults.creator.trim(), defaults.copyright.trim());
         let creator = !creator.is_empty() && read.is_none_or(|r| r.creator.is_none());
         let copyright = !copyright.is_empty() && read.is_none_or(|r| r.copyright.is_none());
-        if !creator && !copyright {
+        let Some(camera_exif) = self.camera_exif.filter(|_| creator || copyright) else {
             return Fill::default();
-        }
+        };
         // Read once for both.
-        let exif = crate::exif::read(file);
+        let exif = camera_exif(file);
         let has = |tag| {
             exif.as_ref()
                 .and_then(|e| e.get(tag).and_then(crate::exif::Field::text))
@@ -49,9 +71,9 @@ impl MetadataDefaults {
         };
         Fill {
             creator: (creator && !has(crate::exif::tag::ARTIST))
-                .then(|| Value::Set(vec![self.creator.trim().to_string()])),
+                .then(|| Value::Set(vec![defaults.creator.trim().to_string()])),
             copyright: (copyright && !has(crate::exif::tag::COPYRIGHT))
-                .then(|| Value::Set(LangAlt::new(self.copyright.trim()))),
+                .then(|| Value::Set(LangAlt::new(defaults.copyright.trim()))),
         }
     }
 }

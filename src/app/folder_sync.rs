@@ -612,7 +612,7 @@ impl Editor {
                         &accepted,
                         &crate::volume_mounted,
                         open,
-                        &crate::catalog::MetadataDefaults::load(),
+                        &crate::catalog_session::new_photo_defaults(),
                     )?;
                     drop(catalog);
                     // Applied: what follows must not lose it, nor where the

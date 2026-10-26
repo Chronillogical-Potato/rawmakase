@@ -204,7 +204,7 @@ impl Editor {
                                 FolderAction::Add => {
                                     let added = cat.import_folder(
                                         &path,
-                                        &crate::catalog::MetadataDefaults::load(),
+                                        &crate::catalog_session::new_photo_defaults(),
                                         &[],
                                     )?;
                                     if !added.ambiguous.is_empty() {
@@ -329,7 +329,7 @@ impl Editor {
                 let mut imported = Vec::new();
                 let result = (|| -> anyhow::Result<_> {
                     let mut catalog = crate::catalog::Catalog::open(&current)?;
-                    let defaults = crate::catalog::MetadataDefaults::load();
+                    let defaults = crate::catalog_session::new_photo_defaults();
                     let mut report = crate::catalog::SidecarReport::default();
                     let mut conflicts = Vec::new();
                     // Folders the catalog has twice over (Add Folder… asks
@@ -450,7 +450,7 @@ impl Editor {
                 let result = (|| -> anyhow::Result<_> {
                     let added = crate::catalog::Catalog::open(&current)?.import_folder(
                         &folder,
-                        &crate::catalog::MetadataDefaults::load(),
+                        &crate::catalog_session::new_photo_defaults(),
                         &[],
                     )?;
                     anyhow::ensure!(

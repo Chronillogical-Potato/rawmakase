@@ -879,8 +879,13 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
     let copy = cat.create_virtual_copy(given[0])?;
     let mut with_copy = given.clone();
     with_copy.push(copy);
-    let order = rename_order(&cat, &with_copy, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(
+        &cat,
+        &with_copy,
+        &AtomicBool::new(false),
+        crate::exif::capture_time,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     let names: Vec<(&str, Option<&str>)> = order
         .photos()
         .iter()
@@ -906,7 +911,12 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
     assert_eq!(captured, "", "the file's time is kept nowhere");
     // Stopped with the dialog.
     assert!(matches!(
-        rename_order(&cat, &given, &AtomicBool::new(true)),
+        rename_order(
+            &cat,
+            &given,
+            &AtomicBool::new(true),
+            crate::exif::capture_time
+        ),
         Err(FileOpError::Cancelled)
     ));
     Ok(())
@@ -916,8 +926,13 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
 fn a_batch_keeps_the_order_read_when_its_dialog_opened() -> Result<()> {
     let fx = fixture(&["a.NEF", "b.NEF"]);
     let (a, b) = (fx.photo("a.NEF"), fx.photo("b.NEF"));
-    let order = rename_order(&fx.cat, &[a, b], &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(
+        &fx.cat,
+        &[a, b],
+        &AtomicBool::new(false),
+        crate::exif::capture_time,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     // A capture time read meanwhile (the backfill, another window) would
     // put b first; the preview keeps the order it was given.
     fx.cat.db_for_tests().execute(
@@ -945,8 +960,13 @@ fn a_batch_keeps_the_order_read_when_its_dialog_opened() -> Result<()> {
 fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
     let mut fx = fixture(&["b.NEF", "b.xmp", "a.NEF", "c.JPG"]);
     let given = [fx.photo("b.NEF"), fx.photo("a.NEF"), fx.photo("c.JPG")];
-    let order = rename_order(&fx.cat, &given, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(
+        &fx.cat,
+        &given,
+        &AtomicBool::new(false),
+        crate::exif::capture_time,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     let template = NameTemplate {
         naming: Naming::CustomNameSequence,
         text: "Trip".into(),
@@ -988,8 +1008,13 @@ fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
     );
     // A name taken marks its photo, and blocks the others.
     std::fs::write(fx.root.join("Next-2.NEF"), b"in the way")?;
-    let order = rename_order(&fx.cat, &given, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(
+        &fx.cat,
+        &given,
+        &AtomicBool::new(false),
+        crate::exif::capture_time,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     let template = NameTemplate {
         naming: Naming::CustomNameSequence,
         text: "Next".into(),
@@ -1037,5 +1062,36 @@ fn a_case_only_rename_leaves_a_companion_already_so_named_where_it_is() -> Resul
     assert_eq!(listing(&fx), ["a.NEF", "a.xmp"]);
     assert_eq!(fsops::entry(&fx.root.join("a.xmp"))?.id, xmp);
     assert_eq!(fx.rows()[&a], "a.NEF");
+    Ok(())
+}
+
+/// A photo the catalog hasn't dated yet is dated by the app's reader, as
+/// the backfill dates it: a CR3's date, which the EXIF reader can't find,
+/// puts it among the dated photos (#671).
+#[test]
+fn an_undated_photo_is_dated_by_the_apps_reader() -> Result<()> {
+    let fx = fixture(&["a.CR3", "b.NEF"]);
+    let (a, b) = (fx.photo("a.CR3"), fx.photo("b.NEF"));
+    fx.cat.db_for_tests().execute(
+        "UPDATE photos SET captured='2021-06-06T10:00:00.000' WHERE id=?1",
+        [b.0],
+    )?;
+    fn reader(path: &std::path::Path) -> Option<String> {
+        (path.extension()? == "CR3").then(|| "2021-06-06T09:00:00.000".into())
+    }
+    let order = rename_order(&fx.cat, &[b, a], &AtomicBool::new(false), reader)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let names: Vec<(&str, Option<&str>)> = order
+        .photos()
+        .iter()
+        .map(|o| (o.filename.as_str(), o.captured.as_deref()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("a.CR3", Some("2021-06-06T09:00:00.000")),
+            ("b.NEF", Some("2021-06-06T10:00:00.000")),
+        ]
+    );
     Ok(())
 }

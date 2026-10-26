@@ -12,6 +12,16 @@ use anyhow::Result;
 /// A file's photo info as the catalog reads it for photos added from
 /// folders; export names read a photo's without a catalog the same way.
 pub(crate) use backfill::{capture_time as file_capture_time, read_info as file_photo_info};
+
+/// What photos added from folders get where their files have none: the
+/// Preferences' Creator and Copyright, giving way to the camera's own,
+/// which the RAW decoders also find in a CR3, MRW or X3F.
+pub(crate) fn new_photo_defaults() -> crate::catalog::NewPhotoDefaults {
+    photo_defaults(crate::catalog::MetadataDefaults::load())
+}
+fn photo_defaults(metadata: crate::catalog::MetadataDefaults) -> crate::catalog::NewPhotoDefaults {
+    crate::catalog::NewPhotoDefaults::new(metadata, crate::photo::camera_exif)
+}
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
@@ -463,6 +473,45 @@ mod tests {
         assert_eq!(
             file_capture_time(&crw).as_deref(),
             Some("2004-05-01T10:43:58.000")
+        );
+        Ok(())
+    }
+
+    /// The Preferences' Creator and Copyright give way to a CR3's own,
+    /// which the catalog reads through the app's reader (#671).
+    #[test]
+    fn a_cr3s_own_creator_and_copyright_keep_the_defaults_out() -> Result<()> {
+        use crate::exif::{CameraExif, Field, tag};
+        use crate::export::exif::{Container, camera_raw};
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        let camera = |main: Vec<Field>| CameraExif {
+            main,
+            ..Default::default()
+        };
+        let own = camera(vec![
+            Field::ascii(tag::MAKE, "Canon"),
+            Field::ascii(tag::ARTIST, "Ann Example"),
+            Field::ascii(tag::COPYRIGHT, "Ann Example 2024"),
+        ]);
+        std::fs::write(folder.join("own.CR3"), camera_raw(Container::Cr3, own))?;
+        let none = camera(vec![Field::ascii(tag::MAKE, "Canon")]);
+        std::fs::write(folder.join("none.CR3"), camera_raw(Container::Cr3, none))?;
+        let mut catalog = Catalog::create(&directory.path().join("Photos.rawmakase"))?;
+        let defaults = photo_defaults(crate::catalog::MetadataDefaults {
+            creator: "Default Creator".into(),
+            copyright: "© Default".into(),
+        });
+        catalog.add_folder_with(&folder, &defaults)?;
+        let creator = |name: &str| -> Result<_> {
+            let photo = catalog.photos()?.into_iter().find(|p| p.filename == name);
+            Ok(catalog.descriptive(photo.expect(name).id)?.creator)
+        };
+        assert_eq!(creator("own.CR3")?, None);
+        assert_eq!(
+            creator("none.CR3")?,
+            Some(crate::metadata::Value::Set(vec!["Default Creator".into()]))
         );
         Ok(())
     }
