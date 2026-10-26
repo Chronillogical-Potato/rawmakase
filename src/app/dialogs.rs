@@ -2,12 +2,14 @@
 use super::{Editor, bulk_import::ImportKind, worker::Event};
 use eframe::egui;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FileDialog {
     MonitorProfile,
     LoadPreset,
     SavePreset,
     CameraProfile,
+    /// `.cube` LUTs expecting colours in this space (Import .cube LUTs).
+    Luts(crate::camera_profiles::LutSpace),
     LensProfile,
     ImportXmp,
     /// A folder to scan for profiles or presets, subfolders included.
@@ -44,6 +46,7 @@ impl Editor {
             move |tx| {
                 let import = match kind {
                     FileDialog::CameraProfile => Some(ImportKind::CameraProfiles),
+                    FileDialog::Luts(space) => Some(ImportKind::Luts(space)),
                     FileDialog::LensProfile => Some(ImportKind::LensProfiles),
                     FileDialog::ImportXmp => Some(ImportKind::Presets),
                     _ => None,
@@ -79,6 +82,7 @@ impl Editor {
                         .add_filter("ICC profile", &["icc", "icm"])
                         .pick_file(),
                     FileDialog::CameraProfile
+                    | FileDialog::Luts(_)
                     | FileDialog::LensProfile
                     | FileDialog::ImportXmp
                     | FileDialog::ImportFolder(_)
@@ -96,6 +100,7 @@ impl Editor {
                     .map(|p| match kind {
                         FileDialog::MonitorProfile => Event::Monitor(p),
                         FileDialog::CameraProfile
+                        | FileDialog::Luts(_)
                         | FileDialog::LensProfile
                         | FileDialog::ImportXmp
                         | FileDialog::ImportFolder(_)

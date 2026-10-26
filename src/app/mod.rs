@@ -47,6 +47,8 @@ pub(crate) struct Editor {
     copy_groups: crate::model::settings_groups::GroupSelection,
     /// The Point Curve menu's saved curves and its Save window.
     curves: curve_menu::CurveMenu,
+    /// The Import .cube LUTs window's colour space, while it is open.
+    lut_import: Option<crate::camera_profiles::LutSpace>,
     /// Collapsed panel sections as last saved to the session.
     collapsed: std::collections::BTreeSet<String>,
     /// The sides in Solo Mode as last saved to the session.
@@ -303,6 +305,7 @@ impl Editor {
             clipboard: None,
             previous_settings: None,
             curves: Default::default(),
+            lut_import: None,
             copy_groups: session.copy_groups.clone().unwrap_or_default(),
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
@@ -861,6 +864,7 @@ mod guided_tool;
 mod history_panel;
 mod inspector;
 pub(crate) mod library;
+mod lut_import;
 mod mask_tool;
 mod monitor;
 mod navigator;

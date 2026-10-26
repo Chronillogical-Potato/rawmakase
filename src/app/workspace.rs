@@ -19,6 +19,7 @@ impl Editor {
             || self.not_editable.is_some()
             || self.view.shortcuts
             || self.curve_save_open()
+            || self.lut_import_open()
             || self.folder_sync.is_reviewing()
             || self.file_ops.dialog_open()
     }
@@ -209,6 +210,8 @@ impl Editor {
         self.preferences_window(&ctx);
         // Above Preferences, where Change… asks it.
         self.folder_question_window(&ctx);
+        // Above Preferences too, which opens it.
+        self.lut_import_window(&ctx);
         self.export_windows(&ctx);
         self.update_notice(&ctx, modal || self.view.shortcuts);
         #[cfg(feature = "telemetry")]
