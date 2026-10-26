@@ -152,6 +152,14 @@ pub(super) fn plan_with(
             let tree = super::tree::relocate(catalog, disk, root, &folder, to_root, &parent)?;
             return tree_plan(catalog, Kind::MoveFolder, tree, batch);
         }
+        FileOp::MoveRoot {
+            root,
+            to_root,
+            parent,
+        } => {
+            let tree = super::tree::nest(catalog, disk, root, to_root, &parent)?;
+            return tree_plan(catalog, Kind::MoveRoot, tree, batch);
+        }
         // Its drive's Trash is asked first.
         FileOp::TrashFolder { .. } => {
             return Err(FileOpError::Unsupported(
@@ -217,7 +225,7 @@ pub(super) fn plan_with(
             let mut files = Files::new(catalog, &folders, disk);
             super::rename::items(&mut files, families, &by_id, &stems, &mut skipped)?
         }
-        Kind::RenameFolder | Kind::MoveFolder | Kind::TrashFolder => Vec::new(),
+        Kind::RenameFolder | Kind::MoveFolder | Kind::MoveRoot | Kind::TrashFolder => Vec::new(),
     };
     let mut summary = summarize(&items, &by_id, computers > 1);
     if kind == Kind::RenamePhotos {

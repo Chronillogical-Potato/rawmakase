@@ -67,6 +67,11 @@ stored! {
         /// photos of its subtree (#575). An older release can't read the
         /// kind, and fails closed on an unfinished one.
         TrashFolder = "trash_folder",
+        /// A root folder moves into a folder of another root, the catalog's
+        /// folders of it joining that root and the root leaving (#586). An
+        /// older release can't read the kind, and fails closed on an
+        /// unfinished one rather than take it for a folder move.
+        MoveRoot = "move_root",
     }
 }
 
@@ -849,8 +854,18 @@ fn read(db: &impl Reads, row: ItemRow) -> Result<Item> {
     let kind: Kind = row.kind.parse()?;
     let subject = match kind {
         Kind::CreateFolder => Subject::Folder(serde_json::from_str(&row.preconditions)?),
-        Kind::RenameFolder | Kind::MoveFolder => {
-            Subject::Tree(serde_json::from_str(&row.preconditions)?)
+        Kind::RenameFolder | Kind::MoveFolder | Kind::MoveRoot => {
+            let tree: TreeState = serde_json::from_str(&row.preconditions)?;
+            // A root's move is journalled as one alone: the other kinds
+            // never move a whole root, nor it a folder.
+            anyhow::ensure!(
+                tree.moves_root() == (kind == Kind::MoveRoot),
+                "file operation {} is a {} of {:?}, which this release never journals",
+                row.id,
+                kind.as_str(),
+                tree.from
+            );
+            Subject::Tree(tree)
         }
         Kind::TrashFolder => Subject::TrashTree(serde_json::from_str(&row.preconditions)?),
         Kind::RemoveFromCatalog | Kind::MovePhotos | Kind::TrashPhotos | Kind::RenamePhotos => {

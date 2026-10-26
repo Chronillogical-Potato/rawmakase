@@ -125,11 +125,12 @@ pub(crate) enum FileRequest {
     },
 }
 /// A folder being dragged in the Folders panel: the folder of `root` at
-/// logical path `from`.
+/// logical path `from` ("" for the root itself), named `name`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DraggedFolder {
     pub root: crate::catalog::RootId,
     pub from: String,
+    pub name: String,
 }
 /// Photos being dragged from the grid: the selection, or the photo dragged
 /// when it isn't in it.
@@ -852,10 +853,11 @@ impl Library {
         to_root: crate::catalog::RootId,
         to: &str,
     ) {
-        let (from, to) = (
-            format!("root:{root}/{from}"),
-            format!("root:{to_root}/{to}"),
-        );
+        let from = match from {
+            "" => format!("root:{root}"),
+            from => format!("root:{root}/{from}"),
+        };
+        let to = format!("root:{to_root}/{to}");
         self.selected_folders.rekey(&from, &to);
         self.expanded = std::mem::take(&mut self.expanded)
             .into_iter()

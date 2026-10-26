@@ -329,7 +329,11 @@ fn decide(
     }
     match item.kind {
         // Rule 3.
-        Kind::MovePhotos | Kind::RenamePhotos | Kind::RenameFolder | Kind::MoveFolder
+        Kind::MovePhotos
+        | Kind::RenamePhotos
+        | Kind::RenameFolder
+        | Kind::MoveFolder
+        | Kind::MoveRoot
             if item
                 .members
                 .iter()
@@ -488,7 +492,7 @@ pub(super) fn outcome_of(item: &Item) -> ItemOutcome {
             },
             Subject::Folder(_) => ItemResult::Unchanged(item.error.clone()),
             Subject::Tree(_) => match item.kind {
-                Kind::MoveFolder => ItemResult::FolderMoved,
+                Kind::MoveFolder | Kind::MoveRoot => ItemResult::FolderMoved,
                 _ => ItemResult::FolderRenamed,
             },
             Subject::TrashTree(_) if super::tree_trash::trashed(item) => ItemResult::Trashed,

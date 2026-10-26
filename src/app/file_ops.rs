@@ -77,7 +77,8 @@ pub(super) enum Verb {
         one: Option<(String, String)>,
     },
     /// Moves folder `name` of `root` from logical path `from` to `to` of
-    /// `to_root`, into the folder named `into`.
+    /// `to_root`, into the folder named `into`; a root (`from` "") joins
+    /// `to_root`, named `joins`.
     MoveFolder {
         root: crate::catalog::RootId,
         from: String,
@@ -85,6 +86,7 @@ pub(super) enum Verb {
         to: String,
         name: String,
         into: String,
+        joins: Option<String>,
     },
     /// Puts folder `name` of `root`, at logical path `logical`, in the
     /// Trash.
@@ -621,11 +623,18 @@ fn question_of(plan: &Plan, verb: &Verb) -> (String, Vec<String>, &'static str) 
             lines.extend(trash_folder_lines(s, &tree));
             (trash_folder_title(name, &tree), "Move to Trash")
         }
-        Verb::MoveFolder { name, into, .. } => {
+        Verb::MoveFolder {
+            name, into, joins, ..
+        } => {
             lines.push(format!(
                 "The folder moves on disk with the {} and the folders in it.",
                 widgets::plural(s.photos, "photo", "photos")
             ));
+            if let Some(joins) = joins {
+                lines.push(format!(
+                    "“{name}” is no longer a root folder: it becomes a folder of “{joins}”."
+                ));
+            }
             if let Some(across) = &s.across {
                 lines.push(folder_across_line(across));
             }

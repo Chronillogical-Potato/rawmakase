@@ -128,6 +128,16 @@ pub enum FileOp {
         to_root: RootId,
         parent: String,
     },
+    /// Moves root folder `root` into logical folder `parent` of another
+    /// root, `to_root` (#586), with every catalog folder of it: on its
+    /// drive by one rename, onto another by a copy of its whole tree, as
+    /// [`Self::MoveFolder`] moves a folder. Its folders join `to_root`,
+    /// keeping their ids, and `root` leaves the catalog's roots.
+    MoveRoot {
+        root: RootId,
+        to_root: RootId,
+        parent: String,
+    },
     /// Puts the folder at logical path `folder` of `root` in the system
     /// Trash, with everything in it; then the catalog's folders of its
     /// subtree leave the catalog with their photos (virtual copies
@@ -629,6 +639,8 @@ mod lock_tests;
 mod move_folder_tests;
 #[cfg(test)]
 mod move_root_tests;
+#[cfg(test)]
+mod nest_root_tests;
 #[cfg(test)]
 mod plan_tests;
 #[cfg(test)]

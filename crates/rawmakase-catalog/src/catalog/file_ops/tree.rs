@@ -8,10 +8,17 @@
 //! `folders.relative_path` alike. Photos keep their rows: their folders
 //! keep their ids, so their paths follow.
 //!
+//! A root folder moves the same way into a folder of another root (#586):
+//! its whole subtree joins that root, and the root leaves the catalog's
+//! roots, with its own locations on every computer, in the transaction
+//! that re-keys it. It is journalled as a kind of its own, which earlier
+//! releases fail closed on.
+//!
 //! Kept to the simple case: the subtree is resolved through a location
-//! above it, so no `folder_locations` row (on any computer) nor legacy
-//! `folder_mappings` row needs to change; a subtree with a location of its
-//! own is refused, as is a root itself. Folders are never merged: a
+//! above it (a root's own), so no other `folder_locations` row (on any
+//! computer) nor legacy `folder_mappings` row needs to change; a subtree
+//! with a location of its own is refused, and a root is only ever moved
+//! whole into another. Folders are never merged: a
 //! destination the disk or the catalog has (a missing catalog folder too)
 //! is refused. Nothing else of the catalog may resolve into the subtree,
 //! such as another root over a folder in it, nor may the catalog itself or
@@ -76,8 +83,11 @@ pub(super) struct TreeMove {
     pub copy: Option<super::tree_copy::TreeCopy>,
 }
 
-/// Why a root can't be renamed or moved here.
-const ROOT: &str = "A root folder can't be renamed or moved in RAWmakase. Do it in Finder, then locate the root folder again.";
+/// Why a root can't be renamed, or moved but whole into another root
+/// ([`nest`]), here.
+const ROOT: &str = "A root folder can't be renamed in RAWmakase, nor moved but into a folder of another root folder. Do it in Finder, then locate the root folder again.";
+/// Why a folder can't go into itself.
+const INTO_ITSELF: &str = "A folder can't be moved into itself or a folder inside it.";
 /// Why a subtree with a location of its own is refused.
 const LOCATED: &str = "A folder in it is located on its own (on this or another computer), which RAWmakase can't move with it yet.";
 /// Why a folder with something of the catalog in it through another root
@@ -130,9 +140,10 @@ fn locate_folders_of(db: &impl Reads, root: RootId) -> Result<Vec<(FolderId, Str
         .collect())
 }
 
-/// Whether logical path `path` is `top` or below it, exactly.
+/// Whether logical path `path` is `top` or below it, exactly: any path is
+/// below a root's (`""`).
 fn below(path: &str, top: &str) -> bool {
-    path == top || path.starts_with(&format!("{top}/"))
+    top.is_empty() || path == top || path.starts_with(&format!("{top}/"))
 }
 
 /// Whether logical path `path` is `top` or below it, by `sidecar::caseless`.
@@ -150,6 +161,18 @@ impl TreeState {
     /// The root it goes into: its own, or the other it is moved into.
     pub fn to_root(&self) -> RootId {
         self.into.unwrap_or(self.root)
+    }
+
+    /// Whether it moves a whole root into another (#586): the root's own
+    /// logical path, which only a root move journals.
+    pub fn moves_root(&self) -> bool {
+        self.from.is_empty()
+    }
+
+    /// The root that leaves the catalog's roots with it: the one it moves
+    /// whole.
+    fn leaving(&self) -> Option<RootId> {
+        self.moves_root().then_some(self.root)
     }
 
     /// Why the folder can't be renamed now, read in `db` on `computer`: its
@@ -171,7 +194,7 @@ impl TreeState {
         }
         // Checked again before the rename and in recovery: another root may
         // have been added inside since.
-        if let Some(why) = overlapped(db, computer, &ids, &[&self.from_path])? {
+        if let Some(why) = overlapped(db, computer, &ids, self.leaving(), &[&self.from_path])? {
             return Ok(Some(why.into()));
         }
         if located(db, self.to_root(), &self.to, &[])? {
@@ -211,7 +234,13 @@ pub(super) fn located(
         sql!("SELECT relative_path FROM folder_locations WHERE root=?"),
         &[&root],
     )?;
-    if rows.iter().any(|l| below_caseless(&l.relative, logical)) {
+    // A root's own location, on any computer, is the one it is resolved
+    // through, and goes with it.
+    let own = |l: &Location| logical.is_empty() && l.relative.is_empty();
+    if rows
+        .iter()
+        .any(|l| !own(l) && below_caseless(&l.relative, logical))
+    {
         return Ok(true);
     }
     for folder in folders {
@@ -287,9 +316,7 @@ pub(super) fn relocate(
     // Within a root by its logical paths; into another, on disk below.
     let same = to_root == root;
     if same && below_caseless(parent, folder) {
-        return Err(refuse(
-            "A folder can't be moved into itself or a folder inside it.",
-        ));
+        return Err(refuse(INTO_ITSELF));
     }
     let name = names(folder).last().unwrap_or_default();
     let to = join(parent, name);
@@ -299,9 +326,42 @@ pub(super) fn relocate(
     plan_to(catalog, disk, root, folder, to_root, &to)
 }
 
+/// Plans moving root `root` into logical folder `parent` of another root,
+/// `to_root`, on this computer (#586), named there as its folder is here.
+pub(super) fn nest(
+    catalog: &Catalog,
+    disk: &dyn Disk,
+    root: RootId,
+    to_root: RootId,
+    parent: &str,
+) -> Result<TreeMove, FileOpError> {
+    let refuse = |why: &str| FileOpError::Destination(why.to_string());
+    if to_root == root {
+        return Err(refuse(INTO_ITSELF));
+    }
+    let computer = &catalog.computer.id;
+    let original: Option<String> = catalog
+        .db
+        .read_optional(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
+    if original.is_none() {
+        return Err(refuse("The root folder is no longer in the catalog."));
+    }
+    let at = logical_location(&catalog.db, computer, root, "")?
+        .ok_or_else(|| refuse("The folder is offline or missing."))?;
+    let name = at
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| refuse("The root folder's name can't be a folder's in the catalog."))?;
+    if let Some(problem) = folder_name_problem(name) {
+        return Err(refuse(problem));
+    }
+    plan_to(catalog, disk, root, "", to_root, &join(parent, name))
+}
+
 /// Plans moving the folder at logical path `from` of `root` to logical
 /// path `to` of `to_root`: the folder's own root, or another, which must
-/// resolve and be online here.
+/// resolve and be online here. A root's own path (`""`) moves the root
+/// whole into another.
 fn plan_to(
     catalog: &Catalog,
     disk: &dyn Disk,
@@ -324,6 +384,20 @@ fn plan_to(
     }
     let source =
         super::disk::spelled(disk, &source, found.id).map_err(|e| refuse(&e.to_string()))?;
+    // A root at the top of a drive is the drive itself, which no rename
+    // or Trash moves.
+    if from.is_empty() {
+        let up = parent(&source);
+        let whole = up == source
+            || disk
+                .entry(up)
+                .map_or(true, |e| e.id.volume() != found.id.volume());
+        if whole {
+            return Err(refuse(
+                "The root folder is a whole drive, which can't be moved into a folder.",
+            ));
+        }
+    }
     // On FAT and exFAT, whose drivers list names decomposed but rename (FAT)
     // and trash a folder only as its name is stored, and on the SMB shares
     // names prove files on, which list them decomposed too: composed where
@@ -354,9 +428,7 @@ fn plan_to(
         return Err(refuse("The destination is not a folder on disk."));
     }
     if spellings.iter().any(|s| dir.starts_with(s)) {
-        return Err(refuse(
-            "A folder can't be moved into itself or a folder inside it.",
-        ));
+        return Err(refuse(INTO_ITSELF));
     }
     if protected(&dir)
         || spellings
@@ -510,13 +582,15 @@ pub(super) fn taken(disk: &dyn Disk, planned: &TreeMove) -> Result<Option<String
 }
 
 /// Why another root or folder of the catalog, outside the subtree
-/// (`ours`), being inside the folder on disk refuses it: inside any of
-/// `dirs`, as resolved or as the disk has them. (Where it goes is taken
-/// by any folder there, which refuses it anyway.)
+/// (`ours`) and other than the root moved whole (`leaving`), being inside
+/// the folder on disk refuses it: inside any of `dirs`, as resolved or as
+/// the disk has them. (Where it goes is taken by any folder there, which
+/// refuses it anyway.)
 pub(super) fn overlapped(
     db: &impl Reads,
     computer: &str,
     ours: &[FolderId],
+    leaving: Option<RootId>,
     dirs: &[&Path],
 ) -> Result<Option<&'static str>> {
     row! {
@@ -539,7 +613,8 @@ pub(super) fn overlapped(
         }
     }
     let roots: Vec<RootRow> = db.read(sql!("SELECT id FROM roots"), &[])?;
-    for root in roots {
+    // The root moved whole is in it as it is itself.
+    for root in roots.into_iter().filter(|r| Some(r.id) != leaving) {
         if let Some(at) = logical_location(db, computer, root.id, "")?
             && into(&at)
         {
@@ -585,12 +660,41 @@ pub(super) fn unfinished(db: &impl Reads, planned: &TreeMove) -> Result<bool> {
 pub(super) fn rekey(w: &mut Write<'_>, state: &TreeState, to: &str) -> Result<()> {
     let mut paths = Vec::new();
     for (folder, logical) in &state.folders {
-        let rest = logical
-            .strip_prefix(state.from.as_str())
-            .context("a folder outside the subtree")?;
-        paths.push((*folder, format!("{to}{rest}")));
+        paths.push((*folder, state.moved(logical, to)?));
     }
-    set_paths(w, state.to_root(), &paths)
+    follow(w, state, &paths)
+}
+
+impl TreeState {
+    /// Where logical path `logical` of the subtree goes, the folder given
+    /// logical path `to`.
+    pub(super) fn moved(&self, logical: &str, to: &str) -> Result<String> {
+        let rest = logical
+            .strip_prefix(self.from.as_str())
+            .context("a folder outside the subtree")?;
+        Ok(join(to, rest))
+    }
+}
+
+/// Moves the subtree of `state` to `paths` of its destination root in `w`'s
+/// transaction ([`set_paths`]), and a root moved whole leaves the catalog's
+/// roots with it, with its own locations on every computer: nothing is
+/// left of it. Fails, writing nothing that stays, when a folder of it is
+/// left behind.
+pub(super) fn follow(
+    w: &mut Write<'_>,
+    state: &TreeState,
+    paths: &[(FolderId, String)],
+) -> Result<()> {
+    set_paths(w, state.to_root(), paths)?;
+    if let Some(root) = state.leaving() {
+        let left: Option<FolderId> =
+            w.read_optional(sql!("SELECT id FROM folders WHERE root=?"), &[&root])?;
+        anyhow::ensure!(left.is_none(), "a folder of the root was left behind");
+        w.execute(sql!("DELETE FROM folder_locations WHERE root=?"), &[&root])?;
+        w.execute(sql!("DELETE FROM roots WHERE id=?"), &[&root])?;
+    }
+    Ok(())
 }
 
 /// Gives each of `paths`' folders root `root` and its logical path there,

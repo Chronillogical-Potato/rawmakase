@@ -226,7 +226,13 @@ pub(super) fn plan(
     if let Some(why) = state.check(db, computer)? {
         return Err(FileOpError::Destination(why));
     }
-    if let Some(why) = overlapped(db, computer, &ids(&state.folders), &[&listed, &source])? {
+    if let Some(why) = overlapped(
+        db,
+        computer,
+        &ids(&state.folders),
+        None,
+        &[&listed, &source],
+    )? {
         return Err(refuse(why));
     }
     if unfinished(db, &state, &source)? {
@@ -357,7 +363,7 @@ impl TrashTreeState {
         if located(db, self.root, &self.from, &ids)? {
             return Ok(Some(LOCATED.into()));
         }
-        if let Some(why) = overlapped(db, computer, &ids, &[&self.from_path])? {
+        if let Some(why) = overlapped(db, computer, &ids, None, &[&self.from_path])? {
             return Ok(Some(why.into()));
         }
         if ingest::folder_rows(db, &ids)? != self.photos {
