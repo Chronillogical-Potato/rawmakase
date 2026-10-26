@@ -71,6 +71,8 @@ impl Editor {
         if c == [0., 0., 1., 1.] {
             self.view.aspect = self.view.chosen_aspect;
             if let Some(crop) = self.fitted_crop() {
+                // A drag still held (R pressed mid-drag) is a step of its own first.
+                self.document.edit.finish_gesture();
                 self.document.edit.change(None, |r| r.crop = crop);
             }
             return;

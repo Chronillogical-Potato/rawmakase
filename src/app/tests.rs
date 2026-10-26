@@ -3303,6 +3303,51 @@ fn the_chosen_aspect_is_its_own_edit_before_the_next_operation() {
     assert_eq!(editor.document.edit.recipe().exposure, 1.25);
 }
 #[test]
+fn the_chosen_aspect_ends_a_held_slider_drag_first() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session {
+            crop_aspect: "1x1".into(),
+            ..Default::default()
+        },
+        None,
+    );
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    // Exposure dragged to +1.25, the button still held as R opens Crop.
+    let frame = editor.document.edit.begin();
+    editor.document.edit.recipe_mut().exposure = 1.25;
+    editor
+        .document
+        .edit
+        .finish(frame, crate::edit_session::Gesture::Held);
+    editor.view.toggle(state::Tool::Crop);
+    let frame = editor.begin_edit_frame();
+    editor.finish_edit_frame(frame, &ctx);
+    editor.document.edit.finish_gesture();
+    // The drag and the crop are a step each: Undo takes back the crop alone, then
+    // the exposure.
+    assert!(editor.document.edit.undo());
+    assert_eq!(editor.document.edit.recipe().crop, [0., 0., 1., 1.]);
+    assert_eq!(editor.document.edit.recipe().exposure, 1.25);
+    assert!(editor.document.edit.undo());
+    assert_eq!(editor.document.edit.recipe().exposure, 0.);
+}
+#[test]
 fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let session = dir.path().join("session.json");
