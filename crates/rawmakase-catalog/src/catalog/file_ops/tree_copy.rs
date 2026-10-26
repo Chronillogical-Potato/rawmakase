@@ -1547,7 +1547,7 @@ fn discard_each(
                     .is_ok();
                 let only_ours = || {
                     disk.list(&at)
-                        .is_ok_and(|names| names.iter().all(|n| deletable.contains(&at.join(n))))
+                        .is_ok_and(|names| only_deletable(&at, &names, &deletable))
                 };
                 if !removed && proof::removes_nothing(disk, &at) && only_ours() {
                     why = copy::LEFT_ON_SHARE;
@@ -1615,7 +1615,7 @@ fn discard_each(
                 _ => Some(why),
             };
             if let (copy::LEFT_ON_SHARE, Some(at)) = (why, here) {
-                deletable.insert(at);
+                deletable.insert(proof::composed_path(&at));
             }
             continue;
         }
@@ -1624,6 +1624,23 @@ fn discard_each(
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
     }
     Ok(left)
+}
+
+/// Whether folder `dir`, listing `names`, holds only what is in
+/// `deletable` (paths with their names composed), by its names composed
+/// as name proofs take them, each once, and the AppleDouble files
+/// (`._name`) macOS keeps beside those.
+fn only_deletable(
+    dir: &Path,
+    names: &[std::ffi::OsString],
+    deletable: &std::collections::HashSet<PathBuf>,
+) -> bool {
+    let names: Vec<std::ffi::OsString> = names.iter().map(|n| proof::composed(n)).collect();
+    let once = names.iter().collect::<std::collections::HashSet<_>>().len() == names.len();
+    once && names.iter().all(|n| {
+        let beside = n.to_str().and_then(|n| n.strip_prefix("._"));
+        deletable.contains(&dir.join(n)) || beside.is_some_and(|b| deletable.contains(&dir.join(b)))
+    })
 }
 
 /// Recovery of folder item `item` copied to another volume: one the

@@ -1776,3 +1776,26 @@ fn a_folder_left_on_a_share_with_another_file_in_it_isnt_said_to_be_deletable() 
     assert_eq!(std::fs::read(&theirs)?, b"theirs");
     Ok(())
 }
+
+/// A folder left on a share holding only the move's copies is the user's
+/// to delete however the share lists their names (decomposed, as macOS's
+/// smbfs does) and with what macOS keeps beside them (`._name`) (review
+/// of #675).
+#[test]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+fn a_folder_left_on_a_share_is_deletable_however_its_names_are_listed() -> Result<()> {
+    let mut fx = fixture(&["day/a.NEF", "day/.h\u{ed}dden", "day/sub/b.NEF", "far/"]);
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 2, Fault::Fail)],
+        apple_double: true,
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    assert_eq!(
+        results(&outcome),
+        [ItemResult::NeedsRecovery(super::copy::LEFT_ON_SHARE.into())]
+    );
+    Ok(())
+}
