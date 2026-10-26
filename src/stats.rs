@@ -101,57 +101,24 @@ fn os_release() -> Option<String> {
     macos_release(&plist)
 }
 
-/// `macos-26` from SystemVersion.plist's ProductVersion.
+/// `macos-26` from SystemVersion.plist's ProductVersion: only the major
+/// release, where the system report has the full version.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn macos_release(plist: &str) -> Option<String> {
-    let after = &plist[plist.find("<key>ProductVersion</key>")?..];
-    let start = after.find("<string>")? + "<string>".len();
-    let major: u32 = after[start..]
-        .split(['.', '<'])
-        .next()?
-        .trim()
-        .parse()
-        .ok()?;
+    let version = crate::diagnostics::macos_product_version(plist)?;
+    let major: u32 = version.split('.').next()?.trim().parse().ok()?;
     (11..100).contains(&major).then(|| format!("macos-{major}"))
+}
+
+/// `windows-10` or `windows-11`, without the build the system report has.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_release(build: u32) -> String {
+    format!("windows-{}", crate::diagnostics::windows_release(build))
 }
 
 #[cfg(windows)]
 fn os_release() -> Option<String> {
-    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
-    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
-    let value = wide("CurrentBuildNumber");
-    let mut buffer = [0u16; 32];
-    let mut size = std::mem::size_of_val(&buffer) as u32;
-    // SAFETY: the key and value names are NUL-terminated and the buffer's
-    // size in bytes is passed with it.
-    let status = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            key.as_ptr(),
-            value.as_ptr(),
-            RRF_RT_REG_SZ,
-            std::ptr::null_mut(),
-            buffer.as_mut_ptr().cast(),
-            &mut size,
-        )
-    };
-    if status != 0 {
-        return None;
-    }
-    let build: u32 = String::from_utf16_lossy(&buffer)
-        .trim_end_matches('\0')
-        .parse()
-        .ok()?;
-    // Windows 11 is still major version 10; its builds start at 22000.
-    Some(
-        if build >= 22_000 {
-            "windows-11"
-        } else {
-            "windows-10"
-        }
-        .into(),
-    )
+    crate::diagnostics::windows_build().map(windows_release)
 }
 
 #[cfg(target_os = "linux")]
@@ -465,6 +432,54 @@ mod tests {
         let plist = plist.replace("26.0.1", "15.6");
         assert_eq!(macos_release(&plist).as_deref(), Some("macos-15"));
         assert_eq!(macos_release("<dict></dict>"), None);
+        // Only the major release, however precise the version.
+        let plist = plist.replace("15.6", "26.1.2");
+        assert_eq!(macos_release(&plist).as_deref(), Some("macos-26"));
+        let plist = plist.replace("26.1.2", "10.15.7");
+        assert_eq!(macos_release(&plist), None);
+    }
+
+    #[test]
+    fn reports_windows_as_10_or_11_without_the_build() {
+        assert_eq!(windows_release(19045), "windows-10");
+        assert_eq!(windows_release(22000), "windows-11");
+        assert_eq!(windows_release(26100), "windows-11");
+    }
+
+    #[test]
+    fn keeps_the_coarse_platform_values() {
+        // The system report's precise probes must not leak into the usage report.
+        let report = Report::collect("vulkan").expect("a supported platform");
+        if cfg!(target_os = "linux") {
+            assert_eq!(report.os_release, "linux");
+            assert!(DISTROS.contains(&report.distro) || report.distro == "other");
+            assert!(["wayland", "x11"].contains(&report.display));
+        }
+        if cfg!(windows) {
+            assert!(["windows-10", "windows-11"].contains(&report.os_release.as_str()));
+        }
+        if cfg!(target_os = "macos") {
+            assert!(!report.os_release.contains('.'));
+        }
+        assert!(
+            [
+                "linux-appimage",
+                "macos-dmg",
+                "windows-installer",
+                "windows-zip",
+                "linux-tarball",
+                "homebrew",
+                "deb",
+                "rpm",
+                "arch-package",
+                "flatpak",
+                "snap",
+                "nix",
+                "cargo",
+                "unknown",
+            ]
+            .contains(&report.channel)
+        );
     }
 
     #[test]
