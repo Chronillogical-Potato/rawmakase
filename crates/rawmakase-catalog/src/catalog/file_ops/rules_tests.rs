@@ -281,7 +281,7 @@ mod scanned {
 fn an_indexed_folder_answers_as_asking_every_name_did() {
     use crate::catalog::sidecar::caseless;
     use std::ffi::OsStr;
-    let mut listing = names(&[
+    let listing = names(&[
         "A.NEF",
         "a.nef",
         "A.NEF.xmp",
@@ -316,12 +316,15 @@ fn an_indexed_folder_answers_as_asking_every_name_did() {
         "E.NEF.DNG.xmp",
         "E.NEF.xmp",
     ]);
+    // Names that aren't text, where the system has them.
     #[cfg(unix)]
-    {
+    let listing = {
         use std::os::unix::ffi::OsStringExt;
+        let mut listing = listing;
         listing.push(OsString::from_vec(b"A\xff.NEF".to_vec()));
         listing.push(OsString::from_vec(b"A\xff.NEF.xmp".to_vec()));
-    }
+        listing
+    };
     // A volume that takes some names alike for one file and others not.
     let same_file =
         |a: &OsStr, b: &OsStr| caseless(a) == caseless(b) && !(a.len() + b.len()).is_multiple_of(3);
