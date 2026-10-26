@@ -294,12 +294,20 @@ fn section_header(
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
     let key = section_key(title);
     let group = current_group(ui);
+    // A pinned panel stays out of Solo Mode: it opens and closes on its own, and
+    // opening another panel leaves it as it is.
+    let solo_exempt = button == HeaderButton::Pin && pinned(ui.ctx(), title);
     if let Some(group) = group {
         ui.ctx().data_mut(|d| {
-            d.get_temp_mut_or_default::<SectionTitles>(section_titles_id())
+            let titles = d
+                .get_temp_mut_or_default::<SectionTitles>(section_titles_id())
                 .entry(group.to_string())
-                .or_default()
-                .insert(key.to_string());
+                .or_default();
+            if solo_exempt {
+                titles.remove(key);
+            } else {
+                titles.insert(key.to_string());
+            }
         });
     }
     let mut open = !ui.ctx().data(|d| {
@@ -451,8 +459,11 @@ fn section_header(
             };
         }
     }
-    if let Some(group) = group {
+    if let Some(group) = group.filter(|_| !solo_exempt) {
         context_menu(&toggle, |ui| {
+            // Menu rows fill the width they are given, and an unsized popup gives
+            // them all it can.
+            ui.set_width(160.);
             if menu_item(ui, "Solo Mode", "", true, solo(ui, group)) {
                 toggle_solo(ui, group, key);
                 ui.close();
@@ -464,7 +475,7 @@ fn section_header(
     {
         open = !open;
         set_open(ui, key, open);
-        if open && let Some(group) = group.filter(|g| solo(ui, g)) {
+        if open && let Some(group) = group.filter(|g| !solo_exempt && solo(ui, g)) {
             close_others(ui, group, key);
         }
     }
