@@ -7,7 +7,10 @@
 //! the sensor data ([`Sensor`]), checking `cancel` as it goes. One selector
 //! ([`Variant`]) decides which reader and codec handle a file; a file of a
 //! known container in a variant not decoded here is [`Error::Unsupported`].
+//! [`capture_dates`] reads, from the file itself, the few parts that date a
+//! photo in the containers whose EXIF is not a TIFF at the file's start.
 #![forbid(unsafe_code)]
+mod captured;
 mod codec;
 mod color;
 mod container;
@@ -23,6 +26,7 @@ mod sensor;
 mod variant;
 mod vendor;
 
+pub use captured::{CaptureDates, Stamp};
 pub use error::{Error, Result};
 pub use info::{Cfa, Presets, RawInfo, SuperCcd, UNSET};
 pub use preview::{NoPreview, is_jpeg_xl};
@@ -67,6 +71,13 @@ pub fn file_camera_names(bytes: &[u8]) -> Result<FileNames> {
 /// "Sony", "NIKON CORPORATION" "Nikon"); another maker's name, trimmed.
 pub fn maker_name(file_make: &str) -> String {
     names::make(file_make)
+}
+
+/// When the CR3, CRW, MRW or X3F `file` was taken, from the parts of it
+/// that say so, nothing else read; none for another file or one that can't
+/// be read. Holds for files whose sensor data is not decoded here (X3F).
+pub fn capture_dates(file: &mut (impl std::io::Read + std::io::Seek)) -> CaptureDates {
+    captured::read(file)
 }
 
 /// The embedded preview of the file `info` was read from, JPEG or JPEG XL

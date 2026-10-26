@@ -75,6 +75,16 @@ pub fn file_camera_names(path: &Path) -> Result<FileNames> {
 pub fn maker_name(file_make: &str) -> String {
     rawmakase_raw::maker_name(file_make)
 }
+/// When the CR3, CRW, MRW or X3F at `path` was taken, in the form and by
+/// the fallbacks of `exif::capture_time`, which can't read these files'
+/// dates: read from the few parts of the file that hold them, nothing
+/// decoded. `None` for other files and files without a date.
+pub fn capture_time(path: &Path) -> Option<String> {
+    let dates = rawmakase_raw::capture_dates(&mut std::fs::File::open(path).ok()?);
+    rawmakase_interop::exif::capture_time_of(
+        [dates.original, dates.digitized, dates.modified].map(|s| (s.date, s.subseconds)),
+    )
+}
 pub struct Raw {
     // Boxed: the decoder's state is large, and a `Raw` travels in enums.
     own: Box<own::Own>,

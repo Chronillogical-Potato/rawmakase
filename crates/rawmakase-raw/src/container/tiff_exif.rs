@@ -1,7 +1,10 @@
 //! The exposure and lens facts every TIFF-based RAW keeps in its EXIF
-//! directory (and, for some, IFD0).
-use super::tiff::{TEXT_MAX, TiffFile};
+//! directory (and, for some, IFD0), its capture dates, and where a JPEG's
+//! EXIF is.
+use super::tiff::{NAME_MAX, TEXT_MAX, TiffFile};
+use crate::captured::CaptureDates;
 use crate::info::RawInfo;
+use crate::io::{Bytes, Order};
 
 pub(crate) fn read(t: &TiffFile, info: &mut RawInfo) {
     for ifd in [Some(&t.ifds[0]), t.exif.as_ref()].into_iter().flatten() {
@@ -57,6 +60,54 @@ pub(crate) fn read(t: &TiffFile, info: &mut RawInfo) {
             info.shutter = 2f64.powf(-sv) as f32;
         }
     }
+}
+
+/// The dates of `t`'s EXIF directory and IFD0 that `dates` has none of yet:
+/// DateTimeOriginal, DateTimeDigitized and DateTime, each with its
+/// subseconds (Exif 2.32), as the file writes them; blank ones are none.
+pub(crate) fn dates(t: &TiffFile, dates: &mut CaptureDates) {
+    let text = |tag| {
+        [t.exif.as_ref(), Some(&t.ifds[0])]
+            .into_iter()
+            .flatten()
+            .find_map(|ifd| t.text_upto(ifd, tag, NAME_MAX))
+            .filter(|v| !v.trim().is_empty())
+    };
+    for (stamp, date, subseconds) in [
+        (&mut dates.original, 36867, 37521),
+        (&mut dates.digitized, 36868, 37522),
+        (&mut dates.modified, 306, 37520),
+    ] {
+        if stamp.date.is_none() {
+            stamp.date = text(date);
+        }
+        if stamp.subseconds.is_none() {
+            stamp.subseconds = text(subseconds);
+        }
+    }
+}
+
+/// Where the TIFF of the JPEG's EXIF (APP1 "Exif") starts, the JPEG `len`
+/// bytes at `jpeg` in `bytes`.
+pub(crate) fn in_jpeg(bytes: &[u8], jpeg: u64, len: u64) -> Option<u64> {
+    let b = Bytes::new(bytes, Order::Big);
+    let end = jpeg.checked_add(len)?;
+    if b.u16(jpeg).ok()? != 0xffd8 {
+        return None;
+    }
+    let mut at = jpeg + 2;
+    while at + 4 <= end {
+        let marker = b.u16(at).ok()?;
+        let size = u64::from(b.u16(at + 2).ok()?);
+        if marker == 0xffe1 && b.slice(at + 4, 6).ok()? == b"Exif\0\0" {
+            return Some(at + 10);
+        }
+        if marker & 0xff00 != 0xff00 || marker == 0xffda || size < 2 {
+            return None;
+        }
+        at += 2 + size;
+    }
+    None
 }
 
 /// EXIF's CFAPattern of a 2 × 2 filter: its colours (0 red, 1 green, 2

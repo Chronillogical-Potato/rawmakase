@@ -1,6 +1,8 @@
-//! Bounded reading of the file's bytes, and the allocation limits every
-//! decoder checks header sizes against before allocating.
+//! Bounded reading of the file's bytes, in memory or in pieces from the
+//! file, and the allocation limits every decoder checks header sizes
+//! against before allocating.
 use crate::error::{Error, Result, corrupt};
+use std::io::{Read, Seek, SeekFrom};
 
 /// The largest sensor decoded, in samples: 400 megapixels of four channels.
 pub(crate) const MAX_SAMPLES: u64 = 1_600_000_000;
@@ -76,5 +78,42 @@ impl<'a> Bytes<'a> {
             Order::Little => u32::from_le_bytes(b),
             Order::Big => u32::from_be_bytes(b),
         })
+    }
+}
+
+/// A file that can be read anywhere.
+pub(crate) trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+/// The most bytes read in one piece: a header, a directory, a metadata box.
+pub(crate) const MAX_PIECE: u64 = 16 << 20;
+
+/// A file read in pieces, for reads that need a few of its parts and not
+/// the rest (`captured`).
+pub(crate) struct Pieces<'r> {
+    file: &'r mut dyn ReadSeek,
+    /// The file's length.
+    pub len: u64,
+}
+
+impl<'r> Pieces<'r> {
+    pub fn new(file: &'r mut dyn ReadSeek) -> Option<Self> {
+        let len = file.seek(SeekFrom::End(0)).ok()?;
+        Some(Self { file, len })
+    }
+    /// The `len` bytes at `at`; `None` past the end of the file, longer
+    /// than [`MAX_PIECE`] or when the file can't be read.
+    pub fn read(&mut self, at: u64, len: u64) -> Option<Vec<u8>> {
+        if len > MAX_PIECE || at.checked_add(len)? > self.len {
+            return None;
+        }
+        self.file.seek(SeekFrom::Start(at)).ok()?;
+        let mut piece = vec![0; usize::try_from(len).ok()?];
+        self.file.read_exact(&mut piece).ok()?;
+        Some(piece)
+    }
+    /// As [`Self::read`], fewer bytes where the file ends sooner.
+    pub fn read_upto(&mut self, at: u64, len: u64) -> Option<Vec<u8>> {
+        self.read(at, len.min(self.len.checked_sub(at)?))
     }
 }

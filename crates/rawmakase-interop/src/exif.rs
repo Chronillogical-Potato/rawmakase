@@ -220,16 +220,21 @@ pub fn read(path: &Path) -> Option<CameraExif> {
 /// DateTimeDigitized, then DateTime, each with its own subseconds.
 pub fn capture_time(path: &Path) -> Option<String> {
     let exif = directories(path, |tag| tag == DATE_TIME)?;
-    [
-        (DATE_TIME_ORIGINAL, SUBSEC_TIME_ORIGINAL),
-        (DATE_TIME_DIGITIZED, SUBSEC_TIME_DIGITIZED),
-        (DATE_TIME, SUBSEC_TIME),
-    ]
-    .into_iter()
-    .find_map(|(date, subseconds)| {
-        let date = exif.get(date).and_then(Field::text)?;
-        lightroom_time(&date, exif.get(subseconds).and_then(Field::text).as_deref())
-    })
+    let text = |tag| exif.get(tag).and_then(Field::text);
+    capture_time_of([
+        (text(DATE_TIME_ORIGINAL), text(SUBSEC_TIME_ORIGINAL)),
+        (text(DATE_TIME_DIGITIZED), text(SUBSEC_TIME_DIGITIZED)),
+        (text(DATE_TIME), text(SUBSEC_TIME)),
+    ])
+}
+
+/// [`capture_time`] of dates read elsewhere (a RAW container's own
+/// records): DateTimeOriginal, DateTimeDigitized and DateTime as EXIF
+/// writes them, each with its subseconds, the first that is a date.
+pub fn capture_time_of(dates: [(Option<String>, Option<String>); 3]) -> Option<String> {
+    dates
+        .into_iter()
+        .find_map(|(date, subseconds)| lightroom_time(&date?, subseconds.as_deref()))
 }
 
 /// Camera, lens and exposure settings of a JPEG, TIFF, PNG, WebP, AVIF, JPEG XL or TIFF-based RAW

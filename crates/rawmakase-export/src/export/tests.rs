@@ -505,6 +505,33 @@ fn capture_times_take_lightroom_form_with_three_digit_subseconds() {
     );
 }
 #[test]
+fn a_raw_containers_dates_fall_back_as_exifs_do() {
+    use crate::exif::capture_time_of;
+    let some = |s: &str| Some(s.to_string());
+    let modified = (some("2018:08:26 10:39:35"), some("9"));
+    assert_eq!(
+        capture_time_of([
+            (some("2018:08:26 10:39:33"), some("12")),
+            (some("2018:08:26 10:39:34"), None),
+            modified.clone(),
+        ])
+        .as_deref(),
+        Some("2018-08-26T10:39:33.120")
+    );
+    // A missing or zeroed date gives way to the next, with its own
+    // subseconds.
+    assert_eq!(
+        capture_time_of([
+            (None, some("12")),
+            (some("0000:00:00 00:00:00"), None),
+            modified,
+        ])
+        .as_deref(),
+        Some("2018-08-26T10:39:35.900")
+    );
+    assert_eq!(capture_time_of(Default::default()), None);
+}
+#[test]
 fn capture_time_is_read_from_tiff_and_jpeg_files() -> anyhow::Result<()> {
     let directory = tempfile::tempdir()?;
     for (jpeg, name) in [(false, "a.tif"), (true, "b.jpg")] {

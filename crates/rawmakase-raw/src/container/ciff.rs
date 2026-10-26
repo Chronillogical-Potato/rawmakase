@@ -5,12 +5,15 @@
 //!
 //! Sources: ExifTool's documentation of the CRW format and of the CanonRaw
 //! tag names (the header, the directory blocks and entries, the record IDs,
-//! SensorInfo, DecoderTable, ImageInfo, ShotInfo and the camera settings),
+//! SensorInfo, DecoderTable, ImageInfo, ShotInfo, TimeStamp and the camera
+//! settings),
 //! and our own measurements on the test dataset's files (where the low bits
 //! and the coded data sit in the raw data record, and the levels).
+use crate::captured::{CaptureDates, exif_date};
 use crate::codec::crw;
 use crate::error::{Error, Result, corrupt};
 use crate::info::{Cfa, RawInfo};
+use crate::io::Pieces;
 use crate::sensor::Sensor;
 use crate::variant::{Plan, Variant};
 use std::ops::Range;
@@ -159,6 +162,61 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_le_bytes(
         b.get(at..at.checked_add(4)?)?.try_into().ok()?,
     ))
+}
+
+/// The TimeStamp record: when the photo was taken, in seconds since 1970 on
+/// the camera's clock, then its time zone.
+const TIME_STAMP: u16 = 0x180e;
+
+/// The capture time in the TimeStamp record, the directories read alone:
+/// CIFF has no other date.
+pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
+    let mut dates = CaptureDates::default();
+    let mut budget = MAX_RECORDS;
+    let seconds = f.read(2, 4).and_then(|header| {
+        let len = f.len;
+        time_stamp(f, u64::from(u32_at(&header, 0)?), len, 0, &mut budget)
+    });
+    dates.original.date = seconds.and_then(|s| exif_date(u64::from(s)));
+    dates
+}
+
+/// The first TimeStamp in the heap block `start..end` and the blocks it
+/// holds, depth first, as [`Records`] finds records.
+fn time_stamp(f: &mut Pieces, start: u64, end: u64, depth: u32, budget: &mut usize) -> Option<u32> {
+    if depth > MAX_DEPTH || end < start.checked_add(6)? {
+        return None;
+    }
+    let dir = start
+        .checked_add(u64::from(u32_at(&f.read(end - 4, 4)?, 0)?))
+        .filter(|&d| d < end)?;
+    let count = u64::from(u16_at(&f.read(dir, 2)?, 0)?);
+    let entries = f
+        .read(dir + 2, 10 * count)
+        .filter(|_| dir + 2 + 10 * count <= end)?;
+    for entry in entries.as_chunks::<10>().0 {
+        *budget = budget.checked_sub(1)?;
+        let tag = u16::from_le_bytes([entry[0], entry[1]]);
+        let id = tag & 0x3fff;
+        // TimeStamp's twelve bytes are never in the entry.
+        if tag & 0xc000 != 0 {
+            continue;
+        }
+        let size = u64::from(u32_at(entry, 2)?);
+        let at = start.checked_add(u64::from(u32_at(entry, 6)?))?;
+        if at.checked_add(size)? > dir {
+            return None;
+        }
+        if id == TIME_STAMP && size >= 4 {
+            return u32_at(&f.read(at, 4)?, 0);
+        }
+        if matches!(id >> 11, 5 | 6)
+            && let Some(found) = time_stamp(f, at, at + size, depth + 1, budget)
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Where a CRW's sensor data is.
@@ -480,6 +538,46 @@ mod tests {
         assert!(crate::decode(&info, &bytes, &AtomicBool::new(false)).is_ok());
     }
 
+    /// The TimeStamp record dates a CRW, found in ImageProps below the
+    /// sensor data's record, which is not read.
+    #[test]
+    fn the_time_stamp_dates_a_crw() {
+        let dated = |seconds: u32| {
+            let mut raw = vec![0u8; 1 << 20];
+            raw[0] = 1;
+            ciff(block(&[
+                (0x2005, raw),
+                (
+                    0x300a,
+                    block(&[
+                        (0x1810, longs(&[0, 0, 0, 0])),
+                        (0x300b, block(&[(0x080a, b"Canon\0EOS 300D\0".to_vec())])),
+                        (0x180e, longs(&[seconds, 0x8000_0000, 0])),
+                    ]),
+                ),
+            ]))
+        };
+        let dates = crate::capture_dates(&mut std::io::Cursor::new(dated(1_083_408_238)));
+        assert_eq!(
+            dates.original,
+            crate::Stamp {
+                date: Some("2004:05:01 10:43:58".into()),
+                subseconds: None,
+            }
+        );
+        assert_eq!(
+            (dates.digitized, dates.modified),
+            (crate::Stamp::default(), crate::Stamp::default())
+        );
+        // A zero time is no date, and so is a file without the record.
+        for file in [dated(0), sample(128, 1, 0)] {
+            assert_eq!(
+                crate::capture_dates(&mut std::io::Cursor::new(file)),
+                crate::CaptureDates::default()
+            );
+        }
+    }
+
     #[test]
     fn four_colour_bodies_are_unsupported() {
         let bytes = sample(128, 1, 0);
@@ -519,6 +617,14 @@ mod tests {
             nested = block(&[(0x300a, nested)]);
         }
         assert!(crate::open(&ciff(nested)).is_err());
+        let mut nested = block(&[(0x180e, longs(&[1]))]);
+        for _ in 0..12 {
+            nested = block(&[(0x300a, nested)]);
+        }
+        assert_eq!(
+            crate::capture_dates(&mut std::io::Cursor::new(ciff(nested))),
+            crate::CaptureDates::default()
+        );
         // A directory offset past the block.
         let mut bad = sample(128, 1, 0);
         let end = bad.len();
@@ -527,6 +633,7 @@ mod tests {
         // Every truncation and a scrambled copy.
         let bytes = sample(128, 1, 0);
         for end in 0..bytes.len() {
+            let _ = crate::capture_dates(&mut std::io::Cursor::new(&bytes[..end]));
             if let Ok(info) = crate::open(&bytes[..end]) {
                 let _ = crate::decode(&info, &bytes[..end], &AtomicBool::new(false));
             }
@@ -535,6 +642,7 @@ mod tests {
         for (i, b) in garbage.iter_mut().enumerate().skip(14) {
             *b ^= (i * 131 % 251) as u8;
         }
+        let _ = crate::capture_dates(&mut std::io::Cursor::new(&garbage));
         if let Ok(info) = crate::open(&garbage) {
             let _ = crate::decode(&info, &garbage, &AtomicBool::new(false));
         }
