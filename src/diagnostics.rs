@@ -57,12 +57,21 @@ pub enum Field {
 }
 
 impl Field {
-    /// Text from outside the app, on one line, without control characters
-    /// and at most `max` characters long; unavailable when nothing is left.
+    /// Text from outside the app, on one line, without control characters,
+    /// paths or the user's login name, and at most `max` characters long;
+    /// unavailable when nothing is left.
     pub fn untrusted(text: &str, max: usize) -> Self {
-        let words: Vec<&str> = text
+        let user = ["USER", "USERNAME", "LOGNAME"]
+            .into_iter()
+            .find_map(|name| std::env::var(name).ok().filter(|u| !u.is_empty()));
+        Self::untrusted_for(text, max, user.as_deref())
+    }
+
+    fn untrusted_for(text: &str, max: usize, user: Option<&str>) -> Self {
+        let words: Vec<String> = text
             .split(|c: char| c.is_whitespace() || c.is_control())
             .filter(|word| !word.is_empty())
+            .map(|word| redact(word, user))
             .collect();
         let line = words.join(" ");
         if line.is_empty() {
@@ -88,6 +97,45 @@ impl fmt::Display for Field {
             Self::Unavailable(why) => write!(f, "unavailable ({why})"),
         }
     }
+}
+
+/// `word` with each part that names a place on disk (starting with `/`,
+/// `~` or `\\`, as `XDG_CURRENT_DESKTOP=GNOME:/home/alice/x` or a driver
+/// path would) replaced by `[path]`, and each that holds the login name by
+/// `[user]`. Parts are split at `:`, `;`, `,`, `=` and brackets, so a name
+/// like `GNU/Linux` stays as it is.
+fn redact(word: &str, user: Option<&str>) -> String {
+    let user = user
+        .filter(|user| user.chars().count() >= 3)
+        .map(str::to_lowercase);
+    let mut out = String::with_capacity(word.len());
+    let mut part = String::new();
+    let flush = |part: &mut String, out: &mut String| {
+        if part.starts_with(['/', '~', '\\']) {
+            out.push_str("[path]");
+        } else if user
+            .as_deref()
+            .is_some_and(|user| part.to_lowercase().contains(user))
+        {
+            out.push_str("[user]");
+        } else {
+            out.push_str(part);
+        }
+        part.clear();
+    };
+    for c in word.chars() {
+        if matches!(
+            c,
+            ':' | ';' | ',' | '=' | '(' | ')' | '[' | ']' | '"' | '\''
+        ) {
+            flush(&mut part, &mut out);
+            out.push(c);
+        } else {
+            part.push(c);
+        }
+    }
+    flush(&mut part, &mut out);
+    out
 }
 
 /// This build.
@@ -748,6 +796,46 @@ Background task: none
         let text = report(&build(), &system(), Some(&window));
         assert_eq!(text.lines().filter(|l| l.starts_with("OS:")).count(), 1);
         assert!(text.lines().all(|line| line.chars().count() < 120));
+    }
+
+    #[test]
+    fn untrusted_text_names_no_path_or_user() {
+        let clean = |text| Field::untrusted_for(text, 96, Some("alice")).to_string();
+        assert_eq!(
+            clean("Hyprland:/home/alice/private.conf"),
+            "Hyprland:[path]"
+        );
+        assert_eq!(clean("GNOME ~/x"), "GNOME [path]");
+        assert_eq!(
+            clean("radv (loaded from /home/bob/lib/driver.so)"),
+            "radv (loaded from [path])"
+        );
+        assert_eq!(clean(r"C:\Users\Bob\driver.dll"), "C:[path]");
+        assert_eq!(clean("file:///srv/x"), "file:[path]");
+        assert_eq!(clean("Alice's GPU"), "[user]'s GPU");
+        assert_eq!(clean("built-by=alice"), "built-by=[user]");
+        // What isn't a path stays.
+        assert_eq!(
+            clean("Debian GNU/Linux 13 (trixie)"),
+            "Debian GNU/Linux 13 (trixie)"
+        );
+        assert_eq!(clean("Mesa 25.2.4-arch1.1"), "Mesa 25.2.4-arch1.1");
+        assert_eq!(clean("ubuntu:GNOME"), "ubuntu:GNOME");
+        // A short login matches too much to be redacted.
+        assert_eq!(
+            Field::untrusted_for("Intel Arc", 96, Some("ar")).to_string(),
+            "Intel Arc"
+        );
+        // Through the adapter and the environment.
+        let mut adapter = adapter();
+        adapter.driver_info = "Mesa /home/alice/private/driver.so".into();
+        let driver = Gpu::from_adapter(&adapter).driver.to_string();
+        assert!(!driver.contains("/home"), "{driver}");
+        let desktop = desktop(env(&[(
+            "XDG_CURRENT_DESKTOP",
+            "Hyprland:/home/alice/p.conf",
+        )]));
+        assert!(!desktop.to_string().contains("/home"), "{desktop}");
     }
 
     #[test]

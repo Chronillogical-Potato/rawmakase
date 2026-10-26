@@ -150,8 +150,21 @@ impl Editor {
                 .library
                 .as_ref()
                 .map(|library| (library.session.photos.len(), library.session.folders.len())),
-            background_task: self.activity.is_busy() || self.catalog_work.is_some(),
+            background_task: self.background_work(),
         }
+    }
+
+    /// Whether anything runs that a report should mention: a foreground
+    /// task, a catalog opening, an export, a preview build or a folder scan.
+    fn background_work(&self) -> bool {
+        self.activity.is_busy()
+            || self.catalog_work.is_some()
+            || self.exporting()
+            || self
+                .preview_builds
+                .progress()
+                .is_some_and(|progress| progress.running())
+            || self.folder_sync.is_scanning()
     }
 
     /// The probe answered, or stopped: either way it no longer runs.
@@ -488,6 +501,22 @@ mod tests {
         assert!(copied(&output).is_empty());
         assert!(e.report_issue.is_open());
         assert!(!e.preferences.open);
+        Ok(())
+    }
+
+    #[test]
+    fn says_whether_a_task_runs_in_the_background() -> anyhow::Result<()> {
+        let (_dir, mut e, _) = editor_with_catalog(&[])?;
+        e.onboarding.visible = false;
+        e.report_issue_test_probe();
+        e.open_report_issue();
+        assert!(text(&e).contains("Background task: none\n"));
+        e.close_report_issue();
+        // A catalog opening, which leaves the window's activity idle.
+        e.catalog_work = Some("Opening".into());
+        assert!(!e.activity.is_busy());
+        e.open_report_issue();
+        assert!(text(&e).contains("Background task: running\n"));
         Ok(())
     }
 
