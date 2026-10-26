@@ -6,6 +6,12 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod tokens;
+pub use tokens::{
+    BUILTIN, Builtin, DatePart, Def, DisplayError, Field, Menu, Needs, Part, Span, TOKENS, Token,
+    TokenTemplate, builtin, by_label, menu,
+};
+
 /// The Export dialog's choice that takes its text from the photo's
 /// copyright, as Lightroom's Simple Copyright Watermark does.
 pub const SIMPLE_COPYRIGHT: &str = "<simple-copyright>";
@@ -164,7 +170,94 @@ impl Naming {
             Self::FilenameSequence | Self::CustomNameSequence | Self::CustomNameOf
         )
     }
+    /// The template as Lightroom's tokens, which the Filename Template
+    /// Editor starts from.
+    pub fn tokens(self) -> &'static str {
+        match self {
+            Self::Filename => "{{image_name}}",
+            Self::FilenameText => "{{image_name}}-{{custom_token}}",
+            Self::FilenameSequence => "{{image_name}}-{{naming_sequenceNumber_1Digit}}",
+            Self::CustomName => "{{custom_token}}",
+            Self::CustomNameSequence => "{{custom_token}}-{{naming_sequenceNumber_1Digit}}",
+            Self::CustomNameOf => {
+                "{{custom_token}} ({{naming_sequenceNumber_1Digit}} of {{naming_sequenceTotal_1Digit}})"
+            }
+            Self::DateFilename => "{{date_YYYYMMDD}}-{{image_name}}",
+        }
+    }
+    /// The preset whose tokens `tokens` are, if any.
+    pub fn from_tokens(tokens: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|n| n.tokens() == tokens)
+    }
 }
+
+/// A camera's make and model for file names, once read from its file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CameraNames {
+    /// Not read (yet, or the reading failed).
+    #[default]
+    NotRead,
+    /// Read: the maker as RAWmakase spells it, and the model as the file
+    /// writes it; `None` when the file has none.
+    Read {
+        make: Option<String>,
+        model: Option<String>,
+    },
+}
+
+/// What a photo's name can be made from, taken once for each export: the
+/// Example and the files named all come from one reading. Text left empty
+/// is unknown or unset.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NameFields {
+    /// Its capture time as the catalog keeps it ("2026-05-04 10:21:33.000")
+    /// or EXIF writes it.
+    pub captured: Option<String>,
+    /// A virtual copy's name.
+    pub copy_name: String,
+    /// Lens, exposure, focal length, ISO and dimensions; its camera is not
+    /// used, see `camera`.
+    pub info: crate::metadata::PhotoInfo,
+    pub title: String,
+    pub caption: String,
+    pub copyright: String,
+    /// Its creators, "; " between them.
+    pub creator: String,
+    pub rating: i32,
+    pub label: String,
+    pub camera: CameraNames,
+}
+impl NameFields {
+    /// Nothing known.
+    pub const NONE: NameFields = NameFields {
+        captured: None,
+        copy_name: String::new(),
+        info: crate::metadata::PhotoInfo {
+            camera: None,
+            lens: None,
+            focal: None,
+            aperture: None,
+            exposure: None,
+            iso: None,
+            dimensions: None,
+        },
+        title: String::new(),
+        caption: String::new(),
+        copyright: String::new(),
+        creator: String::new(),
+        rating: 0,
+        label: String::new(),
+        camera: CameraNames::NotRead,
+    };
+    /// Only its capture time known.
+    pub fn captured(captured: Option<String>) -> Self {
+        Self {
+            captured,
+            ..Self::default()
+        }
+    }
+}
+static NO_FIELDS: NameFields = NameFields::NONE;
 
 /// Where a photo stands in its export, for the names that number or date it.
 #[derive(Clone, Copy, Debug)]
@@ -172,16 +265,15 @@ pub struct NameContext<'a> {
     /// Its place in the export, from 0, in the order the photos were chosen.
     pub index: usize,
     pub total: usize,
-    /// Its capture time as the catalog keeps it ("2026-05-04 10:21:33.000"),
-    /// if known.
-    pub captured: Option<&'a str>,
+    /// What its name can be made from.
+    pub fields: &'a NameFields,
 }
 impl NameContext<'_> {
-    /// One photo exported on its own, its date unknown.
+    /// One photo exported on its own, nothing known about it.
     pub const ONE: NameContext<'static> = NameContext {
         index: 0,
         total: 1,
-        captured: None,
+        fields: &NO_FIELDS,
     };
 }
 
@@ -196,11 +288,17 @@ pub struct NameTemplate {
     pub start: u32,
     /// How many digits Sequence has at least, zeros in front ("007").
     pub padding: usize,
+    /// A template made in the Filename Template Editor, which names files in
+    /// place of `naming`.
+    pub tokens: Option<TokenTemplate>,
 }
 impl NameTemplate {
-    /// `source`'s new name without its extension, for its place `at`, and a
-    /// note when it lacks what the template needs (a capture date).
-    pub fn stem(&self, source: &Path, at: &NameContext) -> (String, Option<String>) {
+    /// `source`'s new name without its extension, for its place `at`, and
+    /// what it lacks of what the template needs (a capture date…).
+    pub fn stem(&self, source: &Path, at: &NameContext) -> (String, Vec<String>) {
+        if let Some(tokens) = &self.tokens {
+            return tokens.stem(source, at, &self.text, self.start);
+        }
         let stem = source.file_stem().unwrap_or_default().to_string_lossy();
         let text = name_part(&self.text);
         let text = text.as_str();
@@ -211,7 +309,7 @@ impl NameTemplate {
             self.start as usize + at.index,
             width = self.padding
         );
-        let mut note = None;
+        let mut note = Vec::new();
         let name = match self.naming {
             Naming::Filename => stem.to_string(),
             Naming::FilenameText if text.is_empty() => stem.to_string(),
@@ -220,12 +318,12 @@ impl NameTemplate {
             Naming::CustomName => custom.to_string(),
             Naming::CustomNameSequence => format!("{custom}-{sequence}"),
             Naming::CustomNameOf => format!("{custom} ({sequence} of {})", at.total),
-            Naming::DateFilename => match at.captured.and_then(date) {
+            Naming::DateFilename => match at.fields.captured.as_deref().and_then(date) {
                 Some(date) => format!("{date}-{stem}"),
                 // Never a file's modified date, which would look like a real
                 // capture date.
                 None => {
-                    note = Some("no capture date: named undated".into());
+                    note.push("no capture date: named undated".into());
                     format!("undated-{stem}")
                 }
             },
@@ -238,6 +336,28 @@ impl NameTemplate {
             name
         };
         (name, note)
+    }
+    /// What it needs that a photo's file may have to give.
+    pub fn needs(&self) -> Needs {
+        match &self.tokens {
+            Some(tokens) => tokens.needs(),
+            None => Needs {
+                captured: self.naming == Naming::DateFilename,
+                ..Needs::default()
+            },
+        }
+    }
+    /// Whether it has the Custom Text.
+    pub fn uses_text(&self) -> bool {
+        self.tokens
+            .as_ref()
+            .map_or(self.naming.uses_text(), TokenTemplate::uses_text)
+    }
+    /// Whether it numbers photos from Start Number.
+    pub fn uses_sequence(&self) -> bool {
+        self.tokens
+            .as_ref()
+            .map_or(self.naming.uses_sequence(), TokenTemplate::uses_sequence)
     }
 }
 
@@ -310,8 +430,17 @@ pub struct ExportSettings {
     pub rename: bool,
     pub custom_text: String,
     /// The Rename To template; `None` in settings saved before there was a
-    /// choice, which follow `rename`.
+    /// choice, which follow `rename`, and for one only a later release knows
+    /// (see [`LaterNaming`]).
+    #[serde(deserialize_with = "known_or_default")]
     pub naming: Option<Naming>,
+    #[serde(skip)]
+    pub later_naming: LaterNaming,
+    /// The template made in the Filename Template Editor (or one of
+    /// RAWmakase's own), which names files while Rename To is still the
+    /// preset it was made over; see [`CustomNaming`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_template: Option<CustomNaming>,
     /// Where Sequence starts.
     pub start_number: u32,
     pub uppercase: bool,
@@ -358,6 +487,8 @@ impl Default for ExportSettings {
             rename: false,
             custom_text: "edited".into(),
             naming: None,
+            later_naming: LaterNaming::default(),
+            name_template: None,
             start_number: 1,
             uppercase: false,
             format: Format::Jpeg,
@@ -385,6 +516,31 @@ impl Default for ExportSettings {
 /// still finds its choice after this one saves the settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LaterFormat(Option<serde_json::Value>);
+
+/// The saved Rename To when only a later release knows it, as
+/// [`LaterFormat`] is for the format.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LaterNaming(Option<serde_json::Value>);
+
+/// A custom template in `export.json`: `{"tokens": "{{image_name}}…",
+/// "over": "Filename", …}`. Earlier releases don't know it, keep it among
+/// their [`LaterFields`] and name files by `naming`, which is never a value
+/// they can't read. It names files only while `naming` is still `over`, the
+/// preset it was made over: an earlier release that chose another preset
+/// has the files named by that. Kept as read, so fields a later release adds
+/// inside it are saved back.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CustomNaming(serde_json::Value);
+impl CustomNaming {
+    /// Its tokens, in Lightroom's form.
+    pub fn tokens(&self) -> Option<&str> {
+        self.0.get("tokens")?.as_str()
+    }
+    fn over(&self) -> Option<&serde_json::Value> {
+        self.0.get("over")
+    }
+}
 
 /// The saved settings only a later release knows, as they were read. They
 /// mean nothing here and are saved back untouched, so that release still finds
@@ -448,27 +604,74 @@ impl ExportSettings {
         self.format = format;
         self.later_format = LaterFormat::default();
     }
+    /// The Rename To preset the user picks, which replaces a custom template
+    /// and a choice from a later release.
+    pub fn choose_naming(&mut self, naming: Naming) {
+        self.naming = Some(naming);
+        self.later_naming = LaterNaming::default();
+        self.name_template = None;
+    }
+    /// The template the user makes or picks, in Lightroom's form: a preset's
+    /// own tokens choose that preset, any other names files over the preset
+    /// chosen now. What a later release added to the template it replaces is
+    /// kept.
+    pub fn choose_tokens(&mut self, tokens: &str) {
+        if let Some(naming) = Naming::from_tokens(tokens) {
+            return self.choose_naming(naming);
+        }
+        let naming = self.naming();
+        self.naming = Some(naming);
+        self.later_naming = LaterNaming::default();
+        let mut template = match self.name_template.take() {
+            Some(CustomNaming(serde_json::Value::Object(map))) => map,
+            _ => serde_json::Map::new(),
+        };
+        template.insert("tokens".into(), tokens.into());
+        template.insert(
+            "over".into(),
+            serde_json::to_value(naming).unwrap_or_default(),
+        );
+        self.name_template = Some(CustomNaming(template.into()));
+    }
+    /// The custom template that names files, in Lightroom's form: `None`
+    /// when Rename To's preset does.
+    pub fn custom_tokens(&self) -> Option<&str> {
+        let template = self.name_template.as_ref()?;
+        let over = serde_json::to_value(self.naming()).ok()?;
+        (self.later_naming.0.is_none() && template.over() == Some(&over))
+            .then(|| template.tokens())
+            .flatten()
+    }
     fn load_from(path: &Path) -> Option<Self> {
         let saved: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
-        let later = saved
+        let later_format = saved
             .get("format")
             .filter(|format| Format::deserialize(*format).is_err())
             .cloned();
+        let later_naming = saved
+            .get("naming")
+            .filter(|naming| Option::<Naming>::deserialize(*naming).is_err())
+            .cloned();
         let mut settings = Self::deserialize(saved).ok()?;
-        settings.later_format = LaterFormat(later);
+        settings.later_format = LaterFormat(later_format);
+        settings.later_naming = LaterNaming(later_naming);
         Some(settings)
     }
     fn save_to(&self, path: &Path) -> anyhow::Result<()> {
-        // Still the stand-in it was read as: the later release's choice.
+        let mut saved = serde_json::to_value(self)?;
+        // Still the stand-ins they were read as: the later release's choices.
         if let LaterFormat(Some(later)) = &self.later_format
             && self.format == Format::default()
         {
-            let mut saved = serde_json::to_value(self)?;
             saved["format"] = later.clone();
-            return crate::storage::atomic_json(path, &saved);
         }
-        crate::storage::atomic_json(path, self)
+        if let LaterNaming(Some(later)) = &self.later_naming
+            && self.naming.is_none()
+        {
+            saved["naming"] = later.clone();
+        }
+        crate::storage::atomic_json(path, &saved)
     }
     /// The chosen folder, before any subfolder; `None` until a specific
     /// folder is picked.
@@ -500,11 +703,12 @@ impl ExportSettings {
             text: self.custom_text.clone(),
             start: self.start_number,
             padding: 0,
+            tokens: self.custom_tokens().map(TokenTemplate::parse),
         }
     }
     /// `source`'s exported name, as the template makes it for its place in the
-    /// export, and a note when it lacks what the template needs (a capture date).
-    pub fn file_name_for(&self, source: &Path, at: &NameContext) -> (String, Option<String>) {
+    /// export, and what it lacks of what the template needs (a capture date…).
+    pub fn file_name_for(&self, source: &Path, at: &NameContext) -> (String, Vec<String>) {
         let (name, note) = self.name_template().stem(source, at);
         let extension = self.format.extension();
         let name = if self.uppercase {
@@ -521,7 +725,7 @@ impl ExportSettings {
     }
     /// Where `source` exports to at its place in the export, and what its name
     /// has to say.
-    pub fn target_for(&self, source: &Path, at: &NameContext) -> Option<(PathBuf, Option<String>)> {
+    pub fn target_for(&self, source: &Path, at: &NameContext) -> Option<(PathBuf, Vec<String>)> {
         let mut folder = self.base_folder(source)?;
         let name = self.subfolder_name.trim();
         if self.subfolder && !name.is_empty() {
@@ -843,10 +1047,11 @@ mod tests {
             start_number: 7,
             ..Default::default()
         };
+        let fields = NameFields::captured(Some("2026-05-04 10:21:33.000".into()));
         let at = NameContext {
             index: 2,
             total: 30,
-            captured: Some("2026-05-04 10:21:33.000"),
+            fields: &fields,
         };
         let name = |s: &ExportSettings, naming| {
             let s = ExportSettings {
@@ -863,8 +1068,9 @@ mod tests {
         assert_eq!(name(&s, Naming::CustomNameOf), "Concert (9 of 30).jpg");
         assert_eq!(name(&s, Naming::DateFilename), "20260504-DSC0001.jpg");
         // EXIF's form of the date too.
+        let exif_fields = NameFields::captured(Some("2026:05:04 10:21:33".into()));
         let exif = NameContext {
-            captured: Some("2026:05:04 10:21:33"),
+            fields: &exif_fields,
             ..at
         };
         s.naming = Some(Naming::DateFilename);
@@ -872,7 +1078,7 @@ mod tests {
         // No capture date: "undated", said, never the file's modified date.
         let (name, note) = s.file_name_for(source, &NameContext::ONE);
         assert_eq!(name, "undated-DSC0001.jpg");
-        assert!(note.is_some());
+        assert_eq!(note.len(), 1);
         // Custom text names one file, never another folder.
         s.naming = Some(Naming::CustomName);
         for text in ["/tmp/final", "../final", "a\\b:c"] {
@@ -903,11 +1109,12 @@ mod tests {
             text: "Concert".into(),
             start: 7,
             padding,
+            tokens: None,
         };
         let at = |index| NameContext {
             index,
             total: 200,
-            captured: None,
+            ..NameContext::ONE
         };
         assert_eq!(template(3).stem(source, &at(2)).0, "Concert-009");
         assert_eq!(template(0).stem(source, &at(2)).0, "Concert-9");

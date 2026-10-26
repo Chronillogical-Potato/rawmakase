@@ -231,7 +231,7 @@ fn read_capture(path: &Path) -> CaptureRead {
 
 /// The file's info: `None` when it cannot be read now, `Some(None)` when it
 /// has none.
-fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
+pub(crate) fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
     if !can_read(path) {
         return None;
     }

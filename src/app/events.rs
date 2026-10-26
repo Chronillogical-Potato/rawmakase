@@ -41,6 +41,7 @@ impl Editor {
                 }
                 // The dialog's own DialogClosed follows.
                 Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
+                Event::NamesRead { request, read } => self.names_read(request, read),
                 Event::RenameOrdered(catalog, cancel, ordered) => {
                     self.rename_ordered(catalog, cancel, *ordered)
                 }

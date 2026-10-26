@@ -301,6 +301,7 @@ impl Editor {
                 text: String::new(),
                 start: 1,
                 padding: digits(1, count),
+                tokens: None,
             },
             planned: None,
             focused: false,

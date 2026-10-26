@@ -12,6 +12,10 @@ pub struct RawInfo {
     pub variant: Variant,
     pub make: String,
     pub model: String,
+    /// The make and model as the file writes them, trimmed, before any of
+    /// RAWmakase's naming (`names::apply`): what export file names use.
+    pub file_make: String,
+    pub file_model: String,
     /// The canonical name of a body sold under several names (empty make
     /// when there is none).
     pub normalized_make: String,
@@ -172,6 +176,8 @@ pub(crate) fn base(variant: Variant) -> RawInfo {
         variant,
         make: String::new(),
         model: String::new(),
+        file_make: String::new(),
+        file_model: String::new(),
         normalized_make: String::new(),
         normalized_model: String::new(),
         raw_width: 0,

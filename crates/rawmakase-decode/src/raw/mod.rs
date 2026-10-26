@@ -60,6 +60,21 @@ pub fn background_pool(
 fn background_thread() {
     priority::lower();
 }
+/// A camera's make and model as its file writes them.
+pub use rawmakase_raw::FileNames;
+/// The make and model the RAW file at `path` writes, before RAWmakase names
+/// its camera (Lightroom's Make and Model file-name tokens): read from its
+/// header, nothing decoded. For files whose EXIF `crate::exif` can't read,
+/// such as a CR3.
+pub fn file_camera_names(path: &Path) -> Result<FileNames> {
+    let bytes = std::fs::read(path)?;
+    Ok(rawmakase_raw::file_camera_names(&bytes)?)
+}
+/// The maker a file's make names, as RAWmakase spells it everywhere
+/// ("SONY" is "Sony").
+pub fn maker_name(file_make: &str) -> String {
+    rawmakase_raw::maker_name(file_make)
+}
 pub struct Raw {
     // Boxed: the decoder's state is large, and a `Raw` travels in enums.
     own: Box<own::Own>,

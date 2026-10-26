@@ -929,6 +929,7 @@ fn a_batch_keeps_the_order_read_when_its_dialog_opened() -> Result<()> {
         text: "x".into(),
         start: 1,
         padding: 0,
+        tokens: None,
     };
     let preview = rename_preview(&fx.cat, &order, &template).map_err(|e| anyhow::anyhow!("{e}"))?;
     let rows: Vec<(PhotoId, &str)> = preview
@@ -951,6 +952,7 @@ fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
         text: "Trip".into(),
         start: 1,
         padding: 3,
+        tokens: None,
     };
     let preview = rename_preview(&fx.cat, &order, &template).map_err(|e| anyhow::anyhow!("{e}"))?;
     let rows: Vec<(&str, &str, bool)> = preview
@@ -993,6 +995,7 @@ fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
         text: "Next".into(),
         start: 1,
         padding: 0,
+        tokens: None,
     };
     let preview = rename_preview(&fx.cat, &order, &template).map_err(|e| anyhow::anyhow!("{e}"))?;
     assert!(preview.plan.is_empty());

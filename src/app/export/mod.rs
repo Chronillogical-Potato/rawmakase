@@ -4,7 +4,12 @@
 //! editing; the top bar shows its progress, and what could not be exported stays
 //! there until it is read.
 mod dialog;
+mod name_editor;
+mod name_read;
 mod watermark_editor;
+
+pub(super) use name_read::Reads;
+use name_read::{NameRead, Status, ToRead};
 
 use crate::app::Module;
 use crate::catalog::PhotoId;
@@ -18,7 +23,7 @@ use crate::export::{
     job::Photo,
     queue::Queue,
 };
-use crate::export_settings::{Existing, ExportSettings};
+use crate::export_settings::{Existing, ExportSettings, NameFields, NameTemplate};
 use eframe::egui::{self, Color32, Sense, Vec2};
 use std::{
     collections::HashMap,
@@ -35,8 +40,9 @@ struct Chosen {
     name: String,
     /// The photo open in Develop: exported with its edit as shown.
     open: bool,
-    /// Its capture time, for Date - Filename.
-    captured: Option<String>,
+    /// What its exported name is made from: the catalog's, read when Export
+    /// was chosen, and the file's once read (`name_read`).
+    fields: NameFields,
     /// Its place among the photos chosen, those left out counted.
     place: usize,
 }
@@ -49,6 +55,12 @@ struct Scope {
     chosen: usize,
     /// Photos chosen that can't be exported: their names and why.
     left_out: Vec<(String, String)>,
+}
+impl Scope {
+    /// Its photo has no catalog: what its name needs is all in its file.
+    fn standalone(&self) -> bool {
+        self.photos.iter().any(|p| p.id.is_none())
+    }
 }
 
 /// A batch whose files already exist, waiting for the answer to Ask.
@@ -123,6 +135,14 @@ pub(super) struct Exports {
     /// Saved watermarks, read when the dialog opens and after the editor
     /// saves one.
     watermarks: Vec<crate::watermark::Watermark>,
+    /// What the scope's names need from its files, read in the background.
+    read: NameRead,
+    /// Export with Previous's settings, waiting for `read`.
+    waiting: Option<ExportSettings>,
+    /// The Filename Template Editor, over the dialog.
+    name_editor: Option<name_editor::NameEditor>,
+    /// Tests: an export doesn't save its settings as the last export's.
+    unsaved_settings: bool,
 }
 
 impl Exports {
@@ -140,6 +160,7 @@ impl Editor {
         let Some(scope) = self.export_scope() else {
             return;
         };
+        self.exports.read.cancel();
         self.exports.scope = scope;
         self.exports.draft = ExportSettings::load().unwrap_or_default();
         self.exports.watermarks = crate::watermark::presets();
@@ -147,11 +168,22 @@ impl Editor {
     }
     /// Export with Previous: the last export's choices, without the dialog.
     pub(super) fn export_with_previous(&mut self) {
-        match ExportSettings::load() {
+        self.export_previous(ExportSettings::load());
+    }
+    /// Export with Previous with the last export's settings, if any.
+    fn export_previous(&mut self, previous: Option<ExportSettings>) {
+        match previous {
             Some(settings) => {
                 if let Some(scope) = self.export_scope() {
+                    self.exports.read.cancel();
                     self.exports.scope = scope;
-                    self.export(settings);
+                    // Names that need the files wait for them, in a small
+                    // window that can cancel.
+                    if self.names_wait(&settings.name_template()) {
+                        self.exports.waiting = Some(settings);
+                    } else {
+                        self.export(settings);
+                    }
                 }
             }
             None => self.open_export_dialog(),
@@ -162,6 +194,8 @@ impl Editor {
         self.exports.dialog
             || self.exports.pending.is_some()
             || self.exports.watermark_editor.is_some()
+            || self.exports.name_editor.is_some()
+            || self.exports.waiting.is_some()
             || self.exports.report
     }
     /// An export is running or waiting.
@@ -208,7 +242,7 @@ impl Editor {
                             source: photo.path.clone(),
                             name,
                             open,
-                            captured: Some(photo.captured.clone()).filter(|c| !c.is_empty()),
+                            fields: NameFields::default(),
                             place,
                         }),
                     }
@@ -224,7 +258,9 @@ impl Editor {
                 scope.chosen = 1;
                 scope.photos.push(Chosen {
                     id: None,
-                    captured: crate::exif::capture_time(&source),
+                    // Its capture time and info are its file's: read in the
+                    // background when its name needs them.
+                    fields: NameFields::default(),
                     place: 0,
                     name: source
                         .file_name()
@@ -251,7 +287,134 @@ impl Editor {
             self.status = format!("Export waits for the open photo: {why}");
             return None;
         }
+        // Metadata typed in the Library goes in the names and the files.
+        if !self.commit_library_drafts() {
+            self.status = format!("Export stopped: {}", self.status);
+            return None;
+        }
+        // What the names are made from, as the catalog has it now, in one
+        // reading: the Example and the files named agree whatever changes.
+        let ids: Vec<PhotoId> = scope.photos.iter().filter_map(|p| p.id).collect();
+        if let Some(l) = &self.library
+            && !ids.is_empty()
+        {
+            match l.session.catalog.name_fields(&ids) {
+                Ok(fields) => {
+                    let chosen = scope.photos.iter_mut().filter(|p| p.id.is_some());
+                    for (chosen, fields) in chosen.zip(fields) {
+                        chosen.fields = fields;
+                    }
+                }
+                Err(e) => {
+                    self.status = format!("Export stopped: the catalog could not be read: {e:#}");
+                    return None;
+                }
+            }
+        }
         Some(scope)
+    }
+
+    /// Whether `template` needs what the scope's files give.
+    fn names_need_files(&self, template: &NameTemplate) -> bool {
+        let scope = &self.exports.scope;
+        !scope.photos.is_empty()
+            && template
+                .needs()
+                .and(name_read::file_sourced(scope.standalone()))
+                .any()
+    }
+    /// Whether names by `template` wait for the scope's files: it needs
+    /// them, and they are being read; started here the first time.
+    fn names_wait(&mut self, template: &NameTemplate) -> bool {
+        if !self.names_need_files(template) {
+            return false;
+        }
+        match self.exports.read.status() {
+            Status::Idle => {
+                let photos = self
+                    .exports
+                    .scope
+                    .photos
+                    .iter()
+                    .map(|p| ToRead {
+                        path: p.source.clone(),
+                        standalone: p.id.is_none(),
+                    })
+                    .collect();
+                self.exports
+                    .read
+                    .start(photos, self.tx.clone(), self.context.clone());
+                true
+            }
+            Status::Reading { .. } => true,
+            Status::Ready | Status::Failed(_) => false,
+        }
+    }
+    /// What `template`'s names wait for or lack from the files: `None` when
+    /// they need nothing from them, or have it.
+    fn names_read_status(&self, template: &NameTemplate) -> Option<Status> {
+        match self.exports.read.status() {
+            Status::Ready => None,
+            status if self.names_need_files(template) => Some(status),
+            _ => None,
+        }
+    }
+
+    /// The scope's files were read: their fields go in its photos, and Export
+    /// with Previous goes on, or (when they could not be read) opens the
+    /// dialog to say so. A read of another scope is dropped.
+    pub(super) fn names_read(&mut self, request: u64, read: Result<Reads, String>) {
+        let Some((read, failed)) = self.exports.read.finished(request, read) else {
+            return;
+        };
+        // What could be read goes in, whether or not all could.
+        for (chosen, read) in self.exports.scope.photos.iter_mut().zip(read) {
+            if let Some(read) = read {
+                name_read::fill(&mut chosen.fields, read, chosen.id.is_none());
+            }
+        }
+        let Some(settings) = self.exports.waiting.take() else {
+            return;
+        };
+        match failed {
+            None => self.export(settings),
+            Some(why) => {
+                self.status = format!("Photo info could not be read for the file names: {why}");
+                self.exports.draft = settings;
+                self.exports.watermarks = crate::watermark::presets();
+                self.exports.dialog = true;
+            }
+        }
+    }
+
+    /// Export with Previous waiting for the files its names need: how far,
+    /// and Cancel.
+    fn export_waiting(&mut self, ctx: &egui::Context) {
+        if self.exports.waiting.is_none() {
+            return;
+        }
+        let palette = theme::palette(ctx);
+        let line = match self.exports.read.status() {
+            Status::Reading { done, total } => {
+                format!("Reading photo info for the file names… {done} of {total}")
+            }
+            _ => "Reading photo info for the file names…".into(),
+        };
+        let mut cancel = false;
+        let response = egui::Modal::new(egui::Id::new("export-names-reading"))
+            .frame(super::widgets::modal_frame(&palette).inner_margin(24))
+            .show(ctx, |ui| {
+                ui.set_width(360.);
+                ui.label(egui::RichText::new(line).size(14.).color(palette.gray(230)));
+                ui.add_space(16.);
+                cancel = ui.button("Cancel").clicked();
+            });
+        if cancel || response.should_close() {
+            self.exports.read.cancel();
+            self.exports.waiting = None;
+            self.exports.scope = Scope::default();
+            self.status = "Export cancelled".into();
+        }
     }
 
     /// Why the open photo's edit is not final yet, if it is not: what it shows
@@ -329,10 +492,14 @@ impl Editor {
     /// Exports the scope chosen with `settings`: each photo as the catalog has it
     /// now, the open one as shown. Asks once about files that already exist.
     fn export(&mut self, settings: ExportSettings) {
-        if let Err(e) = settings.save() {
+        if !self.exports.unsaved_settings
+            && let Err(e) = settings.save()
+        {
             self.status = format!("Export settings not saved: {e:#}");
         }
         let scope = std::mem::take(&mut self.exports.scope);
+        // Its names are made from what the scope has now.
+        self.exports.read.cancel();
         let watermark = if settings.watermark {
             match watermark_for(&settings.watermark_name) {
                 Some(w) => Some(w),
@@ -344,11 +511,8 @@ impl Editor {
         } else {
             None
         };
-        // Metadata typed in the Library goes in the files: not exported without it.
-        if !self.commit_library_drafts() {
-            self.status = format!("Export stopped: {}", self.status);
-            return;
-        }
+        // Metadata typed in the Library was committed when the scope was
+        // chosen (`export_scope`): nothing can be typed while it is open.
         // The open photo is exported as shown; if its edit can't be saved, it is
         // still exported, and the report says so.
         let unsaved = scope.photos.iter().any(|p| p.open) && !self.flush();
@@ -387,13 +551,14 @@ impl Editor {
                         records.next().expect("a record for each photo"),
                         chosen.source.clone(),
                         chosen.name.clone(),
+                        chosen.fields.clone(),
                     ),
                     None => BatchPhoto {
                         source: chosen.source.clone(),
                         name: chosen.name.clone(),
                         edit: Edit::Catalog(Default::default()),
                         values: Values::default(),
-                        captured: chosen.captured.clone(),
+                        naming: chosen.fields.clone(),
                         place: None,
                     },
                 };

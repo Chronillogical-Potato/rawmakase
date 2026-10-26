@@ -2,6 +2,7 @@ use super::*;
 use crate::app::Module;
 use crate::catalog::PhotoId;
 use crate::export_settings::{Destination, Format};
+use name_read::{FileFields, Status};
 
 /// An editor on a catalog of two copies of the synthetic chart DNG and a JPEG.
 fn editor() -> anyhow::Result<(tempfile::TempDir, Editor, Vec<PhotoId>, egui::Context)> {
@@ -309,5 +310,551 @@ fn return_exports_from_the_dialog() -> anyhow::Result<()> {
     return_key(&mut e);
     assert_eq!(e.status, "Choose a folder to export to");
     assert!(e.exports.dialog);
+    Ok(())
+}
+
+/// One frame of the export windows, with `events` as input.
+fn frame(e: &mut Editor, ctx: &egui::Context, events: Vec<egui::Event>) {
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            events,
+            ..Default::default()
+        },
+        |ui| e.export_windows(ui.ctx()),
+    );
+    output.textures_delta.clear();
+}
+/// `key`, pressed and released, then a frame without input.
+fn press(e: &mut Editor, ctx: &egui::Context, key: egui::Key) {
+    let event = |pressed| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(e, ctx, vec![event(true), event(false)]);
+    frame(e, ctx, vec![]);
+}
+/// Return, pressed and released, then a frame without input.
+fn press_return(e: &mut Editor, ctx: &egui::Context) {
+    press(e, ctx, egui::Key::Enter);
+}
+/// Takes the editor's events until `done`.
+fn until(e: &mut Editor, ctx: &egui::Context, done: impl Fn(&Editor) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !done(e) {
+        assert!(std::time::Instant::now() < deadline, "never happened");
+        e.events(ctx);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+/// A reader that names every camera "Sony ILCE-7RM6", once `gate` lets each
+/// photo through, counting the photos read.
+fn gated_reader() -> (
+    name_read::Reader,
+    std::sync::mpsc::Sender<()>,
+    Arc<std::sync::atomic::AtomicUsize>,
+) {
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(gate);
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = count.clone();
+    let reader: name_read::Reader = Arc::new(move |_photo: &name_read::ToRead| {
+        let _ = gate.lock().unwrap().recv();
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(FileFields {
+            camera: crate::export_settings::CameraNames::Read {
+                make: Some("Sony".into()),
+                model: Some("ILCE-7RM6".into()),
+            },
+            ..Default::default()
+        })
+    });
+    (reader, open, count)
+}
+/// The Export dialog for the selection, with `settings`.
+fn open_dialog(e: &mut Editor, settings: ExportSettings) {
+    e.exports.read.cancel();
+    e.exports.scope = e.export_scope().expect("photos to export");
+    e.exports.draft = settings;
+    e.exports.dialog = true;
+    e.exports.unsaved_settings = true;
+}
+const MODEL: &str = "{{com.adobe.model}}-{{image_name}}";
+
+/// The Example and the files are named from what the catalog had when Export
+/// was chosen, typing still in the Library included; a change to the catalog
+/// afterwards (a backfilled capture time, a title) changes neither.
+#[test]
+fn names_come_from_the_catalog_as_it_was_when_export_was_chosen() -> anyhow::Result<()> {
+    let (dir, mut e, ids, _ctx) = editor()?;
+    let library = e.library.as_mut().unwrap();
+    library
+        .session
+        .catalog
+        .set_text(&ids[..1], crate::metadata::TextField::Title, "Harbour")?;
+    let copy = library.create_virtual_copy(ids[0])?.value;
+    library.select(Some(copy));
+    // Typed, not saved yet.
+    library.set_copy_name_draft(copy, "Night");
+    let scope = e.export_scope().expect("the copy");
+    let fields = &scope.photos[0].fields;
+    assert_eq!(
+        (fields.title.as_str(), fields.copy_name.as_str()),
+        ("Harbour", "Night")
+    );
+    assert_eq!(fields.captured, None);
+    // The catalog changes after the dialog opened.
+    let catalog = &mut e.library.as_mut().unwrap().session.catalog;
+    catalog.set_text(&[copy], crate::metadata::TextField::Title, "Later")?;
+    catalog.fill_capture_times(&[(copy, "2026-04-24T18:43:24.000".into())])?;
+    let mut s = settings(&dir.path().join("out"));
+    s.choose_tokens("{{com.adobe.title}} {{copy_name}} {{date_YYYY}}");
+    let example = s
+        .file_name_for(
+            &scope.photos[0].source,
+            &crate::export_settings::NameContext {
+                index: 0,
+                total: 1,
+                fields: &scope.photos[0].fields,
+            },
+        )
+        .0;
+    assert_eq!(example, "Harbour Night.tif");
+    let batch = e.batch_photos(&scope, false)?;
+    let plan = batch::plan(&batch, &s, None).unwrap();
+    assert_eq!(
+        plan.entries[0].target.file_name().unwrap(),
+        "Harbour Night.tif"
+    );
+    assert_eq!(plan.entries[0].notes, ["no capture date"]);
+    Ok(())
+}
+
+/// A template that needs the camera's model reads it once, when it first
+/// needs it; Export (and Return) wait for it; a result of another read is
+/// dropped; the files are named from what was read.
+#[test]
+fn the_dialog_reads_the_camera_names_once_a_template_needs_them() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    let (reader, open, read) = gated_reader();
+    e.exports.read.set_reader(reader);
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let out = dir.path().join("out");
+    open_dialog(&mut e, settings(&out));
+    // Filename needs nothing from the file.
+    frame(&mut e, &ctx, vec![]);
+    assert_eq!(e.exports.read.status(), Status::Idle);
+    // The editor's template needs the model: read now, once.
+    e.exports.draft.choose_tokens(MODEL);
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    assert_eq!(
+        e.exports.read.status(),
+        Status::Reading { done: 0, total: 1 }
+    );
+    press_return(&mut e, &ctx);
+    assert!(
+        e.exports.dialog && e.exports.queued.is_empty(),
+        "Return waits"
+    );
+    // A read of an earlier scope is dropped.
+    e.names_read(0, Ok(vec![Ok(FileFields::default())]));
+    assert!(matches!(e.exports.read.status(), Status::Reading { .. }));
+    open.send(())?;
+    until(&mut e, &ctx, |e| e.exports.read.status() == Status::Ready);
+    frame(&mut e, &ctx, vec![]);
+    assert_eq!(read.load(std::sync::atomic::Ordering::SeqCst), 1);
+    press_return(&mut e, &ctx);
+    assert!(!e.exports.dialog);
+    wait(&mut e, &ctx);
+    assert_eq!(listing(&out), ["ILCE-7RM6-a.tif"]);
+    Ok(())
+}
+
+/// Cancel stops the read; its late completion changes nothing, and the next
+/// dialog reads again.
+#[test]
+fn cancelling_the_dialog_drops_its_read() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    let (reader, open, _read) = gated_reader();
+    e.exports.read.set_reader(reader);
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let mut s = settings(&dir.path().join("out"));
+    s.choose_tokens(MODEL);
+    open_dialog(&mut e, s.clone());
+    frame(&mut e, &ctx, vec![]);
+    assert!(matches!(e.exports.read.status(), Status::Reading { .. }));
+    let escape = |pressed| egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut e, &ctx, vec![escape(true), escape(false)]);
+    frame(&mut e, &ctx, vec![]);
+    assert!(!e.exports.dialog);
+    assert_eq!(e.exports.read.status(), Status::Idle);
+    // The cancelled worker stops without a result; any that came is dropped.
+    open.send(())?;
+    e.names_read(1, Ok(vec![Ok(FileFields::default())]));
+    assert_eq!(e.exports.read.status(), Status::Idle);
+    open_dialog(&mut e, s);
+    frame(&mut e, &ctx, vec![]);
+    open.send(())?;
+    until(&mut e, &ctx, |e| e.exports.read.status() == Status::Ready);
+    assert!(matches!(
+        e.exports.scope.photos[0].fields.camera,
+        crate::export_settings::CameraNames::Read { .. }
+    ));
+    Ok(())
+}
+
+/// A reader that panics: the read fails, nothing stays busy, and Export says
+/// it goes on without the names' fields; the files then say what they lack.
+#[test]
+fn a_failed_read_is_said_and_exports_without_it() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    e.exports.read.set_reader(Arc::new(
+        |_: &name_read::ToRead| -> Result<FileFields, String> { panic!("disk gone") },
+    ));
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let out = dir.path().join("out");
+    let mut s = settings(&out);
+    s.choose_tokens(MODEL);
+    // Export with Previous waits, then opens the dialog to say so.
+    e.exports.unsaved_settings = true;
+    e.export_previous(Some(s));
+    assert!(e.exports.waiting.is_some() && e.export_modal());
+    until(&mut e, &ctx, |e| e.exports.dialog);
+    assert!(e.exports.waiting.is_none());
+    match e.exports.read.status() {
+        Status::Failed(why) => assert!(why.contains("disk gone"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(e.status.contains("could not be read"), "{}", e.status);
+    press_return(&mut e, &ctx);
+    wait(&mut e, &ctx);
+    // As Lightroom: the text around a value it lacks stays.
+    assert_eq!(listing(&out), ["-a.tif"]);
+    let summary = e.exports.summary.clone().expect("the notes");
+    assert_eq!(
+        summary.notes,
+        [(
+            "a.dng".to_string(),
+            "the camera's make and model were not read".to_string()
+        )]
+    );
+    Ok(())
+}
+
+/// Export with Previous with a template that needs the files waits for them in
+/// a window that can cancel, then exports; one that needs nothing exports at
+/// once.
+#[test]
+fn export_with_previous_waits_for_what_its_names_need() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    let (reader, open, _read) = gated_reader();
+    e.exports.read.set_reader(reader);
+    e.exports.unsaved_settings = true;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let out = dir.path().join("out");
+    let mut s = settings(&out);
+    s.choose_tokens(MODEL);
+    e.export_previous(Some(s.clone()));
+    assert!(e.exports.waiting.is_some() && e.exports.queued.is_empty());
+    // Cancel in the window.
+    frame(&mut e, &ctx, vec![]);
+    let escape = |pressed| egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut e, &ctx, vec![escape(true), escape(false)]);
+    assert!(e.exports.waiting.is_none() && !e.export_modal());
+    assert_eq!(e.status, "Export cancelled");
+    open.send(())?;
+    // Again, to the end.
+    e.export_previous(Some(s));
+    open.send(())?;
+    wait_for_queue(&mut e, &ctx);
+    assert_eq!(listing(&out), ["ILCE-7RM6-a.tif"]);
+    // Nothing to read: at once.
+    e.export_previous(Some(settings(&dir.path().join("plain"))));
+    assert!(e.exports.waiting.is_none() && !e.exports.queued.is_empty());
+    wait(&mut e, &ctx);
+    assert_eq!(listing(&dir.path().join("plain")), ["a.tif"]);
+    Ok(())
+}
+/// Takes events until an export was queued and has finished.
+fn wait_for_queue(e: &mut Editor, ctx: &egui::Context) {
+    until(e, ctx, |e| !e.exports.queued.is_empty());
+    wait(e, ctx);
+}
+
+/// A photo opened without a catalog has its capture time in its file only:
+/// Date - Filename waits for it, which a catalog photo doesn't.
+#[test]
+fn a_photo_without_a_catalog_reads_its_date_from_its_file() -> anyhow::Result<()> {
+    let (_dir, mut e, ids, _ctx) = editor()?;
+    let date = ExportSettings {
+        naming: Some(crate::export_settings::Naming::DateFilename),
+        ..Default::default()
+    };
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    e.exports.scope = e.export_scope().unwrap();
+    assert!(!e.names_wait(&date.name_template()));
+    let mut model = ExportSettings::default();
+    model.choose_tokens(MODEL);
+    e.exports
+        .read
+        .set_reader(Arc::new(|_: &name_read::ToRead| Ok(FileFields::default())));
+    assert!(
+        e.names_wait(&model.name_template()),
+        "a catalog photo's model"
+    );
+    e.exports.read.cancel();
+    // Standalone.
+    e.exports.scope.photos[0].id = None;
+    assert!(e.names_wait(&date.name_template()));
+    e.exports.read.cancel();
+    // What its file gives goes in its fields.
+    let mut fields = crate::export_settings::NameFields::default();
+    name_read::fill(
+        &mut fields,
+        FileFields {
+            captured: Some("2026-04-24T18:43:24.000".into()),
+            info: Some(crate::metadata::PhotoInfo {
+                iso: Some(100.),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        true,
+    );
+    assert_eq!(fields.captured.as_deref(), Some("2026-04-24T18:43:24.000"));
+    assert_eq!(fields.info.iso, Some(100.));
+    Ok(())
+}
+
+/// The real reader: a DNG's make and model from its EXIF, the maker spelled
+/// as RAWmakase spells it; a file with none has none.
+#[test]
+fn the_reader_takes_the_files_own_names() -> anyhow::Result<()> {
+    let (dir, e, ids, _ctx) = editor()?;
+    let dng = e
+        .library
+        .as_ref()
+        .unwrap()
+        .photo(ids[0])
+        .unwrap()
+        .path
+        .clone();
+    let (make, model) = crate::exif::camera_names(&dng).unwrap_or_default();
+    let read = name_read::read_path(&dng, true).unwrap();
+    // Its info as the catalog reads it, dimensions included.
+    assert!(
+        read.info.as_ref().is_some_and(|i| i.dimensions.is_some()),
+        "{read:?}"
+    );
+    assert_eq!(
+        read.camera,
+        crate::export_settings::CameraNames::Read {
+            make: Some(crate::raw::maker_name(&make)).filter(|m| !m.is_empty()),
+            model: Some(model).filter(|m| !m.is_empty()),
+        }
+    );
+    let text = dir.path().join("note.txt");
+    std::fs::write(&text, "not a photo")?;
+    assert_eq!(
+        name_read::read_path(&text, false).unwrap().camera,
+        crate::export_settings::CameraNames::Read {
+            make: None,
+            model: None
+        }
+    );
+    // A file gone is an error, not a photo without names.
+    std::fs::remove_file(&text)?;
+    assert!(name_read::read_path(&text, false).is_err());
+    Ok(())
+}
+
+/// Return belongs to the Filename Template Editor while it is open over the
+/// dialog: it is Done, keeping the template, and nothing is exported. With a
+/// mistake in the template it does nothing, and never types a line break.
+#[test]
+fn return_in_the_template_editor_is_done_and_does_not_export() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    let mut wrong = name_editor::NameEditor::new(MODEL);
+    wrong.text.push('{');
+    let typed = wrong.text.clone();
+    e.exports.name_editor = Some(wrong);
+    // Typing in the text, as when Return is pressed in the app.
+    frame(&mut e, &ctx, vec![]);
+    ctx.memory_mut(|m| m.request_focus(name_editor::text_id()));
+    frame(&mut e, &ctx, vec![]);
+    assert!(ctx.memory(|m| m.has_focus(name_editor::text_id())));
+    press_return(&mut e, &ctx);
+    assert_eq!(
+        e.exports.name_editor.as_ref().map(|n| &n.text),
+        Some(&typed)
+    );
+    assert_eq!(e.exports.draft.custom_tokens(), None);
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    press_return(&mut e, &ctx);
+    assert!(e.exports.name_editor.is_none());
+    assert_eq!(e.exports.draft.custom_tokens(), Some(MODEL));
+    assert!(e.exports.dialog && e.exports.queued.is_empty());
+    Ok(())
+}
+
+/// A line break never gets into the template: pasted or typed, it is
+/// dropped before the text takes it, so what is typed next lands at the
+/// cursor.
+#[test]
+fn line_breaks_never_get_into_the_template() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    let mut typing = name_editor::NameEditor::new("abcd");
+    typing.text = "abcd".into();
+    e.exports.name_editor = Some(typing);
+    frame(&mut e, &ctx, vec![]);
+    ctx.memory_mut(|m| m.request_focus(name_editor::text_id()));
+    frame(&mut e, &ctx, vec![]);
+    let mut state = egui::TextEdit::load_state(&ctx, name_editor::text_id()).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(2),
+        )));
+    state.store(&ctx, name_editor::text_id());
+    frame(&mut e, &ctx, vec![egui::Event::Paste("X\r\nY\n".into())]);
+    frame(&mut e, &ctx, vec![egui::Event::Text("Z".into())]);
+    frame(&mut e, &ctx, vec![egui::Event::Text("V\nW".into())]);
+    frame(&mut e, &ctx, vec![egui::Event::Text("U".into())]);
+    assert_eq!(
+        e.exports.name_editor.as_ref().map(|n| n.text.as_str()),
+        Some("abXYZVWUcd")
+    );
+    // An input method's text, while composed and once committed.
+    let mut state = egui::TextEdit::load_state(&ctx, name_editor::text_id()).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(2),
+        )));
+    state.store(&ctx, name_editor::text_id());
+    let composed = |e: &Editor| e.exports.name_editor.as_ref().map(|n| n.text.clone());
+    frame(
+        &mut e,
+        &ctx,
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "日\n本".into(),
+            active_range_chars: Some(2..3),
+        })],
+    );
+    assert_eq!(composed(&e).as_deref(), Some("ab日本XYZVWUcd"));
+    frame(
+        &mut e,
+        &ctx,
+        vec![egui::Event::Ime(egui::ImeEvent::Commit("日\r\n本".into()))],
+    );
+    assert_eq!(composed(&e).as_deref(), Some("ab日本XYZVWUcd"));
+    Ok(())
+}
+
+/// Escape closes one window at a time: the Filename Template Editor first,
+/// dropping its template, also while its text is being typed in, and then
+/// the dialog.
+#[test]
+fn escape_closes_the_template_editor_then_the_dialog() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    frame(&mut e, &ctx, vec![]);
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    frame(&mut e, &ctx, vec![]);
+    ctx.memory_mut(|m| m.request_focus(name_editor::text_id()));
+    frame(&mut e, &ctx, vec![]);
+    assert!(ctx.memory(|m| m.has_focus(name_editor::text_id())));
+    press(&mut e, &ctx, egui::Key::Escape);
+    assert!(e.exports.name_editor.is_none());
+    assert!(e.exports.dialog);
+    assert_eq!(e.exports.draft.custom_tokens(), None);
+    press(&mut e, &ctx, egui::Key::Escape);
+    assert!(!e.exports.dialog);
+    // Escape as the editor opens from the dialog never closes the dialog
+    // under it.
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    frame(&mut e, &ctx, vec![]);
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    press(&mut e, &ctx, egui::Key::Escape);
+    assert!(e.exports.dialog);
+    press(&mut e, &ctx, egui::Key::Escape);
+    assert!(e.exports.name_editor.is_none());
+    assert!(e.exports.dialog && e.exports.queued.is_empty());
+    Ok(())
+}
+
+/// A file that can't be read fails the read (Export says it goes on without
+/// it); what the others gave is used.
+#[test]
+fn a_file_that_cant_be_read_fails_the_read_and_keeps_the_others() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    e.exports
+        .read
+        .set_reader(Arc::new(|photo: &name_read::ToRead| {
+            if photo.path.ends_with("b.dng") {
+                return Err("b.dng can't be read".into());
+            }
+            Ok(FileFields {
+                camera: crate::export_settings::CameraNames::Read {
+                    make: None,
+                    model: Some("X100".into()),
+                },
+                ..Default::default()
+            })
+        }));
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[0]));
+    library.select_range_to(ids[1]);
+    let mut s = settings(&dir.path().join("out"));
+    s.choose_tokens(MODEL);
+    open_dialog(&mut e, s);
+    frame(&mut e, &ctx, vec![]);
+    until(&mut e, &ctx, |e| {
+        matches!(e.exports.read.status(), Status::Failed(_))
+    });
+    assert_eq!(
+        e.exports.read.status(),
+        Status::Failed("b.dng can't be read".into())
+    );
+    let fields: Vec<_> = e
+        .exports
+        .scope
+        .photos
+        .iter()
+        .map(|p| p.fields.camera.clone())
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            crate::export_settings::CameraNames::Read {
+                make: None,
+                model: Some("X100".into())
+            },
+            crate::export_settings::CameraNames::NotRead,
+        ]
+    );
+    press_return(&mut e, &ctx);
+    wait(&mut e, &ctx);
+    assert_eq!(listing(&dir.path().join("out")), ["-b.tif", "X100-a.tif"]);
     Ok(())
 }
