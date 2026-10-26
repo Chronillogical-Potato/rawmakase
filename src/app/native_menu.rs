@@ -16,6 +16,8 @@ impl Editor {
         let workspace = free && library && !self.onboarding.visible;
         let enabled = match action {
             Action::Close | Action::Fullscreen => true,
+            // Like the sidebar's button, while a background task runs too.
+            Action::ReportIssue => !self.workspace_modal() && !self.close_confirm,
             Action::Cut | Action::Copy | Action::Paste => text && !self.activity.is_busy(),
             Action::Undo | Action::Redo if text => !self.activity.is_busy(),
             Action::SelectAll if text => !self.activity.is_busy(),
@@ -115,6 +117,7 @@ impl Editor {
                 !self.menu_state(action, ctx).1,
             )),
             Action::Shortcuts => self.view.shortcuts = true,
+            Action::ReportIssue => self.open_report_issue(),
         }
     }
 
@@ -172,6 +175,15 @@ mod tests {
             editor.menu_action(action, &ctx);
         }
         assert!(editor.menu_state(Action::Fullscreen, &ctx).0);
+        // Report an Issue stays available while a task runs, as the sidebar's
+        // button does, and then makes the dialog modal.
+        assert!(editor.menu_state(Action::ReportIssue, &ctx).0);
+        editor.report_issue_test_probe();
+        editor.menu_action(Action::ReportIssue, &ctx);
+        assert!(editor.report_issue.is_open());
+        assert!(!editor.menu_state(Action::ReportIssue, &ctx).0);
+        assert!(!editor.menu_state(Action::Shortcuts, &ctx).0);
+        editor.close_report_issue();
         assert!(!editor.preferences.open);
         assert!(!editor.view.shortcuts);
         assert!(editor.activity.is_changing_folder());

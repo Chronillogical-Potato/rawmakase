@@ -18,6 +18,7 @@ impl Editor {
             || self.modal.is_some()
             || self.not_editable.is_some()
             || self.view.shortcuts
+            || self.report_issue.is_open()
             || self.curve_save_open()
             || self.lut_import_open()
             || self.folder_sync.is_reviewing()
@@ -227,6 +228,7 @@ impl Editor {
         self.file_op_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
+        self.report_issue_window(&ctx);
         self.copy_dialog_window(&ctx);
         self.preset_rename_window(&ctx);
         self.curve_save_window(&ctx);
@@ -236,9 +238,10 @@ impl Editor {
         // Above Preferences too, which opens it.
         self.lut_import_window(&ctx);
         self.export_windows(&ctx);
-        self.update_notice(&ctx, modal || self.view.shortcuts);
+        let dialog = modal || self.view.shortcuts || self.report_issue.is_open();
+        self.update_notice(&ctx, dialog);
         #[cfg(feature = "telemetry")]
-        self.usage_stats_notice(&ctx, modal || self.view.shortcuts);
+        self.usage_stats_notice(&ctx, dialog);
         // Last, after whatever else this frame opened or asked: see its docs.
         self.develop_key_steps(&ctx, typing);
         self.pending_work(&ctx);
@@ -711,6 +714,11 @@ impl Editor {
             self.view.shortcuts = !self.view.shortcuts;
         }
     }
+    fn report_issue_button(&mut self, ui: &mut egui::Ui) {
+        if super::shortcuts::icon_button(ui, super::icons::Icon::Bug, "Report an issue").clicked() {
+            self.open_report_issue();
+        }
+    }
     fn gear_button(&mut self, ui: &mut egui::Ui) {
         let shortcut = if cfg!(target_os = "macos") {
             "⌘,"
@@ -1012,11 +1020,54 @@ impl Editor {
                     .inner_margin(egui::Margin::symmetric(8, 0)),
             )
             .show(ui, |ui| {
+                let busy = self.activity.is_busy();
+                let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
+                // Preferences and the shortcuts at the foot, with the Library's
+                // Export… for the photos selected; Develop's toolbar has its own.
+                // First, so Report an Issue stays clickable while the rest of
+                // the sidebar is disabled.
+                let mut export = false;
+                egui::Panel::bottom("library-export")
+                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                    .show_separator_line(false)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.;
+                            ui.add_enabled_ui(!busy, |ui| {
+                                self.gear_button(ui);
+                                ui.add_space(4.);
+                                self.shortcuts_button(ui);
+                            });
+                            ui.add_space(4.);
+                            self.report_issue_button(ui);
+                            if self.library.is_some() && self.module == Module::Library {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if busy {
+                                            ui.disable();
+                                        }
+                                        export = super::widgets::action_button(
+                                            ui,
+                                            "Export…",
+                                            Some(super::icons::Icon::Export),
+                                            true,
+                                        )
+                                        .on_hover_text(if cfg!(target_os = "macos") {
+                                            "Export the selected photos · ⇧⌘E"
+                                        } else {
+                                            "Export the selected photos · Ctrl+Shift+E"
+                                        })
+                                        .clicked();
+                                    },
+                                );
+                            }
+                        });
+                    });
                 // Drawn before the bar, which disables what follows it.
-                if self.activity.is_busy() {
+                if busy {
                     ui.disable();
                 }
-                let _side = super::widgets::SectionSide::enter(ui, super::widgets::SectionGroup::LibraryLeft);
                 // The title bar's part over the sidebar: the traffic lights and
                 // the sidebar's toggle, then the catalog menu.
                 let (row, _) = ui.allocate_exact_size(
@@ -1035,39 +1086,6 @@ impl Editor {
                 );
                 ui.add_space(4.);
                 self.catalog_switcher(ui, Some(ui.available_width()));
-                // Preferences and the shortcuts at the foot, with the Library's
-                // Export… for the photos selected; Develop's toolbar has its own.
-                let mut export = false;
-                egui::Panel::bottom("library-export")
-                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
-                    .show_separator_line(false)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.;
-                            self.gear_button(ui);
-                            ui.add_space(4.);
-                            self.shortcuts_button(ui);
-                            if self.library.is_some() && self.module == Module::Library {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        export = super::widgets::action_button(
-                                            ui,
-                                            "Export…",
-                                            Some(super::icons::Icon::Export),
-                                            true,
-                                        )
-                                        .on_hover_text(if cfg!(target_os = "macos") {
-                                            "Export the selected photos · ⇧⌘E"
-                                        } else {
-                                            "Export the selected photos · Ctrl+Shift+E"
-                                        })
-                                        .clicked();
-                                    },
-                                );
-                            }
-                        });
-                    });
                 if export {
                     self.open_export_dialog();
                 }

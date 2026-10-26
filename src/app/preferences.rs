@@ -373,9 +373,15 @@ impl Editor {
                 self.view.shortcuts = true;
                 self.preferences.open = false;
             }
+
             if ui.button("Import from Lightroom").clicked() {
                 self.preferences.open = false;
                 self.open_onboarding();
+            }
+        });
+        form_row(ui, "", |ui| {
+            if ui.button("Report an Issue…").clicked() {
+                self.open_report_issue();
             }
         });
     }

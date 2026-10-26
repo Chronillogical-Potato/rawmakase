@@ -72,6 +72,10 @@ enum Command {
     Inspect {
         input: PathBuf,
     },
+    /// Print the system report the Report an Issue dialog shows, for a bug
+    /// report. Opens no window, catalog, photo or GPU, so the window's lines
+    /// say so.
+    SystemInfo,
     /// Render one RAW with several XMP sidecars, developing it once: for comparisons
     /// with Camera Raw. `jobs` is a JSON list of {"xmp", "output", "max_edge"}; existing
     /// outputs are skipped.
@@ -307,6 +311,17 @@ fn main() -> Result<()> {
                 recipe.as_deref(),
                 origin.map(|p| [p[0], p[1]]),
             )?;
+        }
+        Some(Command::SystemInfo) => {
+            use rawmakase::diagnostics;
+            print!(
+                "{}",
+                diagnostics::report(
+                    &diagnostics::Build::current(),
+                    &diagnostics::System::probe(),
+                    None
+                )
+            );
         }
         Some(Command::Inspect { input }) => {
             let r = rawmakase::photo::open(&input)?;

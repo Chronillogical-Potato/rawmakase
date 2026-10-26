@@ -92,7 +92,10 @@ impl Menu {
             ),
             (
                 "Help",
-                &[(Action::Shortcuts, "Keyboard Shortcuts", "/", false)],
+                &[
+                    (Action::Shortcuts, "Keyboard Shortcuts", "/", false),
+                    (Action::ReportIssue, "Report an Issue…", "", false),
+                ],
             ),
         ];
         let actions = std::iter::once(Action::Preferences)

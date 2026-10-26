@@ -56,6 +56,9 @@ impl Editor {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
                 }
 
+                Event::SystemProbed { generation, system } => {
+                    self.system_probed(generation, *system)
+                }
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
                     self.view.monitor = super::monitor::MonitorProfile::Custom(p);

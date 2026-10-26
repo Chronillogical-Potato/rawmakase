@@ -30,8 +30,31 @@ fn mcp_guide() {
     );
 }
 
+/// The commit and target the system report names. Only RAWmakase's own
+/// checkout counts: a source archive unpacked inside another repository (a
+/// packaging one) would otherwise name that repository's commit.
+fn build_identity() {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let ours = git_output(&["rev-parse", "--show-toplevel"]).is_some_and(|top| {
+        let canonical = |path: &str| std::fs::canonicalize(path).ok();
+        canonical(&top).is_some_and(|top| Some(top) == canonical(&manifest))
+    });
+    let commit = ours
+        .then(|| git_output(&["rev-parse", "HEAD"]))
+        .flatten()
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .unwrap_or_else(|| "unknown (not built from a Git checkout)".into());
+    println!("cargo:rustc-env=RAWMAKASE_COMMIT={commit}");
+    println!(
+        "cargo:rustc-env=RAWMAKASE_TARGET={}",
+        std::env::var("TARGET").unwrap()
+    );
+}
+
 fn main() {
+    // Both follow HEAD, which mcp_guide tracks.
     mcp_guide();
+    build_identity();
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=packaging/windows/rawmakase.ico");
