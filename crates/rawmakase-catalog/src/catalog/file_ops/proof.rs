@@ -71,7 +71,7 @@ impl Proofs {
 /// names on a local FAT or exFAT volume and on an SMB share (macOS's smbfs,
 /// Linux's CIFS); none elsewhere (other network shares, FUSE, GVFS's shares
 /// among them, ReFS…), which is refused. Windows' shares aren't told apart
-/// ([`VolumeKind::Smb`]), so they are refused there.
+/// ([`VolumeKind::Smb`]), and aren't measured: refused.
 ///
 /// An SMB share's ids prove nothing across mounts (macOS gives each mount
 /// another `st_dev`; Linux may give a mount's to the next one, another
@@ -91,19 +91,22 @@ pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
     match facts.kind {
         _ if facts.stable_ids => Some(Proof::Ids),
         VolumeKind::Fat | VolumeKind::Exfat if facts.local => Some(Proof::Names),
-        VolumeKind::Smb => Some(Proof::Names),
+        VolumeKind::Smb if cfg!(any(target_vendor = "apple", target_os = "linux")) => {
+            Some(Proof::Names)
+        }
         _ => None,
     }
 }
 
 /// Whether what is copied off a volume of `facts` keeps its originals where
-/// they are: macOS has no Trash on an SMB share (it answers
-/// NSFeatureUnsupportedError and leaves the file, measured on macOS 15),
-/// and nothing is deleted instead. Linux's is the share's `.Trash-$uid`, as
-/// on any other drive (measured on CIFS). What a move's question says; the
-/// Trash decides when it runs.
+/// they are: an SMB share has no Trash RAWmakase uses. macOS has none there
+/// (it answers NSFeatureUnsupportedError and leaves the file, measured on
+/// macOS 15); Linux's would be the share's `.Trash-$uid`, filled by a
+/// rename that can replace a file another computer put at its name
+/// (measured on CIFS), so it isn't used. Nothing is deleted instead. What
+/// a move's question says; the Trash decides when it runs.
 pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
-    facts.kind == VolumeKind::Smb && cfg!(target_vendor = "apple")
+    facts.kind == VolumeKind::Smb
 }
 
 /// Whether a volume of `kind` is one names prove files on ([`of`]).

@@ -907,7 +907,7 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
 }
 
 /// Puts copy `at` of original `source` in the Trash, as an undone copy
-/// goes. Where its volume has none (an SMB share on macOS) it is removed
+/// goes. Where its volume has none (an SMB share) it is removed
 /// instead, only while `source` holds every byte it does, as many as it
 /// has ([`proof::begins`]): then nothing is lost. `Some` once it is gone,
 /// with the Trash's receipt if the Trash took it; `None` while it stays.

@@ -1458,8 +1458,8 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             if !ready || !as_made(disk, item, &at) {
                 return Ok(false);
             }
-            // Built at its name on a volume with no Trash (an SMB share on
-            // macOS), each copy goes on its own, as one still being built.
+            // Built at its name on a volume with no Trash (an SMB share),
+            // each copy goes on its own, as one still being built.
             let receipt = match cx.trash.trash(&at) {
                 Ok(receipt) => receipt,
                 Err(TrashError::Unsupported) if proofs.direct => {

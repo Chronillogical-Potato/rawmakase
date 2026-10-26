@@ -218,17 +218,6 @@ fn names_only(fx: &Fx) -> Faulty {
     }
 }
 
-/// An SMB share: proven by names, as [`names_only`], on the network, and
-/// renaming nothing exclusively.
-#[cfg(unix)]
-fn share(fx: &Fx) -> Faulty {
-    Faulty {
-        share: true,
-        no_exclusive_rename: true,
-        ..names_only(fx)
-    }
-}
-
 fn trash_at(fx: &Fx) -> PathBuf {
     fx.dir.path().canonicalize().unwrap().join("trash")
 }
@@ -403,33 +392,6 @@ fn on_fat_and_exfat_a_folder_goes_by_its_names_with_ids_renumbered_at_every_step
     Ok(())
 }
 
-/// Linux has a Trash on an SMB share, the share's `.Trash-$uid` (measured
-/// on CIFS): a folder there goes to it as on FAT and exFAT, by its names.
-#[cfg(target_os = "linux")]
-#[test]
-fn on_an_smb_share_on_linux_a_folder_goes_by_its_names() -> Result<()> {
-    let mut t = trip();
-    let was = every_byte(&t.fx);
-    let disk = Rc::new(share(&t.fx));
-    let mut trash = FakeTrash::at(&trash_at(&t.fx));
-    let hook = Rc::clone(&disk);
-    let trash_dir = trash.dir.clone();
-    trash.after = Some(Box::new(move |_: &Path| remount(&hook, &trash_dir)));
-    let plan = plan_on(&t.fx, "day", &trash, &*disk)?;
-    remount(&disk, &t.fx.root.join("day"));
-    let batch = plan.batch().clone();
-    let outcome = execute(&mut t.fx, plan, &trash, &*disk);
-    assert_eq!(results(&outcome), [ItemResult::Trashed], "{outcome:?}");
-    match item(&t.fx, &batch).subject {
-        journal::Subject::TrashTree(state) => assert_eq!(state.proof, proof::Proof::Names),
-        other => panic!("{other:?}"),
-    }
-    assert!(!t.fx.root.join("day").exists());
-    assert_eq!(every_byte(&t.fx), was);
-    assert!(!rows_intact(&t));
-    Ok(())
-}
-
 #[test]
 fn on_fat_and_exfat_a_folder_listed_decomposed_goes_by_the_name_it_is_stored_in() -> Result<()> {
     let mut fx = fixture(&["keep.NEF", "d\u{ed}a/a.NEF"]);
@@ -531,7 +493,7 @@ fn a_folder_in_a_trash_is_refused() -> Result<()> {
 }
 
 #[test]
-fn a_read_only_drive_a_network_drive_and_a_drive_without_proof_are_refused() -> Result<()> {
+fn a_read_only_drive_a_network_share_and_a_drive_without_proof_are_refused() -> Result<()> {
     let t = trip();
     let files = t.fx.files();
     let trash = FakeTrash::new(&t.fx);
@@ -543,31 +505,24 @@ fn a_read_only_drive_a_network_drive_and_a_drive_without_proof_are_refused() -> 
         refusal(&t.fx, "day", &trash, &read_only),
         "The folder's volume is read-only."
     );
-    // A network drive other than an SMB share (NFS, GVFS's FUSE…).
     let network = Faulty {
         network: true,
         ..Faulty::default()
     };
+    let why = refusal(&t.fx, "day", &trash, &network);
+    assert!(
+        why.starts_with("Folders on a network drive can't be moved to the Trash"),
+        "{why}"
+    );
     let unproven = Faulty {
         unstable_ids: vec![t.fx.root.join("day")],
         ..Faulty::default()
     };
-    for disk in [&network, &unproven] {
-        let why = refusal(&t.fx, "day", &trash, disk);
-        assert!(
-            why.starts_with("Moving folders on this kind of drive"),
-            "{why}"
-        );
-    }
-    // An SMB share on macOS, which has no Trash there.
-    #[cfg(target_vendor = "apple")]
-    {
-        let why = refusal(&t.fx, "day", &trash, &share(&t.fx));
-        assert!(
-            why.starts_with("Folders on a network drive can't be moved to the Trash"),
-            "{why}"
-        );
-    }
+    let why = refusal(&t.fx, "day", &trash, &unproven);
+    assert!(
+        why.starts_with("Moving folders on this kind of drive"),
+        "{why}"
+    );
     refused_quietly(&t.fx, &files);
     Ok(())
 }

@@ -1059,3 +1059,35 @@ fn a_large_batch_is_planned_in_time_linear_in_its_photos() -> Result<()> {
     assert!(took < std::time::Duration::from_secs(30), "{took:?}");
     Ok(())
 }
+
+/// Nothing is renamed on an SMB share, whose rename can't promise not to
+/// replace a file another computer just put at the name (macOS's answers
+/// so; Linux's CIFS replaced it every time, #573): the photo stays as it
+/// was, and nothing is left to recover.
+#[test]
+fn a_photo_on_an_smb_share_is_not_renamed() -> Result<()> {
+    let mut fx = fixture(&["a.NEF", "a.xmp"]);
+    let a = fx.photo("a.NEF");
+    let disk = Faulty {
+        names_only: vec![fx.root.clone()],
+        share: true,
+        no_exclusive_rename: true,
+        ..Faulty::default()
+    };
+    let plan = fx.plan_on(rename(&fx, &[("a.NEF", "b")]), &disk)?;
+    let outcome = execute::execute_with(
+        &mut fx.cat,
+        plan.confirm(),
+        &NoTrash,
+        &AtomicBool::new(false),
+        &disk,
+    )?;
+    assert!(
+        matches!(results(&outcome)[..], [ItemResult::Unchanged(_)]),
+        "{outcome:?}"
+    );
+    assert_eq!(listing(&fx), ["a.NEF", "a.xmp"]);
+    assert_eq!(fx.rows()[&a], "a.NEF");
+    assert!(fx.recover(&disk).unfinished.is_empty());
+    Ok(())
+}

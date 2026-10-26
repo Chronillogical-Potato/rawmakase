@@ -556,10 +556,9 @@ fn a_folder_to_an_smb_share_is_refused_on_windows() {
     }
 }
 
-/// A folder moved off a share stays there once copied when its Trash can't
-/// take it: macOS has no Trash on an SMB share, and Linux's refuses one
-/// whose folders all may write to. Only macOS's question can say so
-/// before; nothing is deleted.
+/// A folder moved off a share stays there once copied: macOS has no Trash
+/// on an SMB share, and Linux's isn't used. The question says so before,
+/// and nothing is deleted.
 #[test]
 #[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_moved_from_an_smb_share_stays_there_as_its_trash_can_t_take_it() -> Result<()> {
@@ -575,10 +574,7 @@ fn a_folder_moved_from_an_smb_share_stays_there_as_its_trash_can_t_take_it() -> 
     let tree = tree_of(&fx.root.join("day"));
     let plan = fx.plan_on(to_far(&fx), &disk)?;
     let across = plan.summary().across.clone().expect("it copies");
-    assert_eq!(
-        across.originals_stay,
-        usize::from(cfg!(target_vendor = "apple"))
-    );
+    assert_eq!(across.originals_stay, 1);
     let mut trash = FakeTrash::new(&fx);
     trash.fail_from = Some(1);
     let op = to_far(&fx);

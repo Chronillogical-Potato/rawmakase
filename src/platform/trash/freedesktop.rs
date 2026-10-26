@@ -8,7 +8,9 @@
 //! rename takes the `.trashinfo` back. Each folder made, the `.trashinfo`
 //! and the file in `files/` are on disk (their folders synced) before the
 //! receipt: the catalog lets a photo go on it. A Trash folder another user
-//! can write to is not used. A Trash that can't be used, or one on
+//! can write to is not used, nor any Trash for a file on an SMB share,
+//! where no rename can promise not to replace a file another computer
+//! put at its name ([`fsops::rename_exclusive`]). A Trash that can't be used, or one on
 //! another device, is [`TrashError::Unsupported`]: nothing is copied across
 //! devices, and nothing deleted.
 //!
@@ -72,6 +74,9 @@ pub(super) fn supports(path: &Path, places: &Places) -> TrashSupport {
     let Ok(source) = Source::of(path) else {
         return TrashSupport::Unknown;
     };
+    if source.on_share() {
+        return TrashSupport::No;
+    }
     if let Some(home) = places.home.as_ref().filter(|h| h.device == source.device) {
         // Through a link, as `target` follows it.
         return match fs::metadata(&home.trash) {
@@ -193,6 +198,9 @@ fn trash_with(
     ops: &Fs,
 ) -> Result<TrashReceipt, TrashError> {
     let source = Source::of(path)?;
+    if source.on_share() {
+        return Err(TrashError::Unsupported);
+    }
     let target = target(&source, places, ops)?;
     put(&source, &target, places.uid, date, ops)
 }
@@ -223,6 +231,12 @@ impl Source {
             folder,
             device,
         })
+    }
+
+    /// Whether it is on an SMB share, whose Trash isn't used: before
+    /// anything is made there.
+    fn on_share(&self) -> bool {
+        fsops::volume_facts(&self.folder).is_ok_and(|f| f.kind == fsops::VolumeKind::Smb)
     }
 }
 

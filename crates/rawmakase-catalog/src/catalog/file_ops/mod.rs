@@ -330,8 +330,8 @@ pub struct Across {
     pub available: u64,
     /// How many of what it copies keep their originals where they are:
     /// photo files, with their companions, or the folder, which counts
-    /// once. They are on an SMB share, where macOS has no Trash; nothing is
-    /// deleted instead.
+    /// once. They are on an SMB share, which has no Trash RAWmakase uses;
+    /// nothing is deleted instead.
     pub originals_stay: usize,
 }
 

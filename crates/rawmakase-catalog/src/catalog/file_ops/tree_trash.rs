@@ -115,9 +115,8 @@ const PROTECTED: &str =
     "Folders in the Trash or in RAWmakase's own folders can't be moved to the Trash.";
 /// Why a drive whose files RAWmakase can't tell apart is refused.
 const UNPROVEN: &str = "Moving folders on this kind of drive (network and others) to the Trash isn't available yet. Put it in the Trash in Finder, then remove it from the catalog.";
-/// Why an SMB share on macOS is refused: macOS has no Trash on one
-/// (measured, #575). Linux's is the share's `.Trash-$uid`, as on any other
-/// drive (measured on CIFS); other network drives aren't proven.
+/// Why a network share is refused: macOS has no Trash on one (measured on
+/// SMB, #575), and no other system's is relied on.
 const NETWORK: &str = "Folders on a network drive can't be moved to the Trash: it has no Trash there. Put it in the Trash in Finder, then remove it from the catalog.";
 /// Why a family changed since it was planned.
 const PHOTO_CHANGED: &str = "a photo in it changed since you were asked";
@@ -193,7 +192,7 @@ pub(super) fn plan(
     }
     // Told by the drive's kind, never by the Trash's own probe, which can't
     // say no on macOS (#587).
-    if proof::no_trash(&facts) {
+    if !facts.local {
         return Err(refuse(NETWORK));
     }
     let proof = proof::of(&facts).ok_or_else(|| refuse(UNPROVEN))?;

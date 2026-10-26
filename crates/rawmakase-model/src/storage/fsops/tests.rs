@@ -566,17 +566,17 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     assert_eq!(facts.kind, VolumeKind::Smb, "{shown}");
     assert!(!facts.local && !facts.stable_ids, "{shown}");
     assert!(!facts.exclusive_rename, "{shown}");
-    // It says it can't rename exclusively, and changes nothing.
+    // It says it can't rename exclusively, and changes nothing: macOS's
+    // smbfs answers so, and Linux's CIFS would replace a file another
+    // computer just put at the name.
     let (a, b) = (d.path().join("a.NEF"), d.path().join("b.NEF"));
     fs::write(&a, b"a").unwrap();
-    if cfg!(target_vendor = "apple") {
-        assert!(matches!(
-            rename_exclusive(&a, &b),
-            Err(FsError::Unsupported)
-        ));
-        assert_eq!(fs::read(&a).unwrap(), b"a");
-        assert!(!b.exists());
-    }
+    assert!(matches!(
+        rename_exclusive(&a, &b),
+        Err(FsError::Unsupported)
+    ));
+    assert_eq!(fs::read(&a).unwrap(), b"a");
+    assert!(!b.exists());
     // A file is made only where nothing has its name, in any case or form.
     assert!(matches!(create_file(&a), Err(FsError::AlreadyExists)));
     assert!(matches!(
