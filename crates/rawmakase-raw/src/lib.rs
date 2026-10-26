@@ -95,6 +95,45 @@ pub fn exif_tiffs(file: &mut (impl std::io::Read + std::io::Seek)) -> ExifTiffs 
     exif_tiffs::read(&mut f, &head)
 }
 
+/// What RAWmakase reads of an X3F, whose sensor data it doesn't decode: all
+/// the photo info it has of one.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct X3fMetadata {
+    /// The preview's EXIF, a TIFF of its own, as [`exif_tiffs`] finds it;
+    /// none on the SD9 and SD10.
+    pub exif: Option<Vec<u8>>,
+    pub properties: X3fProperties,
+}
+
+/// What an X3F's property list says of its camera and exposure, which the
+/// SD9 and SD10 write instead of a preview's EXIF. Values not given are
+/// empty or `None`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct X3fProperties {
+    /// CAMMANUF and CAMMODEL, as the file writes them.
+    pub make: String,
+    pub model: String,
+    /// In seconds.
+    pub exposure: Option<f64>,
+    pub aperture: Option<f64>,
+    pub iso: Option<f64>,
+    /// In millimetres.
+    pub focal: Option<f64>,
+}
+
+/// The preview's EXIF and the property list of the X3F `file`, its
+/// directory and these sections read alone; `None` for a file that is no
+/// X3F, or when a section holding them can't be read (a file still being
+/// copied), so that what can't be read is not taken for absent.
+pub fn x3f_metadata(file: &mut (impl std::io::Read + std::io::Seek)) -> Option<X3fMetadata> {
+    let mut f = io::Pieces::new(file)?;
+    let head = f.read_upto(0, 16)?;
+    if !container::x3f::is_x3f(&head) {
+        return None;
+    }
+    container::x3f::metadata(&mut f)
+}
+
 /// The embedded preview of the file `info` was read from, JPEG or JPEG XL
 /// ([`is_jpeg_xl`] tells which; a JPEG is copied when its start of image
 /// marker needs mending).

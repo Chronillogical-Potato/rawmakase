@@ -51,7 +51,12 @@ reads the capture dates from these TIFFs, CRW's TimeStamp record or X3F's TIME
 property, for the catalog's capture-time backfill (`raw::capture_time`) and a
 CRW's exports (`raw::capture_date_tags`). Both read the directories and these
 records alone (`io::Pieces`, each piece at most 16 MB), never the sensor data,
-so they also read an X3F, whose sensor data is not decoded.
+so they also read an X3F, whose sensor data is not decoded. `x3f_metadata(file)`
+is all the photo info RAWmakase has of an X3F (`rawmakase-decode`'s
+`raw::undecoded`): its preview's EXIF, and the camera and exposure in its
+property list, which the SD9 and SD10 write instead. It is none when a section
+holding them can't be read, so what a file still being copied hides is read
+again later, and only the properties asked for are decoded.
 
 Modules, each with a small `pub(crate)` surface:
 
@@ -61,7 +66,7 @@ Modules, each with a small `pub(crate)` surface:
 | `exif_tiffs` | Where a CR3, MRW or X3F keeps its camera's EXIF, read from the file's pieces (`exif_tiffs`) |
 | `captured` | Capture dates read from a file's pieces, by container (`capture_dates`) |
 | `codec/` | Decoders from bytes to samples, knowing no container or camera: bit pumps, JPEG Huffman codes, lossless JPEG, DNG's JPEG XL tiles, Nikon's Huffman-coded data and small RAWs, Nikon High Efficiency (JPEG XS), Panasonic's blocks and strips, Sony's codings, Fujifilm's compressed stripes, Canon's CRX, Olympus's coding, packed samples, Pentax's Huffman-coded differences, Samsung's codings, Canon's CRW blocks, Phase One's IIQ rows, Hasselblad's pairs |
-| `container/` | Probing and structure per container family: where the sensor data, previews and maker notes are (`tiff`, `dng`, `nef`, `rw2`, `arw`, `raf`, `cr3`, `orf`, `pef`, `srw`, `erf`, `cr2`, `headerless`, `ciff`, `iiq`, `fff`, `mos`, `sti`, `brcm`, `mrw`, `dcs`, `kdc`; `x3f` for its EXIF and capture dates alone) |
+| `container/` | Probing and structure per container family: where the sensor data, previews and maker notes are (`tiff`, `dng`, `nef`, `rw2`, `arw`, `raf`, `cr3`, `orf`, `pef`, `srw`, `erf`, `cr2`, `headerless`, `ciff`, `iiq`, `fff`, `mos`, `sti`, `brcm`, `mrw`, `dcs`, `kdc`; `x3f` for its EXIF, capture dates and property list alone) |
 | `vendor/` | Per-maker rules: what a maker's own tags and maker notes mean (white balance, presets, lens, crops, levels) and their decryption (`nikon`, `panasonic`, `sony`, `fujifilm`, `canon_cr3`, `olympus`, `pentax`, `samsung`, `epson`, `canon`, `phase_one`, `hasselblad`, `leaf`) |
 | `variant` | The one selector: `enum Variant`, and one exhaustive `match` from variant to reader and codec |
 | `levels`, `geometry` | The one policy each for black and white levels, and for orientation and crops |
