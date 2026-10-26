@@ -19,12 +19,20 @@ impl Volume {
     /// path named it (`\\?\D:`), without it, as [`volume_of`] and
     /// [`locate`] now name it.
     pub(crate) fn plain(self) -> Volume {
+        let Some(mount) = self.mount.as_deref().map(plain) else {
+            return self;
+        };
+        // Only a mount written with the prefix (Windows' alone) changes; a
+        // Unix folder's name may hold `\\?\` too.
+        if self.mount.as_deref() == Some(mount.as_path()) {
+            return self;
+        }
         Volume {
             name: match self.name.strip_prefix(r"\\?\") {
-                Some(name) if self.mount.is_some() => name.to_owned(),
-                _ => self.name,
+                Some(name) => name.to_owned(),
+                None => self.name,
             },
-            mount: self.mount.as_deref().map(plain),
+            mount: Some(mount),
         }
     }
 }
@@ -409,6 +417,15 @@ mod tests {
         assert_eq!(local.mount, None);
         assert_eq!(linux.name, "CARD");
         assert_eq!(linux.mount, Some(PathBuf::from("/run/media/me/CARD")));
+    }
+    /// Elsewhere than on Windows a drive kept is read as it was, even one
+    /// whose folder's name begins as Windows' `\\?\` prefix does.
+    #[test]
+    #[cfg(unix)]
+    fn a_unix_drive_kept_is_read_as_it_was() {
+        let drive = volume_of(Path::new(r"/mnt/\\?\Photos/2026"));
+        assert_eq!(drive.name, r"\\?\Photos");
+        assert_eq!(drive.clone().plain(), drive);
     }
     /// A drive or share is one drive whether its path is written with
     /// Windows' `\\?\` prefix (a root folder, kept canonical) or without
