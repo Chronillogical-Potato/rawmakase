@@ -22,6 +22,15 @@ body:
         - label: I searched existing issues for this problem.
           required: true
 
+  - type: textarea
+    id: system-info
+    attributes:
+      label: System information
+      description: |
+        Paste the system information RAWmakase reports: click the bug icon at the foot of the left sidebar, or choose Preferences > General > Report an Issue… (Help > Report an Issue… on macOS), then Copy System Info. From a terminal, `rawmakase system-info` prints the same. It names no files, folders or catalogs.
+        On a version without it, or if the app won't start, type the version, installation method, operating system and CPU architecture instead.
+      render: text
+
   - type: input
     id: version
     attributes:
