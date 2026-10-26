@@ -50,21 +50,22 @@ impl Editor {
         }
     }
     /// Opening the Crop tool shows the photo's own aspect, as Lightroom does,
-    /// rather than the last photo's: the aspect last chosen from the menu when
-    /// uncropped, Original at the photo's ratio, a preset it matches, or else its
-    /// exact ratio as Custom.
-    pub(super) fn read_aspect(&mut self) {
+    /// rather than the last photo's: Original at the photo's ratio, a preset it
+    /// matches, or else its exact ratio as Custom. An uncropped photo takes the
+    /// aspect last chosen from the menu; whether its crop should be fitted to it
+    /// is returned, for the frame to record as an edit.
+    pub(super) fn read_aspect(&mut self) -> bool {
         if !self.view.is(Tool::Crop) || self.view.aspect_read {
-            return;
+            return false;
         }
         let Some(im) = self.document.full().cloned() else {
-            return;
+            return false;
         };
         self.view.aspect_read = true;
         let c = self.document.edit.recipe().crop;
         if c == [0., 0., 1., 1.] {
             self.view.aspect = self.view.chosen_aspect;
-            return;
+            return true;
         }
         let mut r = self.document.edit.recipe().clone();
         r.crop = [0., 0., 1., 1.];
@@ -90,6 +91,7 @@ impl Editor {
                 .find(|a| near(aspect, *a))
                 .unwrap_or(aspect)
         };
+        false
     }
     /// Lightroom's Navigator: the whole photo with the zoomed area outlined.
     /// Clicking or dragging in it moves the zoomed view there.

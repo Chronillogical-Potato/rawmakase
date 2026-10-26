@@ -44,8 +44,9 @@ impl Editor {
     }
     pub(super) fn begin_edit_frame(&mut self) -> EditFrame {
         self.sync_command_revision();
-        // Before the frame looks at it, so reading it changes no crop.
-        self.read_aspect();
+        // Before the frame looks at it, so reading it changes no crop; an uncropped
+        // photo taking the chosen aspect is fitted inside the frame, as its edit.
+        let fit = self.read_aspect();
         let frame = EditFrame {
             command_adjust: false,
             generation: self.load.id(),
@@ -58,6 +59,9 @@ impl Editor {
         // The histogram sets it again while a triangle stays hovered, so the
         // warning goes once the pointer leaves or the histogram is not drawn.
         self.view.clipping.set_hover(None);
+        if fit {
+            self.fit_aspect();
+        }
         frame
     }
     /// [`Self::begin_edit_frame`] for a frame that draws Develop: a mask's pin or row

@@ -3283,45 +3283,57 @@ fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()
         editor.view.toggle(state::Tool::Crop);
         let frame = editor.begin_edit_frame();
         editor.finish_edit_frame(frame, &ctx);
-        assert_eq!(
-            editor.document.edit.recipe().crop,
-            crop,
-            "reading changes no crop"
-        );
         editor.view.aspect
     };
+    let crop = |editor: &Editor| editor.document.edit.recipe().crop;
+    // The crop's width over its height on the 300 × 200 photo.
+    let ratio = |editor: &Editor| {
+        let c = crop(editor);
+        (c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.)
+    };
+    let steps = |editor: &Editor| editor.document.edit.history().steps().0.len();
     let mut editor = new_editor(Default::default());
     let full = [0., 0., 1., 1.];
-    // Until one is chosen an uncropped photo shows Original.
+    // Until one is chosen an uncropped photo shows Original, and stays uncropped.
+    let before = steps(&editor);
     assert_eq!(open(&mut editor, full), -1.);
+    assert_eq!(crop(&editor), full);
+    assert_eq!(steps(&editor), before);
     // 4 x 5 chosen from the menu constrains this photo's crop...
     let frame = editor.begin_edit_frame();
     editor.choose_aspect(1.25);
     editor.finish_edit_frame(frame, &ctx);
-    let c = editor.document.edit.recipe().crop;
-    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.25).abs() < 1e-3);
-    // ...and is what the next uncropped photo starts from, without cropping it.
+    assert!((ratio(&editor) - 1.25).abs() < 1e-3);
+    // ...and the next uncropped photo takes it as the tool opens, as one undoable step.
+    let before = steps(&editor);
     assert_eq!(open(&mut editor, full), 1.25);
-    // Choosing it again from the menu crops that photo too.
+    assert!((ratio(&editor) - 1.25).abs() < 1e-3);
+    assert_eq!(steps(&editor), before + 1);
+    assert!(editor.document.edit.undo());
+    assert_eq!(crop(&editor), full);
+    // Choosing it again from the menu crops that photo again.
     let frame = editor.begin_edit_frame();
     editor.choose_aspect(1.25);
     editor.finish_edit_frame(frame, &ctx);
-    let c = editor.document.edit.recipe().crop;
-    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.25).abs() < 1e-3);
-    // A cropped photo still shows its own aspect, and does not replace the choice.
+    assert!((ratio(&editor) - 1.25).abs() < 1e-3);
+    // A cropped photo keeps its crop and shows its own aspect, and does not replace
+    // the choice.
     let xpan = [0., 0.223, 1., 0.777];
     assert_eq!(open(&mut editor, xpan), 65. / 24.);
+    assert_eq!(crop(&editor), xpan);
     assert_eq!(open(&mut editor, full), 1.25);
     // Swapping a photo's crop to portrait leaves the choice following each photo.
     let frame = editor.begin_edit_frame();
     editor.swap_crop_orientation();
     editor.finish_edit_frame(frame, &ctx);
     assert_eq!(open(&mut editor, full), 1.25);
-    // Free is a choice too.
+    assert!((ratio(&editor) - 1.25).abs() < 1e-3);
+    // Free is a choice too, and leaves an uncropped photo uncropped.
     let frame = editor.begin_edit_frame();
     editor.choose_aspect(0.);
     editor.finish_edit_frame(frame, &ctx);
     assert_eq!(open(&mut editor, full), 0.);
+    assert_eq!(crop(&editor), full);
     // The choice is kept in the session for the next launch.
     let frame = editor.begin_edit_frame();
     editor.choose_aspect(16. / 9.);
@@ -3330,6 +3342,7 @@ fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()
     assert_eq!(saved.crop_aspect, "16x9");
     let mut relaunched = new_editor(saved);
     assert_eq!(open(&mut relaunched, full), 16. / 9.);
+    assert!((ratio(&relaunched) - 16. / 9.).abs() < 1e-3);
     // A name this version does not know reads as Original.
     let mut unknown = new_editor(crate::app::session::Session {
         crop_aspect: "golden".into(),
