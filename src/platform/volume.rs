@@ -13,6 +13,21 @@ pub(crate) struct Volume {
     pub mount: Option<PathBuf>,
 }
 
+impl Volume {
+    /// The drive as this release names it: one an earlier release kept
+    /// with Windows' `\\?\` prefix in its mount, and in its name where its
+    /// path named it (`\\?\D:`), without it, as [`volume_of`] and
+    /// [`locate`] now name it.
+    pub(crate) fn plain(self) -> Volume {
+        Volume {
+            name: match self.name.strip_prefix(r"\\?\") {
+                Some(name) if self.mount.is_some() => name.to_owned(),
+                _ => self.name,
+            },
+            mount: self.mount.as_deref().map(plain),
+        }
+    }
+}
 /// The volume `path` would be on, from its path alone: /Volumes/NAME on macOS, /media/USER/NAME,
 /// /run/media/USER/NAME or /mnt/NAME on Linux, a drive letter or UNC share
 /// on Windows, and otherwise the startup disk.
