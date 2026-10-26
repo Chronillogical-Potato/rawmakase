@@ -180,10 +180,15 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
         file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         // An SMB server given a flush after the times sets the write time
         // to when its handle closes (macOS 15 against a Synology share,
-        // every time). There `fsync(2)`, which kept them every time; the
-        // server applies the times as it is given them.
+        // and Linux 7.2's CIFS against Samba 4.22, every time). There
+        // macOS's `fsync(2)` kept them every time, and Linux's, which is
+        // that flush, is left out; the server applies the times as it is
+        // given them, before the call returns.
         if !source.is_dir() && super::os::kind(to)? == super::VolumeKind::Smb {
+            #[cfg(target_vendor = "apple")]
             return rustix::fs::fsync(&file).map_err(|e| std::io::Error::from(e).into());
+            #[cfg(not(target_vendor = "apple"))]
+            return Ok(());
         }
     }
     // A folder's are left to the system, as before (a Windows folder's

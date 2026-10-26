@@ -586,10 +586,14 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     assert_eq!(fs::read(&a).unwrap(), b"a");
     let c = d.path().join("caf\u{e9}.NEF");
     create_file(&c).unwrap();
-    assert!(matches!(
-        create_file(&d.path().join("cafe\u{301}.NEF")),
-        Err(FsError::AlreadyExists)
-    ));
+    // macOS's smbfs finds a name by either form; Linux's CIFS sends its
+    // bytes, which a server may tell apart (Samba 4.22 does).
+    if cfg!(target_vendor = "apple") {
+        assert!(matches!(
+            create_file(&d.path().join("cafe\u{301}.NEF")),
+            Err(FsError::AlreadyExists)
+        ));
+    }
     // With a birth time near now, as the server keeps it.
     let off = created(&c)
         .unwrap()

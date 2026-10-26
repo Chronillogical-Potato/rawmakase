@@ -247,7 +247,7 @@ impl fmt::Display for Refusal {
             ),
             Self::CompanionName(n) => write!(f, "{n} can't be renamed to match it."),
             Self::FileIdsUnproven => f.write_str(
-                "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac, and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
+                "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others) isn't available yet. Copy them in Finder, then use Synchronize Folder.",
             ),
         }
     }
