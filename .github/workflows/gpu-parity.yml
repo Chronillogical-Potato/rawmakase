@@ -37,6 +37,9 @@ jobs:
       # the engine alone builds wgpu without a platform backend (its dependency
       # graph has no `metal`), and the tests panic at instance creation. The
       # app crate's eframe pulls the feature in, and the filter still selects
-      # only develop::gpu.
+      # only develop::gpu. installed_zoom_profile_cpu_gpu_agree is skipped: it
+      # also needs a local Adobe LCP (RAWMAKASE_LCP), which the runner lacks.
       - name: GPU tests
-        run: cargo test --locked --workspace develop::gpu -- --ignored --test-threads=1
+        run: >-
+          cargo test --locked --workspace develop::gpu -- --ignored --test-threads=1
+          --skip installed_zoom_profile_cpu_gpu_agree
