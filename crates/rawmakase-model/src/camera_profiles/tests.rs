@@ -399,6 +399,19 @@ fn profiles_fit_under_the_names_adobe_uses() {
         0.,
         "Panasonic DC-G99"
     ));
+    // Twins LibRaw names as themselves, which Camera Raw profiles as the G99 (#664).
+    for model in ["DC-G97", "DC-G95D", "DC-G99D", "DC-G99M2"] {
+        assert!(
+            fits(
+                "Panasonic",
+                model,
+                ("Panasonic", model),
+                0.,
+                "Panasonic DC-G99"
+            ),
+            "{model}"
+        );
+    }
     // The make Adobe spells otherwise, and the table.
     assert!(fits(
         "OM Digital",

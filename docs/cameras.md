@@ -119,8 +119,9 @@ profile fits when its camera is any of:
 - the decoder's canonical name for a body sold under several names (`normalized_model`):
   the Panasonic DC-G95 is Adobe's DC-G99, the DC-TZ91 its DC-ZS70;
 - the names in [data/adobe-camera-names.toml](../data/adobe-camera-names.toml):
-  makes Adobe spells otherwise (OM Digital Solutions) and phones Adobe names by
-  their marketing name (Samsung SM-G965F is the Galaxy S9+), each with a `why`;
+  makes Adobe spells otherwise (OM Digital Solutions), phones Adobe names by
+  their marketing name (Samsung SM-G965F is the Galaxy S9+) and twins the decoder
+  names as themselves (the Panasonic DC-G97 is Adobe's DC-G99), each with a `why`;
 - for Google phones, Adobe's older `Model-Google-google`.
 
 Names are compared without case, spaces or underscores (the decoders' Nikon "Z 6_2" is
