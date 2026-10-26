@@ -60,6 +60,14 @@ impl Editor {
         self.view.clipping.set_hover(None);
         frame
     }
+    /// [`Self::begin_edit_frame`] for a frame that draws Develop: a mask's pin or row
+    /// is found hovered again as it is drawn, after the frame took the overlay it
+    /// showed. A command's frame, which draws nothing, keeps the hover.
+    pub(super) fn begin_develop_frame(&mut self) -> EditFrame {
+        let frame = self.begin_edit_frame();
+        self.view.masking.leave();
+        frame
+    }
     pub(super) fn finish_edit_frame(&mut self, frame: EditFrame, ctx: &egui::Context) {
         let step =
             ctx.data_mut(|d| d.remove_temp::<(String, String)>(super::widgets::history_step_id()));

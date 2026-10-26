@@ -363,7 +363,12 @@ impl Editor {
             Tool::Remove if self.view.retouch.visualize => {
                 Overlay::Spots(self.view.retouch.threshold)
             }
-            Tool::Mask if self.view.masking.overlay => match self.view.masking.selected {
+            Tool::Mask => match self.view.masking.hovered().or(self
+                .view
+                .masking
+                .selected
+                .filter(|_| self.view.masking.overlay))
+            {
                 Some(index) if index < self.document.edit.recipe().masks.len() => Overlay::Mask {
                     index,
                     color: [230, 40, 40],

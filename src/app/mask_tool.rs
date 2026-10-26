@@ -72,12 +72,24 @@ struct Pending {
 enum Drag {
     #[default]
     None,
-    /// Brush dabs in image space.
-    Stroke { points: Vec<[f32; 2]>, erase: bool },
+    /// Brush dabs in image space, painted into the stroke at `stroke` (mask,
+    /// component, stroke) as they come, so the photo and its overlay show them.
+    Stroke {
+        points: Vec<[f32; 2]>,
+        stroke: (usize, usize, usize),
+    },
     /// A gradient being drawn from its first point.
     Create([f32; 2]),
     /// A gradient handle moved from where the drag started.
     Handle(Handle, [f32; 2], MaskShape),
+    /// The mask at `mask` moved by its pin from `start`: its shapes then, and as
+    /// last moved.
+    Move {
+        mask: usize,
+        start: [f32; 2],
+        original: Vec<MaskShape>,
+        moved: Vec<MaskShape>,
+    },
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Handle {
@@ -102,6 +114,10 @@ pub(super) struct MaskTool {
     pending: Option<Pending>,
     drag: Drag,
     renaming: Option<Renaming>,
+    /// The mask whose pin, or row in the mask list, the pointer is over, as found
+    /// while they are drawn; each editor frame starts with neither.
+    hovered_pin: Option<usize>,
+    hovered_row: Option<usize>,
 }
 /// A mask's name as it is being typed.
 struct Renaming {
@@ -130,6 +146,8 @@ impl Default for MaskTool {
             pending: None,
             drag: Drag::None,
             renaming: None,
+            hovered_pin: None,
+            hovered_row: None,
         }
     }
 }
@@ -150,6 +168,21 @@ impl MaskTool {
         self.pending = None;
         self.drag = Drag::None;
         self.renaming = None;
+        self.leave();
+    }
+    /// Ends a drag on the photo where it is: what was painted or moved stays.
+    pub(super) fn end_drag(&mut self) {
+        self.drag = Drag::None;
+    }
+    /// The mask whose overlay shows while the pointer is over its pin or its row in
+    /// the mask list, as in Lightroom, whether or not Show Overlay is on.
+    pub(super) fn hovered(&self) -> Option<usize> {
+        self.hovered_pin.or(self.hovered_row)
+    }
+    /// Forgets what the pointer was over.
+    pub(super) fn leave(&mut self) {
+        self.hovered_pin = None;
+        self.hovered_row = None;
     }
     /// Shows a mask a selection just made, with its overlay.
     pub(super) fn select_after_selection(&mut self, mask: usize, component: usize) {
@@ -351,25 +384,49 @@ impl Editor {
         };
         let near_pin = |pos: Pos2| pins.iter().find(|(_, p)| p.distance(pos) < 9.).map(|p| p.0);
         let alt = ui.input(|i| i.modifiers.alt);
+        self.view.masking.hovered_pin = pointer.and_then(near_pin);
 
+        // An Undo, Redo, History click or Delete while painting or moving a mask ends
+        // the drag, the pointer moving or not.
+        if !self.drag_kept() {
+            self.view.masking.end_drag();
+        }
         if response.drag_started()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
             let at = to_image(origin);
-            let t = &mut self.view.masking;
+            let t = &self.view.masking;
             let creating = pending.is_some_and(|p| matches!(p.kind, Kind::Linear | Kind::Radial));
-            t.drag = if creating {
+            let drag = if creating {
                 Drag::Create(at)
             } else if let (Some(h), Some(s)) = (near(origin), &shape) {
                 Drag::Handle(h, at, s.clone())
+            } else if let Some(i) = near_pin(origin).filter(|_| pending.is_none()) {
+                // Dragging a pin moves its mask, as in Lightroom.
+                let m = &self.document.edit.recipe().masks[i];
+                let shapes: Vec<MaskShape> = m.components.iter().map(|c| c.shape.clone()).collect();
+                Drag::Move {
+                    mask: i,
+                    start: at,
+                    original: shapes.clone(),
+                    moved: shapes,
+                }
             } else if brushing {
-                Drag::Stroke {
-                    points: vec![at],
-                    erase: alt || t.brush == 2,
+                let erase = alt || t.brush == 2;
+                match self.begin_stroke(at, erase) {
+                    Some(stroke) => Drag::Stroke {
+                        points: vec![at],
+                        stroke,
+                    },
+                    None => Drag::None,
                 }
             } else {
                 Drag::None
             };
+            if let Drag::Move { mask, .. } = drag {
+                self.view.masking.select(Some(mask), Some(0));
+            }
+            self.view.masking.drag = drag;
         }
         if response.dragged()
             && let Some(pos) = response.interact_pointer_pos()
@@ -377,13 +434,15 @@ impl Editor {
             let at = to_image(pos);
             let size = self.view.masking.brushes[self.view.masking.brush].size;
             match &mut self.view.masking.drag {
-                Drag::Stroke { points, .. } => {
+                Drag::Stroke { points, stroke } => {
                     let last = space.to(points[points.len() - 1]);
                     let q = space.to(at);
                     if (q[0] - last[0]).hypot(q[1] - last[1]) >= size * 0.2
                         && points.len() < MAX_POINTS
                     {
                         points.push(at);
+                        let (stroke, points) = (*stroke, points.as_slice().into());
+                        self.extend_stroke(stroke, points);
                     }
                 }
                 Drag::Handle(h, start, original) => {
@@ -392,23 +451,34 @@ impl Editor {
                         self.document.edit.recipe_mut().masks[m].components[c].shape = moved;
                     }
                 }
-                _ => {}
-            }
-        }
-        if response.drag_stopped()
-            && let Some(pos) = response.interact_pointer_pos()
-        {
-            let end = to_image(pos);
-            match std::mem::take(&mut self.view.masking.drag) {
-                Drag::Stroke { points, erase } => self.add_stroke(points, erase),
-                Drag::Create(start) => {
-                    if let Some(p) = pending {
-                        let shape = new_shape(p.kind, space, start, end);
-                        self.add_component(MaskComponent::new(shape), p.op);
-                        self.view.masking.pending = None;
+                Drag::Move {
+                    mask,
+                    start,
+                    original,
+                    moved,
+                } => {
+                    let delta = [at[0] - start[0], at[1] - start[1]];
+                    *moved = original.iter().map(|s| shifted(s, delta)).collect();
+                    let (mask, moved) = (*mask, moved.clone());
+                    // `drag_kept` found the mask as last moved this frame.
+                    if let Some(m) = self.document.edit.recipe_mut().masks.get_mut(mask) {
+                        for (c, shape) in m.components.iter_mut().zip(moved) {
+                            c.shape = shape;
+                        }
                     }
                 }
                 _ => {}
+            }
+        }
+        if response.drag_stopped() {
+            // A brush stroke is already painted in; a gradient is made now.
+            let end = response.interact_pointer_pos().map(to_image);
+            if let (Drag::Create(start), Some(p), Some(end)) =
+                (std::mem::take(&mut self.view.masking.drag), pending, end)
+            {
+                let shape = new_shape(p.kind, space, start, end);
+                self.add_component(MaskComponent::new(shape), p.op);
+                self.view.masking.pending = None;
             }
         }
         if response.clicked()
@@ -435,11 +505,9 @@ impl Editor {
             let preview = new_shape(p.kind, space, *start, to_image(pos));
             draw_shape(&painter, &preview, space, &to_screen);
         }
-        if let Drag::Stroke { points, .. } = &self.view.masking.drag {
-            let screen: Vec<Pos2> = points.iter().map(|p| to_screen(*p)).collect();
-            overlay::path(&painter, screen, Color32::from_white_alpha(220));
-        }
-        let on_handle = pointer.and_then(near).is_some() || pointer.and_then(near_pin).is_some();
+        let moving = matches!(self.view.masking.drag, Drag::Move { .. });
+        let on_handle =
+            pointer.and_then(near).is_some() || pointer.and_then(near_pin).is_some() || moving;
         if let Some(pos) = pointer.filter(|p| rect.contains(*p)) {
             if on_handle {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
@@ -523,14 +591,71 @@ impl Editor {
                 let l = lab[0].clamp(0., 1.);
                 (*low, *high) = ((l - 0.1).max(0.), (l + 0.1).min(1.));
             }
-            (MaskShape::Brush { .. }, _) => self.add_stroke(vec![at], erase),
+            (MaskShape::Brush { .. }, _) => {
+                self.add_stroke(vec![at], erase);
+            }
             _ => {}
         }
     }
-    fn add_stroke(&mut self, points: Vec<[f32; 2]>, erase: bool) {
-        let Some((m, c)) = self.selected_component() else {
-            return;
-        };
+    /// Starts a stroke of the current brush (or the Erase brush) at `at` in the
+    /// selected brush component; returns where it is, as `Drag::Stroke` keeps it.
+    /// Painting shows the mask's overlay, as in Lightroom; O hides it again.
+    fn begin_stroke(&mut self, at: [f32; 2], erase: bool) -> Option<(usize, usize, usize)> {
+        let (m, c) = self.selected_component()?;
+        let strokes = self.add_stroke(vec![at], erase)?;
+        self.view.masking.overlay = true;
+        Some((m, c, strokes - 1))
+    }
+    /// Whether the stroke being painted, or the mask being moved, is still selected
+    /// and in the edit as the drag left it; any other drag is kept. Equal shapes alone
+    /// could be another mask a Delete moved into its place.
+    fn drag_kept(&self) -> bool {
+        let masks = &self.document.edit.recipe().masks;
+        let t = &self.view.masking;
+        match &t.drag {
+            Drag::Stroke {
+                points,
+                stroke: (m, c, s),
+            } if t.selected == Some(*m) && t.component == Some(*c) => {
+                match masks.get(*m).and_then(|mask| mask.components.get(*c)) {
+                    Some(MaskComponent {
+                        shape: MaskShape::Brush { strokes },
+                        ..
+                    }) => strokes.get(*s).is_some_and(|k| *k.points == **points),
+                    _ => false,
+                }
+            }
+            Drag::Move { mask, moved, .. } if t.selected == Some(*mask) => {
+                masks.get(*mask).is_some_and(|m| {
+                    m.components.len() == moved.len()
+                        && m.components.iter().zip(moved).all(|(c, s)| c.shape == *s)
+                })
+            }
+            Drag::Stroke { .. } | Drag::Move { .. } => false,
+            _ => true,
+        }
+    }
+    /// Gives the stroke at `(m, c, s)`, which [`Self::drag_kept`] found this frame,
+    /// its next `points`.
+    fn extend_stroke(
+        &mut self,
+        (m, c, s): (usize, usize, usize),
+        points: std::sync::Arc<[[f32; 2]]>,
+    ) {
+        let masks = &mut self.document.edit.recipe_mut().masks;
+        if let Some(MaskComponent {
+            shape: MaskShape::Brush { strokes },
+            ..
+        }) = masks.get_mut(m).and_then(|mask| mask.components.get_mut(c))
+            && let Some(stroke) = strokes.get_mut(s)
+        {
+            stroke.points = points;
+        }
+    }
+    /// Adds a stroke along `points` to the selected brush component; returns how many
+    /// strokes it has then, or `None` when it took none.
+    fn add_stroke(&mut self, points: Vec<[f32; 2]>, erase: bool) -> Option<usize> {
+        let (m, c) = self.selected_component()?;
         let t = &self.view.masking;
         let b = t.brushes[if erase { 2 } else { t.brush }];
         if let MaskShape::Brush { strokes } =
@@ -546,7 +671,9 @@ impl Editor {
                 erase,
                 auto_mask: b.auto_mask && !erase,
             });
+            return Some(strokes.len());
         }
+        None
     }
     /// Oklab of the photo's developed colour, without masks, at screen position `pos`
     /// over the photo drawn in `rect`: a 3×3 average of a small full-resolution render.
@@ -612,6 +739,8 @@ impl Editor {
     pub(super) fn close_masking(&mut self) {
         self.selection.end_prompting();
         self.view.masking.pending = None;
+        self.view.masking.end_drag();
+        self.view.masking.leave();
         self.view.tool = super::state::Tool::None;
     }
     fn create_row(&mut self, ui: &mut egui::Ui) {
@@ -680,6 +809,9 @@ impl Editor {
                 let width = ui.available_width();
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(width, 24.), Sense::click());
+                if response.hovered() {
+                    self.view.masking.hovered_row = Some(i);
+                }
                 let active = selected == Some(i);
                 ui.painter().rect_filled(
                     rect,
@@ -1074,6 +1206,25 @@ fn anchor(m: &MaskGroup) -> Option<[f32; 2]> {
         _ => None,
     })
 }
+/// `shape` moved by `delta` (image space); colour and tone ranges and bitmaps stay.
+fn shifted(shape: &MaskShape, delta: [f32; 2]) -> MaskShape {
+    let shift = |p: [f32; 2]| [p[0] + delta[0], p[1] + delta[1]];
+    let mut shape = shape.clone();
+    match &mut shape {
+        MaskShape::Brush { strokes } => {
+            for s in strokes {
+                s.points = s.points.iter().map(|p| shift(*p)).collect();
+            }
+        }
+        MaskShape::Linear { from, to } => {
+            *from = shift(*from);
+            *to = shift(*to);
+        }
+        MaskShape::Radial { center, .. } => *center = shift(*center),
+        _ => {}
+    }
+    shape
+}
 /// A gradient drawn by dragging from `start` to `end` (image space).
 fn new_shape(kind: Kind, space: Space, start: [f32; 2], end: [f32; 2]) -> MaskShape {
     match kind {
@@ -1312,7 +1463,7 @@ mod tests {
     /// the order the workspace runs them.
     fn frame(e: &mut Editor, events: Vec<egui::Event>) {
         let ctx = e.context.clone();
-        let edit = e.begin_edit_frame();
+        let edit = e.begin_develop_frame();
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 900.))),
@@ -1344,6 +1495,52 @@ mod tests {
             components: vec![MaskComponent::new(MaskShape::Brush { strokes: vec![] })],
             ..Default::default()
         }
+    }
+    #[test]
+    fn hovering_a_masks_row_shows_its_overlay_until_the_row_is_gone() {
+        let mut e = Editor::with_context(
+            &egui::Context::default(),
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
+        e.view.tool = Tool::Mask;
+        e.document.edit.change(None, |r| r.masks.push(mask("Sky")));
+        frame(&mut e, vec![]);
+        assert_eq!(e.overlay(), crate::app::worker::Overlay::None);
+        // Down the panel until the pointer is over the mask's row.
+        let row = (0..90)
+            .map(|k| Pos2::new(100., k as f32 * 10.))
+            .find(|&p| {
+                frame(&mut e, vec![egui::Event::PointerMoved(p)]);
+                e.view.masking.hovered_row.is_some()
+            })
+            .expect("the mask's row");
+        assert!(!e.view.masking.overlay);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        frame(&mut e, vec![egui::Event::PointerMoved(row)]);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        // A command (a dial, the API) changes the edit in a frame that draws
+        // nothing: the hover stays, so the overlay does not go and come back.
+        let ctx = e.context.clone();
+        let edit = e.begin_edit_frame();
+        e.document.edit.recipe_mut().exposure = 0.5;
+        e.finish_edit_frame(edit, &ctx);
+        assert!(matches!(
+            e.overlay(),
+            crate::app::worker::Overlay::Mask { index: 0, .. }
+        ));
+        // The panel hidden (Tab, F8): the row is not drawn, nor its hover.
+        let edit = e.begin_develop_frame();
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        e.finish_edit_frame(edit, &ctx);
+        assert_eq!(e.overlay(), crate::app::worker::Overlay::None);
     }
     fn names(e: &Editor) -> Vec<&str> {
         let masks = &e.document.edit.recipe().masks;
