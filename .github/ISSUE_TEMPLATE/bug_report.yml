@@ -28,8 +28,10 @@ body:
       label: System information
       description: |
         Paste the system information RAWmakase reports: click the bug icon at the foot of the left sidebar, or choose Preferences > General > Report an Issue… (Help > Report an Issue… on macOS), then Copy System Info. From a terminal, `rawmakase system-info` prints the same. It names no files, folders or catalogs.
-        On a version without it, or if the app won't start, type the version, installation method, operating system and CPU architecture instead.
+        On 0.4.5 or earlier, or if the app won't start, type the installation method (DMG, Homebrew, DEB, RPM, Arch package, Linux archive, Windows installer/ZIP or source build), the full OS version and the CPU architecture instead.
       render: text
+    validations:
+      required: true
 
   - type: input
     id: version
@@ -37,36 +39,6 @@ body:
       label: RAWmakase version
       description: Give the exact version, not just "latest". Use the downloaded package name or `rawmakase --version` if available. For a source build, include the commit hash.
       placeholder: "Example: 0.1.9; also reproduced on 0.1.10"
-    validations:
-      required: true
-
-  - type: input
-    id: installation
-    attributes:
-      label: Installation method
-      description: Include the package filename or source when available.
-      placeholder: "DMG, Homebrew, DEB, RPM, Arch package, Linux archive, Windows installer/ZIP, or source build"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: operating-system
-    attributes:
-      label: Operating system
-      options:
-        - macOS
-        - Windows
-        - Linux
-        - Other
-    validations:
-      required: true
-
-  - type: input
-    id: system-version
-    attributes:
-      label: OS version and CPU architecture
-      description: Include the full OS version (and distribution on Linux), plus Apple Silicon/Intel, x86_64, or ARM64. Say if the architecture is unknown.
-      placeholder: "Example: Ubuntu 24.04, x86_64"
     validations:
       required: true
 
@@ -127,8 +99,8 @@ body:
   - type: textarea
     id: settings-and-hardware
     attributes:
-      label: Relevant settings and hardware
-      description: For rendering/color problems, include the selected camera profile, preset, edits, and export settings. For display, crash, or performance problems, add CPU, RAM, GPU/driver, display scaling, monitor ICC profile, and Linux desktop/Wayland/X11 if known. Include only relevant details.
+      label: Relevant settings
+      description: For rendering/color problems, include the selected camera profile, preset, edits, and export settings. For performance problems, add how much RAM the computer has; the system information above covers the rest of the hardware. Include only relevant details.
 
   - type: textarea
     id: attachments
