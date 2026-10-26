@@ -14,6 +14,9 @@ about 8 MB of text); this script writes the same bytes every time.
       the generated look XMPs the chart cases in tests/corpus/cases.json use (and
       scripts/corpus/camera-raw-charts.py renders) to tests/corpus/looks/cube-<name>.xmp.
       Cubes RAWmakase refuses (a DOMAIN other than 0–1) are listed and get no look.
+  python3 scripts/corpus/synthetic-cubes.py looks --lut-space adobe-rgb
+      the same, imported with `--lut-space` (adobe-rgb or prophoto-rgb), into
+      tests/corpus/looks/cube-<name>-<space>.xmp.
 
 Run from the repository root.
 """
@@ -152,27 +155,29 @@ def write_cubes(out, quiet=False):
             print(out / f'{name}.cube')
 
 
-def write_looks(rawmakase):
+def write_looks(rawmakase, space='srgb'):
     with tempfile.TemporaryDirectory(prefix='synthetic-cubes-') as tmp:
         tmp = Path(tmp)
         cubes, data = tmp / 'Synthetic', tmp / 'data'
         write_cubes(cubes, quiet=True)
         env = dict(os.environ, RAWMAKASE_DATA_DIR=str(data))
-        result = subprocess.run([str(rawmakase), 'import-profiles', str(cubes)], env=env,
-                                capture_output=True, text=True)
+        result = subprocess.run([str(rawmakase), 'import-profiles', '--lut-space', space, str(cubes)],
+                                env=env, capture_output=True, text=True)
         print(result.stdout + result.stderr, end='')
         library = data / 'camera-profiles'
         # Only the looks the chart cases use are kept in the repository.
         used = {c['look']['file'] for c in json.loads((ROOT / 'tests/corpus/cases.json').read_text())['cases']
                 if 'look' in c}
         LOOKS.mkdir(parents=True, exist_ok=True)
+        suffix = '' if space == 'srgb' else f'-{space}'
         for name in CUBES:
             look = library / f'{name}.xmp'
+            target = LOOKS / f'cube-{name}{suffix}.xmp'
             if not look.exists():
                 print(f'{name}: no look (refused)')
-            elif f'cube-{name}.xmp' in used:
-                shutil.copyfile(look, LOOKS / f'cube-{name}.xmp')
-                print(LOOKS / f'cube-{name}.xmp')
+            elif target.name in used:
+                shutil.copyfile(look, target)
+                print(target)
 
 
 if __name__ == '__main__':
@@ -183,8 +188,9 @@ if __name__ == '__main__':
     s.add_argument('out', type=Path)
     s = sub.add_parser('looks')
     s.add_argument('--rawmakase', type=Path, default=ROOT / 'target/release/rawmakase')
+    s.add_argument('--lut-space', choices=['srgb', 'adobe-rgb', 'prophoto-rgb'], default='srgb')
     args = p.parse_args()
     if args.command == 'cubes':
         write_cubes(args.out)
     else:
-        write_looks(args.rawmakase)
+        write_looks(args.rawmakase, args.lut_space)

@@ -2,17 +2,65 @@
 //! cube becomes the look's RGB table (`RgbTable::from_cube`), and the look is written
 //! into the profile library as an ordinary look XMP, which then lists, renders, travels
 //! in recipes and presets and takes a Profile Amount like any other. How faithfully the
-//! table holds the cube is measured at import ([`Fidelity`]).
+//! table holds the cube is measured at import ([`Fidelity`]). The import says which
+//! colour space the cube expects ([`LutSpace`]), as Create Profile asks.
 //!
 //! The look is named after the file: the name is what RAWmakase lists, dedupes and
 //! resolves looks by, so the import owns collisions ([`Names`]) and a cube's `TITLE`,
 //! which packs often repeat across files, is only its description.
-use super::{cube::Cube, rgb_table::RgbTable};
+use super::{
+    cube::Cube,
+    rgb_table::{RgbTable, Tail},
+};
 use anyhow::{Context, Result, bail, ensure};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
+
+/// The colour space a `.cube` expects its colours in, chosen at import as Camera Raw's
+/// Create Profile asks for it. The cube's values become the table's samples unchanged,
+/// read as values encoded in this space: the space changes only the primaries and the
+/// encoding the table names (Camera Raw 18.7 converts nothing either; see
+/// docs/lightroom-profiles.md#camera-raws-create-profile). The one owner of each space's
+/// table codes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum LutSpace {
+    /// sRGB primaries and encoding: Create Profile's default, and what most LUTs expect.
+    #[default]
+    Srgb,
+    /// Adobe RGB (1998) primaries, gamma 2.2.
+    AdobeRgb,
+    /// ProPhoto RGB primaries, gamma 1.8.
+    ProPhotoRgb,
+}
+impl LutSpace {
+    pub const ALL: [Self; 3] = [Self::Srgb, Self::AdobeRgb, Self::ProPhotoRgb];
+    /// The space's name, as Camera Raw and Photoshop call it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Srgb => "sRGB",
+            Self::AdobeRgb => "Adobe RGB (1998)",
+            Self::ProPhotoRgb => "ProPhoto RGB",
+        }
+    }
+    /// The table's primaries, encoding and gamut codes and its amount bounds, as Create
+    /// Profile writes them for this space: colours outside it clipped before the lookup,
+    /// at amounts 0–2, in every space.
+    pub(super) fn tail(self) -> Tail {
+        let (primaries, encoding) = match self {
+            Self::Srgb => (0, 1),
+            Self::AdobeRgb => (1, 3),
+            Self::ProPhotoRgb => (2, 2),
+        };
+        (primaries, encoding, 0, [0., 2.])
+    }
+}
+impl std::fmt::Display for LutSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// How faithfully a cube's look holds the cube, measured on a dense sample of inputs:
 /// the cube's nodes and the centres of its cells and of the table's.
@@ -66,6 +114,7 @@ impl std::fmt::Display for Fidelity {
 /// A cube converted, not yet named.
 pub(super) struct Converted {
     /// The table's id: the MD5 of its bytes, which also names the look (`crs:UUID`).
+    /// The bytes name the space, so the same cube in two spaces is two looks.
     pub uuid: String,
     /// The table in Adobe's encoding.
     table: String,
@@ -77,13 +126,14 @@ pub(super) struct Converted {
 /// The most a `.cube` file may hold: a 65³ cube is about 8 MB of text.
 pub(super) const MAX_BYTES: u64 = 64_000_000;
 
-/// Reads and converts a cube, or says why it cannot be imported.
-pub(super) fn convert(bytes: &[u8]) -> Result<Converted> {
+/// Reads and converts a cube expecting colours in `space`, or says why it cannot be
+/// imported.
+pub(super) fn convert(bytes: &[u8], space: LutSpace) -> Result<Converted> {
     let text = std::str::from_utf8(bytes).map_err(|_| {
         anyhow::anyhow!("not a .cube file: it is not text (a macOS ._ file, perhaps)")
     })?;
     let cube = Cube::parse(text)?;
-    let (table, table_bytes) = RgbTable::from_cube(&cube)?;
+    let (table, table_bytes) = RgbTable::from_cube(&cube, space)?;
     let fidelity = fidelity(&cube, &table);
     let uuid = {
         use md5::{Digest, Md5};
@@ -100,7 +150,8 @@ pub(super) fn convert(bytes: &[u8]) -> Result<Converted> {
     })
 }
 
-/// How far the table is from the cube, measured in table space.
+/// How far the table is from the cube, measured in table space: the same in every
+/// space, as the samples are.
 fn fidelity(cube: &Cube, table: &RgbTable) -> Fidelity {
     let divisions = table.divisions();
     let shaper = matches!(cube, Cube::Three(lut) if lut.has_shaper());
@@ -460,7 +511,7 @@ pub(super) mod tests {
         ]
     }
     fn converted_table(text: &str) -> (RgbTable, Converted) {
-        let converted = convert(text.as_bytes()).unwrap();
+        let converted = convert(text.as_bytes(), LutSpace::Srgb).unwrap();
         (RgbTable::decode(&converted.table).unwrap(), converted)
     }
 
@@ -532,7 +583,7 @@ pub(super) mod tests {
         assert_eq!(table_fidelity(&cube_text(65, smooth)), Fidelity::Exact);
     }
     fn table_fidelity(text: &str) -> Fidelity {
-        convert(text.as_bytes()).unwrap().fidelity
+        convert(text.as_bytes(), LutSpace::Srgb).unwrap().fidelity
     }
 
     /// Outputs outside 0–1 do not fit the table and are clamped, and the report says so.
@@ -656,18 +707,27 @@ pub(super) mod tests {
             "LUT_3D_SIZE 2",
             "LUT_3D_SIZE 2\nDOMAIN_MAX 2 2 2\nDOMAIN_MIN 0 0 0",
         );
-        let error = convert(domain.as_bytes()).err().unwrap().to_string();
+        let error = convert(domain.as_bytes(), LutSpace::Srgb)
+            .err()
+            .unwrap()
+            .to_string();
         assert!(error.contains("domain"), "{error}");
         // A shaper reading another range than 0–1 is a cube for log or scene-linear
         // input, as a 3D domain other than 0–1 is.
         let mut shaped =
             String::from("LUT_1D_SIZE 2\nLUT_1D_INPUT_RANGE 0 2\nLUT_3D_SIZE 2\n0 0 0\n1 1 1\n");
         shaped += cube_text(2, |p| p).split_once("LUT_3D_SIZE 2\n").unwrap().1;
-        let error = convert(shaped.as_bytes()).err().unwrap().to_string();
+        let error = convert(shaped.as_bytes(), LutSpace::Srgb)
+            .err()
+            .unwrap()
+            .to_string();
         assert!(error.contains("shaper reads"), "{error}");
         // A macOS AppleDouble file beside the cube, as zips carry them.
         let apple_double = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        \xff\xfe";
-        let error = convert(apple_double).err().unwrap().to_string();
+        let error = convert(apple_double, LutSpace::Srgb)
+            .err()
+            .unwrap()
+            .to_string();
         assert!(error.contains("not text"), "{error}");
     }
 
@@ -677,8 +737,8 @@ pub(super) mod tests {
     #[test]
     fn the_generated_look_is_deterministic_and_reads_back() {
         let text = cube_text(9, sharp).replace("Test cube", "Warm & <Bright>");
-        let a = convert(text.as_bytes()).unwrap();
-        let b = convert(text.as_bytes()).unwrap();
+        let a = convert(text.as_bytes(), LutSpace::Srgb).unwrap();
+        let b = convert(text.as_bytes(), LutSpace::Srgb).unwrap();
         let xml = look_xmp(&a, "Portra", "Film");
         assert_eq!(xml, look_xmp(&b, "Portra", "Film"));
         assert_eq!(a.uuid.len(), 32);
@@ -702,6 +762,7 @@ pub(super) mod tests {
             cube_text(2, |p| p)
                 .replace("TITLE \"Test cube\"\n", "")
                 .as_bytes(),
+            LutSpace::Srgb,
         )
         .unwrap();
         let xml = look_xmp(&plain, "Plain", "");
@@ -709,11 +770,49 @@ pub(super) mod tests {
         assert!(LookFile::parse(&xml).is_ok());
     }
 
+    /// An sRGB import is the same bytes, and so the same UUID, as before the space
+    /// could be chosen (taken on main at b553df67): a cube imported by an earlier
+    /// release imports again as already imported, not as a second look.
+    #[test]
+    fn srgb_imports_keep_their_uuids() {
+        let three = convert(cube_text(9, sharp).as_bytes(), LutSpace::Srgb).unwrap();
+        let mut text = String::from("LUT_1D_SIZE 16\n");
+        for i in 0..16 {
+            let v = i as f32 / 15.;
+            text += &format!("{:.6} {:.6} {:.6}\n", v.powf(0.8), v, 1. - v);
+        }
+        let one = convert(text.as_bytes(), LutSpace::Srgb).unwrap();
+        assert_eq!(three.uuid, "2C6D97DE4C1FFCCC069D018C727397D9");
+        assert_eq!(one.uuid, "531113C520AB3E707C1376AC03C74633");
+        assert_eq!(LutSpace::default(), LutSpace::Srgb);
+    }
+
+    /// The space is in the table's bytes, so the same cube in each space is its own
+    /// look; how faithfully the table holds the cube is the same in every space, an
+    /// exact cube and a resampled one alike.
+    #[test]
+    fn each_space_is_its_own_look_with_the_same_fidelity() {
+        for (size, exact) in [(17, true), (65, false)] {
+            let text = cube_text(size, sharp);
+            let all: Vec<Converted> = LutSpace::ALL
+                .iter()
+                .map(|&space| convert(text.as_bytes(), space).unwrap())
+                .collect();
+            for (i, a) in all.iter().enumerate() {
+                assert_eq!(a.fidelity, all[0].fidelity, "{size}");
+                for b in &all[i + 1..] {
+                    assert_ne!(a.uuid, b.uuid, "{size}");
+                }
+            }
+            assert_eq!(all[0].fidelity == Fidelity::Exact, exact, "{size}");
+        }
+    }
+
     #[test]
     fn names_are_stored_as_checked() {
         let (stem, group) = stem_and_group(Path::new("/x/Pack\r1/A\u{1}B.cube")).unwrap();
         assert_eq!((stem.as_str(), group.as_str()), ("A B", "Pack 1"));
-        let converted = convert(cube_text(2, |p| p).as_bytes()).unwrap();
+        let converted = convert(cube_text(2, |p| p).as_bytes(), LutSpace::Srgb).unwrap();
         let xml = look_xmp(&converted, &stem, &group);
         assert_eq!(LookFile::identity(&xml).unwrap().0, stem);
     }
@@ -767,7 +866,7 @@ pub(super) mod tests {
         ] {
             assert_eq!(group(path), want, "{path}");
         }
-        let converted = convert(cube_text(2, |p| p).as_bytes()).unwrap();
+        let converted = convert(cube_text(2, |p| p).as_bytes(), LutSpace::Srgb).unwrap();
         let xml = look_xmp(&converted, "A", &group("/x/Pack/Cube Files/A.cube"));
         assert_eq!(LookFile::parse(&xml).unwrap().group, "Pack");
     }

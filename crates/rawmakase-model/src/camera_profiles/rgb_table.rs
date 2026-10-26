@@ -3,7 +3,7 @@
 //! of an HSV look table. A table maps colours in its own space (primaries and encoding)
 //! through a 1D curve per channel or a 3D grid, and a look applies it at an amount:
 //! `r + amount·(table(r) − r)` in table space, as the DNG SDK blends.
-use super::{Matrix, PRO_TO_RGB, RGB_TO_PRO, cube::Cube, matmul};
+use super::{Matrix, PRO_TO_RGB, RGB_TO_PRO, cube::Cube, cube_look::LutSpace, matmul};
 use crate::color::{mul, srgb_decode, srgb_encode};
 use anyhow::{Result, bail, ensure};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -23,7 +23,7 @@ const IDENTITY: Matrix = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
 
 /// The primaries a table's colours are in (`dng_rgb_table::primaries`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Primaries {
+pub enum Primaries {
     Srgb,
     AdobeRgb,
     ProPhoto,
@@ -257,6 +257,9 @@ impl RgbTable {
     pub fn gamma(&self) -> Gamma {
         self.gamma
     }
+    pub fn primaries(&self) -> Primaries {
+        self.primaries
+    }
     pub fn gamut(&self) -> Gamut {
         self.gamut
     }
@@ -271,10 +274,6 @@ const MAX_1D: usize = 4096;
 /// A table's primaries, gamma and gamut codes and its amount bounds, as stored after
 /// its samples.
 pub(super) type Tail = (u32, u32, u32, [f64; 2]);
-/// What a `.cube`'s table is stored as: sRGB primaries and encoding, colours outside
-/// sRGB clipped, at Profile Amounts 0–200%, as the RGB tables third-party profiles
-/// make from their cubes carry.
-const CUBE: Tail = (0, 1, 0, [0., 2.]);
 /// A table's bytes as the DNG SDK stores them, the inverse of [`RgbTable::decode`]'s
 /// layout: `samples` (0–1, clamped and rounded to 16 bits) in its order, each stored as
 /// its difference from the identity, then `tail`.
@@ -317,18 +316,19 @@ pub(super) fn encode_table(
     bytes
 }
 impl RgbTable {
-    /// A `.cube` as an RGB table in the space Camera Raw 18.7's Create Profile gives
-    /// one by default (sRGB primaries and encoding, clipped, amounts 0–2), with the
-    /// table's bytes (which name it). Create Profile samples every 3D cube onto at most
-    /// 32 divisions; here one of up to 64 keeps its grid, node for node, since
-    /// resampling onto another grid is measurably lossy. A larger one (65 is common;
+    /// A `.cube` as an RGB table in `space`, as Camera Raw 18.7's Create Profile makes
+    /// one (the space's primaries and encoding, clipped, amounts 0–2; sRGB by default),
+    /// with the table's bytes (which name it). The space changes only the codes after
+    /// the samples. Create Profile samples every 3D cube onto at most 32 divisions;
+    /// here one of up to 64 keeps its grid, node for node, since resampling onto
+    /// another grid is measurably lossy. A larger one (65 is common;
     /// Create Profile refuses it) is sampled onto 64, the most a table holds, by
     /// tetrahedral lookup in the cube, as Create Profile resamples; so is a cube with a
     /// 1D shaper, which is baked in (Create Profile drops it). A 1D cube over 4096
     /// entries is sampled onto 4096. Outputs are clamped to 0–1. A cube over another
     /// domain than 0–1 is refused, as Create Profile refuses it, and so is a shaper
     /// reading another input range.
-    pub(super) fn from_cube(cube: &Cube) -> Result<(Self, Vec<u8>)> {
+    pub(super) fn from_cube(cube: &Cube, space: LutSpace) -> Result<(Self, Vec<u8>)> {
         let (dimensions, divisions, samples) = match cube {
             Cube::Three(lut) => {
                 ensure!(
@@ -393,7 +393,7 @@ impl RgbTable {
                 (Dimensions::One, n, samples)
             }
         };
-        let bytes = encode_table(dimensions, divisions, &samples, CUBE);
+        let bytes = encode_table(dimensions, divisions, &samples, space.tail());
         let table = Self::decode(&super::enhanced::compress(&bytes))?;
         Ok((table, bytes))
     }
@@ -477,8 +477,9 @@ pub mod tests {
     }
     pub(crate) const ADOBE: Tail = (1, 3, 0, [0., 2.]);
     /// Tables of every kind for GPU tests: a 3D Adobe RGB table, a 3D linear ProPhoto
-    /// one that extends the gamut, a 1D sRGB one, and a 3D sRGB one whose blend leaves
-    /// 0–1 at amounts over 1 (`clips_over_one`).
+    /// one that extends the gamut, a 1D sRGB one, a 3D sRGB one whose blend leaves
+    /// 0–1 at amounts over 1 (`clips_over_one`), and a 3D ProPhoto one in gamma 1.8, as
+    /// a `.cube` imported for ProPhoto RGB is.
     pub(crate) fn variety() -> Vec<RgbTable> {
         let curves = |v: f32| {
             [
@@ -492,6 +493,7 @@ pub mod tests {
             table_bytes(9, fade, (2, 0, 1, [0., 2.])),
             table_bytes_1d(64, curves, (0, 1, 0, [0., 2.])),
             table_bytes(9, clips_over_one, (0, 1, 0, [0., 2.])),
+            table_bytes(9, fade, (2, 2, 0, [0., 2.])),
         ]
         .iter()
         .map(|b| RgbTable::decode(&encode(b)).unwrap())
@@ -578,6 +580,97 @@ pub mod tests {
         assert_eq!(bounded.amount(0.5, 2.), 1.);
         assert_eq!(bounded.amount(1., 0.), 0.5);
         assert_eq!(bounded.amount(1., 2.), 1.5);
+        Ok(())
+    }
+    /// A `.cube`'s table in each space Create Profile offers has that space's primaries
+    /// and encoding, Clip and amounts 0–2, and the cube's samples unchanged: the bytes
+    /// differ only after them, as Camera Raw 18.7 writes `creative-32` in each space.
+    #[test]
+    fn a_cubes_space_changes_only_its_codes() -> Result<()> {
+        let mut text = String::from("LUT_3D_SIZE 5\n");
+        for i in 0..125 {
+            let [r, g, b] = [i % 5, i / 5 % 5, i / 25].map(|v| v as f32 / 4.);
+            text += &format!("{} {} {}\n", 0.1 + 0.8 * g, r * r, 1. - b);
+        }
+        let cube = Cube::parse(&text)?;
+        let samples = 16 + 125 * 6;
+        let (_, srgb) = RgbTable::from_cube(&cube, LutSpace::Srgb)?;
+        for (space, primaries, gamma) in [
+            (LutSpace::Srgb, Primaries::Srgb, Gamma::Srgb),
+            (LutSpace::AdobeRgb, Primaries::AdobeRgb, Gamma::Power22),
+            (LutSpace::ProPhotoRgb, Primaries::ProPhoto, Gamma::Power18),
+        ] {
+            let (table, bytes) = RgbTable::from_cube(&cube, space)?;
+            assert_eq!(
+                (table.primaries, table.gamma, table.gamut, table.bounds),
+                (primaries, gamma, Gamut::Clip, [0., 2.]),
+                "{space}"
+            );
+            assert_eq!(bytes[..samples], srgb[..samples], "{space}");
+            assert_eq!(bytes.len(), samples + 28);
+        }
+        Ok(())
+    }
+    /// A table blends in its own encoding: a cube that maps each channel linearly
+    /// gives `decode(f(encode(x)))` on a gray, a different colour in each space's
+    /// encoding. A colour inside Adobe RGB but outside sRGB passes an identity cube
+    /// unchanged in Adobe RGB and ProPhoto, and is clipped into sRGB in sRGB.
+    #[test]
+    fn a_cubes_space_is_the_one_it_applies_in() -> Result<()> {
+        let cube = |f: fn([f32; 3]) -> [f32; 3], space| -> Result<RgbTable> {
+            let mut text = String::from("LUT_3D_SIZE 3\n");
+            for i in 0..27 {
+                let [x, y, z] = f([i % 3, i / 3 % 3, i / 9].map(|v| v as f32 / 2.));
+                text += &format!("{x} {y} {z}\n");
+            }
+            Ok(RgbTable::from_cube(&Cube::parse(&text)?, space)?.0)
+        };
+        let f = |[r, g, b]: [f32; 3]| [0.2 + 0.6 * r, 0.9 * g, 0.1 + 0.5 * b];
+        let x = 0.18f32;
+        let mut outputs = Vec::new();
+        for (space, encode, decode) in [
+            (
+                LutSpace::Srgb,
+                srgb_encode as fn(f32) -> f32,
+                srgb_decode as fn(f32) -> f32,
+            ),
+            (
+                LutSpace::AdobeRgb,
+                |v: f32| v.powf(1. / 2.2),
+                |v: f32| v.powf(2.2),
+            ),
+            (
+                LutSpace::ProPhotoRgb,
+                |v: f32| v.powf(1. / 1.8),
+                |v: f32| v.powf(1.8),
+            ),
+        ] {
+            let table = cube(f, space)?;
+            let [into, back] = table.matrices;
+            let got = mul(into, table.apply(mul(back, [x; 3]), 1.));
+            let want = f([encode(x); 3]).map(decode);
+            assert!(
+                got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-4),
+                "{space}: {got:?} {want:?}"
+            );
+            outputs.push(want);
+        }
+        assert!(outputs[0][0] != outputs[1][0] && outputs[1][0] != outputs[2][0]);
+        // Adobe RGB's green, which sRGB holds only with a negative red.
+        let [_, from_adobe] = Primaries::AdobeRgb.matrices();
+        let green = mul(from_adobe, [0.05, 0.6, 0.1]);
+        assert!(green[0] < -0.01, "{green:?}");
+        for space in LutSpace::ALL {
+            let got = cube(|p| p, space)?.apply(green, 1.);
+            let want = match space {
+                LutSpace::Srgb => green.map(|v| v.clamp(0., 1.)),
+                _ => green,
+            };
+            assert!(
+                got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-3),
+                "{space}: {got:?} {want:?}"
+            );
+        }
         Ok(())
     }
     #[test]

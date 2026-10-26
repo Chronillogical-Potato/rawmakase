@@ -615,7 +615,7 @@ impl CameraProfile {
     pub fn with_test_rgb_tables(self) -> Vec<Self> {
         rgb_table::tests::variety()
             .into_iter()
-            .zip([0.7, 1., 1.5, 2.])
+            .zip([0.7, 1., 1.5, 2., 1.25])
             .map(|(table, amount)| {
                 let mut p = self.clone();
                 let look = p.enhanced.as_mut().expect("a profile with a look");
@@ -627,7 +627,7 @@ impl CameraProfile {
     /// `self` with the look a `.cube` imports as over it.
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_cube_for_test(&self, cube: &str) -> Result<Self> {
-        let converted = cube_look::convert(cube.as_bytes())?;
+        let converted = cube_look::convert(cube.as_bytes(), LutSpace::Srgb)?;
         enhanced::LookFile::parse(&cube_look::look_xmp(&converted, "Cube", ""))?.compose(self)
     }
     /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
@@ -790,7 +790,7 @@ mod library;
 mod look_settings;
 pub mod open;
 mod rgb_table;
-pub use cube_look::Fidelity;
+pub use cube_look::{Fidelity, LutSpace};
 pub use dcp::{d65_color_matrix, from_bytes};
 pub use enhanced::RgbLook;
 pub use library::{
@@ -800,7 +800,7 @@ pub use library::{
 #[cfg(any(test, feature = "test-support"))]
 pub use library::{import_into_dir, listed_from};
 pub use look_settings::LookSettings;
-pub use rgb_table::{Dimensions, Gamut};
+pub use rgb_table::{Dimensions, Gamma, Gamut, Primaries};
 #[cfg(test)]
 mod tests;
 

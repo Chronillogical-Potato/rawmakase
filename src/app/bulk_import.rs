@@ -316,7 +316,13 @@ fn check_name(
     true
 }
 
-fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary {
+/// Imports the profiles and LUTs `found` holds, the LUTs as expecting colours in
+/// `space`.
+fn import_camera_profiles(
+    found: &[Found],
+    progress: &ImportProgress,
+    space: crate::camera_profiles::LutSpace,
+) -> Summary {
     let mut summary = Summary::new(ImportKind::CameraProfiles);
     let destination = crate::storage::data_dir().join("camera-profiles");
     let mut names = BTreeMap::new();
@@ -364,7 +370,7 @@ fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary
     // Every DCP was checked above, so batches only fail on a write error.
     for batch in dcps.chunks(1000) {
         progress.set(format!("Importing profiles… {} done", summary.imported));
-        match crate::camera_profiles::import_files(batch) {
+        match crate::camera_profiles::import_files(batch, space) {
             Ok(done) => summary.imported += done.len(),
             Err(e) => batch.iter().for_each(|p| summary.fail(p, format!("{e:#}"))),
         }
@@ -377,11 +383,11 @@ fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary
     // Looks last, as they need their base profile in the library. One without
     // its base fails the batch, so then import them one by one.
     for batch in looks.chunks(1000) {
-        match crate::camera_profiles::import_files(batch) {
+        match crate::camera_profiles::import_files(batch, space) {
             Ok(done) => summary.imported += done.len(),
             Err(_) => {
                 for path in batch {
-                    match crate::camera_profiles::import_files(std::slice::from_ref(path)) {
+                    match crate::camera_profiles::import_files(std::slice::from_ref(path), space) {
                         Ok(_) => summary.imported += 1,
                         // Camera Raw's folder of looks covers every camera; only
                         // looks chosen by name are worth a line each.
@@ -408,7 +414,7 @@ fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary
     // read above, so a batch fails only on a write error.
     for batch in cubes.chunks(1000) {
         progress.set(format!("Importing LUTs… {} done", summary.imported));
-        match crate::camera_profiles::import_files(batch) {
+        match crate::camera_profiles::import_files(batch, space) {
             Ok(done) => done.into_iter().for_each(|done| summary.add_cube(done)),
             Err(e) => batch.iter().for_each(|p| summary.fail(p, format!("{e:#}"))),
         }
@@ -548,7 +554,10 @@ fn run(kind: ImportKind, picks: &[PathBuf], progress: &ImportProgress) -> Summar
     progress.set(format!("Looking for {}…", kind.noun(2)));
     let found = gather(kind, picks);
     match kind {
-        ImportKind::CameraProfiles => import_camera_profiles(&found, progress),
+        // The app's imports take LUTs at the sRGB default.
+        ImportKind::CameraProfiles => {
+            import_camera_profiles(&found, progress, crate::camera_profiles::LutSpace::Srgb)
+        }
         ImportKind::LensProfiles => import_lens_profiles(&found, progress),
         ImportKind::Presets => import_presets(
             &found,
@@ -560,13 +569,11 @@ fn run(kind: ImportKind, picks: &[PathBuf], progress: &ImportProgress) -> Summar
 }
 
 /// The `import-profiles` command: imports `picks` (files and folders) as the app's
-/// Import does, waiting for it.
-pub fn import_profiles(picks: &[PathBuf]) -> Summary {
-    run(
-        ImportKind::CameraProfiles,
-        picks,
-        &ImportProgress::default(),
-    )
+/// Import does, waiting for it, with the `.cube` LUTs among them expecting colours in
+/// `space`.
+pub fn import_profiles(picks: &[PathBuf], space: crate::camera_profiles::LutSpace) -> Summary {
+    let found = gather(ImportKind::CameraProfiles, picks);
+    import_camera_profiles(&found, &ImportProgress::default(), space)
 }
 
 impl Editor {
@@ -711,6 +718,7 @@ mod tests {
             stem: "Portra".into(),
             already: false,
             fidelity,
+            space: crate::camera_profiles::LutSpace::Srgb,
         };
         summary.imported = 1;
         summary

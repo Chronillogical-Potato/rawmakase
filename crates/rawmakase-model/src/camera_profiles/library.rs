@@ -1,6 +1,6 @@
 use super::{
     CameraProfile,
-    cube_look::{self, Fidelity, Names, Placement},
+    cube_look::{self, Fidelity, LutSpace, Names, Placement},
     enhanced::{LookBase, LookFile},
     from_bytes,
 };
@@ -176,8 +176,12 @@ pub fn listed_from(dirs: &[PathBuf], m: &Metadata) -> Listed {
 }
 /// [`import_files`] into `destination` instead of the user's library, for tests.
 #[cfg(any(test, feature = "test-support"))]
-pub fn import_into_dir(paths: &[PathBuf], destination: &Path) -> Result<Vec<ImportedProfile>> {
-    import_into(paths, destination)
+pub fn import_into_dir(
+    paths: &[PathBuf],
+    destination: &Path,
+    space: LutSpace,
+) -> Result<Vec<ImportedProfile>> {
+    import_into(paths, destination, space)
 }
 fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
     if m.is_rendered() {
@@ -342,10 +346,15 @@ fn collect(dir: &Path, depth: usize, files: &mut Vec<std::path::PathBuf>) {
 }
 
 /// Explicitly import files into RAWmakase's own library: DCPs and look XMPs are
-/// copied, and a `.cube` becomes a look XMP (see `cube_look`). Validate the complete
-/// batch before writing; never follow or discover Adobe application directories.
-pub fn import_files(paths: &[std::path::PathBuf]) -> Result<Vec<ImportedProfile>> {
-    import_into(paths, &crate::storage::data_dir().join("camera-profiles"))
+/// copied, and a `.cube` becomes a look XMP (see `cube_look`) for colours in `space`,
+/// one for the whole batch (DCPs and XMPs have their own). Validate the complete batch
+/// before writing; never follow or discover Adobe application directories.
+pub fn import_files(paths: &[std::path::PathBuf], space: LutSpace) -> Result<Vec<ImportedProfile>> {
+    import_into(
+        paths,
+        &crate::storage::data_dir().join("camera-profiles"),
+        space,
+    )
 }
 /// One file [`import_files`] took into the library.
 #[derive(Clone, Debug)]
@@ -369,6 +378,8 @@ pub struct CubeImport {
     pub already: bool,
     /// How faithfully the look holds the cube.
     pub fidelity: Fidelity,
+    /// The colour space the cube was imported as expecting.
+    pub space: LutSpace,
 }
 impl CubeImport {
     /// Named other than its file, as a different profile has that name.
@@ -378,10 +389,15 @@ impl CubeImport {
 }
 impl std::fmt::Display for CubeImport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // sRGB, the default, goes unsaid, as before the space could be chosen.
+        let space = match self.space {
+            LutSpace::Srgb => String::new(),
+            space => format!(" in {space}"),
+        };
         if self.already {
-            return write!(f, "already imported as look \"{}\"", self.name);
+            return write!(f, "already imported as look \"{}\"{space}", self.name);
         }
-        write!(f, "imported as look \"{}\"", self.name)?;
+        write!(f, "imported as look \"{}\"{space}", self.name)?;
         if self.renamed() {
             write!(f, ", as another profile is named \"{}\"", self.stem)?;
         }
@@ -389,13 +405,13 @@ impl std::fmt::Display for CubeImport {
     }
 }
 /// Whether a `.cube` can be imported, and how faithfully: what [`import_files`] would
-/// make of its bytes.
+/// make of its bytes, in any space (the space changes neither).
 pub fn read_cube(bytes: &[u8]) -> Result<Fidelity> {
     ensure!(
         bytes.len() as u64 <= cube_look::MAX_BYTES,
         "the cube is too large"
     );
-    Ok(cube_look::convert(bytes)?.fidelity)
+    Ok(cube_look::convert(bytes, LutSpace::Srgb)?.fidelity)
 }
 /// What [`import_readable`] did.
 #[derive(Debug, Default)]
@@ -407,7 +423,8 @@ pub struct Imported {
 }
 /// [`import_files`] for a set the user didn't pick file by file (a camera's
 /// profiles from Camera Raw's folder): DCPs RAWmakase can't read, such as Camera
-/// Raw's HDR profiles, are skipped instead of failing the rest.
+/// Raw's HDR profiles, are skipped instead of failing the rest. A `.cube` among
+/// them imports at the sRGB default.
 pub fn import_readable(paths: &[std::path::PathBuf]) -> Result<Imported> {
     import_readable_into(paths, &crate::storage::data_dir().join("camera-profiles"))
 }
@@ -433,14 +450,18 @@ fn import_readable_into(paths: &[std::path::PathBuf], destination: &Path) -> Res
     let imported = if readable.is_empty() {
         Vec::new()
     } else {
-        import_into(&readable, destination)?
+        import_into(&readable, destination, LutSpace::Srgb)?
             .into_iter()
             .map(|done| done.path)
             .collect()
     };
     Ok(Imported { imported, skipped })
 }
-fn import_into(paths: &[std::path::PathBuf], destination: &Path) -> Result<Vec<ImportedProfile>> {
+fn import_into(
+    paths: &[std::path::PathBuf],
+    destination: &Path,
+    space: LutSpace,
+) -> Result<Vec<ImportedProfile>> {
     use anyhow::Context;
     use std::io::Write;
     ensure!(
@@ -567,13 +588,14 @@ fn import_into(paths: &[std::path::PathBuf], destination: &Path) -> Result<Vec<I
     let mut imported = Vec::new();
     for (path, bytes) in cubes {
         let file = path.file_name().unwrap_or_default().to_string_lossy();
-        let converted = cube_look::convert(&bytes).with_context(|| format!("{file}"))?;
+        let converted = cube_look::convert(&bytes, space).with_context(|| format!("{file}"))?;
         let (stem, group) = cube_look::stem_and_group(path)?;
         let report = |name: String, already| CubeImport {
             name,
             stem: stem.clone(),
             already,
             fidelity: converted.fidelity.clone(),
+            space,
         };
         match names.place(&stem, &group, &converted.uuid)? {
             Placement::Already(name, library) => imported.push(ImportedProfile {
@@ -827,17 +849,20 @@ mod tests {
         let paths = |done: Vec<ImportedProfile>| -> Vec<PathBuf> {
             done.into_iter().map(|d| d.path).collect()
         };
-        let result = paths(import_into(&selected, &dest)?);
+        let result = paths(import_into(&selected, &dest, LutSpace::Srgb)?);
         assert_eq!(std::fs::read(&result[0])?, bytes);
         assert_eq!(std::fs::read(&source)?, bytes);
-        assert_eq!(paths(import_into(&selected, &dest)?), result);
+        assert_eq!(
+            paths(import_into(&selected, &dest, LutSpace::Srgb)?),
+            result
+        );
         std::fs::write(&result[0], b"existing user data")?;
-        assert!(import_into(&selected, &dest).is_err());
+        assert!(import_into(&selected, &dest, LutSpace::Srgb).is_err());
         assert_eq!(std::fs::read(&result[0])?, b"existing user data");
         let unsupported = temp.path().join("preset.xmp");
         std::fs::write(&unsupported, "<preset/>")?;
         let new_dest = temp.path().join("fresh-library");
-        assert!(import_into(&[source, unsupported], &new_dest).is_err());
+        assert!(import_into(&[source, unsupported], &new_dest, LutSpace::Srgb).is_err());
         assert!(!new_dest.exists());
         Ok(())
     }
@@ -908,7 +933,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
         let dest = temp.path().join("library");
-        let done = import_into(std::slice::from_ref(&cube), &dest)?;
+        let done = import_into(std::slice::from_ref(&cube), &dest, LutSpace::Srgb)?;
         assert_eq!(done.len(), 1);
         let report = cube_of(&done[0]);
         assert_eq!((report.name.as_str(), report.already), ("Portra", false));
@@ -930,6 +955,108 @@ mod tests {
         Ok(())
     }
 
+    /// A cube imported for Adobe RGB is a look the library lists in its group, whose
+    /// table is in Adobe RGB and gamma 2.2. Again in Adobe RGB it is imported already;
+    /// in another space it is a look of its own beside the first, named by the usual
+    /// rule, and each line says the space. DCPs and look XMPs in the batch are copied
+    /// as they are.
+    #[test]
+    fn a_cube_imports_in_the_space_chosen() -> Result<()> {
+        use super::super::{Gamma, Primaries};
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
+        let import = |space| import_into(std::slice::from_ref(&cube), &dest, space);
+        let done = import(LutSpace::AdobeRgb)?;
+        assert_eq!(
+            cube_of(&done[0]).to_string(),
+            "imported as look \"Portra\" in Adobe RGB (1998): exact"
+        );
+        let first = std::fs::read(dest.join("Portra.xmp"))?;
+        let listed = || {
+            listed_in(
+                std::slice::from_ref(&dest),
+                &with_matrix(),
+                &Cameras::default(),
+            )
+        };
+        let table = |listed: &Listed, name: &str| {
+            let look = listed.profiles.iter().find(|p| p.name == name).expect(name);
+            let table = look
+                .enhanced
+                .as_ref()
+                .and_then(|e| e.rgb())
+                .unwrap()
+                .table();
+            (
+                listed.groups.entry(look).group,
+                table.primaries(),
+                table.gamma(),
+            )
+        };
+        let once = listed();
+        assert!(once.errors.is_empty(), "{:?}", once.errors);
+        assert_eq!(
+            table(&once, "Portra"),
+            (Some("Film".into()), Primaries::AdobeRgb, Gamma::Power22)
+        );
+        let done = import(LutSpace::AdobeRgb)?;
+        assert_eq!(
+            cube_of(&done[0]).to_string(),
+            "already imported as look \"Portra\" in Adobe RGB (1998)"
+        );
+        // At the sRGB default afterwards, and in ProPhoto: new looks, renamed, the first
+        // kept as it was.
+        let done = import(LutSpace::Srgb)?;
+        assert_eq!(
+            cube_of(&done[0]).to_string(),
+            "imported as look \"Portra (Film)\", as another profile is named \"Portra\": exact"
+        );
+        let done = import(LutSpace::ProPhotoRgb)?;
+        assert_eq!(
+            cube_of(&done[0]).to_string(),
+            "imported as look \"Portra (Film 2)\" in ProPhoto RGB, as another profile is \
+             named \"Portra\": exact"
+        );
+        assert_eq!(std::fs::read(dest.join("Portra.xmp"))?, first);
+        let all = listed();
+        assert!(all.errors.is_empty(), "{:?}", all.errors);
+        for (name, primaries, gamma) in [
+            ("Portra", Primaries::AdobeRgb, Gamma::Power22),
+            ("Portra (Film)", Primaries::Srgb, Gamma::Srgb),
+            ("Portra (Film 2)", Primaries::ProPhoto, Gamma::Power18),
+        ] {
+            assert_eq!(
+                table(&all, name),
+                (Some("Film".into()), primaries, gamma),
+                "{name}"
+            );
+        }
+        // A batch of a DCP, a look XMP and a cube: the space is the cube's alone.
+        let src = temp.path().join("mixed");
+        std::fs::create_dir_all(&src)?;
+        let dcp_path = src.join("mine.dcp");
+        std::fs::write(&dcp_path, dcp("Test Camera", "Camera Neutral"))?;
+        let converted = super::super::cube_look::convert(&std::fs::read(&cube)?, LutSpace::Srgb)?;
+        let xmp_path = src.join("Look.xmp");
+        std::fs::write(
+            &xmp_path,
+            super::super::cube_look::look_xmp(&converted, "Look", ""),
+        )?;
+        let other = temp.path().join("other");
+        let done = import_into(
+            &[dcp_path.clone(), xmp_path.clone(), cube.clone()],
+            &other,
+            LutSpace::ProPhotoRgb,
+        )?;
+        assert!(cube_of(&done[2]).to_string().contains("in ProPhoto RGB"));
+        for (copy, source) in [(&done[0], &dcp_path), (&done[1], &xmp_path)] {
+            assert!(copy.cube.is_none());
+            assert_eq!(std::fs::read(&copy.path)?, std::fs::read(source)?);
+        }
+        Ok(())
+    }
+
     /// Importing the same cube again changes nothing and says so, whatever folder it
     /// comes from: its table, not its bytes or its group, is what identifies it.
     #[test]
@@ -937,7 +1064,7 @@ mod tests {
         let temp = tempfile::tempdir()?;
         let dest = temp.path().join("library");
         let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
-        import_into(std::slice::from_ref(&cube), &dest)?;
+        import_into(std::slice::from_ref(&cube), &dest, LutSpace::Srgb)?;
         let before = std::fs::read(dest.join("Portra.xmp"))?;
         let moved = write_cube(&temp.path().join("Elsewhere"), "Portra.cube", warm);
         // Rewritten with other whitespace and a comment: other bytes, the same table.
@@ -947,7 +1074,7 @@ mod tests {
             format!("# exported again\n{}", text.replace(' ', "  ")),
         )?;
         for path in [cube, moved] {
-            let done = import_into(std::slice::from_ref(&path), &dest)?;
+            let done = import_into(std::slice::from_ref(&path), &dest, LutSpace::Srgb)?;
             let report = cube_of(&done[0]);
             assert!(report.already, "{report}");
             assert_eq!(done[0].path, dest.join("Portra.xmp"));
@@ -967,10 +1094,10 @@ mod tests {
         let dest = temp.path().join("library");
         std::fs::create_dir_all(&dest)?;
         let warm_cube = write_cube(&temp.path().join("Warm"), "Portra.cube", warm);
-        import_into(&[warm_cube], &dest)?;
+        import_into(&[warm_cube], &dest, LutSpace::Srgb)?;
         // An Adobe look's name, held by a look XMP whose file is named otherwise.
         let other = write_cube(&temp.path().join("x"), "Other.cube", warm);
-        let converted = super::super::cube_look::convert(&std::fs::read(&other)?)?;
+        let converted = super::super::cube_look::convert(&std::fs::read(&other)?, LutSpace::Srgb)?;
         std::fs::write(
             dest.join("adobe-vivid.xmp"),
             super::super::cube_look::look_xmp(&converted, "Adobe Vivid", "Adobe"),
@@ -985,7 +1112,7 @@ mod tests {
             // Not imported, but the name Lightroom edits fall back by.
             write_cube(&cool_dir, "Adobe Standard.cube", cool),
         ];
-        let done = import_into(&picks, &dest)?;
+        let done = import_into(&picks, &dest, LutSpace::Srgb)?;
         let names: Vec<_> = done.iter().map(|d| cube_of(d).name.as_str()).collect();
         assert_eq!(
             names,
@@ -1008,14 +1135,14 @@ mod tests {
         );
         // A third Portra goes further; the renamed one imports again as itself.
         let third = write_cube(&temp.path().join("b/Cool"), "Portra.cube", |p| p);
-        let done = import_into(&[third], &dest)?;
+        let done = import_into(&[third], &dest, LutSpace::Srgb)?;
         assert_eq!(cube_of(&done[0]).name, "Portra (Cool 2)");
-        let done = import_into(&picks[..1], &dest)?;
+        let done = import_into(&picks[..1], &dest, LutSpace::Srgb)?;
         assert!(cube_of(&done[0]).already);
         assert_eq!(cube_of(&done[0]).name, "Portra (Cool)");
         // The same cube from another folder is found under its new name.
         let copy = write_cube(&temp.path().join("Cool copy"), "Portra.cube", cool);
-        let done = import_into(&[copy], &dest)?;
+        let done = import_into(&[copy], &dest, LutSpace::Srgb)?;
         assert!(cube_of(&done[0]).already, "{}", cube_of(&done[0]));
         assert_eq!(cube_of(&done[0]).name, "Portra (Cool)");
         // Every look lists under its own name.
@@ -1048,10 +1175,15 @@ mod tests {
         std::fs::create_dir_all(&dest)?;
         std::fs::write(dest.join("mine.dcp"), dcp("Test Camera", "Camera Neutral"))?;
         let pack = temp.path().join("Pack Moody/For Other Programs/Cube Files");
-        import_into(&[write_cube(&pack, "Portra.cube", warm)], &dest)?;
+        import_into(
+            &[write_cube(&pack, "Portra.cube", warm)],
+            &dest,
+            LutSpace::Srgb,
+        )?;
         let look = |name: &str, group: &str, f: fn([f32; 3]) -> [f32; 3]| -> Result<()> {
             let cube = write_cube(&temp.path().join("src"), &format!("{name}.cube"), f);
-            let converted = super::super::cube_look::convert(&std::fs::read(&cube)?)?;
+            let converted =
+                super::super::cube_look::convert(&std::fs::read(&cube)?, LutSpace::Srgb)?;
             std::fs::write(
                 dest.join(format!("{name}.xmp")),
                 super::super::cube_look::look_xmp(&converted, name, group),
@@ -1110,13 +1242,13 @@ mod tests {
         let pack = |name: &str| temp.path().join(name).join("Cube Files");
         let first = write_cube(&pack("Pack A"), "Portra.cube", warm);
         let second = write_cube(&pack("Pack B"), "Portra.cube", cool);
-        let done = import_into(&[first, second.clone()], &dest)?;
+        let done = import_into(&[first, second.clone()], &dest, LutSpace::Srgb)?;
         let names: Vec<_> = done.iter().map(|d| cube_of(d).name.as_str()).collect();
         assert_eq!(names, ["Portra", "Portra (Pack B)"]);
         // Imported again from elsewhere, it is found by its table, not its group.
         let moved = write_cube(&temp.path().join("Moved/LUTs"), "Portra.cube", cool);
         for path in [second, moved] {
-            let done = import_into(&[path], &dest)?;
+            let done = import_into(&[path], &dest, LutSpace::Srgb)?;
             assert!(cube_of(&done[0]).already);
             assert_eq!(cube_of(&done[0]).name, "Portra (Pack B)");
         }
@@ -1139,7 +1271,7 @@ mod tests {
         let dest = temp.path().join("library");
         std::fs::create_dir_all(dest.join("Portra.xmp"))?;
         let cube = write_cube(&temp.path().join("Film"), "Portra.cube", warm);
-        assert!(import_into(&[cube], &dest).is_err());
+        assert!(import_into(&[cube], &dest, LutSpace::Srgb).is_err());
         Ok(())
     }
 
@@ -1158,7 +1290,7 @@ mod tests {
             ),
         )?;
         let dest = temp.path().join("library");
-        let error = import_into(&[good, bad], &dest).unwrap_err();
+        let error = import_into(&[good, bad], &dest, LutSpace::Srgb).unwrap_err();
         assert!(format!("{error:#}").starts_with("Log.cube: "), "{error:#}");
         assert!(!dest.join("Good.xmp").exists());
         assert!(read_cube(&std::fs::read(temp.path().join("Pack/Good.cube"))?).is_ok());

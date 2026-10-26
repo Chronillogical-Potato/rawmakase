@@ -250,6 +250,10 @@
         0.279,
         0.847
       ],
+      "cube-creative-33-adobe-rgb-100": [
+        0.366,
+        0.959
+      ],
       "cube-creative-33-bw": [
         18.08,
         31.393
@@ -265,6 +269,14 @@
       "cube-creative-33-point-curve": [
         0.474,
         1.927
+      ],
+      "cube-creative-33-prophoto-rgb-100": [
+        0.408,
+        1.369
+      ],
+      "cube-creative-33-prophoto-rgb-200": [
+        0.502,
+        1.944
       ],
       "cube-creative-33-saturation+50": [
         1.285,
@@ -290,12 +302,20 @@
         0.274,
         0.831
       ],
+      "cube-hue-rotation-33-adobe-rgb-100": [
+        0.278,
+        0.748
+      ],
       "cube-identity-17-100": [
         0.275,
         0.897
       ],
       "cube-identity-33-100": [
         0.275,
+        0.897
+      ],
+      "cube-identity-33-prophoto-rgb-100": [
+        0.276,
         0.897
       ],
       "cube-out-of-range-17-100": [
