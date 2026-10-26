@@ -310,6 +310,9 @@ pub(super) struct ViewState {
     pub(super) aspect: f32,
     /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
     pub(super) aspect_read: bool,
+    /// The aspect last chosen from the Crop tool's menu, which an uncropped photo
+    /// opens with; saved in the session.
+    pub(super) chosen_aspect: f32,
     /// The crop guide overlay; saved in the session.
     pub(super) crop_guides: super::crop_tool::CropGuides,
     /// When the overlay was last changed; it shows for a moment after, even in Auto.
@@ -362,6 +365,7 @@ impl Default for ViewState {
             crop_drag: None,
             aspect: -1.,
             aspect_read: false,
+            chosen_aspect: -1.,
             crop_guides: Default::default(),
             crop_guides_changed: None,
             ruler: Default::default(),

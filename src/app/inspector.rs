@@ -240,6 +240,7 @@ impl Editor {
         }
         let palette = theme::palette(ui.ctx());
         let mut action = None;
+        let mut chosen = None;
         let mut guides = self.view.crop_guides;
         let analysing = self.document.straighten.is_running();
         let r = self.document.edit.recipe_mut();
@@ -260,8 +261,13 @@ impl Editor {
                         .width(ui.available_width())
                         .selected_text(aspect_name(self.view.aspect))
                         .show_ui(ui, |ui| {
-                            for (aspect, name) in ASPECTS {
-                                ui.selectable_value(&mut self.view.aspect, aspect, name);
+                            for (aspect, name, _) in ASPECTS {
+                                if ui
+                                    .selectable_label(self.view.aspect == aspect, name)
+                                    .clicked()
+                                {
+                                    chosen = Some(aspect);
+                                }
                             }
                         });
                 });
@@ -389,6 +395,9 @@ impl Editor {
             });
         });
         self.set_crop_guides(guides);
+        if let Some(aspect) = chosen {
+            self.choose_aspect(aspect);
+        }
         match action {
             Some(CropAction::Swap) => self.swap_crop_orientation(),
             Some(CropAction::AutoStraighten) => self.start_auto_straighten(),
@@ -1596,22 +1605,37 @@ fn aspect_name(aspect: f32) -> &'static str {
     let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
     ASPECTS
         .iter()
-        .find(|(a, _)| near(*a, aspect) || (*a > 0. && near(1. / *a, aspect)))
-        .map_or("Custom", |(_, name)| *name)
+        .find(|(a, ..)| near(*a, aspect) || (*a > 0. && near(1. / *a, aspect)))
+        .map_or("Custom", |(_, name, _)| *name)
 }
 
-/// The crop's aspect presets, long side over short.
-pub(super) const ASPECTS: [(f32, &str); 9] = [
-    (-1., "Original"),
-    (0., "Free"),
-    (1., "1 x 1"),
-    (1.25, "4 x 5"),
-    (1.4, "5 x 7"),
-    (1.5, "2 x 3"),
-    (4. / 3., "3 x 4"),
-    (16. / 9., "16 x 9"),
-    (65. / 24., "65 x 24 (XPan)"),
+/// The crop's aspect presets, long side over short, with their menu and stable
+/// session names.
+pub(super) const ASPECTS: [(f32, &str, &str); 9] = [
+    (-1., "Original", "original"),
+    (0., "Free", "free"),
+    (1., "1 x 1", "1x1"),
+    (1.25, "4 x 5", "4x5"),
+    (1.4, "5 x 7", "5x7"),
+    (1.5, "2 x 3", "2x3"),
+    (4. / 3., "3 x 4", "3x4"),
+    (16. / 9., "16 x 9", "16x9"),
+    (65. / 24., "65 x 24 (XPan)", "65x24"),
 ];
+/// The session's name for a preset `aspect` from the menu.
+pub(super) fn aspect_key(aspect: f32) -> &'static str {
+    ASPECTS
+        .iter()
+        .find(|(a, ..)| *a == aspect)
+        .map_or("original", |(.., key)| *key)
+}
+/// The preset the session names `key`; Original for a name this version does not know.
+pub(super) fn aspect_from_key(key: &str) -> f32 {
+    ASPECTS
+        .iter()
+        .find(|(.., k)| *k == key)
+        .map_or(-1., |(a, ..)| *a)
+}
 pub(super) const BANDS: [&str; 8] = [
     "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta",
 ];

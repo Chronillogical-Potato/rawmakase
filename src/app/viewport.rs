@@ -45,8 +45,9 @@ impl Editor {
         }
     }
     /// Opening the Crop tool shows the photo's own aspect, as Lightroom does,
-    /// rather than the last photo's: Original when uncropped or at the photo's
-    /// ratio, a preset it matches, or else its exact ratio as Custom.
+    /// rather than the last photo's: the aspect last chosen from the menu when
+    /// uncropped, Original at the photo's ratio, a preset it matches, or else its
+    /// exact ratio as Custom.
     pub(super) fn read_aspect(&mut self) {
         if !self.view.is(Tool::Crop) || self.view.aspect_read {
             return;
@@ -57,7 +58,7 @@ impl Editor {
         self.view.aspect_read = true;
         let c = self.document.edit.recipe().crop;
         if c == [0., 0., 1., 1.] {
-            self.view.aspect = -1.;
+            self.view.aspect = self.view.chosen_aspect;
             return;
         }
         let mut r = self.document.edit.recipe().clone();
@@ -78,7 +79,7 @@ impl Editor {
         } else {
             super::inspector::ASPECTS
                 .iter()
-                .map(|(a, _)| *a)
+                .map(|(a, ..)| *a)
                 .filter(|a| *a > 0.)
                 .flat_map(|a| [a, 1. / a])
                 .find(|a| near(aspect, *a))

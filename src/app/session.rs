@@ -75,6 +75,11 @@ pub(crate) struct Session {
     /// The Crop tool's guide overlay.
     #[serde(default)]
     pub crop_guides: CropGuideLayout,
+    /// The Crop tool's aspect last chosen from its menu, by stable name ("original",
+    /// "free", "1x1", "4x5", …); an uncropped photo opens with it. A name this
+    /// version does not know reads as Original.
+    #[serde(default)]
+    pub crop_aspect: String,
     /// Preferences > Raw Defaults: what photos without an edit start from.
     #[serde(default, deserialize_with = "crate::raw_defaults::lenient_settings")]
     pub raw_defaults: crate::raw_defaults::RawDefaults,

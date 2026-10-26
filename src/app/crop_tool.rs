@@ -396,6 +396,15 @@ impl super::Editor {
             }
         }
     }
+    /// Picks `aspect` from the Crop tool's menu: the crop takes it as the frame ends,
+    /// and uncropped photos open with it, here and after a relaunch.
+    pub(super) fn choose_aspect(&mut self, aspect: f32) {
+        self.view.aspect = aspect;
+        if aspect != self.view.chosen_aspect {
+            self.view.chosen_aspect = aspect;
+            let _ = self.save_session();
+        }
+    }
     /// Changes the guide overlay, saved in the session as a view preference.
     pub(super) fn set_crop_guides(&mut self, guides: CropGuides) {
         if guides != self.view.crop_guides {

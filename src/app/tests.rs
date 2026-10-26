@@ -3194,6 +3194,86 @@ fn crop_tool_reads_each_photos_own_aspect() {
     assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
 }
 #[test]
+fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let session = dir.path().join("session.json");
+    let ctx = egui::Context::default();
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    let new_editor = |s: crate::app::session::Session| {
+        let mut editor = Editor::with_context(&ctx, None, s, None);
+        editor.session_file = Some(session.clone());
+        editor.document.set_image(image.clone());
+        editor
+    };
+    let open = |editor: &mut Editor, crop: [f32; 4]| {
+        editor.view.tool = state::Tool::None;
+        editor.document.edit.setup_mut().crop = crop;
+        editor.view.toggle(state::Tool::Crop);
+        let frame = editor.begin_edit_frame();
+        editor.finish_edit_frame(frame, &ctx);
+        assert_eq!(
+            editor.document.edit.recipe().crop,
+            crop,
+            "reading changes no crop"
+        );
+        editor.view.aspect
+    };
+    let mut editor = new_editor(Default::default());
+    let full = [0., 0., 1., 1.];
+    // Until one is chosen an uncropped photo shows Original.
+    assert_eq!(open(&mut editor, full), -1.);
+    // 4 x 5 chosen from the menu constrains this photo's crop...
+    let frame = editor.begin_edit_frame();
+    editor.choose_aspect(1.25);
+    editor.finish_edit_frame(frame, &ctx);
+    let c = editor.document.edit.recipe().crop;
+    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.25).abs() < 1e-3);
+    // ...and is what the next uncropped photo starts from, without cropping it.
+    assert_eq!(open(&mut editor, full), 1.25);
+    // A cropped photo still shows its own aspect, and does not replace the choice.
+    let xpan = [0., 0.223, 1., 0.777];
+    assert_eq!(open(&mut editor, xpan), 65. / 24.);
+    assert_eq!(open(&mut editor, full), 1.25);
+    // Swapping a photo's crop to portrait leaves the choice following each photo.
+    let frame = editor.begin_edit_frame();
+    editor.swap_crop_orientation();
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(open(&mut editor, full), 1.25);
+    // Free is a choice too.
+    let frame = editor.begin_edit_frame();
+    editor.choose_aspect(0.);
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(open(&mut editor, full), 0.);
+    // The choice is kept in the session for the next launch.
+    let frame = editor.begin_edit_frame();
+    editor.choose_aspect(16. / 9.);
+    editor.finish_edit_frame(frame, &ctx);
+    let saved: crate::app::session::Session = serde_json::from_slice(&std::fs::read(&session)?)?;
+    assert_eq!(saved.crop_aspect, "16x9");
+    let mut relaunched = new_editor(saved);
+    assert_eq!(open(&mut relaunched, full), 16. / 9.);
+    // A name this version does not know reads as Original.
+    let mut unknown = new_editor(crate::app::session::Session {
+        crop_aspect: "golden".into(),
+        ..Default::default()
+    });
+    assert_eq!(open(&mut unknown, full), -1.);
+    Ok(())
+}
+#[test]
 fn a_virtual_copy_made_in_develop_keeps_the_unsaved_edit_and_opens() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let photos = dir.path().join("photos");
