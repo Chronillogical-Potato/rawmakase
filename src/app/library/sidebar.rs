@@ -7,13 +7,13 @@ use crate::app::theme;
 use crate::app::widgets::section;
 use crate::catalog::{CollectionKind, FolderId, PhotoId, RootId};
 use eframe::egui::{self, Vec2};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// The sidebar's trees, as the catalog's lists were when they were built.
 pub(super) struct Trees {
     /// What the lists were: see [`Library::lists_key`].
     key: ListsKey,
-    /// The drive each root was on, in the catalog's order of roots.
+    /// The drive each of [`Library::anchors`] was on.
     drives: Vec<crate::platform::volume::Volume>,
     /// The startup disk first, then other drives by name.
     volumes: Vec<Drive>,
@@ -37,6 +37,19 @@ impl Trees {
     pub(super) fn drives(&self) -> Vec<crate::platform::volume::Volume> {
         self.volumes.iter().map(|d| d.volume.clone()).collect()
     }
+    /// Each drive the Folders panel shows, with its trees.
+    #[cfg(test)]
+    pub(super) fn drive_trees(&self) -> Vec<(crate::platform::volume::Volume, Vec<&FolderNode>)> {
+        self.volumes
+            .iter()
+            .map(|d| (d.volume.clone(), d.trees.iter().collect()))
+            .collect()
+    }
+    /// The photo count each drive shows.
+    #[cfg(test)]
+    pub(super) fn drive_photos(&self) -> Vec<usize> {
+        self.volumes.iter().map(|d| d.photos).collect()
+    }
 }
 impl Library {
     fn lists_key(&self) -> ListsKey {
@@ -54,19 +67,35 @@ impl Library {
             members,
         )
     }
-    /// Where each root folder is on this computer.
-    pub(super) fn root_paths(&self) -> Vec<std::path::PathBuf> {
-        let roots = self.session.roots.iter();
-        roots
-            .map(|(_, original, mapped)| mapped.as_deref().unwrap_or(original).into())
+    /// Where the Folders panel's trees start on this computer: each root
+    /// (logical path ""), then each folder located apart from its root.
+    pub(super) fn anchors(&self) -> Vec<(RootId, String, std::path::PathBuf)> {
+        let roots = self.session.roots.iter().map(|(id, original, mapped)| {
+            let path = mapped.as_deref().unwrap_or(original);
+            (*id, String::new(), path.into())
+        });
+        let folders = self.session.roots.iter().flat_map(|(id, ..)| {
+            let overrides = self.session.overrides.get(id).into_iter().flatten();
+            overrides.map(|o| (*id, o.relative.clone(), o.path.clone()))
+        });
+        roots.chain(folders).collect()
+    }
+    /// Where the folders of root `root` located apart from it are, by
+    /// logical path.
+    fn located(&self, root: RootId) -> HashMap<&str, &std::path::Path> {
+        let overrides = self.session.overrides.get(&root).into_iter().flatten();
+        overrides
+            .map(|o| (o.relative.as_str(), o.path.as_path()))
             .collect()
     }
     /// The sidebar's trees, built again only when the lists, or the drives
-    /// their roots are on, changed.
+    /// their roots and located folders are on, changed.
     fn sidebar_trees(&mut self) -> std::sync::Arc<Trees> {
         let key = self.lists_key();
-        let paths = self.root_paths();
-        let drives = self.volumes.drives(paths.iter().map(|p| p.as_path()));
+        let anchors = self.anchors();
+        let drives = self
+            .volumes
+            .drives(anchors.iter().map(|(.., path)| path.as_path()));
         if let Some(trees) = self
             .sidebar_trees
             .as_ref()
@@ -74,49 +103,64 @@ impl Library {
         {
             return trees.clone();
         }
+        let drive_of: HashMap<(RootId, &str), &crate::platform::volume::Volume> = anchors
+            .iter()
+            .zip(&drives)
+            .map(|((root, logical, _), drive)| ((*root, logical.as_str()), drive))
+            .collect();
         let mut volumes: std::collections::BTreeMap<
             crate::platform::volume::Volume,
-            Vec<(RootId, String, Option<String>)>,
+            Vec<FolderNode>,
         > = Default::default();
-        for (root, drive) in self.session.roots.iter().zip(&drives) {
-            volumes.entry(drive.clone()).or_default().push(root.clone());
+        // Folders located on another drive than the folder above them, shown
+        // under that drive after its roots, as Lightroom shows them. They
+        // stay in their roots' counts and photos, as choosing a root shows.
+        let mut apart: Vec<(crate::platform::volume::Volume, FolderNode)> = Vec::new();
+        for (root, original, mapped) in &self.session.roots {
+            let root_path = mapped.as_deref().unwrap_or(original);
+            let name = std::path::Path::new(original)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let located = self.located(*root);
+            let mut tree = FolderNode::root(*root, name, root_path.into());
+            for f in self.session.folders.iter().filter(|f| f.root == *root) {
+                tree.insert(f, &located);
+            }
+            tree.finish();
+            let drive = |logical: &str| drive_of.get(&(*root, logical)).copied();
+            // Deepest first, so a folder taken out has none of them in it.
+            let mut logicals: Vec<&str> = located.keys().copied().collect();
+            logicals.sort_by_key(|l| std::cmp::Reverse(l.split('/').count()));
+            for logical in logicals {
+                // The drive of the nearest folder above it with a location.
+                let above = std::iter::successors(Some(logical), |l| {
+                    (!l.is_empty()).then(|| l.rsplit_once('/').map_or("", |(p, _)| p))
+                })
+                .skip(1)
+                .find_map(drive);
+                if let (Some(own), Some(above)) = (drive(logical), above)
+                    && own != above
+                    && let Some(node) = tree.detach(logical)
+                {
+                    apart.push((own.clone(), node));
+                }
+            }
+            if let Some(drive) = drive("") {
+                volumes.entry(drive.clone()).or_default().push(tree);
+            }
+        }
+        apart.sort_by_key(|(_, node)| node.name.to_lowercase());
+        for (drive, node) in apart {
+            volumes.entry(drive).or_default().push(node);
         }
         let mut volumes: Vec<_> = volumes
             .into_iter()
-            .map(|(volume, roots)| {
-                let photos = roots
-                    .iter()
-                    .map(|(id, ..)| {
-                        self.session
-                            .folders
-                            .iter()
-                            .filter(|f| f.root == *id)
-                            .map(|f| f.count)
-                            .sum::<usize>()
-                    })
-                    .sum();
-                let trees = roots
-                    .into_iter()
-                    .map(|(root, original, mapped)| {
-                        let root_path = mapped.as_deref().unwrap_or(&original);
-                        let name = std::path::Path::new(&original)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let mut tree = FolderNode::root(root, name, root_path.into());
-                        for f in self.session.folders.iter().filter(|f| f.root == root) {
-                            tree.insert(f);
-                        }
-                        tree.finish();
-                        tree
-                    })
-                    .collect();
-                Drive {
-                    volume,
-                    trees,
-                    photos,
-                }
+            .map(|(volume, trees)| Drive {
+                photos: trees.iter().map(FolderNode::photos_in_tree).sum(),
+                volume,
+                trees,
             })
             .collect();
         volumes.sort_by_key(|d: &Drive| (d.volume.mount.is_some(), d.volume.name.to_lowercase()));
@@ -195,7 +239,8 @@ impl Library {
                 });
                 section(ui, "Folders", false, |ui| {
                     // Lightroom-style volume headers with an attached light.
-                    self.volumes.check(ui.ctx(), self.root_paths());
+                    let anchors = self.anchors().into_iter().map(|(.., path)| path).collect();
+                    self.volumes.check(ui.ctx(), anchors);
                     let online = self.volumes.snapshot().online;
                     self.volumes_checked(&online);
                     // Applied once every row is drawn, for a Shift-click range.
@@ -434,8 +479,9 @@ impl Library {
         for (root, original, mapped) in &self.session.roots {
             let path = std::path::PathBuf::from(mapped.as_deref().unwrap_or(original));
             let mut node = FolderNode::root(*root, String::new(), path);
+            let located = self.located(*root);
             for folder in self.session.folders.iter().filter(|f| f.root == *root) {
-                node.insert(folder);
+                node.insert(folder, &located);
             }
             // Actual tree locations respect folder overrides; physical path depth
             // cannot tell us the logical parent of a relocated folder.

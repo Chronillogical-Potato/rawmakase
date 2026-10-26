@@ -37,6 +37,8 @@ pub(crate) struct CatalogSession {
     /// Each collection's photos, limited to the ones in `photos`.
     pub collection_photos: HashMap<CollectionId, HashSet<PhotoId>>,
     pub roots: Vec<(RootId, String, Option<String>)>,
+    /// The folders located apart from their roots on this computer, by root.
+    pub overrides: HashMap<RootId, Vec<crate::catalog::Override>>,
     /// Previous Import: the photos the last Add Photo Folder or Synchronize
     /// added.
     pub previous_import: HashSet<PhotoId>,
@@ -85,6 +87,7 @@ impl CatalogSession {
             collections: Vec::new(),
             collection_photos: HashMap::new(),
             roots: Vec::new(),
+            overrides: HashMap::new(),
             previous_import: HashSet::new(),
             backfill: Default::default(),
             wake: std::sync::Arc::new(|| {}),
@@ -208,6 +211,7 @@ impl CatalogSession {
             members.retain(|id| ids.contains(id));
         }
         let roots = self.catalog.roots()?;
+        let overrides = self.catalog.overrides()?;
         let previous_import = self.catalog.previous_import()?.into_iter().collect();
         self.photos = photos;
         self.previous_import = previous_import;
@@ -215,6 +219,7 @@ impl CatalogSession {
         self.collections = collections;
         self.collection_photos = collection_photos;
         self.roots = roots;
+        self.overrides = overrides;
         // Read again after a change that may move, rename, promote or
         // remove photos: what was read before no longer applies.
         self.generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;

@@ -581,6 +581,22 @@ impl Catalog {
         let computer = &self.computer.id;
         self.db.write(|w| clear(w, computer, root, relative))
     }
+    /// The folders of every root located separately on this computer, by
+    /// root.
+    pub fn overrides(&self) -> Result<HashMap<RootId, Vec<Override>>> {
+        Ok(self
+            .location_rows()?
+            .into_iter()
+            .map(|(root, rows)| {
+                let overrides = rows
+                    .into_iter()
+                    .filter(|(relative, _)| !relative.is_empty())
+                    .map(|(relative, path)| Override { relative, path })
+                    .collect();
+                (root, overrides)
+            })
+            .collect())
+    }
     /// The folders below root `root` located separately on this computer.
     pub fn root_overrides(&self, root: RootId) -> Result<Vec<Override>> {
         self.folder_overrides(root, "")
