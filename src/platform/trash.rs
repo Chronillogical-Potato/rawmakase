@@ -112,11 +112,20 @@ mod tests {
             || std::env::var_os("RAWMAKASE_TRASH_TESTS").is_some_and(|v| v == "1")
     }
 
+    /// One real trashing at a time. The app trashes one item after
+    /// another; two at once, on a fresh Windows runner, once had the shell
+    /// refuse to recycle one of them.
+    fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+        static TRASHING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        TRASHING.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn a_synthetic_file_goes_to_the_trash_with_a_receipt() {
         if !real_trash() {
             return;
         }
+        let _one = one_at_a_time();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rawmakase-trash-test.jpg");
         let bytes = b"RAWmakase trash test, synthetic";
@@ -134,6 +143,7 @@ mod tests {
         if !real_trash() {
             return;
         }
+        let _one = one_at_a_time();
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("rawmakase-trash-test");
         std::fs::create_dir(&folder).unwrap();
@@ -179,6 +189,7 @@ mod tests {
         if !real_trash() {
             return;
         }
+        let _one = one_at_a_time();
         let there = tempfile::tempdir_in(other).unwrap();
         let folder = there.path().join("rawmakase-trash-test");
         std::fs::create_dir(&folder).unwrap();
