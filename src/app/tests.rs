@@ -5618,6 +5618,81 @@ fn solo_mode_opens_one_panel_per_side_and_is_set_from_the_header_menu() {
     );
 }
 #[test]
+fn a_pinned_panel_opens_and_closes_on_its_own_in_solo_mode() {
+    use super::widgets::{HeaderButton, SectionGroup, SectionSide};
+    let ctx = egui::Context::default();
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::solo_sections_id(),
+            std::collections::BTreeSet::from(["develop-right".to_string()]),
+        );
+        d.insert_temp(
+            super::widgets::collapsed_sections_id(),
+            std::collections::BTreeSet::from(["Tone Curve".to_string()]),
+        );
+    });
+    let headers = std::cell::RefCell::new(Vec::new());
+    let draw = |events, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let _side = SectionSide::enter(ui, SectionGroup::DevelopRight);
+            headers.borrow_mut().clear();
+            headers.borrow_mut().push(ui.cursor().top() + 14. + 14.);
+            super::widgets::section_with(ui, "Histogram", HeaderButton::Pin, |ui| {
+                ui.label("Histogram");
+            });
+            for title in ["Basic", "Tone Curve"] {
+                headers.borrow_mut().push(ui.cursor().top() + 14. + 14.);
+                super::widgets::section(ui, title, false, |ui| {
+                    ui.label(title);
+                });
+            }
+        })
+    };
+    let collapsed = || -> std::collections::BTreeSet<String> {
+        ctx.data(|d| d.get_temp(super::widgets::collapsed_sections_id()))
+            .unwrap_or_default()
+    };
+    // Drawn unpinned first, the Histogram solos with the others until pinned.
+    draw(vec![], 0.);
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::pinned_sections_id(),
+            std::collections::BTreeSet::from(["Histogram".to_string()]),
+        )
+    });
+    draw(vec![], 0.5);
+    // Opening Tone Curve closes Basic, but not the pinned Histogram.
+    let tone_curve = Pos2::new(60., headers.borrow()[2]);
+    draw(click_at(tone_curve, egui::PointerButton::Primary), 1.);
+    assert_eq!(collapsed(), ["Basic".to_string()].into());
+    // The Histogram folds and opens again without closing Tone Curve.
+    draw(vec![], 2.);
+    let histogram = Pos2::new(60., headers.borrow()[0]);
+    draw(click_at(histogram, egui::PointerButton::Primary), 3.);
+    assert_eq!(
+        collapsed(),
+        ["Basic".to_string(), "Histogram".to_string()].into()
+    );
+    draw(vec![], 4.);
+    let histogram = Pos2::new(60., headers.borrow()[0]);
+    draw(click_at(histogram, egui::PointerButton::Primary), 5.);
+    assert_eq!(collapsed(), ["Basic".to_string()].into());
+    // Unpinned, it scrolls and solos with the others again.
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            super::widgets::pinned_sections_id(),
+            std::collections::BTreeSet::<String>::new(),
+        )
+    });
+    draw(vec![], 6.);
+    let basic = Pos2::new(60., headers.borrow()[1]);
+    draw(click_at(basic, egui::PointerButton::Primary), 7.);
+    assert_eq!(
+        collapsed(),
+        ["Histogram".to_string(), "Tone Curve".to_string()].into()
+    );
+}
+#[test]
 fn up_and_down_nudge_the_hovered_slider_but_never_while_typing_or_scrolling() {
     let ctx = egui::Context::default();
     let mut value = 0.;
