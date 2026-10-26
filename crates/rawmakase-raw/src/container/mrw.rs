@@ -10,9 +10,9 @@
 //! files (the data after the blocks, the levels as the as-shot white
 //! balance in the filter's order).
 use super::tiff::TiffFile;
-use crate::captured::CaptureDates;
 use crate::codec::packed::{self, Packing};
 use crate::error::{Error, Result, corrupt};
+use crate::exif_tiffs::ExifTiffs;
 use crate::info::{Cfa, RawInfo};
 use crate::io::{Bytes, Order, Pieces};
 use crate::sensor::Sensor;
@@ -42,8 +42,8 @@ struct Blocks<'a> {
     prd: Option<&'a [u8]>,
     wbg: Option<&'a [u8]>,
     rif: Option<&'a [u8]>,
-    /// Where TTW's TIFF starts.
-    ttw: Option<u64>,
+    /// Where TTW's TIFF starts, and its block's size.
+    ttw: Option<(u64, u64)>,
 }
 
 fn blocks(bytes: &[u8]) -> Result<Blocks<'_>> {
@@ -69,7 +69,7 @@ fn blocks(bytes: &[u8]) -> Result<Blocks<'_>> {
             b"\0PRD" if size >= 24 => out.prd = Some(b.slice(body, 24)?),
             b"\0WBG" if size >= 12 => out.wbg = Some(b.slice(body, 12)?),
             b"\0RIF" if size >= 16 => out.rif = Some(b.slice(body, 16)?),
-            b"\0TTW" => out.ttw = Some(body),
+            b"\0TTW" => out.ttw = Some((body, size)),
             _ => {}
         }
         at = body.saturating_add(size);
@@ -77,20 +77,24 @@ fn blocks(bytes: &[u8]) -> Result<Blocks<'_>> {
     Ok(out)
 }
 
-/// The capture dates of TTW's TIFF, the blocks before the sensor data read
+/// The camera's EXIF: TTW's TIFF, the blocks before the sensor data read
 /// alone.
-pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
-    let mut dates = CaptureDates::default();
+pub(crate) fn exif_tiffs(f: &mut Pieces) -> ExifTiffs {
     let head = f
         .read(4, 4)
         .and_then(|size| f.read(0, 8 + u64::from(u32::from_be_bytes(size.try_into().ok()?))));
-    if let Some(head) = head
-        && let Ok(Blocks { ttw: Some(at), .. }) = blocks(&head)
-        && let Some(t) = TiffFile::parse(&head, at)
-    {
-        super::tiff_exif::dates(&t, &mut dates);
+    let main = head.as_deref().and_then(|head| {
+        let (at, size) = blocks(head).ok()?.ttw?;
+        let at = usize::try_from(at).ok()?;
+        let end = at
+            .saturating_add(usize::try_from(size).ok()?)
+            .min(head.len());
+        Some(head.get(at..end)?.to_vec())
+    });
+    ExifTiffs {
+        main,
+        ..Default::default()
     }
-    dates
 }
 
 /// Reads the header facts.
@@ -124,7 +128,7 @@ pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
         p => return Err(Error::Unsupported(format!("MRW Bayer pattern {p}"))),
     };
     let mut info = crate::info::base(variant);
-    if let Some(t) = ttw.and_then(|at| TiffFile::parse(bytes, at)) {
+    if let Some(t) = ttw.and_then(|(at, _)| TiffFile::parse(bytes, at)) {
         info.make = t.text_upto(&t.ifds[0], 271, 64).unwrap_or_default();
         info.model = t.text_upto(&t.ifds[0], 272, 64).unwrap_or_default();
         info.flip = crate::geometry::flip(t.int(&t.ifds[0], 274).unwrap_or(1));
@@ -371,8 +375,12 @@ mod tests {
                 modified: stamp("2005:03:24 14:56:53"),
             }
         );
-        // The decoder reads the same block.
+        // The decoder reads the same block, which is the camera's EXIF.
         assert_eq!(crate::open(&file).unwrap().make, "Minolta");
+        assert_eq!(
+            crate::exif_tiffs(&mut std::io::Cursor::new(&file)).main,
+            Some(ttw.clone())
+        );
         // Without TTW, no dates.
         assert_eq!(
             crate::capture_dates(&mut std::io::Cursor::new(&mrw(0x59, 1, &[0; 12]))),
@@ -380,6 +388,7 @@ mod tests {
         );
         for end in 0..file.len() {
             let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..end]));
+            let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&file[..end]));
         }
     }
 

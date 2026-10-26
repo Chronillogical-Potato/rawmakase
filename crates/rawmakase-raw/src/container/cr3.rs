@@ -13,9 +13,9 @@
 //! Sources: ISO/IEC 14496-12, Laurent Clévy's public description of the CR3
 //! format, TIFF 6, Exif 2.32, and our own measurements.
 use super::tiff::{NAME_MAX, TiffFile};
-use crate::captured::CaptureDates;
 use crate::codec::crx;
 use crate::error::{Error, Result, corrupt};
+use crate::exif_tiffs::ExifTiffs;
 use crate::info::{Cfa, RawInfo};
 use crate::io::{Bytes, Pieces};
 use crate::sensor::Sensor;
@@ -252,10 +252,10 @@ fn parse(bytes: &[u8]) -> Cr3<'_> {
 /// The most top-level boxes passed over on the way to `moov`.
 const MAX_TOP_BOXES: usize = 64;
 
-/// The capture dates in `CMT2` (the EXIF directory's) and `CMT1`
-/// (DateTime), the file's `moov` box read alone.
-pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
-    let mut dates = CaptureDates::default();
+/// The camera's EXIF: `CMT1` (IFD0), `CMT2` (the EXIF directory) and
+/// `CMT4` (GPS), the file's `moov` box read alone.
+pub(crate) fn exif_tiffs(f: &mut Pieces) -> ExifTiffs {
+    let mut tiffs = ExifTiffs::default();
     let mut at = 0u64;
     for _ in 0..MAX_TOP_BOXES {
         let Some(head) = f.read_upto(at, 16).filter(|h| h.len() >= 8) else {
@@ -275,11 +275,8 @@ pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
         }
         if &head[4..8] == b"moov" {
             if let Some(moov) = f.read(at, len) {
-                for cmt in parse(&moov).cmt[..2].iter().rev().flatten() {
-                    if let Some(t) = TiffFile::parse(cmt, 0) {
-                        super::tiff_exif::dates(&t, &mut dates);
-                    }
-                }
+                let [main, exif, _, gps] = parse(&moov).cmt.map(|cmt| cmt.map(<[u8]>::to_vec));
+                tiffs = ExifTiffs { main, exif, gps };
             }
             break;
         }
@@ -288,7 +285,7 @@ pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
         };
         at = next;
     }
-    dates
+    tiffs
 }
 
 /// The records and items read from the timed metadata, and the maker notes
@@ -802,7 +799,7 @@ mod tests {
     /// The dates are in `CMT2`, the EXIF directory, and `CMT1`'s DateTime;
     /// only the boxes' headers and `moov` are read.
     #[test]
-    fn the_metadata_boxes_date_a_cr3_and_nothing_else_is_read() {
+    fn the_metadata_boxes_date_a_cr3_and_hold_its_exif_and_nothing_else_is_read() {
         let cmt1 = tiff(&[text(271, "Canon"), text(306, "2024:03:02 10:00:03")]);
         let cmt2 = tiff(&[
             text(36867, "2024:03:02 10:00:01"),
@@ -811,9 +808,17 @@ mod tests {
             text(37521, "12"),
             text(37522, "  "),
         ]);
+        let cmt4 = tiff(&[text(1, "N")]);
         let canon = bx(
             b"uuid",
-            &[CANON_UUID.to_vec(), bx(b"CMT1", &cmt1), bx(b"CMT2", &cmt2)].concat(),
+            &[
+                CANON_UUID.to_vec(),
+                bx(b"CMT1", &cmt1),
+                bx(b"CMT2", &cmt2),
+                bx(b"CMT3", b"II*\0maker notes"),
+                bx(b"CMT4", &cmt4),
+            ]
+            .concat(),
         );
         let mut file = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
         file.extend(bx(b"free", &[0; 100]));
@@ -842,12 +847,31 @@ mod tests {
             }
         );
         assert!(counted.read < 2048, "{}", counted.read);
+        // The camera's EXIF: IFD0, the EXIF directory and GPS, each its own
+        // TIFF; the maker notes are not.
+        counted.read = 0;
+        assert_eq!(
+            crate::exif_tiffs(&mut counted),
+            crate::ExifTiffs {
+                main: Some(cmt1),
+                exif: Some(cmt2),
+                gps: Some(cmt4),
+            }
+        );
+        assert!(counted.read < 2048, "{}", counted.read);
         // The decoder's own test file has no dates.
         let file = cr3(true);
         assert_eq!(
             crate::capture_dates(&mut std::io::Cursor::new(&file)),
             crate::CaptureDates::default()
         );
+        // Other files hold none of a CR3's, MRW's or X3F's.
+        for other in [&b""[..], b"II*\0\x08\0\0\0", &[0xff, 0xd8, 0xff, 0xd9]] {
+            assert_eq!(
+                crate::exif_tiffs(&mut std::io::Cursor::new(other)),
+                crate::ExifTiffs::default()
+            );
+        }
     }
 
     #[test]
@@ -947,6 +971,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         for n in (0..file.len()).step_by(7) {
             let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..n]));
+            let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&file[..n]));
             if let Ok(info) = crate::open(&file[..n]) {
                 let _ = crate::preview(&info, &file[..n]);
                 let decoded = crate::decode(&info, &file[..n], &cancel);
@@ -958,6 +983,7 @@ mod tests {
                 let mut d = file.clone();
                 d[i] = v;
                 let _ = crate::capture_dates(&mut std::io::Cursor::new(&d));
+                let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&d));
                 if let Ok(info) = crate::open(&d) {
                     let _ = crate::preview(&info, &d);
                     let _ = crate::decode(&info, &d, &cancel);

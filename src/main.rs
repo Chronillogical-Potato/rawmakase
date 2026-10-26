@@ -354,7 +354,10 @@ fn main() -> Result<()> {
             )?;
             let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
             let base = Recipe::with_profiles(&im.metadata, &profiles);
-            let camera = rawmakase::exif::read(&input);
+            let camera = Some(
+                rawmakase::photo::camera_exif(&input)
+                    .unwrap_or_else(|| rawmakase::export::job::stand_in(&input, &im.metadata)),
+            );
             for job in jobs.iter().filter(|j| !j.output.exists()) {
                 let rendered = (|| -> Result<()> {
                     let preset =
@@ -509,7 +512,11 @@ fn main() -> Result<()> {
                     ..Default::default()
                 },
                 &rawmakase::export::Embed {
-                    camera: rawmakase::exif::read(&input),
+                    camera: Some(
+                        rawmakase::photo::camera_exif(&input).unwrap_or_else(|| {
+                            rawmakase::export::job::stand_in(&input, &im.metadata)
+                        }),
+                    ),
                     ..Default::default()
                 },
                 if overwrite {

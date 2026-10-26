@@ -120,3 +120,116 @@ pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
         block
     }
 }
+
+/// The RAW containers whose camera EXIF is not a TIFF at the file's start.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone, Copy, Debug)]
+pub enum Container {
+    /// Canon's CR3: `CMT1`, `CMT2` and `CMT4` in Canon's box in `moov`.
+    Cr3,
+    /// Minolta's MRW: the TIFF in its TTW block.
+    Mrw,
+    /// Sigma's X3F: its JPEG preview's EXIF.
+    X3f,
+}
+
+/// A CR3, MRW or X3F holding `camera` where the camera keeps its EXIF, and
+/// no sensor data RAWmakase could decode, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn camera_raw(container: Container, camera: CameraExif) -> Vec<u8> {
+    // An ISO base media box.
+    fn bx(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend(kind);
+        out.extend(body);
+        out
+    }
+    match container {
+        Container::Cr3 => {
+            // Each a TIFF whose first directory is IFD0, the EXIF directory
+            // or the GPS directory.
+            let tiff = |fields: Vec<Field>| {
+                tiff_block(CameraExif {
+                    main: fields,
+                    ..Default::default()
+                })
+            };
+            let mut canon = vec![
+                0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b,
+                0x6a, 0x48,
+            ];
+            canon.extend(bx(b"CMT1", &tiff(camera.main)));
+            canon.extend(bx(b"CMT2", &tiff(camera.exif)));
+            if !camera.gps.is_empty() {
+                canon.extend(bx(b"CMT4", &tiff(camera.gps)));
+            }
+            let mut out = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
+            out.extend(bx(b"moov", &bx(b"uuid", &canon)));
+            out.extend(bx(b"mdat", &[0; 64]));
+            out
+        }
+        Container::Mrw => {
+            let block = |name: &[u8; 4], body: &[u8]| {
+                let mut out = name.to_vec();
+                out.extend((body.len() as u32).to_be_bytes());
+                out.extend(body);
+                out
+            };
+            let mut out = block(b"\0MRM", &block(b"\0TTW", &tiff_block(camera)));
+            out.extend([0; 64]);
+            out
+        }
+        Container::X3f => {
+            let tiff = tiff_block(camera);
+            let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe1];
+            jpeg.extend(((tiff.len() + 8) as u16).to_be_bytes());
+            jpeg.extend(b"Exif\0\0");
+            jpeg.extend(tiff);
+            jpeg.extend([0xff, 0xd9]);
+            // The header, an image section (its mark, then its version,
+            // type, format, columns, rows and row size) and the directory.
+            let mut out = b"FOVb".to_vec();
+            out.extend(0x0002_0003u32.to_le_bytes());
+            out.resize(232, 0);
+            let image = out.len() as u32;
+            out.extend(b"SECi");
+            for v in [0x0001_0000u32, 2, 18, 4, 4, 0] {
+                out.extend(v.to_le_bytes());
+            }
+            out.extend(&jpeg);
+            let directory = out.len() as u32;
+            out.extend(b"SECd");
+            for v in [0x0002_0000u32, 1, image, 28 + jpeg.len() as u32] {
+                out.extend(v.to_le_bytes());
+            }
+            out.extend(b"IMA2");
+            out.extend(directory.to_le_bytes());
+            out
+        }
+    }
+}
+
+/// A CRW (CIFF) whose only record is its TimeStamp, `seconds` since 1970
+/// on the camera's clock, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn dated_crw(seconds: u32) -> Vec<u8> {
+    // The header: byte order, its length, "HEAPCCDR", a version and a
+    // reserved word.
+    let mut out = b"II".to_vec();
+    out.extend(26u32.to_le_bytes());
+    out.extend(b"HEAPCCDR");
+    out.extend([0; 12]);
+    // The heap: the TimeStamp (seconds, time zone, its information), then
+    // the directory, one entry: the record's ID, size and offset.
+    let heap = out.len();
+    for v in [seconds, 0, 0] {
+        out.extend(v.to_le_bytes());
+    }
+    let directory = (out.len() - heap) as u32;
+    out.extend(1u16.to_le_bytes());
+    out.extend(0x180eu16.to_le_bytes());
+    out.extend(12u32.to_le_bytes());
+    out.extend(0u32.to_le_bytes());
+    out.extend(directory.to_le_bytes());
+    out
+}

@@ -7,8 +7,8 @@
 //! property list ("SECp", type `PROP`) is a count of name and value
 //! offsets into UTF-16 text, among them TIME, when the photo was taken in
 //! seconds since 1970 on the camera's clock; the sd Quattro and later bodies
-//! write none. RAWmakase decodes no X3F sensor data: only the capture dates
-//! are read here.
+//! write none. RAWmakase decodes no X3F sensor data: only where the
+//! preview's EXIF is and the capture time are read here.
 //!
 //! Sources: Foveon's public description of the X3F format (the header, the
 //! directory, the sections and the property list), ExifTool's SigmaRaw tag
@@ -16,7 +16,8 @@
 //! to the sd Quattro H (TIME and the preview's DateTimeOriginal agree on
 //! every file that has both).
 use super::tiff::TiffFile;
-use crate::captured::{CaptureDates, exif_date};
+use crate::captured::exif_date;
+use crate::exif_tiffs::ExifTiffs;
 use crate::io::Pieces;
 
 /// The most sections and properties read: files with more are malformed.
@@ -39,13 +40,11 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     ))
 }
 
-/// The capture dates of the first JPEG preview with EXIF, the property
-/// list's TIME standing in for a DateTimeOriginal it lacks; the directory
-/// and these sections' starts read alone.
-pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
-    let mut dates = CaptureDates::default();
-    let sections = directory(f).unwrap_or_default();
-    for &(at, len, kind) in &sections {
+/// The camera's EXIF: the TIFF of the first JPEG preview with EXIF, the
+/// directory and the image sections' starts read alone.
+pub(crate) fn exif_tiffs(f: &mut Pieces) -> ExifTiffs {
+    let mut tiffs = ExifTiffs::default();
+    for (at, len, kind) in directory(f).unwrap_or_default() {
         if !matches!(&kind, b"IMAG" | b"IMA2") || len <= IMAGE_HEADER {
             continue;
         }
@@ -56,20 +55,31 @@ pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
         };
         if head.starts_with(b"SECi")
             && let Some(exif) = super::tiff_exif::in_jpeg(&head, IMAGE_HEADER, take - IMAGE_HEADER)
-            && let Some(t) = TiffFile::parse(&head, exif)
         {
-            super::tiff_exif::dates(&t, &mut dates);
-            break;
+            let at = usize::try_from(exif.start).unwrap_or(usize::MAX);
+            let end = usize::try_from(exif.end)
+                .unwrap_or(usize::MAX)
+                .min(head.len());
+            // A preview whose EXIF is no TIFF gives way to the next.
+            if let Some(tiff) = head.get(at..end)
+                && TiffFile::parse(tiff, 0).is_some()
+            {
+                tiffs.main = Some(tiff.to_vec());
+                break;
+            }
         }
     }
-    if dates.original.date.is_none() {
-        dates.original.date = sections
-            .iter()
-            .filter(|s| &s.2 == b"PROP")
-            .find_map(|&(at, len, _)| time(f, at, len))
-            .and_then(exif_date);
-    }
-    dates
+    tiffs
+}
+
+/// When the photo was taken, as the property list's TIME says: seconds
+/// since 1970 on the camera's clock, as EXIF writes a date.
+pub(crate) fn time(f: &mut Pieces) -> Option<String> {
+    directory(f)?
+        .iter()
+        .filter(|s| &s.2 == b"PROP")
+        .find_map(|&(at, len, _)| time_property(f, at, len))
+        .and_then(exif_date)
 }
 
 /// The directory's sections: offset, length and type.
@@ -98,7 +108,7 @@ fn directory(f: &mut Pieces) -> Option<Vec<(u64, u64, [u8; 4])>> {
 /// a version, the count, the text's format (0, UTF-16), a reserved word and
 /// the text's length in characters, then each property's name and value
 /// offsets in characters, then the text.
-fn time(f: &mut Pieces, at: u64, len: u64) -> Option<u64> {
+fn time_property(f: &mut Pieces, at: u64, len: u64) -> Option<u64> {
     let p = f.read(at, len)?;
     let count = u64::from(u32_at(&p, 8)?);
     if !p.starts_with(b"SECp") || u32_at(&p, 12)? != 0 || count > MAX_PROPERTIES {
@@ -235,6 +245,11 @@ mod tests {
         ]);
         let dates = crate::capture_dates(&mut Cursor::new(&file));
         assert_eq!(dates.original, stamp("2021:09:04 17:20:45", Some("5")));
+        // The preview's EXIF is the camera's.
+        assert_eq!(
+            crate::exif_tiffs(&mut Cursor::new(&file)).main,
+            Some(exif.clone())
+        );
         assert_eq!(dates.digitized, stamp("2021:09:04 17:20:44", None));
         assert_eq!(dates.modified, stamp("2021:09:04 17:20:46", Some("7")));
         // An SD9's: no preview, TIME alone.
@@ -248,6 +263,17 @@ mod tests {
         let dates = crate::capture_dates(&mut Cursor::new(&file));
         assert_eq!(dates.original, stamp("2003:04:12 12:40:05", None));
         assert_eq!(dates.digitized, Stamp::default());
+        assert_eq!(
+            crate::exif_tiffs(&mut Cursor::new(&file)),
+            crate::ExifTiffs::default()
+        );
+        // A preview whose EXIF is no TIFF gives way to the next one's.
+        let file = x3f(&[
+            (b"IMA2", image(&jpeg(b"not a TIFF"))),
+            (b"IMA2", image(&jpeg(&exif))),
+        ]);
+        let dates = crate::capture_dates(&mut Cursor::new(&file));
+        assert_eq!(dates.original, stamp("2021:09:04 17:20:45", Some("5")));
     }
 
     #[test]
@@ -285,12 +311,14 @@ mod tests {
         assert!(good.original.date.is_some() && good.modified.date.is_some());
         for end in 0..file.len() {
             let _ = crate::capture_dates(&mut Cursor::new(&file[..end]));
+            let _ = crate::exif_tiffs(&mut Cursor::new(&file[..end]));
         }
         for i in 0..file.len() {
             for v in [0, 0x7f, 0xff] {
                 let mut d = file.clone();
                 d[i] = v;
                 let _ = crate::capture_dates(&mut Cursor::new(&d));
+                let _ = crate::exif_tiffs(&mut Cursor::new(&d));
             }
         }
         // A TIME that is not a number is none.

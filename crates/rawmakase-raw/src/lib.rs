@@ -7,14 +7,16 @@
 //! the sensor data ([`Sensor`]), checking `cancel` as it goes. One selector
 //! ([`Variant`]) decides which reader and codec handle a file; a file of a
 //! known container in a variant not decoded here is [`Error::Unsupported`].
-//! [`capture_dates`] reads, from the file itself, the few parts that date a
-//! photo in the containers whose EXIF is not a TIFF at the file's start.
+//! [`capture_dates`] and [`exif_tiffs`] read, from the file itself, the few
+//! parts that date a photo and hold its camera's EXIF in the containers
+//! whose EXIF is not a TIFF at the file's start.
 #![forbid(unsafe_code)]
 mod captured;
 mod codec;
 mod color;
 mod container;
 mod error;
+mod exif_tiffs;
 mod facts;
 mod geometry;
 mod info;
@@ -28,6 +30,7 @@ mod vendor;
 
 pub use captured::{CaptureDates, Stamp};
 pub use error::{Error, Result};
+pub use exif_tiffs::ExifTiffs;
 pub use info::{Cfa, Presets, RawInfo, SuperCcd, UNSET};
 pub use preview::{NoPreview, is_jpeg_xl};
 pub use sensor::Sensor;
@@ -78,6 +81,18 @@ pub fn maker_name(file_make: &str) -> String {
 /// be read. Holds for files whose sensor data is not decoded here (X3F).
 pub fn capture_dates(file: &mut (impl std::io::Read + std::io::Seek)) -> CaptureDates {
     captured::read(file)
+}
+
+/// Where the CR3, MRW or X3F `file` keeps its camera's EXIF, as TIFFs of
+/// their own, nothing else read; none for another file (a CRW has no
+/// TIFF) or one that can't be read. Holds for files whose sensor data is
+/// not decoded here (X3F).
+pub fn exif_tiffs(file: &mut (impl std::io::Read + std::io::Seek)) -> ExifTiffs {
+    let Some(mut f) = io::Pieces::new(file) else {
+        return ExifTiffs::default();
+    };
+    let head = f.read_upto(0, 16).unwrap_or_default();
+    exif_tiffs::read(&mut f, &head)
 }
 
 /// The embedded preview of the file `info` was read from, JPEG or JPEG XL
