@@ -62,14 +62,15 @@ impl Field {
     /// A value that looks like it names a path is withheld whole: cutting
     /// the path out of it can't be done reliably.
     pub fn untrusted(text: &str, max: usize) -> Self {
-        if names_a_path(text) {
-            return Self::Unavailable("withheld: looked like a path");
-        }
         let words: Vec<&str> = text
             .split(|c: char| c.is_whitespace() || c.is_control())
             .filter(|word| !word.is_empty())
             .collect();
         let line = words.join(" ");
+        // Checked as it would be shown: a control character can't hide one.
+        if names_a_path(&line) {
+            return Self::Unavailable("withheld: looked like a path");
+        }
         if line.is_empty() {
             return Self::Unavailable("empty");
         }
@@ -81,8 +82,9 @@ impl Field {
         Self::Value(cut)
     }
 
-    /// `untrusted`, for a value the user's environment sets, which could
-    /// also hold their login name: such a value is withheld whole.
+    /// `untrusted`, for a value the user sets (the desktop, a custom
+    /// kernel's suffix), which could also hold their login name: such a
+    /// value is withheld whole.
     fn from_environment(text: &str, max: usize, user: Option<&str>) -> Self {
         if user.is_some_and(|user| holds_word(text, user)) {
             return Self::Unavailable("withheld: held the user name");
@@ -105,15 +107,15 @@ impl fmt::Display for Field {
 }
 
 /// Whether `text` may name a place on disk: a part that starts with `/`
-/// (after a separator, unlike `GNU/Linux`), `~`, a backslash, a URL, a
-/// drive letter (`C:`) or a percent-escape.
+/// (after a separator, unlike `GNU/Linux`), `./` or `../`, `~`, a
+/// backslash, a URL, a drive letter (`C:`) or a percent-escape.
 fn names_a_path(text: &str) -> bool {
-    if text.contains(['\\', '~', '%']) || text.contains("://") {
+    if text.contains(['\\', '~', '%']) || text.contains("://") || text.contains("./") {
         return true;
     }
     let chars: Vec<char> = text.chars().collect();
     let separator =
-        |c: Option<&char>| c.is_none_or(|c| c.is_whitespace() || ":;,=([{\"'<".contains(*c));
+        |c: Option<&char>| c.is_none_or(|c| c.is_whitespace() || ":;,=([{\"'<>|".contains(*c));
     chars.iter().enumerate().any(|(i, c)| {
         let before = i.checked_sub(1).and_then(|i| chars.get(i));
         match c {
@@ -603,19 +605,32 @@ fn linux_name(os_release: &str) -> Option<Field> {
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn kernel() -> Field {
-    std::fs::read_to_string("/proc/sys/kernel/osrelease")
-        .map_or(Field::Unavailable("unreadable"), |release| {
-            Field::untrusted(&release, 64)
+    let var = |name: &str| std::env::var_os(name);
+    std::fs::read_to_string("/proc/sys/kernel/osrelease").map_or(
+        Field::Unavailable("unreadable"),
+        |release| {
+            // A custom kernel's suffix (CONFIG_LOCALVERSION) is free text.
+            Field::from_environment(&release, 64, login(var).as_deref())
+        },
+    )
+}
+
+/// The login name, from the first of these variables that is set.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn login(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<String> {
+    ["USER", "USERNAME", "LOGNAME"]
+        .into_iter()
+        .find_map(|name| {
+            var(name)
+                .map(|u| u.to_string_lossy().into_owned())
+                .filter(|u| !u.is_empty())
         })
 }
 
 /// `XDG_CURRENT_DESKTOP`, e.g. `GNOME` or `Hyprland`.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn desktop(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Field {
-    let user = ["USER", "USERNAME", "LOGNAME"]
-        .into_iter()
-        .find_map(|name| var(name).map(|u| u.to_string_lossy().into_owned()))
-        .filter(|u| !u.is_empty());
+    let user = login(&var);
     match var("XDG_CURRENT_DESKTOP") {
         Some(value) => Field::from_environment(&value.to_string_lossy(), 64, user.as_deref()),
         None => Field::Unavailable("not set"),
@@ -822,6 +837,11 @@ Background task: none
             "file:///srv/x",
             "%USERPROFILE%",
             "%2Fhome%2Falice",
+            "Hyprland:./Private Photos/secret.ARW",
+            "GNOME|/srv/secret.ARW",
+            "GNOME>/srv/secret.ARW",
+            "GNOME\u{1b}/srv/secret.ARW",
+            "../x",
         ] {
             assert_eq!(
                 Field::untrusted(text, 96),
@@ -861,6 +881,22 @@ Background task: none
         assert_eq!(desktop_for("al", "Hyprland:al"), withheld);
         assert_eq!(desktop_for("alice", "Alice's-session"), withheld);
         assert_eq!(desktop_for("john.doe", "GNOME:John.Doe"), withheld);
+        // An empty variable falls through to the next.
+        assert_eq!(
+            desktop(env(&[
+                ("USER", ""),
+                ("LOGNAME", "alice"),
+                ("XDG_CURRENT_DESKTOP", "Hyprland:alice")
+            ])),
+            withheld
+        );
+        // A custom kernel's suffix is checked the same way, Arch's isn't hit.
+        let kernel = |release| Field::from_environment(release, 64, Some("alice"));
+        assert_eq!(kernel("6.17.0-alice"), withheld);
+        assert_eq!(
+            Field::from_environment("6.17.1-arch1-1", 64, Some("arch")),
+            Field::Value("6.17.1-arch1-1".into())
+        );
         // Only whole words: the login ian isn't in Debian.
         assert_eq!(
             desktop_for("ian", "Debian:GNOME"),
