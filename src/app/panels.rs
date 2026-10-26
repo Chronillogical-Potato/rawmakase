@@ -262,9 +262,16 @@ impl Editor {
     }
     /// A panel change asked for by a key, a command or a device: as
     /// [`Self::change_panels`], except that Develop's tab panel opens and
-    /// folds as its rail does, in a narrow window too. Returns whether the
-    /// panels changed.
+    /// folds as its rail does, in a narrow window too. While the whole-window
+    /// mode hides every panel (see `chrome`), the change brings the chrome
+    /// back with the layout as it was, rather than changing a layout no one
+    /// sees. Returns false if a change could not be made.
     pub(super) fn request_panels(&mut self, change: PanelChange) -> bool {
+        if self.chrome.hidden(self.module) {
+            let view = self.chrome.show();
+            self.chrome_view(view);
+            return true;
+        }
         if change != PanelChange::Toggle(WorkspacePanel::Presets) {
             return self.change_panels(change);
         }

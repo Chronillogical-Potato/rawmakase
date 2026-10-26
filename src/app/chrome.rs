@@ -40,8 +40,9 @@ impl Chrome {
     }
     /// F: hide `module`'s chrome, or bring it back. The Library gives the window
     /// to the grid first and to the photo on the next press, which opens the
-    /// Loupe, unless the photo is already the one shown. Only what is drawn
-    /// changes: the panels keep the layout they are saved with.
+    /// Loupe, unless the photo is already the one shown, opened from the grid
+    /// too. Only what is drawn changes: the panels keep the layout they are
+    /// saved with.
     pub(super) fn toggle(&mut self, module: Module, loupe: bool) -> View {
         if self.hidden != Some(module) {
             self.hidden = Some(module);
@@ -49,7 +50,7 @@ impl Chrome {
             self.opened = false;
             return View::Unchanged;
         }
-        if self.photo {
+        if self.photo || loupe {
             return self.show();
         }
         self.photo = true;

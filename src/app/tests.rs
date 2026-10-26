@@ -6951,6 +6951,74 @@ fn entering_another_module_closes_a_loupe_the_mode_opened() -> anyhow::Result<()
     Ok(())
 }
 #[test]
+fn f_leaves_the_mode_over_a_loupe_opened_in_it() -> anyhow::Result<()> {
+    use super::panels::WorkspacePanel;
+    let (_d, mut e, _ids) = editor_with_catalog(&["a.RAF"])?;
+    e.onboarding.visible = false;
+    let f = |e: &mut Editor| {
+        panel_frame(
+            e,
+            key_down(egui::Key::F, egui::Modifiers::NONE),
+            FocusedButton::No,
+        );
+        panel_frame(e, key_up(egui::Key::F), FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    f(&mut e);
+    assert!(!e.panel_shown(WorkspacePanel::Left));
+    // The grid has the window, and a photo is opened from it, as a double
+    // click does: the photo has the window now, so F leaves the mode, and the
+    // Loupe stays, as the mode did not open it.
+    e.library.as_mut().unwrap().open_loupe();
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    f(&mut e);
+    assert!(e.panel_shown(WorkspacePanel::Left));
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
+fn panel_keys_bring_the_hidden_chrome_back_as_it_was() {
+    use super::panels::WorkspacePanel;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    let layout = e.panels;
+    // Each panel key, with every panel hidden by the mode, brings the chrome
+    // back with the layout it had, rather than changing one no one sees.
+    for (key, modifiers) in [
+        (egui::Key::Tab, egui::Modifiers::NONE),
+        (egui::Key::Tab, egui::Modifiers::SHIFT),
+        (egui::Key::F7, egui::Modifiers::NONE),
+        (egui::Key::F8, egui::Modifiers::SHIFT),
+    ] {
+        panel_frame(
+            &mut e,
+            key_down(egui::Key::F, egui::Modifiers::NONE),
+            FocusedButton::No,
+        );
+        panel_frame(&mut e, key_up(egui::Key::F), FocusedButton::No);
+        panel_frame(&mut e, vec![], FocusedButton::No);
+        assert!(!e.panel_shown(WorkspacePanel::Left));
+        panel_frame(&mut e, key_down(key, modifiers), FocusedButton::No);
+        panel_frame(&mut e, key_up(key), FocusedButton::No);
+        panel_frame(&mut e, vec![], FocusedButton::No);
+        assert_eq!(e.panels, layout, "{modifiers:?} {key:?}");
+        for panel in [
+            WorkspacePanel::Left,
+            WorkspacePanel::Right,
+            WorkspacePanel::Filmstrip,
+            WorkspacePanel::Presets,
+        ] {
+            assert!(
+                e.panel_shown(panel),
+                "{panel:?} after {modifiers:?} {key:?}"
+            );
+        }
+    }
+}
+#[test]
 fn tab_moves_the_focus_on_while_a_control_has_it() {
     use super::panels::WorkspacePanel;
     let ctx = egui::Context::default();

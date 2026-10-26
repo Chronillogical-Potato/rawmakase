@@ -89,8 +89,9 @@ does. They need no photo. `state.panels` reports each panel of the open module a
 the panels, the filmstrip and the views' toolbars. It needs no photo. In the
 Library the grid takes the window first and, applied again, the photo (the
 Loupe) does; in Develop the photo has it from the first application. Applied
-once more, or after a module switch, the chrome and the panels are back. The
-window itself is not changed.
+once more, or after a module switch, the chrome and the panels are back. A
+`panels:` action while it is applied brings them back too, as they were, and
+changes no panel. The window itself is not changed.
 
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.
