@@ -2843,8 +2843,16 @@ fn a_folder_located_on_another_drive_shows_under_that_drive() -> Result<()> {
     };
     let disk = drive("Disk", &directory.path().join("disk"));
     let other = drive("Other", &directory.path().join("other"));
+    // By the paths the catalog keeps (canonical: /private/var on macOS,
+    // \\?\ on Windows), as the drives are found for them.
+    let at: HashMap<String, PathBuf> = library
+        .anchors()
+        .into_iter()
+        .map(|(_, logical, path)| (logical, path))
+        .collect();
+    let (moved, party) = (at["Wedding"].clone(), at["Party"].clone());
     library.volumes.set_seen(volumes::Seen::from([
-        (root.clone(), disk.clone()),
+        (at[""].clone(), disk.clone()),
         (moved.clone(), other.clone()),
         (party.clone(), disk.clone()),
     ]));
