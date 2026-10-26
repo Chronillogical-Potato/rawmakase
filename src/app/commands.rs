@@ -199,6 +199,8 @@ pub(super) enum Action {
     Previous,
     /// Hides or shows the open module's panels, as Tab, Shift+Tab and F6–F8 do.
     Panels(PanelChange),
+    /// Hides or shows everything but the photo, as F does.
+    Chrome,
 }
 impl Action {
     const NAMED: &[(&'static str, Self)] = &[
@@ -273,6 +275,7 @@ impl Action {
             "panels:presets",
             Self::Panels(PanelChange::Toggle(WorkspacePanel::Presets)),
         ),
+        ("chrome", Self::Chrome),
     ];
     pub(super) fn metadata(self) -> Option<super::photo_metadata::Edit> {
         use super::photo_metadata::{Edit, LABELS};
@@ -421,7 +424,12 @@ impl Editor {
                 }),
             auto_running: self.document.auto.is_running(),
             treatment_pending: self.document.pending_treatment.is_some(),
-            panels: self.panels.of(self.module),
+            panels: self.shown_panels(),
+            chrome: if self.chrome.hidden(self.module) {
+                "hidden"
+            } else {
+                "shown"
+            },
             save_state: match self.document.edit.save_state() {
                 super::save_state::SaveState::Clean => "saved",
                 super::save_state::SaveState::Pending(_) => "pending",
@@ -907,6 +915,11 @@ impl Editor {
             Previous => return self.command_navigate(-1),
             Panels(change) => {
                 if !self.request_panels(change) {
+                    return Err(Error::new("save_failed", self.status.clone()));
+                }
+            }
+            Chrome => {
+                if !self.toggle_chrome() {
                     return Err(Error::new("save_failed", self.status.clone()));
                 }
             }

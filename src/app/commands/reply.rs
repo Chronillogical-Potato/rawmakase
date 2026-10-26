@@ -37,8 +37,10 @@ pub(in crate::app) struct State {
     pub treatment_pending: bool,
     pub save_state: &'static str,
     /// Which of the open module's panels show: `left`, `right` and `filmstrip`,
-    /// each `shown` or `hidden`.
+    /// each `shown` or `hidden`; all hidden while the chrome is.
     pub panels: crate::app::panels::PanelLayout,
+    /// Whether the whole-window mode hides the chrome: `shown` or `hidden`.
+    pub chrome: &'static str,
 }
 #[derive(Debug, Serialize)]
 pub(in crate::app) struct BuildProgress {

@@ -75,11 +75,27 @@ impl Editor {
             library.poll_previews(&ctx);
         }
         self.poll_preview_builds();
+        // Entering a module draws its chrome: the whole-window mode belongs to
+        // the module it was turned on in.
+        let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+        let entered = self.chrome.follow(self.module, loupe);
+        self.chrome_view(entered);
         // Preferences is modal: keys go to it, not to the photo behind.
         #[cfg(target_os = "macos")]
         self.native_menu_actions(&ctx);
         let modal = self.workspace_modal();
         if !modal {
+            // Escape leaves the whole-window mode, as it does in Lightroom. It
+            // is taken here, before the Library's views and Develop's tools, so
+            // they keep it while the chrome is up and the photo is the way out
+            // while it is not. A menu open over the view closes first.
+            if self.chrome.hidden(self.module)
+                && !egui::Popup::is_any_open(&ctx)
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                let shown = self.chrome.show();
+                self.chrome_view(shown);
+            }
             self.metadata_shortcuts(&ctx);
             self.workspace_shortcuts(&ctx);
             self.preferences_shortcut(&ctx);
@@ -96,7 +112,9 @@ impl Editor {
         } else {
             crate::app::library::Action::None
         };
-        self.workspace_bar(ui, sidebar_shown);
+        if self.chrome.shown(self.module) {
+            self.workspace_bar(ui, sidebar_shown);
+        }
         // A file dialog or a running Sync: nothing behind them takes clicks, so no
         // catalog action is chosen only to be dropped.
         if self.activity.is_busy() {
@@ -127,10 +145,15 @@ impl Editor {
             // over the photo alone.
             self.develop_side_panels(ui);
             self.follow_edit_frame(&mut frame);
-            self.toolbar(ui);
+            if self.chrome.shown(self.module) {
+                self.toolbar(ui);
+            }
             self.follow_edit_frame(&mut frame);
             self.develop_photo(ui);
             self.finish_edit_frame(frame, &ctx);
+        }
+        if self.chrome.hidden(self.module) {
+            title_bar_pad(ui);
         }
         if let Some(request) = self.library.as_mut().and_then(|l| l.take_copy_request()) {
             self.virtual_copy(request);
@@ -401,6 +424,30 @@ impl Editor {
                     self.virtual_copy(crate::app::library::CopyAction::Create(id));
                 }
             }
+            // F hides the chrome, leaving the photo the window; in the Library
+            // it is the grid that takes the window first, and the photo that
+            // takes it on the next press (see `chrome`). No modifier at all, so
+            // Shift+F is not it; the event's own modifiers, which a quick
+            // key-up cannot outrun. Held, it changes once, and the setup view
+            // has no chrome to hide.
+            let hide = !self.onboarding.visible
+                && ctx.input(|i| {
+                    i.events.iter().any(|e| {
+                        matches!(
+                            e,
+                            egui::Event::Key {
+                                key: egui::Key::F,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } if !modifiers.any()
+                        )
+                    })
+                });
+            if hide {
+                self.toggle_chrome();
+            }
             if plain(egui::Key::D) {
                 if self.module == Module::Library {
                     if let Some(id) = self.library.as_mut().and_then(|l| l.selected_or_first()) {
@@ -410,6 +457,44 @@ impl Editor {
                     self.module = Module::Develop;
                 }
             }
+        }
+    }
+
+    /// F: hides the open module's chrome, or brings it back (see `chrome`).
+    /// The Library's info panel goes with the chrome, so a field still being
+    /// typed in it is saved first, as hiding the panel does; false, with the
+    /// chrome still up, if it could not be. With no photo for the Library's
+    /// next step, the chrome comes back.
+    pub(super) fn toggle_chrome(&mut self) -> bool {
+        if self.chrome.shown(self.module)
+            && self.module == Module::Library
+            && !self.commit_library_drafts()
+        {
+            return false;
+        }
+        let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
+        let view = self.chrome.toggle(self.module, loupe);
+        self.chrome_view(view);
+        // No photo to give the window to, as a search matching none leaves
+        // the grid: the press brings the chrome back instead.
+        if view == super::chrome::View::OpenLoupe
+            && !self.library.as_ref().is_some_and(|l| l.loupe_open())
+        {
+            let shown = self.chrome.show();
+            self.chrome_view(shown);
+        }
+        true
+    }
+    /// Applies what the whole-window mode did to the Library's view: the photo
+    /// takes the window, or the grid takes it back.
+    pub(super) fn chrome_view(&mut self, view: super::chrome::View) {
+        let Some(library) = &mut self.library else {
+            return;
+        };
+        match view {
+            super::chrome::View::Unchanged => {}
+            super::chrome::View::OpenLoupe => library.open_loupe(),
+            super::chrome::View::CloseLoupe => library.close_loupe(),
         }
     }
 
@@ -868,11 +953,12 @@ impl Editor {
         if self.panel_shown(WorkspacePanel::Right) {
             action.then(self.library_right_panel(ui, develops));
         }
+        let chrome = self.chrome.shown(self.module);
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| match &mut self.library {
                 Some(l) if !l.session.photos.is_empty() => {
-                    action.then(l.grid(ui, &mut self.view.zoom));
+                    action.then(l.grid(ui, &mut self.view.zoom, chrome));
                     if let Some(id) = l.loupe_develops() {
                         self.loupe_viewport(ui, id);
                     }
@@ -1155,7 +1241,8 @@ impl Editor {
     }
 
     /// Develop's zoom keys, shared with the Library's Loupe: Cmd+= and Cmd+-
-    /// step through the zoom levels, Z toggles Fit and the last zoom, F fits.
+    /// step through the zoom levels, Z toggles Fit and the last zoom. F is not
+    /// here: it hides the chrome (see `chrome`), as Lightroom's does.
     pub(super) fn zoom_keys(&mut self, ctx: &egui::Context) {
         use egui::Key;
         // Each key with the modifiers held for it, which a quick shortcut
@@ -1185,7 +1272,6 @@ impl Editor {
                 Key::Minus if modifiers.command => self.step_zoom(-1),
                 // Once per press: a held Z must not flicker the zoom.
                 Key::Z if !modifiers.any() && !repeat => self.view.zoom.on = !self.view.zoom.on,
-                Key::F if !modifiers.any() => self.view.zoom.on = false,
                 _ => {}
             }
         }
@@ -2020,6 +2106,18 @@ pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
 
+/// With the chrome hidden the window has no bar to drag by. This keeps a grab
+/// beside the traffic lights, the size of their inset, so the window still
+/// moves while almost all of the photo stays its own. Drawn after the photo,
+/// whose view takes every click in its area, so the corner is the window's.
+fn title_bar_pad(ui: &mut egui::Ui) {
+    let corner = ui.max_rect().min;
+    let width = fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left + 24.;
+    fastframe_titlebar::drag(
+        ui,
+        egui::Rect::from_min_size(corner, egui::Vec2::new(width, BAR_HEIGHT)),
+    );
+}
 /// A status line showing `text`, with `detail` (a Library summary's items)
 /// or else `hover` on hover.
 fn status_text(ui: &mut egui::Ui, text: &str, detail: Option<&str>, hover: Option<&str>) {

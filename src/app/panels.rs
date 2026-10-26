@@ -224,9 +224,25 @@ impl WorkspacePanels {
 }
 
 impl Editor {
-    /// Whether the module open shows `panel`.
+    /// Whether the module open shows `panel`. The whole-window mode (see
+    /// `chrome`) hides every panel without changing the layout kept for it.
     pub(super) fn panel_shown(&self, panel: WorkspacePanel) -> bool {
-        self.panels.of(self.module).shown(panel)
+        self.chrome.shown(self.module) && self.panels.of(self.module).shown(panel)
+    }
+    /// The open module's panels as drawn: all hidden while the whole-window
+    /// mode is on, whatever the layout kept for them.
+    pub(super) fn shown_panels(&self) -> PanelLayout {
+        if self.chrome.hidden(self.module) {
+            let hidden = Visibility::Hidden;
+            return PanelLayout {
+                left: hidden,
+                right: hidden,
+                filmstrip: hidden,
+                presets: hidden,
+                adjustments: hidden,
+            };
+        }
+        self.panels.of(self.module)
     }
     /// Changes the open module's panels. A panel being hidden first lets go of
     /// what it was doing: the Library's info panel saves a field still being
@@ -261,9 +277,16 @@ impl Editor {
     }
     /// A panel change asked for by a key, a command or a device: as
     /// [`Self::change_panels`], except that Develop's tab panel opens and
-    /// folds as its rail does, in a narrow window too. Returns whether the
-    /// panels changed.
+    /// folds as its rail does, in a narrow window too. While the whole-window
+    /// mode hides every panel (see `chrome`), the change brings the chrome
+    /// back with the layout as it was, rather than changing a layout no one
+    /// sees. Returns false if a change could not be made.
     pub(super) fn request_panels(&mut self, change: PanelChange) -> bool {
+        if self.chrome.hidden(self.module) {
+            let view = self.chrome.show();
+            self.chrome_view(view);
+            return true;
+        }
         if change != PanelChange::Toggle(WorkspacePanel::Presets) {
             return self.change_panels(change);
         }

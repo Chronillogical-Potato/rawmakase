@@ -85,6 +85,17 @@ does. They need no photo. `state.panels` reports each panel of the open module a
 `shown` or `hidden`. A device button can also be set to `tab`, `shift+tab` or
 `f6`–`f8`.
 
+`chrome` hides or shows everything but the photo, as F does: the workspace bar,
+the panels, the filmstrip and the views' toolbars. It needs no photo. In the
+Library the grid takes the window first and, applied again, the photo (the
+Loupe) does; in Develop the photo has it from the first application. Applied
+once more, or after a module switch, the chrome and the panels are back. A
+`panels:` action while it is applied brings them back too, as they were, and
+changes no panel. The window itself is not changed. `state.chrome` is `hidden`
+while it is applied, and `state.panels` then reports every panel `hidden`. In
+the Library, a Copy Name or metadata field still being typed is saved first; if
+it cannot be, the action fails with `save_failed` and the chrome stays.
+
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.
 `open_failed` names the photo Develop could not open (a cut-short or
