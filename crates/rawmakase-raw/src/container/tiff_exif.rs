@@ -87,9 +87,9 @@ pub(crate) fn dates(t: &TiffFile, dates: &mut CaptureDates) {
     }
 }
 
-/// Where the TIFF of the JPEG's EXIF (APP1 "Exif") starts, the JPEG `len`
-/// bytes at `jpeg` in `bytes`.
-pub(crate) fn in_jpeg(bytes: &[u8], jpeg: u64, len: u64) -> Option<u64> {
+/// Where the TIFF of the JPEG's EXIF (APP1 "Exif") is, from its start to
+/// the segment's end, the JPEG `len` bytes at `jpeg` in `bytes`.
+pub(crate) fn in_jpeg(bytes: &[u8], jpeg: u64, len: u64) -> Option<std::ops::Range<u64>> {
     let b = Bytes::new(bytes, Order::Big);
     let end = jpeg.checked_add(len)?;
     if b.u16(jpeg).ok()? != 0xffd8 {
@@ -100,7 +100,7 @@ pub(crate) fn in_jpeg(bytes: &[u8], jpeg: u64, len: u64) -> Option<u64> {
         let marker = b.u16(at).ok()?;
         let size = u64::from(b.u16(at + 2).ok()?);
         if marker == 0xffe1 && b.slice(at + 4, 6).ok()? == b"Exif\0\0" {
-            return Some(at + 10);
+            return Some(at + 10..(at + 2 + size).max(at + 10));
         }
         if marker & 0xff00 != 0xff00 || marker == 0xffda || size < 2 {
             return None;

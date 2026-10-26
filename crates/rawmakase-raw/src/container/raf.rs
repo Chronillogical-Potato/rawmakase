@@ -86,8 +86,8 @@ pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
         pixels: 0,
     });
     let mut orientation = 1;
-    if let Some(at) = super::tiff_exif::in_jpeg(bytes, u64::from(jpeg), u64::from(jpeg_len))
-        && let Some(t) = TiffFile::parse(bytes, at)
+    if let Some(exif) = super::tiff_exif::in_jpeg(bytes, u64::from(jpeg), u64::from(jpeg_len))
+        && let Some(t) = TiffFile::parse(bytes, exif.start)
     {
         super::tiff_exif::read(&t, &mut info);
         orientation = t.int(&t.ifds[0], 274).unwrap_or(1);

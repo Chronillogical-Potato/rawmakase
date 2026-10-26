@@ -3,7 +3,8 @@
 //! at the file's start: Canon's CR3 (`CMT1` and `CMT2`) and CRW (CIFF's
 //! TimeStamp record), Minolta's MRW (the TIFF in its TTW block) and Sigma's
 //! X3F (its preview's EXIF, else its TIME property).
-use crate::container::{ciff, cr3, mrw, x3f};
+use crate::container::tiff::TiffFile;
+use crate::container::{ciff, tiff_exif, x3f};
 use crate::io::{Pieces, ReadSeek};
 
 /// A date as EXIF writes it, "2018:08:26 10:39:33", and its subsecond
@@ -25,23 +26,28 @@ pub struct CaptureDates {
 }
 
 /// The capture dates of a CR3, CRW, MRW or X3F; none for another file or
-/// one that can't be read.
+/// one that can't be read. A CR3's, MRW's and X3F's are its camera's EXIF
+/// ([`crate::exif_tiffs`]), the EXIF directory's before IFD0's; an X3F
+/// without them has its TIME.
 pub(crate) fn read(file: &mut dyn ReadSeek) -> CaptureDates {
     let Some(mut f) = Pieces::new(file) else {
         return CaptureDates::default();
     };
     let head = f.read_upto(0, 16).unwrap_or_default();
-    if cr3::is_cr3(&head) {
-        cr3::capture_dates(&mut f)
-    } else if ciff::is_ciff(&head) {
-        ciff::capture_dates(&mut f)
-    } else if mrw::is_mrw(&head) {
-        mrw::capture_dates(&mut f)
-    } else if x3f::is_x3f(&head) {
-        x3f::capture_dates(&mut f)
-    } else {
-        CaptureDates::default()
+    if ciff::is_ciff(&head) {
+        return ciff::capture_dates(&mut f);
     }
+    let mut dates = CaptureDates::default();
+    let tiffs = crate::exif_tiffs::read(&mut f, &head);
+    for tiff in [&tiffs.exif, &tiffs.main].into_iter().flatten() {
+        if let Some(t) = TiffFile::parse(tiff, 0) {
+            tiff_exif::dates(&t, &mut dates);
+        }
+    }
+    if x3f::is_x3f(&head) && dates.original.date.is_none() {
+        dates.original.date = x3f::time(&mut f);
+    }
+    dates
 }
 
 /// `seconds` since 1970 on a clock with no zone (the camera's) as EXIF

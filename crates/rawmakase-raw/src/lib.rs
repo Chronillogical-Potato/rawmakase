@@ -15,6 +15,7 @@ mod codec;
 mod color;
 mod container;
 mod error;
+mod exif_tiffs;
 mod facts;
 mod geometry;
 mod info;

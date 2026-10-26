@@ -13,9 +13,9 @@
 //! Sources: ISO/IEC 14496-12, Laurent Clévy's public description of the CR3
 //! format, TIFF 6, Exif 2.32, and our own measurements.
 use super::tiff::{NAME_MAX, TiffFile};
-use crate::captured::CaptureDates;
 use crate::codec::crx;
 use crate::error::{Error, Result, corrupt};
+use crate::exif_tiffs::ExifTiffs;
 use crate::info::{Cfa, RawInfo};
 use crate::io::{Bytes, Pieces};
 use crate::sensor::Sensor;
@@ -252,10 +252,10 @@ fn parse(bytes: &[u8]) -> Cr3<'_> {
 /// The most top-level boxes passed over on the way to `moov`.
 const MAX_TOP_BOXES: usize = 64;
 
-/// The capture dates in `CMT2` (the EXIF directory's) and `CMT1`
-/// (DateTime), the file's `moov` box read alone.
-pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
-    let mut dates = CaptureDates::default();
+/// The camera's EXIF: `CMT1` (IFD0) and `CMT2` (the EXIF directory), the
+/// file's `moov` box read alone.
+pub(crate) fn exif_tiffs(f: &mut Pieces) -> ExifTiffs {
+    let mut tiffs = ExifTiffs::default();
     let mut at = 0u64;
     for _ in 0..MAX_TOP_BOXES {
         let Some(head) = f.read_upto(at, 16).filter(|h| h.len() >= 8) else {
@@ -275,11 +275,8 @@ pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
         }
         if &head[4..8] == b"moov" {
             if let Some(moov) = f.read(at, len) {
-                for cmt in parse(&moov).cmt[..2].iter().rev().flatten() {
-                    if let Some(t) = TiffFile::parse(cmt, 0) {
-                        super::tiff_exif::dates(&t, &mut dates);
-                    }
-                }
+                let [main, exif, ..] = parse(&moov).cmt.map(|cmt| cmt.map(<[u8]>::to_vec));
+                tiffs = ExifTiffs { main, exif };
             }
             break;
         }
@@ -288,7 +285,7 @@ pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
         };
         at = next;
     }
-    dates
+    tiffs
 }
 
 /// The records and items read from the timed metadata, and the maker notes
