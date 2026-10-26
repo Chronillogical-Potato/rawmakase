@@ -50,7 +50,29 @@ fn prints_the_system_report_without_a_window_or_catalog() {
             "{label}: {text}"
         );
     }
-    // No catalog, session or data folder was made.
-    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    // No catalog or session was made. Other programs it runs (the package
+    // manager, asked how this copy was installed) may leave caches.
+    let made = files(home.path());
+    assert!(
+        !made.iter().any(|path| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            name.ends_with(".rawmakase") || name == "session.json"
+        }),
+        "{made:?}"
+    );
     assert!(!text.contains(&*home.path().to_string_lossy()));
+}
+
+/// Every file under `dir`.
+fn files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(files(&path));
+        } else {
+            found.push(path);
+        }
+    }
+    found
 }
