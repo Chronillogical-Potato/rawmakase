@@ -1,6 +1,6 @@
 [package]
 name = "rawmakase"
-version = "0.3.1"
+version = "0.4.5"
 edition = "2024"
 rust-version = "1.98"
 description = "A fast, non-destructive RAW photo developer"
@@ -10,16 +10,21 @@ repository = "https://github.com/pch/rawmakase"
 # The control protocol and its command-line client build on their own, without
 # the app's GUI, GPU or native libraries.
 [workspace]
-members = ["crates/rawmakase-catalog", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-native", "crates/rawmakase-protocol", "crates/rawmakase-remote", "tools/rawmakase-ctl"]
+members = ["crates/rawmakase-catalog", "crates/rawmakase-decode", "crates/rawmakase-engine", "crates/rawmakase-export", "crates/rawmakase-inference", "crates/rawmakase-interop", "crates/rawmakase-model", "crates/rawmakase-protocol", "crates/rawmakase-raw", "crates/rawmakase-remote", "crates/rawmakase-tiff", "tools/rawmakase-ctl"]
+
+[workspace.dependencies]
+# The rendered formats the app reads and writes (`storage::RasterFormat`): one
+# list for every crate that decodes or encodes them.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
 
 [dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0" }
+rawmakase-decode = { path = "crates/rawmakase-decode", version = "0.1.0" }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0" }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0" }
 rawmakase-inference = { path = "crates/rawmakase-inference", version = "0.1.0" }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0" }
-rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0" }
 rawmakase-protocol = { path = "crates/rawmakase-protocol", version = "0.1.0" }
 # The optional remote selection worker's client, and the worker binary itself.
 rawmakase-remote = { path = "crates/rawmakase-remote", version = "0.1.0" }
@@ -42,7 +47,7 @@ rayon = "1.12"
 bytemuck = { version = "1.25", features = ["derive"] }
 pollster = "1"
 wgpu = { version = "30", default-features = false, features = ["wgsl"] }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+image.workspace = true
 tiff = "0.11.3"
 tempfile = "3"
 unicode-normalization = "0.1"
@@ -64,14 +69,14 @@ rfd = "0.17.2"
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 # Shared egui app foundation (github.com/crmne/fastframe). Not on crates.io
 # yet: pin a tag and update it deliberately.
-fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
+fastframe-text = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0", features = ["watch"] }
+fastframe-fonts = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
+fastframe-icons = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
 # The SVG loader behind the icons, at eframe's egui version.
 egui_extras = { version = "0.36", default-features = false, features = ["svg"] }
-fastframe-macos = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
-fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.1.7", version = "0.1.7" }
+fastframe-titlebar = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
+fastframe-theme = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }
 
 # The terminal a release build's command-line output goes to, and the
 # Desktop and Pictures export folders.
@@ -90,26 +95,39 @@ midir = "0.11"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 dispatch2 = "0.3"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSCell", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow", "objc2-quartz-core"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer", "objc2-core-graphics"] }
+# The Trash (src/platform/trash/macos.rs): NSFileManager's trashItemAtURL,
+# and URLForDirectory for whether a volume has one; a drive's name for the
+# Folders panel (src/platform/volume.rs): NSURLVolumeNameKey.
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "FoundationErrors", "NSError", "NSFileManager", "NSPathUtilities", "NSString", "NSURL"] }
 
-# The desktop's text size through the desktop portal (src/platform/text_scale.rs);
-# the same blocking zbus fastframe-text already uses, so no new crates.
-[target.'cfg(target_os = "linux")'.dependencies]
-zbus = { version = "5.19", default-features = false, features = ["blocking-api", "async-io"] }
+# The freedesktop Trash (src/platform/trash/freedesktop.rs, also built for
+# macOS's tests): the user's id, and whether a folder could be made where
+# its Trash would be. Its rename is storage::fsops's.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", features = ["fs", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Win32_Storage_FileSystem and Win32_System_WindowsProgramming: the drive
+# type of a volume, for whether it has a Recycle Bin (src/platform/trash/
+# windows.rs); rawmakase-model builds both already.
+windows-sys = { version = "0.61", features = ["Win32_Devices_Display", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_Registry", "Win32_System_WindowsProgramming", "Win32_UI_ColorSystem", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# The Recycle Bin (src/platform/trash/windows.rs): IFileOperation and its
+# progress sink, COM interfaces windows-sys has no vtables for; the sink's
+# #[implement] names windows-core.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+windows-core = "0.62"
 
 # The model's fixtures, for the app's tests.
 [dev-dependencies]
 rawmakase-catalog = { path = "crates/rawmakase-catalog", version = "0.1.0", features = ["test-support"] }
+rawmakase-decode = { path = "crates/rawmakase-decode", version = "0.1.0", features = ["test-support"] }
 rawmakase-engine = { path = "crates/rawmakase-engine", version = "0.1.0", features = ["test-support"] }
 rawmakase-export = { path = "crates/rawmakase-export", version = "0.1.0", features = ["test-support"] }
 rawmakase-interop = { path = "crates/rawmakase-interop", version = "0.1.0", features = ["test-support"] }
 rawmakase-model = { path = "crates/rawmakase-model", version = "0.1.0", features = ["test-support"] }
-rawmakase-native = { path = "crates/rawmakase-native", version = "0.1.0", features = ["test-support"] }
 # Tests set up and inspect catalog files directly; the app itself reaches
 # the catalog's database only through rawmakase-catalog.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
@@ -127,8 +145,32 @@ fn_params_excessive_bools = "warn"
 large_enum_variant = "warn"
 redundant_clone = "warn"
 
+# crmne's egui and winit forks, which fastframe's apps build against: fixes
+# waiting for upstream releases (fastframe's getting started guide, "egui and
+# winit forks"), among them file drops on Wayland. Move egui and winit
+# together, to the revisions that guide lists.
+[patch.crates-io]
+ecolor = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+eframe = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+egui = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+egui-wgpu = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+egui-winit = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+egui_extras = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+egui_glow = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+emath = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+epaint = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+epaint_default_fonts = { git = "https://github.com/crmne/egui", rev = "6ce633ba5f7f64d19ef6d204f9377da560bb546b" }
+winit = { git = "https://github.com/crmne/winit", rev = "ed7caa9023f10b397f5b6ec8284a840cbd8a6f65" }
+
 [profile.release]
 lto = "thin"
 
 [profile.dev]
 opt-level = 1
+
+# Dependencies keep line tables for backtraces but not the full debug info a
+# debugger needs to step through them: a workspace test build's target shrinks
+# from 31 to 20 GB, with no slower build. The workspace crates keep full debug
+# info.
+[profile.dev.package."*"]
+debug = "line-tables-only"

@@ -72,13 +72,64 @@ pub(crate) enum Event {
     /// A catalog import or open is under way, as a status line.
     CatalogWorking(String),
     CatalogReady(Result<Box<crate::app::library::Library>, String>),
+    /// Source keys resolved by the import worker travel with its result.
+    FoldersAdded {
+        result: Result<Box<crate::app::library::Library>, String>,
+        source: Vec<String>,
+    },
     /// A Synchronize Folder scan finished, or failed.
     FolderSyncScanned(Box<crate::app::folder_sync::Scanned>),
     /// Applying a synchronization finished: the catalog opened again.
     FolderSyncApplied(Result<Box<crate::app::folder_sync::Synced>, String>),
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
+    /// A file operation was planned (see `app::file_ops`).
+    /// What export file names need from the photos' files, for the read
+    /// `request` (see `app::export::name_read`).
+    NamesRead {
+        request: u64,
+        read: Result<crate::app::export::Reads, String>,
+    },
+    /// Rename Photo(s)' photos in the order they are numbered in, for the
+    /// catalog they were read from.
+    /// The cancel flag it was read with tells it from a later one.
+    RenameOrdered(
+        crate::catalog::CatalogLocation,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        Box<Result<crate::catalog::file_ops::RenameOrder, String>>,
+    ),
+    /// The plan, and Delete's Move to Trash beside it.
+    FileOpPlanned(
+        Box<
+            Result<
+                (
+                    crate::catalog::file_ops::Plan,
+                    Option<crate::catalog::file_ops::Plan>,
+                ),
+                String,
+            >,
+        >,
+    ),
+    /// A file operation's run ended, its thread's report of it.
+    FileOpDone(
+        crate::catalog::file_ops::BatchId,
+        Box<Result<crate::catalog::file_ops::Outcome, String>>,
+    ),
+    /// A catalog's unfinished file operations were recovered; `None` when
+    /// another window holds them, or they can't run there.
+    FileOpsRecovered(
+        crate::catalog::CatalogLocation,
+        Box<Result<Option<crate::catalog::file_ops::Recovery>, String>>,
+    ),
+    /// The user's choice for an unfinished file operation was carried out.
+    FileOpResolved(
+        crate::catalog::CatalogLocation,
+        crate::catalog::file_ops::OperationId,
+        Box<Result<crate::catalog::file_ops::ItemOutcome, String>>,
+    ),
     Monitor(PathBuf),
+    /// The folder chosen for decoded images.
+    DecodeCacheFolder(PathBuf),
     /// Files and folders chosen to import profiles or presets from.
     Import(crate::app::bulk_import::ImportKind, Vec<PathBuf>),
     Imported(Box<crate::app::bulk_import::Summary>),
@@ -88,6 +139,7 @@ pub(crate) enum Event {
         id: u64,
         profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
         errors: Vec<String>,
+        groups: crate::camera_profiles::Groups,
     },
     PresetLoad(PathBuf),
     /// Point Color's dropper sample for the photo loaded as `id`, taken with
@@ -284,6 +336,8 @@ fn send(tx: &Sender<Event>, ctx: &egui::Context, event: Event) {
 
 mod latest;
 mod loader;
+#[cfg(test)]
+pub(in crate::app) use loader::tests::cmyk_profile;
 mod reference;
 mod renderer;
 pub(crate) use latest::Latest;
@@ -291,4 +345,6 @@ pub(crate) use latest::panic_message;
 pub(crate) use loader::Loader;
 pub(in crate::app) use reference::{ReferenceImage, ReferenceJob, Resolution, reference_loader};
 pub(crate) use renderer::Renderer;
+#[cfg(test)]
+pub(super) use renderer::holding;
 pub(super) use renderer::{RenderBackend, renderer_with_backend};

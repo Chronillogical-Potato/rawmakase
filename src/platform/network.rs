@@ -31,7 +31,7 @@ pub(crate) fn prepare_filesystem_bridge() {
         return;
     }
     // GVFS already owns the share/session/authentication. This exposes its existing
-    // mounts to native file choosers and LibRaw; no share credentials are handled here.
+    // mounts to native file choosers and the decoders; no share credentials are handled here.
     let Ok(mut child) = Command::new(binary)
         .arg(&mount)
         .arg("-f")

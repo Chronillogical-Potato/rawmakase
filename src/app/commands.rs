@@ -385,6 +385,10 @@ impl Editor {
             generation: self.load.id(),
             revision: self.automation.revision,
             loaded: develop && self.document.full().is_some() && !self.load.is_running(),
+            open_failed: self.open_failed(),
+            open_error: self
+                .open_failed()
+                .and_then(|_| self.document.failed.clone()),
             busy: self.activity.is_busy(),
             modal: self.command_modal(),
             black_and_white: develop && recipe.effects.monochrome,
@@ -430,6 +434,14 @@ impl Editor {
             },
         }
     }
+    /// The photo Develop shows as one it could not open.
+    pub(super) fn open_failed(&self) -> Option<crate::catalog::PhotoId> {
+        (self.module == Module::Develop
+            && self.document.failed.is_some()
+            && !self.load.is_running())
+        .then_some(self.document.catalog_photo)
+        .flatten()
+    }
     pub(super) fn command_modal(&self) -> bool {
         self.preferences.open
             || self.export_modal()
@@ -439,6 +451,7 @@ impl Editor {
             || self.onboarding.visible
             || self.curve_save_open()
             || self.folder_sync.is_reviewing()
+            || self.file_ops.dialog_open()
     }
     fn check_target(&self, target: &Target) -> Result<()> {
         if target
@@ -468,7 +481,7 @@ impl Editor {
         }
         Ok(())
     }
-    fn require_develop(&self) -> Result<()> {
+    pub(super) fn require_develop(&self) -> Result<()> {
         if self.module == Module::Library || self.document.metadata.is_none() {
             return Err(Error::new("no_document", "Open a photo in Develop first"));
         }
@@ -677,6 +690,7 @@ impl Editor {
     ) -> Result<Outcome> {
         match operation {
             Operation::Set(param, value) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(param, Some(value), 0, target, ctx)?
             }
             Operation::Preset(target) => {
@@ -720,6 +734,7 @@ impl Editor {
                 }
             }
             Operation::ControlValue(param, value) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(
                     param,
                     Some(param.control_value(value, target.mask.is_some())),
@@ -730,6 +745,7 @@ impl Editor {
                 ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
             Operation::Adjust(param, ticks) => {
+                let param = self.for_photo(param, target);
                 self.command_parameter(param, None, ticks, target, ctx)?;
                 ctx.request_repaint_after(std::time::Duration::from_millis(450));
             }
@@ -804,6 +820,16 @@ impl Editor {
             | Operation::Wait(..) => unreachable!(),
         }
         Ok(Outcome::Empty)
+    }
+    /// `param` as the open photo holds it (see `ParameterId::for_photo`): a JPEG,
+    /// PNG or TIFF's Temp and Tint are relative. A mask's are its own.
+    fn for_photo(&self, param: Param, target: &Target) -> Param {
+        match param {
+            Param::Setting(id) if target.mask.is_none() => {
+                Param::Setting(id.for_photo(self.document.metadata.as_ref()))
+            }
+            other => other,
+        }
     }
     fn command_parameter(
         &mut self,
@@ -1053,7 +1079,13 @@ impl Editor {
             self.document.catalog_photo
         };
         let next = current
-            .and_then(|id| library.navigate(id, step))
+            .and_then(|id| {
+                if self.module == Module::Library {
+                    library.navigate(id, step)
+                } else {
+                    self.develop_step(id, step)
+                }
+            })
             .ok_or_else(|| Error::new("end_of_list", "No next photo in this direction"))?;
         if self.module == Module::Library {
             self.library

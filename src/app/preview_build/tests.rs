@@ -25,8 +25,9 @@ fn test_render(item: &Item, cancel: &AtomicBool) -> anyhow::Result<image::RgbIma
     }
     if name.starts_with("slow") {
         STARTED.lock().unwrap().push(item.path.clone());
-        let until = Instant::now() + Duration::from_secs(10);
-        while !released(&item.path) && Instant::now() < until {
+        // Wait until this test releases the file or cancels the build. A clock
+        // limit stored the preview when the test thread was slow to cancel.
+        while !released(&item.path) {
             anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
             std::thread::sleep(Duration::from_millis(2));
         }
@@ -136,23 +137,25 @@ fn save_edit(e: &mut Editor, id: PhotoId, exposure: f32) {
 }
 
 #[test]
-fn only_stale_raws_of_the_selection_are_built() {
-    let (_dir, mut e, ids, cache) = editor(&["a.ARW", "b.ARW", "c.JPG", "d.ARW"]);
-    let [a, b, c, d] = ids[..] else {
-        panic!("four photos")
+fn only_stale_raws_and_edited_files_of_the_selection_are_built() {
+    let (_dir, mut e, ids, cache) = editor(&["a.ARW", "b.ARW", "c.JPG", "d.ARW", "e.JPG"]);
+    let [a, b, c, d, edited] = ids[..] else {
+        panic!("five photos")
     };
     e.build_previews(&[a], PreviewKind::Standard).unwrap();
     settle(&mut e);
     assert!(fresh(&cache, &e, a));
     std::fs::remove_file(path_of(&e, d)).unwrap();
+    save_edit(&mut e, edited, 1.);
     let queued = e
-        .build_previews(&[a, b, c, d], PreviewKind::Standard)
+        .build_previews(&[a, b, c, d, edited], PreviewKind::Standard)
         .unwrap();
-    // The JPEG and the offline RAW are skipped; the fresh one costs nothing.
+    // The unedited JPEG (its file is its preview) and the offline RAW are skipped;
+    // the fresh one costs nothing; the edited JPEG is built with its edit.
     assert_eq!(
         queued,
         Queued {
-            queued: 2,
+            queued: 3,
             skipped: 2
         }
     );
@@ -160,9 +163,11 @@ fn only_stale_raws_of_the_selection_are_built() {
     assert_eq!(renders_of(&path_of(&e, a)), 1);
     assert_eq!(renders_of(&path_of(&e, b)), 1);
     assert_eq!(renders_of(&path_of(&e, c)), 0);
+    assert_eq!(renders_of(&path_of(&e, edited)), 1);
     assert!(fresh(&cache, &e, b));
+    assert!(fresh(&cache, &e, edited));
     let progress = e.preview_builds.progress().unwrap();
-    assert_eq!((progress.done, progress.total), (2, 2));
+    assert_eq!((progress.done, progress.total), (3, 3));
     assert!(progress.failed.is_empty());
 }
 
@@ -235,6 +240,7 @@ fn a_cancel_seen_after_the_render_still_stores_nothing() {
         record: EditRecord::default(),
         defaults: Default::default(),
         demosaic: Demosaic::default(),
+        decode_cache: Default::default(),
         identity: "a".into(),
         kind: PreviewKind::Standard,
         edge: 2048,
@@ -405,6 +411,71 @@ fn discarding_drops_rows_and_requests_of_every_kind() {
     );
 }
 
+/// A preview stored before RAWmakase developed photos with its own decoders
+/// (LibRaw's decoding: an identity that named no decoder), or by an earlier
+/// version of them (`raw::developed`), is not used: the lookup misses its row,
+/// so the preview is built again.
+#[test]
+fn previews_developed_by_an_earlier_decoder_are_refused() {
+    let defaults = DevelopDefaults::default();
+    // The identity as earlier releases computed it: before the switch without a
+    // decoder, after it with the decoder they named.
+    let earlier = |record: &EditRecord, decoder: Option<&str>| {
+        let mut h = DefaultHasher::new();
+        "preview-identity-1".hash(&mut h);
+        record.recipe.hash(&mut h);
+        record.local.hash(&mut h);
+        record.lightroom().hash(&mut h);
+        if record.recipe.is_none() && record.lightroom().is_none() {
+            format!("{defaults:?}").hash(&mut h);
+            rawmakase_export::build_info::SOFTWARE.hash(&mut h);
+        }
+        "Rawmakase".hash(&mut h);
+        if let Some(decoder) = decoder {
+            decoder.to_string().hash(&mut h);
+        }
+        format!("{:016x}", h.finish())
+    };
+    let saved = EditRecord {
+        recipe: Some("{\"exposure\":1}".into()),
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let photo = dir.path().join("photo.ARW");
+    std::fs::write(&photo, b"raw").unwrap();
+    let stamp = crate::catalog::preview_cache::Stamp::read(&photo).unwrap();
+    let mut cache = PreviewCache::open(&dir.path().join("previews.db")).unwrap();
+    let image = image::RgbImage::from_pixel(64, 32, image::Rgb([200, 120, 60]));
+    let decoders = [None, Some("rawmakase-raw 1")];
+    for (record, decoder) in [EditRecord::default(), saved]
+        .into_iter()
+        .flat_map(|record| decoders.map(|decoder| (record.clone(), decoder)))
+    {
+        let old = earlier(&record, decoder);
+        assert_ne!(old, identity(&record, &defaults, Demosaic::Rawmakase));
+        cache
+            .store_sized(&photo, &old, PreviewKind::Standard, &stamp, 1024, &image)
+            .unwrap();
+        assert!(
+            cache
+                .sized_fresh(&photo, &old, PreviewKind::Standard, 1024)
+                .unwrap()
+        );
+        let now = identity(&record, &defaults, Demosaic::Rawmakase);
+        assert!(
+            !cache
+                .sized_fresh(&photo, &now, PreviewKind::Standard, 1024)
+                .unwrap()
+        );
+        assert!(
+            cache
+                .load_sized(&photo, &now, PreviewKind::Standard)
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
 #[test]
 fn identity_follows_the_edit_the_defaults_and_the_demosaic() {
     let defaults = DevelopDefaults::default();
@@ -415,7 +486,6 @@ fn identity_follows_the_edit_the_defaults_and_the_demosaic() {
     };
     let base = identity(&none, &defaults, Demosaic::Rawmakase);
     assert_eq!(base, identity(&none, &defaults, Demosaic::Rawmakase));
-    assert_ne!(base, identity(&none, &defaults, Demosaic::Libraw));
     assert_ne!(base, identity(&saved, &defaults, Demosaic::Rawmakase));
     let local = EditRecord {
         local: Some("[]".into()),
@@ -774,6 +844,7 @@ fn a_photo_too_large_for_a_jpeg_fails_with_why() {
         record: EditRecord::default(),
         defaults: Default::default(),
         demosaic: Demosaic::default(),
+        decode_cache: Default::default(),
         identity: "a".into(),
         kind: PreviewKind::OneToOne,
         edge: 0,
@@ -914,5 +985,58 @@ fn discarding_a_photo_stops_its_build_under_way() {
             .unwrap()
             .sized_fresh(&path, &identity, PreviewKind::OneToOne, 0)
             .unwrap()
+    );
+}
+
+/// A JPEG renders from the file itself, at full size, with its own defaults:
+/// unedited, a preview of it reproduces it.
+#[test]
+fn a_jpeg_preview_renders_from_the_file() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("photo.jpg");
+    let colour = image::Rgb([90, 120, 150]);
+    image::RgbImage::from_pixel(48, 32, colour).save(&path)?;
+    let item = Item {
+        catalog: CatalogLocation::File(dir.path().join("c.rawmakase")),
+        photo: PhotoId(1),
+        name: "photo.jpg".into(),
+        path,
+        record: EditRecord::default(),
+        defaults: Default::default(),
+        demosaic: Demosaic::default(),
+        decode_cache: Default::default(),
+        identity: "a".into(),
+        kind: PreviewKind::Standard,
+        edge: 2048,
+        ticket: None,
+    };
+    let preview = render(&item, &AtomicBool::new(false))?;
+    assert_eq!(preview.dimensions(), (48, 32));
+    for p in preview.pixels() {
+        for (got, want) in p.0.iter().zip(colour.0) {
+            assert!(got.abs_diff(want) <= 2, "{p:?}");
+        }
+    }
+    Ok(())
+}
+
+/// The skipped photos are not only the non-RAW ones: an HDR or CMYK file
+/// Develop can't open, and a rendered file without an edit, which is its own
+/// preview, are skipped too.
+#[test]
+fn the_status_says_what_skipped_photos_were() {
+    assert_eq!(
+        queued_message(Queued {
+            queued: 2,
+            skipped: 3
+        }),
+        "Building 2 previews · 3 skipped (offline, not editable, or an unedited file that is its own preview)"
+    );
+    assert_eq!(
+        queued_message(Queued {
+            queued: 1,
+            skipped: 0
+        }),
+        "Building 1 preview"
     );
 }

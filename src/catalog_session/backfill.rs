@@ -131,14 +131,16 @@ impl CatalogSession {
             }
         }
     }
-    /// Reads the info of the photos that have none, of those `available` says
-    /// are online; asked while reading, it reads again once done.
+    /// Reads the info of the photos that have none or are to be read again
+    /// (see [`crate::catalog::Catalog::photos_to_read_info`]), of those
+    /// `available` says are online; asked while reading, it reads again once
+    /// done.
     pub(crate) fn start_photo_info(&mut self, available: impl Fn(&Path) -> bool) {
         if self.backfill.info.is_some() {
             self.backfill.info_again = true;
             return;
         }
-        let Ok(missing) = self.catalog.photos_without_info() else {
+        let Ok(missing) = self.catalog.photos_to_read_info() else {
             return;
         };
         let missing: HashSet<PhotoId> = missing.into_iter().collect();
@@ -192,18 +194,21 @@ enum CaptureRead {
 }
 
 /// Whether a capture time can be read from this kind of file at all, so
-/// files that never yield one are not opened on every launch: a PNG rarely
-/// has one, and the EXIF reader handles TIFF-based RAWs and RAF but not
-/// Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
+/// files that never yield one are not opened on every launch: JPEG, TIFF,
+/// PNG, WebP, AVIF and JPEG XL, and every RAW (the EXIF reader's, and the
+/// CR3, CRW, MRW and X3F files RAWmakase's own decoders date).
 fn has_capture_time(path: &Path) -> bool {
-    let extension = path
-        .extension()
-        .map(|x| x.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "jpg" | "jpeg" | "tif" | "tiff" => true,
-        "cr3" | "crw" | "x3f" | "mrw" => false,
-        _ => crate::storage::is_raw(path),
+    use crate::storage::RasterFormat;
+    match RasterFormat::of(path) {
+        Some(
+            RasterFormat::Jpeg
+            | RasterFormat::Tiff
+            | RasterFormat::Png
+            | RasterFormat::Webp
+            | RasterFormat::Avif
+            | RasterFormat::Jxl,
+        ) => true,
+        None => crate::storage::is_raw(path),
     }
 }
 
@@ -211,47 +216,55 @@ fn read_capture(path: &Path) -> CaptureRead {
     if !can_read(path) {
         return CaptureRead::Unreadable;
     }
-    match crate::exif::capture_time(path) {
+    match capture_time(path) {
         Some(time) => CaptureRead::Dated(time),
         None => CaptureRead::Undated,
     }
 }
 
+/// When the photo in the file at `path` was taken, in Lightroom's form: from
+/// its EXIF, else from the containers whose dates the EXIF reader can't read
+/// (the RAW decoders tell CR3, CRW, MRW and X3F files by their first bytes).
+pub(crate) fn capture_time(path: &Path) -> Option<String> {
+    crate::exif::capture_time(path).or_else(|| crate::raw::capture_time(path))
+}
+
 /// The file's info: `None` when it cannot be read now, `Some(None)` when it
 /// has none.
-fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
+pub(crate) fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
     if !can_read(path) {
         return None;
     }
     Some(if crate::storage::is_raw(path) {
-        // A RAW LibRaw cannot open now (still copying, a network error) is
+        // A RAW that cannot be opened now (still copying, a network error) is
         // tried again later.
         Some(PhotoInfo::from_metadata(
             &crate::photo::open(path).ok()?.metadata,
         ))
     } else {
         let mut info = crate::exif::photo_info(path).unwrap_or_default();
-        // A header that cannot be read yet (a file still being copied) is
+        // A rendered file's size as shown, after its orientation, from its
+        // header alone. A header that cannot be read yet (a file still being copied) is
         // tried again later.
-        info.dimensions = Some(raster_dimensions(path)?);
+        info.dimensions = Some(crate::raster::dimensions(path)?);
         (info != PhotoInfo::default()).then_some(info)
     })
 }
 
-/// A JPEG, TIFF or PNG's size as shown, after its EXIF orientation, from its
-/// header alone.
-fn raster_dimensions(path: &Path) -> Option<(u32, u32)> {
-    use image::ImageDecoder;
-    let mut decoder = image::ImageReader::open(path)
-        .ok()?
-        .with_guessed_format()
-        .ok()?
-        .into_decoder()
-        .ok()?;
-    let (w, h) = decoder.dimensions();
-    let turned = decoder.orientation().is_ok_and(|o| {
-        use image::metadata::Orientation::*;
-        matches!(o, Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH)
-    });
-    Some(if turned { (h, w) } else { (w, h) })
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capture_times_are_read_from_rendered_files_and_raws() {
+        for name in [
+            "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.png", "A.PNG",
+            "A.NEF", "A.dng", "A.ARW", "A.raf", "A.webp", "A.avif", "A.jxl", "A.CR3", "A.crw",
+            "A.X3F", "A.mrw",
+        ] {
+            assert!(has_capture_time(Path::new(name)), "{name}");
+        }
+        for name in ["A.heic", "A.xmp", "A", "._A.NEF"] {
+            assert!(!has_capture_time(Path::new(name)), "{name}");
+        }
+    }
 }

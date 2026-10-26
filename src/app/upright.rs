@@ -41,6 +41,13 @@ impl Editor {
         });
     }
 
+    /// Measures what the edit needs from the photo and lacks: a Straighten Auto copied
+    /// from another photo, and Upright's corrections.
+    pub(super) fn ensure_analysis(&mut self) {
+        self.ensure_straighten();
+        self.ensure_upright();
+    }
+
     /// Analyses the photo when an Upright mode is chosen but has no correction yet, as
     /// after undoing to a state from before an analysis, or opening such a photo.
     /// Guided's guides are solved once the other modes' corrections are there to sit

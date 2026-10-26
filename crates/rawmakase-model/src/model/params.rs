@@ -29,6 +29,9 @@ pub enum ParameterId {
     Saturation,
     Temperature,
     Tint,
+    /// A rendered file's Temp and Tint, relative −100..+100.
+    IncrementalTemperature,
+    IncrementalTint,
     /// The Crop panel's Angle, in degrees.
     Straighten,
     /// Detail: Sharpening.
@@ -101,6 +104,15 @@ pub enum Tick {
     /// tick is a similar change of colour anywhere on the scale; clockwise is
     /// warmer.
     Mireds(f32),
+}
+
+/// How far one press of Lightroom's `+` or `-` moves the selected Basic slider:
+/// Option for fine, nothing for normal, Shift for large.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyStep {
+    Fine,
+    Normal,
+    Large,
 }
 
 /// How a setting's value is shown and typed: in its own unit, or scaled to
@@ -182,7 +194,7 @@ const fn percent<Id: Copy>(id: Id, label: &'static str) -> Descriptor<Id> {
     }
 }
 
-const DESCRIPTORS: [Descriptor; 57] = [
+const DESCRIPTORS: [Descriptor; 59] = [
     Descriptor {
         id: ParameterId::Exposure,
         label: "Exposure",
@@ -220,6 +232,32 @@ const DESCRIPTORS: [Descriptor; 57] = [
         label: "Tint",
         interactive: -TINT_LIMIT..=TINT_LIMIT,
         valid: -TINT_LIMIT..=TINT_LIMIT,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTemperature,
+        label: "Temp",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
+        tick: Tick::Linear(1.),
+        drag_step: None,
+        display: Display {
+            scale: 1.,
+            decimals: 0,
+            signed: true,
+        },
+    },
+    Descriptor {
+        id: ParameterId::IncrementalTint,
+        label: "Tint",
+        interactive: -100. ..=100.,
+        valid: -100. ..=100.,
         tick: Tick::Linear(1.),
         drag_step: None,
         display: Display {
@@ -343,6 +381,15 @@ const DESCRIPTORS: [Descriptor; 57] = [
 ];
 
 impl ParameterId {
+    /// The setting this control moves on photo `m`: a JPEG, PNG or TIFF keeps its
+    /// white balance as relative Temp and Tint, so Temperature and Tint move those.
+    pub fn for_photo(self, m: Option<&crate::camera_data::Metadata>) -> Self {
+        match self {
+            Self::Temperature if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTemperature,
+            Self::Tint if m.is_some_and(|m| m.is_rendered()) => Self::IncrementalTint,
+            other => other,
+        }
+    }
     /// The parametric curve's regions, in the order of `Effects::parametric`.
     pub const PARAMETRIC: [Self; 4] = [
         Self::ParametricShadows,
@@ -357,7 +404,7 @@ impl ParameterId {
         [Self::BluePrimaryHue, Self::BluePrimarySaturation],
     ];
     #[cfg(test)]
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 59] = [
         Self::Exposure,
         Self::Contrast,
         Self::Highlights,
@@ -371,6 +418,8 @@ impl ParameterId {
         Self::Saturation,
         Self::Temperature,
         Self::Tint,
+        Self::IncrementalTemperature,
+        Self::IncrementalTint,
         Self::Straighten,
         Self::SharpeningAmount,
         Self::SharpeningRadius,
@@ -435,6 +484,8 @@ impl ParameterId {
             Self::Saturation => &mut r.saturation,
             Self::Temperature => &mut r.temperature,
             Self::Tint => &mut r.tint,
+            Self::IncrementalTemperature => &mut r.incremental_temperature,
+            Self::IncrementalTint => &mut r.incremental_tint,
             Self::Straighten => &mut r.straighten,
             Self::SharpeningAmount => &mut r.sharpening,
             Self::SharpeningRadius => &mut r.sharpening_radius,
@@ -514,6 +565,45 @@ impl ParameterId {
                 (1e6 / mired).clamp(low, high)
             }
         }
+    }
+    /// How far one press of `+` or `-` moves this setting, in the recipe's units:
+    /// Lightroom Classic's steps (fine, normal, large) for the Basic sliders it
+    /// selects with `.` and `,`; `None` for the rest. Temp steps evenly in kelvin,
+    /// unlike its dial's mireds; a rendered file's relative Temp steps as Tint.
+    pub fn key_steps(self) -> Option<[f32; 3]> {
+        match self {
+            Self::Exposure => Some([0.02, 0.1, 0.33]),
+            Self::Contrast
+            | Self::Highlights
+            | Self::Shadows
+            | Self::Whites
+            | Self::Blacks
+            | Self::Texture
+            | Self::Clarity
+            | Self::Dehaze
+            | Self::Vibrance
+            | Self::Saturation => Some([0.01, 0.05, 0.2]),
+            Self::Temperature => Some([5., 50., 200.]),
+            Self::Tint | Self::IncrementalTemperature | Self::IncrementalTint => {
+                Some([1., 5., 20.])
+            }
+            _ => None,
+        }
+    }
+    /// `value` moved one `size` key step, up or down, from where it is: no snapping
+    /// to a grid, clamped to the slider's range (see [`nudged`] for values beyond
+    /// it). A setting without key steps keeps its value.
+    pub fn key_stepped(self, value: f32, size: KeyStep, up: bool) -> f32 {
+        let Some(steps) = self.key_steps() else {
+            return value;
+        };
+        let step = match size {
+            KeyStep::Fine => steps[0],
+            KeyStep::Normal => steps[1],
+            KeyStep::Large => steps[2],
+        };
+        let delta = if up { step } else { -step };
+        nudged(value, delta, self.descriptor().interactive.clone())
     }
 }
 
@@ -673,6 +763,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_rendered_photo_moves_temp_and_tint_relatively() {
+        let rendered = crate::camera_data::Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let raw = crate::camera_data::Metadata::default();
+        for (id, relative) in [
+            (
+                ParameterId::Temperature,
+                ParameterId::IncrementalTemperature,
+            ),
+            (ParameterId::Tint, ParameterId::IncrementalTint),
+        ] {
+            assert_eq!(id.for_photo(Some(&rendered)), relative);
+            assert_eq!(id.for_photo(Some(&raw)), id);
+            assert_eq!(id.for_photo(None), id);
+        }
+        assert_eq!(
+            ParameterId::Exposure.for_photo(Some(&rendered)),
+            ParameterId::Exposure
+        );
+    }
+
+    #[test]
     fn every_parameter_has_its_own_descriptor() {
         for id in ParameterId::ALL {
             assert_eq!(id.descriptor().id, id);
@@ -727,6 +841,68 @@ mod tests {
         assert_eq!(ParameterId::Contrast.from_shown(150.), 1.);
         assert_eq!(ParameterId::Exposure.from_shown(9.), EXPOSURE_LIMIT);
         assert_eq!(ParameterId::Contrast.shown(0.35), 35.);
+    }
+
+    #[test]
+    fn key_steps_are_lightrooms_in_shown_units() {
+        use KeyStep::{Fine, Large, Normal};
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-3;
+        // (setting, start, size, up, shown result): Lightroom Classic 15.6's steps,
+        // added to the value as it is, never snapped to a grid.
+        for (id, start, size, up, shown) in [
+            (ParameterId::Exposure, 0.37, Normal, false, 0.27),
+            (ParameterId::Exposure, 0., Large, true, 0.33),
+            (ParameterId::Exposure, 0., Fine, false, -0.02),
+            (ParameterId::Contrast, 0.07, Normal, false, 2.),
+            (ParameterId::Contrast, 0., Large, true, 20.),
+            (ParameterId::Contrast, 0., Fine, true, 1.),
+            (ParameterId::Saturation, 0., Normal, true, 5.),
+            (ParameterId::Dehaze, 0., Large, false, -20.),
+            (ParameterId::Temperature, 5350., Normal, false, 5300.),
+            (ParameterId::Temperature, 3000., Large, true, 3200.),
+            (ParameterId::Temperature, 20000., Large, false, 19800.),
+            (ParameterId::Temperature, 3000., Fine, true, 3005.),
+            (ParameterId::Temperature, 20000., Fine, true, 20005.),
+            (ParameterId::Tint, 18., Normal, true, 23.),
+            (ParameterId::Tint, 18., Large, false, -2.),
+            (ParameterId::Tint, 18., Fine, true, 19.),
+            (ParameterId::IncrementalTemperature, 0., Normal, true, 5.),
+            (ParameterId::IncrementalTint, 0., Large, false, -20.),
+            (ParameterId::IncrementalTemperature, 0., Fine, true, 1.),
+        ] {
+            let result = id.shown(id.key_stepped(start, size, up));
+            assert!(
+                close(result, shown),
+                "{id:?} {start} {size:?} {up}: {result}"
+            );
+        }
+    }
+
+    #[test]
+    fn key_steps_stop_at_the_slider_ends_and_never_push_further_out() {
+        use KeyStep::{Large, Normal};
+        assert_eq!(ParameterId::Exposure.key_stepped(4.9, Large, true), 5.);
+        assert_eq!(ParameterId::Exposure.key_stepped(5., Normal, true), 5.);
+        assert_eq!(ParameterId::Contrast.key_stepped(1., Large, true), 1.);
+        assert_eq!(ParameterId::Tint.key_stepped(140., Large, true), 150.);
+        assert_eq!(
+            ParameterId::Temperature.key_stepped(TEMPERATURE_MAX, Large, true),
+            TEMPERATURE_MAX
+        );
+        assert_eq!(
+            ParameterId::Temperature.key_stepped(TEMPERATURE_MIN, Large, false),
+            TEMPERATURE_MIN
+        );
+        // An imported Exposure beyond the slider's ±5 moves back by the step, and
+        // further out not at all.
+        assert_eq!(ParameterId::Exposure.key_stepped(7., Large, true), 7.);
+        assert!((ParameterId::Exposure.key_stepped(7., Normal, false) - 6.9).abs() < 1e-5);
+        // Only the Basic sliders have key steps.
+        assert_eq!(ParameterId::VignetteAmount.key_steps(), None);
+        assert_eq!(
+            ParameterId::VignetteAmount.key_stepped(0.3, Large, true),
+            0.3
+        );
     }
 
     #[test]

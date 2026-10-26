@@ -238,6 +238,8 @@ impl SettingGroup {
             WhiteBalance => {
                 to.temperature = from.temperature;
                 to.tint = from.tint;
+                to.incremental_temperature = from.incremental_temperature;
+                to.incremental_tint = from.incremental_tint;
             }
             Exposure => to.exposure = from.exposure,
             Contrast => to.contrast = from.contrast,
@@ -346,6 +348,7 @@ impl SettingGroup {
             Crop => {
                 to.crop = from.crop;
                 to.straighten = from.straighten;
+                to.straighten_auto = from.auto_straighten();
                 to.constrain_crop = from.constrain_crop;
             }
             Masking => to.masks = from.masks.clone(),
@@ -456,6 +459,16 @@ pub fn transfer(
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
+    // RAW and rendered files keep white balance in different terms (Kelvin against
+    // relative) and have profiles of their own: between them, the target keeps its
+    // white balance and profile, and everything else transfers.
+    let separate = source.metadata.is_rendered() != m.is_rendered()
+        && (selection.contains(SettingGroup::WhiteBalance)
+            || selection.contains(SettingGroup::TreatmentAndProfile));
+    if separate {
+        recipe.keep_white_balance_and_profile(to);
+        notes.push("White balance and profile apply to RAW and rendered files separately".into());
+    }
     // Masks made from a selection are rasters of the photo they were made on: the
     // source's do not come along, and the target keeps its own.
     if selection.contains(SettingGroup::Masking) {
@@ -482,6 +495,7 @@ pub fn transfer(
             .recorded(display_axes(&recipe, m));
     }
     if selection.contains(SettingGroup::TreatmentAndProfile)
+        && !separate
         && let Some(profile) = &from.profile
     {
         // A profile file belongs to one photo's camera (or its DNG): use the target's of
@@ -521,13 +535,23 @@ pub fn transfer(
     {
         recipe.use_camera_baseline(m);
     }
-    if selection.contains(SettingGroup::WhiteBalance) {
+    if separate {
+        // The target's own white balance and profile, unchanged.
+    } else if selection.contains(SettingGroup::WhiteBalance) {
         // The same Temperature and Tint mean different gains on another camera.
         recipe.update_wb(m);
         recipe.auto_white_balance = None;
     } else if selection.contains(SettingGroup::TreatmentAndProfile) {
         // A new profile maps the same gains to other Temperature and Tint values.
         recipe.sync_white_balance_controls(m);
+    }
+    // An angle Auto measured on the source is measured on this photo too, which keeps
+    // its own until then. Lightroom copies the source's angle.
+    if selection.contains(SettingGroup::Crop) && from.auto_straighten().is_some() {
+        recipe.straighten = to.straighten;
+        recipe.straighten_auto = Some(crate::model::transform::AutoStraighten::Pending(
+            to.straighten,
+        ));
     }
     // Upright's corrections are analysed from the photo as its lens corrections render
     // it: new lens settings call for a new analysis, which the editor runs.
@@ -587,6 +611,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         camera_exposure: _,
         temperature: _,
         tint: _,
+        incremental_temperature: _,
+        incremental_tint: _,
         wb: _,
         auto_white_balance: _,
         contrast: _,
@@ -609,6 +635,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         sharpening: _,
         crop: _,
         straighten: _,
+        straighten_auto: _,
         constrain_crop: _,
         transform: _,
         upright: _,
@@ -673,6 +700,8 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("camera_exposure", Derived),
         ("temperature", Group(WhiteBalance)),
         ("tint", Group(WhiteBalance)),
+        ("incremental_temperature", Group(WhiteBalance)),
+        ("incremental_tint", Group(WhiteBalance)),
         ("wb", Derived),
         ("auto_white_balance", Derived),
         ("contrast", Group(Contrast)),
@@ -695,6 +724,7 @@ pub(crate) fn every_setting(r: &Recipe) -> Vec<(&'static str, Kind)> {
         ("sharpening", Group(Sharpening)),
         ("crop", Group(Crop)),
         ("straighten", Group(Crop)),
+        ("straighten_auto", Group(Crop)),
         ("constrain_crop", Group(Crop)),
         ("transform", Group(TransformAdjustments)),
         // The mode transfers; its corrections are analysed for each photo.

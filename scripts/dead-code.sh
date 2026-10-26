@@ -32,6 +32,9 @@ declarations = re.findall(rf"^(?:#\[cfg\(.*\)\]\n)?{visibility}mod \w+;", librar
 reexports = re.findall(rf"^{visibility}use \w+::(?:\{{[^}}]*\}}|\w+);", library, re.M)
 for group in reexports:
     modules += re.findall(r"\b(\w+)\b", group.split("::", 1)[1])
+# `pub use platform::volume::mounted as volume_mounted;`: an item of the
+# library's own under another name, which the binary reaches as `crate::`.
+aliases = re.findall(rf"^{visibility}use [\w:]+ as \w+;", library, re.M)
 main = open("src/main.rs").read()
 inner = re.findall(r"^#!\[.*\]\n", main, re.M)
 body = re.sub(r"^#!\[.*\]\n", "", main, flags=re.M)
@@ -47,7 +50,7 @@ private = lambda d: re.sub(r"^pub(?:\(crate\))? ", "", d, flags=re.M)
 # Not every re-exported module is used by the binary; that is no dead code.
 declared = "\n".join(
     [private(d) for d in declarations]
-    + ["#[allow(unused_imports)]\n" + private(r) for r in reexports]
+    + ["#[allow(unused_imports)]\n" + private(r) for r in reexports + aliases]
 )
 open(sys.argv[1], "w").write("".join(inner) + declared + "\n" + body)
 PY

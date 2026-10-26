@@ -12,6 +12,17 @@ use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
 use std::time::{Duration, Instant};
 
 impl Editor {
+    pub(super) fn workspace_modal(&self) -> bool {
+        self.preferences.open
+            || self.export_modal()
+            || self.modal.is_some()
+            || self.not_editable.is_some()
+            || self.view.shortcuts
+            || self.curve_save_open()
+            || self.folder_sync.is_reviewing()
+            || self.file_ops.dialog_open()
+    }
+
     pub(super) fn metadata_shortcuts(&mut self, ctx: &egui::Context) {
         if self.activity.is_busy() {
             return;
@@ -46,6 +57,8 @@ impl Editor {
     }
     pub(super) fn draw(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        // Before any field takes this frame's keys, or gives them up.
+        let typing = ctx.text_edit_focused();
         self.control_commands(&ctx);
         self.events(&ctx);
         self.poll_updates(&ctx);
@@ -66,13 +79,9 @@ impl Editor {
         let entered = self.chrome.entered(self.module);
         self.chrome_view(entered);
         // Preferences is modal: keys go to it, not to the photo behind.
-        let modal = self.preferences.open
-            || self.export_modal()
-            || self.modal.is_some()
-            || self.not_editable.is_some()
-            || self.view.shortcuts
-            || self.curve_save_open()
-            || self.folder_sync.is_reviewing();
+        #[cfg(target_os = "macos")]
+        self.native_menu_actions(&ctx);
+        let modal = self.workspace_modal();
         if !modal {
             // Escape leaves the whole-window mode, as it does in Lightroom. It
             // is taken here, before the Library's views and Develop's tools, so
@@ -114,7 +123,7 @@ impl Editor {
             self.left_develop();
             self.library_workspace(ui, sidebar);
         } else {
-            let mut frame = self.begin_edit_frame();
+            let mut frame = self.begin_develop_frame();
             if !modal {
                 self.develop_shortcuts(&ctx);
             }
@@ -166,6 +175,41 @@ impl Editor {
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
         }
+        use super::library::FileRequest;
+        match self.library.as_mut().and_then(|l| l.take_file_request()) {
+            Some(FileRequest::Remove(ids)) => self.request_photo_removal(ids),
+            Some(FileRequest::Delete(ids)) => self.request_photo_delete(ids, false),
+            Some(FileRequest::Trash(ids)) => self.request_photo_trash(ids),
+            Some(FileRequest::DeleteRejected) => self.request_rejected_delete(),
+            Some(FileRequest::Rename(ids)) => self.request_rename(ids),
+            Some(FileRequest::ChooseParent { root, from }) => self.choose_parent_for(root, from),
+            Some(FileRequest::MoveFolder {
+                root,
+                from,
+                to_root,
+                to,
+            }) => self.request_folder_move(root, from, to_root, to),
+            Some(FileRequest::RenameFolder { root, logical }) => self.rename_folder(root, logical),
+            Some(FileRequest::TrashFolder { root, logical }) => {
+                self.request_folder_trash(root, logical)
+            }
+            Some(FileRequest::Move {
+                photos,
+                root,
+                to,
+                name,
+            }) => self.request_photo_move(photos, root, to, name),
+            Some(FileRequest::ChooseFolder(ids)) => self.choose_folder_for(ids),
+            Some(FileRequest::NewFolder {
+                root,
+                parent,
+                name,
+                photos,
+                inside,
+            }) => self.name_new_folder(root, parent, name, photos, inside),
+            None => {}
+        }
+        self.poll_file_recovery();
         if let Some(library) = &mut self.library
             && library.take_reread_finished()
         {
@@ -177,6 +221,7 @@ impl Editor {
         self.remove_folder_window(&ctx);
         self.folder_sync_window(&ctx);
         self.read_metadata_window(&ctx);
+        self.file_op_window(&ctx);
         self.not_editable_window(&ctx);
         self.shortcuts_window(&ctx);
         self.copy_dialog_window(&ctx);
@@ -189,7 +234,11 @@ impl Editor {
         self.update_notice(&ctx, modal || self.view.shortcuts);
         #[cfg(feature = "telemetry")]
         self.usage_stats_notice(&ctx, modal || self.view.shortcuts);
+        // Last, after whatever else this frame opened or asked: see its docs.
+        self.develop_key_steps(&ctx, typing);
         self.pending_work(&ctx);
+        #[cfg(target_os = "macos")]
+        self.update_native_menu(&ctx);
         super::panels::keep_resize_cursor(&ctx);
         let collapsed = ctx.data(|d| {
             d.get_temp::<std::collections::BTreeSet<String>>(
@@ -220,6 +269,7 @@ impl Editor {
             self.pinned = pinned;
             let _ = self.save_session();
         }
+        self.remember_maximized(&ctx);
         self.sync_undo();
         // The layout is kept once a drag (the thumbnail size) or typing (the search)
         // ends, or when the window closes.
@@ -230,6 +280,50 @@ impl Editor {
         } else {
             LayoutEdit::Settled
         });
+    }
+    /// Saves the session when the window is maximized or restored. A minimized
+    /// window keeps what it was: Windows reports it as not maximized.
+    pub(super) fn remember_maximized(&mut self, ctx: &egui::Context) {
+        if !KEEPS_MAXIMIZED {
+            return;
+        }
+        let (maximized, now) = ctx.input(|i| {
+            let viewport = i.viewport();
+            let maximized = viewport
+                .maximized
+                .filter(|_| viewport.minimized != Some(true));
+            (maximized, i.time)
+        });
+        match self.restoring_maximized {
+            RestoreMaximized::Pending if maximized == Some(true) => {
+                self.restoring_maximized = RestoreMaximized::Done;
+            }
+            RestoreMaximized::Pending => {
+                // Applied once the first frame has shown the window, which X11
+                // window managers wait for. Not to a minimized window, which it
+                // would restore.
+                if maximized == Some(false) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                }
+                self.restoring_maximized = RestoreMaximized::Asked {
+                    until: now + MAXIMIZE_GRACE,
+                };
+                return;
+            }
+            RestoreMaximized::Asked { until } => {
+                if maximized != Some(true) && now < until {
+                    return;
+                }
+                self.restoring_maximized = RestoreMaximized::Done;
+            }
+            RestoreMaximized::Done => {}
+        }
+        if let Some(maximized) = maximized
+            && maximized != self.maximized
+        {
+            self.maximized = maximized;
+            let _ = self.save_session();
+        }
     }
     /// Saves the session when the place in the catalog, or a settled layout, changed.
     pub(super) fn remember_place(&mut self, layout: LayoutEdit) {
@@ -464,6 +558,20 @@ impl Editor {
             );
             ui.close();
         }
+        if menu_row(
+            ui,
+            Icon::Rejected,
+            "Delete Rejected Photos…",
+            self.library.is_some(),
+        )
+        .on_hover_text(
+            "Move the rejected photos shown here to the Trash, or remove them from the catalog",
+        )
+        .clicked()
+        {
+            self.request_rejected_delete();
+            ui.close();
+        }
         menu_separator(ui);
         if menu_row(ui, Icon::Folder, "Open Catalog…", true).clicked() {
             self.catalog_dialog(CatalogDialog::Open, ctx);
@@ -601,13 +709,15 @@ impl Editor {
                     .inner_margin(egui::Margin::symmetric(18, 0)),
             )
             .show(ui, |ui| {
-                title_bar_drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
+                // The bar is the title bar on macOS: its empty space moves the
+                // window, and a double click does what System Settings says.
+                fastframe_titlebar::drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
                 // Beside the sidebar, which holds the traffic lights, its
                 // toggle, the catalog menu, Preferences and the shortcuts.
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.;
                     if !sidebar {
-                        ui.add_space(fastframe_macos::traffic_light_inset(ui.ctx()));
+                        ui.add_space(fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
                     }
                     // The panel toggles: none in the setup view, which has no panels.
                     let toggles = !self.onboarding.visible;
@@ -628,6 +738,7 @@ impl Editor {
                     self.export_progress(ui);
                     self.preview_build_progress(ui);
                     self.folder_sync_progress(ui);
+                    self.file_op_progress(ui);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 0.;
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
@@ -729,9 +840,11 @@ impl Editor {
             .rect_filled(outer, 0., theme::palette(ui.ctx()).photo_backdrop());
         let area = outer.shrink(PHOTO_MARGIN);
         let before = self.view.zoom.on;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
-            self.viewport_ui(ui)
-        });
+        let response = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+                self.viewport_ui(ui)
+            })
+            .inner;
         let Some(library) = &mut self.library else {
             return;
         };
@@ -742,11 +855,9 @@ impl Editor {
         // As in Lightroom, a double-click goes back to the grid; its first
         // click's zoom is undone.
         // egui counts a click soon after a double-click as a triple one.
-        let double = ui.input(|i| {
-            let button = egui::PointerButton::Primary;
-            (i.pointer.button_double_clicked(button) || i.pointer.button_triple_clicked(button))
-                && i.pointer.interact_pos().is_some_and(|p| area.contains(p))
-        });
+        // Use the viewport's response so modals, overlapping windows and
+        // disabled UI keep their clicks instead of reaching the photo behind.
+        let double = response.double_clicked() || response.triple_clicked();
         if double && let Some(on) = library.loupe_double_click() {
             self.view.zoom.on = on;
         }
@@ -778,6 +889,17 @@ impl Editor {
                 Some(false) => self.open_export_dialog(),
                 None => {}
             }
+            // Lightroom's Sync Settings, from the active photo to the rest of the
+            // selection.
+            let sync = ctx.input_mut(|i| {
+                i.consume_key(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::S,
+                )
+            });
+            if sync && !self.sync_targets().is_empty() {
+                self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
+            }
         }
         // The catalog's sidebar, drawn before the bar, asked for this.
         let mut action = sidebar;
@@ -788,7 +910,7 @@ impl Editor {
         // The filmstrip runs under the right panel, as in Develop. Hidden,
         // the views are still brought up to date.
         if let Some(library) = &mut self.library {
-            action = action.then(if filmstrip {
+            action.then(if filmstrip {
                 library.library_filmstrip(ui)
             } else {
                 library.prepare(ui.ctx());
@@ -801,14 +923,14 @@ impl Editor {
         }
         self.loupe_stored_preview();
         if self.panel_shown(WorkspacePanel::Right) {
-            action = action.then(self.library_right_panel(ui, develops));
+            action.then(self.library_right_panel(ui, develops));
         }
         let chrome = self.chrome.shown(self.module);
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
             .show(ui, |ui| match &mut self.library {
                 Some(l) if !l.session.photos.is_empty() => {
-                    action = action.then(l.grid(ui, &mut self.view.zoom, chrome));
+                    action.then(l.grid(ui, &mut self.view.zoom, chrome));
                     if let Some(id) = l.loupe_develops() {
                         self.loupe_viewport(ui, id);
                     }
@@ -836,9 +958,10 @@ impl Editor {
                 crate::app::library::Action::RelinkRoot(id) => {
                     self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkRoot(id)), ctx)
                 }
-                crate::app::library::Action::RelinkFolder(id) => {
-                    self.catalog_dialog(CatalogDialog::Folder(FolderAction::RelinkFolder(id)), ctx)
-                }
+                crate::app::library::Action::RelinkFolder(root, logical) => self.catalog_dialog(
+                    CatalogDialog::Folder(FolderAction::RelinkFolder(root, logical)),
+                    ctx,
+                ),
                 crate::app::library::Action::AddFolder => {
                     self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), ctx)
                 }
@@ -872,13 +995,13 @@ impl Editor {
                     Vec2::new(ui.available_width(), BAR_HEIGHT),
                     egui::Sense::hover(),
                 );
-                title_bar_drag(ui, row.expand2(Vec2::new(8., 0.)));
+                fastframe_titlebar::drag(ui, row.expand2(Vec2::new(8., 0.)));
                 ui.scope_builder(
                     egui::UiBuilder::new()
                         .max_rect(row)
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     |ui| {
-                        ui.add_space(10. + fastframe_macos::traffic_light_inset(ui.ctx()));
+                        ui.add_space(10. + fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
                         self.panel_toggle(ui, WorkspacePanel::Left);
                     },
                 );
@@ -921,16 +1044,21 @@ impl Editor {
                     self.open_export_dialog();
                 }
                 if let Some(library) = &mut self.library {
-                    action = action.then(library.sidebar(ui));
+                    action.then(library.sidebar(ui));
                 } else {
                     ui.add_space(12.);
-                    ui.label(
-                        egui::RichText::new(
-                            "Create an RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
-                        )
-                        .size(12.)
-                        .color(palette.gray(150)),
-                    );
+                    // On the catalog name's column.
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin::symmetric(10, 0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Create a RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
+                                )
+                                .size(12.)
+                                .color(palette.gray(150)),
+                            );
+                        });
                 }
             });
         action
@@ -971,6 +1099,31 @@ impl Editor {
                     ui,
                     super::widgets::SectionGroup::LibraryRight,
                 );
+                // Sync Settings at the foot, as in Lightroom: the active photo's
+                // settings onto the rest of the selection.
+                let mut sync = false;
+                if self.library.is_some() {
+                    let targets = self.sync_target_count();
+                    egui::Panel::bottom("library-sync")
+                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                        .show_separator_line(false)
+                        .show(ui, |ui| {
+                            let layout = egui::Layout::right_to_left(egui::Align::Center);
+                            ui.with_layout(layout, |ui| {
+                                sync = super::widgets::action_button(
+                                    ui,
+                                    "Sync Settings…",
+                                    None,
+                                    targets > 0,
+                                )
+                                .on_hover_text(sync_hover(targets))
+                                .clicked();
+                            });
+                        });
+                }
+                if sync {
+                    self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
+                }
                 // The Navigator controls the zoom: Develop's for a RAW in the
                 // Loupe, the same one for other photos. Outside the Loupe it
                 // shows the selected photo, and a zoom chosen there opens it.
@@ -997,7 +1150,7 @@ impl Editor {
                 }
                 match &mut self.library {
                     Some(library) => {
-                        action = action.then(library.info_panel(ui, |ui| {
+                        action.then(library.info_panel(ui, |ui| {
                             if !pinned {
                                 navigator(ui);
                             }
@@ -1096,8 +1249,10 @@ impl Editor {
         }
     }
     pub(super) fn develop_shortcuts(&mut self, ctx: &egui::Context) {
+        self.view.masking.expire_rename(ctx.cumulative_pass_nr());
         if !self.activity.is_busy() && !ctx.text_edit_focused() {
             self.zoom_keys(ctx);
+            self.develop_delete_key(ctx);
             let (copy, paste, previous, treatment);
             let mut reset = false;
             let mut sync = false;
@@ -1319,7 +1474,9 @@ impl Editor {
                 if i.key_pressed(egui::Key::T) && i.modifiers.shift && !i.modifiers.command {
                     self.toggle_guided_tool();
                 }
-                if i.key_pressed(egui::Key::Escape) {
+                // egui lets go of a text field on Escape before this runs; a mask's
+                // name field still takes that Escape to keep the old name.
+                if i.key_pressed(egui::Key::Escape) && !self.view.masking.is_renaming() {
                     self.view.tool = Tool::None;
                 }
                 if self.view.is(Tool::Crop) {
@@ -1426,17 +1583,13 @@ impl Editor {
             .frame(status_frame(ui, PHOTO_MARGIN as i8))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
-                    let display = if self.view.monitor.is_some() {
-                        if cfg!(target_os = "macos") {
-                            "Display: custom ICC (manual monitor conversion)"
-                        } else {
-                            "Display: custom ICC (disable compositor ICC conversion)"
-                        }
-                    } else if cfg!(target_os = "macos") {
-                        "Display: sRGB (managed by macOS)"
-                    } else {
-                        "Display: sRGB (compositor may manage the monitor)"
-                    };
+                    let display = format!(
+                        "Display: {}",
+                        super::monitor::describe(
+                            &self.view.monitor,
+                            self.view.system_display.display()
+                        )
+                    );
                     status_text(
                         ui,
                         self.document
@@ -1445,7 +1598,7 @@ impl Editor {
                             .message()
                             .unwrap_or(&self.status),
                         self.message_detail(&self.status),
-                        Some(display),
+                        Some(&display),
                     );
                     if !self.preview.status.is_empty() {
                         ui.separator();
@@ -1523,10 +1676,10 @@ impl Editor {
     }
 
     fn develop_side_panels(&mut self, ui: &mut egui::Ui) {
-        // From the window's right edge: the tab rail, the adjustments, then
-        // Presets or History beside the photo.
+        // From the window's right edge: the rail, the adjustments or the
+        // open tool's drawer, then Presets or History beside the photo.
         let tabs = self.develop_rail_edge(ui);
-        if self.panel_shown(WorkspacePanel::Right) {
+        if self.panel_shown(WorkspacePanel::Right) && self.develop_adjustments_shown() {
             self.develop_right_panel(ui);
         }
         self.develop_tab_panel(ui, tabs);
@@ -1583,10 +1736,24 @@ impl Editor {
                 if navigator || histogram {
                     ui.add_space(4.);
                 }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    top(self, ui, false);
-                    ui.add_enabled_ui(enabled, |ui| self.controls(ui));
-                });
+                if super::inspector::has_drawer(self.view.tool) {
+                    // The drawers' labels are short: their controls take the room.
+                    let _labels = super::widgets::LabelColumn::enter(
+                        ui,
+                        super::inspector::DRAWER_LABEL_COLUMN,
+                    );
+                    egui::ScrollArea::vertical()
+                        .id_salt("tool-drawer")
+                        .show(ui, |ui| {
+                            top(self, ui, false);
+                            ui.add_enabled_ui(enabled, |ui| self.tool_drawer(ui));
+                        });
+                } else {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        top(self, ui, false);
+                        ui.add_enabled_ui(enabled, |ui| self.controls(ui));
+                    });
+                }
             });
     }
 
@@ -1610,6 +1777,8 @@ impl Editor {
             Some("Sync Settings")
         } else if self.activity.is_changing_folder() {
             Some(FOLDER_CHANGE)
+        } else if self.activity.is_changing_files() {
+            Some(FILE_CHANGE)
         } else if self.automation.outputs_running() {
             Some(OUTPUT)
         } else {
@@ -1627,8 +1796,15 @@ impl Editor {
         if ctx.input(|i| i.viewport().close_requested()) {
             let until = Instant::now() + super::exit::DEADLINE;
             let anyway = std::mem::take(&mut self.close_anyway);
+            // A file operation stops after the photo under way; closing
+            // waits for it, or goes anyway, saving nothing while it holds
+            // the catalog (the open edit was saved before it began, and the
+            // journal leaves what it cut short to recovery).
+            self.file_ops.stop();
             let flushed = if !anyway && self.closing_waits_for().is_some() {
                 None
+            } else if anyway && self.activity.is_changing_files() {
+                Some(Flushed::Saved)
             } else {
                 Some(self.flush_by(until))
             };
@@ -1666,7 +1842,7 @@ impl Editor {
                 // must stay possible should it stall on a network share.
                 let anyway = match waits_for {
                     Some(OUTPUT) => Some("Cancel it and close"),
-                    Some(FOLDER_CHANGE) => Some("Close anyway"),
+                    Some(FOLDER_CHANGE | FILE_CHANGE) => Some("Close anyway"),
                     _ => None,
                 };
                 if let Some(label) = anyway
@@ -1884,6 +2060,7 @@ fn status_frame(ui: &egui::Ui, side: i8) -> egui::Frame {
 const OUTPUT: &str = "the output the control socket asked for";
 /// What the close guard calls a folder change.
 const FOLDER_CHANGE: &str = "the folder change";
+const FILE_CHANGE: &str = "the file operation";
 
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as
@@ -1901,43 +2078,14 @@ pub(super) const LIBRARY_INFO_MIN: f32 = 224.;
 /// The workspace bar's height; on macOS the traffic lights sit on its centre.
 pub(super) const BAR_HEIGHT: f32 = 44.;
 
-/// The bar's empty space moves the window, and a double click does what
-/// System Settings says, as a title bar does. Controls drawn later take their
-/// own clicks. Only macOS hides the system title bar.
-fn title_bar_drag(ui: &mut egui::Ui, bar: egui::Rect) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let response = ui.interact(
-        bar,
-        ui.id().with("title-bar"),
-        egui::Sense::click_and_drag(),
-    );
-    let ctx = ui.ctx();
-    if response.double_clicked() {
-        match fastframe_macos::double_click_action() {
-            fastframe_macos::DoubleClick::Minimize => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            fastframe_macos::DoubleClick::Zoom => {
-                let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-            }
-            // AppKit fills the screen itself, from the drag started below.
-            fastframe_macos::DoubleClick::Fill | fastframe_macos::DoubleClick::Nothing => {}
-        }
-    } else if response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
-        // AppKit only starts a drag during the original mouse-down.
-        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-    }
-}
 /// With the chrome hidden the window has no bar to drag by. This keeps a grab
 /// beside the traffic lights, the size of their inset, so the window still
-/// moves while almost all of the photo stays its own.
+/// moves while almost all of the photo stays its own. Drawn after the photo,
+/// whose view takes every click in its area, so the corner is the window's.
 fn title_bar_pad(ui: &mut egui::Ui) {
     let corner = ui.max_rect().min;
-    let width = fastframe_macos::traffic_light_inset(ui.ctx()) + 24.;
-    title_bar_drag(
+    let width = fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left + 24.;
+    fastframe_titlebar::drag(
         ui,
         egui::Rect::from_min_size(corner, egui::Vec2::new(width, BAR_HEIGHT)),
     );
@@ -1959,6 +2107,28 @@ pub(super) enum LayoutEdit {
     Settled,
 }
 
+/// Whether the window opens maximized when it was left so. Not on macOS, where egui
+/// reads the state only at launch (emilk/egui#3494), so a window zoomed back out
+/// would still open zoomed.
+pub(super) const KEEPS_MAXIMIZED: bool = !cfg!(target_os = "macos");
+
+/// How long a window reopened maximized waits for the window manager to maximize
+/// it before its state is saved again: until then it shows unmaximized on X11.
+const MAXIMIZE_GRACE: f64 = 2.;
+
+/// Reopening the window maximized, as it was left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum RestoreMaximized {
+    /// The window manager is to be asked on the first frame.
+    Pending,
+    /// Asked; the window's state is kept until it is maximized or `until` (egui
+    /// time) passes, so the frames before don't save it unmaximized.
+    Asked {
+        until: f64,
+    },
+    Done,
+}
+
 /// Keeps the window open for the "Work still pending" question, and shows it: Quit
 /// from the app menu (Cmd-Q) reaches a minimized window, where the question would
 /// stay hidden until the window was restored. Quit from the Dock reaches it too while
@@ -1969,6 +2139,20 @@ fn refuse_close(ctx: &egui::Context) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
+}
+
+/// The Library's Sync Settings button's hover, for `targets` photos to sync to.
+fn sync_hover(targets: usize) -> String {
+    let keys = if cfg!(target_os = "macos") {
+        "⇧⌘S"
+    } else {
+        "Ctrl+Shift+S"
+    };
+    if targets == 0 {
+        return format!("Select the photos to sync with the active photo · {keys}");
+    }
+    let photos = super::widgets::plural(targets, "other selected photo", "other selected photos");
+    format!("Sync the active photo's settings to {photos} · {keys}")
 }
 
 #[cfg(test)]

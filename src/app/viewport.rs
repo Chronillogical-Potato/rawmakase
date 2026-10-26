@@ -133,7 +133,8 @@ impl Editor {
         }
     }
     /// Before the first image arrives: the Library preview of the photo being
-    /// opened with a spinner, or a hint when nothing is open.
+    /// opened with a spinner, or without one if it could not be opened, or a
+    /// hint when nothing is open.
     fn loading_placeholder(&self, ui: &mut egui::Ui, area: Rect) {
         let palette = theme::palette(ui.ctx());
         // A photo counts as opening until its first render arrives, even after
@@ -187,6 +188,16 @@ impl Editor {
         );
         ui.painter()
             .rect_filled(badge, 15., Color32::from_black_alpha(170));
+        if self.document.failed.is_some() {
+            ui.painter().text(
+                badge.center(),
+                egui::Align2::CENTER_CENTER,
+                "Couldn't open this photo",
+                egui::FontId::proportional(12.),
+                palette.gray(225),
+            );
+            return;
+        }
         let spinner =
             Rect::from_center_size(badge.left_center() + Vec2::new(20., 0.), Vec2::splat(14.));
         super::widgets::paint_spinner(ui, spinner, None);
@@ -262,7 +273,7 @@ impl Editor {
         let size = Vec2::new(g.width as f32, g.height as f32);
         self.view.zoom.photo_rect(area, size, ppp)
     }
-    pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn viewport_ui(&mut self, ui: &mut egui::Ui) -> egui::Response {
         let (whole, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         ui.painter()
@@ -309,7 +320,7 @@ impl Editor {
             } else {
                 self.loading_placeholder(ui, whole);
             }
-            return;
+            return response;
         };
         let geometry = self
             .document
@@ -508,13 +519,10 @@ impl Editor {
         {
             let u = (pos.x - rect.left()) / rect.width();
             let v = (pos.y - rect.top()) / rect.height();
-            self.document.edit.recipe_mut().wb =
-                develop::neutral_pick(&im, self.document.edit.recipe(), u, v);
-            self.document.edit.recipe_mut().auto_white_balance = None;
-            self.document
-                .edit
-                .recipe_mut()
-                .sync_white_balance_controls(&im.metadata);
+            let gains = develop::neutral_pick(&im, self.document.edit.recipe(), u, v);
+            let recipe = self.document.edit.recipe_mut();
+            recipe.pick_white_balance(gains, &im.metadata);
+            recipe.auto_white_balance = None;
             self.view.tool = Tool::None;
         }
         // Point Color's dropper adds a swatch of the color under the pointer and
@@ -677,6 +685,7 @@ impl Editor {
         if self.view.zoom.on && self.region() != self.preview.last_region {
             self.schedule();
         }
+        response
     }
     /// The crop guide overlay over the crop at `crop` on screen, when it shows: always;
     /// with the pointer over the photo (`photo`), while something is dragged or just after a new
@@ -753,7 +762,12 @@ impl Editor {
             if let Some(angle) = super::crop_tool::ruler_angle(from, to, current)
                 && angle != current
             {
-                self.document.edit.recipe_mut().straighten = angle;
+                crate::model::edit::change_setting(
+                    self.document.edit.recipe_mut(),
+                    crate::model::params::ParameterId::Straighten,
+                    None,
+                    |r| r.straighten = angle,
+                );
                 self.document.edit.name_next_step(super::history::Step::new(
                     "Straighten",
                     format!("{angle:+.2}"),

@@ -128,18 +128,23 @@ impl Filters {
             .iter()
             .enumerate()
             .filter(|(_, p)| {
-                self.folder_scope
-                    .as_ref()
-                    .is_none_or(|ids| ids.contains(&p.folder))
-                    && ((self.collection.is_none() && !self.previous_import)
-                        || self.members.contains(&p.id))
-                    && (!self.only_missing || !available(&p.path))
-                    && (!self.enabled || self.bar_shows(p, &query))
+                self.source_holds(p, &available) && (!self.enabled || self.bar_shows(p, &query))
             })
             .map(|(i, _)| i)
             .collect();
         self.sort.sort(photos, &mut visible, keys, self.reverse);
         visible
+    }
+    /// Whether the source (the folders, the collection, the previous
+    /// import or the offline photos shown) has `p`, whatever the filter bar
+    /// says; `available` tells whether a file is there.
+    pub(super) fn source_holds(&self, p: &Photo, available: impl Fn(&Path) -> bool) -> bool {
+        self.folder_scope
+            .as_ref()
+            .is_none_or(|ids| ids.contains(&p.folder))
+            && ((self.collection.is_none() && !self.previous_import)
+                || self.members.contains(&p.id))
+            && (!self.only_missing || !available(&p.path))
     }
     /// Whether the filter bar lets `p` through; `query` is in lower case.
     fn bar_shows(&self, p: &Photo, query: &str) -> bool {

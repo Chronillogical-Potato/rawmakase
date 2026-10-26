@@ -23,6 +23,8 @@ pub(super) struct Document {
     pub(super) pending_treatment: Option<PendingTreatment>,
     pub(super) export: ExportOptions,
     pub(super) catalog_photo: Option<PhotoId>,
+    /// Why opening the photo failed: no image is coming.
+    pub(super) failed: Option<String>,
     pub(super) lightroom_notice: String,
     /// Lightroom's history for the open catalog photo, oldest first.
     pub(super) lightroom_history: Vec<crate::catalog::HistoryStep>,
@@ -44,6 +46,8 @@ pub(super) struct Document {
     pub(super) defaults: Option<crate::raw_defaults::Resolved>,
     pub(super) profiles: Vec<Arc<crate::camera_profiles::CameraProfile>>,
     pub(super) profile_errors: Vec<String>,
+    /// Where the Profile menu lists each of `profiles`.
+    pub(super) profile_groups: crate::camera_profiles::Groups,
     /// The Auto estimate for this photo; dropping it with the document cancels it.
     pub(super) auto: super::task::Task,
     /// Point Color's dropper sampling the photo, off the UI thread.
@@ -143,6 +147,41 @@ impl From<egui::TextureHandle> for Picture {
         }
     }
 }
+/// What a render was asked for, which its result is shown with.
+#[derive(Clone)]
+pub(super) struct Pending {
+    /// What the pixels are rendered with, Visualize Range included, so a picker
+    /// never takes a gray preview for the photo.
+    pub(super) recipe: Option<Recipe>,
+    pub(super) mode: TextureMode,
+    pub(super) crop: [f32; 4],
+}
+impl Default for Pending {
+    fn default() -> Self {
+        Self {
+            recipe: None,
+            mode: TextureMode::Whole,
+            crop: [0., 0., 1., 1.],
+        }
+    }
+}
+/// The document, photo, region and size a render shows.
+pub(super) struct RenderView {
+    pub(super) image: std::sync::Weak<CameraImage>,
+    pub(super) path: Option<PathBuf>,
+    pub(super) photo: Option<PhotoId>,
+    pub(super) region: Option<[u32; 4]>,
+    pub(super) max_edge: u32,
+}
+impl RenderView {
+    pub(super) fn same(&self, other: &Self) -> bool {
+        self.image.ptr_eq(&other.image)
+            && self.path == other.path
+            && self.photo == other.photo
+            && self.region == other.region
+            && self.max_edge == other.max_edge
+    }
+}
 pub(super) struct PreviewState {
     pub(super) task: super::task::Task,
     /// The last whole-photo render, always drawn so zooming never shows a gap.
@@ -158,19 +197,26 @@ pub(super) struct PreviewState {
     pub(super) region_samples: Option<image::RgbImage>,
     /// Whether renders keep their samples: while a loupe or the readout reads them.
     pub(super) samples_requested: bool,
-    /// The recipe the shown samples were rendered with, and that of the render in
-    /// flight.
+    /// The recipe the shown samples were rendered with.
     pub(super) samples_recipe: Option<Recipe>,
-    pub(super) pending_recipe: Option<Recipe>,
+    /// What the latest render was asked for, applied to its result when it lands.
+    pub(super) pending: Pending,
+    /// Earlier renders an edit let finish (see `Task::supersede`), oldest first: those
+    /// the renderer took, as one it replaced before taking it never reports
+    /// (`replaced`).
+    pub(super) overtaken: std::collections::VecDeque<(u64, Pending)>,
+    /// The render whose result is shown, so an earlier one landing late is not.
+    pub(super) shown: u64,
+    /// What the latest render shows: an edit lets the running render finish only
+    /// when it is still the same.
+    pub(super) last_view: Option<RenderView>,
     pub(super) status: String,
     pub(super) last_fit_edge: u32,
     pub(super) last_region: Option<[u32; 4]>,
     pub(super) mode: TextureMode,
-    pub(super) pending_mode: TextureMode,
     /// The crop `texture` was rendered with, when known: until a render for a new
     /// crop lands, the old one is placed where its crop sits instead of stretched.
     pub(super) crop: Option<[f32; 4]>,
-    pub(super) pending_crop: [f32; 4],
     /// Before's render, while it shows beside the edit.
     pub(super) before: super::before_after::BeforePreview,
     /// The photo's stored Standard preview, shown while it opens until the
@@ -191,14 +237,15 @@ impl Default for PreviewState {
             region_samples: None,
             samples_requested: false,
             samples_recipe: None,
-            pending_recipe: None,
+            pending: Pending::default(),
+            overtaken: Default::default(),
+            shown: 0,
+            last_view: None,
             status: String::new(),
             last_fit_edge: 0,
             last_region: None,
             mode: TextureMode::Whole,
-            pending_mode: TextureMode::Whole,
             crop: None,
-            pending_crop: [0., 0., 1., 1.],
             before: Default::default(),
             stand_in: None,
             embedded: false,
@@ -279,7 +326,9 @@ pub(super) struct ViewState {
     pub(super) masking: super::mask_tool::MaskTool,
     /// The Guided Upright tool's selection, drag and view options.
     pub(super) guided: super::guided_tool::GuidedTool,
-    pub(super) monitor: Option<PathBuf>,
+    pub(super) monitor: super::monitor::MonitorProfile,
+    /// The display profile the system assigns to the window's display.
+    pub(super) system_display: super::monitor::SystemProbe,
     pub(super) selected_band: usize,
     /// The Color Grading panel's view: 3-Way or one wheel.
     pub(super) grading: super::color_grading::GradingView,
@@ -293,6 +342,9 @@ pub(super) struct ViewState {
     /// A Targeted Adjustment Tool drag in progress.
     pub(super) targeted: Option<super::targeted_tool::TargetDrag>,
     pub(super) shortcuts: bool,
+    /// The Basic slider the `.` and `,` keys selected for `+` and `-`, named as on
+    /// a RAW file (see `basic_keys`); kept across photos and modules.
+    pub(super) selected_setting: Option<crate::model::params::ParameterId>,
     pub(super) zoom_key: (bool, f32),
     pub(super) zoom_anim: Option<(f64, egui::Rect)>,
     pub(super) shown_rect: Option<egui::Rect>,
@@ -318,7 +370,8 @@ impl Default for ViewState {
             wheel: Default::default(),
             masking: Default::default(),
             guided: Default::default(),
-            monitor: None,
+            monitor: Default::default(),
+            system_display: Default::default(),
             selected_band: 0,
             grading: Default::default(),
             selected_curve: 0,
@@ -329,6 +382,7 @@ impl Default for ViewState {
             point_color: Default::default(),
             targeted: None,
             shortcuts: false,
+            selected_setting: None,
             zoom_key: (false, 1.),
             zoom_anim: None,
             shown_rect: None,
@@ -392,6 +446,46 @@ impl Document {
     }
 }
 impl PreviewState {
+    /// Starts the render of a change, cancelling the running one; with `edit`, an
+    /// edit of the same view, lets it finish and show on the way.
+    pub(super) fn start(
+        &mut self,
+        edit: bool,
+        pending: Pending,
+    ) -> (u64, Arc<std::sync::atomic::AtomicBool>) {
+        if edit && self.task.is_running() {
+            let earlier = std::mem::replace(&mut self.pending, pending);
+            self.overtaken.push_back((self.task.id(), earlier));
+            self.task.supersede()
+        } else {
+            self.pending = pending;
+            self.overtaken.clear();
+            self.task.start()
+        }
+    }
+    /// What render `id` was asked for, if its result is still to show: the latest
+    /// render's, or an earlier one an edit let finish and not older than the shown.
+    pub(super) fn request(&self, id: u64) -> Option<Pending> {
+        if !self.task.counts(id) || id < self.shown {
+            None
+        } else if id == self.task.id() {
+            Some(self.pending.clone())
+        } else {
+            self.overtaken
+                .iter()
+                .find(|(i, _)| *i == id)
+                .map(|(_, p)| p.clone())
+        }
+    }
+    /// Forgets render `id`, which the renderer replaced before taking it.
+    pub(super) fn replaced(&mut self, id: u64) {
+        self.overtaken.retain(|(i, _)| *i != id);
+    }
+    /// Notes that render `id`'s result is shown: earlier ones no longer are.
+    pub(super) fn showing(&mut self, id: u64) {
+        self.shown = id;
+        self.overtaken.retain(|(i, _)| *i >= id);
+    }
     pub(crate) fn clear_document(&mut self) {
         self.task.invalidate();
         self.texture = None;
@@ -485,6 +579,12 @@ impl PreviewState {
     }
 }
 impl ViewState {
+    /// The ICC profile renders convert to for the monitor, captured by each job.
+    pub(super) fn display_profile(&self) -> Option<PathBuf> {
+        self.monitor
+            .transform(self.system_display.display())
+            .map(Into::into)
+    }
     pub(crate) fn is(&self, tool: Tool) -> bool {
         self.tool == tool
     }

@@ -1,5 +1,6 @@
 //! The Library's left panel: Catalog, Folders and Collections, and
 //! the source they choose.
+use super::folder_selection::{Click, FolderSelection};
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
 use crate::app::theme;
@@ -12,6 +13,8 @@ use std::collections::HashSet;
 pub(super) struct Trees {
     /// What the lists were: see [`Library::lists_key`].
     key: ListsKey,
+    /// The drive each root was on, in the catalog's order of roots.
+    drives: Vec<crate::platform::volume::Volume>,
     /// The startup disk first, then other drives by name.
     volumes: Vec<Drive>,
     collections: Vec<collections::CollectionNode>,
@@ -28,6 +31,13 @@ struct Drive {
 /// failed, the Quick Collection made).
 type ListsKey = (u64, usize, usize, usize, usize);
 
+impl Trees {
+    /// The drives the Folders panel shows, in order.
+    #[cfg(test)]
+    pub(super) fn drives(&self) -> Vec<crate::platform::volume::Volume> {
+        self.volumes.iter().map(|d| d.volume.clone()).collect()
+    }
+}
 impl Library {
     fn lists_key(&self) -> ListsKey {
         let members = self
@@ -44,22 +54,32 @@ impl Library {
             members,
         )
     }
-    /// The sidebar's trees, built again only when the lists changed.
+    /// Where each root folder is on this computer.
+    pub(super) fn root_paths(&self) -> Vec<std::path::PathBuf> {
+        let roots = self.session.roots.iter();
+        roots
+            .map(|(_, original, mapped)| mapped.as_deref().unwrap_or(original).into())
+            .collect()
+    }
+    /// The sidebar's trees, built again only when the lists, or the drives
+    /// their roots are on, changed.
     fn sidebar_trees(&mut self) -> std::sync::Arc<Trees> {
         let key = self.lists_key();
-        if let Some(trees) = self.sidebar_trees.as_ref().filter(|t| t.key == key) {
+        let paths = self.root_paths();
+        let drives = self.volumes.drives(paths.iter().map(|p| p.as_path()));
+        if let Some(trees) = self
+            .sidebar_trees
+            .as_ref()
+            .filter(|t| t.key == key && t.drives == drives)
+        {
             return trees.clone();
         }
         let mut volumes: std::collections::BTreeMap<
             crate::platform::volume::Volume,
             Vec<(RootId, String, Option<String>)>,
         > = Default::default();
-        for root in &self.session.roots {
-            let path = std::path::PathBuf::from(root.2.as_deref().unwrap_or(&root.1));
-            volumes
-                .entry(crate::platform::volume::volume_of(&path))
-                .or_default()
-                .push(root.clone());
+        for (root, drive) in self.session.roots.iter().zip(&drives) {
+            volumes.entry(drive.clone()).or_default().push(root.clone());
         }
         let mut volumes: Vec<_> = volumes
             .into_iter()
@@ -102,6 +122,7 @@ impl Library {
         volumes.sort_by_key(|d: &Drive| (d.volume.mount.is_some(), d.volume.name.to_lowercase()));
         let trees = std::sync::Arc::new(Trees {
             key,
+            drives,
             volumes,
             collections: collections::tree(
                 &self.session.collections,
@@ -128,7 +149,7 @@ impl Library {
                         && !self.filters.previous_import;
                     if source_row(ui, "All Photographs", self.session.photos.len(), all).clicked() {
                         self.filters.folder_scope = None;
-                        self.selected_folder.clear();
+                        self.selected_folders.clear();
                         self.filters.collection = None;
                         self.filters.only_missing = false;
                         self.filters.previous_import = false;
@@ -174,10 +195,11 @@ impl Library {
                 });
                 section(ui, "Folders", false, |ui| {
                     // Lightroom-style volume headers with an attached light.
-                    self.volumes
-                        .check(ui.ctx(), trees.volumes.iter().map(|v| &v.volume));
-                    let online = self.volumes.snapshot();
+                    self.volumes.check(ui.ctx(), self.root_paths());
+                    let online = self.volumes.snapshot().online;
                     self.volumes_checked(&online);
+                    // Applied once every row is drawn, for a Shift-click range.
+                    let mut clicked = None;
                     for (k, drive) in trees.volumes.iter().enumerate() {
                         let volume = &drive.volume;
                         // Room between drives, so each reads as its own group.
@@ -214,33 +236,100 @@ impl Library {
                                 tree,
                                 0,
                                 &mut self.expanded,
-                                &self.selected_folder,
+                                &self.selected_folders,
+                                self.subfolders_shown,
                             ) {
-                                Some(TreeAction::Select(key, ids)) => {
-                                    self.selected_folder = key;
-                                    self.filters.folder_scope = Some(ids);
-                                    self.filters.collection = None;
-                                    self.filters.previous_import = false;
-                                    self.filter();
+                                Some(TreeAction::Select(key, click)) => {
+                                    clicked = Some((key, click));
                                 }
                                 Some(TreeAction::RelinkRoot(id)) => action = Action::RelinkRoot(id),
-                                Some(TreeAction::RelinkFolder(id)) => {
-                                    action = Action::RelinkFolder(id)
+                                Some(TreeAction::RelinkFolder { root, logical }) => {
+                                    action = Action::RelinkFolder(root, logical)
                                 }
                                 Some(TreeAction::Synchronize(scope, name)) => {
                                     self.sync_request = Some((scope, name));
                                 }
+                                Some(TreeAction::NewFolder {
+                                    root,
+                                    parent,
+                                    name,
+                                    folder,
+                                }) => self.request_new_folder(root, parent, name, folder),
+                                Some(TreeAction::RenameFolder { root, logical }) => {
+                                    self.file_request =
+                                        Some(super::FileRequest::RenameFolder { root, logical })
+                                }
+                                Some(TreeAction::MoveFolder { root, logical }) => {
+                                    self.file_request = Some(super::FileRequest::ChooseParent {
+                                        root,
+                                        from: logical,
+                                    })
+                                }
+                                Some(TreeAction::TrashFolder { root, logical }) => {
+                                    self.file_request =
+                                        Some(super::FileRequest::TrashFolder { root, logical })
+                                }
+                                Some(TreeAction::RemoveRoot(root, name)) => {
+                                    self.removal_request = Some(super::FolderRemoval {
+                                        catalog: self.session.catalog.location().clone(),
+                                        name,
+                                        folders: HashSet::new(),
+                                        photos: 0,
+                                        empty_root: Some(root),
+                                    });
+                                }
+                                Some(TreeAction::DropFolder {
+                                    root,
+                                    from,
+                                    to_root,
+                                    to,
+                                }) => {
+                                    self.file_request = Some(super::FileRequest::MoveFolder {
+                                        root,
+                                        from,
+                                        to_root,
+                                        to,
+                                    })
+                                }
+                                Some(TreeAction::Reveal(path)) => {
+                                    if let Err(e) = crate::platform::reveal::reveal(&path) {
+                                        self.message =
+                                            format!("Could not show {}: {e}", path.display());
+                                    }
+                                }
+                                Some(TreeAction::Drop {
+                                    root,
+                                    to,
+                                    name,
+                                    photos,
+                                }) => self.request_move(photos, root, to, name),
                                 Some(TreeAction::Remove(name, folders, photos)) => {
                                     self.removal_request = Some(super::FolderRemoval {
                                         catalog: self.session.catalog.location().clone(),
                                         name,
                                         folders,
                                         photos,
+                                        empty_root: None,
                                     })
+                                }
+                                Some(TreeAction::ShowSubfolders(shown)) => {
+                                    self.show_subfolders(shown)
                                 }
                                 None => {}
                             }
                         }
+                    }
+                    if let Some((key, click)) = clicked {
+                        let mut rows = Vec::new();
+                        for drive in &trees.volumes {
+                            let collapsed = format!("volume-collapsed:{}", drive.volume.name);
+                            if !self.expanded.contains(&collapsed) {
+                                for tree in &drive.trees {
+                                    tree.shown_rows(&self.expanded, &mut rows);
+                                }
+                            }
+                        }
+                        self.click_folder(&key, click, &rows);
                     }
                     if self.session.roots.is_empty() {
                         empty_note(ui, "No folders yet");
@@ -291,11 +380,11 @@ impl Library {
         self.filters.collection = None;
         self.filters.folder_scope = None;
         self.filters.only_missing = false;
-        self.selected_folder.clear();
+        self.selected_folders.clear();
         self.offer_previous_import = false;
         self.filter();
     }
-    pub(super) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
+    pub(in crate::app) fn select_collection(&mut self, id: crate::catalog::CollectionId) {
         self.filters.previous_import = false;
         self.filters.collection = Some(id);
         self.filters.members = self
@@ -306,39 +395,163 @@ impl Library {
             .unwrap_or_default();
         self.filters.folder_scope = None;
         self.filters.only_missing = false;
-        self.selected_folder.clear();
+        self.selected_folders.clear();
         self.filter();
     }
+    /// A plain click on the folder with tree key `key`, as the Folders
+    /// panel gives it.
+    #[cfg(test)]
+    pub(in crate::app) fn click_folder_for_tests(&mut self, key: &str) {
+        self.click_folder(key, Click::Replace, &[key]);
+    }
+    /// Shows the folders chosen by clicking `key` in the Folders panel;
+    /// `rows` are the folder rows shown, in order.
+    pub(super) fn click_folder(&mut self, key: &str, click: Click, rows: &[&str]) {
+        self.selected_folders.click(key, click, rows);
+        self.filters.folder_scope = self.folders_scope(&self.selected_folders);
+        self.filters.collection = None;
+        self.filters.previous_import = false;
+        self.filter();
+    }
+    /// Resolve imported source rows on the import worker, where filesystem
+    /// access (including mapped symlinks and network volumes) may block.
+    pub(in crate::app) fn added_folder_keys(&self, paths: &[std::path::PathBuf]) -> Vec<String> {
+        fn collect(node: &FolderNode, paths: &[std::path::PathBuf], keys: &mut Vec<String>) {
+            let location = node
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| node.path.clone());
+            if paths.iter().any(|path| location.starts_with(path)) {
+                keys.push(node.key.clone());
+                // The chosen tree row already includes all its logical descendants.
+                return;
+            }
+            for child in node.children.values() {
+                collect(child, paths, keys);
+            }
+        }
+        let mut keys = Vec::new();
+        for (root, original, mapped) in &self.session.roots {
+            let path = std::path::PathBuf::from(mapped.as_deref().unwrap_or(original));
+            let mut node = FolderNode::root(*root, String::new(), path);
+            for folder in self.session.folders.iter().filter(|f| f.root == *root) {
+                node.insert(folder);
+            }
+            // Actual tree locations respect folder overrides; physical path depth
+            // cannot tell us the logical parent of a relocated folder.
+            collect(&node, paths, &mut keys);
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Focus the import's resolved source after restoring the Library layout.
+    pub(in crate::app) fn show_added_folders(&mut self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        self.selected_folders.clear();
+        for key in keys {
+            self.selected_folders.click(key, Click::Toggle, &[]);
+            let mut parent = key.as_str();
+            while let Some((above, _)) = parent.rsplit_once('/') {
+                self.expanded.insert(above.to_owned());
+                parent = above;
+            }
+        }
+        self.filters.clear_bar();
+        self.filters.only_missing = false;
+        self.filters.collection = None;
+        self.filters.previous_import = false;
+        self.filters.folder_scope = self.folders_scope(&self.selected_folders);
+        self.filter();
+        self.show_grid();
+    }
+
     /// The source shown: a folder tree key ("" is All Photographs) or
-    /// `collection:<id>`.
+    /// `collection:<id>`. Of several folders, the one the others were chosen
+    /// from: the session keeps one.
     pub(in crate::app) fn source_key(&self) -> String {
         match self.filters.collection {
             Some(id) => format!("collection:{id}"),
-            None => self.selected_folder.clone(),
+            None => self.selected_folders.anchor().to_string(),
         }
     }
-    /// Shows a folder saved with `source_key` again, including its subfolders,
-    /// and selects `photo` if it is in it.
-    /// The folders a folder key covers now: the folder and its subfolders.
-    /// None for a key that names no folder in the catalog.
+    /// Whether a folder shows the photos in its subfolders too (Show Photos
+    /// in Subfolders), as it does unless turned off.
+    #[cfg(test)]
+    pub(in crate::app) fn subfolders_shown(&self) -> bool {
+        self.subfolders_shown
+    }
+    /// Turns Show Photos in Subfolders on or off; the folders shown follow.
+    pub(in crate::app) fn show_subfolders(&mut self, shown: bool) {
+        if shown == self.subfolders_shown {
+            return;
+        }
+        self.subfolders_shown = shown;
+        if !self.selected_folders.is_empty() {
+            self.filters.folder_scope = self.folders_scope(&self.selected_folders);
+            self.filter();
+        }
+    }
+    /// The folders a folder key covers now: the folder, and its subfolders
+    /// while they're shown. None for a key that names no folder in the
+    /// catalog, Some of none for a folder of folders shown alone.
     pub(super) fn folder_scope(&self, key: &str) -> Option<HashSet<FolderId>> {
+        self.folder_ids(key, self.subfolders_shown)
+    }
+    /// [`Self::folder_scope`], with `subfolders` or without.
+    pub(super) fn folder_ids(&self, key: &str, subfolders: bool) -> Option<HashSet<FolderId>> {
         let rest = key.strip_prefix("root:")?;
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
         let root = root.parse::<i64>().ok().map(RootId)?;
-        let ids: HashSet<FolderId> = self
+        let below = format!("{relative}/");
+        let within: Vec<(FolderId, bool)> = self
             .session
             .folders
             .iter()
-            .filter(|f| {
+            .filter(|f| f.root == root)
+            .filter_map(|f| {
                 let path = f.relative.trim_end_matches('/');
-                f.root == root
-                    && (relative.is_empty()
-                        || path == relative
-                        || path.starts_with(&format!("{relative}/")))
+                let own = path == relative;
+                (own || relative.is_empty() || path.starts_with(&below)).then_some((f.id, own))
             })
-            .map(|f| f.id)
             .collect();
-        (!ids.is_empty()).then_some(ids)
+        (!within.is_empty()).then(|| {
+            within
+                .into_iter()
+                .filter(|(_, own)| subfolders || *own)
+                .map(|(id, _)| id)
+                .collect()
+        })
+    }
+    /// The folders several folder keys cover now; none for none chosen (All
+    /// Photographs). A chosen folder no longer in the catalog adds none.
+    pub(super) fn folders_scope(&self, folders: &FolderSelection) -> Option<HashSet<FolderId>> {
+        (!folders.is_empty()).then(|| {
+            folders
+                .keys()
+                .iter()
+                .filter_map(|key| self.folder_scope(key))
+                .flatten()
+                .collect()
+        })
+    }
+    /// Shows a folder saved with `source_key` again, as folders are shown,
+    /// and selects `photo` if it is in it.
+    /// The folders `folders` cover now, if any of them is still in the
+    /// catalog; what was shown stays shown while none is.
+    pub(super) fn current_scope(&self, folders: &FolderSelection) -> Option<HashSet<FolderId>> {
+        let mut named = false;
+        let mut ids = HashSet::new();
+        for key in folders.keys() {
+            if let Some(scope) = self.folder_scope(key) {
+                named = true;
+                ids.extend(scope);
+            }
+        }
+        named.then_some(ids)
     }
     pub(in crate::app) fn restore_source(&mut self, key: &str, photo: Option<PhotoId>) {
         if let Some(id) = key
@@ -356,7 +569,7 @@ impl Library {
             if let Some(root) = root.parse::<i64>().ok().map(RootId)
                 && let Some(ids) = self.folder_scope(key)
             {
-                self.selected_folder = key.to_string();
+                self.selected_folders = FolderSelection::one(key);
                 self.filters.folder_scope = Some(ids);
                 self.filters.collection = None;
                 // Unfold the path down to the folder.
@@ -400,16 +613,18 @@ impl Library {
                     },
                 );
         }
-        if self.selected_folder.is_empty() {
-            return "All Photographs".into();
-        }
-        match self.selected_folder.rsplit_once('/') {
+        let selected = match self.selected_folders.keys() {
+            [] => return "All Photographs".into(),
+            [key] => key,
+            keys => return format!("{} folders", keys.len()),
+        };
+        match selected.rsplit_once('/') {
             Some((_, name)) => name.into(),
             None => self
                 .session
                 .roots
                 .iter()
-                .find(|(id, _, _)| format!("root:{id}") == self.selected_folder)
+                .find(|(id, _, _)| format!("root:{id}") == *selected)
                 .and_then(|(_, original, _)| {
                     std::path::Path::new(original)
                         .file_name()

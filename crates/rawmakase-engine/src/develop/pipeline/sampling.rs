@@ -90,6 +90,26 @@ pub(super) fn sample(im: Source, x: f32, y: f32) -> [f32; 3] {
 pub fn preview(im: &CameraImage, max: u32) -> CameraImage {
     preview_source(im.into(), max)
 }
+/// The photo reduced to `max` for measuring it. A DNG's OpcodeList3 GainMap (its lens
+/// shading) is part of the photo as Camera Raw measures it, so the copy carries it in
+/// full: the scene tone stage's measures, the haze and the Shadows/Highlights and
+/// Clarity maps read the shading the render corrects. (The render applies it at the
+/// lens Vignetting amount and with the built-in correction on; the copy, kept per
+/// image, does not follow either.)
+pub(crate) fn measurement_source(im: Source, max: u32) -> CameraImage {
+    let mut copy = preview_source(im, max);
+    if let Some(grid) = copy.metadata.lens.as_ref().and_then(|l| l.gain_map.clone()) {
+        let (w, h) = (copy.width as usize, copy.height as usize);
+        copy.pixels.par_iter_mut().enumerate().for_each(|(i, p)| {
+            let gain = grid.gain(
+                ((i / w) as f32 + 0.5) / h as f32,
+                ((i % w) as f32 + 0.5) / w as f32,
+            );
+            (0..3).for_each(|c| p[c] *= gain[c]);
+        });
+    }
+    copy
+}
 pub(crate) fn preview_source(im: Source, max: u32) -> CameraImage {
     if im.width.max(im.height) <= max {
         return im.image.clone();

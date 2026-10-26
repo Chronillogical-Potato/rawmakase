@@ -144,7 +144,10 @@ def measure(dump):
     hues = [i for i, g in enumerate(groups) if g == 'hue']
     cases, versions = [], {}
     for ref_path in sorted((CORPUS / 'camera-raw').glob('*.json')):
-        if ref_path.stem == 'baseline':
+        # The directory also holds stage probes, highlight spots and baselines,
+        # with different schemas and sampling domains. Only chart DNGs use this
+        # layout and have dumps from camera_raw_parity_does_not_regress.
+        if not (CORPUS / 'charts' / f'{ref_path.stem}.dng').is_file():
             continue
         chart = ref_path.stem
         ref = json.loads(ref_path.read_text())

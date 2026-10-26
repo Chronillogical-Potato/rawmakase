@@ -7,7 +7,14 @@ use std::path::PathBuf;
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Session {
     pub last_path: Option<PathBuf>,
+    /// Preferences > Monitor profile: a chosen ICC profile; none follows the
+    /// system, or with `monitor_srgb` shows sRGB as it is.
     pub monitor: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub monitor_srgb: bool,
+    /// The window was maximized when last seen; it opens maximized again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub maximized: bool,
     /// Titles of panel sections the user collapsed; all others start open.
     #[serde(default)]
     pub collapsed: std::collections::BTreeSet<String>,
@@ -74,12 +81,24 @@ pub(crate) struct Session {
     /// Preferences > Standard Preview Size, the long edge in pixels.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_preview_size: Option<u32>,
+    /// Preferences > Catalog: decoded-image disk cache limit in GiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded_cache_size_gib: Option<u32>,
+    /// Preferences > Performance: the folder chosen for decoded images; `None`
+    /// keeps them in the per-user cache directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decoded_cache_folder: Option<PathBuf>,
     /// Preferences > Automatically Discard 1:1 Previews, in days unused; 0 is
     /// Never.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one_to_one_discard_days: Option<u32>,
 }
 impl Session {
+    pub(crate) fn decoded_cache_size_gib(&self) -> u32 {
+        self.decoded_cache_size_gib
+            .filter(|size| DECODED_CACHE_SIZE_RANGE.contains(size))
+            .unwrap_or((crate::decode_cache::DEFAULT_LIMIT >> 30) as u32)
+    }
     /// The Standard Preview Size, or the default when none of the offered
     /// sizes was saved.
     pub(crate) fn standard_preview_size(&self) -> u32 {
@@ -97,6 +116,8 @@ impl Session {
         }
     }
 }
+
+pub(super) const DECODED_CACHE_SIZE_RANGE: std::ops::RangeInclusive<u32> = 1..=1_048_576;
 
 /// The Crop tool's guide overlay, which way round it is and when it shows, by stable
 /// names as [`LibraryLayout`]; a name this version does not know reads as the default.
@@ -131,6 +152,8 @@ pub(crate) struct LibraryLayout {
     pub kind: String,
     /// Cmd+L turned the filter bar off.
     pub filters_off: bool,
+    /// Show Photos in Subfolders turned off.
+    pub subfolders_hidden: bool,
 }
 pub(crate) fn load_session() -> Session {
     read_json_or_default(&data_dir().join("session.json"))
@@ -140,6 +163,57 @@ pub(crate) fn load_session() -> Session {
 mod raw_defaults_tests {
     use super::Session;
     use crate::raw_defaults::{DefaultChoice, RawDefaults};
+
+    /// A session saved while RAWmakase offered LibRaw's demosaic reads as
+    /// RAWmakase's, and keeps every other preference: an unreadable session
+    /// would reset them all.
+    #[test]
+    fn a_session_that_chose_libraws_demosaic_keeps_its_preferences() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        std::fs::write(
+            &path,
+            r#"{"last_path":"/photos/a.ARW","monitor":null,"demosaic":"Libraw",
+                "onboarding_done":true,"auto_advance":true,"theme":"nord.toml",
+                "skipped_version":"1.2.3","decoded_cache_size_gib":16}"#,
+        )
+        .unwrap();
+        let session: Session = crate::storage::read_json_or_default(&path);
+        assert_eq!(session.demosaic, crate::camera_data::Demosaic::Rawmakase);
+        assert_eq!(
+            session.last_path.as_deref(),
+            Some(std::path::Path::new("/photos/a.ARW"))
+        );
+        assert!(session.onboarding_done && session.auto_advance);
+        assert_eq!(session.theme.as_deref(), Some("nord.toml"));
+        assert_eq!(session.skipped_version.as_deref(), Some("1.2.3"));
+        assert_eq!(session.decoded_cache_size_gib(), 16);
+        // Saved again, it is RAWmakase's.
+        let saved = serde_json::to_value(&session).unwrap();
+        assert_eq!(saved["demosaic"], "Rawmakase");
+    }
+
+    #[test]
+    fn decoded_cache_size_round_trips_and_old_or_invalid_sizes_use_default() {
+        let old: Session = serde_json::from_str(r#"{"last_path":null,"monitor":null}"#).unwrap();
+        assert_eq!(old.decoded_cache_size_gib(), 4);
+        for size in [1, 32, 1024, 1025, 1_048_576] {
+            let session = Session {
+                decoded_cache_size_gib: Some(size),
+                ..Default::default()
+            };
+            let back: Session =
+                serde_json::from_str(&serde_json::to_string(&session).unwrap()).unwrap();
+            assert_eq!(back.decoded_cache_size_gib(), size);
+        }
+        for size in [0, 1_048_577, u32::MAX] {
+            let session = Session {
+                decoded_cache_size_gib: Some(size),
+                ..Default::default()
+            };
+            assert_eq!(session.decoded_cache_size_gib(), 4);
+        }
+    }
 
     #[test]
     fn raw_defaults_survive_the_session_and_unreadable_ones_reset() {

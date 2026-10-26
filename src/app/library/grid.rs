@@ -174,6 +174,7 @@ impl Library {
                                     };
                                     let (response, edit) =
                                         photo_cell(ui, &p, self.texture(&p), shown, width);
+                                    self.drag_photos(ui, &response, &p);
                                     let response = if response.hovered() {
                                         let text = self.hover_text(&p);
                                         response.on_hover_text(text)
@@ -259,6 +260,30 @@ impl Library {
                     kinds,
                 ));
             }
+            PhotoAction::Remove => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.request_removal(ids);
+            }
+            PhotoAction::Rename => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.request_rename(ids);
+            }
+            PhotoAction::Trash => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.request_trash(ids);
+            }
             PhotoAction::ReadMetadata => {
                 let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
                     self.selected_ids()
@@ -267,8 +292,47 @@ impl Library {
                 };
                 self.read_request = Some(ids);
             }
+            PhotoAction::MoveToFolder => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.file_request = Some(super::FileRequest::ChooseFolder(ids));
+            }
         }
         None
+    }
+    /// Lets a grid cell be dragged onto a folder: the selection when the
+    /// photo is in it, else the photo, with a count following the pointer.
+    fn drag_photos(&self, ui: &egui::Ui, response: &egui::Response, photo: &Photo) {
+        let Some(count) = drag_payload(response, || self.menu_scope(photo.id)) else {
+            return;
+        };
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let Some(pos) = ui.ctx().pointer_latest_pos() else {
+            return;
+        };
+        let palette = theme::palette(ui.ctx());
+        let layer = egui::LayerId::new(egui::Order::Tooltip, ui.id().with("dragged-photos"));
+        let painter = ui.ctx().layer_painter(layer);
+        let mut corner = pos + egui::Vec2::splat(10.);
+        if let Some(texture) = self.texture(photo) {
+            let size = texture.size_vec2();
+            let size = size * (72. / size.x.max(size.y));
+            let rect = egui::Rect::from_min_size(corner, size);
+            let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.));
+            painter.image(texture.id(), rect, uv, egui::Color32::from_white_alpha(220));
+            corner = rect.right_bottom();
+        }
+        let text = painter.layout_no_wrap(
+            count.to_string(),
+            egui::FontId::proportional(11.),
+            palette.gray(240),
+        );
+        let badge = egui::Rect::from_center_size(corner, text.size() + egui::vec2(10., 4.));
+        painter.rect_filled(badge, badge.height() / 2., palette.selected_marker());
+        painter.galley(badge.center() - text.size() / 2., text, palette.gray(240));
     }
 }
 impl Library {
@@ -345,4 +409,56 @@ impl Library {
 }
 pub(super) fn filter_caption(palette: &theme::Palette, text: &str) -> egui::RichText {
     egui::RichText::new(text).size(11.).color(palette.gray(150))
+}
+
+/// How far the pointer goes from where it was pressed before photos are
+/// dragged; less is a click gone astray.
+const DRAG_DISTANCE: f32 = 8.;
+
+/// Drags the photos `ids` gives from cell `response`, once the pointer is
+/// [`DRAG_DISTANCE`] from where it was pressed; how many while they are
+/// dragged.
+pub(super) fn drag_payload(
+    response: &egui::Response,
+    ids: impl FnOnce() -> Vec<PhotoId>,
+) -> Option<usize> {
+    drag_once(response, || super::DraggedPhotos(ids())).map(|p| p.0.len())
+}
+
+/// Drags what `payload` makes from `response`, once the pointer is
+/// [`DRAG_DISTANCE`] from where it was pressed; it while it is dragged.
+/// Escape (egui's) ends the drag: it doesn't start again until the button
+/// is pressed again.
+pub(super) fn drag_once<P: std::any::Any + Send + Sync>(
+    response: &egui::Response,
+    payload: impl FnOnce() -> P,
+) -> Option<std::sync::Arc<P>> {
+    let ctx = &response.ctx;
+    let key = response.id.with("photo-drag");
+    if !response.dragged() {
+        ctx.data_mut(|d| d.remove::<bool>(key));
+        return None;
+    }
+    let started = ctx.data(|d| d.get_temp::<bool>(key));
+    match started {
+        // Under way, or ended by Escape.
+        Some(true) => egui::DragAndDrop::payload::<P>(ctx),
+        Some(false) => None,
+        None => {
+            let far = ctx.input(|i| {
+                i.pointer
+                    .press_origin()
+                    .zip(i.pointer.latest_pos())
+                    .is_some_and(|(from, to)| from.distance(to) >= DRAG_DISTANCE)
+            });
+            if !far {
+                return None;
+            }
+            ctx.data_mut(|d| d.insert_temp(key, true));
+            // Not `dnd_set_drag_payload`: it takes the payload only on the
+            // frame egui's own drag starts, a few points before this one.
+            egui::DragAndDrop::set_payload(ctx, payload());
+            egui::DragAndDrop::payload::<P>(ctx)
+        }
+    }
 }

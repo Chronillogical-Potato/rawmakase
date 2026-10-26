@@ -22,18 +22,95 @@ pub(crate) struct PhotoMeasures {
 }
 /// What the stage cache keeps of a photo's measurement copy for the settings the
 /// measures read: the measures, and the haze positive Dehaze removes, measured on the
-/// same scene values the first time a render needs it.
+/// same scene values the first time a render needs it; and what renders measure on
+/// the same scene values with one more setting, by that setting.
 #[derive(Debug)]
 pub(crate) struct Measured {
     pub(crate) measures: PhotoMeasures,
     pub(crate) haze: std::sync::OnceLock<std::sync::Arc<super::Haze>>,
+    /// The Contrast pivot by the Dehaze it was measured at.
+    pivots: Kept<f32>,
+    /// The Shadows/Highlights map's base by the Exposure it was built at.
+    maps: Kept<std::sync::Arc<crate::develop::local_tone::MapBase>>,
+    /// The copy's camera colour (white balance, the profile's matrix and HueSatMap,
+    /// calibration), which the map's base exposes.
+    colors: std::sync::OnceLock<std::sync::Arc<Vec<[f32; 3]>>>,
 }
 impl Measured {
     pub(crate) fn new(measures: PhotoMeasures) -> Self {
         Self {
             measures,
             haze: Default::default(),
+            pivots: Kept::default(),
+            maps: Kept::default(),
+            colors: Default::default(),
         }
+    }
+    /// The copy's camera colour, made by `make` unless kept. Not initialised in place: a
+    /// render that waited on it could be the task its parallel work runs; renders
+    /// making it at the same time make the same colours.
+    pub(crate) fn colors(
+        &self,
+        make: impl FnOnce() -> Vec<[f32; 3]>,
+    ) -> std::sync::Arc<Vec<[f32; 3]>> {
+        if let Some(c) = self.colors.get() {
+            return c.clone();
+        }
+        let colors = std::sync::Arc::new(make());
+        self.colors.get_or_init(|| colors).clone()
+    }
+    /// How many pivots and map bases are kept.
+    #[cfg(test)]
+    pub(crate) fn kept(&self) -> [usize; 2] {
+        [
+            self.pivots.0.lock().unwrap().len(),
+            self.maps.0.lock().unwrap().len(),
+        ]
+    }
+    /// The Shadows/Highlights map's base at Exposure `exposure`, built by `build` unless
+    /// kept.
+    pub(crate) fn map_base(
+        &self,
+        exposure: f32,
+        build: impl FnOnce() -> crate::develop::local_tone::MapBase,
+    ) -> std::sync::Arc<crate::develop::local_tone::MapBase> {
+        self.maps.get_or(exposure, || std::sync::Arc::new(build()))
+    }
+    /// The Contrast pivot at Dehaze `dehaze`, measured by `measure` unless kept.
+    pub(crate) fn pivot(&self, dehaze: f32, measure: impl FnOnce() -> f32) -> f32 {
+        self.pivots.get_or(dehaze, measure)
+    }
+}
+/// Values by the setting they were made with, the last few used.
+#[derive(Debug)]
+struct Kept<T>(std::sync::Mutex<Vec<(u32, T)>>);
+impl<T> Default for Kept<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+impl<T: Clone> Kept<T> {
+    /// Values kept: a slider's few last positions.
+    const LEN: usize = 4;
+    /// The value for `setting`, made by `make` unless kept. Not locked while making,
+    /// whose parallel work may run other renders' tasks; renders making it at the same
+    /// time make the same value.
+    fn get_or(&self, setting: f32, make: impl FnOnce() -> T) -> T {
+        let key = setting.to_bits();
+        let lock = || {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        };
+        if let Some((_, v)) = lock().iter().find(|(k, _)| *k == key) {
+            return v.clone();
+        }
+        let value = make();
+        let mut kept = lock();
+        kept.retain(|(k, _)| *k != key);
+        kept.insert(0, (key, value.clone()));
+        kept.truncate(Self::LEN);
+        value
     }
 }
 /// Long edge of the copy the maximum is taken on: on a 920-pixel probe Camera Raw

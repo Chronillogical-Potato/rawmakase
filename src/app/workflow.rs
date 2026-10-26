@@ -7,7 +7,7 @@ use crate::{
     develop::Geometry,
 };
 use eframe::egui::{self, Vec2};
-use std::{path::PathBuf, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 /// How saving the edit before closing ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,7 +72,7 @@ impl Editor {
             .map(|path| super::worker::Prefetch {
                 path,
                 cancel: self.prefetch_cancel.clone(),
-                demosaic: self.demosaic.effective(),
+                demosaic: self.demosaic,
             });
         // The photo being left is Paste from Previous's source; opening the same photo
         // again (as a new demosaic setting does) leaves Previous as it was.
@@ -97,14 +97,19 @@ impl Editor {
         if let Some(photo) = photo {
             self.request_stand_ins(id, photo, neighbour);
         }
-        self.status = "Reading RAW…".into();
+        self.status = if crate::storage::is_raw(&path) {
+            "Reading RAW…"
+        } else {
+            "Reading photo…"
+        }
+        .into();
         self.loader.submit(LoadJob {
             id,
             path,
             cancel,
             prefetch,
             defaults: self.raw_defaults.clone(),
-            demosaic: self.demosaic.effective(),
+            demosaic: self.demosaic,
         });
         // The photo left may be the reference, or its edit may have changed.
         self.load_reference();
@@ -114,7 +119,7 @@ impl Editor {
     /// the filmstrip, or the previous one after stepping back.
     pub(super) fn prefetch_neighbour(&self, id: PhotoId) -> Option<PathBuf> {
         let photo = self.library.as_ref()?.photo(self.neighbour_of(id)?)?;
-        (photo.path.is_file() && crate::storage::is_raw(&photo.path)).then(|| photo.path.clone())
+        photo.path.is_file().then(|| photo.path.clone())
     }
     /// The photo next to `id` in the direction of travel.
     fn neighbour_of(&self, id: PhotoId) -> Option<PhotoId> {
@@ -139,6 +144,11 @@ impl Editor {
     /// Saves the edit now, after any background save in flight; false if
     /// it could not be saved.
     pub(super) fn flush(&mut self) -> bool {
+        // A Sync may be writing the open photo: nothing is saved over it until it is
+        // done (see `autosave`).
+        if self.activity.holds_catalog_writes() {
+            return false;
+        }
         if !self.commit_library_drafts() {
             return false;
         }
@@ -200,9 +210,13 @@ impl Editor {
         if let Some(completion) = self.autosave.poll() {
             self.background_saved(completion);
         }
+        // A Sync may be writing the open photo (a target, from the Library): what an
+        // analysis landing meanwhile changed is not saved over it. The photo opens
+        // again once the Sync is done, or saves then if it was not a target.
         if !self.document.edit.save_state().ready()
             || self.document.edit.history().in_gesture()
             || self.autosave.busy()
+            || self.activity.holds_catalog_writes()
         {
             return;
         }
@@ -240,6 +254,10 @@ impl Editor {
     /// giving up at `until`: a catalog on a stalled network share must not hold up
     /// closing. A save still running then goes on, and the edit stays unsaved.
     pub(super) fn flush_by(&mut self, until: Instant) -> Flushed {
+        // Saved once a Sync, which may be writing the open photo, is done.
+        if self.activity.holds_catalog_writes() {
+            return Flushed::Late;
+        }
         if !self.commit_library_drafts() {
             return Flushed::Failed;
         }
@@ -345,7 +363,12 @@ impl Editor {
             Tool::Remove if self.view.retouch.visualize => {
                 Overlay::Spots(self.view.retouch.threshold)
             }
-            Tool::Mask if self.view.masking.overlay => match self.view.masking.selected {
+            Tool::Mask => match self.view.masking.hovered().or(self
+                .view
+                .masking
+                .selected
+                .filter(|_| self.view.masking.overlay))
+            {
                 Some(index) if index < self.document.edit.recipe().masks.len() => Overlay::Mask {
                     index,
                     color: [230, 40, 40],
@@ -367,20 +390,24 @@ impl Editor {
         self.view.zoom.region(self.view.viewport, g.width, g.height)
     }
     pub(super) fn schedule(&mut self) {
+        self.schedule_render(false);
+    }
+    /// Renders an edit. While a slider moves, each change starts a render; one of
+    /// the same view already running finishes and shows on the way instead of being
+    /// cancelled, or a GPU slower than the changes would show nothing until the
+    /// slider stops.
+    pub(super) fn schedule_edit(&mut self) {
+        self.schedule_render(true);
+    }
+    fn schedule_render(&mut self, edit: bool) {
         let image = self.document.full().cloned();
         if let Some(image) = image {
             self.yield_before();
-            let (id, cancel) = self.preview.task.start();
             let region = self.region();
             self.preview.last_region = region;
             let geometry = Geometry::new(&image, &self.effective_recipe(), 0);
             let RenderEdges { fit, max_edge } = self.render_edges(&geometry);
             self.preview.last_fit_edge = fit;
-            self.preview.pending_crop = geometry.crop();
-            self.preview.pending_mode = region.map_or(
-                super::state::TextureMode::Whole,
-                super::state::TextureMode::Region,
-            );
             // Visualize Range renders the selected swatch's selection instead of its
             // adjustment; never as the photo's thumbnail.
             let mut recipe = self.effective_recipe();
@@ -391,10 +418,31 @@ impl Editor {
             if let Some(list) = visualize {
                 recipe.point_colors = list;
             }
-            // What the shown pixels were rendered with, Visualize Range included, so
-            // a picker never takes a gray preview for the photo.
-            self.preview.pending_recipe = Some(recipe.clone());
-            self.renderer.submit(RenderJob {
+            let view = super::state::RenderView {
+                image: Arc::downgrade(&image),
+                path: self.document.path.clone(),
+                photo: self.document.catalog_photo,
+                region,
+                max_edge,
+            };
+            let same_view = self
+                .preview
+                .last_view
+                .as_ref()
+                .is_some_and(|v| v.same(&view));
+            self.preview.last_view = Some(view);
+            let (id, cancel) = self.preview.start(
+                edit && same_view,
+                super::state::Pending {
+                    recipe: Some(recipe.clone()),
+                    mode: region.map_or(
+                        super::state::TextureMode::Whole,
+                        super::state::TextureMode::Region,
+                    ),
+                    crop: geometry.crop(),
+                },
+            );
+            let replaced = self.renderer.submit(RenderJob {
                 pane: super::worker::Pane::After,
                 max_edge,
                 cancel,
@@ -402,7 +450,7 @@ impl Editor {
                 image,
                 recipe,
                 region,
-                monitor: self.view.monitor.clone(),
+                monitor: self.view.display_profile(),
                 clipping: self.view.clipping.overlay(),
                 navigator: !self.view.zoom.on || self.preview.navigator.is_none(),
                 thumbnail,
@@ -410,6 +458,9 @@ impl Editor {
                 overlay: self.overlay(),
                 drawn: self.preview.presented(),
             });
+            if let Some(replaced) = replaced {
+                self.preview.replaced(replaced);
+            }
         }
         self.schedule_before();
     }
@@ -474,10 +525,32 @@ impl Editor {
         self.preview.stand_in = None;
     }
     pub(super) fn navigate(&mut self, delta: isize) {
-        if let (Some(l), Some(id)) = (&self.library, self.document.catalog_photo)
-            && let Some(next) = l.navigate(id, delta as i32)
+        if let Some(id) = self.document.catalog_photo
+            && let Some(next) = self.develop_step(id, delta as i32)
         {
             self.develop_catalog_photo(next);
+        }
+    }
+    /// The photo `step` photos from `id` in the filmstrip that Develop can
+    /// open, passing over the ones it can't (offline, HDR, animated, CMYK):
+    /// stopping on them would leave every photo beyond out of reach of the
+    /// arrow keys. With none in that direction, the first one, so opening it
+    /// says why it can't be.
+    pub(super) fn develop_step(&self, id: PhotoId, step: i32) -> Option<PhotoId> {
+        let library = self.library.as_ref()?;
+        let first = library.navigate(id, step)?;
+        let mut at = first;
+        loop {
+            let photo = library.photo(at)?;
+            if at == id
+                || crate::app::library::develop_refusal(photo, photo.path.is_file()).is_none()
+            {
+                return Some(at);
+            }
+            match library.navigate(at, step) {
+                Some(next) if next != at => at = next,
+                _ => return Some(first),
+            }
         }
     }
 }

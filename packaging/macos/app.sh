@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local app bundle: native libraries remain installed through Homebrew.
+# Local app bundle, ad-hoc signed; releases are bundled by packaging/macos/bundle.py.
 set -eu
 cd "$(dirname "$0")/../.."
 # Prefer a native rustup compiler over an older Homebrew Rust or Rosetta toolchain.

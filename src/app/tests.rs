@@ -331,7 +331,9 @@ fn photo_click_zooms_and_drag_pans_without_editing() {
                 events,
                 ..Default::default()
             },
-            |ui| editor.viewport_ui(ui),
+            |ui| {
+                editor.viewport_ui(ui);
+            },
         );
         output.textures_delta.clear();
         (
@@ -488,6 +490,149 @@ fn stale_preview_results_are_discarded() {
     .unwrap();
     e.events(&ctx);
     assert!(e.preview.texture.is_none());
+}
+
+/// A slider moving starts a render on every change. On a slow GPU each render
+/// takes longer than the next change, so cancelling the running one showed
+/// nothing until the drag stopped; it now finishes and shows on the way.
+#[test]
+fn a_render_overtaken_by_an_edit_still_shows_with_its_own_settings() {
+    let ctx = egui::Context::default();
+    let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    // Only the results sent here arrive: the renderer takes a job and holds it.
+    task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let first = e.preview.task.id();
+    let first_recipe = e.effective_recipe();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    // Many changes while the first still renders, as on a slow GPU:
+    // those replaced before the renderer took them are forgotten, not the first.
+    for i in 0..30 {
+        in_edit_frame(&ctx, &mut e, |e| {
+            e.document.edit.recipe_mut().exposure = 0.5 + i as f32 / 100.
+        });
+    }
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
+    let second = e.preview.task.id();
+    assert!(second > first);
+    assert_eq!(e.preview.overtaken.len(), 1);
+    let rendered = |id, status: &str| Event::Rendered {
+        id,
+        pane: worker::Pane::After,
+        preview: worker::Preview::Pixels {
+            image: crate::rendered::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![128; 3],
+            navigator: None,
+        },
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
+        thumbnail: None,
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: status.into(),
+    };
+    e.tx.send(rendered(first, "first")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "first");
+    // Pickers sample it as what it is: the edit before the change.
+    assert_eq!(e.preview.samples_recipe.as_ref(), Some(&first_recipe));
+    assert!(e.preview.task.is_running());
+    e.tx.send(rendered(second, "second")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    assert_eq!(
+        e.preview.samples_recipe.as_ref().map(|r| r.exposure),
+        Some(1.)
+    );
+    assert!(!e.preview.task.is_running());
+    // An earlier frame arriving late never replaces a later one.
+    e.tx.send(rendered(first, "late")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    // A render for anything but an edit, a new view say, cancels what runs.
+    e.schedule();
+    e.tx.send(rendered(second, "cancelled")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    // So does an edit of another document of the same decoded photo.
+    let running = e.preview.task.id();
+    e.document.catalog_photo = Some(PhotoId(7));
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 2.);
+    e.tx.send(rendered(running, "another document")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+}
+
+/// A frame an edit overtook shows on the way, but never becomes the photo's Library
+/// thumbnail: that is cached under the current edit, which it was not rendered with.
+#[test]
+fn only_the_latest_render_becomes_the_library_thumbnail() -> anyhow::Result<()> {
+    let d = tempfile::tempdir()?;
+    let photos = d.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    std::fs::write(photos.join("a.RAF"), b"fixture")?;
+    let path = d.path().join("test.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(&photos)?;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let (mut e, _) = editor_with_blue_photo(&ctx, crate::app::session::Session::default(), true);
+    task::wait_for(vec![e.renderer.stop()], std::time::Duration::from_secs(5));
+    let (taken_tx, taken) = std::sync::mpsc::channel();
+    let (_release, release) = std::sync::mpsc::channel();
+    e.renderer = worker::holding(taken_tx, release);
+    let library = library::Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].id;
+    e.library = Some(Box::new(library));
+    e.document.catalog_photo = Some(photo);
+    e.document.path = Some(photos.join("a.RAF"));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let first = e.preview.task.id();
+    assert_eq!(
+        taken.recv_timeout(std::time::Duration::from_secs(5)),
+        Ok(first)
+    );
+    in_edit_frame(&ctx, &mut e, |e| e.document.edit.recipe_mut().exposure = 1.);
+    let second = e.preview.task.id();
+    let rendered = |id, status: &str| Event::Rendered {
+        id,
+        pane: worker::Pane::After,
+        preview: worker::Preview::Pixels {
+            image: crate::rendered::Rendered {
+                width: 1,
+                height: 1,
+                pixels: vec![[0.5; 3]],
+            },
+            display_rgb: vec![128; 3],
+            navigator: None,
+        },
+        histogram: Box::new(crate::rendered::Histogram::EMPTY),
+        thumbnail: Some(image::RgbImage::new(4, 4)),
+        samples: None,
+        stage: worker::RenderStage::Fit,
+        status: status.into(),
+    };
+    let cached = |e: &Editor| e.library.as_ref().unwrap().has_edited_thumbnail(photo);
+    e.tx.send(rendered(first, "first")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "first");
+    assert!(!cached(&e));
+    e.tx.send(rendered(second, "second")).unwrap();
+    e.events(&ctx);
+    assert_eq!(e.preview.status, "second");
+    assert!(cached(&e));
+    Ok(())
 }
 
 #[test]
@@ -766,6 +911,82 @@ fn develop_history_survives_reopening_the_photo() -> anyhow::Result<()> {
     assert_eq!(recipe.exposure, 0.5);
     Ok(())
 }
+/// A rendered file's saved edit belongs to its file as a RAW's does: once the
+/// file is rewritten, opening it again starts from the file, with the saved edit
+/// protected rather than shown or replaced.
+#[test]
+fn an_edited_jpeg_whose_file_changed_reopens_from_the_file() -> anyhow::Result<()> {
+    use worker::LoadedHeader;
+    for (name, source) in [
+        ("photo.ARW", crate::camera_data::Source::Raw),
+        ("photo.jpg", crate::camera_data::Source::Rendered),
+    ] {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join(name);
+        let write = |side: u32| -> anyhow::Result<()> {
+            if source == crate::camera_data::Source::Rendered {
+                image::RgbImage::from_pixel(side, side, image::Rgb([90, 120, 150])).save(&file)?;
+            } else {
+                std::fs::write(&file, vec![7u8; side as usize])?;
+            }
+            Ok(())
+        };
+        write(16)?;
+        let path = dir.path().join("photos.rawmakase");
+        let mut catalog = crate::catalog::Catalog::create(&path)?;
+        catalog.add_folder(dir.path())?;
+        let id = catalog.photos()?[0].id;
+        let saved = Recipe {
+            exposure: 1.,
+            ..Default::default()
+        };
+        catalog.save_edit(
+            id,
+            &file,
+            &saved,
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )?;
+        drop(catalog);
+        let ctx = egui::Context::default();
+        let mut editor =
+            Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+        let open = |editor: &mut Editor| {
+            editor.document.reset(Some(id));
+            let (generation, _) = editor.load.start();
+            editor
+                .tx
+                .send(Event::Header(Box::new(LoadedHeader {
+                    id: generation,
+                    path: file.clone(),
+                    metadata: Metadata {
+                        source,
+                        ..Default::default()
+                    },
+                    recipe: Recipe::default(),
+                    export: Default::default(),
+                    status: "Original".into(),
+                })))
+                .unwrap();
+            editor.events(&ctx);
+        };
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 1., "{name}");
+        assert!(!editor.document.edit.save_state().is_protected(), "{name}");
+
+        write(32)?;
+        open(&mut editor);
+        assert_eq!(editor.document.edit.recipe().exposure, 0., "{name}");
+        assert!(editor.document.edit.save_state().is_protected(), "{name}");
+        assert!(
+            editor.document.lightroom_notice.contains("Photo changed"),
+            "{name}: {}",
+            editor.document.lightroom_notice
+        );
+    }
+    Ok(())
+}
 #[test]
 fn navigation_during_an_edit_frame_cannot_dirty_the_next_document() {
     let ctx = egui::Context::default();
@@ -839,7 +1060,11 @@ fn session_preferences_use_the_injected_store() -> anyhow::Result<()> {
     editor.events(&ctx);
     let saved: crate::app::session::Session = serde_json::from_slice(&std::fs::read(path)?)?;
     assert_eq!(saved.last_path, editor.document.path);
-    assert_eq!(saved.monitor, editor.view.monitor);
+    assert_eq!(saved.monitor, Some(dir.path().join("display.icc")));
+    assert_eq!(
+        editor.view.monitor,
+        crate::app::monitor::MonitorProfile::Custom(dir.path().join("display.icc"))
+    );
     Ok(())
 }
 #[test]
@@ -1009,7 +1234,7 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
             },
             |ui| {
                 ctx.input(|i| editor.red_eye_keys(i));
-                editor.viewport_ui(ui)
+                editor.viewport_ui(ui);
             },
         );
         editor.finish_edit_frame(edit, &ctx);
@@ -1208,7 +1433,9 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
                 events,
                 ..Default::default()
             },
-            |ui| editor.viewport_ui(ui),
+            |ui| {
+                editor.viewport_ui(ui);
+            },
         );
         output.textures_delta.clear();
         editor.document.edit.recipe().red_eye.len()
@@ -1262,6 +1489,413 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
         editor.status
     );
     editor.document.edit.recipe().validate().unwrap();
+}
+#[test]
+fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
+    use super::worker::Overlay;
+    use crate::model::masks::MaskShape;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: vec![[0.2; 3]; 160000],
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    let frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let frame = editor.begin_edit_frame();
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut editor, vec![]);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.create_mask(mask_tool::Kind::Brush, None)
+    });
+    let steps = editor.document.edit.history().steps().0.len();
+    assert!(!editor.view.masking.overlay);
+    assert_eq!(editor.overlay(), Overlay::None);
+    let points = |editor: &Editor| match &editor.document.edit.recipe().masks[0].components[0].shape
+    {
+        MaskShape::Brush { strokes } => strokes.iter().map(|s| s.points.len()).collect::<Vec<_>>(),
+        shape => panic!("{shape:?}"),
+    };
+    let (a, b) = (Pos2::new(20., 100.), Pos2::new(180., 100.));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    let mut painted = 0;
+    for k in 1..=8 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 8.)],
+        );
+        // Mid-stroke, the photo already has the stroke so far, and the red overlay
+        // shows it, as in Lightroom.
+        let now = points(&editor);
+        assert_eq!(now.len(), 1, "one stroke while painting");
+        assert!(now[0] >= painted);
+        painted = now[0];
+        assert!(matches!(editor.overlay(), Overlay::Mask { index: 0, .. }));
+    }
+    assert!(painted > 3, "{painted}");
+    // Still one step to come, once the stroke ends.
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), vec![painted]);
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
+    // The overlay stays once the stroke ends, until O hides it.
+    assert!(matches!(editor.overlay(), Overlay::Mask { index: 0, .. }));
+    let o = egui::Event::Key {
+        key: egui::Key::O,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        ctx.input_mut(|i| i.events.push(o));
+        ctx.input(|i| editor.mask_keys(i));
+    });
+    assert_eq!(editor.overlay(), Overlay::None);
+    // Further strokes start away from the mask's pin, which a drag would move.
+    let (a, b) = (Pos2::new(20., 140.), Pos2::new(180., 140.));
+    // An Undo while painting takes back the stroke so far and ends the painting.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    assert_eq!(points(&editor).len(), 2);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.undo());
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), vec![painted]);
+    // So does an Undo with the pointer held still: a Redo then brings the stroke back
+    // as far as it was painted, and the drag that goes on paints no more of it.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    let partial = points(&editor);
+    assert_eq!(partial.len(), 2);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.undo());
+    frame(&mut editor, vec![]);
+    in_edit_frame(&ctx, &mut editor, |editor| editor.redo());
+    assert_eq!(points(&editor), partial);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), partial);
+    // Or Undo and Redo in one frame, before the photo is drawn again.
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
+    );
+    let partial = points(&editor);
+    in_edit_frame(&ctx, &mut editor, |editor| {
+        editor.undo();
+        editor.redo();
+    });
+    assert_eq!(points(&editor), partial);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), partial);
+    // Space taking over mid-stroke ends it: once Space is let go, the drag that goes
+    // on paints nothing more into it.
+    let space = |pressed| egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a + (b - a) * 0.25)],
+    );
+    let started = points(&editor);
+    assert_eq!(started.len(), partial.len() + 1);
+    frame(&mut editor, vec![space(true)]);
+    frame(&mut editor, vec![space(false)]);
+    frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+    frame(&mut editor, vec![button(b, false)]);
+    assert_eq!(points(&editor), started);
+    editor.document.edit.recipe().validate().unwrap();
+}
+#[test]
+fn dragging_a_mask_pin_moves_the_mask() {
+    use crate::model::masks::{MaskComponent, MaskGroup, MaskShape};
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 400,
+        height: 400,
+        pixels: vec![[0.2; 3]; 160000],
+        metadata: Metadata {
+            width: 400,
+            height: 400,
+            wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    editor.preview.texture = Some(
+        ctx.load_texture(
+            "photo",
+            egui::ColorImage::filled([200, 200], egui::Color32::GRAY),
+            egui::TextureOptions::LINEAR,
+        )
+        .into(),
+    );
+    let frame = |editor: &mut Editor, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::splat(200.))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let frame = editor.begin_edit_frame();
+                editor.viewport_ui(ui);
+                editor.finish_edit_frame(frame, &ctx);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut editor, vec![]);
+    // A brush mask with a stroke, and a radial gradient added to it.
+    let stroke = crate::model::masks::BrushStroke {
+        points: vec![[0.3, 0.3], [0.5, 0.3]].into(),
+        radius: 0.05,
+        feather: 0.5,
+        flow: 1.,
+        density: 1.,
+        erase: false,
+        auto_mask: false,
+    };
+    in_edit_frame(&ctx, &mut editor, |e| {
+        e.view.tool = state::Tool::Mask;
+        let mut radial = MaskComponent::new(MaskShape::Radial {
+            center: [0.7, 0.7],
+            radii: [0.1, 0.1],
+            angle: 0.,
+            feather: 0.5,
+        });
+        radial.op = crate::model::masks::MaskOp::Add;
+        e.document.edit.recipe_mut().masks.push(MaskGroup {
+            components: vec![
+                MaskComponent::new(MaskShape::Brush {
+                    strokes: vec![stroke],
+                }),
+                radial,
+            ],
+            ..Default::default()
+        });
+    });
+    frame(&mut editor, vec![]);
+    let steps = editor.document.edit.history().steps().0.len();
+    // Over the pin, the mask's overlay shows though Show Overlay is off; it goes when
+    // the pointer leaves.
+    assert!(!editor.view.masking.overlay);
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(Pos2::new(62., 61.))],
+    );
+    assert!(matches!(
+        editor.overlay(),
+        super::worker::Overlay::Mask { index: 0, .. }
+    ));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(Pos2::new(150., 40.))],
+    );
+    assert_eq!(editor.overlay(), super::worker::Overlay::None);
+    // The pin sits on the stroke's first dab; dragging it by a tenth of the photo
+    // moves every part of the mask with it, as one step.
+    let (a, b) = (Pos2::new(60., 60.), Pos2::new(80., 80.));
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(a), button(a, true)],
+    );
+    for k in 1..=4 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 4.)],
+        );
+    }
+    frame(&mut editor, vec![button(b, false)]);
+    let m = &editor.document.edit.recipe().masks[0];
+    let near = |p: [f32; 2], q: [f32; 2]| (p[0] - q[0]).abs() < 0.01 && (p[1] - q[1]).abs() < 0.01;
+    let MaskShape::Brush { strokes } = &m.components[0].shape else {
+        panic!()
+    };
+    assert!(
+        near(strokes[0].points[0], [0.4, 0.4]),
+        "{:?}",
+        strokes[0].points
+    );
+    assert!(
+        near(strokes[0].points[1], [0.6, 0.4]),
+        "{:?}",
+        strokes[0].points
+    );
+    let MaskShape::Radial { center, .. } = m.components[1].shape else {
+        panic!()
+    };
+    assert!(near(center, [0.8, 0.8]), "{center:?}");
+    assert_eq!(strokes.len(), 1, "the drag painted nothing");
+    assert_eq!(editor.view.masking.selected, Some(0));
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
+    assert!(!editor.view.zoom.on);
+    // With its brush selected, as after painting, the pin still moves the mask.
+    assert!(editor.mask_brush_shown());
+    let c = Pos2::new(80., 100.);
+    frame(
+        &mut editor,
+        vec![egui::Event::PointerMoved(b), button(b, true)],
+    );
+    for k in 1..=4 {
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(b + (c - b) * k as f32 / 4.)],
+        );
+    }
+    frame(&mut editor, vec![button(c, false)]);
+    let MaskShape::Brush { strokes } = &editor.document.edit.recipe().masks[0].components[0].shape
+    else {
+        panic!()
+    };
+    assert_eq!(strokes.len(), 1, "the drag painted nothing");
+    assert!(
+        near(strokes[0].points[0], [0.4, 0.5]),
+        "{:?}",
+        strokes[0].points
+    );
+    // Undo, Space or deleting the mask while moving it ends the move: the drag that
+    // goes on moves nothing.
+    let space = |pressed| egui::Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let pin = c;
+    let d = Pos2::new(120., 120.);
+    let base = editor.document.edit.recipe().masks[0].clone();
+    for interruption in 0..5 {
+        // The mask with its pin at `pin`, and a second like it, which a Delete moves
+        // into its place.
+        in_edit_frame(&ctx, &mut editor, |e| {
+            let mut other = base.clone();
+            other.name = "Other".into();
+            e.document.edit.recipe_mut().masks = vec![base.clone(), other];
+            e.view.masking.selected = None;
+        });
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin), button(pin, true)],
+        );
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin + Vec2::new(4., 4.))],
+        );
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(pin + Vec2::new(8., 8.))],
+        );
+        match interruption {
+            0 => in_edit_frame(&ctx, &mut editor, |e| e.undo()),
+            1 => {
+                frame(&mut editor, vec![space(true)]);
+                frame(&mut editor, vec![space(false)]);
+            }
+            // Delete, as its key does; back where the drag started, so the mask that
+            // takes its place has the same shapes as the drag last left.
+            2 | 3 => {
+                if interruption == 3 {
+                    frame(&mut editor, vec![egui::Event::PointerMoved(pin)]);
+                }
+                in_edit_frame(&ctx, &mut editor, |e| {
+                    e.document.edit.recipe_mut().masks.remove(0);
+                    e.view.masking.selected = None;
+                });
+            }
+            // K starts another mask.
+            _ => in_edit_frame(&ctx, &mut editor, |e| {
+                e.create_mask(mask_tool::Kind::Brush, None)
+            }),
+        }
+        let before = editor.document.edit.recipe().masks.clone();
+        frame(&mut editor, vec![egui::Event::PointerMoved(d)]);
+        frame(&mut editor, vec![button(d, false)]);
+        assert_eq!(
+            editor.document.edit.recipe().masks,
+            before,
+            "interruption {interruption}"
+        );
+    }
 }
 #[test]
 fn masking_tool_draws_gradients_paints_brushes_and_edits_handles() {
@@ -1519,6 +2153,123 @@ fn a_dropped_folder_is_added_itself_not_its_parent() -> anyhow::Result<()> {
 }
 
 #[test]
+fn dropping_a_folder_shows_it_instead_of_unrelated_catalog_photos() -> anyhow::Result<()> {
+    let (dir, mut editor, _) = editor_with_catalog(&["unrelated.ARW"])?;
+    let folder = dir.path().join("trip");
+    std::fs::create_dir_all(folder.join("day1"))?;
+    std::fs::write(folder.join("one.ARW"), b"one")?;
+    std::fs::write(folder.join("day1/two.ARW"), b"two")?;
+    let ctx = editor.context.clone();
+    editor.dropped(vec![folder.clone()]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    assert_eq!(library.session.photos.len(), 3);
+    let mut shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    shown.sort();
+    assert_eq!(shown, ["one.ARW", "two.ARW"]);
+    assert!(!library.source_key().is_empty());
+    // Dropping an already catalogued subfolder narrows the source too.
+    editor.dropped(vec![folder.join("day1")]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    assert_eq!(library.shown().len(), 1);
+    assert_eq!(
+        library.photo(library.shown()[0]).unwrap().filename,
+        "two.ARW"
+    );
+    Ok(())
+}
+
+#[test]
+fn dropping_a_relocated_folders_parent_does_not_select_its_logical_siblings() -> anyhow::Result<()>
+{
+    let dir = tempfile::tempdir()?;
+    let root = dir.path().join("photos");
+    for (folder, name) in [("a/b", "inside.ARW"), ("a/c", "outside.ARW")] {
+        std::fs::create_dir_all(root.join(folder))?;
+        std::fs::write(root.join(folder).join(name), name.as_bytes())?;
+    }
+    let path = dir.path().join("test.rawmakase");
+    let mut catalog = crate::catalog::Catalog::create(&path)?;
+    catalog.add_folder(&root)?;
+    let moved = catalog
+        .folders()?
+        .into_iter()
+        .find(|f| f.relative == "a/b")
+        .unwrap()
+        .id;
+    let incoming = dir.path().join("incoming");
+    std::fs::create_dir(&incoming)?;
+    std::fs::rename(root.join("a/b"), incoming.join("x"))?;
+    catalog.relink_folder(moved, &incoming.join("x"))?;
+    drop(catalog);
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library::Library::load(&path, ctx.clone())?));
+    editor.dropped(vec![incoming]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    let shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    assert_eq!(
+        shown,
+        ["inside.ARW"],
+        "source={} roots={:?} folders={:?} status={}",
+        library.source_key(),
+        library.session.roots,
+        library.session.folders,
+        editor.status
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn dropping_a_folder_mapped_through_a_symlink_selects_it_and_clears_old_filters()
+-> anyhow::Result<()> {
+    let (dir, mut editor, _) = editor_with_catalog(&["outside.ARW"])?;
+    let real = dir.path().join("real");
+    let alias = dir.path().join("alias");
+    std::fs::create_dir(&real)?;
+    std::fs::write(real.join("inside.ARW"), b"inside")?;
+    std::os::unix::fs::symlink(&real, &alias)?;
+    let library = editor.library.as_mut().unwrap();
+    let old_root = library.session.roots[0].0;
+    library.session.catalog.add_folder(&real)?;
+    let root = library
+        .session
+        .catalog
+        .folders()?
+        .into_iter()
+        .find(|f| f.path == real.canonicalize().unwrap())
+        .unwrap()
+        .root;
+    library.session.catalog.relink_root(root, &alias)?;
+    library.refresh()?;
+    library.click_folder_for_tests(&format!("root:{old_root}"));
+    editor.saved_layout.query = "outside".into();
+    let ctx = editor.context.clone();
+    editor.dropped(vec![alias]);
+    settle_catalog(&mut editor, &ctx);
+    let library = editor.library.as_ref().unwrap();
+    let shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    assert_eq!(shown, ["inside.ARW"]);
+    assert_eq!(library.source_key(), format!("root:{root}"));
+    Ok(())
+}
+
+#[test]
 fn dropping_several_folders_adds_each_of_them() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("photos.rawmakase");
@@ -1565,6 +2316,15 @@ fn dropping_several_folders_adds_each_of_them() -> anyhow::Result<()> {
     editor.dropped(vec![card.join("c1.ARW"), card.join("c2.ARW")]);
     settle_catalog(&mut editor, &ctx);
     assert_eq!(names(&editor), ["c1.ARW", "c2.ARW", "h.ARW", "t.ARW"]);
+    let library = editor.library.as_ref().unwrap();
+    let mut shown: Vec<_> = library
+        .shown()
+        .iter()
+        .map(|id| library.photo(*id).unwrap().filename.clone())
+        .collect();
+    shown.sort();
+    assert_eq!(shown, ["c1.ARW", "c2.ARW"]);
+
     assert!(editor.module == Module::Library);
     assert_eq!(editor.document.catalog_photo, None);
     Ok(())
@@ -1648,6 +2408,7 @@ fn removing_a_folder_closes_its_photo_and_leaves_the_files() -> anyhow::Result<(
         name: "trip".into(),
         folders: trip.clone(),
         photos: 1,
+        empty_root: None,
     };
     let other = crate::catalog::CatalogLocation::File(dir.path().join("other.rawmakase"));
     editor.remove_folders(&removal(other));
@@ -1773,6 +2534,29 @@ fn the_prefetched_neighbour_follows_the_direction_of_travel() -> anyhow::Result<
     // Nothing past the end of the filmstrip.
     editor.document.catalog_photo = Some(middle);
     assert_eq!(editor.prefetch_neighbour(last), None);
+    Ok(())
+}
+#[test]
+fn a_rendered_neighbour_is_prefetched_too() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    for name in ["a.jpg", "b.jpg"] {
+        image::RgbImage::new(4, 4).save(dir.path().join(name))?;
+    }
+    let path = dir.path().join("photos.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(dir.path())?;
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let library = library::Library::load(&path, ctx)?;
+    let photos: Vec<_> = library.session.photos.iter().map(|p| p.id).collect();
+    let first = *photos
+        .iter()
+        .find(|p| library.navigate(**p, -1).is_none_or(|q| q == **p))
+        .unwrap();
+    let second = library.navigate(first, 1).unwrap();
+    let expected = library.photo(second).unwrap().path.clone();
+    editor.library = Some(Box::new(library));
+    assert_eq!(editor.prefetch_neighbour(first), Some(expected));
     Ok(())
 }
 #[test]
@@ -1955,6 +2739,143 @@ fn select_all_shortcut_selects_the_filmstrip_for_sync() -> anyhow::Result<()> {
     let library = e.library.as_ref().unwrap();
     assert_eq!(library.selected_photos(), ids);
     assert_eq!(library.selected(), Some(ids[1]));
+    Ok(())
+}
+/// In the Library grid, Shift+Cmd+S opens Sync Settings from the active photo to
+/// the rest of the selection, with no photo open in Develop (issue #445).
+#[test]
+fn library_sync_shortcut_syncs_from_the_active_photo() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let press = |e: &mut Editor| {
+        let ctx = e.context.clone();
+        let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key: egui::Key::S,
+                    physical_key: Some(egui::Key::S),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ],
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| e.draw(ui));
+        output.textures_delta.clear();
+    };
+    // A photo alone has nothing to sync to.
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    assert_eq!(e.sync_target_count(), 0);
+    press(&mut e);
+    assert!(e.modal.is_none());
+    // The last one clicked is active, and the source.
+    e.library.as_mut().unwrap().select_range_to(ids[2]);
+    assert_eq!(e.library.as_ref().unwrap().selected(), Some(ids[2]));
+    let targets: Vec<_> = e.sync_targets().into_iter().map(|t| t.id).collect();
+    assert_eq!(targets, ids[..2]);
+    assert_eq!(e.sync_target_count(), 2);
+    press(&mut e);
+    assert!(
+        matches!(&e.modal, Some(Modal::CopySettings(dialog))
+            if dialog.purpose == settings_transfer::Transfer::Sync),
+        "Shift+Cmd+S opens Synchronize Settings"
+    );
+    Ok(())
+}
+/// From the Library, the photo open in Develop can be a Sync's target: it opens
+/// again with what the Sync saved, so its stale edit is not saved over it.
+/// From the Library, the photo open in Develop can be a target: while an Auto
+/// estimate is still to land on it, it would be saved over what the Sync wrote, so
+/// Sync waits.
+#[test]
+fn library_sync_waits_for_auto_on_the_open_photo() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[0]));
+    library.select_range_to(ids[2]);
+    // ids[0] is open in Develop and a target; ids[2] is the source.
+    e.document.catalog_photo = Some(ids[0]);
+    let _auto = e.document.auto.start();
+    assert!(e.sync_targets().is_empty());
+    assert_eq!(e.sync_target_count(), 0);
+    e.document.auto = Default::default();
+    assert_eq!(e.sync_target_count(), 2);
+    // Not selected, it is not changed and does not hold the Sync back.
+    let _auto = e.document.auto.start();
+    let library = e.library.as_mut().unwrap();
+    library.select(Some(ids[1]));
+    library.select_range_to(ids[2]);
+    assert_eq!(e.sync_target_count(), 1);
+    Ok(())
+}
+#[test]
+fn a_synced_photo_open_in_develop_opens_again() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF"])?;
+    let library = e.library.as_ref().unwrap();
+    let path = library.photo(ids[0]).unwrap().path.clone();
+    let catalog = library.session.catalog.location().clone();
+    e.document.catalog_photo = Some(ids[0]);
+    e.document.path = Some(path.clone());
+    let synced = |id| sync::Synced {
+        id,
+        path: path.clone(),
+        before: sync::EditBefore::Saved(Box::default()),
+        after: Default::default(),
+        history: crate::catalog::SavedHistory {
+            origin: Default::default(),
+            steps: Vec::new(),
+            applied: 0,
+        },
+        history_before: crate::catalog::SavedHistory {
+            origin: Default::default(),
+            steps: Vec::new(),
+            applied: 0,
+        },
+        identity: crate::storage::Identity::read(&path).unwrap(),
+    };
+    let result = |id| sync::SyncResult {
+        change: sync::BatchChange::Settings(Default::default()),
+        catalog: catalog.clone(),
+        synced: vec![synced(id)],
+        failed: Vec::new(),
+        notes: Vec::new(),
+    };
+    let settled = || {
+        save_state::SaveState::Pending(
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+        )
+    };
+    let ctx = e.context.clone();
+    // Another photo synced: the open one stays as it is, and saves once it is done.
+    assert!(e.activity.begin_sync());
+    e.document.edit.setup_mut().exposure = 0.4;
+    *e.document.edit.save_state_mut() = settled();
+    e.autosave(&ctx);
+    assert!(!e.autosave.busy(), "nothing saves while a Sync writes");
+    e.synced(result(ids[1]));
+    assert!(!e.load.is_running());
+    assert!(e.document.edit.save_state().needs_save());
+    // The open photo synced: what an analysis landing during the Sync changed on it
+    // (as Upright's would) is not saved over the Sync, and it opens again.
+    assert!(e.activity.begin_sync());
+    e.document.edit.setup_mut().exposure = 0.9;
+    *e.document.edit.save_state_mut() = settled();
+    e.autosave(&ctx);
+    assert!(!e.autosave.busy(), "nothing saves while a Sync writes");
+    // Nor a save asked for directly (Restart to Update, closing).
+    assert!(!e.flush());
+    assert_eq!(
+        e.flush_by(std::time::Instant::now() + std::time::Duration::from_secs(1)),
+        workflow::Flushed::Late
+    );
+    assert!(!e.autosave.busy());
+    e.synced(result(ids[0]));
+    assert!(e.load.is_running(), "the open photo opens again");
+    assert!(!e.document.edit.save_state().needs_save());
+    let library = e.library.as_ref().unwrap();
+    assert!(library.session.catalog.load_edit(ids[0], &path)?.is_none());
     Ok(())
 }
 #[test]
@@ -2653,6 +3574,52 @@ fn double_click_in_the_loupe_goes_back_to_the_grid() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn preferences_double_click_does_not_close_the_developed_loupe() -> anyhow::Result<()> {
+    let (_d, mut e, ids) = editor_with_catalog(&["a.RAF"])?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    e.library.as_mut().unwrap().open_loupe();
+    // Keep the online RAW on the Develop-backed Loupe path without decoding
+    // the fixture or racing a background load.
+    e.document.catalog_photo = Some(ids[0]);
+    e.loupe_tried = Some(ids[0]);
+    e.preferences.open = true;
+    let ctx = e.context.clone();
+    let at = Pos2::new(600., 300.);
+    let click = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let frame = |e: &mut Editor, events: Vec<egui::Event>, time: f64| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| e.draw(ui),
+        );
+        output.textures_delta.clear();
+    };
+    frame(&mut e, vec![egui::Event::PointerMoved(at)], 0.0);
+    for (pressed, time) in [(true, 0.1), (false, 0.15), (true, 0.2), (false, 0.25)] {
+        frame(&mut e, vec![click(pressed)], time);
+    }
+    assert!(e.preferences.open);
+    assert!(e.library.as_ref().unwrap().loupe_open());
+    // The same gesture still closes this Loupe once Preferences is gone.
+    e.preferences.open = false;
+    frame(&mut e, vec![], 1.0);
+    frame(&mut e, vec![], 1.05);
+    for (pressed, time) in [(true, 1.1), (false, 1.15), (true, 1.2), (false, 1.25)] {
+        frame(&mut e, vec![click(pressed)], time);
+    }
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
 fn quick_collection_toggles_shows_clears_and_undoes() -> anyhow::Result<()> {
     let (_d, mut e, ids) = editor_with_catalog(&["a.RAF", "b.RAF", "c.RAF"])?;
     let library = e.library.as_mut().unwrap();
@@ -3143,11 +4110,8 @@ fn crop_keys_swap_and_cycle_the_overlay_but_not_while_typing() -> anyhow::Result
     Ok(())
 }
 
-#[test]
-fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_turn() {
-    let ctx = egui::Context::default();
-    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
-    // Stripes falling 3° to the right.
+/// Stripes falling 3° to the right, which Auto straighten levels at about −3°.
+fn falling_stripes() -> Arc<CameraImage> {
     let (w, h) = (600usize, 400usize);
     let (s, c) = 3f32.to_radians().sin_cos();
     let pixels = (0..w * h)
@@ -3167,7 +4131,7 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
             [sum / 4.; 3]
         })
         .collect();
-    e.document.set_image(Arc::new(CameraImage {
+    Arc::new(CameraImage {
         recovered: Default::default(),
         width: w as u32,
         height: h as u32,
@@ -3181,7 +4145,14 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
         fast: false,
         scale_factor: 1.,
         scale_clipped: 0,
-    }));
+    })
+}
+
+#[test]
+fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_turn() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.document.set_image(falling_stripes());
     e.document.edit.setup_mut().wb = [1.; 3];
     let upright = e.document.edit.recipe().upright.clone();
     let next = |e: &mut Editor| loop {
@@ -3230,6 +4201,124 @@ fn auto_straighten_sets_the_level_angle_as_one_step_and_measures_again_after_a_t
     assert_eq!(e.document.edit.recipe().upright, upright);
     e.undo();
     assert_eq!(e.document.edit.recipe().straighten, 0.);
+}
+
+/// Pasting the Crop of a photo whose angle was Auto measures this photo, as Sync does
+/// on the photos it changes; the angle found belongs to the Paste's step, which Undo
+/// and Redo take back and forth without measuring again.
+#[test]
+fn pasting_an_auto_straighten_measures_this_photo_within_the_paste() {
+    use crate::model::transform::AutoStraighten;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = falling_stripes();
+    e.document.metadata = Some(image.metadata.clone());
+    e.document.set_image(image);
+    e.document.edit.setup_mut().wb = [1.; 3];
+    // The Crop copied from a photo Auto turned by 5°.
+    e.document.edit.setup_mut().set_auto_straighten(Some(5.));
+    let mut crop = crate::model::settings_groups::GroupSelection::none();
+    crop.set(
+        crate::model::settings_groups::SettingGroup::Crop,
+        crate::model::settings_groups::GroupInclusion::Included,
+    );
+    e.copy_settings(crop);
+    *e.document.edit.setup_mut() = Recipe {
+        wb: [1.; 3],
+        ..Default::default()
+    };
+    // Pasted as the menu does, within a frame, which records the step.
+    let frame = e.begin_edit_frame();
+    e.paste_settings();
+    e.finish_edit_frame(frame, &ctx);
+    let r = e.document.edit.recipe();
+    assert_eq!(r.straighten_auto, Some(AutoStraighten::Pending(0.)));
+    assert!(e.document.straighten.is_running());
+    let (generation, analysed, result) = loop {
+        match e.rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(worker::Event::Straighten {
+                generation,
+                analysed,
+                result,
+                ..
+            }) => break (generation, analysed, result),
+            Ok(_) => continue,
+            Err(err) => panic!("no Auto straighten result: {err}"),
+        }
+    };
+    e.auto_straighten_ready(generation, &analysed, result);
+    let r = e.document.edit.recipe();
+    let angle = r.straighten;
+    assert!((angle + 3.).abs() < 0.2, "{angle}");
+    assert_eq!(r.auto_straighten(), Some(AutoStraighten::Measured(angle)));
+    assert!(!e.document.straighten.is_running());
+    let (steps, applied) = e.document.edit.history().steps();
+    assert_eq!(applied, 1);
+    assert_eq!(steps[0].name, "Paste Settings");
+    e.undo();
+    assert_eq!(e.document.edit.recipe().straighten, 0.);
+    assert_eq!(e.document.edit.recipe().auto_straighten(), None);
+    e.redo();
+    assert_eq!(e.document.edit.recipe().straighten, angle);
+    assert!(!e.document.straighten.is_running());
+}
+
+/// A photo flipped while its pasted Auto straighten is being measured is measured
+/// again as it is now, rather than left waiting or given the stale angle.
+#[test]
+fn a_pasted_auto_straighten_flipped_before_it_is_measured_is_measured_again() {
+    use crate::model::transform::AutoStraighten;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let image = falling_stripes();
+    e.document.metadata = Some(image.metadata.clone());
+    e.document.set_image(image);
+    e.document.edit.setup_mut().set_auto_straighten(Some(5.));
+    let mut crop = crate::model::settings_groups::GroupSelection::none();
+    crop.set(
+        crate::model::settings_groups::SettingGroup::Crop,
+        crate::model::settings_groups::GroupInclusion::Included,
+    );
+    e.copy_settings(crop);
+    *e.document.edit.setup_mut() = Recipe {
+        wb: [1.; 3],
+        straighten: 1.,
+        ..Default::default()
+    };
+    e.paste_settings();
+    assert!(e.document.straighten.is_running());
+    crate::develop::mirror(
+        e.document.edit.setup_mut(),
+        crate::develop::Mirror::Horizontal,
+    );
+    assert_eq!(
+        e.document.edit.recipe().straighten_auto,
+        Some(AutoStraighten::Pending(-1.))
+    );
+    let next = |e: &mut Editor| loop {
+        match e.rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(worker::Event::Straighten {
+                generation,
+                analysed,
+                result,
+                ..
+            }) => break e.auto_straighten_ready(generation, &analysed, result),
+            Ok(_) => continue,
+            Err(err) => panic!("no Auto straighten result: {err}"),
+        }
+    };
+    // Measured before the flip: it doesn't fit, and the photo is measured again.
+    next(&mut e);
+    assert!(e.document.edit.recipe().straighten_pending());
+    assert!(e.document.straighten.is_running(), "measured again");
+    next(&mut e);
+    // Flipped, the stripes rise to the right.
+    let r = e.document.edit.recipe();
+    assert!((r.straighten - 3.).abs() < 0.2, "{}", r.straighten);
+    assert_eq!(
+        r.auto_straighten(),
+        Some(AutoStraighten::Measured(r.straighten))
+    );
 }
 
 #[test]
@@ -3774,6 +4863,18 @@ fn preset_amount_scales_the_preset_from_the_settings_before_it() {
     editor.document.edit.replace(recipe);
     editor.finish_edit_frame(frame, &ctx);
     assert!(editor.presets.amount.is_none());
+    // An edit earlier in the frame the slider moves in (a mask's name kept as the
+    // slider was clicked) ends it there, rather than being taken back by it.
+    editor.apply_preset(0).unwrap();
+    let frame = editor.begin_edit_frame();
+    editor.document.edit.recipe_mut().vibrance = 0.3;
+    assert_eq!(
+        editor.set_preset_amount(0.5),
+        super::presets::AmountChange::Same
+    );
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(editor.document.edit.recipe().vibrance, 0.3);
+    assert!(editor.presets.amount.is_none());
 }
 #[test]
 fn red_eye_brackets_resize_the_circle_a_click_uses() {
@@ -4243,7 +5344,7 @@ fn a_swatch_added_while_visualize_range_is_on_is_visualized_at_once() {
     editor.point_color_sample_ready(&sampled, Ok([2., 0.6, 0.3]));
     assert_eq!(editor.view.point_color.selected, Some(0));
     // The render scheduled with the swatch shows its range, with no other change.
-    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    let pending = editor.preview.pending.recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
         crate::model::point_color::SwatchView::VisualizeRange
@@ -4342,7 +5443,7 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     editor.document.edit.setup_mut().effects.monochrome = false;
     // The preview's identity includes it, so a picker never takes it for the photo.
     editor.schedule();
-    let pending = editor.preview.pending_recipe.as_ref().unwrap();
+    let pending = editor.preview.pending.recipe.as_ref().unwrap();
     assert_eq!(
         pending.point_colors[0].view,
         crate::model::point_color::SwatchView::VisualizeRange
@@ -4910,7 +6011,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
             |_| {},
         )?;
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        let mut photo = BatchPhoto::from_record(record, path.clone(), name);
+        let mut photo = BatchPhoto::from_record(record, path.clone(), name, Default::default());
         if last {
             photo.edit = Edit::Shown {
                 recipe: Box::new(editor.document.edit.recipe().clone()),
@@ -4928,6 +6029,7 @@ fn a_batch_export_matches_develops_export_pixel_for_pixel() -> anyhow::Result<()
                 defaults: defaults.clone(),
                 watermark: None,
                 demosaic: Default::default(),
+                cache: editor.decode_cache.clone(),
             },
             &Default::default(),
             |_| {},
@@ -5942,23 +7044,60 @@ fn hiding_develops_right_panel_takes_its_tab_panel_and_rail() {
     assert!(ctx.read_response(rail_id(DevelopTab::Presets)).is_none());
 }
 #[test]
-fn a_tool_opened_over_the_presets_ends_a_preset_preview() {
-    // A preset previewed under the pointer, then R: Crop's drawer takes the
-    // Presets tab's place, and the photo must not keep the preview.
+fn a_tools_drawer_takes_the_adjustments_place_beside_the_tabs() {
+    // The rail's first group (Edit and the tools) switches the adjustments
+    // panel; Presets and History keep their panel beside it.
+    use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
+    use super::side_tabs::{edit_id, rail_id};
     let ctx = egui::Context::default();
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.module = Module::Develop;
     e.onboarding.visible = false;
-    panel_frame(&mut e, vec![], FocusedButton::No);
-    e.presets.preview = Some(Recipe {
-        exposure: 1.,
-        ..Default::default()
-    });
-    e.presets.hover = Some((0, std::time::Instant::now()));
+    // Room for the tab panel beside the photo.
+    assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Left)));
+    let tabs_drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("presets").with("__resize"))
+            .is_some()
+    };
+    let click = |e: &mut Editor, id: egui::Id| {
+        let at = ctx
+            .read_response(id)
+            .expect("the rail's button")
+            .rect
+            .center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        panel_frame(e, vec![egui::Event::PointerMoved(at)], FocusedButton::No);
+        panel_frame(e, vec![button(true)], FocusedButton::No);
+        panel_frame(e, vec![button(false)], FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    for _ in 0..3 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(tabs_drawn(&ctx));
+    // Crop's drawer leaves the Presets tab open.
     e.view.tool = state::Tool::Crop;
     panel_frame(&mut e, vec![], FocusedButton::No);
-    assert!(e.presets.preview.is_none());
-    assert!(e.presets.hover.is_none());
+    assert!(tabs_drawn(&ctx));
+    // Switching the tab keeps the tool.
+    click(&mut e, rail_id(DevelopTab::History));
+    assert_eq!(e.panels.develop_tab, DevelopTab::History);
+    assert_eq!(e.view.tool, state::Tool::Crop);
+    assert!(tabs_drawn(&ctx));
+    // Edit closes the drawer, the tab panel stays.
+    click(&mut e, edit_id());
+    assert_eq!(e.view.tool, state::Tool::None);
+    assert!(tabs_drawn(&ctx));
+    // Folding the tabs leaves a tool open.
+    e.view.tool = state::Tool::Mask;
+    click(&mut e, rail_id(DevelopTab::History));
+    assert!(!tabs_drawn(&ctx));
+    assert_eq!(e.view.tool, state::Tool::Mask);
 }
 #[test]
 fn hiding_the_presets_ends_a_preset_preview() {
@@ -6397,6 +7536,7 @@ fn a_change_still_waiting_for_the_undo_log_forgets_a_removed_folders_photos() ->
         name: "photos".into(),
         folders,
         photos: 1,
+        empty_root: None,
     });
     editor.sync_undo();
     // Its id may be the next photo's: nothing may undo onto it.
@@ -6462,4 +7602,452 @@ fn shift_cmd_c_and_v_reach_develop_though_winit_reads_them_as_the_clipboard() {
     // Plain Cmd+C stays the clipboard's: no Copy Settings.
     frame(&mut editor, egui::Event::Copy, egui::Modifiers::COMMAND);
     assert!(editor.modal.is_none());
+}
+/// The accessibility tree of `editor`'s Develop controls in a frame given `events`.
+fn controls_frame(
+    ctx: &egui::Context,
+    editor: &mut Editor,
+    events: Vec<egui::Event>,
+) -> egui::accesskit::TreeUpdate {
+    let mut output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(320., 1600.))),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            let frame = editor.begin_edit_frame();
+            egui::CentralPanel::default().show(ui, |ui| editor.controls(ui));
+            editor.finish_edit_frame(frame, ui.ctx());
+        },
+    );
+    output.textures_delta.clear();
+    output
+        .platform_output
+        .accesskit_update
+        .expect("accessibility is on")
+}
+fn press_and_release(at: Pos2) -> [Vec<egui::Event>; 2] {
+    [true, false].map(|pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    })
+}
+fn centre(node: &egui::accesskit::Node) -> Pos2 {
+    let b = node.bounds().expect("placed");
+    Pos2::new(((b.x0 + b.x1) / 2.) as f32, ((b.y0 + b.y1) / 2.) as f32)
+}
+#[test]
+fn the_basic_panel_offers_relative_white_balance_for_a_jpeg() {
+    use egui::accesskit::Role;
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let m = Metadata {
+        source: crate::camera_data::Source::Rendered,
+        width: 64,
+        height: 48,
+        ..Default::default()
+    };
+    let (profiles, _) = crate::camera_profiles::installed(&m);
+    editor.document.reset(None);
+    let (generation, _) = editor.load.start();
+    for event in [
+        Event::Header(Box::new(worker::LoadedHeader {
+            id: generation,
+            path: "photo.jpg".into(),
+            metadata: m.clone(),
+            recipe: Recipe::for_rendered(&m),
+            export: Default::default(),
+            status: "Original".into(),
+        })),
+        Event::Profiles {
+            id: generation,
+            profiles,
+            errors: Vec::new(),
+            groups: Default::default(),
+        },
+    ] {
+        editor.tx.send(event).unwrap();
+    }
+    editor.events(&ctx);
+    controls_frame(&ctx, &mut editor, vec![]);
+    let update = controls_frame(&ctx, &mut editor, vec![]);
+    let nodes = || update.nodes.iter().map(|(_, node)| node);
+    let combo = |value: &str| {
+        nodes()
+            .find(|n| n.role() == Role::ComboBox && n.value() == Some(value))
+            .cloned()
+            .unwrap_or_else(|| panic!("no {value} menu"))
+    };
+    let white_balance = combo("As Shot");
+    let below = centre(&white_balance).y;
+    // The first slider under the WB menu is relative Temp, then Tint: ±100 each.
+    let mut numbers: Vec<_> = nodes()
+        .filter(|n| n.role() == Role::SpinButton && centre(n).y > below)
+        .collect();
+    numbers.sort_by(|a, b| centre(a).y.total_cmp(&centre(b).y));
+    for number in &numbers[..2] {
+        assert_eq!(
+            (number.min_numeric_value(), number.max_numeric_value()),
+            (Some(-100.), Some(100.))
+        );
+    }
+    // The profile is the file's own; nothing to import.
+    let profile = combo("Embedded");
+    let [down, up] = press_and_release(centre(&profile));
+    controls_frame(&ctx, &mut editor, down);
+    controls_frame(&ctx, &mut editor, up);
+    let menu = controls_frame(&ctx, &mut editor, vec![]);
+    let labels: Vec<String> = menu
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| n.label().or(n.value()).map(String::from))
+        .collect();
+    let count = |labels: &[String], label: &str| labels.iter().filter(|l| *l == label).count();
+    // Open: the menu lists the profile beside the box showing it.
+    assert_eq!(count(&labels, "Embedded"), 2, "{labels:?}");
+    for absent in [
+        "Default (camera matrix)",
+        "Import Adobe profiles for this camera",
+        "Import profiles…",
+        "Import profiles from folder…",
+    ] {
+        assert_eq!(count(&labels, absent), 0, "{absent}: {labels:?}");
+    }
+    // Close it, then open the WB menu: no Kelvin presets.
+    controls_frame(
+        &ctx,
+        &mut editor,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    let [down, up] = press_and_release(centre(&white_balance));
+    controls_frame(&ctx, &mut editor, down);
+    controls_frame(&ctx, &mut editor, up);
+    let menu = controls_frame(&ctx, &mut editor, vec![]);
+    let labels: Vec<String> = menu
+        .nodes
+        .iter()
+        .filter_map(|(_, n)| n.label().or(n.value()).map(String::from))
+        .collect();
+    // The box shows As Shot, and the menu offers it with Auto and Custom.
+    assert_eq!(count(&labels, "As Shot"), 2, "{labels:?}");
+    for offered in ["Auto", "Custom"] {
+        assert_eq!(count(&labels, offered), 1, "{offered}: {labels:?}");
+    }
+    assert_eq!(count(&labels, "Daylight"), 0, "{labels:?}");
+}
+#[test]
+fn opening_a_jpeg_says_it_is_reading_the_photo() -> anyhow::Result<()> {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("photo.jpg");
+    image::RgbImage::new(8, 8).save(&file)?;
+    assert!(editor.load_raw(file, None));
+    assert_eq!(editor.status, "Reading photo…");
+    Ok(())
+}
+#[test]
+fn auto_white_balance_on_a_jpeg_sets_its_relative_temp_and_tint() {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let (width, height) = (64u32, 48u32);
+    let metadata = Metadata {
+        source: crate::camera_data::Source::Rendered,
+        width,
+        height,
+        ..Default::default()
+    };
+    // A warm gradient, which Auto cools.
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width,
+        height,
+        pixels: (0..width * height)
+            .map(|i| {
+                let v = 0.05 + 0.5 * (i % width) as f32 / width as f32;
+                [v * 1.2, v, v * 0.8]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    *editor.document.edit.setup_mut() = Recipe::for_rendered(&metadata);
+    editor.start_auto(worker::AutoKind::WhiteBalance);
+    let start = std::time::Instant::now();
+    while editor.document.auto.is_running() {
+        assert!(start.elapsed().as_secs() < 60, "Auto did not finish");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        editor.events(&ctx);
+    }
+    let r = editor.document.edit.recipe();
+    assert!(
+        r.incremental_temperature < 0.,
+        "{}",
+        r.incremental_temperature
+    );
+    assert_eq!((r.temperature, r.tint), (6500., 0.));
+    // The sliders carry it (the gains stay 1), and the WB menu shows Auto.
+    assert_eq!(r.wb, [1.; 3]);
+    assert_eq!(
+        r.auto_white_balance,
+        Some([r.incremental_temperature, r.incremental_tint])
+    );
+}
+#[test]
+fn a_tools_drawer_keeps_the_adjustments_width() {
+    let ctx = egui::Context::default();
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let width = |e: &mut Editor| {
+        for _ in 0..3 {
+            panel_frame(e, vec![], FocusedButton::No);
+        }
+        egui::containers::panel::PanelState::load(&ctx, egui::Id::new("adjustments"))
+            .unwrap()
+            .outer_rect
+            .width()
+    };
+    let edit = width(&mut e);
+    for tool in [
+        state::Tool::Crop,
+        state::Tool::Remove,
+        state::Tool::RedEye,
+        state::Tool::Mask,
+    ] {
+        e.view.tool = tool;
+        assert_eq!(width(&mut e), edit, "{tool:?} widened the panel");
+        e.view.tool = state::Tool::None;
+        assert_eq!(width(&mut e), edit, "after {tool:?}");
+    }
+}
+#[test]
+fn edit_on_the_rail_folds_the_adjustments_and_brings_them_back() {
+    use super::panels::WorkspacePanel;
+    use super::side_tabs::edit_id;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    e.onboarding.visible = false;
+    let drawn = |ctx: &egui::Context| {
+        ctx.read_response(egui::Id::new("adjustments").with("__resize"))
+            .is_some()
+    };
+    let click = |e: &mut Editor| {
+        let at = ctx.read_response(edit_id()).expect("Edit").rect.center();
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        panel_frame(e, vec![egui::Event::PointerMoved(at)], FocusedButton::No);
+        panel_frame(e, vec![button(true)], FocusedButton::No);
+        panel_frame(e, vec![button(false)], FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    for _ in 0..2 {
+        panel_frame(&mut e, vec![], FocusedButton::No);
+    }
+    assert!(drawn(&ctx));
+    // Edit, already showing, folds the adjustments; the rail stays.
+    click(&mut e);
+    assert!(!drawn(&ctx));
+    assert!(!e.panel_shown(WorkspacePanel::Adjustments));
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    // A tool's drawer shows while they are folded.
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(drawn(&ctx));
+    // Closing it folds them again; Edit from it brings the adjustments back.
+    e.view.tool = state::Tool::None;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    assert!(!drawn(&ctx));
+    e.view.tool = state::Tool::Crop;
+    panel_frame(&mut e, vec![], FocusedButton::No);
+    click(&mut e);
+    assert_eq!(e.view.tool, state::Tool::None);
+    assert!(drawn(&ctx));
+    assert!(e.panel_shown(WorkspacePanel::Adjustments));
+    // Tab leaves the fold alone: it is the rail's.
+    click(&mut e);
+    let tab = || key_down(egui::Key::Tab, egui::Modifiers::NONE);
+    panel_frame(&mut e, tab(), FocusedButton::No);
+    panel_frame(&mut e, tab(), FocusedButton::No);
+    assert!(e.panel_shown(WorkspacePanel::Right));
+    assert!(!e.panel_shown(WorkspacePanel::Adjustments));
+}
+
+/// The texts one frame of `editor` paints.
+fn painted_texts(editor: &mut Editor, ctx: &egui::Context) -> Vec<String> {
+    fn collect(shape: &egui::Shape, texts: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => texts.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, texts)),
+            _ => {}
+        }
+    }
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| editor.draw(ui));
+    output.textures_delta.clear();
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+/// A photo whose opening failed is not shown as still loading: no image is
+/// coming, and the status line says why.
+#[test]
+fn a_photo_that_failed_to_open_is_not_shown_loading() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(&ctx, None, Default::default(), None);
+    editor.onboarding.visible = false;
+    editor.module = Module::Develop;
+    editor.document.reset(Some(PhotoId(1)));
+    let (load_id, _) = editor.load.start();
+    assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
+    editor
+        .tx
+        .send(Event::Failed {
+            id: load_id,
+            task: worker::TaskKind::Load,
+            error: "Could not read the WebP file: An expected chunk was missing".into(),
+        })
+        .unwrap();
+    editor.events(&ctx);
+    let texts = painted_texts(&mut editor, &ctx);
+    assert!(!texts.contains(&"Loading photo…".to_string()), "{texts:?}");
+    assert!(
+        texts.contains(&"Couldn't open this photo".to_string()),
+        "{texts:?}"
+    );
+    // Opening it again shows it loading again.
+    editor.document.reset(Some(PhotoId(1)));
+    editor.load.start();
+    assert!(painted_texts(&mut editor, &ctx).contains(&"Loading photo…".to_string()));
+}
+/// A frame with the window maximized or not, at `time`: the session's value
+/// afterwards, and whether the frame asked to maximize the window.
+fn window_frame(
+    e: &mut Editor,
+    ctx: &egui::Context,
+    time: f64,
+    maximized: bool,
+    minimized: bool,
+) -> (bool, bool) {
+    let mut input = egui::RawInput {
+        time: Some(time),
+        ..Default::default()
+    };
+    input.viewports.insert(
+        egui::ViewportId::ROOT,
+        egui::ViewportInfo {
+            maximized: Some(maximized),
+            minimized: Some(minimized),
+            ..Default::default()
+        },
+    );
+    let mut output = ctx.run_ui(input, |ui| e.remember_maximized(ui.ctx()));
+    output.textures_delta.clear();
+    let asked = output.viewport_output[&egui::ViewportId::ROOT]
+        .commands
+        .contains(&egui::ViewportCommand::Maximized(true));
+    let saved: crate::app::session::Session = e
+        .session_file
+        .as_ref()
+        .and_then(|file| std::fs::read(file).ok())
+        .map_or_else(Default::default, |json| {
+            serde_json::from_slice(&json).unwrap()
+        });
+    (saved.maximized, asked)
+}
+#[test]
+fn the_window_reopens_maximized_as_it_was_left() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session::default(),
+        Some(dir.path().join("session.json")),
+    );
+    let keeps = workspace::KEEPS_MAXIMIZED;
+    assert_eq!(window_frame(&mut e, &ctx, 0., true, false), (keeps, false));
+    // Minimized from maximized, Windows reports it not maximized.
+    assert_eq!(window_frame(&mut e, &ctx, 1., false, true), (keeps, false));
+    assert_eq!(window_frame(&mut e, &ctx, 2., true, false), (keeps, false));
+    // Restored to its size.
+    assert_eq!(window_frame(&mut e, &ctx, 3., false, false), (false, false));
+    Ok(())
+}
+#[test]
+fn a_window_reopened_maximized_keeps_that_until_the_window_manager_maximizes_it()
+-> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let file = dir.path().join("session.json");
+    let session = || crate::app::session::Session {
+        maximized: true,
+        ..Default::default()
+    };
+    crate::storage::atomic_json(&file, &session())?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
+    let keeps = workspace::KEEPS_MAXIMIZED;
+    // An X11 window manager maximizes the window only once it is shown: the first
+    // frame asks again, and the frames before it is maximized don't count.
+    assert_eq!(window_frame(&mut e, &ctx, 0., false, false), (true, keeps));
+    assert_eq!(window_frame(&mut e, &ctx, 0.5, false, false), (true, false));
+    assert_eq!(window_frame(&mut e, &ctx, 1., true, false), (true, false));
+    assert_eq!(
+        window_frame(&mut e, &ctx, 1.5, false, false),
+        (!keeps, false)
+    );
+
+    // One that never maximizes it: after a while, the window is saved as it is.
+    crate::storage::atomic_json(&file, &session())?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
+    assert_eq!(window_frame(&mut e, &ctx, 0., false, false), (true, keeps));
+    assert_eq!(window_frame(&mut e, &ctx, 1.9, false, false), (true, false));
+    assert_eq!(
+        window_frame(&mut e, &ctx, 2.1, false, false),
+        (!keeps, false)
+    );
+
+    // Maximized already (Windows, Wayland), or started minimized: nothing to ask.
+    for minimized in [false, true] {
+        crate::storage::atomic_json(&file, &session())?;
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, session(), Some(file.clone()));
+        assert_eq!(
+            window_frame(&mut e, &ctx, 0., true, minimized),
+            (true, false)
+        );
+        assert_eq!(window_frame(&mut e, &ctx, 0.1, true, false), (true, false));
+    }
+    Ok(())
 }

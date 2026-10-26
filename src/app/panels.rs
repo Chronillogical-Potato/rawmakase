@@ -18,12 +18,22 @@ pub(super) enum WorkspacePanel {
     Filmstrip,
     /// Develop's Presets and History tabs, beside the adjustments.
     Presets,
+    /// Develop's adjustments, which the rail's Edit folds; a tool's drawer
+    /// shows in their place either way.
+    Adjustments,
 }
 impl WorkspacePanel {
-    const ALL: [Self; 4] = [Self::Left, Self::Right, Self::Filmstrip, Self::Presets];
+    const ALL: [Self; 5] = [
+        Self::Left,
+        Self::Right,
+        Self::Filmstrip,
+        Self::Presets,
+        Self::Adjustments,
+    ];
     /// The side panels `module` has, which Tab hides and shows together.
     fn sides(module: Module) -> &'static [Self] {
         match module {
+            // The adjustments' fold is the rail's, under the right panel.
             Module::Develop => &[Self::Left, Self::Right, Self::Presets],
             Module::Library => &[Self::Left, Self::Right],
         }
@@ -77,6 +87,8 @@ pub(crate) struct PanelLayout {
     pub filmstrip: Visibility,
     /// Develop's tab panel; the Library has none.
     pub presets: Visibility,
+    /// Develop's adjustments; the Library has none.
+    pub adjustments: Visibility,
 }
 impl PanelLayout {
     pub(super) fn shown(self, panel: WorkspacePanel) -> bool {
@@ -88,6 +100,7 @@ impl PanelLayout {
             WorkspacePanel::Right => self.right,
             WorkspacePanel::Filmstrip => self.filmstrip,
             WorkspacePanel::Presets => self.presets,
+            WorkspacePanel::Adjustments => self.adjustments,
         }
     }
     fn slot(&mut self, panel: WorkspacePanel) -> &mut Visibility {
@@ -96,6 +109,7 @@ impl PanelLayout {
             WorkspacePanel::Right => &mut self.right,
             WorkspacePanel::Filmstrip => &mut self.filmstrip,
             WorkspacePanel::Presets => &mut self.presets,
+            WorkspacePanel::Adjustments => &mut self.adjustments,
         }
     }
     /// `module`'s layout after `change`. A group hides when any of it shows,
@@ -329,6 +343,8 @@ impl Editor {
             (WorkspacePanel::Filmstrip, false) => (Icon::PanelBottomOpen, "the filmstrip", " · F6"),
             (WorkspacePanel::Presets, true) => (Icon::PanelRight, "Presets and History", ""),
             (WorkspacePanel::Presets, false) => (Icon::PanelRightOpen, "Presets and History", ""),
+            (WorkspacePanel::Adjustments, true) => (Icon::PanelRight, "the adjustments", ""),
+            (WorkspacePanel::Adjustments, false) => (Icon::PanelRightOpen, "the adjustments", ""),
         };
         let verb = if shown { "Hide" } else { "Show" };
         let palette = super::theme::palette(ui.ctx());
@@ -391,6 +407,7 @@ mod tests {
             right,
             filmstrip,
             presets: SHOWN,
+            adjustments: SHOWN,
         }
     }
 

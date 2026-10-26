@@ -73,8 +73,8 @@ Add one row by hand; nothing else is needed:
 
 ```toml
 [[camera]]
-make = "Panasonic"          # LibRaw's names: `raw-identify -v <file>` prints
-model = "DC-S5M2"           #   "Normalized Make/Model"
+make = "Panasonic"          # the decoders' names: `rawmakase fingerprint <file>`
+model = "DC-S5M2"           #   prints them (header.facts.normalized)
 aliases = ["S5 II"]         # optional
 baseline_exposure = 0.35    # EV
 source = "measured"         # adobe-dng | adobe-profile | fitted | measured
@@ -102,7 +102,7 @@ DNGs or Adobe profiles.
 
 - `--dng <folder>` reads BaselineExposure from DNGs made by Adobe DNG Converter from
   copies of sample raws, kept outside the repository. Check the make and model it
-  prints against LibRaw's names.
+  prints against the decoders' names.
 - `--report <report.json>` fits rows from the exposure check in
   `tests/corpus/README.md` (`parity-report.py --photos`): Camera Raw renders of the
   corpus photos against RAWmakase's default renders. Rerun the check after changing
@@ -112,43 +112,69 @@ DNGs or Adobe profiles.
 
 An imported Adobe profile (a DCP) names the camera it was made for, and RAWmakase
 uses it only for photos from that camera (`CameraProfile::ensure_camera`). Adobe
-and LibRaw name many cameras differently, so a profile fits when its camera is
-any of:
+and the decoders (which keep LibRaw's names) name many cameras differently, so a
+profile fits when its camera is any of:
 
-- the make and model LibRaw reports, or the model alone;
-- LibRaw's canonical name for a body sold under several names (`normalized_model`):
+- the make and model the decoder reports, or the model alone;
+- the decoder's canonical name for a body sold under several names (`normalized_model`):
   the Panasonic DC-G95 is Adobe's DC-G99, the DC-TZ91 its DC-ZS70;
 - the names in [data/adobe-camera-names.toml](../data/adobe-camera-names.toml):
-  makes Adobe spells otherwise (OM Digital Solutions) and phones Adobe names by
-  their marketing name (Samsung SM-G965F is the Galaxy S9+), each with a `why`;
+  makes Adobe spells otherwise (OM Digital Solutions), phones Adobe names by
+  their marketing name (Samsung SM-G965F is the Galaxy S9+) and twins the decoder
+  names as themselves (the Panasonic DC-G97 is Adobe's DC-G99), each with a `why`;
 - for Google phones, Adobe's older `Model-Google-google`.
 
-Names are compared without case, spaces or underscores (LibRaw's Nikon "Z 6_2" is
+Names are compared without case, spaces or underscores (the decoders' Nikon "Z 6_2" is
 Adobe's "Z 6 2"). A phone profile named for a camera module (Rear Main, Telephoto…)
 fits the module the photo's 35 mm focal length points to. The one-click import
 offers Adobe's profiles under the same rule. `rawmakase inspect` lists a photo's
 `adobe_names`.
 
-Add a table entry only when neither LibRaw's canonical name nor the comparison
+Add a table entry only when neither the decoder's canonical name nor the comparison
 finds the profile, and check it against a Camera Raw render of the camera.
 
 ## Sources of the current rows
 
 Most rows (`adobe-dng`) come from Adobe DNG Converter 18.x: it converted a copy of one
 CC0 [raw.pixls.us](https://raw.pixls.us) sample per camera (the files
-`scripts/corpus/pixls.py` downloads), and the row is the DNG's BaselineExposure plus
-the difference between Adobe's white level and LibRaw's, which RAWmakase scales by:
-log2((LibRaw white − black) / (Adobe white − black)). That term is 0 for most bodies;
-Canon's ISO-dependent white levels make it up to +0.8 EV, so a Canon row holds at the
-sample's ISO and may be off by a few tenths at others.
+`scripts/corpus/pixls.py` downloads), and the row is the DNG's BaselineExposure,
+rounded to 0.05 EV. RAWmakase's decoders read Adobe's black and white levels
+([RAW decoding](raw-decoding.md)). Canon's white Adobe takes by ISO speed (the camera
+table's rows of `iso`, ColorData's levels), and moves its BaselineExposure with it, so
+that a photo's brightness stays referenced to one level: the EOS 1100D's is −0.5 at
+ISO 160, whose white is 11222, and 0 at ISO 400's 15000: the photo's brightness stays
+referenced to the samples' full range. Canon rows therefore give `levels`, the black,
+white and samples' maximum of their sample, and a photo whose levels differ (known on
+opening, `Metadata::levels`) takes the difference of log2((white − black) / (maximum −
+black)) between the two. On the 325 Canon files with a row that Adobe DNG Converter
+converted, the exposure is then within 0.1 EV of Adobe's BaselineExposure on 323, as
+it was while RAWmakase decoded with LibRaw (234 with the row alone; the white over the
+black alone leaves the bodies whose black rises with ISO speed, the 80D's, 200D's and
+800D's, 0.2 EV off). The two left are an EOS 6D at extended ISO 50 (Adobe takes a stop
+off) and an EOS 1300D frame 0.11 EV off. Other makes' BaselineExposure does not follow their white
+(the ILCE-7RM4A's is 0.35 at ISO 160's white of 15000 and at ISO 250's 16383), so
+their rows are Adobe's value alone. While RAWmakase decoded with LibRaw, rows added the
+difference between Adobe's white level and LibRaw's, log2((LibRaw white − black) /
+(Adobe white − black)), up to +1.1 EV (the DC-GH5S at ISO 800), and `sample` said
+"plus … for the white level"; when the decoders switched, those terms were taken out
+again (the term measured on the dataset's files at each sample's ISO was the one the
+row had added, on every row with a file at that ISO), and fitted rows lost the same
+term.
 
 Adobe's value also follows some shooting settings, which the rows leave out: Canon
 Highlight Tone Priority and Fujifilm DR200 add 1 EV, extended low ISOs (Sony ISO 50,
 Fujifilm ISO 100 on ISO 160 bodies, Olympus ISO LOW) take 1 EV off. Each such row says
 so in `sample`. RAWmakase adds the stop for Highlight Tone Priority itself, reading it
-from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured),
-and follows Fujifilm's exposure midpoint shift (above); extended low ISO on other makes
-is not handled yet.
+from the Canon maker notes (both On and Enhanced; no Enhanced sample has been measured)
+and, for the bodies from the 40D to the 600D, from their custom functions, where LibRaw
+does not read it: their CameraInfo lacks it (60D) or says Off (550D) when it is on, and
+Camera Raw follows the custom function. RAWmakase also follows Fujifilm's exposure midpoint shift (above),
+and takes the stop off below a row's `lowest_iso`: the Sony A7, A7R, A7R II, A7 III, A7R III,
+A7 IV and A7R IV, whose ISO 50, 64 and 80 are extended settings under a native 100 (Adobe DNG
+Converter 18.7 on 32 dataset photos of these bodies: always exactly 1 EV under the row; the
+A7S III's and HX99's ISO 80 is native and keeps the row). On the 20 such photos with Camera
+Raw default renders, median dE00 went from about 10 to 0.4. Extended low ISO on other makes
+(Olympus ISO LOW) is not handled yet.
 
 After the table, 151 of the 156 raw.pixls.us samples that Camera Raw 18.7 and
 RAWmakase both render come out within ±0.1 EV of Camera Raw (median midtone, LibRaw
@@ -163,7 +189,7 @@ Camera Raw renders most of those Fujifilm bodies darker than their baseline expl
 for a reason not found yet.
 
 Still about 1 EV off, for the shooting settings above or a decoding problem: the
-Olympus E-M10 Mark III and Sony A7R IV (extended low ISO). LibRaw reads the black level
+Olympus E-M10 Mark III (extended low ISO). LibRaw reads the black level
 of the Canon EOS R6 Mark III and PowerShot V1 as 0 plus small per-channel values instead
 of 512; RAWmakase takes the black from the raw's masked left border when LibRaw's is
 below a quarter of it, which brings both within 0.1 EV. The Leica Q, Ricoh GR III and Sigma fp L
@@ -173,10 +199,12 @@ Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
 GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
 and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
-Six rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+Eight rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`), the A7 II and A7CR, fitted to Camera Raw 18.6
-renders of private photos (8 and 4), and the A7R VI, EOS 700D and A7R, read from
-Adobe DNG Converter 18.7's DNG of one private photo each. LibRaw does not identify
+renders of private photos (8 and 4), the A7R VI, EOS 700D and A7R, read from
+Adobe DNG Converter 18.7's DNG of one private photo each, the EOS 1500D (2000D),
+read from its DNG of one Signature Edits photo, and the EOS R8 Mark II, read from
+its DNGs of six private photos. LibRaw does not identify
 the A7R VI by name yet, but its white level, black level and crop match Adobe's.
 
 The 45 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and
@@ -184,13 +212,30 @@ Fujifilm bodies; see [camera parity](camera-parity.md)) are `adobe-dng` values f
 one test-dataset photo each, at the ISO the row says. Against Camera Raw 18.7 default
 renders of 110 photos of these bodies (the dataset's, and 26 rendered for bodies it
 had none of), the median midtone exposure difference went from 0.15 EV to 0.02 EV, and
-103 photos are within 0.1 EV (41 before). Of the other seven, two 80D frames of one
+103 photos are within 0.1 EV (41 before). Of the other seven, two 80D sRAW frames of one
 shoot were already 0.44 EV brighter than Camera Raw and are now 0.58 brighter, the
-row moving every 80D photo alike; a 30D photo is 0.30 EV brighter where another body's
+row's white-level term, measured on a full-size raw, not holding for LibRaw's sRAW
+conversion (see below); a 30D photo is 0.30 EV brighter where another body's
 at the same ISO matches; a 5DS R and a Rebel T6 photo at other ISO settings than their
 rows' samples went from 0.3 EV to 0.16 EV off, Canon's white level being
 ISO-dependent; and two RX1R III frames stay 0.14 EV darker, the row's value being the
 Sony fallback they had.
+
+### Canon sRAW and mRAW
+
+RAWmakase converts Canon's sRAW and mRAW as Adobe DNG Converter does, on Adobe's
+linear scale and white level ([RAW decoding](raw-decoding.md)), so rows give
+`sraw_baseline_exposure`: Adobe DNG Converter 18.7's sRAW BaselineExposure. On the
+dataset's 37 sRAW and mRAW files (16 bodies) that value is one per body, the same for
+sRAW and mRAW and from ISO 100 to 3200. A Canon body without one takes their median,
+0.25; the 40D, 50D, 5DS and 1D Mark IV have no full-size row to hold theirs yet.
+LibRaw converted them on a 16383 scale with its green 1.303 times Adobe's linear values
+(its stored sRAW white balance, 1336/1024); while RAWmakase decoded with LibRaw, rows
+added log2(16383 / (1.303 × Adobe's sRAW white level)) to Adobe's value. Against Camera
+Raw 18.7 default renders of the 7 such photos the dataset has, the rows of that time
+took the median dE00 from 2.6 to 1.1 (the two 80D frames 4.2 and 5.1 to 0.45 and 1.4);
+a 5DS R mRAW and a 5D Mark III sRAW at ISO 3200 rendered 0.4 and 0.2 EV darker than
+Camera Raw, which renders them brighter than Adobe's own DNG of them says.
 
 Not in the table: cameras whose raw is a DNG (Leica M, Q, SL and CL, Ricoh GR, Sigma
 fp), which carry their own value; the Hasselblad X1D and X1D II, which LibRaw names

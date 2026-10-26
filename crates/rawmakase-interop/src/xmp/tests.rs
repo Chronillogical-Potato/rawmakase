@@ -262,6 +262,24 @@ fn resolved_photo_white_balance_differs_from_as_shot_preset() -> Result<()> {
     assert_ne!(result.wb, [1.; 3]);
     Ok(())
 }
+/// An angle a preset or sidecar gives is not the Crop panel's Auto, even when it is
+/// Auto's own number; one that gives none leaves Auto as it was.
+#[test]
+fn a_crop_angle_from_xmp_is_not_auto() -> Result<()> {
+    use crate::model::transform::AutoStraighten;
+    let m = Metadata::default();
+    let mut auto = Recipe::default();
+    auto.set_auto_straighten(Some(0.));
+    let angle = parse(Path::new("preset.xmp"), &xml(r#"c:CropAngle="0""#, ""))?;
+    assert_eq!(angle.apply(&auto, &m, &[], None)?.straighten_auto, None);
+    let exposure = parse(Path::new("preset.xmp"), &xml(r#"c:Exposure2012="0.5""#, ""))?;
+    assert_eq!(
+        exposure.apply(&auto, &m, &[], None)?.auto_straighten(),
+        Some(AutoStraighten::Measured(0.))
+    );
+    Ok(())
+}
+
 #[test]
 fn named_white_balance_presets_apply_their_values() -> Result<()> {
     let m = Metadata {
@@ -569,6 +587,32 @@ fn profile_amount_applies_to_looks_that_have_one() -> Result<()> {
     let r = preset("Test Creative", "0")?.apply(&base, &m, &profiles, None)?;
     assert_eq!(r.profile.as_ref().unwrap().name, "Test Creative");
     assert_eq!(r.profile_amount, 0.);
+    // Camera Raw's photo sidecars use resource children instead of attributes.
+    let resource = |amount: &str, uuid: &str| {
+        parse(
+            Path::new("photo.xmp"),
+            &xml(
+                r#"c:Exposure2012="0""#,
+                &format!(
+                    r#"<c:Look r:parseType="Resource"><c:Name>Test Creative</c:Name><c:Amount>{amount}</c:Amount>{uuid}</c:Look>"#
+                ),
+            ),
+        )
+    };
+    for amount in [0., 0.5, 2.] {
+        let p = resource(&amount.to_string(), "")?;
+        let r = p.apply(&base, &m, &profiles, None)?;
+        assert_eq!(r.profile_amount, amount);
+    }
+    for invalid in ["-1", "2.5", "NaN", ""] {
+        assert!(resource(invalid, "").is_err());
+    }
+    let wrong_uuid = resource("0.5", "<c:UUID>not-the-installed-look</c:UUID>")?;
+    assert_eq!(
+        wrong_uuid.settings["RAWmakaseLookUUID"],
+        "not-the-installed-look"
+    );
+    assert!(!wrong_uuid.look_available(&m, &profiles));
     // A look without an Amount renders at 100%; a preset that names another profile
     // resets an earlier Amount.
     let earlier = Recipe {
@@ -1554,5 +1598,116 @@ fn adobe_standard_resolves_to_the_phone_module_that_took_the_photo() -> Result<(
         .apply(&Recipe::default(), &unknown, &profiles, None)
         .unwrap_err();
     assert!(format!("{e:#}").contains("Missing camera profile ‘Adobe Standard’"));
+    Ok(())
+}
+
+fn rendered() -> Metadata {
+    Metadata {
+        source: crate::camera_data::Source::Rendered,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn xmp_reads_and_writes_relative_white_balance_for_a_jpeg() -> Result<()> {
+    let m = rendered();
+    let profiles = crate::camera_profiles::installed(&m).0;
+    let attrs = r#"c:IncrementalTemperature="+25" c:IncrementalTint="-10" c:WhiteBalance="Custom" c:CameraProfile="Embedded""#;
+    let sidecar = parse(Path::new("photo.xmp"), &xml(attrs, ""))?;
+    let r = sidecar.apply(&Recipe::for_rendered(&m), &m, &profiles, None)?;
+    assert_eq!((r.incremental_temperature, r.incremental_tint), (25., -10.));
+    assert_eq!(r.wb, [1.; 3]);
+    assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
+    let text = write::packet(
+        &r,
+        &m,
+        &write::Photo {
+            settings: true,
+            ..Default::default()
+        },
+    );
+    for attr in [
+        r#"crs:IncrementalTemperature="+25""#,
+        r#"crs:IncrementalTint="-10""#,
+        r#"crs:WhiteBalance="Custom""#,
+        r#"crs:CameraProfile="Embedded""#,
+    ] {
+        assert!(text.contains(attr), "{attr} in {text}");
+    }
+    assert!(!text.contains("crs:Temperature="), "{text}");
+    assert!(!text.contains("crs:Tint="), "{text}");
+    // As shot is written as Lightroom writes it.
+    let text = write::packet(
+        &Recipe::for_rendered(&m),
+        &m,
+        &write::Photo {
+            settings: true,
+            ..Default::default()
+        },
+    );
+    assert!(text.contains(r#"crs:WhiteBalance="As Shot""#), "{text}");
+    assert!(text.contains(r#"crs:IncrementalTemperature="0""#), "{text}");
+    Ok(())
+}
+
+#[test]
+fn a_raw_xmp_with_relative_white_balance_is_still_refused() -> Result<()> {
+    let m = Metadata::default();
+    let preset = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:IncrementalTemperature="+25" c:Exposure2012="0.5""#, ""),
+    )?;
+    let error = preset.apply(&Recipe::default(), &m, &[], None).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("Active IncrementalTemperature"),
+        "{error:#}"
+    );
+    // Lenient application keeps the RAW's white balance and the rest of the edit.
+    let (r, warnings) = preset.apply_lenient(&Recipe::default(), &m, &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(
+        (r.incremental_temperature, r.wb),
+        (0., Recipe::default().wb)
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("IncrementalTemperature")),
+        "{warnings:?}"
+    );
+    // At 0, as Lightroom may write it, it is accepted.
+    let zero = parse(
+        Path::new("photo.xmp"),
+        &xml(r#"c:IncrementalTemperature="0" c:IncrementalTint="0""#, ""),
+    )?;
+    zero.apply(&Recipe::default(), &m, &[], None)?;
+    Ok(())
+}
+
+#[test]
+fn kelvin_white_balance_is_ignored_on_a_rendered_photo() -> Result<()> {
+    let m = rendered();
+    let mut base = Recipe::for_rendered(&m);
+    base.incremental_temperature = 12.;
+    base.update_wb(&m);
+    let preset = parse(
+        Path::new("Warm.xmp"),
+        &xml(
+            r#"c:WhiteBalance="Custom" c:Temperature="5000" c:Tint="10" c:Exposure2012="0.5""#,
+            "",
+        ),
+    )?;
+    let r = preset.apply(&base, &m, &[], None)?;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(
+        (r.temperature, r.tint, r.incremental_temperature, r.wb),
+        (base.temperature, base.tint, 12., base.wb)
+    );
+    let (r, warnings) = preset.apply_lenient(&base, &m, &[], None)?;
+    assert_eq!((r.exposure, r.wb), (0.5, base.wb));
+    assert_eq!(
+        warnings,
+        vec!["Temperature in Kelvin applies to RAW files only".to_string()]
+    );
     Ok(())
 }

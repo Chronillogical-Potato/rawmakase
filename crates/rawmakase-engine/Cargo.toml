@@ -3,7 +3,7 @@ name = "rawmakase-engine"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
-description = "RAWmakase's renderer: developing a decoded image with a recipe on the CPU, and the GPU preview port, without LibRaw, the catalog or the GUI"
+description = "RAWmakase's renderer: developing a decoded image with a recipe on the CPU, and the GPU preview port, without the RAW decoders, the catalog or the GUI"
 license = "MIT"
 publish = false
 
@@ -16,7 +16,7 @@ rawmakase-interop = { path = "../rawmakase-interop", version = "0.1.0" }
 rawmakase-model = { path = "../rawmakase-model", version = "0.1.0" }
 anyhow = "1"
 bytemuck = { version = "1.25", features = ["derive"] }
-image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+image.workspace = true
 pollster = "1"
 rayon = "1.12"
 serde = { version = "1", features = ["derive", "rc"] }

@@ -214,7 +214,7 @@ fn clearing_falls_back_to_the_nearest_remaining_location() -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     drop(cat);
-    // The parent folder needs a row of its own to be relinked.
+    // The parent folder has a catalog folder of its own.
     legacy(&catalog)?.execute(
         "INSERT INTO folders(root,relative_path) VALUES(?, '2026')",
         [root.0],
@@ -677,5 +677,109 @@ fn adding_where_a_relocated_root_used_to_be_is_a_stale_copy() -> Result<()> {
     assert_eq!(added.conflicts.len(), 1);
     assert_eq!(added.conflicts[0].located, new.join("Trip"));
     assert_eq!(cat.roots()?.len(), 1);
+    Ok(())
+}
+
+/// The logical paths of the folders with a legacy mapping, which older
+/// releases read for the folders below them too.
+fn legacy_mapped(catalog: &Path) -> Result<Vec<String>> {
+    Ok(legacy(catalog)?
+        .prepare(
+            "SELECT p.path FROM folder_mappings m JOIN folder_paths p ON p.folder=m.folder
+             ORDER BY p.path",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+#[test]
+fn locating_a_folder_of_folders_moves_every_folder_below_it() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let added = d.path().join("added");
+    let moved = d.path().join("other disk/Wedding");
+    let card_alone = d.path().join("card alone");
+    for share in [&added.join("Wedding"), &moved] {
+        photo(&share.join("RAW/Card 1"), "a.NEF")?;
+        photo(&share.join("RAW/Card 2"), "b.NEF")?;
+    }
+    photo(&added.join("Home"), "home.NEF")?;
+    photo(&card_alone, "a.NEF")?;
+    let catalog = new_catalog(d.path())?;
+    let mut cat = Catalog::open_as(&catalog, &linux())?;
+    cat.add_folder(&added)?;
+    let root = cat.roots()?[0].0;
+    let added = added.canonicalize()?;
+    let moved = moved.canonicalize()?;
+    // "Wedding" and "Wedding/RAW" hold only folders: the catalog has no
+    // folder of their own.
+    assert!(folder_id(&catalog, "Wedding").is_err());
+    let card_1 = folder_id(&catalog, "Wedding/RAW/Card 1")?;
+    cat.relink_folder(card_1, &card_alone)?;
+
+    cat.relink_folder_at(root, "Wedding", &moved, Overrides::Keep)?;
+    // A folder located on its own stays there; the rest follow.
+    assert_eq!(
+        path_of(&catalog, &linux(), "a.NEF")?,
+        card_alone.join("a.NEF")
+    );
+    assert_eq!(
+        path_of(&catalog, &linux(), "b.NEF")?,
+        moved.join("RAW/Card 2/b.NEF")
+    );
+    assert_eq!(
+        path_of(&catalog, &linux(), "home.NEF")?,
+        added.join("Home/home.NEF")
+    );
+    let overrides: Vec<String> = cat
+        .folder_overrides(root, "Wedding")?
+        .into_iter()
+        .map(|o| o.relative)
+        .collect();
+    assert_eq!(overrides, ["Wedding/RAW/Card 1"]);
+    // Older releases get no mapping for the folders below one the catalog
+    // has no folder of: it would go stale as folders come and go.
+    assert_eq!(legacy_mapped(&catalog)?, ["Wedding/RAW/Card 1"]);
+
+    // Clearing the folders located separately moves them with it.
+    cat.relink_folder_at(root, "Wedding", &moved, Overrides::Clear)?;
+    assert_eq!(
+        path_of(&catalog, &linux(), "a.NEF")?,
+        moved.join("RAW/Card 1/a.NEF")
+    );
+    assert!(cat.folder_overrides(root, "Wedding")?.is_empty());
+    assert!(legacy_mapped(&catalog)?.is_empty());
+
+    // A folder added below it later follows it too.
+    photo(&moved.join("RAW/Card 3"), "c.NEF")?;
+    cat.add_folder(&moved.join("RAW/Card 3"))?;
+    assert_eq!(
+        path_of(&catalog, &linux(), "c.NEF")?,
+        moved.join("RAW/Card 3/c.NEF")
+    );
+    // Once it has photos of its own, older releases get its mapping, and
+    // lose it with the location.
+    photo(&moved, "cover.NEF")?;
+    cat.add_folder(&moved)?;
+    assert_eq!(
+        path_of(&catalog, &linux(), "cover.NEF")?,
+        moved.join("cover.NEF")
+    );
+    assert!(legacy_mapped(&catalog)?.is_empty());
+    cat.relink_folder_at(root, "Wedding", &moved, Overrides::Keep)?;
+    assert_eq!(legacy_mapped(&catalog)?, ["Wedding"]);
+
+    // Clearing it puts everything below back where the root has it.
+    cat.clear_folder_location(root, "Wedding")?;
+    assert_eq!(
+        path_of(&catalog, &linux(), "b.NEF")?,
+        added.join("Wedding/RAW/Card 2/b.NEF")
+    );
+    assert_eq!(count(&catalog, "folder_mappings")?, 0);
+
+    // A path with no folder of the catalog at or below it is refused.
+    assert!(
+        cat.relink_folder_at(root, "Wed", &moved, Overrides::Keep)
+            .is_err()
+    );
     Ok(())
 }

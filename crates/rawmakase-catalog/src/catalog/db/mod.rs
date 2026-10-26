@@ -25,7 +25,7 @@ use std::{path::Path, time::Duration};
 pub use sql::assert_shape;
 pub(in crate::catalog) use sql::{Sql, SqliteSql, sql, sqlite_sql};
 
-/// Marks a file as an RAWmakase catalog (`PRAGMA application_id`).
+/// Marks a file as a RAWmakase catalog (`PRAGMA application_id`).
 const APPLICATION_ID: i64 = 0x4f4d4152;
 /// The catalog format version (`PRAGMA user_version`) new catalogs get; older
 /// releases check it too. Version 2 may hold raster mask data, which a release
@@ -64,6 +64,15 @@ impl Db {
     /// publishes it under its final name.
     pub(in crate::catalog) fn create(path: &Path) -> Result<()> {
         let db = Connection::open(path)?;
+        // Unit tests of this crate rebuild a catalog per injected fault. The
+        // fault is an in-process panic, so a commit only has to reach the
+        // operating system. `synchronous=FULL` (SQLite's default, and what a
+        // shipping catalog uses below) flushes every statement; on NTFS that
+        // flush is most of the Windows fault-matrix time. `cfg(test)` is off
+        // when this crate is compiled as a dependency, so the app's tests
+        // and the shipping binary stay `FULL`.
+        #[cfg(test)]
+        db.execute_batch("PRAGMA synchronous=OFF;")?;
         db.execute_batch(&format!(
             "PRAGMA application_id={APPLICATION_ID}; PRAGMA user_version={VERSION};"
         ))?;
@@ -78,7 +87,7 @@ impl Db {
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         ensure!(
             db.query_row("PRAGMA application_id", [], |r| r.get::<_, i64>(0))? == APPLICATION_ID,
-            "Not an RAWmakase catalog"
+            "Not a RAWmakase catalog"
         );
         ensure!(
             opens(
@@ -88,6 +97,11 @@ impl Db {
             "Unsupported RAWmakase catalog version; file left unchanged"
         );
         db.busy_timeout(Duration::from_secs(5))?;
+        // See `create`: this crate's unit tests skip the durability flush.
+        // Split so a shipping open cannot compile the OFF pragma.
+        #[cfg(test)]
+        db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=OFF;")?;
+        #[cfg(not(test))]
         db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
         Ok(Self {
             backend: Backend::Sqlite(db),

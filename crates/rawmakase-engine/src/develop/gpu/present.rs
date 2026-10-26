@@ -78,7 +78,7 @@ pub struct Frame {
 }
 /// The sRGB-to-monitor transform sampled on a lattice of 8-bit values, so the shader
 /// applies it without lcms. Built once per profile, from the transform the caller
-/// supplies (`raw::display_transform`), so the engine links no colour management.
+/// supplies (`color_management::display_transform`), so the engine links no colour management.
 pub struct MonitorLut {
     size: u32,
     values: Vec<f32>,
@@ -547,11 +547,23 @@ impl Processor {
                 .texture
                 .clone();
             let view = plain.create_view(&Default::default());
-            record(&mut encoder, &view, false, &[&present], [cw, ch]);
+            record(
+                &mut encoder,
+                &view,
+                false,
+                &[&present],
+                [cw.div_ceil(4), ch.div_ceil(4)],
+            );
             (plain, view)
         });
         encoder.clear_buffer(&presenter.histogram, 0, None);
-        record(&mut encoder, &view, true, &[&present], [cw, ch]);
+        record(
+            &mut encoder,
+            &view,
+            true,
+            &[&present],
+            [cw.div_ceil(4), ch.div_ceil(4)],
+        );
         let mut reduce = |kind: Kind,
                           source: &wgpu::TextureView,
                           edge: u32,
@@ -607,6 +619,7 @@ impl Processor {
         );
         ensure!(!cancel.load(Ordering::Relaxed), "Render superseded");
         let submission = super::submit(&self.queue, encoder);
+        super::develop::submitted(&mut self.kept);
         let (tx, rx) = mpsc::channel();
         let map = |buffer: &wgpu::Buffer| {
             let tx = tx.clone();

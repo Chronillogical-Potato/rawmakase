@@ -5,11 +5,9 @@ From Adobe DNGs (preferred): convert copies of sample raws with Adobe DNG Conver
 outside the repository, in one call so it starts once:
   "/Applications/Adobe DNG Converter.app/Contents/MacOS/Adobe DNG Converter" -c -d <out> <copies>
 then pass the folder; each DNG's BaselineExposure, black and white level are read with
-exiftool. When LibRaw's white level for the raw differs from Adobe's, add
-log2((LibRaw white - black) / (Adobe white - black)) to the printed value (see
-docs/cameras.md); --libraw-white gives LibRaw's white per file: a file of
-"<DNG name without .dng> <white>" lines, since it varies by camera and, for Canon, ISO.
-  python3 scripts/cameras/fit-baselines.py --dng <folder of DNGs> [--libraw-white whites.txt]
+exiftool. RAWmakase reads Adobe's levels, so the BaselineExposure is the row's value
+(see docs/cameras.md).
+  python3 scripts/cameras/fit-baselines.py --dng <folder of DNGs>
 
 From Camera Raw renders: run the exposure check in tests/corpus/README.md
 (parity-report.py --photos), then fit from its report:
@@ -58,20 +56,7 @@ def row(make, model, ev, source, sample, how=None):
     return '\n'.join(lines) + '\n'
 
 
-def libraw_whites(path):
-    if path is None:
-        return {}
-    whites = {}
-    for line in Path(path).read_text().splitlines():
-        if line.strip() and not line.startswith('#'):
-            name, _, white = line.rpartition(' ')
-            whites[name.strip()] = float(white)
-    return whites
-
-
-def from_dngs(folder, whites):
-    import math
-
+def from_dngs(folder):
     for dng in sorted(Path(folder).rglob('*.dng'), key=lambda p: p.name.lower()):
         out = subprocess.run(['exiftool', '-j', '-n', '-Make', '-Model', '-ISO', '-BaselineExposure',
                               '-SubIFD:BlackLevel', '-SubIFD:WhiteLevel', str(dng)],
@@ -83,11 +68,6 @@ def from_dngs(folder, whites):
         ev = float(tags['BaselineExposure'])
         black = statistics.mean(float(v) for v in str(tags.get('BlackLevel', 0)).split())
         white = float(str(tags.get('WhiteLevel', 0)).split()[0])
-        libraw_white = whites.get(dng.stem)
-        if whites and libraw_white is None:
-            print(f'# {dng.name}: no LibRaw white level given, white-level term left out', file=sys.stderr)
-        if libraw_white and white > black:
-            ev += math.log2((libraw_white - black) / (white - black))
         print(f'# {dng.name}: BaselineExposure {tags["BaselineExposure"]}, black {black:g}, white {white:g}')
         make, model = str(tags.get('Make', '?')), str(tags.get('Model', '?'))
         model = model[len(make):].strip() if model.lower().startswith(make.lower()) else model
@@ -137,10 +117,8 @@ def main():
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument('--dng', type=Path, help='folder of DNGs written by Adobe DNG Converter')
     g.add_argument('--report', type=Path, help='report.json of scripts/corpus/parity-report.py --photos')
-    p.add_argument('--libraw-white', type=Path,
-                   help="file of '<DNG name without .dng> <LibRaw white level>' lines")
     args = p.parse_args()
-    from_dngs(args.dng, libraw_whites(args.libraw_white)) if args.dng else from_report(args.report)
+    from_dngs(args.dng) if args.dng else from_report(args.report)
 
 
 if __name__ == '__main__':

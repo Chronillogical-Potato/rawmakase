@@ -391,7 +391,7 @@ fn png_carries_icc_camera_exif_xmp_and_resolution() -> Result<()> {
     );
     assert_eq!(
         info.icc_profile.as_deref(),
-        Some(raw::srgb_profile()?.as_slice())
+        Some(crate::color_management::srgb_profile())
     );
     let exif = info.exif_metadata.as_deref().unwrap();
     // eXIf holds the TIFF stream itself, without JPEG's "Exif" header.
@@ -412,6 +412,50 @@ fn png_carries_icc_camera_exif_xmp_and_resolution() -> Result<()> {
     let dims = info.pixel_dims.unwrap();
     assert_eq!((dims.xppu, dims.unit), (11_811, png::Unit::Meter));
     assert_eq!(image::open(&png)?.to_rgb8().into_raw(), image.rgb8());
+    Ok(())
+}
+#[test]
+fn a_png_export_is_read_back_with_its_camera_and_capture_time() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("source.ARW");
+    fs::write(&source, b"source")?;
+    let image = Rendered {
+        width: 4,
+        height: 2,
+        pixels: vec![[0.5; 3]; 8],
+    };
+    let embed = Embed {
+        camera: Some(crate::exif::CameraExif {
+            main: vec![
+                crate::exif::Field::ascii(0x010f, "SONY"),
+                crate::exif::Field::ascii(0x0110, "ILCE-7M4"),
+            ],
+            exif: vec![
+                crate::exif::Field::ascii(0x9003, "2024:05:04 10:21:33"),
+                crate::exif::Field::ascii(0x9291, "12"),
+            ],
+            gps: Vec::new(),
+        }),
+        ..Default::default()
+    };
+    let png = dir.path().join("out.png");
+    export_with(
+        &png,
+        &source,
+        &image,
+        &Metadata::default(),
+        &ExportOptions::default(),
+        &embed,
+        Replace::NoClobber,
+    )?;
+    assert_eq!(
+        crate::exif::capture_time(&png).as_deref(),
+        Some("2024-05-04T10:21:33.120")
+    );
+    assert_eq!(
+        crate::exif::camera_names(&png),
+        Some(("SONY".into(), "ILCE-7M4".into()))
+    );
     Ok(())
 }
 #[test]
@@ -459,6 +503,33 @@ fn capture_times_take_lightroom_form_with_three_digit_subseconds() {
             "2021-06-06T10:00:01",
         ]
     );
+}
+#[test]
+fn a_raw_containers_dates_fall_back_as_exifs_do() {
+    use crate::exif::capture_time_of;
+    let some = |s: &str| Some(s.to_string());
+    let modified = (some("2018:08:26 10:39:35"), some("9"));
+    assert_eq!(
+        capture_time_of([
+            (some("2018:08:26 10:39:33"), some("12")),
+            (some("2018:08:26 10:39:34"), None),
+            modified.clone(),
+        ])
+        .as_deref(),
+        Some("2018-08-26T10:39:33.120")
+    );
+    // A missing or zeroed date gives way to the next, with its own
+    // subseconds.
+    assert_eq!(
+        capture_time_of([
+            (None, some("12")),
+            (some("0000:00:00 00:00:00"), None),
+            modified,
+        ])
+        .as_deref(),
+        Some("2018-08-26T10:39:35.900")
+    );
+    assert_eq!(capture_time_of(Default::default()), None);
 }
 #[test]
 fn capture_time_is_read_from_tiff_and_jpeg_files() -> anyhow::Result<()> {

@@ -126,12 +126,21 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
                 .map(str::to_string)
                 .or_else(|| child_text(d, "Name"))
                 .unwrap_or_default();
-            if let Some(amount) = d.attribute((CRS, "Amount")) {
-                let amount = super::look::LookAmount::parse(amount)?;
+            if let Some(amount) = d
+                .attribute((CRS, "Amount"))
+                .map(str::to_string)
+                .or_else(|| child_text(d, "Amount"))
+            {
+                let amount = super::look::LookAmount::parse(&amount)?;
                 settings.insert(super::look::SETTING.into(), amount.0.to_string());
             }
-            if let Some(uuid) = d.attribute((CRS, "UUID")).filter(|_| !look.is_empty()) {
-                settings.insert("RAWmakaseLookUUID".into(), uuid.into());
+            if let Some(uuid) = d
+                .attribute((CRS, "UUID"))
+                .map(str::to_string)
+                .or_else(|| child_text(d, "UUID"))
+                .filter(|_| !look.is_empty())
+            {
+                settings.insert("RAWmakaseLookUUID".into(), uuid);
             }
         } else if name == "Preset" && sidecar {
             // In a photo sidecar, the nested preset-amount record is provenance.

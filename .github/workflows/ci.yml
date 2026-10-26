@@ -62,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: >-
           pacman -Syu --noconfirm --needed
-          rustup git libraw lcms2 pkgconf desktop-file-utils perl-image-exiftool
+          rustup git pkgconf desktop-file-utils perl-image-exiftool
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
@@ -74,7 +74,7 @@ jobs:
           rustup default stable
       # Only pushes to main save caches: pull requests restore main's, and
       # release validation would save caches nothing else restores.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       # Compiling the declared MSRV is what makes it a minimum: comparing
@@ -88,14 +88,13 @@ jobs:
           cargo +"$msrv" check --locked --all-targets
       - run: cargo fmt --check
       # The model, file formats, the catalog, the protocol crate and the standalone
-      # client build without the app's native libraries, wgpu or GUI, and the
-      # renderer without the native libraries or GUI; fmt above covers the whole
-      # workspace.
+      # client build without the RAW decoders, wgpu or GUI, and the renderer
+      # without the RAW decoders or GUI; fmt above covers the whole workspace.
       - name: Check the model, file formats, catalog, renderer, control protocol, remote worker and client
         run: |
-          cargo clippy --locked --all-targets -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-remote -p rawmakase-ctl -- -D warnings
+          cargo clippy --locked --all-targets -p rawmakase-tiff -p rawmakase-raw -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-remote -p rawmakase-ctl -- -D warnings
           cargo test --locked -p rawmakase-model --all-features
-          cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine
+          cargo test --locked -p rawmakase-tiff -p rawmakase-raw -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine
           cargo test --locked -p rawmakase-protocol -p rawmakase-remote -p rawmakase-ctl
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # Packagers can leave out the usage report (Cargo.toml, `telemetry`).
@@ -103,7 +102,7 @@ jobs:
       # Tests that need private RAW files, camera profiles or a GPU are #[ignore]d.
       # exiftool reads exported metadata back as an independent reader; Arch
       # installs it in vendor_perl, outside PATH.
-      - run: PATH="/usr/bin/vendor_perl:$PATH" cargo test --locked -p rawmakase -p rawmakase-native -p rawmakase-export
+      - run: PATH="/usr/bin/vendor_perl:$PATH" cargo test --locked -p rawmakase -p rawmakase-decode -p rawmakase-export
         env:
           RAWMAKASE_REQUIRE_EXIFTOOL: "1"
       - name: Validate desktop entry
@@ -111,8 +110,8 @@ jobs:
 
   check-arm64:
     name: Test on aarch64
-    # Arch Linux has no arm64 container image, so this builds LibRaw the way the
-    # aarch64 release does.
+    # Arch Linux has no arm64 container image, so this runs on Ubuntu, as the
+    # aarch64 release builds.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -122,23 +121,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool pkg-config libjpeg-dev zlib1g-dev libvulkan1 libxkbcommon-dev libwayland-dev
+          sudo apt-get install -y build-essential pkg-config libvulkan1 libxkbcommon-dev libwayland-dev
           rustup toolchain install stable --profile minimal
           rustup default stable
-          bash packaging/native-deps.sh "$RUNNER_TEMP/native"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - name: Test
-        run: |
-          export PKG_CONFIG_PATH="$RUNNER_TEMP/native/lib/pkgconfig"
-          export LD_LIBRARY_PATH="$RUNNER_TEMP/native/lib"
-          export CXXFLAGS="-DCMS_NO_REGISTER_KEYWORD"
-          cargo test --locked --workspace
+        run: cargo test --locked --workspace
 
   check-windows:
     name: Test on Windows
-    # MSVC with LibRaw and Little CMS from vcpkg (packaging/windows/deps.ps1).
+    # MSVC, with the C runtime linked statically (.cargo/config.toml).
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -151,30 +145,14 @@ jobs:
       - name: Windows support in this source
         id: source
         shell: bash
-        run: echo "windows=$(test -f packaging/windows/deps.ps1 && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        run: echo "windows=$(test -f packaging/windows/rawmakase.ico && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - if: steps.source.outputs.windows == 'true'
         name: Rust
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
-      # vcpkg's binary cache; release builds (release.yml) start from scratch.
-      # vcpkg's package hashes cover the image's CMake and PowerShell versions,
-      # and runners mix image versions during a rollout, so each image version
-      # keeps its own cache.
       - if: steps.source.outputs.windows == 'true'
-        id: image
-        shell: bash
-        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
-      - if: steps.source.outputs.windows == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~\AppData\Local\vcpkg\archives
-          key: vcpkg-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ hashFiles('packaging/windows/deps.ps1', 'packaging/windows/vcpkg-ports/**') }}
-      - if: steps.source.outputs.windows == 'true'
-        name: LibRaw and Little CMS
-        run: packaging/windows/deps.ps1 "$env:RUNNER_TEMP\deps"
-      - if: steps.source.outputs.windows == 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - if: steps.source.outputs.windows == 'true'
@@ -206,32 +184,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source-ref || github.sha }}
-      - name: Dependencies
+      - name: Rust
         run: |
-          brew install autoconf automake libtool pkg-config libomp jpeg-turbo
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
-          # LibRaw and Little CMS are built the way the macOS release builds
-          # them (build.rs wants LibRaw >= 0.22); jpeg-turbo is what LibRaw's
-          # own build links its JPEG decoder against, as macOS has no libjpeg.
-          # build.rs links the OpenMP runtime from LIBOMP_PREFIX.
-          jpeg_prefix=$(brew --prefix jpeg-turbo)
-          {
-            echo "PKG_CONFIG_PATH=$RUNNER_TEMP/native/lib/pkgconfig:$jpeg_prefix/lib/pkgconfig"
-            echo "CPPFLAGS=-I$jpeg_prefix/include"
-            echo "LDFLAGS=-L$jpeg_prefix/lib"
-            echo "LIBOMP_PREFIX=$(brew --prefix libomp)"
-            # LibRaw's decoders are OpenMP-parallel; Little CMS lost its register
-            # keyword to C++17.
-            echo "CXXFLAGS=-DCMS_NO_REGISTER_KEYWORD"
-            # The test binaries load the libraries built above at run time.
-            echo "DYLD_LIBRARY_PATH=$RUNNER_TEMP/native/lib:$(brew --prefix libomp)/lib"
-          } >> "$GITHUB_ENV"
-      # GITHUB_ENV takes effect in the next step, including the JPEG paths
-      # needed by LibRaw's configure script.
-      - name: Build native dependencies
-        run: bash packaging/native-deps.sh "$RUNNER_TEMP/native"
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -246,7 +203,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: >-
-          pacman -Syu --noconfirm --needed rust git libraw lcms2 pkgconf namcap
+          pacman -Syu --noconfirm --needed rust git pkgconf namcap
           hicolor-icon-theme libxkbcommon vulkan-icd-loader wayland
           libxkbcommon-x11 libx11 libxcb libxcursor libxi libxrandr libglvnd
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -254,7 +211,7 @@ jobs:
           ref: ${{ inputs.source-ref || github.sha }}
       # makepkg rebuilds its source folder, so the build goes to target-arch outside it,
       # and that and the cargo registry are cached between runs.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target-arch"
           save-if: ${{ github.ref == 'refs/heads/main' && !inputs.source-ref }}
@@ -307,9 +264,10 @@ jobs:
     name: Crates without native libraries
     # The model, file formats, catalog and control protocol depend on no app,
     # GPU, GUI or native imaging crate, and the renderer on no app, GUI or
-    # native imaging crate (scripts/crate-closures.sh); they build and test on
-    # a machine with no LibRaw or Little CMS installed. The catalog's bundled
-    # SQLite is the one C library they build.
+    # native imaging crate; no workspace crate depends on or links a C RAW
+    # library or Little CMS (scripts/crate-closures.sh). They build and test on
+    # a machine with no LibRaw or Little CMS installed, and so does the decoding
+    # crate. The catalog's bundled SQLite is the one C library they build.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -328,7 +286,8 @@ jobs:
           rustup default stable
       - run: scripts/crate-closures.sh
       - run: cargo test --locked -p rawmakase-model --all-features
-      - run: cargo test --locked -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol
+      - run: cargo test --locked -p rawmakase-tiff -p rawmakase-raw -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol
+      - run: cargo test --locked -p rawmakase-decode
 
   postgres:
     name: Portable catalog SQL

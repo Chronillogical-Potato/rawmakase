@@ -58,7 +58,7 @@ impl Computer {
                 let temp = tempfile::NamedTempFile::new_in(dir)?;
                 std::fs::write(temp.path(), &id)?;
                 // Another process may have made one meanwhile: theirs stays.
-                match temp.persist_noclobber(&file) {
+                match crate::storage::persist_noclobber(temp, &file) {
                     Ok(_) => id,
                     Err(_) => read(&file).context("Unreadable computer id")?,
                 }
@@ -207,6 +207,16 @@ pub(super) fn logical_location(
     root: RootId,
     logical: &str,
 ) -> Result<Option<PathBuf>> {
+    Ok(logical_anchored(db, computer, root, logical)?.map(|(_, path)| path))
+}
+/// [`logical_location`], with the location it resolves below (see
+/// [`resolve_anchored`]).
+pub(super) fn logical_anchored(
+    db: &impl Reads,
+    computer: &str,
+    root: RootId,
+    logical: &str,
+) -> Result<Option<(PathBuf, PathBuf)>> {
     let original: Option<String> =
         db.read_optional(sql!("SELECT original_path FROM roots WHERE id=?"), &[&root])?;
     let Some(original) = original else {
@@ -223,8 +233,8 @@ pub(super) fn logical_location(
         .into_iter()
         .map(|l| (l.relative, PathBuf::from(l.path)))
         .collect();
-    Ok(resolve_in(&original, &rows, logical, cfg!(windows))
-        .filter(|path| !path.as_os_str().is_empty()))
+    Ok(resolve_anchored(&original, &rows, logical, cfg!(windows))
+        .filter(|(_, path)| !path.as_os_str().is_empty()))
 }
 /// Forgets where folder `folder` is on every computer, as it leaves the
 /// catalog: a location left behind would refuse the folder added again as
@@ -509,27 +519,58 @@ impl Catalog {
             Ok(())
         })
     }
-    /// Finds folder `id` and its subfolders at `path` on this computer.
+    /// Finds folder `id` and its subfolders at `path` on this computer,
+    /// keeping the locations of folders below it.
     pub fn relink_folder(&mut self, id: FolderId, path: &Path) -> Result<()> {
-        ensure!(path.is_dir(), "Choose an existing folder");
         let (root, logical) = self.logical_path(id)?;
-        let path = path.to_string_lossy();
+        self.relink_folder_at(root, &logical, path, Overrides::Keep)
+    }
+    /// Finds the folder of `root` at logical path `relative` and everything
+    /// below it at `path` on this computer, keeping or clearing the locations
+    /// of folders below it. The folder needs no catalog folder of its own: a
+    /// folder holding only folders is located by its path.
+    pub fn relink_folder_at(
+        &mut self,
+        root: RootId,
+        relative: &str,
+        path: &Path,
+        overrides: Overrides,
+    ) -> Result<()> {
+        ensure!(path.is_dir(), "Choose an existing folder");
         let computer = &self.computer.id;
         self.db.write(|w| {
-            w.execute(
-                sql!(
-                    "INSERT INTO folder_mappings(folder, path) VALUES (?, ?)
-                     ON CONFLICT(folder) DO UPDATE SET path=excluded.path"
-                ),
-                &[&id, &path],
-            )?;
+            let folders = logical_folders(w, root)?;
+            ensure!(
+                folders.iter().any(|(_, logical)| within(relative, logical)),
+                "Unknown folder"
+            );
+            if overrides == Overrides::Clear {
+                for below in own_rows(w, computer, root)? {
+                    if below != relative && within(relative, &below) {
+                        clear(w, computer, root, &below)?;
+                    }
+                }
+            }
             w.execute(
                 sql!(
                     "INSERT INTO folder_locations(root, relative_path, computer, path) VALUES (?, ?, ?, ?)
                      ON CONFLICT(root, relative_path, computer) DO UPDATE SET path=excluded.path"
                 ),
-                &[&root, &logical, computer, &path],
+                &[&root, &relative, computer, &path.to_string_lossy()],
             )?;
+            // Older releases read a catalog folder's own mapping, for the
+            // folders below it too. Folders below a folder with none of its
+            // own get none: a mapping there would go stale as folders come
+            // and go, and stop them being renamed or moved.
+            for (id, _) in folders.iter().filter(|(_, logical)| logical == relative) {
+                w.execute(
+                    sql!(
+                        "INSERT INTO folder_mappings(folder, path) VALUES (?, ?)
+                         ON CONFLICT(folder) DO UPDATE SET path=excluded.path"
+                    ),
+                    &[id, &path.to_string_lossy()],
+                )?;
+            }
             Ok(())
         })
     }
@@ -542,12 +583,17 @@ impl Catalog {
     }
     /// The folders below root `root` located separately on this computer.
     pub fn root_overrides(&self, root: RootId) -> Result<Vec<Override>> {
+        self.folder_overrides(root, "")
+    }
+    /// The folders below the folder of `root` at logical path `relative`
+    /// (the root for '') located separately on this computer.
+    pub fn folder_overrides(&self, root: RootId, relative: &str) -> Result<Vec<Override>> {
         Ok(self
             .location_rows()?
             .remove(&root)
             .unwrap_or_default()
             .into_iter()
-            .filter(|(relative, _)| !relative.is_empty())
+            .filter(|(below, _)| below != relative && within(relative, below))
             .map(|(relative, path)| Override { relative, path })
             .collect())
     }
@@ -647,4 +693,33 @@ fn clear(w: &mut Write<'_>, computer: &str, root: RootId, relative: &str) -> Res
         )?;
     }
     Ok(())
+}
+/// Whether logical path `logical` is `parent` or a folder below it.
+fn within(parent: &str, logical: &str) -> bool {
+    let mut below = names(logical);
+    names(parent).all(|n| below.next() == Some(n))
+}
+/// The catalog folders of `root`, with their logical paths.
+fn logical_folders(db: &impl Reads, root: RootId) -> Result<Vec<(FolderId, String)>> {
+    row! {
+        struct Logical {
+            id: FolderId,
+            logical: String,
+        }
+    }
+    let rows: Vec<Logical> = db.read(
+        sql!(
+            "SELECT f.id, p.path FROM folders f JOIN folder_paths p ON p.folder=f.id
+             WHERE f.root=?"
+        ),
+        &[&root],
+    )?;
+    Ok(rows.into_iter().map(|r| (r.id, r.logical)).collect())
+}
+/// The logical paths `computer` has a location of its own for in `root`.
+fn own_rows(db: &impl Reads, computer: &str, root: RootId) -> Result<Vec<String>> {
+    db.read(
+        sql!("SELECT relative_path FROM folder_locations WHERE root=? AND computer=?"),
+        &[&root, &computer],
+    )
 }

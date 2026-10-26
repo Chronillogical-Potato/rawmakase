@@ -240,3 +240,163 @@ fn defaults_fill_only_what_neither_file_nor_sidecar_has() -> Result<()> {
     );
     Ok(())
 }
+
+/// A little-endian TIFF whose only directory holds `packet` as its XMP (tag 700).
+fn tiff_with(packet: &str) -> Vec<u8> {
+    let mut tiff = b"II*\0".to_vec();
+    tiff.extend(8u32.to_le_bytes());
+    tiff.extend(1u16.to_le_bytes());
+    tiff.extend(700u16.to_le_bytes());
+    tiff.extend(crate::tiff::kind::BYTE.to_le_bytes());
+    tiff.extend((packet.len() as u32).to_le_bytes());
+    tiff.extend(26u32.to_le_bytes());
+    tiff.extend(0u32.to_le_bytes());
+    tiff.extend(packet.as_bytes());
+    tiff
+}
+/// A tiny PNG with `packet` as its XMP, in an "XML:com.adobe.xmp" iTXt chunk.
+fn png_with(packet: &str) -> Result<Vec<u8>> {
+    use image::ImageEncoder as _;
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(
+        &[0u8; 3],
+        1,
+        1,
+        image::ExtendedColorType::Rgb8,
+    )?;
+    let mut chunk = b"iTXt".to_vec();
+    chunk.extend(b"XML:com.adobe.xmp\0\0\0\0\0");
+    chunk.extend(packet.as_bytes());
+    let crc = !chunk.iter().fold(!0u32, |mut crc, &byte| {
+        crc ^= byte as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+        crc
+    });
+    let iend = png.len() - 12;
+    let mut out = png[..iend].to_vec();
+    out.extend(((chunk.len() - 4) as u32).to_be_bytes());
+    out.extend(chunk);
+    out.extend(crc.to_be_bytes());
+    out.extend_from_slice(&png[iend..]);
+    Ok(out)
+}
+
+#[test]
+fn a_files_own_xmp_is_read_by_its_extension() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let packet = xmp(r#"dc:title="Inside""#, "");
+    let jpeg = jpeg_with(&packet)?;
+    let tiff = tiff_with(&packet);
+    let png = png_with(&packet)?;
+    let title_of = |name: &str, bytes: &[u8]| -> Result<_> {
+        let file = dir.path().join(name);
+        std::fs::write(&file, bytes)?;
+        let (read, report) = read_file(&file);
+        assert!(report.unreadable.is_empty(), "{name}: {report:?}");
+        Ok(read.and_then(|r| r.title))
+    };
+    for name in ["A.jpg", "B.JPG", "C.jpeg", "D.JPEG"] {
+        assert_eq!(title_of(name, &jpeg)?, set("Inside"), "{name}");
+    }
+    for name in ["E.tif", "F.TIF", "G.tiff", "H.TIFF", "I.dng", "J.DNG"] {
+        assert_eq!(title_of(name, &tiff)?, set("Inside"), "{name}");
+    }
+    for name in ["K.png", "L.PNG"] {
+        assert_eq!(title_of(name, &png)?, set("Inside"), "{name}");
+    }
+    // A compressed one, which the XMP standard does not allow, is passed over.
+    let mut compressed = png.clone();
+    let flag = compressed
+        .windows(18)
+        .position(|w| w == b"XML:com.adobe.xmp\0")
+        .unwrap()
+        + 18;
+    compressed[flag] = 1;
+    assert_eq!(title_of("K2.png", &compressed)?, None);
+    // Nor is a JPEG's or a TIFF's under another extension.
+    assert_eq!(title_of("M.webp", &jpeg)?, None);
+    assert_eq!(title_of("N.NEF", &tiff)?, None);
+    Ok(())
+}
+
+fn formats_fixture(name: &str, dir: &Path) -> Result<PathBuf> {
+    let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/data/formats")
+        .join(name);
+    let file = dir.join(name);
+    std::fs::copy(from, &file)?;
+    Ok(file)
+}
+
+#[test]
+fn webp_avif_and_jxl_files_own_xmp_is_read() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    // metadata-brob.jxl has its "xml " box brotli-compressed, as cjxl writes
+    // by default.
+    for name in [
+        "metadata.webp",
+        "metadata.avif",
+        "metadata.jxl",
+        "metadata-brob.jxl",
+    ] {
+        let file = formats_fixture(name, dir.path())?;
+        let (read, report) = read_file(&file);
+        assert!(report.unreadable.is_empty(), "{name}: {report:?}");
+        assert_eq!(read.and_then(|r| r.title), set("Fixture title"), "{name}");
+    }
+    Ok(())
+}
+
+#[test]
+fn an_avifs_xmp_item_over_16_mib_is_not_read() -> Result<()> {
+    use rawmakase_interop::isobmff::Heif;
+    let dir = tempfile::tempdir()?;
+    let file = formats_fixture("metadata.avif", dir.path())?;
+    let mut bytes = std::fs::read(&file)?;
+    let heif = Heif::read(&mut std::io::Cursor::new(&bytes)).unwrap();
+    let xmp = heif
+        .describing(*b"cdsc", heif.primary)
+        .into_iter()
+        .find(|id| heif.item(*id).unwrap().content_type == "application/rdf+xml")
+        .unwrap();
+    let (offset, len) = heif.extent(xmp).unwrap();
+    // Point the XMP item at a copy of its packet at the end of the file,
+    // padded with spaces past 16 MiB: still a readable packet, but too big.
+    let mut location = (offset as u32).to_be_bytes().to_vec();
+    location.extend((len as u32).to_be_bytes());
+    let at = bytes
+        .windows(8)
+        .position(|w| w == location.as_slice())
+        .unwrap();
+    let big = (16 << 20) + 1;
+    let mut packet = bytes[offset as usize..(offset + len) as usize].to_vec();
+    packet.resize(big, b' ');
+    let end = bytes.len() as u32;
+    bytes[at..at + 4].copy_from_slice(&end.to_be_bytes());
+    bytes[at + 4..at + 8].copy_from_slice(&(big as u32).to_be_bytes());
+    bytes.extend(packet);
+    std::fs::write(&file, bytes)?;
+    // Skipped unread, as a WebP chunk or JPEG XL box that size is.
+    let (read, report) = read_file(&file);
+    assert!(report.unreadable.is_empty(), "{report:?}");
+    assert_eq!(read.and_then(|r| r.title), None);
+    Ok(())
+}
+
+#[test]
+fn webp_avif_and_jxl_files_without_xmp_read_nothing_and_are_not_unreadable() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    for name in ["animated.webp", "ten-bit.avif", "sixteen-bit.jxl"] {
+        let file = formats_fixture(name, dir.path())?;
+        let (read, report) = read_file(&file);
+        assert!(report.unreadable.is_empty(), "{name}: {report:?}");
+        assert_eq!(read.and_then(|r| r.title), None, "{name}");
+    }
+    Ok(())
+}

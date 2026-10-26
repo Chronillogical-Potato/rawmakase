@@ -16,7 +16,7 @@ pub fn compare(
     );
     let raw = crate::photo::open(input)?;
     let edit = if let Some(p) = recipe {
-        crate::presets::load_preset(p)?
+        crate::presets::load_preset(p)?.recipe
     } else {
         Recipe::with_profiles(
             &raw.metadata,
@@ -84,7 +84,7 @@ pub fn compare(
         output.join("report.json"),
         serde_json::to_vec_pretty(&report)?,
     )?;
-    crate::presets::save_preset(&output.join("recipe.json"), &edit)?;
+    crate::presets::save_preset(&output.join("recipe.json"), &edit, &image.metadata)?;
     println!("Comparison written to {}", output.display());
     Ok(())
 }

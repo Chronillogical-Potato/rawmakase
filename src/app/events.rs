@@ -21,6 +21,15 @@ impl Editor {
                     self.status = message.clone();
                     self.catalog_work = Some(message);
                 }
+                Event::FoldersAdded { result, source } => {
+                    let added = result.is_ok();
+                    self.catalog_work = None;
+                    self.catalog_ready(result);
+                    if added && let Some(library) = &mut self.library {
+                        library.show_added_folders(&source);
+                        let _ = self.save_session();
+                    }
+                }
                 Event::CatalogReady(result) => {
                     self.catalog_work = None;
                     self.catalog_ready(result);
@@ -31,24 +40,50 @@ impl Editor {
                     self.folder_synced(result);
                 }
                 // The dialog's own DialogClosed follows.
+                Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
+                Event::NamesRead { request, read } => self.names_read(request, read),
+                Event::RenameOrdered(catalog, cancel, ordered) => {
+                    self.rename_ordered(catalog, cancel, *ordered)
+                }
+                Event::FileOpDone(batch, done) => self.file_op_done(batch, *done),
+                Event::FileOpsRecovered(catalog, recovered) => {
+                    self.file_ops_recovered(catalog, *recovered)
+                }
+                Event::FileOpResolved(catalog, operation, resolved) => {
+                    self.file_op_resolved(catalog, operation, *resolved)
+                }
                 Event::FolderQuestion(question) => {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
                 }
 
                 Event::Monitor(p) => {
                     self.activity.finish_dialog();
-                    self.view.monitor = Some(p);
+                    self.view.monitor = super::monitor::MonitorProfile::Custom(p);
                     let _ = self.save_session();
                     self.schedule();
                 }
+                Event::DecodeCacheFolder(folder) => {
+                    self.activity.finish_dialog();
+                    self.move_decode_cache(Some(folder));
+                }
                 Event::PresetLoad(p) => {
                     self.activity.finish_dialog();
-                    match crate::presets::load_preset(&p) {
+                    let loaded = crate::presets::load_preset(&p).and_then(|preset| {
+                        let m =
+                            self.document.metadata.as_ref().ok_or_else(|| {
+                                anyhow::anyhow!("Open a photo to apply a preset to")
+                            })?;
+                        Ok(crate::presets::applied_to(
+                            preset,
+                            self.document.edit.recipe(),
+                            m,
+                        ))
+                    });
+                    match loaded {
                         Ok(r) => {
-                            let r = crate::presets::applied_to(r, self.document.edit.recipe());
                             let old = self.document.edit.replace(r);
                             // Before the step is taken, as the Presets panel does.
-                            self.ensure_upright();
+                            self.ensure_analysis();
                             self.commit_edit(old.clone(), None);
                         }
                         Err(e) => self.status = e.to_string(),
@@ -118,9 +153,11 @@ impl Editor {
                     id,
                     profiles,
                     errors,
+                    groups,
                 } if id == self.load.id() => {
                     self.document.profiles = profiles;
                     self.document.profile_errors = errors;
+                    self.document.profile_groups = groups;
                     self.refresh_photo_defaults();
                     self.refresh_preset_support();
                     if let Some(text) = self.document.pending_lightroom.take() {
@@ -140,7 +177,8 @@ impl Editor {
                 Event::Synced(result) => self.synced(*result),
                 Event::PresetSave(p) => {
                     self.activity.finish_dialog();
-                    match crate::presets::save_preset(&p, self.document.edit.recipe()) {
+                    let m = self.document.metadata.clone().unwrap_or_default();
+                    match crate::presets::save_preset(&p, self.document.edit.recipe(), &m) {
                         Ok(()) => self.status = "Preset saved".into(),
                         Err(e) => self.status = e.to_string(),
                     }
@@ -187,7 +225,7 @@ impl Editor {
                     self.document.set_image(full);
                     self.load.finish(id);
                     // An Upright mode chosen before the photo decoded still needs analysing.
-                    self.ensure_upright();
+                    self.ensure_analysis();
                     if !self.document.edit.save_state().is_protected() {
                         // A raw default that could not be used stays explained.
                         self.status = match self.defaults_note() {
@@ -216,11 +254,12 @@ impl Editor {
                     samples,
                     stage,
                     status,
-                } if id == self.preview.task.id() => {
-                    let region = matches!(
-                        self.preview.pending_mode,
-                        super::state::TextureMode::Region(_)
-                    );
+                } => {
+                    let Some(request) = self.preview.request(id) else {
+                        continue;
+                    };
+                    self.preview.showing(id);
+                    let region = matches!(request.mode, super::state::TextureMode::Region(_));
                     // A region's own histogram would describe only what is
                     // visible; the whole photo's follows as `Histogram`.
                     if !region {
@@ -247,20 +286,24 @@ impl Editor {
                     // Pixels asked for by a hover or loupe that has since ended are
                     // not kept.
                     self.preview.keep_samples(region, samples);
-                    self.preview.samples_recipe = self.preview.pending_recipe.clone();
-                    self.preview.mode = self.preview.pending_mode;
+                    self.preview.samples_recipe = request.recipe;
+                    self.preview.mode = request.mode;
                     if !region {
-                        self.preview.crop = Some(self.preview.pending_crop);
+                        self.preview.crop = Some(request.crop);
                     }
                     if stage != RenderStage::Draft {
                         self.preview.task.finish(id);
-                        if let Some(small) = thumbnail {
+                        // The thumbnail is cached under the current edit: an earlier
+                        // render an edit overtook shows, but was not rendered with it.
+                        if let Some(small) = thumbnail
+                            && id == self.preview.task.id()
+                        {
                             self.refresh_library_thumbnail(ctx, small);
                         }
                     }
                     self.preview.status = status;
                 }
-                Event::Histogram { id, histogram } if id == self.preview.task.id() => {
+                Event::Histogram { id, histogram } if self.preview.request(id).is_some() => {
                     self.preview.histogram = *histogram;
                 }
                 Event::Failed {
@@ -268,6 +311,7 @@ impl Editor {
                     task: TaskKind::Load,
                     error,
                 } if id == self.load.id() => {
+                    self.document.failed = Some(error.clone());
                     self.status = error;
                     self.load.finish(id);
                     // No render is coming to take over from the stored preview.
@@ -390,6 +434,11 @@ impl Editor {
                     self.clear_reference();
                 }
                 l.set_defaults(self.raw_defaults.clone());
+                // A catalog opened (not read again) may have file
+                // operations a crash left unfinished.
+                if !reloaded {
+                    self.recover_files_later(l.session.catalog.location().clone());
+                }
                 self.library = Some(l);
                 self.module = Module::Library;
                 // On launch, return to the folder, photo and module of last time.

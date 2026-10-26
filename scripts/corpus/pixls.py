@@ -8,7 +8,7 @@ downloads them into $RAWMAKASE_CORPUS/raws/pixls/ and checks their hashes.
   manifest   rebuild tests/corpus/pixls.json from raw.pixls.us for MODELS below
              (about 200 recent and popular bodies; smallest CC0 file per model)
   download   fetch missing files; refuses to exceed the corpus budget (--budget-gb)
-  cameras    write tests/corpus/cameras.json with each camera's LibRaw color matrix,
+  cameras    write tests/corpus/cameras.json with each camera's color matrix, as the decoders read it,
              read from the downloaded files and any other RAWs in the corpus; the
              color tests make one synthetic chart per camera from it
 

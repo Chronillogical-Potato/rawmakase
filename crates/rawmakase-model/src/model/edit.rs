@@ -21,12 +21,15 @@ pub fn change_setting<T>(
 }
 
 /// Brings the recipe in line after setting `id` changed from `previous`:
-/// a new Temp or Tint recomputes the white balance multipliers for `photo`, which
-/// then no longer come from Auto.
+/// a new Temp or Tint (relative ones for rendered files too) recomputes the white balance multipliers for `photo`, which
+/// then no longer come from Auto; a new Straighten angle is no longer Auto's.
 pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Option<&Metadata>) {
     let current = *id.value_mut(r);
     match id {
-        ParameterId::Temperature | ParameterId::Tint => {
+        ParameterId::Temperature
+        | ParameterId::Tint
+        | ParameterId::IncrementalTemperature
+        | ParameterId::IncrementalTint => {
             if current != previous
                 && let Some(m) = photo
             {
@@ -34,6 +37,7 @@ pub fn setting_changed(r: &mut Recipe, id: ParameterId, previous: f32, photo: Op
                 r.auto_white_balance = None;
             }
         }
+        ParameterId::Straighten if current != previous => r.straighten_auto = None,
         _ => {}
     }
 }
@@ -56,6 +60,34 @@ pub fn turn_on_edited_panel(before: &Recipe, after: &mut Recipe) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An angle set by hand is not Auto's, even once it is back at Auto's: a Paste's
+    /// measurement then can't replace it, nor a Sync measure it again.
+    #[test]
+    fn a_straighten_changed_by_hand_is_no_longer_auto() {
+        use crate::model::transform::AutoStraighten;
+        let set = |r: &mut Recipe, angle: f32| {
+            change_setting(r, ParameterId::Straighten, None, |r| r.straighten = angle)
+        };
+        let mut pending = Recipe {
+            straighten_auto: Some(AutoStraighten::Pending(0.)),
+            ..Default::default()
+        };
+        set(&mut pending, 1.);
+        set(&mut pending, 0.);
+        assert_eq!(pending.straighten_auto, None);
+        let mut measured = Recipe::default();
+        measured.set_auto_straighten(Some(0.));
+        // Unchanged, it stays Auto's.
+        set(&mut measured, 0.);
+        assert_eq!(
+            measured.auto_straighten(),
+            Some(AutoStraighten::Measured(0.))
+        );
+        set(&mut measured, 2.);
+        set(&mut measured, 0.);
+        assert_eq!(measured.auto_straighten(), None);
+    }
 
     #[test]
     fn only_a_change_to_one_switched_off_panel_turns_it_on() {
@@ -89,5 +121,22 @@ mod tests {
             r.auto_white_balance.is_some(),
             "no photo, nothing to recompute"
         );
+    }
+
+    #[test]
+    fn a_rendered_photos_relative_white_balance_edit_clears_auto() {
+        use crate::camera_data::Source;
+        let m = Metadata {
+            source: Source::Rendered,
+            ..Default::default()
+        };
+        let mut r = Recipe::for_rendered(&m);
+        r.auto_white_balance = Some([5000., 0.]);
+        change_setting(&mut r, ParameterId::IncrementalTemperature, Some(&m), |r| {
+            r.incremental_temperature = 30.
+        });
+        // Temp and Tint carry a rendered file's white balance; its gains stay 1.
+        assert_eq!((r.incremental_temperature, r.wb), (30., [1.; 3]));
+        assert_eq!(r.auto_white_balance, None);
     }
 }

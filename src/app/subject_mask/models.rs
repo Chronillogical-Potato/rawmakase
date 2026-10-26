@@ -690,9 +690,8 @@ mod tests {
                 let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
-                if answer_one(stream, &body, answer, &asked).is_err() {
-                    return;
-                }
+                // A client that hung up mid-answer still gets the next one.
+                let _ = answer_one(stream, &body, answer, &asked);
             }
         });
         let file = ModelFile {
@@ -799,6 +798,34 @@ mod tests {
         assert_eq!(
             requests.try_iter().collect::<Vec<_>>(),
             [None, Some(30_000)]
+        );
+    }
+
+    /// A client giving up before it has read what was sent resets the connection;
+    /// on a slow machine `download` does that at its budget. The host must still
+    /// answer the next request rather than refuse it.
+    #[test]
+    fn the_host_answers_after_a_client_resets_the_connection() {
+        let (file, requests) = host(vec![Answer::Stall { send: 30_000 }, Answer::Rest]);
+        let address = file
+            .url
+            .trim_start_matches("http://")
+            .trim_end_matches("/x.onnx");
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        stream.write_all(b"GET /x.onnx HTTP/1.1\r\n\r\n").unwrap();
+        stream.read_exact(&mut [0u8; 4]).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        // Unread bytes left behind: closing resets the connection.
+        drop(stream);
+        let dir = tempfile::tempdir().unwrap();
+        let part = partial(&dir, &body()[..60_000]);
+        assert_eq!(
+            download(&part, &Progress::default(), &file, 0, BODY_BUDGET),
+            Ok(())
+        );
+        assert_eq!(
+            requests.try_iter().collect::<Vec<_>>(),
+            [None, Some(60_000)]
         );
     }
 

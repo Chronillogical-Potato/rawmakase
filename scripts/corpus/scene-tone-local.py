@@ -516,7 +516,7 @@ def lift_tables(d):
 
 # Rust output.
 
-def family(const, tables, values, lo, hi):
+def family(const, tables, values, lo, hi, tail_rows=()):
     rows = []
     for table in tables:
         vals = [f'{v:.4f}' for v in table]
@@ -524,7 +524,8 @@ def family(const, tables, values, lo, hi):
         rows.append('        [\n            ' + ',\n            '.join(lines) + ',\n        ],')
     vs = ', '.join(f'{v:g}' if v != int(v) else f'{v:.0f}.' for v in values)
     return (f'pub(super) const {const}: Family = Family {{\n    values: [{vs}],\n    lo: {lo:.1f},\n'
-            f'    hi: {hi:.1f},\n    tables: [\n' + '\n'.join(rows) + '\n    ],\n}.monotone();\n')
+            f'    hi: {hi:.1f},\n    tables: [\n' + '\n'.join(rows) + '\n    ],\n    tail: [0.; 6],\n}\n.monotone()'
+            + ''.join(f'\n.with_tail({r})' for r in tail_rows) + ';\n')
 
 
 LOCAL_HEADER = '''//! Camera Raw 18.7's Shadows, Highlights and Dehaze on scene values (process version
@@ -536,13 +537,18 @@ LOCAL_HEADER = '''//! Camera Raw 18.7's Shadows, Highlights and Dehaze on scene 
 //! percentile. Positive Shadows is the two-scale lift instead: `SHADOWS_DETAIL` of the
 //! base level less the regional level, `SHADOWS_REGION` of the regional level less the
 //! Shadows key, fitted together; the rows a family leaves to another are 0. Rows are
-//! the slider positions `values`; columns are bin centres over [lo, hi].
+//! the slider positions `values`; columns are bin centres over [lo, hi]. Past `hi` a row
+//! holds its last column plus `tail` per stop: negative Highlights at -100 keeps the
+//! slope of its last 7 columns (`Family::with_tail`), as Camera Raw keeps pulling objects
+//! further above a dark photo's key.
 #![allow(clippy::excessive_precision, clippy::approx_constant)]
 pub(crate) struct Family {
     pub values: [f32; 6],
     pub lo: f32,
     pub hi: f32,
     pub tables: [[f32; 48]; 6],
+    /// Per row, the log2 gain per stop past `hi` (0: the last column holds).
+    pub tail: [f32; 6],
 }
 '''
 
@@ -634,7 +640,8 @@ def tables(args):
         + family('SHADOWS_DETAIL', none + detail, SH, *RANGES['S'])
         + family('SHADOWS_REGION', none + region, SH, *RANGES['S'])
         + family('HIGHLIGHTS', t['H'][:3] + [w * photo + (1 - w) * synth for (photo, count), synth in zip(H, t['H'][3:])
-                                             for w in [count / (count + HIGHLIGHT_SUPPORT)]], SH, *RANGES['H'])
+                                             for w in [count / (count + HIGHLIGHT_SUPPORT)]], SH, *RANGES['H'],
+                 tail_rows=(0,))
         + family('DEHAZE', D, DEHAZE, *RANGES['D']))
     c = t['C']
     (out / 'clarity_data.rs').write_text(

@@ -12,7 +12,7 @@ fn photo(source: &Path) -> BatchPhoto {
         name: source.file_name().unwrap().to_string_lossy().into(),
         edit: Edit::Catalog(Default::default()),
         values: Default::default(),
-        captured: None,
+        naming: Default::default(),
         place: None,
     }
 }
@@ -207,10 +207,11 @@ impl Fixture {
             .catalog
             .photo_records(&ids)?
             .into_iter()
+            .zip(self.catalog.name_fields(&ids)?)
             .zip(&self.photos)
-            .map(|(record, (_, path))| {
+            .map(|((record, naming), (_, path))| {
                 let name = path.file_name().unwrap().to_string_lossy().into();
-                BatchPhoto::from_record(record, path.clone(), name)
+                BatchPhoto::from_record(record, path.clone(), name, naming)
             })
             .collect())
     }
@@ -222,6 +223,7 @@ impl Fixture {
             defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
             watermark: None,
             demosaic: Default::default(),
+            cache: Default::default(),
         }
     }
 }
@@ -304,6 +306,39 @@ fn every_photo_is_exported_with_its_own_edit_or_said_why_not() -> Result<()> {
         outcomes[4]
     );
     assert_eq!(listing(&f.out()), ["a.tif", "b.tif", "c.tif"]);
+    Ok(())
+}
+
+/// Issue 546: exFAT on macOS refuses both an exclusive rename and a hard link.
+/// Runs on the folder RAWMAKASE_TEST_EXFAT names, on such a volume; without it
+/// there is nothing to test against. To make one on macOS:
+/// `mkfile -n 64m x.img; hdiutil attach -imagekey diskimage-class=CRawDiskImage
+/// -nomount x.img`, then `newfs_exfat /dev/rdiskN` and `mount -t exfat
+/// /dev/diskN <folder>`.
+#[test]
+fn a_volume_without_exclusive_rename_takes_exports_without_replacing_files() -> Result<()> {
+    let Some(volume) = std::env::var_os("RAWMAKASE_TEST_EXFAT") else {
+        eprintln!("RAWMAKASE_TEST_EXFAT unset: skipped");
+        return Ok(());
+    };
+    let f = fixture(&["a.dng", "b.dng"])?;
+    let out = tempfile::tempdir_in(volume)?;
+    std::fs::write(out.path().join("a.tif"), b"previous")?;
+    let batch = f.batch(f.batch_photos()?, settings(out.path()));
+    // Appears after planning, before the photo is written.
+    std::fs::write(out.path().join("b.tif"), b"late")?;
+    let outcomes = run_all(&batch);
+    assert_eq!(exported(&outcomes[0]), out.path().join("a-2.tif"));
+    assert_eq!(exported(&outcomes[1]), out.path().join("b-2.tif"));
+    assert_eq!(std::fs::read(out.path().join("a.tif"))?, b"previous");
+    assert_eq!(std::fs::read(out.path().join("b.tif"))?, b"late");
+    assert!(!pixels(&out.path().join("a-2.tif")).is_empty());
+    // Without the "._" files macOS keeps beside each file there.
+    let files: Vec<_> = listing(out.path())
+        .into_iter()
+        .filter(|n| !n.starts_with("._"))
+        .collect();
+    assert_eq!(files, ["a-2.tif", "a.tif", "b-2.tif", "b.tif"]);
     Ok(())
 }
 
@@ -625,8 +660,8 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
     );
     // Date - Filename: the capture date, or "undated" with a note, never the file's
     // modified date.
-    photos[0].captured = Some("2026-05-04 10:21:33.000".into());
-    photos[2].captured = None;
+    photos[0].naming.captured = Some("2026-05-04 10:21:33.000".into());
+    photos[2].naming.captured = None;
     let photos = vec![photos[0].clone(), photos[2].clone()];
     let mut s = settings(&f.out().join("dated"));
     s.naming = Some(crate::export_settings::Naming::DateFilename);
@@ -640,4 +675,94 @@ fn sequence_numbers_follow_the_photos_chosen_and_a_failure_keeps_its_number() ->
         other => panic!("{other:?}"),
     }
     Ok(())
+}
+
+#[test]
+fn exporting_a_jpeg_never_replaces_it() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source = dir.path().join("photo.jpg");
+    image::RgbImage::from_fn(32, 24, |x, y| {
+        image::Rgb([(x * 8) as u8, (y * 10) as u8, 128])
+    })
+    .save(&source)?;
+    let original = std::fs::read(&source)?;
+    let photos = vec![photo(&source)];
+    let export = |existing: Existing| {
+        let settings = ExportSettings {
+            destination: Destination::SameFolder,
+            naming: Some(crate::export_settings::Naming::Filename),
+            format: Format::Jpeg,
+            existing,
+            ..Default::default()
+        };
+        let batch = Batch {
+            plan: plan(&photos, &settings, Some(existing)).unwrap(),
+            photos: photos.clone(),
+            settings,
+            defaults: Arc::new(DevelopDefaults::with_presets(Default::default(), |_| None)),
+            watermark: None,
+            demosaic: Default::default(),
+            cache: Default::default(),
+        };
+        run_all(&batch)
+    };
+
+    match &export(Existing::Overwrite)[..] {
+        [Outcome::Failed(reason)] => {
+            assert!(reason.contains("Cannot overwrite source"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read(&source)?, original);
+    assert_eq!(listing(dir.path()), ["photo.jpg"]);
+
+    // Unique names it as every export does: the next free "name-2", "name-3"…
+    let outcomes = export(Existing::Unique);
+    assert_eq!(exported(&outcomes[0]), dir.path().join("photo-2.jpg"));
+    assert_eq!(std::fs::read(&source)?, original);
+    assert_eq!(listing(dir.path()), ["photo-2.jpg", "photo.jpg"]);
+    Ok(())
+}
+
+/// A template from the Filename Template Editor names each photo from the
+/// fields taken when Export was chosen, and says what each name lacks.
+#[test]
+fn a_custom_template_names_from_the_fields_taken_at_export() {
+    use crate::export_settings::{CameraNames, NameFields};
+    let d = tempfile::tempdir().unwrap();
+    let mut photos = vec![
+        photo(Path::new("/one/DSC01.ARW")),
+        photo(Path::new("/one/DSC02.ARW")),
+    ];
+    photos[0].naming = NameFields {
+        captured: Some("2026-04-24T18:43:24.000".into()),
+        camera: CameraNames::Read {
+            make: Some("Sony".into()),
+            model: Some("ILCE-7RM6".into()),
+        },
+        ..Default::default()
+    };
+    // The same second, and no camera read: told apart, and said.
+    photos[1].naming = NameFields {
+        captured: Some("2026-04-24T18:43:24.000".into()),
+        ..Default::default()
+    };
+    let mut s = settings(d.path());
+    s.choose_tokens(crate::export_settings::BUILTIN[0].tokens);
+    let plan = plan(&photos, &s, None).unwrap();
+    assert_eq!(
+        names(&plan),
+        [
+            (
+                String::from("2026-04-24 18.43.24 ILCE-7RM6.tif"),
+                Write::Create
+            ),
+            (String::from("2026-04-24 18.43.24.tif"), Write::Create),
+        ]
+    );
+    assert!(plan.entries[0].notes.is_empty());
+    assert_eq!(
+        plan.entries[1].notes,
+        ["the camera's make and model were not read"]
+    );
 }

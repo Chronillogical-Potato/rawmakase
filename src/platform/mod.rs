@@ -1,9 +1,11 @@
 //! Platform integration, independent of catalog and rendering policy.
 pub(crate) mod display;
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod menu;
 pub(crate) mod network;
 pub(crate) mod quit;
 pub(crate) mod reveal;
-pub(crate) mod text_scale;
+pub(crate) mod trash;
 pub(crate) mod volume;
 pub(crate) mod web;
 
@@ -52,29 +54,21 @@ pub(crate) fn taskbar_icon(window: &impl winit::raw_window_handle::HasWindowHand
     }
 }
 
-/// Whether winit opens windows through Wayland rather than X11 on Linux: it
-/// does whenever the session offers Wayland, by either variable.
-#[cfg(any(target_os = "linux", feature = "telemetry"))]
+/// Whether winit opens windows through Wayland rather than X11 on Linux, for
+/// the usage report: it does whenever the session offers Wayland, by either
+/// variable.
+#[cfg(feature = "telemetry")]
 pub(crate) fn wayland() -> bool {
     wayland_in(|name| std::env::var_os(name))
 }
 
-/// Whether files dragged from another app can be dropped onto the window.
-/// winit 0.30 (eframe 0.36's) only takes drops on X11, macOS and Windows.
-pub(crate) fn accepts_dropped_files() -> bool {
-    #[cfg(target_os = "linux")]
-    return !wayland();
-    #[cfg(not(target_os = "linux"))]
-    return true;
-}
-
-#[cfg(any(target_os = "linux", feature = "telemetry"))]
+#[cfg(feature = "telemetry")]
 fn wayland_in(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     let set = |name| var(name).is_some_and(|value| !value.is_empty());
     set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET")
 }
 
-#[cfg(all(test, any(target_os = "linux", feature = "telemetry")))]
+#[cfg(all(test, feature = "telemetry"))]
 mod tests {
     use super::wayland_in;
     use std::ffi::OsString;

@@ -283,6 +283,27 @@ pub(super) fn expand(text: &str) -> Result<Vec<u8>> {
     ensure!(data.len() == expected, "Invalid expanded table size");
     Ok(data)
 }
+/// A table's bytes in Adobe's encoding, the inverse of [`expand`]: zlib with the
+/// expanded length first, in base 85.
+pub(super) fn compress(bytes: &[u8]) -> String {
+    use std::io::Write;
+    let mut compressed = (bytes.len() as u32).to_le_bytes().to_vec();
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    // Writing into memory cannot fail.
+    z.write_all(bytes).expect("zlib into memory");
+    compressed.extend(z.finish().expect("zlib into memory"));
+    let mut text = String::with_capacity(compressed.len() * 5 / 4 + 5);
+    for chunk in compressed.chunks(4) {
+        let mut word = [0; 4];
+        word[..chunk.len()].copy_from_slice(chunk);
+        let mut value = u32::from_le_bytes(word);
+        for _ in 0..chunk.len() + 1 {
+            text.push(ALPHABET[(value % 85) as usize] as char);
+            value /= 85;
+        }
+    }
+    text
+}
 fn decode_table(text: &str) -> Result<DecodedTable> {
     let data = expand(text)?;
     ensure!(data.len() >= 24, "Invalid expanded table size");
@@ -356,6 +377,9 @@ pub(super) enum LookBase {
 #[derive(Clone, Debug)]
 pub(super) struct LookFile {
     pub name: String,
+    /// Its `crs:Group`, which the profile menu lists it under; not part of the
+    /// profile a recipe embeds.
+    pub group: String,
     pub base: LookBase,
     restriction: String,
     copyright: String,
@@ -402,17 +426,20 @@ impl LookFile {
         p.validate()?;
         Ok(p)
     }
+    /// A look file's name and UUID, without reading its tables: what an import
+    /// checks the names it gives against.
+    pub fn identity(text: &str) -> Result<(String, String)> {
+        let doc = roxmltree::Document::parse(text)?;
+        let d = look_description(&doc)?;
+        Ok((
+            look_name(d)?.into(),
+            d.attribute((CRS, "UUID")).unwrap_or("").into(),
+        ))
+    }
     pub fn parse(text: &str) -> Result<Self> {
         let doc = roxmltree::Document::parse(text)?;
-        let d = doc
-            .descendants()
-            .find(|n| {
-                n.has_tag_name((RDF, "Description"))
-                    && n.parent().is_some_and(|p| p.has_tag_name((RDF, "RDF")))
-            })
-            .context("Missing profile description")?;
+        let d = look_description(&doc)?;
         let attr = |name| d.attribute((CRS, name)).unwrap_or("");
-        ensure!(attr("PresetType") == "Look", "XMP is not a look profile");
         let base = match attr("CameraProfile") {
             "" => LookBase::Any,
             name => LookBase::Named(name.into()),
@@ -471,17 +498,7 @@ impl LookFile {
                 value.parse::<f32>()? / 100.
             })
         };
-        let name_node = d
-            .children()
-            .find(|n| n.has_tag_name((CRS, "Name")))
-            .context("Missing profile name")?;
-        let name = name_node
-            .descendants()
-            .find(|n| {
-                n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default")
-            })
-            .and_then(|n| n.text())
-            .context("Missing profile name")?;
+        let name = look_name(d)?;
         ensure!(
             boolean(attr("RequiresRGBTables"))? != Some(true),
             "Look requires the photo's own RGB tables"
@@ -598,6 +615,7 @@ impl LookFile {
         look.validate_contents()?;
         Ok(Self {
             name: name.into(),
+            group: label(d, "Group").unwrap_or("").trim().into(),
             base,
             restriction: attr("CameraModelRestriction").into(),
             copyright: attr("Copyright").into(),
@@ -605,29 +623,45 @@ impl LookFile {
         })
     }
 }
+/// A look file's profile description, which must be a look.
+fn look_description<'a, 'input>(
+    doc: &'a roxmltree::Document<'input>,
+) -> Result<roxmltree::Node<'a, 'input>> {
+    let d = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name((RDF, "Description"))
+                && n.parent().is_some_and(|p| p.has_tag_name((RDF, "RDF")))
+        })
+        .context("Missing profile description")?;
+    ensure!(
+        d.attribute((CRS, "PresetType")) == Some("Look"),
+        "XMP is not a look profile"
+    );
+    Ok(d)
+}
+/// The name a look lists under: its `crs:Name`'s default language.
+fn look_name<'a>(d: roxmltree::Node<'a, '_>) -> Result<&'a str> {
+    label(d, "Name").context("Missing profile name")
+}
+/// A label element's (`crs:Name`, `crs:Group`) default language.
+fn label<'a>(d: roxmltree::Node<'a, '_>, element: &str) -> Option<&'a str> {
+    d.children()
+        .find(|n| n.has_tag_name((CRS, element)))
+        .and_then(|n| {
+            n.descendants().find(|n| {
+                n.has_tag_name((RDF, "li")) && n.attribute((XML, "lang")) == Some("x-default")
+            })
+        })
+        .and_then(|n| n.text())
+}
 #[cfg(any(test, feature = "test-support"))]
 #[cfg_attr(not(test), allow(dead_code))]
 pub mod tests {
     use super::*;
-    use std::io::Write;
-    /// A table's bytes in Adobe's encoding: zlib with the expanded length first, in
-    /// base 85.
+    /// A table's bytes in Adobe's encoding.
     pub(crate) fn encode(bytes: &[u8]) -> String {
-        let mut compressed = (bytes.len() as u32).to_le_bytes().to_vec();
-        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        z.write_all(bytes).unwrap();
-        compressed.extend(z.finish().unwrap());
-        let mut text = String::new();
-        for chunk in compressed.chunks(4) {
-            let mut word = [0; 4];
-            word[..chunk.len()].copy_from_slice(chunk);
-            let mut value = u32::from_le_bytes(word);
-            for _ in 0..chunk.len() + 1 {
-                text.push(ALPHABET[(value % 85) as usize] as char);
-                value /= 85;
-            }
-        }
-        text
+        super::compress(bytes)
     }
     fn compose_text(text: &str, base: &CameraProfile) -> Result<CameraProfile> {
         LookFile::parse(text)?.compose(base)

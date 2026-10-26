@@ -7,8 +7,45 @@ use super::{Catalog, PhotoId};
 use crate::metadata::PhotoInfo;
 use anyhow::Result;
 
+/// Photo `id`'s info; a virtual copy has its master's.
+pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<Option<PhotoInfo>> {
+    row! {
+        struct Info {
+            camera: Option<String>,
+            lens: Option<String>,
+            focal: Option<f64>,
+            aperture: Option<f64>,
+            exposure: Option<f64>,
+            iso: Option<f64>,
+            width: Option<u32>,
+            height: Option<u32>,
+        }
+    }
+    let info: Option<Info> = db.read_optional(
+        sql!(
+            "SELECT camera, lens, focal, aperture, exposure, iso, width, height
+             FROM photo_info
+             WHERE photo = (SELECT COALESCE(master_id, id) FROM photos WHERE id = ?)"
+        ),
+        &[&id],
+    )?;
+    Ok(info.map(|i| PhotoInfo {
+        camera: i.camera,
+        lens: i.lens,
+        focal: i.focal,
+        aperture: i.aperture,
+        exposure: i.exposure,
+        iso: i.iso,
+        dimensions: i.width.zip(i.height),
+    }))
+}
+
 /// Set in `meta` once photo info has been copied from the stored catalog.
 pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
+/// The PNGs whose files are read once more, because their info was stored
+/// before PNGs' EXIF was read: their ids, comma-separated, each removed once
+/// its file is read; empty when none is left.
+const PNG_INFO_REREAD: &str = "png_info_reread";
 
 impl Catalog {
     /// Each photo's width over height, as shown, where it is known; a
@@ -36,35 +73,7 @@ impl Catalog {
     }
     /// A photo's info; a virtual copy has its master's.
     pub fn photo_info(&self, id: PhotoId) -> Result<Option<PhotoInfo>> {
-        row! {
-            struct Info {
-                camera: Option<String>,
-                lens: Option<String>,
-                focal: Option<f64>,
-                aperture: Option<f64>,
-                exposure: Option<f64>,
-                iso: Option<f64>,
-                width: Option<u32>,
-                height: Option<u32>,
-            }
-        }
-        let info: Option<Info> = self.db.read_optional(
-            sql!(
-                "SELECT camera, lens, focal, aperture, exposure, iso, width, height
-                 FROM photo_info
-                 WHERE photo = (SELECT COALESCE(master_id, id) FROM photos WHERE id = ?)"
-            ),
-            &[&id],
-        )?;
-        Ok(info.map(|i| PhotoInfo {
-            camera: i.camera,
-            lens: i.lens,
-            focal: i.focal,
-            aperture: i.aperture,
-            exposure: i.exposure,
-            iso: i.iso,
-            dimensions: i.width.zip(i.height),
-        }))
+        read(&self.db, id)
     }
     /// The cameras the catalog's photos were taken with, as photo info names
     /// them, in alphabetical order.
@@ -104,20 +113,62 @@ impl Catalog {
             .collect();
         Ok(cameras.into_iter().collect())
     }
-    /// Masters with no info yet, whose files may have it.
-    pub fn photos_without_info(&self) -> Result<Vec<PhotoId>> {
-        self.db.read(
+    /// Masters whose files are to be read for their info: those with none
+    /// yet, and PNGs stored before their EXIF was read
+    /// ([`Self::reread_png_info_once`]) until their files are read.
+    pub fn photos_to_read_info(&self) -> Result<Vec<PhotoId>> {
+        let mut ids: Vec<PhotoId> = self.db.read(
             sql!(
                 "SELECT id FROM photos
                  WHERE master_id IS NULL AND id NOT IN (SELECT photo FROM photo_info)"
             ),
             &[],
-        )
+        )?;
+        ids.extend(reread_ids(self.meta(PNG_INFO_REREAD)?));
+        Ok(ids)
+    }
+    /// Earlier releases read no EXIF from PNGs and stored their size alone, so
+    /// their camera, lens and exposure are read once more: the PNGs whose info
+    /// has none of these are listed for [`Self::photos_to_read_info`], once per
+    /// catalog. Their stored info stays until their files are read.
+    pub fn reread_png_info_once(&mut self) -> Result<()> {
+        if self.meta(PNG_INFO_REREAD)?.is_some() {
+            return Ok(());
+        }
+        row! {
+            struct Stored {
+                id: PhotoId,
+                filename: String,
+            }
+        }
+        let stored: Vec<Stored> = self.db.read(
+            sql!(
+                "SELECT p.id, p.filename FROM photos p JOIN photo_info i ON i.photo = p.id
+                 WHERE p.master_id IS NULL AND i.camera IS NULL AND i.lens IS NULL
+                     AND i.focal IS NULL AND i.aperture IS NULL AND i.exposure IS NULL
+                     AND i.iso IS NULL"
+            ),
+            &[],
+        )?;
+        let pngs: Vec<String> = stored
+            .into_iter()
+            .filter(|s| {
+                crate::storage::RasterFormat::of(std::path::Path::new(&s.filename))
+                    == Some(crate::storage::RasterFormat::Png)
+            })
+            .map(|s| s.id.to_string())
+            .collect();
+        self.set_meta(PNG_INFO_REREAD, &pngs.join(","))
     }
     /// Records info read from files, in one transaction; `None` records that
     /// a file had none, so it is not read again.
     pub fn fill_photo_info(&mut self, infos: &[(PhotoId, Option<PhotoInfo>)]) -> Result<()> {
         self.db.write(|w| {
+            let mut reread: Vec<PhotoId> = reread_ids(w.read_optional(
+                sql!("SELECT value FROM meta WHERE key=?"),
+                &[&PNG_INFO_REREAD],
+            )?);
+            let pending = reread.len();
             for (id, info) in infos {
                 // Under the photo's master now, in case it became a copy while
                 // being read.
@@ -129,6 +180,11 @@ impl Catalog {
                 if let Some(master) = master {
                     insert(w, master, info.as_ref().unwrap_or(&PhotoInfo::default()))?;
                 }
+                reread.retain(|r| r != id && Some(*r) != master);
+            }
+            if reread.len() != pending {
+                let ids: Vec<String> = reread.iter().map(PhotoId::to_string).collect();
+                super::set_meta(w, PNG_INFO_REREAD, &ids.join(","))?;
             }
             Ok(())
         })
@@ -138,6 +194,15 @@ impl Catalog {
     pub fn backfill_lightroom_info(&mut self) -> Result<usize> {
         self.backfill_once(INFO_BACKFILLED, copy_lightroom_info)
     }
+}
+
+/// The ids listed under [`PNG_INFO_REREAD`].
+fn reread_ids(listed: Option<String>) -> Vec<PhotoId> {
+    listed
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|id| id.parse().ok().map(PhotoId))
+        .collect()
 }
 
 fn insert(w: &mut Write<'_>, id: PhotoId, info: &PhotoInfo) -> Result<()> {

@@ -284,21 +284,22 @@ impl Editor {
                                 }
                                 continue;
                             }
-                            if enabled && response.clicked() {
+                            // Control-click opens the menu on macOS, as a right-click does.
+                            if enabled
+                                && response.clicked()
+                                && !super::widgets::context_clicked(&response)
+                            {
                                 clicked = Some(i);
                             }
-                            // Presets made here can be changed, as Lightroom's own.
-                            if user.owns(p) {
-                                response.context_menu(|ui| {
-                                    use super::user_presets::PresetAction;
-                                    if ui.button("Update with Current Settings").clicked() {
-                                        user_action = Some(PresetAction::Update(i));
-                                    }
-                                    if ui.button("Rename…").clicked() {
-                                        user_action = Some(PresetAction::StartRename(i));
-                                    }
-                                    if ui.button("Delete").clicked() {
-                                        user_action = Some(PresetAction::Delete(i));
+                            // Presets made here can be changed, as Lightroom's own;
+                            // imported ones renamed or deleted, and any preset file
+                            // shown where it is.
+                            if !p.builtin {
+                                super::widgets::context_menu(&response, |ui| {
+                                    if let Some(action) =
+                                        super::user_presets::preset_menu(ui, &user, p, i)
+                                    {
+                                        user_action = Some(action);
                                     }
                                 });
                             }
@@ -467,7 +468,7 @@ impl Editor {
             .map(|(_, used)| used);
         this_photos_upright(&mut r, self.document.edit.recipe());
         let before = self.document.edit.replace(r);
-        self.ensure_upright();
+        self.ensure_analysis();
         // The settings before it are kept once, and every Amount is computed
         // from them again, so dragging never drifts.
         let full = self.document.edit.recipe().clone();
@@ -490,6 +491,17 @@ impl Editor {
     /// Sets the Amount of the preset just applied (0–2, 1 = 100%), and whether that
     /// changed the photo.
     pub(super) fn set_preset_amount(&mut self, amount: f32) -> AmountChange {
+        // An edit earlier in this frame (a mask's name kept as the slider was clicked)
+        // ends the Amount now: the settings it holds would take that edit back.
+        if self.presets.amount.is_some() {
+            self.end_stale_preset_amount();
+            if self.presets.amount.is_none() {
+                self.context.data_mut(|d| {
+                    d.remove_temp::<(String, String)>(super::widgets::history_step_id())
+                });
+                return AmountChange::Same;
+            }
+        }
         let (Some(session), Some(m)) = (&mut self.presets.amount, &self.document.metadata) else {
             return AmountChange::Same;
         };

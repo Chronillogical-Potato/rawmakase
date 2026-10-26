@@ -5,12 +5,12 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, adjustment_section, label_column, name_history_step, parametric_curve_ui,
-    segmented, setting_slider, slider, slider_with, switched_section, tone_curve_ui,
-    toolbar_action,
+    SliderEvent, adjustment_section, keyed_setting_slider, label_column, name_history_step,
+    parametric_curve_ui, segmented, setting_slider, slider, slider_with, switched_section,
+    tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
-use super::{Editor, bulk_import::ImportKind};
+use super::{Editor, basic_keys, bulk_import::ImportKind};
 use crate::app::icons::{self, Icon};
 use crate::model::panels::{Panel, PanelState};
 use crate::model::params::ParameterId;
@@ -21,6 +21,7 @@ use crate::{app::theme, develop::targeted::Target};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
+mod profile_menu;
 
 /// A histogram corner's clipping triangle: its corner point, which way it
 /// points (1 right, -1 left) and the area that takes its clicks.
@@ -197,8 +198,9 @@ impl Editor {
                 .on_hover_text("Output histogram of the whole photo");
         });
     }
-    /// The open tool's drawer, in Develop's tab panel: Crop's settings, or
-    /// Remove's, Red Eye's or Masking's. Its tools are on the tab rail.
+    /// The open tool's drawer, in place of Develop's adjustments: Crop's
+    /// settings, or Remove's, Red Eye's or Masking's. Its tools are on the
+    /// rail.
     pub(super) fn tool_drawer(&mut self, ui: &mut egui::Ui) {
         let Some(name) = DRAWER_TOOLS
             .iter()
@@ -244,24 +246,29 @@ impl Editor {
         drawer_frame().show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
             control_row(ui, "Aspect", |ui| {
-                let swap = 26.;
-                egui::ComboBox::from_id_salt("crop-aspect")
-                    .width(ui.available_width() - swap - 4.)
-                    .selected_text(aspect_name(self.view.aspect))
-                    .show_ui(ui, |ui| {
-                        for (aspect, name) in ASPECTS {
-                            ui.selectable_value(&mut self.view.aspect, aspect, name);
-                        }
-                    });
-                if ui
-                    .add_sized([swap, 20.], egui::Button::new("⇄"))
-                    .on_hover_text("Swap portrait and landscape · X")
-                    .clicked()
-                {
-                    action = Some(CropAction::Swap);
-                }
+                // From the right: the swap button is as wide as its glyph
+                // needs, and the aspects take what it leaves.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_sized([26., 20.], egui::Button::new("⇄"))
+                        .on_hover_text("Swap portrait and landscape · X")
+                        .clicked()
+                    {
+                        action = Some(CropAction::Swap);
+                    }
+                    egui::ComboBox::from_id_salt("crop-aspect")
+                        .width(ui.available_width())
+                        .selected_text(aspect_name(self.view.aspect))
+                        .show_ui(ui, |ui| {
+                            for (aspect, name) in ASPECTS {
+                                ui.selectable_value(&mut self.view.aspect, aspect, name);
+                            }
+                        });
+                });
             });
-            setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.);
+            crate::model::edit::change_setting(r, ParameterId::Straighten, None, |r| {
+                setting_slider(ui, ParameterId::Straighten, &mut r.straighten, 0.)
+            });
             control_row(ui, "Straighten", |ui| {
                 let w = (ui.available_width() - 4.) / 2.;
                 let armed = self.view.ruler == Ruler::Armed;
@@ -341,10 +348,13 @@ impl Editor {
             });
             ui.horizontal(|ui| {
                 ui.add_space(label_column(ui));
-                ui.label(
-                    egui::RichText::new("Drag the frame on the photo; changes apply live.")
-                        .size(10.)
-                        .color(palette.gray(125)),
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new("Drag the frame on the photo; changes apply live.")
+                            .size(10.)
+                            .color(palette.gray(125)),
+                    )
+                    .wrap(),
                 );
             });
             ui.horizontal(|ui| {
@@ -356,7 +366,9 @@ impl Editor {
                     .clicked()
                 {
                     r.crop = [0., 0., 1., 1.];
+                    // An angle Reset sets is not Auto's, even when Auto's was 0.
                     r.straighten = 0.;
+                    r.straighten_auto = None;
                     r.rotation = 0;
                     r.flip_x = false;
                     r.flip_y = false;
@@ -400,15 +412,19 @@ impl Editor {
             .as_ref()
             .map(|m| egui::Id::new(("adobe-profiles", &m.make, &m.model)));
         let adobe: Vec<std::path::PathBuf> = match (adobe_key, &self.document.metadata) {
-            (Some(key), Some(m)) => ui.ctx().data_mut(|d| {
+            // A JPEG, TIFF or PNG has its Embedded profile only.
+            (Some(key), Some(m)) if !m.is_rendered() => ui.ctx().data_mut(|d| {
                 d.get_temp_mut_or_insert_with(key, || crate::camera_profiles::adobe_installed(m))
                     .clone()
             }),
             _ => Vec::new(),
         };
         let metadata = self.document.metadata.clone();
+        // A JPEG, TIFF or PNG: its Embedded profile, and relative white balance.
+        let rendered = metadata.as_ref().is_some_and(|m| m.is_rendered());
         let profiles = self.document.profiles.clone();
         let profile_errors = self.document.profile_errors.clone();
+        let profile_groups = self.document.profile_groups.clone();
         let histogram = self.preview.histogram.bins;
         // Auto needs the decoded photo, and runs one estimate at a time.
         let auto_ready = self.document.full().is_some() && !self.document.auto.is_running();
@@ -490,10 +506,12 @@ impl Editor {
                     .width(ui.available_width())
                     .selected_text(r.profile.as_ref().map_or(matrix, |p| p.name.as_str()))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut r.profile, None, matrix);
-                        for profile in &profiles {
-                            ui.selectable_value(&mut r.profile, Some(profile.clone()), &profile.name)
-                                .on_hover_text(&profile.copyright);
+                        if !rendered {
+                            ui.selectable_value(&mut r.profile, None, matrix);
+                        }
+                        profile_menu::items(ui, &mut r.profile, &profiles, &profile_groups);
+                        if rendered {
+                            return;
                         }
                         ui.separator();
                         if !adobe.is_empty()
@@ -575,86 +593,123 @@ impl Editor {
                 shot.reset_white_balance(m);
                 (shot.temperature, shot.tint)
             });
-            control_row(ui, "WB", |ui| {
-                let current = (r.temperature, r.tint);
-                let near =
-                    |(t, n): (f32, f32)| (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5;
-                let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
-                    "Auto"
-                } else if as_shot.is_some_and(near) {
-                    "As Shot"
-                } else {
-                    NamedWhiteBalance::ALL
-                        .into_iter()
-                        .find(|w| near((w.values().temperature, w.values().tint)))
-                        .map_or("Custom", NamedWhiteBalance::name)
-                };
-                // The selector sits at the row's far left, so the menu lines up
-                // with Profile's.
-                let rect = Rect::from_center_size(
-                    Pos2::new(
-                        ui.max_rect().left() - label_column(ui) - 5. + 13.,
-                        ui.max_rect().center().y,
-                    ),
-                    Vec2::new(26., 20.),
-                );
-                let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
-                let picking = view.is(Tool::WhiteBalance);
-                if picking || response.hovered() {
-                    ui.painter()
-                        .rect_filled(rect, 3., palette.gray(if picking { 72 } else { 50 }));
-                }
-                eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
-                if response
-                    .on_hover_text("White balance selector (W): click a neutral area of the photo")
-                    .clicked()
-                {
-                    view.toggle(Tool::WhiteBalance);
-                }
-                egui::ComboBox::from_id_salt("white-balance")
-                    .width(ui.available_width())
-                    .selected_text(selected)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(selected == "As Shot", "As Shot")
-                            .clicked()
-                            && let Some(m) = &metadata
-                        {
-                            r.wb = [1.; 3];
-                            r.reset_white_balance(m);
-                        }
-                        if ui
-                            .add_enabled(
-                                auto_ready,
-                                egui::Button::selectable(selected == "Auto", "Auto"),
-                            )
-                            .on_hover_text("Make the photo's near-neutral areas neutral")
-                            .clicked()
-                        {
-                            auto_request = Some(AutoKind::WhiteBalance);
-                        }
-                        for named in NamedWhiteBalance::ALL {
+            let photo = metadata.as_ref();
+            // A monochrome photo has no white balance: Lightroom disables it.
+            let white_balance = basic_keys::enabled(ParameterId::Temperature, photo);
+            ui.add_enabled_ui(white_balance, |ui| {
+                control_row(ui, "WB", |ui| {
+                    // A rendered file's white balance is relative Temp and Tint, which
+                    // Auto records too; As Shot is 0 and 0.
+                    let (current, as_shot) = if rendered {
+                        (
+                            (r.incremental_temperature, r.incremental_tint),
+                            Some((0., 0.)),
+                        )
+                    } else {
+                        ((r.temperature, r.tint), as_shot)
+                    };
+                    let near = |(t, n): (f32, f32)| {
+                        (t - current.0).abs() < 1. && (n - current.1).abs() < 0.5
+                    };
+                    let selected = if r.auto_white_balance.is_some_and(|[t, n]| near((t, n))) {
+                        "Auto"
+                    } else if as_shot.is_some_and(near) {
+                        "As Shot"
+                    } else if rendered {
+                        "Custom"
+                    } else {
+                        NamedWhiteBalance::ALL
+                            .into_iter()
+                            .find(|w| near((w.values().temperature, w.values().tint)))
+                            .map_or("Custom", NamedWhiteBalance::name)
+                    };
+                    // The selector sits at the row's far left, so the menu lines up
+                    // with Profile's.
+                    let rect = Rect::from_center_size(
+                        Pos2::new(
+                            ui.max_rect().left() - label_column(ui) - 5. + 13.,
+                            ui.max_rect().center().y,
+                        ),
+                        Vec2::new(26., 20.),
+                    );
+                    let response = ui.interact(rect, ui.id().with("wb-selector"), Sense::click());
+                    let picking = view.is(Tool::WhiteBalance);
+                    if picking || response.hovered() {
+                        ui.painter().rect_filled(
+                            rect,
+                            3.,
+                            palette.gray(if picking { 72 } else { 50 }),
+                        );
+                    }
+                    eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
+                    if response
+                        .on_hover_text(
+                            "White balance selector (W): click a neutral area of the photo",
+                        )
+                        .clicked()
+                    {
+                        view.toggle(Tool::WhiteBalance);
+                    }
+                    egui::ComboBox::from_id_salt("white-balance")
+                        .width(ui.available_width())
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
                             if ui
-                                .selectable_label(selected == named.name(), named.name())
+                                .selectable_label(selected == "As Shot", "As Shot")
                                 .clicked()
                                 && let Some(m) = &metadata
                             {
-                                let values = named.values();
-                                r.temperature = values.temperature;
-                                r.tint = values.tint;
-                                r.update_wb(m);
-                                r.auto_white_balance = None;
+                                r.wb = [1.; 3];
+                                r.reset_white_balance(m);
                             }
-                        }
-                        ui.add_enabled(
-                            false,
-                            egui::Button::selectable(selected == "Custom", "Custom"),
-                        );
-                    });
+                            if ui
+                                .add_enabled(
+                                    auto_ready,
+                                    egui::Button::selectable(selected == "Auto", "Auto"),
+                                )
+                                .on_hover_text("Make the photo's near-neutral areas neutral")
+                                .clicked()
+                            {
+                                auto_request = Some(AutoKind::WhiteBalance);
+                            }
+                            // Kelvin presets are for RAW files, as in Lightroom.
+                            let named = if rendered {
+                                &[][..]
+                            } else {
+                                &NamedWhiteBalance::ALL[..]
+                            };
+                            for &named in named {
+                                if ui
+                                    .selectable_label(selected == named.name(), named.name())
+                                    .clicked()
+                                    && let Some(m) = &metadata
+                                {
+                                    let values = named.values();
+                                    r.temperature = values.temperature;
+                                    r.tint = values.tint;
+                                    r.update_wb(m);
+                                    r.auto_white_balance = None;
+                                }
+                            }
+                            ui.add_enabled(
+                                false,
+                                egui::Button::selectable(selected == "Custom", "Custom"),
+                            );
+                        });
+                });
+                let selected = &mut view.selected_setting;
+                if rendered {
+                    let (temp, tint) = (
+                        ParameterId::IncrementalTemperature,
+                        ParameterId::IncrementalTint,
+                    );
+                    basic_control(ui, r, temp, 0., photo, selected);
+                    basic_control(ui, r, tint, 0., photo, selected);
+                } else {
+                    basic_control(ui, r, ParameterId::Temperature, 6500., photo, selected);
+                    basic_control(ui, r, ParameterId::Tint, 0., photo, selected);
+                }
             });
-            let photo = metadata.as_ref();
-            setting_control(ui, r, ParameterId::Temperature, 6500., photo);
-            setting_control(ui, r, ParameterId::Tint, 0., photo);
             subheading(ui, "Tone");
             for id in [
                 ParameterId::Exposure,
@@ -664,7 +719,7 @@ impl Editor {
                 ParameterId::Whites,
                 ParameterId::Blacks,
             ] {
-                setting_control(ui, r, id, 0., photo);
+                basic_control(ui, r, id, 0., photo, &mut view.selected_setting);
             }
             subheading(ui, "Presence");
             for id in [
@@ -674,7 +729,7 @@ impl Editor {
                 ParameterId::Vibrance,
                 ParameterId::Saturation,
             ] {
-                setting_control(ui, r, id, 0., photo);
+                basic_control(ui, r, id, 0., photo, &mut view.selected_setting);
             }
         }) {
             r.wb = [1.; 3];
@@ -1459,29 +1514,56 @@ impl Editor {
             self.dialog(FileDialog::ImportFolder(kind), &ui.ctx().clone());
         }
         if import_adobe && let Some(m) = self.document.metadata.clone() {
+            let result = crate::camera_profiles::import_readable(&adobe);
             if let Some(key) = adobe_key {
-                ui.ctx()
-                    .data_mut(|d| d.remove::<Vec<std::path::PathBuf>>(key));
+                // Imported or unreadable, none of them is worth offering again.
+                ui.ctx().data_mut(|d| {
+                    if result.is_ok() {
+                        d.insert_temp(key, Vec::<std::path::PathBuf>::new());
+                    } else {
+                        d.remove::<Vec<std::path::PathBuf>>(key);
+                    }
+                });
             }
-            match crate::camera_profiles::import_files(&adobe) {
+            match result {
                 Ok(done) => {
-                    let (profiles, errors) = crate::camera_profiles::installed(&m);
-                    // As the loader's: the raw defaults are resolved again
-                    // after this frame, so changing an unedited photo's recipe
-                    // is not taken for an edit.
-                    let _ = self.tx.send(super::worker::Event::Profiles {
-                        id: self.load.id(),
-                        profiles,
-                        errors,
-                    });
-                    ui.ctx().request_repaint();
-                    self.refresh_library_defaults();
-                    self.status = format!(
-                        "Imported {} Adobe profiles for {} {}. Choose one from the Profile menu.",
-                        done.len(),
-                        m.make,
-                        m.model
-                    );
+                    if !done.imported.is_empty() {
+                        let crate::camera_profiles::Listed {
+                            profiles,
+                            errors,
+                            groups,
+                        } = crate::camera_profiles::listed(&m);
+                        // As the loader's: the raw defaults are resolved again
+                        // after this frame, so changing an unedited photo's recipe
+                        // is not taken for an edit.
+                        let _ = self.tx.send(super::worker::Event::Profiles {
+                            id: self.load.id(),
+                            profiles,
+                            errors,
+                            groups,
+                        });
+                        ui.ctx().request_repaint();
+                        self.refresh_library_defaults();
+                    }
+                    let mut reasons: Vec<&str> =
+                        done.skipped.iter().map(|(_, e)| e.as_str()).collect();
+                    reasons.sort_unstable();
+                    reasons.dedup();
+                    let reasons = reasons.join("; ");
+                    self.status = match (done.imported.len(), done.skipped.len()) {
+                        (0, k) => format!(
+                            "No new Adobe profiles for {} {}; skipped {k} ({reasons}).",
+                            m.make, m.model
+                        ),
+                        (n, 0) => format!(
+                            "Imported {n} Adobe profiles for {} {}. Choose one from the Profile menu.",
+                            m.make, m.model
+                        ),
+                        (n, k) => format!(
+                            "Imported {n} Adobe profiles for {} {}, skipped {k} ({reasons}). Choose one from the Profile menu.",
+                            m.make, m.model
+                        ),
+                    };
                 }
                 Err(e) => self.status = format!("Profiles not imported: {e:#}"),
             }
@@ -1701,9 +1783,9 @@ fn experimental(ui: &mut egui::Ui, note: &str) {
         .on_hover_text(note);
     });
 }
-/// The tools whose drawers open in Develop's tab panel, as the rail lists
-/// them, with their tooltips and the drawer's caption. Red Eye has no
-/// shortcut, as in Lightroom.
+/// The tools whose drawers open in place of Develop's adjustments, as the
+/// rail lists them, with their tooltips and the drawer's caption. Red Eye
+/// has no shortcut, as in Lightroom.
 pub(super) const DRAWER_TOOLS: [(Tool, &str, &str); 4] = [
     (Tool::Crop, "Crop & Straighten · R", "Crop & Straighten"),
     (
@@ -1714,8 +1796,10 @@ pub(super) const DRAWER_TOOLS: [(Tool, &str, &str); 4] = [
     (Tool::RedEye, "Red Eye Correction", "Red Eye"),
     (Tool::Mask, "Masking · Shift+W", "Masking"),
 ];
-/// A tool drawer's contents on the tab panel, at the adjustments sections'
-/// margins.
+/// The slider grid's label column in the tool drawers, wide enough for
+/// their longest captions ("Orientation", "Range High").
+pub(super) const DRAWER_LABEL_COLUMN: f32 = 68.;
+/// A tool drawer's contents, at the adjustments sections' margins.
 fn drawer_frame() -> egui::Frame {
     egui::Frame::new().inner_margin(egui::Margin {
         left: 8,
@@ -1724,7 +1808,7 @@ fn drawer_frame() -> egui::Frame {
         bottom: 12,
     })
 }
-/// Whether `tool` has a drawer in the tab panel.
+/// Whether `tool` has a drawer in place of the adjustments.
 pub(super) fn has_drawer(tool: Tool) -> bool {
     DRAWER_TOOLS.iter().any(|(t, ..)| *t == tool)
 }
@@ -1757,6 +1841,27 @@ enum GuidedAction {
     Clear,
 }
 
+/// [`setting_control`] for a Basic slider, which the `.` and `,` keys select for
+/// `+` and `-` to step (`basic_keys`): its label lights up while it is the
+/// `selected` one, and a click on the label selects it.
+fn basic_control(
+    ui: &mut egui::Ui,
+    r: &mut Recipe,
+    id: ParameterId,
+    default: f32,
+    photo: Option<&crate::camera_data::Metadata>,
+    selected: &mut Option<ParameterId>,
+) {
+    let canonical = basic_keys::canonical(id);
+    let lit = *selected == Some(canonical) && basic_keys::enabled(id, photo);
+    let event = crate::model::edit::change_setting(r, id, photo, |r| {
+        keyed_setting_slider(ui, id, id.value_mut(r), default, lit)
+    });
+    if event == SliderEvent::LabelClicked {
+        *selected = Some(canonical);
+        ui.ctx().request_repaint();
+    }
+}
 /// The slider for develop setting `id`, and what changing it implies for the rest
 /// of the recipe (`model::edit`).
 fn setting_control(

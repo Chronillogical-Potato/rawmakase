@@ -352,6 +352,8 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         camera_exposure,
         temperature,
         tint,
+        incremental_temperature,
+        incremental_tint,
         wb,
         auto_white_balance,
         contrast,
@@ -374,6 +376,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         sharpening,
         crop,
         straighten,
+        straighten_auto,
         constrain_crop,
         transform,
         upright,
@@ -407,6 +410,18 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         ))
     .clamp(TEMPERATURE_MIN, TEMPERATURE_MAX);
     let tint = lerp_setting(ParameterId::Tint, a.tint, *tint, t);
+    let incremental_temperature = lerp_setting(
+        ParameterId::IncrementalTemperature,
+        a.incremental_temperature,
+        *incremental_temperature,
+        t,
+    );
+    let incremental_tint = lerp_setting(
+        ParameterId::IncrementalTint,
+        a.incremental_tint,
+        *incremental_tint,
+        t,
+    );
     let levels = {
         let black = lerp(a.black_point, *black_point, t, 0., 0.99);
         let white = lerp(a.white_point, *white_point, t, 0.01, 1.);
@@ -436,6 +451,8 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         camera_exposure: *camera_exposure,
         temperature,
         tint,
+        incremental_temperature,
+        incremental_tint,
         wb: *wb,
         auto_white_balance: None,
         contrast: lerp_setting(ParameterId::Contrast, a.contrast, *contrast, t),
@@ -467,6 +484,7 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         sharpening: lerp(a.sharpening, *sharpening, t, 0., 1.),
         crop: *crop,
         straighten: *straighten,
+        straighten_auto: *straighten_auto,
         constrain_crop: *constrain_crop,
         transform: *transform,
         upright: upright.clone(),
@@ -480,10 +498,18 @@ fn blend(a: &Recipe, b: &Recipe, t: f32, m: &Metadata) -> Recipe {
         unknown: unknown.clone(),
     };
     // The gains follow the controls, unless they are one side's own.
-    if (r.temperature, r.tint) == (b.temperature, b.tint) && r.profile == b.profile {
+    let controls = |x: &Recipe| {
+        (
+            x.temperature,
+            x.tint,
+            x.incremental_temperature,
+            x.incremental_tint,
+        )
+    };
+    if controls(&r) == controls(b) && r.profile == b.profile {
         r.wb = *wb;
         r.auto_white_balance = *auto_white_balance;
-    } else if (r.temperature, r.tint) == (a.temperature, a.tint) && r.profile == a.profile {
+    } else if controls(&r) == controls(a) && r.profile == a.profile {
         r.wb = a.wb;
         r.auto_white_balance = a.auto_white_balance;
     } else {

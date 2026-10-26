@@ -19,6 +19,10 @@ pub(super) struct Reread {
     read: Vec<(PhotoId, std::path::PathBuf, crate::catalog::FileMetadata)>,
     report: crate::catalog::SidecarReport,
     place: Place,
+    /// The session's structural generation it started under: what it read
+    /// is dropped once the catalog was read again meanwhile, as a photo's
+    /// id may name another by then.
+    generation: u64,
 }
 
 /// A descriptive metadata change, for the shared undo log.
@@ -216,8 +220,22 @@ impl Library {
             read: Vec::new(),
             report: Default::default(),
             place: self.place(),
+            generation: self.session.generation(),
         });
         Ok(())
+    }
+    /// Stops Read Metadata from Files, dropping what it read, before a
+    /// change that may give photos' ids to others.
+    pub(in crate::app) fn cancel_reread(&mut self) {
+        if self.reread.take().is_some() {
+            self.message = "Read Metadata from Files stopped; nothing was read".into();
+            self.reread_finished = true;
+        }
+    }
+    /// [`Self::poll_reread`], for the app's tests.
+    #[cfg(test)]
+    pub(in crate::app) fn poll_reread_for_tests(&mut self) {
+        self.poll_reread();
     }
     /// Takes in what the files read so far had, and once all are read,
     /// writes it as one command.
@@ -245,6 +263,10 @@ impl Library {
         self.reread_finished = true;
     }
     fn finish_reread(&mut self, reread: Reread) -> Result<()> {
+        if reread.generation != self.session.generation() {
+            self.message = "The catalog changed while its files were read; nothing was read".into();
+            return Ok(());
+        }
         // Photos removed, or made copies, while their files were read are
         // left out: copies are never read.
         let read: Vec<_> = reread

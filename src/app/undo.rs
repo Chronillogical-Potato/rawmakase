@@ -197,7 +197,7 @@ impl Editor {
     }
     /// Shared by UI shortcuts and external commands; false preserves a failed step.
     pub(super) fn command_history(&mut self, redo: bool) -> bool {
-        if self.activity.is_syncing() {
+        if self.activity.holds_catalog_writes() {
             return false;
         }
         let applied = self.step(if redo {
@@ -216,8 +216,10 @@ impl Editor {
         if !self.commit_library_drafts() {
             return false;
         }
-        // A drag still held is the latest change, so it is what Undo takes back.
+        // A drag still held is the latest change, so it is what Undo takes back. A
+        // mask drag ends there, so a Redo in the same frame cannot revive it.
         self.finish_gesture();
+        self.view.masking.end_drag();
         let log = &mut self.undo_log;
         let command = match direction {
             Direction::Undo => log.undo.pop_back(),
@@ -308,15 +310,8 @@ impl Editor {
                 }
                 let changed: Vec<_> = sync.edits.iter().map(|e| e.id).collect();
                 self.refresh_previews(&changed);
-                // A synchronized photo open here opens again with what was written
-                // back (or with no edit at all), so nothing stale is saved over it.
-                if let Some(open) = self.document.catalog_photo
-                    && sync.edits.iter().any(|e| e.id == open)
-                    && let Some(path) = self.document.path.clone()
-                {
-                    self.document.edit.save_state_mut().saved();
-                    self.load_raw(path, Some(open));
-                }
+                // Written back, or with no edit at all.
+                self.reopen_synced(&changed);
                 self.status = format!(
                     "{verb} {} ({})",
                     sync.change.name(),
@@ -350,7 +345,7 @@ impl Editor {
                     // Not a change of its own for the log.
                     self.document.edit.take_recorded();
                     self.document.edit.save_state_mut().mark_changed();
-                    self.ensure_upright();
+                    self.ensure_analysis();
                     self.schedule();
                     self.status = format!("{verb} in Develop");
                     return true;

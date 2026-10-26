@@ -905,6 +905,8 @@ pub(super) enum SliderEvent {
     None,
     /// Double-clicked back to its default.
     Reset,
+    /// Its label clicked: the slider the Basic panel's keys step.
+    LabelClicked,
 }
 /// `display` overrides the shown scale and decimals, e.g. Sharpening's 0–150.
 /// Whether a slider shows a tick at its fill's origin.
@@ -970,6 +972,8 @@ pub(super) struct SliderStyle {
     /// descriptor's valid range, as Exposure's ±8 EV beside its ±5 rail. `None`
     /// keeps typing to the rail's range.
     pub typed: Option<(f32, f32)>,
+    /// The label stands out: the slider the Basic panel's keys step.
+    pub selected: bool,
 }
 /// The Temp slider's rail, blue to yellow.
 pub(super) const TEMPERATURE_GRADIENT: (Color32, Color32) = (
@@ -988,12 +992,27 @@ pub(super) fn setting_slider(
     value: &mut f32,
     default: f32,
 ) -> SliderEvent {
+    keyed_setting_slider(ui, id, value, default, false)
+}
+/// [`setting_slider`] for a slider the Basic panel's keys step: its label stands
+/// out while `selected`, and a click on it selects it.
+pub(super) fn keyed_setting_slider(
+    ui: &mut egui::Ui,
+    id: ParameterId,
+    value: &mut f32,
+    default: f32,
+    selected: bool,
+) -> SliderEvent {
     let gradient = match id {
-        ParameterId::Temperature => Some(TEMPERATURE_GRADIENT),
-        ParameterId::Tint | ParameterId::ShadowTint => Some(TINT_GRADIENT),
+        ParameterId::Temperature | ParameterId::IncrementalTemperature => {
+            Some(TEMPERATURE_GRADIENT)
+        }
+        ParameterId::Tint | ParameterId::IncrementalTint | ParameterId::ShadowTint => {
+            Some(TINT_GRADIENT)
+        }
         _ => None,
     };
-    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+    descriptor_slider(ui, id.descriptor(), value, default, gradient, selected)
 }
 /// The slider for a mask's adjustment, as its descriptor describes it.
 pub(super) fn local_setting_slider(
@@ -1007,7 +1026,7 @@ pub(super) fn local_setting_slider(
         LocalParameterId::Tint => Some(TINT_GRADIENT),
         _ => None,
     };
-    descriptor_slider(ui, id.descriptor(), value, default, gradient)
+    descriptor_slider(ui, id.descriptor(), value, default, gradient, false)
 }
 fn descriptor_slider<Id>(
     ui: &mut egui::Ui,
@@ -1015,6 +1034,7 @@ fn descriptor_slider<Id>(
     value: &mut f32,
     default: f32,
     gradient: Option<(Color32, Color32)>,
+    selected: bool,
 ) -> SliderEvent {
     let style = SliderStyle {
         display: Some((d.display.scale, d.display.decimals)),
@@ -1023,6 +1043,7 @@ fn descriptor_slider<Id>(
         drag_step: d.drag_step,
         hue_rail: false,
         typed: Some((*d.valid.start(), *d.valid.end())),
+        selected,
     };
     slider_styled(ui, d.label, value, d.interactive.clone(), default, style)
 }
@@ -1065,6 +1086,7 @@ pub(super) fn slider_styled(
         drag_step: step,
         hue_rail,
         typed,
+        selected,
     } = style;
     let mut event = SliderEvent::None;
     let start = *range.start();
@@ -1106,13 +1128,29 @@ pub(super) fn slider_styled(
             Pos2::new(row.left() + label_column(ui), row.bottom()),
         );
         let label_response = ui.interact(label_rect, ui.id().with("label"), Sense::click());
-        ui.painter().text(
-            label_rect.right_center() - Vec2::new(5., 0.),
-            egui::Align2::RIGHT_CENTER,
-            label,
-            egui::FontId::proportional(11.),
-            palette.gray(190),
-        );
+        let label_pos = label_rect.right_center() - Vec2::new(5., 0.);
+        let font = egui::FontId::proportional(11.);
+        if selected {
+            // A lit label marks the slider the keys step, as in Lightroom.
+            let galley = ui
+                .painter()
+                .layout_no_wrap(label.to_string(), font, palette.gray(245));
+            let text = egui::Align2::RIGHT_CENTER.anchor_size(label_pos, galley.size());
+            ui.painter()
+                .rect_filled(text.expand2(Vec2::new(3., 1.)), 2., palette.gray(66));
+            ui.painter().galley(text.min, galley, palette.gray(245));
+        } else {
+            ui.painter().text(
+                label_pos,
+                egui::Align2::RIGHT_CENTER,
+                label,
+                font,
+                palette.gray(190),
+            );
+        }
+        if label_response.clicked() {
+            event = SliderEvent::LabelClicked;
+        }
         if label_response.double_clicked() {
             *value = default.clamp(start, end);
             event = SliderEvent::Reset;
@@ -1673,6 +1711,7 @@ pub(super) fn menu_item(
             Sense::hover()
         },
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     if enabled && response.hovered() {
         ui.painter().rect_filled(rect, 3., palette.accent());
     }
@@ -1772,7 +1811,7 @@ pub(super) fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// `buttons`, the last one primary. Returns the choice clicked, `dismissed`
 /// when the window is closed, or None while it is open. Return confirms
 /// nothing unless a button has focus. A `truncated` detail stays on one line,
-/// e.g. a path.
+/// e.g. a path. Longer details scroll independently of the title and buttons.
 pub(super) fn confirm_modal<T: Copy>(
     ctx: &egui::Context,
     id: &str,
@@ -1799,7 +1838,20 @@ pub(super) fn confirm_modal<T: Copy>(
                     .size(12.)
                     .color(palette.gray(150)),
             );
-            ui.add(if truncated { detail.truncate() } else { detail });
+            if truncated {
+                ui.add(detail.truncate());
+            } else {
+                // Reserve room for the frame, heading and actions even on a
+                // short viewport. In particular, Synchronize Folder can list
+                // hundreds of missing photos here.
+                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 180.).clamp(0., 360.))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.add(detail.wrap());
+                    });
+            }
             ui.add_space(20.);
             ui.horizontal(|ui| {
                 ui.spacing_mut().button_padding = Vec2::new(14., 6.);
@@ -1816,6 +1868,93 @@ pub(super) fn confirm_modal<T: Copy>(
             });
         });
     choice.or(response.should_close().then_some(dismissed))
+}
+/// A confirmation for something that can't be undone with Undo, such as
+/// removing photos from the catalog: Cancel has the focus, so Return or
+/// Space alone cancels, as do Escape and a click outside; the action needs a
+/// click, or Tab to it first. Keys already held down when it opened (a held
+/// Delete repeating, a Return still down) do nothing until they are
+/// released. Several actions may follow Cancel, the last the primary one:
+/// Some(Some(i)) for `actions[i]`, Some(None) for cancelling, None while it
+/// is open. Tab goes from Cancel to each in turn.
+pub(super) fn destructive_choice(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    lines: &[String],
+    cancel: &str,
+    actions: &[&str],
+) -> Option<Option<usize>> {
+    /// The keys down when the dialog first showed, until all are released.
+    #[derive(Clone, Default)]
+    struct Opened {
+        held: Vec<egui::Key>,
+        focused: bool,
+    }
+    let key = egui::Id::new(id).with("destructive-confirm");
+    let down: Vec<egui::Key> = ctx.input(|i| i.keys_down.iter().copied().collect());
+    let mut opened = ctx
+        .data_mut(|d| d.get_temp::<Opened>(key))
+        .unwrap_or_else(|| Opened {
+            held: down.clone(),
+            focused: false,
+        });
+    // While a key held from before is down, no key reaches the buttons.
+    opened.held.retain(|k| down.contains(k));
+    if !opened.held.is_empty() {
+        ctx.input_mut(|i| {
+            i.events.retain(|e| !matches!(e, egui::Event::Key { .. }));
+        });
+    }
+    let palette = theme::palette(ctx);
+    let mut choice = None;
+    let response = egui::Modal::new(egui::Id::new(id))
+        .frame(modal_frame(&palette).inner_margin(24))
+        .show(ctx, |ui| {
+            ui.set_width(440.);
+            ui.label(
+                egui::RichText::new(title)
+                    .size(15.)
+                    .color(palette.gray(236)),
+            );
+            ui.add_space(6.);
+            for line in lines {
+                ui.label(egui::RichText::new(line).size(12.).color(palette.gray(150)));
+            }
+            ui.add_space(20.);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                let cancelled = ui.button(cancel);
+                // Cancel has the focus at first, and keeps it while a key
+                // held from before is down (egui moves focus on Tab before
+                // anything here sees the key).
+                if !opened.focused || !opened.held.is_empty() {
+                    cancelled.request_focus();
+                    opened.focused = true;
+                }
+                if cancelled.clicked() {
+                    choice = Some(None);
+                }
+                for (i, action) in actions.iter().enumerate() {
+                    let clicked = if i + 1 == actions.len() {
+                        primary_button(ui, action).clicked()
+                    } else {
+                        ui.button(*action).clicked()
+                    };
+                    if clicked {
+                        choice = Some(Some(i));
+                    }
+                }
+            });
+        });
+    let choice = choice.or(response.should_close().then_some(None));
+    ctx.data_mut(|d| match choice {
+        Some(_) => d.remove::<Opened>(key),
+        None => {
+            d.insert_temp(key, opened);
+        }
+    });
+    choice
 }
 /// "1 photo", "2 photos": `n` with the word for its number.
 pub(super) fn plural(n: usize, one: &str, many: &str) -> String {
@@ -1844,6 +1983,150 @@ pub(super) fn pretty_path(path: &std::path::Path) -> String {
             format!("~{}", &text[home.len()..])
         }
         _ => text,
+    }
+}
+
+#[cfg(test)]
+mod confirmation_tests {
+    use super::*;
+
+    fn frame(
+        ctx: &egui::Context,
+        size: Vec2,
+        detail: &str,
+        events: Vec<egui::Event>,
+    ) -> (Option<bool>, egui::accesskit::TreeUpdate) {
+        let mut choice = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                choice = confirm_modal(
+                    ui.ctx(),
+                    "folder-sync-remove",
+                    "Remove missing photos?",
+                    detail,
+                    false,
+                    &[("Cancel", false), ("Remove", true)],
+                    false,
+                );
+            },
+        );
+        output.textures_delta.clear();
+        (choice, output.platform_output.accesskit_update.unwrap())
+    }
+
+    #[test]
+    fn long_removal_confirmation_keeps_title_and_buttons_in_view() {
+        for size in [Vec2::new(1280., 720.), Vec2::new(640., 360.)] {
+            for count in [1, 30, 100] {
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                let detail = format!(
+                    "These photos are removed from the catalog with what they hold:\n{}",
+                    (0..count)
+                        .map(|i| format!("IMG_{i:04}.NEF: Edited, Keywords, 2 virtual copies"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                // Let the centered modal settle after its first sizing pass.
+                for _ in 0..3 {
+                    assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+                }
+                let (_, tree) = frame(&ctx, size, &detail, vec![]);
+                for label in ["Remove missing photos?", "Cancel", "Remove"] {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .map(|(_, node)| node)
+                        .find(|node| node.label() == Some(label) || node.value() == Some(label))
+                        .unwrap_or_else(|| panic!("missing {label}"));
+                    let b = node.bounds().expect("placed");
+                    assert!(
+                        b.x0 >= 0. && b.y0 >= 0. && b.x1 <= size.x as f64 && b.y1 <= size.y as f64,
+                        "{label} outside {size:?} with {count} photos: {b:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_confirmation_scrolls_to_the_last_photo_and_buttons_still_work() {
+        let size = Vec2::new(640., 360.);
+        let detail = (0..100)
+            .map(|i| format!("IMG_{i:04}.NEF: Edited, Keywords"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for (button, expected) in [("Cancel", false), ("Remove", true)] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            for _ in 0..4 {
+                assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+            }
+            frame(
+                &ctx,
+                size,
+                &detail,
+                vec![egui::Event::PointerMoved(Pos2::new(320., 180.))],
+            );
+            let events = vec![
+                egui::Event::PointerMoved(Pos2::new(320., 180.)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: Vec2::new(0., -10_000.),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            assert_eq!(frame(&ctx, size, &detail, events).0, None);
+            for _ in 0..30 {
+                assert_eq!(frame(&ctx, size, &detail, vec![]).0, None);
+            }
+            let (_, tree) = frame(&ctx, size, &detail, vec![]);
+            let last = tree
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.value() == Some("IMG_0099.NEF: Edited, Keywords"))
+                .expect("last photo")
+                .bounds()
+                .expect("placed");
+            let action = tree
+                .nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| node.label() == Some(button))
+                .expect("action")
+                .bounds()
+                .expect("placed");
+            assert!(last.y0 > 0. && last.y1 < action.y0, "{last:?}");
+            let pos = Pos2::new(
+                ((action.x0 + action.x1) / 2.) as f32,
+                ((action.y0 + action.y1) / 2.) as f32,
+            );
+            for pressed in [true, false] {
+                let choice = frame(
+                    &ctx,
+                    size,
+                    &detail,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+                .0;
+                assert_eq!(choice, if pressed { None } else { Some(expected) });
+            }
+        }
     }
 }
 

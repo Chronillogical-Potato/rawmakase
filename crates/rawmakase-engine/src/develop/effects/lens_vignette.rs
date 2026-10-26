@@ -52,16 +52,18 @@ const TABLE_REACH: f32 = 1.1;
 /// `lens` raised to `amount`, times `manual`, as one table for sampling (and the GPU).
 /// The table's radius is the decoded image's; `frame_scale` is the decoded image's half
 /// diagonal over the photo frame's (the camera's default crop), which the manual gain
-/// is measured on. The lens table keeps its own centre, the decoded image's, so a
-/// default crop off the sensor's centre is approximated there.
+/// is measured on, and `reach` the radius of the decoded image's corner farthest from
+/// the table's centre (`optics::reach`). The table keeps the lens correction's optical
+/// centre, so a default crop off it is approximated there.
 pub(crate) fn combined_table(
     lens: Option<&Radial>,
     amount: f32,
     manual: &ManualVignette,
     frame_scale: f32,
+    reach: f32,
 ) -> Radial {
     let knots: Vec<f32> = (0..TABLE_KNOTS)
-        .map(|i| TABLE_REACH * (i as f32 / (TABLE_KNOTS - 1) as f32).sqrt())
+        .map(|i| TABLE_REACH * reach * (i as f32 / (TABLE_KNOTS - 1) as f32).sqrt())
         .collect();
     let values = knots
         .iter()
@@ -107,13 +109,23 @@ mod tests {
             knots: vec![0., 1.],
             values: vec![1., 1.5],
         };
-        let table = combined_table(Some(&lens), 0.5, &v, 1.);
+        let table = combined_table(Some(&lens), 0.5, &v, 1., 1.);
         for r in [0., 0.3, 0.7, 0.9, 0.97, 1.] {
             let exact = lens.eval(r).powf(0.5) * v.gain(r);
             assert!((table.eval(r) / exact - 1.).abs() < 0.003, "{r}");
         }
         // A default crop: the frame's corner gets the full corner gain.
-        let framed = combined_table(None, 1., &v, 1.25);
+        let framed = combined_table(None, 1., &v, 1.25, 1.);
         assert!((framed.eval(0.8) / v.gain(1.) - 1.).abs() < 0.003);
+        // An off-centre correction's table runs past radius 1 to its far corner.
+        let far = Radial {
+            knots: vec![0., 1.3],
+            values: vec![1., 1.9],
+        };
+        let table = combined_table(Some(&far), 1., &v, 1., 1.3);
+        for r in [1.1, 1.2, 1.3] {
+            let exact = far.eval(r) * v.gain(r);
+            assert!((table.eval(r) / exact - 1.).abs() < 0.003, "{r}");
+        }
     }
 }

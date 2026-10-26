@@ -69,6 +69,32 @@ pub(super) fn tiff_block(d: CameraExif) -> Vec<u8> {
     out
 }
 
+/// A `width` × `height` PNG whose eXIf chunk names its camera and lens,
+/// as RAWmakase's PNG exports carry them, for tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn camera_png(width: u32, height: u32, camera: (&str, &str), lens: &str) -> Vec<u8> {
+    use crate::exif::tag::{LENS_MODEL, MAKE, MODEL};
+    let mut info = png::Info::with_size(width, height);
+    info.color_type = png::ColorType::Rgb;
+    info.bit_depth = png::BitDepth::Eight;
+    info.exif_metadata = Some(
+        tiff_block(CameraExif {
+            main: vec![Field::ascii(MAKE, camera.0), Field::ascii(MODEL, camera.1)],
+            exif: vec![Field::ascii(LENS_MODEL, lens)],
+            gps: Vec::new(),
+        })
+        .into(),
+    );
+    let mut out = Vec::new();
+    let mut w = png::Encoder::with_info(&mut out, info)
+        .and_then(|e| e.write_header())
+        .expect("a PNG header in memory");
+    w.write_image_data(&vec![128; (width * height * 3) as usize])
+        .expect("PNG data in memory");
+    w.finish().expect("a PNG in memory");
+    out
+}
+
 /// A small TIFF, or a JPEG when `jpeg`, taken at `original` with these
 /// subseconds, for tests.
 #[cfg(any(test, feature = "test-support"))]
@@ -83,7 +109,7 @@ pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
         exif,
         gps: Vec::new(),
     });
-    let mut out = if jpeg {
+    if jpeg {
         let mut out = vec![0xff, 0xd8, 0xff, 0xe1];
         out.extend(((block.len() + 8) as u16).to_be_bytes());
         out.extend(b"Exif\0\0");
@@ -92,8 +118,5 @@ pub fn dated_file(jpeg: bool, original: &str, subseconds: &str) -> Vec<u8> {
         out
     } else {
         block
-    };
-    // Real files are never shorter than the header the reader starts with.
-    out.resize(out.len().max(512), 0);
-    out
+    }
 }

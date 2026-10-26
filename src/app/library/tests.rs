@@ -47,28 +47,168 @@ fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     let ctx = egui::Context::default();
     let library = Library::load(&path, ctx.clone())?;
     let photo = library.session.photos[0].clone();
-    assert_eq!(
-        develop_refusal(&photo, true),
-        Some(Refusal::NotRaw("JPG".into()))
-    );
+    // A JPEG opens in Develop; only an offline file is refused.
+    assert_eq!(develop_refusal(&photo, true), None);
     assert_eq!(develop_refusal(&photo, false), Some(Refusal::Offline));
-    assert_eq!(Refusal::NotRaw("JPG".into()).label(), "JPG file");
+    assert_eq!(Refusal::Offline.label(), "Offline");
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.module = Module::Library;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.module == Module::Develop);
+    assert!(editor.not_editable.is_none());
+    assert_eq!(editor.document.catalog_photo, Some(photo.id));
+    // Back in the Library, the file goes offline.
+    editor.module = Module::Library;
+    std::fs::remove_file(folder.join("a.jpg"))?;
+    editor.develop_catalog_photo(photo.id);
+    assert!(editor.module == Module::Library);
+    let (title, reason) = editor.not_editable.clone().unwrap();
+    assert_eq!(title, "a.jpg can't be opened in Develop");
+    assert!(reason.contains("offline"));
+    Ok(())
+}
+
+#[test]
+fn an_unsupported_jpeg_says_why_in_develop() -> Result<()> {
+    use image::ImageEncoder;
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("print.jpg");
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(&file)?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let photo = library.session.photos[0].clone();
+    // Found before anything opens it.
+    let refusal = develop_refusal(&photo, true).expect("refused");
+    assert_eq!(refusal.label(), "JPG file");
+    assert_eq!(refusal.detail(), "RAWmakase can't edit CMYK images");
+    // What opening it fails with says the same.
+    let error = crate::photo::open_source(&file, &Default::default())
+        .err()
+        .expect("a CMYK file can't be opened");
+    assert_eq!(Refusal::opening(&file, &error), Some(refusal));
+    // Develop says so in its dialog, and stays in the Library.
     let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
     editor.library = Some(Box::new(library));
     editor.module = Module::Library;
     editor.develop_catalog_photo(photo.id);
     assert!(editor.module == Module::Library);
-    let (title, reason) = editor.not_editable.clone().unwrap();
-    assert_eq!(title, "a.jpg can't be opened in Develop");
-    assert!(reason.contains("camera RAW"));
-    // Dismissed, then the file goes offline.
-    editor.not_editable = None;
-    std::fs::remove_file(folder.join("a.jpg"))?;
-    editor.develop_catalog_photo(photo.id);
-    assert!(editor.not_editable.unwrap().1.contains("offline"));
+    assert!(!editor.load.is_running());
+    let (title, reason) = editor.not_editable.clone().expect("the dialog");
+    assert_eq!(title, "print.jpg can't be opened in Develop");
+    assert_eq!(reason, "RAWmakase can't edit CMYK images");
     Ok(())
 }
 
+/// A folder of a.jpg, b.jpg (CMYK, which Develop can't edit) and c.jpg, in a
+/// catalog loaded into an editor showing the Library; and the three photos.
+fn editor_with_a_cmyk_jpeg_between(
+    directory: &std::path::Path,
+) -> Result<(crate::app::Editor, [PhotoId; 3])> {
+    use image::ImageEncoder;
+    let folder = directory.join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(8, 8).save(folder.join("a.jpg"))?;
+    let mut encoder =
+        image::codecs::jpeg::JpegEncoder::new(std::fs::File::create(folder.join("b.jpg"))?);
+    encoder.set_icc_profile(crate::app::worker::cmyk_profile())?;
+    encoder.write_image(&[10; 8 * 8 * 3], 8, 8, image::ExtendedColorType::Rgb8)?;
+    image::RgbImage::new(8, 8).save(folder.join("c.jpg"))?;
+    let path = directory.join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let library = Library::load(&path, ctx.clone())?;
+    let id = |name: &str| {
+        library
+            .session
+            .photos
+            .iter()
+            .find(|p| p.filename == name)
+            .map(|p| p.id)
+            .unwrap()
+    };
+    let ids = [id("a.jpg"), id("b.jpg"), id("c.jpg")];
+    assert_eq!(library.navigate(ids[0], 1), Some(ids[1]));
+    assert_eq!(library.navigate(ids[1], 1), Some(ids[2]));
+    let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+    editor.library = Some(Box::new(library));
+    editor.module = Module::Library;
+    Ok((editor, ids))
+}
+
+/// Stepping through Develop passes over a photo it can't edit, which would
+/// otherwise leave every photo beyond out of reach of the arrow keys.
+#[test]
+fn develop_steps_past_a_photo_it_cannot_edit() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (mut editor, [a, _, c]) = editor_with_a_cmyk_jpeg_between(directory.path())?;
+    editor.develop_catalog_photo(a);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    editor.navigate(1);
+    assert!(editor.module == Module::Develop);
+    assert_eq!(editor.document.catalog_photo, Some(c));
+    assert!(editor.not_editable.is_none());
+    editor.navigate(-1);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    assert!(editor.not_editable.is_none());
+    Ok(())
+}
+
+/// With nothing Develop can edit in that direction, the next photo's refusal
+/// is said, as for a click on it, and the open photo stays.
+#[test]
+fn develop_says_why_when_only_photos_it_cannot_edit_follow() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let (mut editor, [a, b, c]) = editor_with_a_cmyk_jpeg_between(directory.path())?;
+    std::fs::remove_file(directory.path().join("photos/c.jpg"))?;
+    editor.develop_catalog_photo(a);
+    editor.navigate(1);
+    assert_eq!(editor.document.catalog_photo, Some(a));
+    let (title, reason) = editor.not_editable.clone().expect("the dialog");
+    assert_eq!(title, "b.jpg can't be opened in Develop");
+    assert_eq!(reason, "RAWmakase can't edit CMYK images");
+    let _ = (b, c);
+    Ok(())
+}
+
+/// The Loupe shows an edited JPEG through Develop's pipeline, with its edit; an
+/// unedited one keeps its own, quicker preview, which looks the same.
+#[test]
+fn loupe_develops_a_jpeg_once_it_has_an_edit() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    let file = folder.join("a.jpg");
+    image::RgbImage::from_pixel(64, 48, image::Rgb([90, 120, 150])).save(&file)?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx)?;
+    library.wait_for_availability();
+    let id = library.session.photos[0].id;
+    library.select(Some(id));
+    library.open_loupe();
+    assert_eq!(library.loupe_develops(), None);
+    let recipe = crate::model::recipe::Recipe {
+        exposure: 1.,
+        ..Default::default()
+    };
+    library.session.catalog.save_edit(
+        id,
+        &file,
+        &recipe,
+        &Default::default(),
+        crate::catalog::HistoryUpdate::Keep,
+    )?;
+    assert_eq!(library.loupe_develops(), Some(id));
+    Ok(())
+}
 #[test]
 fn a_file_found_again_is_checked_back_online() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -231,7 +371,7 @@ fn tree_locate_action_uses_the_clicked_root() {
             },
             |ui| {
                 let top = ui.cursor().top();
-                action = folder_tree_row(ui, &root, 0, &mut expanded, "");
+                action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default(), true);
                 row = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
             },
         );
@@ -266,6 +406,8 @@ fn tree_locate_action_uses_the_clicked_root() {
         .find(|(_, node)| node.label() == Some("Locate root folder…"))
         .and_then(|(_, node)| node.bounds())
         .expect("the menu offers Locate");
+    assert_eq!(item.y1 - item.y0, 24., "use the filmstrip menu row height");
+    assert!(item.x1 - item.x0 >= 210., "use full-width menu rows");
     let at = egui::pos2(
         ((item.x0 + item.x1) / 2.) as f32,
         ((item.y0 + item.y1) / 2.) as f32,
@@ -273,6 +415,250 @@ fn tree_locate_action_uses_the_clicked_root() {
     frame(click(at, egui::PointerButton::Primary, true));
     let (action, _, _) = frame(click(at, egui::PointerButton::Primary, false));
     assert!(matches!(action, Some(TreeAction::RelinkRoot(RootId(42)))));
+}
+#[test]
+fn tree_click_modifiers_choose_how_the_folder_is_selected() {
+    use super::folder_selection::Click;
+    let ctx = egui::Context::default();
+    let root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let mut expanded = HashSet::new();
+    let at = egui::pos2(120., 10.);
+    let mut frame = |modifiers: egui::Modifiers, pressed: Option<bool>| {
+        let mut action = None;
+        let events = pressed.map_or_else(Vec::new, |pressed| {
+            vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                },
+            ]
+        });
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| action = folder_tree_row(ui, &root, 0, &mut expanded, &Default::default(), true),
+        );
+        output.textures_delta.clear();
+        action
+    };
+    for (modifiers, expected) in [
+        (egui::Modifiers::NONE, Click::Replace),
+        (egui::Modifiers::COMMAND, Click::Toggle),
+        (egui::Modifiers::SHIFT, Click::Range),
+    ] {
+        frame(modifiers, None);
+        frame(modifiers, Some(true));
+        let action = frame(modifiers, Some(false));
+        assert!(
+            matches!(&action, Some(TreeAction::Select(key, click)) if key == "root:42" && *click == expected),
+            "{modifiers:?}"
+        );
+    }
+}
+/// Library > Show Photos in Subfolders off, as in Lightroom: a folder shows
+/// only the photos directly in it, its count says so, and the setting is
+/// kept with the layout.
+#[test]
+fn a_folder_can_show_only_its_own_photos() -> Result<()> {
+    use super::folder_selection::Click;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("photos");
+    for (sub, name) in [
+        ("", "top.RAF"),
+        ("day1", "one.RAF"),
+        ("day1/raw", "deep.RAF"),
+    ] {
+        std::fs::create_dir_all(root.join(sub))?;
+        std::fs::write(root.join(sub).join(name), b"synthetic raw")?;
+    }
+    // A folder holding only a folder.
+    std::fs::create_dir_all(root.join("trip/day"))?;
+    std::fs::write(root.join("trip/day/trip.RAF"), b"synthetic raw")?;
+    let path = directory.path().join("days.rawmakase");
+    Catalog::create(&path)?.add_folder(&root)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let root_key = format!("root:{}", library.session.roots[0].0);
+    let key = |sub: &str| format!("{root_key}/{sub}");
+    let shown = |library: &Library| {
+        let mut names: Vec<&str> = visible_names(library);
+        names.sort();
+        names.join(" ")
+    };
+    library.click_folder(&root_key, Click::Replace, &[]);
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF trip.RAF");
+    assert!(library.subfolders_shown());
+
+    library.show_subfolders(false);
+    assert_eq!(
+        shown(&library),
+        "top.RAF",
+        "the folder shown follows at once"
+    );
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    assert_eq!(shown(&library), "one.RAF");
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    assert_eq!(shown(&library), "", "a folder of folders shows none");
+    // Several folders: each one's own photos.
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    library.click_folder(&key("day1/raw"), Click::Toggle, &[]);
+    assert_eq!(shown(&library), "deep.RAF one.RAF");
+    // Reading the catalog again and going back to a place keep it.
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    let place = library.place();
+    library.refresh()?;
+    assert_eq!(shown(&library), "one.RAF");
+    library.click_folder(&root_key, Click::Replace, &[]);
+    library.go_to_place(&place);
+    assert_eq!(shown(&library), "one.RAF");
+    // A place kept while subfolders showed shows a folder of folders empty.
+    library.show_subfolders(true);
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    let trip = library.place();
+    assert_eq!(shown(&library), "trip.RAF");
+    library.show_subfolders(false);
+    library.click_folder(&key("day1"), Click::Replace, &[]);
+    library.go_to_place(&trip);
+    assert_eq!(shown(&library), "");
+    library.refresh()?;
+    assert_eq!(shown(&library), "");
+    // All Photographs is every photo still.
+    library.filters.folder_scope = None;
+    library.selected_folders.clear();
+    library.filter();
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF trip.RAF");
+
+    // Removing a folder of folders shown alone shows All Photographs.
+    library.click_folder(&key("trip"), Click::Replace, &[]);
+    let trip_folders = library.folder_ids(&key("trip"), true).unwrap();
+    library.remove_folders(&trip_folders, "trip")?;
+    assert_eq!(library.source_key(), "");
+    assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF");
+
+    // Kept across launches: the session's source comes back as it was shown.
+    let layout = library.layout();
+    let saved: crate::app::session::LibraryLayout =
+        serde_json::from_str(&serde_json::to_string(&layout)?)?;
+    let mut restored = Library::load(&path, egui::Context::default())?;
+    restored.restore_source(&key("day1"), None);
+    restored.apply_layout(&saved);
+    assert!(!restored.subfolders_shown());
+    assert_eq!(shown(&restored), "one.RAF");
+    // A layout saved before the setting shows subfolders.
+    let old: crate::app::session::LibraryLayout = serde_json::from_str(r#"{"sort": "rating"}"#)?;
+    restored.apply_layout(&old);
+    assert!(restored.subfolders_shown());
+    assert_eq!(shown(&restored), "deep.RAF one.RAF");
+    Ok(())
+}
+#[test]
+fn a_folder_s_menu_turns_subfolders_off_and_its_count_follows() {
+    use crate::catalog::FolderId;
+    let mut root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let folder = |id: i64, relative: &str, count: usize| Folder {
+        id: FolderId(id),
+        root: RootId(42),
+        relative: relative.into(),
+        path: PathBuf::from("/missing").join(relative),
+        count,
+    };
+    root.insert(&folder(1, "", 2));
+    root.insert(&folder(2, "day1", 3));
+    root.finish();
+    let (labels, action) = tree_menu(&root, "Show Photos in Subfolders", true);
+    assert!(
+        labels.iter().any(|l| l == "Show Photos in Subfolders"),
+        "{labels:?}"
+    );
+    assert!(matches!(action, Some(TreeAction::ShowSubfolders(false))));
+    let (_, action) = tree_menu(&root, "Show Photos in Subfolders", false);
+    assert!(matches!(action, Some(TreeAction::ShowSubfolders(true))));
+    assert_eq!(super::tree::shown_count(&root, true), 5);
+    assert_eq!(super::tree::shown_count(&root, false), 2);
+}
+#[test]
+fn several_folders_show_their_photos_together() -> Result<()> {
+    use super::folder_selection::Click;
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("photos");
+    for sub in ["day1", "day2", "day2/raw", "day3", "day4"] {
+        let folder = root.join(sub);
+        std::fs::create_dir_all(&folder)?;
+        std::fs::write(folder.join("image.RAF"), b"synthetic raw")?;
+    }
+    let path = directory.path().join("days.rawmakase");
+    Catalog::create(&path)?.add_folder(&root)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let root_id = library.session.roots[0].0;
+    let key = |sub: &str| format!("root:{root_id}/{sub}");
+    // The rows as the Folders panel shows them, day2 folded.
+    let rows = [
+        format!("root:{root_id}"),
+        key("day1"),
+        key("day2"),
+        key("day3"),
+        key("day4"),
+    ];
+    let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let in_folders = |library: &Library| {
+        let mut folders: Vec<String> = ids_of(library)
+            .iter()
+            .map(|id| {
+                // The folders below "photos": the catalog keeps canonical
+                // paths, e.g. /private/var for macOS's /var.
+                let path = &library.photo(*id).unwrap().path;
+                let names: Vec<_> = path
+                    .parent()
+                    .unwrap()
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                let below = names.iter().rposition(|n| n == "photos").unwrap() + 1;
+                names[below..].join("/")
+            })
+            .collect();
+        folders.sort();
+        folders
+    };
+    library.click_folder(&key("day1"), Click::Replace, &rows);
+    assert_eq!(in_folders(&library), ["day1"]);
+    // Shift-click: day1 to day3, with day2's subfolder.
+    library.click_folder(&key("day3"), Click::Range, &rows);
+    assert_eq!(in_folders(&library), ["day1", "day2", "day2/raw", "day3"]);
+    assert_eq!(library.source_name(), "3 folders");
+    // The session keeps the folder the range started from.
+    assert_eq!(library.source_key(), key("day1"));
+    // Synchronize Folder needs one folder.
+    assert!(library.selected_sync_scope().is_none());
+    // Cmd-click takes a folder out and adds another.
+    library.click_folder(&key("day2"), Click::Toggle, &rows);
+    library.click_folder(&key("day4"), Click::Toggle, &rows);
+    assert_eq!(in_folders(&library), ["day1", "day3", "day4"]);
+    // Going back to a place shows its folders again.
+    let place = library.place();
+    library.click_folder(&key("day2"), Click::Replace, &rows);
+    assert_eq!(in_folders(&library), ["day2", "day2/raw"]);
+    assert!(library.selected_sync_scope().is_some());
+    library.go_to_place(&place);
+    assert_eq!(in_folders(&library), ["day1", "day3", "day4"]);
+    // A folder and its own subfolder show each photo once.
+    library.click_folder(&key("day2"), Click::Replace, &rows);
+    library.click_folder(&format!("{}/raw", key("day2")), Click::Toggle, &rows);
+    assert_eq!(in_folders(&library), ["day2", "day2/raw"]);
+    // Restoring the session's source shows that folder alone.
+    library.restore_source(&key("day4"), None);
+    assert_eq!(in_folders(&library), ["day4"]);
+    assert_eq!(library.source_name(), "day4");
+    Ok(())
 }
 #[test]
 fn batched_availability_distinguishes_files_directories_and_missing_paths() -> Result<()> {
@@ -438,27 +824,24 @@ fn a_stuck_volume_check_is_not_started_again() {
     let online = Arc::new(Mutex::new(HashMap::new()));
     let busy = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (release, stalled) = mpsc::channel::<()>();
-    let stalled = Mutex::new(stalled);
     let (changed_tx, changed) = mpsc::channel();
-    let mounts = || vec![PathBuf::from("/Volumes/Stalled")];
+    let stalled_mount = || HashMap::from([(PathBuf::from("/Volumes/Stalled"), (true, None))]);
     // A probe that hangs, as `is_dir` can on a stalled mount.
     assert!(volumes::spawn_volume_check(
         &online,
         &busy,
-        mounts(),
         move || changed_tx.send(()).unwrap(),
-        move |_| {
-            stalled.lock().unwrap().recv().unwrap();
-            (true, None)
+        move || {
+            stalled.recv().unwrap();
+            stalled_mount()
         },
     ));
     for _ in 0..3 {
         assert!(!volumes::spawn_volume_check(
             &online,
             &busy,
-            mounts(),
             || {},
-            |_| unreachable!("a second check started"),
+            || -> HashMap<PathBuf, volumes::VolumeState> { unreachable!("a second check started") },
         ));
     }
     release.send(()).unwrap();
@@ -481,9 +864,8 @@ fn a_stuck_volume_check_is_not_started_again() {
     assert!(volumes::spawn_volume_check(
         &online,
         &busy,
-        mounts(),
         || {},
-        |_| (false, None)
+        HashMap::new
     ));
 }
 #[test]
@@ -1256,6 +1638,60 @@ fn the_filmstrip_keeps_its_place_across_views() -> Result<()> {
     Ok(())
 }
 #[test]
+fn a_mouse_wheel_over_the_filmstrip_scrolls_it_sideways() -> Result<()> {
+    let (_directory, mut library) = library_of(
+        &(0..40)
+            .map(|n| format!("{n:02}.RAF"))
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    )?;
+    let ctx = library.ctx.clone();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200., 800.));
+    let over_strip = egui::Event::PointerMoved(egui::Pos2::new(600., 780.));
+    let wheel = |y: f32| egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: Vec2::new(0., y),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // The strip's horizontal offset after a frame with `events`, then a
+    // second of frames for the smoothed scrolling to settle.
+    let mut time = 0.;
+    let strip = std::cell::Cell::new(None);
+    let mut frames = |library: &mut Library, events: Vec<egui::Event>| {
+        let mut events = Some(events);
+        for _ in 0..30 {
+            time += 1. / 30.;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events: events.take().unwrap_or_default(),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::bottom(super::filmstrip::ID)
+                        .exact_size(super::filmstrip::HEIGHT)
+                        .show(ui, |ui| {
+                            strip.set(Some(ui.make_persistent_id(egui::IdSalt::new("filmstrip"))));
+                            library.filmstrip(ui, None, Module::Develop);
+                        });
+                },
+            );
+            output.textures_delta.clear();
+        }
+        egui::scroll_area::State::load(&ctx, strip.get().unwrap()).map_or(0., |s| s.offset.x)
+    };
+    assert_eq!(frames(&mut library, vec![over_strip.clone()]), 0.);
+    // Rolling the wheel down moves on through the strip, and up moves back.
+    let on = frames(&mut library, vec![over_strip.clone(), wheel(-3.)]);
+    assert!(on > 0.);
+    assert!(frames(&mut library, vec![over_strip, wheel(1.)]) < on);
+    Ok(())
+}
+#[test]
 fn the_filmstrip_follows_a_change_made_after_it_was_drawn() -> Result<()> {
     let (_directory, mut library) = library_of(&["a.RAF", "b.RAF"])?;
     let ctx = library.ctx.clone();
@@ -1299,17 +1735,21 @@ fn a_strip_scrolled_past_a_shorter_list_draws_again() {
 }
 #[test]
 fn a_panel_with_nothing_to_do_keeps_an_earlier_panels_action() {
+    let then = |mut earlier: Action, later| {
+        earlier.then(later);
+        earlier
+    };
     // The strip's Open in Develop survives the sidebar drawn after it.
     assert_eq!(
-        Action::Develop(PhotoId(1)).then(Action::None),
+        then(Action::Develop(PhotoId(1)), Action::None),
         Action::Develop(PhotoId(1))
     );
     assert_eq!(
-        Action::Develop(PhotoId(1)).then(Action::AddFolder),
+        then(Action::Develop(PhotoId(1)), Action::AddFolder),
         Action::AddFolder
     );
     assert_eq!(
-        Action::None.then(Action::Develop(PhotoId(2))),
+        then(Action::None, Action::Develop(PhotoId(2))),
         Action::Develop(PhotoId(2))
     );
 }
@@ -1557,7 +1997,7 @@ fn photo_info_of_folder_photos_is_read_once_and_kept() -> Result<()> {
     let info = library.active_info().unwrap();
     assert_eq!(info.dimensions_text().as_deref(), Some("300 × 200"));
     // Kept: nothing is left to read on the next open.
-    assert!(library.session.catalog.photos_without_info()?.is_empty());
+    assert!(library.session.catalog.photos_to_read_info()?.is_empty());
     Ok(())
 }
 #[test]
@@ -2313,6 +2753,9 @@ fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
         output.textures_delta.clear();
         library.sidebar_trees.clone().expect("the sidebar's trees")
     };
+    // Once the drives the roots are on are found, which may move them.
+    frame(&mut library);
+    library.volumes.wait();
     let first = frame(&mut library);
     assert!(std::sync::Arc::ptr_eq(&first, &frame(&mut library)));
     // A photo added to a collection, which reads no lists again, shows.
@@ -2326,6 +2769,32 @@ fn the_sidebar_builds_its_trees_once_until_the_lists_change() -> Result<()> {
     // So does a read of the lists, whatever it changed.
     library.session.reload()?;
     assert!(!std::sync::Arc::ptr_eq(&changed, &frame(&mut library)));
+    Ok(())
+}
+
+#[test]
+fn the_folders_panel_groups_roots_by_the_drive_found_for_them() -> Result<()> {
+    let (_dir, mut library) = library_of(&["a.RAF"])?;
+    let ctx = library.ctx.clone();
+    let frame = |library: &mut Library| {
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            egui::Panel::left("sidebar").show(ui, |ui| library.sidebar(ui));
+        });
+        output.textures_delta.clear();
+        let trees = library.sidebar_trees.clone().expect("the sidebar's trees");
+        trees.drives()
+    };
+    frame(&mut library);
+    library.volumes.wait();
+    let root = library.root_paths().remove(0);
+    let image = crate::platform::volume::Volume {
+        name: "RMK590".into(),
+        mount: Some(root.parent().unwrap().into()),
+    };
+    library
+        .volumes
+        .set_seen(volumes::Seen::from([(root, image.clone())]));
+    assert_eq!(frame(&mut library), vec![image]);
     Ok(())
 }
 
@@ -2387,4 +2856,579 @@ fn the_filmstrip_cells_keep_their_size_when_the_selection_opens_a_photo() -> Res
     let all = painted(&mut library);
     assert_eq!(none, all);
     Ok(())
+}
+#[test]
+fn photos_dragged_past_8_points_onto_a_folder_are_dropped_there() {
+    use crate::catalog::PhotoId;
+    let ctx = egui::Context::default();
+    // A root with no photos of its own: no catalog folder, a folder still.
+    let node = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let mut expanded = HashSet::new();
+    let source = egui::Rect::from_min_size(egui::pos2(20., 150.), Vec2::splat(60.));
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut action = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                action = folder_tree_row(ui, &node, 0, &mut expanded, &Default::default(), true);
+                let cell = ui.allocate_rect(source, egui::Sense::click_and_drag());
+                super::grid::drag_payload(&cell, || vec![PhotoId(1), PhotoId(2)]);
+            },
+        );
+        output.textures_delta.clear();
+        action
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let dragging =
+        |ctx: &egui::Context| egui::DragAndDrop::has_payload_of_type::<super::DraggedPhotos>(ctx);
+    frame(vec![]);
+    let start = source.center();
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    // A few points is a click gone astray, not a drag.
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -4.))]);
+    assert!(!dragging(&ctx));
+    let folder = egui::pos2(120., 10.);
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -20.))]);
+    assert!(dragging(&ctx));
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(
+        matches!(
+            &action,
+            Some(TreeAction::Drop { root: RootId(42), to, photos, .. })
+                if to.is_empty() && *photos == [PhotoId(1), PhotoId(2)]
+        ),
+        "no drop"
+    );
+    // A point at a time, as a mouse moves: egui's own drag starts before
+    // the drag distance is reached.
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            start + Vec2::new(0., -(dy as f32)),
+        )]);
+    }
+    assert!(dragging(&ctx), "dragged a point at a time");
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(matches!(action, Some(TreeAction::Drop { .. })), "no drop");
+    // Escape mid-drag drops nothing.
+    frame(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    frame(vec![egui::Event::PointerMoved(start + Vec2::new(0., -20.))]);
+    frame(vec![egui::Event::PointerMoved(folder)]);
+    frame(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    let action = frame(vec![press(folder, false)]);
+    assert!(action.is_none());
+}
+/// Delete Rejected Photos in Offline Photographs: only the rejected photos
+/// shown there, never an online one.
+#[test]
+fn rejected_photos_of_the_offline_source_are_only_offline_ones() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    std::fs::write(d.path().join("kept.ARW"), b"source")?;
+    std::fs::write(d.path().join("gone.ARW"), b"source")?;
+    let db = d.path().join("photos.rawmakase");
+    Catalog::create(&db)?.add_folder(d.path())?;
+    std::fs::remove_file(d.path().join("gone.ARW"))?;
+    let mut l = Library::load(&db, egui::Context::default())?;
+    for p in &mut l.session.photos {
+        p.flag = -1;
+    }
+    l.wait_for_availability();
+    assert_eq!(l.rejected_in_source().len(), 2);
+    l.filters.only_missing = true;
+    l.filter();
+    let gone = l
+        .session
+        .photos
+        .iter()
+        .find(|p| p.filename == "gone.ARW")
+        .unwrap()
+        .id;
+    assert_eq!(l.rejected_in_source(), [gone]);
+    Ok(())
+}
+/// A folder renamed in the tree keeps what was selected and unfolded in it,
+/// and nothing beside it changes.
+#[test]
+fn a_renamed_folder_keeps_its_selection_and_unfolded_folders() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    let root = RootId(3);
+    library.selected_folders = folder_selection::FolderSelection::one("root:3/trip/day1");
+    library.expanded = ["root:3/trip", "root:3/trip/day1", "root:3/tripod"]
+        .map(String::from)
+        .into();
+    library.folder_renamed(root, "trip", root, "Iceland");
+    assert!(library.selected_folders.contains("root:3/Iceland/day1"));
+    assert_eq!(library.selected_folders.anchor(), "root:3/Iceland/day1");
+    let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
+    expanded.sort();
+    assert_eq!(
+        expanded,
+        ["root:3/Iceland", "root:3/Iceland/day1", "root:3/tripod"]
+    );
+    Ok(())
+}
+/// A folder moved into another root keeps what was selected and unfolded
+/// in it, under that root.
+#[test]
+fn a_folder_moved_to_another_root_keeps_its_selection_and_unfolded_folders() -> Result<()> {
+    let (_directory, mut library) = library_of(&["a.RAF"])?;
+    library.selected_folders = folder_selection::FolderSelection::one("root:3/trip/day1");
+    library.expanded = ["root:3/trip", "root:3/trip/day1", "root:4/2025"]
+        .map(String::from)
+        .into();
+    library.folder_renamed(RootId(3), "trip", RootId(4), "2025/trip");
+    assert!(library.selected_folders.contains("root:4/2025/trip/day1"));
+    let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
+    expanded.sort();
+    assert_eq!(
+        expanded,
+        ["root:4/2025", "root:4/2025/trip", "root:4/2025/trip/day1"]
+    );
+    Ok(())
+}
+/// A folder dragged past 8 points onto another folder of its root is
+/// dropped there; onto a folder inside it, nothing is.
+#[test]
+fn a_folder_dragged_onto_another_of_its_root_is_dropped_there() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |logical: &str, id: u32| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, y2025, inside) = (
+        node("2024/day1", 1),
+        node("2025", 2),
+        node("2024/day1/sub", 3),
+    );
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &y2025, &inside] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                        true,
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    // Rows are 22 points tall, one under another.
+    let (row1, row2, row3) = (
+        egui::pos2(120., 11.),
+        egui::pos2(120., 33.),
+        egui::pos2(120., 55.),
+    );
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let actions = frame(vec![press(row2, false)]);
+    let dropped = actions.into_iter().flatten().find_map(|a| match a {
+        TreeAction::DropFolder { from, to, .. } => Some((from, to)),
+        _ => None,
+    });
+    assert_eq!(dropped, Some(("2024/day1".into(), "2025".into())));
+    // Into a folder inside it: no drop.
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    frame(vec![egui::Event::PointerMoved(row1 + Vec2::new(0., 12.))]);
+    frame(vec![egui::Event::PointerMoved(row3)]);
+    let actions = frame(vec![press(row3, false)]);
+    assert!(
+        !actions
+            .into_iter()
+            .flatten()
+            .any(|a| matches!(a, TreeAction::DropFolder { .. }))
+    );
+}
+
+#[test]
+fn a_dragged_folder_follows_the_pointer_by_name() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |logical: &str, id: u32| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, y2025) = (node("2024/day1", 1), node("2025", 2));
+    let mut expanded = HashSet::new();
+    // Where "day1" is painted this frame.
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &y2025] {
+                    folder_tree_row(ui, n, 0, &mut expanded, &Default::default(), true);
+                }
+            },
+        );
+        output.textures_delta.clear();
+        output
+            .shapes
+            .into_iter()
+            .filter_map(|s| match s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "day1" => Some(t.visual_bounding_rect()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let row1 = egui::pos2(120., 11.);
+    let pointer = egui::pos2(200., 120.);
+    frame(vec![]);
+    // A point at a time, as a mouse moves.
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
+    let drawn = frame(vec![egui::Event::PointerMoved(pointer)]);
+    assert!(
+        drawn
+            .iter()
+            .any(|r| r.left() > pointer.x && r.top() > pointer.y - 4. && r.top() < pointer.y + 30.),
+        "its name beside the pointer: {drawn:?}"
+    );
+    // Dropped (here on nothing), it is gone.
+    let drawn = frame(vec![press(pointer, false)]);
+    let drawn = [drawn, frame(vec![])].concat();
+    assert!(drawn.iter().all(|r| r.left() < pointer.x), "{drawn:?}");
+}
+
+#[test]
+fn a_folder_with_no_catalog_folder_of_its_own_is_dragged_too() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    // 2024 holds no photos itself: the catalog has folders below it only.
+    let node = |logical: &str, folder: Option<FolderId>| FolderNode {
+        key: format!("root:42/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(42),
+        logical: logical.into(),
+        folder,
+        ..Default::default()
+    };
+    let (y2024, y2025) = (node("2024", None), node("2025", Some(FolderId(2))));
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&y2024, &y2025] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                        true,
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (row1, row2) = (egui::pos2(120., 11.), egui::pos2(120., 33.));
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let actions = frame(vec![press(row2, false)]);
+    let dropped = actions.into_iter().flatten().find_map(|a| match a {
+        TreeAction::DropFolder { from, to, .. } => Some((from, to)),
+        _ => None,
+    });
+    assert_eq!(dropped, Some(("2024".into(), "2025".into())));
+}
+
+#[test]
+fn a_folder_dropped_on_another_roots_folder_is_dropped_there() {
+    use crate::catalog::FolderId;
+    let ctx = egui::Context::default();
+    let node = |root: i64, logical: &str, id: u32| FolderNode {
+        key: format!("root:{root}/{logical}"),
+        name: logical.rsplit('/').next().unwrap().into(),
+        in_root: RootId(root),
+        logical: logical.into(),
+        folder: Some(FolderId(id as _)),
+        ..Default::default()
+    };
+    let (day1, elsewhere) = (node(42, "2024/day1", 1), node(43, "trips", 2));
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 240.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                for n in [&day1, &elsewhere] {
+                    actions.push(folder_tree_row(
+                        ui,
+                        n,
+                        0,
+                        &mut expanded,
+                        &Default::default(),
+                        true,
+                    ));
+                }
+            },
+        );
+        output.textures_delta.clear();
+        actions
+    };
+    let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let (row1, row2) = (egui::pos2(120., 11.), egui::pos2(120., 33.));
+    frame(vec![]);
+    frame(vec![egui::Event::PointerMoved(row1), press(row1, true)]);
+    for dy in 1..=12 {
+        frame(vec![egui::Event::PointerMoved(
+            row1 + Vec2::new(0., dy as f32),
+        )]);
+    }
+    frame(vec![egui::Event::PointerMoved(row2)]);
+    let dropped = frame(vec![press(row2, false)])
+        .into_iter()
+        .flatten()
+        .find_map(|a| match a {
+            TreeAction::DropFolder {
+                root,
+                from,
+                to_root,
+                to,
+            } => Some((root, from, to_root, to)),
+            _ => None,
+        });
+    assert_eq!(
+        dropped,
+        Some((RootId(42), "2024/day1".into(), RootId(43), "trips".into()))
+    );
+}
+/// The labels of `node`'s right-click menu, and the action a click on
+/// `choose` gives.
+fn tree_menu(
+    node: &FolderNode,
+    choose: &str,
+    subfolders: bool,
+) -> (Vec<String>, Option<TreeAction>) {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    let mut expanded = HashSet::new();
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut action = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360., 400.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                action =
+                    folder_tree_row(ui, node, 0, &mut expanded, &Default::default(), subfolders)
+            },
+        );
+        output.textures_delta.clear();
+        (action, output.platform_output.accesskit_update)
+    };
+    let click = |at: egui::Pos2, button: egui::PointerButton, pressed: bool| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    let row = egui::pos2(120., 10.);
+    frame(vec![]);
+    frame(click(row, egui::PointerButton::Secondary, true));
+    frame(click(row, egui::PointerButton::Secondary, false));
+    let (_, update) = frame(vec![]);
+    let update = update.expect("accessibility is on");
+    let buttons: Vec<(String, egui::Pos2)> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == egui::accesskit::Role::Button)
+        .filter_map(|(_, n)| {
+            let b = n.bounds()?;
+            Some((
+                n.label()?.to_string(),
+                egui::pos2(((b.x0 + b.x1) / 2.) as f32, ((b.y0 + b.y1) / 2.) as f32),
+            ))
+        })
+        .collect();
+    let labels = buttons.iter().map(|(l, _)| l.clone()).collect();
+    let Some((_, at)) = buttons.iter().find(|(l, _)| l == choose) else {
+        return (labels, None);
+    };
+    frame(click(*at, egui::PointerButton::Primary, true));
+    let (action, _) = frame(click(*at, egui::PointerButton::Primary, false));
+    (labels, action)
+}
+#[test]
+fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
+    use crate::catalog::FolderId;
+    let folder = FolderNode {
+        key: "root:42/2024".into(),
+        name: "2024".into(),
+        in_root: RootId(42),
+        logical: "2024".into(),
+        folder: Some(FolderId(1)),
+        ids: [FolderId(1)].into_iter().collect(),
+        ..Default::default()
+    };
+    let (labels, action) = tree_menu(&folder, "Move to Trash…", true);
+    assert!(labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    assert!(
+        matches!(&action, Some(TreeAction::TrashFolder { root: RootId(42), logical }) if logical == "2024"),
+        "not asked to trash it"
+    );
+    // A root with folders: neither Move to Trash nor its own removal.
+    let mut root = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    root.ids.insert(FolderId(1));
+    let (labels, _) = tree_menu(&root, "", true);
+    assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    // A root with nothing left in the catalog can be removed.
+    let empty = FolderNode::root(RootId(42), "Photos".into(), "/missing".into());
+    let (labels, action) = tree_menu(&empty, "Remove from Catalog…", true);
+    assert!(!labels.iter().any(|l| l == "Move to Trash…"), "{labels:?}");
+    assert!(
+        matches!(&action, Some(TreeAction::RemoveRoot(RootId(42), name)) if name == "Photos"),
+        "not asked to remove the root"
+    );
+}
+#[test]
+fn a_folder_holding_only_folders_can_be_located() {
+    use crate::catalog::FolderId;
+    let mut root = FolderNode::root(RootId(42), "2026".into(), "/missing".into());
+    root.insert(&Folder {
+        id: FolderId(1),
+        root: RootId(42),
+        relative: "Wedding/RAW/Card 1".into(),
+        path: PathBuf::from("/missing/Wedding/RAW/Card 1"),
+        count: 3,
+    });
+    root.finish();
+    let wedding = &root.children["Wedding"];
+    assert!(wedding.folder.is_none(), "no catalog folder of its own");
+    let (labels, action) = tree_menu(wedding, "Locate this folder…", true);
+    assert!(
+        labels.iter().any(|l| l == "Locate this folder…"),
+        "{labels:?}"
+    );
+    assert!(
+        matches!(&action, Some(TreeAction::RelinkFolder { root: RootId(42), logical }) if logical == "Wedding"),
+        "not asked to locate it"
+    );
+    // A folder with photos of its own is located by its path too.
+    let card = &wedding.children["RAW"].children["Card 1"];
+    let (_, action) = tree_menu(card, "Locate this folder…", true);
+    assert!(
+        matches!(&action, Some(TreeAction::RelinkFolder { root: RootId(42), logical }) if logical == "Wedding/RAW/Card 1"),
+        "not asked to locate it"
+    );
+    // A root keeps its own entry.
+    let (labels, action) = tree_menu(&root, "Locate root folder…", true);
+    assert!(
+        !labels.iter().any(|l| l == "Locate this folder…"),
+        "{labels:?}"
+    );
+    assert!(matches!(action, Some(TreeAction::RelinkRoot(RootId(42)))));
 }

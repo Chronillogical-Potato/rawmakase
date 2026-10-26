@@ -135,6 +135,12 @@ impl Editor {
                 // folders it skipped.
                 let mut report = crate::catalog::SidecarReport::default();
                 let mut conflicts = Vec::new();
+                let relinks = matches!(
+                    kind,
+                    CatalogDialog::Folder(
+                        FolderAction::RelinkRoot(_) | FolderAction::RelinkFolder(..)
+                    )
+                );
                 let result = (|| -> anyhow::Result<Option<CatalogLocation>> {
                     Ok(match kind {
                         CatalogDialog::Create => {
@@ -185,7 +191,7 @@ impl Editor {
                                 _ => "Find missing folder on this computer",
                             });
                             // Where another computer has it, when that is here too.
-                            if let Some(there) = suggestion(&cat, action) {
+                            if let Some(there) = suggestion(&cat, &action) {
                                 dialog = dialog.set_directory(there);
                             }
                             let Some(path) = dialog.pick_folder() else {
@@ -213,20 +219,39 @@ impl Editor {
                                     report = added.report;
                                     conflicts = added.conflicts;
                                 }
-                                FolderAction::RelinkRoot(id) => {
-                                    let overrides = cat.root_overrides(id)?;
+                                FolderAction::RelinkRoot(root) => {
+                                    let overrides = cat.root_overrides(root)?;
                                     if !overrides.is_empty() {
                                         ask(FolderQuestion::Overrides {
                                             catalog: current,
-                                            root: id,
+                                            root,
+                                            relative: String::new(),
                                             path,
                                             overrides,
                                         });
                                         return Ok(None);
                                     }
-                                    cat.relink_root(id, &path)?
+                                    cat.relink_root(root, &path)?
                                 }
-                                FolderAction::RelinkFolder(id) => cat.relink_folder(id, &path)?,
+                                FolderAction::RelinkFolder(root, relative) => {
+                                    let overrides = cat.folder_overrides(root, &relative)?;
+                                    if !overrides.is_empty() {
+                                        ask(FolderQuestion::Overrides {
+                                            catalog: current,
+                                            root,
+                                            relative,
+                                            path,
+                                            overrides,
+                                        });
+                                        return Ok(None);
+                                    }
+                                    cat.relink_folder_at(
+                                        root,
+                                        &relative,
+                                        &path,
+                                        crate::catalog::Overrides::Keep,
+                                    )?
+                                }
                             }
                             Some(current)
                         }
@@ -240,18 +265,7 @@ impl Editor {
                     ctx.request_repaint();
                 }
                 let event = match result {
-                    Ok(Some(location)) => reopened(
-                        &location,
-                        matches!(
-                            kind,
-                            CatalogDialog::Folder(
-                                FolderAction::RelinkRoot(_) | FolderAction::RelinkFolder(_)
-                            )
-                        ),
-                        &report,
-                        &conflicts,
-                        &ctx,
-                    ),
+                    Ok(Some(location)) => reopened(&location, relinks, &report, &conflicts, &ctx),
                     Ok(None) => Event::DialogClosed,
                     Err(e) => Event::CatalogReady(Err(format!("{e:#}"))),
                 };
@@ -312,6 +326,7 @@ impl Editor {
             tx,
             ctx.clone(),
             move |tx| {
+                let mut imported = Vec::new();
                 let result = (|| -> anyhow::Result<_> {
                     let mut catalog = crate::catalog::Catalog::open(&current)?;
                     let defaults = crate::catalog::MetadataDefaults::load();
@@ -331,6 +346,7 @@ impl Editor {
                         match catalog.import_folder(folder, &defaults, &[]) {
                             Ok(added) if !added.ambiguous.is_empty() => skipped.push(name),
                             Ok(added) => {
+                                imported.push(folder.clone());
                                 report.unreadable.extend(added.report.unreadable);
                                 report.ignored.extend(added.report.ignored);
                                 conflicts.extend(added.conflicts);
@@ -362,7 +378,11 @@ impl Editor {
                 })()
                 .map(Box::new)
                 .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(Event::CatalogReady(result));
+                let source = result
+                    .as_ref()
+                    .map(|library| library.added_folder_keys(&imported))
+                    .unwrap_or_default();
+                let _ = tx.send(Event::FoldersAdded { result, source });
             },
             |tx, error| {
                 let _ = tx.send(Event::CatalogReady(Err(error)));
@@ -448,7 +468,16 @@ impl Editor {
                 })()
                 .map(Box::new)
                 .map_err(|e| format!("{e:#}"));
-                let _ = tx.send(Event::CatalogReady(result));
+                let event = if is_folder {
+                    let source = result
+                        .as_ref()
+                        .map(|library| library.added_folder_keys(&[folder]))
+                        .unwrap_or_default();
+                    Event::FoldersAdded { result, source }
+                } else {
+                    Event::CatalogReady(result)
+                };
+                let _ = tx.send(event);
             },
             |tx, error| {
                 let _ = tx.send(Event::CatalogReady(Err(error)));
@@ -642,18 +671,22 @@ impl Editor {
             1 => "its photo".to_string(),
             n => format!("its {n} photos"),
         };
+        let body = match removal.empty_root {
+            Some(_) => "The root folder has nothing left in the catalog. Its folder stays on disk; add it again to bring it back.".to_string(),
+            None => format!(
+                "The folder, its subfolders and {photos} leave the catalog, with \
+                 their edits, ratings, keywords and places in collections. The \
+                 files stay on disk; add the folder again to bring them back \
+                 without those."
+            ),
+        };
         // Only a click or the focused button confirms: a stray Return must
         // never remove a folder.
         let Some(remove) = confirm_modal(
             ctx,
             "remove-folder",
             &format!("Remove “{}” from the catalog?", removal.name),
-            &format!(
-                "The folder, its subfolders and {photos} leave the catalog, with \
-                 their edits, ratings, keywords and places in collections. The \
-                 files stay on disk; add the folder again to bring them back \
-                 without those."
-            ),
+            &body,
             false,
             &[("Cancel", false), ("Remove", true)],
             false,
@@ -682,6 +715,13 @@ impl Editor {
             );
             return;
         }
+        if let Some(root) = removal.empty_root {
+            self.status = match library.remove_empty_root(root, &removal.name) {
+                Ok(()) => library.message.clone(),
+                Err(e) => format!("Root not removed: {e:#}"),
+            };
+            return;
+        }
         match library.remove_folders(&removal.folders, &removal.name) {
             // Removed, even if the catalog could not be read again: their ids
             // may be given to new photos, so nothing may keep them.
@@ -705,19 +745,22 @@ impl Editor {
                     .catalog_photo
                     .is_some_and(|id| removed.value.contains(&id))
                 {
-                    // Nothing may save into a removed photo, nor a load still
-                    // under way bring it back.
-                    self.load.invalidate();
-                    self.selection.clear_document();
-                    self.document.reset(None);
-                    self.preview.clear_document();
-                    self.presets.clear_document();
-                    self.view.clear_document();
-                    self.module = Module::Library;
+                    self.close_removed_document();
                 }
             }
             Err(e) => self.status = format!("Folder not removed: {e:#}"),
         }
+    }
+    /// Closes the open photo, removed from the catalog: nothing may save
+    /// into it, nor a load still under way bring it back.
+    pub(super) fn close_removed_document(&mut self) {
+        self.load.invalidate();
+        self.selection.clear_document();
+        self.document.reset(None);
+        self.preview.clear_document();
+        self.presets.clear_document();
+        self.view.clear_document();
+        self.module = Module::Library;
     }
     /// Says why Develop could not open a photo.
     pub(super) fn not_editable_window(&mut self, ctx: &egui::Context) {
@@ -807,14 +850,11 @@ fn catalog_file_dialog() -> rfd::FileDialog {
 }
 /// Where another computer has the root or folder of `action`, when that
 /// path is on this computer too: the place Find Missing Folder starts.
-fn suggestion(catalog: &crate::catalog::Catalog, action: FolderAction) -> Option<PathBuf> {
+fn suggestion(catalog: &crate::catalog::Catalog, action: &FolderAction) -> Option<PathBuf> {
     let (root, relative) = match action {
         FolderAction::Add => return None,
-        FolderAction::RelinkRoot(id) => (id, String::new()),
-        FolderAction::RelinkFolder(id) => {
-            let folder = catalog.folders().ok()?.into_iter().find(|f| f.id == id)?;
-            (folder.root, folder.relative)
-        }
+        FolderAction::RelinkRoot(id) => (*id, ""),
+        FolderAction::RelinkFolder(root, relative) => (*root, relative.as_str()),
     };
     let locations = catalog
         .folder_locations()
@@ -832,7 +872,7 @@ fn suggestion(catalog: &crate::catalog::Catalog, action: FolderAction) -> Option
             .push((at.clone(), path.clone()));
     }
     by_computer.values().find_map(|rows| {
-        crate::catalog::locations::resolve_in(&locations.original, rows, &relative, cfg!(windows))
+        crate::catalog::locations::resolve_in(&locations.original, rows, relative, cfg!(windows))
             .filter(|path| path.is_dir())
     })
 }

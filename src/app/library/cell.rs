@@ -78,7 +78,8 @@ pub(super) fn photo_cell(
     let response = ui.interact(
         rect,
         egui::Id::new(("catalog-photo-cell", photo.id)),
-        Sense::click(),
+        // Dragged onto a folder, the photos move there.
+        Sense::click_and_drag(),
     );
     // Lightroom grid: dark cells separated by thin gutters, a light surround
     // for the selection, and the color label tinting the cell.
@@ -328,6 +329,14 @@ pub(in crate::app) enum PhotoAction {
     Copy(super::CopyAction),
     /// Read Metadata from Files.
     ReadMetadata,
+    /// Remove from Catalog.
+    Remove,
+    /// Move to Trash.
+    Trash,
+    /// Rename Photo… or Rename Photos….
+    Rename,
+    /// Move to Folder…: the photo's files to another catalog folder.
+    MoveToFolder,
     /// Library › Previews: Build Standard-Sized Previews.
     BuildPreviews(crate::catalog::preview_cache::PreviewKind),
     /// Library › Previews: Discard 1:1 Previews, or Standard and 1:1.
@@ -335,6 +344,18 @@ pub(in crate::app) enum PhotoAction {
     /// Develop's Set as Reference Photo.
     SetReference,
 }
+/// Remove from Catalog's shortcut, as Lightroom shows it.
+const REMOVE_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌥⌫"
+} else {
+    "Alt+Backspace"
+};
+/// Move to Trash's shortcut, as Lightroom shows Remove and Trash Photos'.
+const TRASH_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘⌥⇧⌫"
+} else {
+    "Ctrl+Alt+Shift+Backspace"
+};
 /// Create Virtual Copy's shortcut, as Lightroom shows it.
 pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "macos") {
     "⌘'"
@@ -354,10 +375,20 @@ pub(in crate::app) fn photo_menu(
     use crate::app::photo_metadata::{Edit, LABELS};
     use crate::app::widgets::{menu_item, menu_separator, submenu_style};
     let mut action = None;
+    // Why Develop can't open the photo reads its file: once each time the menu opens.
+    let key = response.id.with(("develop-refusal", photo.id, available));
+    if crate::app::widgets::context_clicked(response) {
+        response
+            .ctx
+            .data_mut(|d| d.remove::<Option<super::Refusal>>(key));
+    }
     crate::app::widgets::context_menu(response, |ui| {
         ui.set_width(210.);
         ui.spacing_mut().item_spacing.y = 0.;
-        let refusal = super::develop_refusal(photo, available);
+        let refusal = ui.ctx().data_mut(|d| {
+            d.get_temp_mut_or_insert_with(key, || super::develop_refusal(photo, available))
+                .clone()
+        });
         if module == super::Module::Develop {
             if menu_item(ui, "Set as Reference Photo", "", refusal.is_none(), false) {
                 action = Some(PhotoAction::SetReference);
@@ -409,6 +440,22 @@ pub(in crate::app) fn photo_menu(
         menu_separator(ui);
         if menu_item(ui, "Read Metadata from Files…", "", true, false) {
             action = Some(PhotoAction::ReadMetadata);
+            ui.close();
+        }
+        if menu_item(ui, "Rename…", "F2", true, false) {
+            action = Some(PhotoAction::Rename);
+            ui.close();
+        }
+        if menu_item(ui, "Move to Folder…", "", true, false) {
+            action = Some(PhotoAction::MoveToFolder);
+            ui.close();
+        }
+        if menu_item(ui, "Remove from Catalog…", REMOVE_SHORTCUT, true, false) {
+            action = Some(PhotoAction::Remove);
+            ui.close();
+        }
+        if menu_item(ui, "Move to Trash…", TRASH_SHORTCUT, true, false) {
+            action = Some(PhotoAction::Trash);
             ui.close();
         }
         menu_separator(ui);

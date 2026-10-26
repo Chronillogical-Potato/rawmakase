@@ -12,18 +12,18 @@ pub(super) fn process_pixel(
     p: [f32; 3],
     r: &Recipe,
     lut: &CurveSet,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
     pos: [f32; 2],
     local: Option<Local>,
 ) -> [f32; 3] {
-    let scene = exposure_stage(scene_color(p, r, lut, matrix, local), lut, local);
+    let (scene, clarity_lum) = scene_input(p, r, lut, camera, local);
     if lut.output == PixelOutput::SceneInput {
         return scene;
     }
     let scene = if lut.output == PixelOutput::AutoBasis {
         auto_basis(scene, r)
     } else {
-        scene_stage(scene, r, lut, pos, local)
+        scene_stage(scene, clarity_lum, r, lut, pos, local)
     };
     if lut.output == PixelOutput::SceneOutput {
         return scene;
@@ -37,12 +37,53 @@ pub(super) fn tone_stage(
     p: [f32; 3],
     r: &Recipe,
     lut: &CurveSet,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
     pos: [f32; 2],
     local: Option<Local>,
 ) -> [f32; 3] {
-    let scene = exposure_stage(scene_color(p, r, lut, matrix, local), lut, local);
-    profile_stage(scene_stage(scene, r, lut, pos, local), r)
+    let (scene, clarity_lum) = scene_input(p, r, lut, camera, local);
+    profile_stage(scene_stage(scene, clarity_lum, r, lut, pos, local), r)
+}
+/// S1/S2 output and Clarity's fine luminance on the measurement map's basis.
+/// Mask colour and Exposure change the rendered pixel, but must not become detail
+/// relative to a blur that was measured before those mask adjustments.
+fn scene_input(
+    p: [f32; 3],
+    r: &Recipe,
+    lut: &CurveSet,
+    camera: Camera,
+    local: Option<Local>,
+) -> ([f32; 3], f32) {
+    let color = scene_color(p, r, lut, camera, local);
+    let scene = exposure_stage(color, lut, local);
+    let clarity_scene = if lut
+        .local
+        .as_ref()
+        .is_some_and(|m| m.clarity.is_some() || m.clarity_detail.is_some())
+        && local.is_some_and(|l| {
+            local::uses(
+                l.delta,
+                &[
+                    slot::TEMPERATURE,
+                    slot::TINT,
+                    slot::EXPOSURE,
+                    slot::COLOR,
+                    slot::COLOR + 1,
+                    slot::COLOR + 2,
+                ],
+            )
+        }) {
+        let color = if local.is_some_and(|l| local::uses(l.delta, &[slot::TEMPERATURE, slot::TINT]))
+        {
+            scene_color(p, r, lut, camera, None)
+        } else {
+            color
+        };
+        exposure_stage(color, lut, None)
+    } else {
+        scene
+    };
+    (scene, crate::develop::scene_tone::luminance(clarity_scene))
 }
 /// S1: a camera sample's scene colour: white balance (a mask's too), the profile's
 /// matrix and HueSatMap, and Camera Calibration. Linear, sRGB primaries.
@@ -50,14 +91,22 @@ pub(super) fn scene_color(
     p: [f32; 3],
     r: &Recipe,
     lut: &CurveSet,
-    matrix: [[f32; 3]; 3],
+    camera: Camera,
     local: Option<Local>,
 ) -> [f32; 3] {
     let wb = local.map_or([1.; 3], |l| l.math.white_balance_gain(l.delta));
-    let p = std::array::from_fn(|c| p[c] * r.wb[c] * wb[c]);
+    // Not `min`, which would turn a NaN sample into the clip.
+    let held = |c: usize| {
+        if p[c] > camera.clip[c] {
+            camera.clip[c]
+        } else {
+            p[c]
+        }
+    };
+    let p = std::array::from_fn(|c| held(c) * r.wb[c] * wb[c]);
     let color = r.profile.as_ref().map_or_else(
-        || mul(matrix, p),
-        |profile| profile.camera_color(p, matrix, r.temperature),
+        || mul(camera.matrix, p),
+        |profile| profile.camera_color(p, camera.matrix, r.temperature),
     );
     lut.calibration.apply(color)
 }
@@ -80,12 +129,13 @@ pub(super) fn exposure_stage(color: [f32; 3], lut: &CurveSet, local: Option<Loca
 /// global curves.
 pub(super) fn scene_stage(
     pro: [f32; 3],
+    clarity_lum: f32,
     r: &Recipe,
     lut: &CurveSet,
     pos: [f32; 2],
     local: Option<Local>,
 ) -> [f32; 3] {
-    let pro = match &lut.local {
+    let gain = match &lut.local {
         Some(map) => {
             let lum = crate::develop::scene_tone::luminance(pro);
             let sliders = local
@@ -97,15 +147,15 @@ pub(super) fn scene_stage(
                         r.effects.clarity + l.delta[slot::CLARITY],
                     ]
                 });
-            let gain = match sliders {
-                Some(sliders) => map.gain_with(pos[0], pos[1], lum, sliders),
-                None => map.gain(pos[0], pos[1], lum),
-            };
-            pro.map(|v| v * gain)
+            match sliders {
+                Some(sliders) => map.gain_with(pos[0], pos[1], lum, clarity_lum, sliders),
+                None => map.gain(pos[0], pos[1], lum, clarity_lum),
+            }
         }
-        None => pro,
+        None => 1.,
     };
-    lut.scene.apply(pro, pos, local.map(|l| l.delta))
+    lut.scene
+        .apply(pro.map(|v| v * gain), pos, gain, local.map(|l| l.delta))
 }
 /// In place of S3 for Auto tone's measurement (`PixelOutput::AutoBasis`): the DNG SDK's
 /// exposure ramp at its default Shadows, with its black at 0.0015 × 2^exposure (none

@@ -4,18 +4,56 @@
 //! Per-camera baseline exposures live in data/cameras.toml (crate::cameras).
 use crate::camera_data::{HighlightTonePriority, Metadata};
 /// Camera Raw's default exposure for this photo: a DNG's own BaselineExposure,
-/// otherwise the camera table's value (data/cameras.toml).
+/// otherwise the camera table's value (data/cameras.toml). A rendered file has none.
 pub fn baseline_exposure(m: &Metadata) -> f32 {
+    if m.is_rendered() {
+        return 0.;
+    }
     if let Some(dng) = m.baseline_exposure {
         return dng;
     }
     let row = crate::cameras::baseline_exposure(&m.make, &m.model);
-    let table = row.ev + fujifilm_shift(m, &row);
+    // Adobe gives small raws a baseline of their own (see data/cameras.toml).
+    let ev = if m.sraw {
+        row.sraw_ev
+    } else {
+        row.ev + white_shift(m, &row)
+    };
+    let mut table = ev + fujifilm_shift(m, &row);
+    // Below the lowest native ISO the camera exposes more and pulls the raw back.
+    if row
+        .lowest_iso
+        .is_some_and(|lowest| m.iso > 0. && m.iso < lowest - 1.)
+    {
+        table -= 1.;
+    }
     // Table rows hold for photos without Highlight Tone Priority, which Camera Raw
     // brightens by the stop the camera held back.
     match m.highlight_tone_priority {
         HighlightTonePriority::Off => table,
         HighlightTonePriority::On | HighlightTonePriority::Enhanced => table + 1.,
+    }
+}
+/// Adobe's BaselineExposure for a body whose white level it takes by ISO speed
+/// (Canon) moves with that white, so the photo's brightness stays referenced
+/// to the samples' full range: a photo whose white, over its black, is
+/// another part of that range than the row's sample's takes the difference,
+/// log2((white − black) / (maximum − black)) less the sample's. On the 325
+/// Canon files of the test dataset Adobe DNG Converter converted, 323 come
+/// within 0.1 EV of its BaselineExposure (the white alone, over the black,
+/// leaves the bodies whose black moves with ISO speed 0.2 EV off). 0 without
+/// both levels.
+fn white_shift(m: &Metadata, row: &crate::cameras::Baseline) -> f32 {
+    let (Some(photo), Some(sample)) = (m.levels, row.levels) else {
+        return 0.;
+    };
+    let part = |[black, white, maximum]: [f32; 3]| {
+        let (range, full) = (white - black, maximum - black);
+        (range > 0. && full > 0.).then(|| (range / full).log2())
+    };
+    match (part(photo.map(|v| v as f32)), part(sample)) {
+        (Some(photo), Some(sample)) => photo - sample,
+        _ => 0.,
     }
 }
 /// Camera Raw's baseline for a Fujifilm raw is a per-body constant minus the raw's
@@ -94,6 +132,88 @@ mod tests {
             neutral_calibration(&fujifilm("Unlisted body", true, None)),
             [1.; 3]
         );
+    }
+    #[test]
+    fn sony_extended_low_iso_takes_a_stop_off() {
+        // Adobe DNG Converter 18.7: A7R III at ISO 50 and 80 -0.85, at 100 +0.15;
+        // the A7S III's ISO 80 is native and keeps its row.
+        let at = |model, iso| Metadata {
+            iso,
+            ..camera("Sony", model)
+        };
+        assert_eq!(baseline_exposure(&at("ILCE-7RM3", 100.)), 0.15);
+        assert!(close(baseline_exposure(&at("ILCE-7RM3", 80.)), -0.85));
+        assert!(close(baseline_exposure(&at("ILCE-7RM3", 50.)), -0.85));
+        assert!(close(baseline_exposure(&at("ILCE-7M3", 64.)), -0.65));
+        assert_eq!(baseline_exposure(&at("ILCE-7SM3", 80.)), 0.15);
+        // A raw without an ISO keeps the row.
+        assert_eq!(baseline_exposure(&at("ILCE-7RM3", 0.)), 0.15);
+    }
+    /// Adobe takes a Canon's white by ISO speed and moves its BaselineExposure
+    /// with it: the EOS 1100D's is -0.5 at its ISO 160 sample's white of
+    /// 11222 (black 2047), 0 at ISO 400's 15000 (Adobe DNG Converter 18.7).
+    #[test]
+    fn canon_exposure_follows_the_white_adobe_takes_by_iso() {
+        let at = |levels| Metadata {
+            levels,
+            ..camera("Canon", "EOS 1100D")
+        };
+        assert!(close(
+            baseline_exposure(&at(Some([2047, 11222, 16383]))),
+            -0.5
+        ));
+        let iso_400 = baseline_exposure(&at(Some([2047, 15000, 16383])));
+        assert!(
+            close(iso_400, -0.5 + (12953f32 / 9175.).log2()),
+            "{iso_400}"
+        );
+        assert!(iso_400.abs() < 0.01);
+        // The EOS 200D's black rises with ISO speed: 0 at ISO 100 (511 to
+        // 11892), Adobe's 0.32 at ISO 400 (2048 to 14338); the part of the
+        // 14-bit range each white takes gives 0.26.
+        let iso_400 = baseline_exposure(&Metadata {
+            levels: Some([2048, 14338, 16383]),
+            ..camera("Canon", "EOS 200D")
+        });
+        let want = (12290f32 / 14335.).log2() - (11381f32 / 15872.).log2();
+        assert!(
+            close(iso_400, want) && (want - 0.258).abs() < 0.001,
+            "{iso_400}"
+        );
+        // Without the photo's levels, or for a row without its sample's, the
+        // row alone.
+        assert!(close(baseline_exposure(&at(None)), -0.5));
+        let other = Metadata {
+            levels: Some([512, 9000, 16383]),
+            ..camera("Sony", "ILCE-7M4")
+        };
+        assert_eq!(baseline_exposure(&other), 0.35);
+        // Small RAWs keep their own baseline.
+        let sraw = Metadata {
+            sraw: true,
+            ..at(Some([2047, 15000, 16383]))
+        };
+        assert!(close(baseline_exposure(&sraw), 0.25));
+    }
+    #[test]
+    fn canon_sraw_takes_its_own_baseline() {
+        // Adobe gives sRAW and mRAW a BaselineExposure of their own, one per body
+        // (from ISO 100 to 3200, both sizes).
+        let sraw = |model| Metadata {
+            sraw: true,
+            ..camera("Canon", model)
+        };
+        assert_eq!(baseline_exposure(&camera("Canon", "EOS 5D Mark IV")), 0.15);
+        assert!(close(baseline_exposure(&sraw("EOS 5D Mark IV")), 0.35));
+        assert!(close(baseline_exposure(&sraw("EOS 5DS R")), 0.25));
+        // A Canon body without one takes the median of the sRAW values.
+        assert!(close(baseline_exposure(&sraw("EOS 40D")), 0.25));
+        // Highlight Tone Priority adds its stop to the sRAW value too.
+        let htp = Metadata {
+            highlight_tone_priority: HighlightTonePriority::On,
+            ..sraw("EOS 5DS R")
+        };
+        assert!(close(baseline_exposure(&htp), 1.25));
     }
     #[test]
     fn olympus_units_use_their_5300k_preset() {
@@ -207,14 +327,14 @@ mod tests {
         assert_eq!(baseline_exposure(&camera("SONY", "ILCE-7M2")), 0.35);
         assert_eq!(baseline_exposure(&camera("Sony", "ILCE-7M4")), 0.35);
         assert_eq!(baseline_exposure(&camera("Canon", "EOS R7")), 0.4);
-        assert_eq!(baseline_exposure(&camera("Nikon", "Z 30")), 0.35);
+        assert_eq!(baseline_exposure(&camera("Nikon", "Z 30")), 0.3);
         // An unlisted body follows its make.
         assert_eq!(
             baseline_exposure(&camera("Canon", "EOS R1")),
             crate::cameras::baseline_exposure("Canon", "EOS R1").ev
         );
-        // The Canon median, 0.3 EV with the older bodies' rows.
-        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.2);
+        // The Canon median, 0.15 EV with the older bodies' rows.
+        assert!(baseline_exposure(&camera("Canon", "EOS R1")) > 0.1);
     }
     #[test]
     fn canon_highlight_tone_priority_adds_a_stop() {

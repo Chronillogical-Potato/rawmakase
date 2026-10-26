@@ -163,7 +163,7 @@ impl Library {
             .or_else(|| self.visible[..at].iter().rev().find(|i| selected(i)))
             .map(|i| self.session.photos[*i].id)
     }
-    pub(super) fn select_all(&mut self) {
+    pub(in crate::app) fn select_all(&mut self) {
         self.selection.selected = self
             .visible
             .iter()
@@ -280,6 +280,15 @@ impl Library {
                 (Key::B, _) if !press.repeat => {
                     self.quick_key(press.modifiers, self.selected_ids())
                 }
+                // Once per press: a held Delete must not ask again.
+                (Key::Delete | Key::Backspace, _) if !press.repeat => {
+                    let ids = self.selected_ids();
+                    self.delete_press(press.modifiers, ids)
+                }
+                (Key::F2, false) if !press.repeat && !press.modifiers.any() => {
+                    let ids = self.selected_ids();
+                    self.request_rename(ids)
+                }
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),
@@ -303,6 +312,15 @@ impl Library {
                 (Key::Home, false) => self.step(Step::Home, false),
                 (Key::End, false) => self.step(Step::End, false),
                 (Key::Escape, _) => self.close_loupe(),
+                // The Loupe's photo, once per press.
+                (Key::Delete | Key::Backspace, _) if !press.repeat => {
+                    let ids = self.selection.active.into_iter().collect();
+                    self.delete_press(press.modifiers, ids)
+                }
+                (Key::F2, false) if !press.repeat && !press.modifiers.any() => {
+                    let ids = self.selection.active.into_iter().collect();
+                    self.request_rename(ids)
+                }
                 (Key::C, false) if !press.modifiers.any() => self.open_compare(),
                 (Key::N, false) if !press.modifiers.any() => self.open_survey(),
                 // The Loupe applies B to the photo shown, once per press.

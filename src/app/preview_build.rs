@@ -18,6 +18,7 @@ use crate::catalog::preview_cache::{PreviewCache, PreviewKind, Stamp};
 use crate::catalog::{CatalogLocation, PhotoId};
 use crate::edits::EditRecord;
 use crate::model::recipe::Recipe;
+use crate::photo::Opened;
 use crate::raw_defaults::DevelopDefaults;
 use anyhow::{Context, ensure};
 use eframe::egui::{self, Color32, Sense, Vec2};
@@ -51,8 +52,9 @@ const THUMBNAIL_EDGE: u32 = 640;
 
 /// What a stored preview's pixels depend on that is known without opening the
 /// photo: its saved edit, else its Lightroom edit, else the raw defaults and the
-/// release that resolves them; and the demosaic. The build and Develop's lookup
-/// both name rows by it. Whether the file changed is the row's `Stamp`'s to say.
+/// release that resolves them; the demosaic and the RAW decoder
+/// (`raw::developed`). The build and Develop's lookup both name rows by it.
+/// Whether the file changed is the row's `Stamp`'s to say.
 pub(super) fn identity(
     record: &EditRecord,
     defaults: &DevelopDefaults,
@@ -67,13 +69,14 @@ pub(super) fn identity(
         format!("{defaults:?}").hash(&mut h);
         rawmakase_export::build_info::SOFTWARE.hash(&mut h);
     }
-    format!("{:?}", demosaic.effective()).hash(&mut h);
+    format!("{:?}", demosaic).hash(&mut h);
+    crate::raw::developed().hash(&mut h);
     format!("{:016x}", h.finish())
 }
 
 /// Whether a photo has an edit of its own, saved or from Lightroom; the grid
 /// shows the embedded preview of a photo without one.
-fn has_edit(record: &EditRecord) -> bool {
+pub(super) fn has_edit(record: &EditRecord) -> bool {
     record.recipe.is_some() || record.lightroom().is_some()
 }
 
@@ -88,6 +91,8 @@ pub(super) struct Item {
     pub record: EditRecord,
     pub defaults: Arc<DevelopDefaults>,
     pub demosaic: Demosaic,
+    /// Where a full-size decode is looked up first.
+    pub decode_cache: crate::decode_cache::DecodeCache,
     pub identity: String,
     pub kind: PreviewKind,
     /// The long edge asked for; 0 for full size.
@@ -188,14 +193,23 @@ fn thumbnail(image: &image::RgbImage) -> image::RgbImage {
 /// identity-checked record (a protected or unreadable edit fails, never falling
 /// back to the defaults), Upright completed, then a cancellable render.
 pub(super) fn render(item: &Item, cancel: &AtomicBool) -> anyhow::Result<image::RgbImage> {
-    let raw = crate::photo::open(&item.path)
+    let opened = crate::photo::open_source(&item.path, cancel)
         .with_context(|| format!("{} can't be read", item.path.display()))?;
-    let (profiles, _) = crate::camera_profiles::installed(&raw.metadata);
-    let mut recipe = item_recipe(item, &raw.metadata, &profiles)?;
-    let image = if needs_full(&recipe, &raw.metadata, item.edge) {
-        crate::export::job::decode_full(raw, &item.path, item.demosaic, cancel)?
-    } else {
-        raw.develop(Decode::Half, cancel)?
+    let (profiles, _) = crate::camera_profiles::installed(opened.metadata());
+    let mut recipe = item_recipe(item, opened.metadata(), &profiles)?;
+    let image = match opened {
+        Opened::Raw(raw) if needs_full(&recipe, &raw.metadata, item.edge) => {
+            crate::export::job::decode_full(
+                raw,
+                &item.path,
+                item.demosaic,
+                &item.decode_cache,
+                cancel,
+            )?
+        }
+        Opened::Raw(raw) => raw.develop(Decode::Half, cancel)?,
+        // A JPEG, PNG or TIFF opens at full size: there is no smaller decode.
+        Opened::Rendered(image) => image,
     };
     ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
     develop(&mut recipe, &image, item.edge, cancel)
@@ -210,7 +224,8 @@ fn item_recipe(
     Ok(crate::edits::resolve(&item.record, &item.path, m, profiles, &item.defaults)?.recipe)
 }
 
-/// `recipe` rendered on the decoded photo at `edge`, its Upright completed first.
+/// `recipe` rendered on the decoded photo at `edge`, its Upright and Straighten Auto
+/// completed first.
 fn develop(
     recipe: &mut Recipe,
     image: &crate::camera_data::CameraImage,
@@ -223,11 +238,11 @@ fn develop(
 }
 
 /// Whether the photo needs its full-size decode for `edge`: the half-size one,
-/// cropped and transformed as `recipe` says, falls short of it. Upright still to
-/// be worked out always takes the full decode, as completing it can shrink the
-/// photo (Constrain Crop).
+/// cropped and transformed as `recipe` says, falls short of it. Upright or a
+/// Straighten Auto still to be worked out always takes the full decode, which
+/// Develop measures on, and completing it can shrink the photo (Constrain Crop).
 pub(super) fn needs_full(recipe: &Recipe, m: &Metadata, edge: u32) -> bool {
-    if edge == 0 || recipe.upright.needs_analysis() {
+    if edge == 0 || recipe.upright.needs_analysis() || recipe.straighten_pending() {
         return true;
     }
     let g = crate::develop::Geometry::for_metadata(m, recipe);
@@ -687,7 +702,8 @@ enum Files {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct Queued {
     pub queued: usize,
-    /// Offline photos and files Develop can't open.
+    /// Offline photos, files Develop can't open, and JPEG, PNG, TIFF, WebP,
+    /// AVIF or JPEG XL files without an edit, which are their own previews.
     pub skipped: usize,
 }
 
@@ -748,8 +764,8 @@ impl Editor {
         builds.builder(&ctx)
     }
 
-    /// What building `ids` would capture now: an item per available RAW, and how
-    /// many others were skipped.
+    /// What building `ids` would capture now: an item per available RAW or edited
+    /// JPEG, PNG, TIFF, WebP, AVIF or JPEG XL, and how many others were skipped.
     fn build_items(
         &self,
         ids: &[PhotoId],
@@ -788,25 +804,30 @@ impl Editor {
             .photo_records(&photo_ids)
             .map_err(|e| format!("The catalog could not be read: {e:#}"))?;
         let edge = self.preview_builds.edge(kind);
-        let items = chosen
-            .into_iter()
-            .zip(records)
-            .map(|((photo, name, path), record)| Item {
+        let mut items = Vec::with_capacity(chosen.len());
+        for ((photo, name, path), record) in chosen.into_iter().zip(records) {
+            let edited = has_edit(&record.edit);
+            // A JPEG, PNG, TIFF, WebP, AVIF or JPEG XL without an edit is its own
+            // preview.
+            if !edited && !crate::storage::is_raw(&path) {
+                skipped += 1;
+                continue;
+            }
+            items.push(Item {
                 catalog: catalog.clone(),
                 photo,
                 name,
                 identity: identity(&record.edit, &self.raw_defaults, self.demosaic),
-                ticket: has_edit(&record.edit)
-                    .then(|| library.edited_ticket(photo))
-                    .flatten(),
+                ticket: edited.then(|| library.edited_ticket(photo)).flatten(),
                 record: record.edit,
                 path,
                 defaults: self.raw_defaults.clone(),
-                demosaic: self.demosaic.effective(),
+                demosaic: self.demosaic,
+                decode_cache: self.decode_cache.clone(),
                 kind,
                 edge,
-            })
-            .collect();
+            });
+        }
         Ok((items, skipped))
     }
 
@@ -1076,7 +1097,8 @@ impl Editor {
     }
 }
 
-/// "Building 12 previews · 3 skipped (offline or not RAW)".
+/// "Building 12 previews · 3 skipped (offline, not editable, or an unedited
+/// file that is its own preview)".
 pub(super) fn queued_message(queued: Queued) -> String {
     let mut line = match queued.queued {
         0 => "No previews to build".to_string(),
@@ -1084,7 +1106,7 @@ pub(super) fn queued_message(queued: Queued) -> String {
     };
     if queued.skipped > 0 {
         line.push_str(&format!(
-            " · {} skipped (offline or not a RAW file)",
+            " · {} skipped (offline, not editable, or an unedited file that is its own preview)",
             queued.skipped
         ));
     }

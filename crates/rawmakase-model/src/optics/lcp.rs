@@ -2,7 +2,8 @@
 //! from the file, an imported profile, and the profiles a photo can choose from.
 //! Matching them to a photo and evaluating their correction is `lens::lcp`'s.
 //!
-//! Model: with x, y the offset from the image centre in units of FocalLengthX × the
+//! Model: with x, y the offset from the optical centre (ImageXCenter, ImageYCenter:
+//! fractions of the image's width and height) in units of FocalLengthX × the
 //! long edge (FocalLength × SensorFormatFactor / 36 when not given), r² = x² + y²,
 //! distortion maps ideal to observed radius by 1 + k1 r² + k2 r⁴ + k3 r⁶, vignetting
 //! darkens by 1 + a1 r² + a2 r⁴ + a3 r⁶, and the red/blue chromatic models scale the
@@ -13,14 +14,30 @@ use anyhow::{Context, Result, ensure};
 use std::sync::{Arc, OnceLock};
 
 /// A chromatic model: ScaleFactor and radial parameters.
-pub(crate) type Chromatic = (f32, [f32; 3]);
+pub(crate) type Chromatic = (f32, RadialModel);
+
+/// A polynomial and its own focal normalization. Nested models do not inherit
+/// PerspectiveModel's FocalLengthX: an omitted value uses the entry's focal length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RadialModel {
+    pub focal_x: Option<f32>,
+    pub params: [f32; 3],
+}
+
+fn radial_model(node: roxmltree::Node, prefix: &str) -> Option<RadialModel> {
+    Some(RadialModel {
+        focal_x: number(node, "FocalLengthX").filter(|v| *v > 0.),
+        params: params(node, prefix)?,
+    })
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub make: String,
     pub lens: Vec<String>,
-    /// The maker's numeric lens ID (`stCamera:LensID`, which for Nikon is the maker
-    /// note's `LensIDNumber`); `None` when the profile writes none.
+    /// The maker's numeric lens ID (`stCamera:LensID`): for Nikon the maker note's
+    /// `LensIDNumber`, for Pentax its two `LensType` bytes, written "4 252" and held
+    /// as LibRaw reads them, 4 << 8 | 252. `None` when the profile writes none.
     pub lens_id: Option<u32>,
     /// The lens's display name (`LensPrettyName`, else `ProfileName`).
     pub name: String,
@@ -34,11 +51,13 @@ pub struct Entry {
     pub aperture: Option<f32>,
     pub distance: Option<f32>,
     pub(crate) sensor_factor: f32,
-    pub(crate) focal_x: Option<f32>,
-    pub(crate) distortion: Option<[f32; 3]>,
-    pub(crate) vignette: Option<[f32; 3]>,
+    pub(crate) distortion: Option<RadialModel>,
+    pub(crate) vignette: Option<RadialModel>,
     pub(crate) red: Option<Chromatic>,
     pub(crate) blue: Option<Chromatic>,
+    /// PerspectiveModel's optical centre (ImageXCenter, ImageYCenter), in fractions of
+    /// the profiled image's width and height.
+    pub(crate) centre: Option<[f32; 2]>,
 }
 
 fn attr(node: roxmltree::Node, name: &str) -> Option<String> {
@@ -78,6 +97,21 @@ fn params(node: roxmltree::Node, prefix: &str) -> Option<[f32; 3]> {
     ])
 }
 
+/// `stCamera:LensID` as one number: Nikon's "138" as it is, Pentax's "4 252" as
+/// LibRaw combines the two bytes. Other forms (Sony's hexadecimal) are left out.
+fn lens_id(v: &str) -> Option<u32> {
+    let mut parts = v.split_whitespace();
+    let first: u32 = parts.next()?.parse().ok()?;
+    match (parts.next(), parts.next()) {
+        (None, _) => Some(first),
+        (Some(second), None) => {
+            let second: u8 = second.parse().ok()?;
+            Some((u8::try_from(first).ok()? as u32) << 8 | second as u32)
+        }
+        _ => None,
+    }
+}
+
 pub fn parse(text: &str) -> Result<Vec<Entry>> {
     ensure!(text.len() <= 16_000_000, "Lens profile too large");
     let doc = roxmltree::Document::parse(text).context("Invalid lens profile XML")?;
@@ -103,7 +137,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
             let m = perspective.and_then(|p| model(p, name))?;
             Some((
                 number(m, "ScaleFactor").unwrap_or(1.),
-                params(m, "RadialDistortParam")?,
+                radial_model(m, "RadialDistortParam")?,
             ))
         };
         out.push(Entry {
@@ -113,7 +147,7 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
                 .unwrap_or_default(),
             profile_name: attr(d, "ProfileName").unwrap_or_default(),
             lens,
-            lens_id: attr(d, "LensID").and_then(|v| v.trim().parse().ok()),
+            lens_id: attr(d, "LensID").and_then(|v| lens_id(&v)),
             raw: attr(d, "CameraRawProfile").is_some_and(|v| v.eq_ignore_ascii_case("true")),
             prefer_metadata_distortion: attr(d, "PreferMetadataDistort")
                 .is_some_and(|v| v.eq_ignore_ascii_case("true")),
@@ -121,13 +155,15 @@ pub fn parse(text: &str) -> Result<Vec<Entry>> {
             aperture: number(d, "ApertureValue"),
             distance: number(d, "FocusDistance"),
             sensor_factor: number(d, "SensorFormatFactor").unwrap_or(1.),
-            focal_x: perspective.and_then(|p| number(p, "FocalLengthX")),
-            distortion: perspective.and_then(|p| params(p, "RadialDistortParam")),
+            distortion: perspective.and_then(|p| radial_model(p, "RadialDistortParam")),
             vignette: perspective
                 .and_then(|p| model(p, "VignetteModel"))
-                .and_then(|v| params(v, "VignetteModelParam")),
+                .and_then(|v| radial_model(v, "VignetteModelParam")),
             red: chromatic("ChromaticRedGreenModel"),
             blue: chromatic("ChromaticBlueGreenModel"),
+            centre: perspective
+                .and_then(|p| Some([number(p, "ImageXCenter")?, number(p, "ImageYCenter")?]))
+                .filter(|c| c.iter().all(|v| (0.25..=0.75).contains(v))),
         });
     }
     ensure!(

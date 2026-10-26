@@ -113,7 +113,7 @@ impl Library {
         }
     }
     /// Makes a change and hands it to the undo log once it is saved.
-    fn record_collection(
+    pub(super) fn record_collection(
         &mut self,
         collection: crate::catalog::CollectionId,
         added: Vec<PhotoId>,

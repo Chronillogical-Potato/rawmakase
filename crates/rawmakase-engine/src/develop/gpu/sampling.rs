@@ -51,10 +51,14 @@ slots! {
     BLUE: 2,
     VIGNETTING: 2,
     VIGNETTING_AMOUNT: 1,
+    // Offset (or -1) of the GainMap table (`gpu_params::lens_gpu_params`).
+    GAIN_MAP: 1,
     // Workgroups per row of the dispatch.
     COUNT: 1,
     // `ManualDistortion`: k (0 when off) and the frame's axes.
     MANUAL: 3,
+    // Protect reconstructed X-Trans stripe colour during CA remapping.
+    XTRANS: 1,
 }
 
 /// `S_*` offset constants for `local.wgsl`.
@@ -103,10 +107,12 @@ mod tests {
                 ("BLUE", 45),
                 ("VIGNETTING", 47),
                 ("VIGNETTING_AMOUNT", 49),
-                ("COUNT", 50),
-                ("MANUAL", 51),
+                ("GAIN_MAP", 50),
+                ("COUNT", 51),
+                ("MANUAL", 52),
+                ("XTRANS", 55),
             ]
         );
-        assert_eq!(HEADER, 54);
+        assert_eq!(HEADER, 56);
     }
 }

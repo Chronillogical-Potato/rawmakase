@@ -8,13 +8,16 @@ on:
   workflow_dispatch:
     inputs:
       number:
-        description: Issue number to preview without changing labels or posting comments
+        description: Issue number to assess
         required: true
         type: string
+      dry_run:
+        description: Preview without changing labels or posting comments
+        type: boolean
+        default: true
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: triage-issue-${{ inputs.number || github.event.issue.number }}
@@ -23,13 +26,27 @@ concurrency:
 jobs:
   triage:
     if: github.event.sender.type != 'Bot' && !github.event.issue.pull_request
+    # Persist muted threads and prior replies on issue and comment events.
+    cache-mode: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: crmne/copilot-triage@bf3a5847a772f7080a59b59b404ed00bbc035616 # v0.15.1
+      - name: Authenticate as RAWmakase Sous Chef
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          copilot-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          client-id: ${{ vars.TRIAGE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRIAGE_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-issues: write
+      - uses: crmne/copilot-triage@f99b390350c35f44f1cca240c9b25c08eb9ad4db # v0.18.0
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          engine: rubyllm
+          provider: openai
+          model: gpt-5.6-luna
+          api-key: ${{ secrets.OPENAI_API_KEY }}
           kind: issue
           number: ${{ inputs.number || github.event.issue.number }}
-          # Manual runs preview a decision in the job summary; they still use Copilot credits.
-          dry-run: ${{ github.event_name == 'workflow_dispatch' }}
+          # Manual runs default to preview; both modes incur API usage.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}

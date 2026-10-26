@@ -78,7 +78,7 @@ fn reader(tx: Sender<Event>, ctx: egui::Context, cache_path: PathBuf) -> Latest<
         let mut rgb = image.into_raw();
         // As the renderer does: a failed transform shows the sRGB pixels.
         if let Some(monitor) = &job.wanted.monitor {
-            let _ = crate::raw::display_transform(monitor, &mut rgb);
+            let _ = crate::color_management::display_transform(monitor, &mut rgb);
         }
         let image = egui::ColorImage::from_rgb(size, &rgb);
         let _ = tx.send(Event::StandIn(Box::new(StandIn {
@@ -124,15 +124,17 @@ impl Editor {
     fn stand_in_for(&self, photo: PhotoId) -> Option<Wanted> {
         let library = self.library.as_ref()?;
         let path = library.photo(photo)?.path.clone();
-        if !crate::storage::is_raw(&path) {
+        let record = library.session.catalog.edit_record(photo).ok()?;
+        // A JPEG, TIFF or PNG without an edit is shown as its file is, and never
+        // stored (see `build_items`).
+        if !crate::storage::is_raw(&path) && !super::preview_build::has_edit(&record) {
             return None;
         }
-        let record = library.session.catalog.edit_record(photo).ok()?;
         Some(Wanted {
             photo,
             path,
             identity: super::preview_build::identity(&record, &self.raw_defaults, self.demosaic),
-            monitor: self.view.monitor.clone(),
+            monitor: self.view.display_profile(),
         })
     }
     /// Asks for the stored preview of the photo load `load` opens, showing a
@@ -212,7 +214,7 @@ impl Editor {
         let Some(library) = &self.library else {
             return;
         };
-        let offline = library.loupe_offline_raw();
+        let offline = library.loupe_offline_developed();
         if offline == library.loupe_stored().map(|(id, _)| *id) {
             return;
         }

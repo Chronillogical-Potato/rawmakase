@@ -2,14 +2,7 @@ use super::*;
 use crate::develop::curve::ToneCurve;
 use crate::develop::effects::EffectsRendering;
 fn adjust(p: [f32; 3], m: &Metadata, r: &Recipe) -> [f32; 3] {
-    process_pixel(
-        p,
-        r,
-        &CurveSet::new(r),
-        profile_matrix(m, r),
-        [0., 0.],
-        None,
-    )
+    process_pixel(p, r, &CurveSet::new(r), camera_stage(m, r), [0., 0.], None)
 }
 fn fixture() -> CameraImage {
     let m = Metadata {
@@ -32,6 +25,280 @@ fn fixture() -> CameraImage {
         scale_factor: 1.,
         scale_clipped: 0,
     }
+}
+/// A rendered file of one row of 8-bit sRGB pixels as `photo::open_source` gives it:
+/// the pseudo-scene of these sRGB pixels, decoded to linear ProPhoto RGB.
+pub(crate) fn rendered_fixture(srgb: &[[u8; 3]]) -> CameraImage {
+    use rawmakase_model::camera_data::Source;
+    use rawmakase_model::camera_profiles::RGB_TO_PRO;
+    let decode = |v: u8| {
+        let v = v as f32 / 255.;
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let width = srgb.len() as u32;
+    crate::develop::rendered::to_scene(CameraImage {
+        recovered: Default::default(),
+        width,
+        height: 1,
+        pixels: srgb
+            .iter()
+            .map(|p| crate::color::mul(RGB_TO_PRO, p.map(decode)))
+            .collect(),
+        metadata: Metadata {
+            width,
+            height: 1,
+            source: Source::Rendered,
+            wb: [1.; 3],
+            daylight_wb: [1.; 3],
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    })
+}
+/// An untouched edit of a rendered file reproduces it (on the CPU): deep shadows, mid
+/// tones, saturated colours and near-white, where highlight recovery and the scene
+/// tone stage's toe and default black would otherwise act.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is() -> anyhow::Result<()> {
+    let mut srgb: Vec<[u8; 3]> = (0..=8).map(|v| [v, v, v]).collect();
+    srgb.extend([
+        [64, 64, 64],
+        [118, 118, 118],
+        [200, 30, 40],
+        [20, 160, 60],
+        [30, 60, 220],
+    ]);
+    srgb.extend((248..=255).map(|v| [v, v, v]));
+    srgb.extend([[255, 250, 240], [255, 255, 200]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    let mut off = Vec::new();
+    for (got, want) in out.rgb8().chunks(3).zip(&srgb) {
+        if (0..3).any(|c| (got[c] as i16 - want[c] as i16).abs() > 1) {
+            off.push((*want, [got[0], got[1], got[2]]));
+        }
+    }
+    assert!(off.is_empty(), "{off:?}");
+    Ok(())
+}
+/// A grey ramp, every 8-bit sRGB level, as a rendered file.
+fn grey_ramp() -> CameraImage {
+    let srgb: Vec<[u8; 3]> = (0..=255u8).map(|v| [v; 3]).collect();
+    rendered_fixture(&srgb)
+}
+fn rendered_levels(im: &CameraImage, r: &Recipe) -> anyhow::Result<Vec<[u8; 3]>> {
+    let out = crate::develop::render(im, &r.checked()?, 0)?;
+    Ok(out.rgb8().chunks(3).map(|p| [p[0], p[1], p[2]]).collect())
+}
+fn near(got: [u8; 3], want: [u8; 3], tolerance: i16) -> bool {
+    (0..3).all(|c| (got[c] as i16 - want[c] as i16).abs() <= tolerance)
+}
+
+/// Lightroom Classic 15.6 (Camera Raw 18.7) renders of a grey JPEG chart: Exposure
+/// brightens and darkens through the default rendering, so mid-tones move more than a
+/// linear gain and white stays white at −1 EV.
+#[test]
+fn exposure_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (exposure, levels) in [
+        (
+            1.,
+            [
+                (48u8, 79u8),
+                (96, 146),
+                (128, 181),
+                (192, 229),
+                (240, 251),
+                (255, 255),
+            ],
+        ),
+        (
+            -1.,
+            [
+                (48, 27),
+                (96, 60),
+                (128, 83),
+                (192, 141),
+                (240, 213),
+                (255, 255),
+            ],
+        ),
+    ] {
+        let r = Recipe {
+            exposure,
+            ..Recipe::for_rendered(&im.metadata)
+        };
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, [want; 3], 2),
+                "Exposure {exposure}: {input} -> {got:?}, Lightroom {want}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lightroom's renders of the same chart at Temp +25, +50 and Tint +25.
+#[test]
+fn white_balance_on_a_rendered_file_follows_lightroom() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    for (temperature, tint, levels) in [
+        (
+            25.,
+            0.,
+            [
+                (48u8, [70u8, 61, 45]),
+                (96, [132, 117, 92]),
+                (128, [170, 152, 124]),
+            ],
+        ),
+        (
+            50.,
+            0.,
+            [
+                (48, [91, 73, 42]),
+                (96, [165, 136, 87]),
+                (128, [202, 170, 120]),
+            ],
+        ),
+        (
+            0.,
+            25.,
+            [
+                (48, [52, 47, 54]),
+                (96, [102, 95, 106]),
+                (128, [136, 127, 140]),
+            ],
+        ),
+    ] {
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (input, want) in levels {
+            let got = out[input as usize];
+            assert!(
+                near(got, want, 3),
+                "Temp {temperature} Tint {tint}: {input} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Lightroom white-balances a rendered file's colours by a matrix, not channel gains
+/// (sky at Temp −35 is 30 levels redder than gains give), and in the cool magenta
+/// corner takes blue to 0. There red is 5 levels high: the matrix leaves ProPhoto blue
+/// below 0 there, which the tone stage carries and Lightroom's apparently does not.
+#[test]
+fn white_balance_on_a_rendered_files_colours_follows_lightroom() -> anyhow::Result<()> {
+    let (sky, foliage, skin, grey) = (0, 1, 2, 3);
+    let im = rendered_fixture(&[[110, 150, 200], [80, 115, 55], [190, 140, 110], [39; 3]]);
+    for (temperature, tint, levels) in [
+        (
+            -35.,
+            0.,
+            vec![
+                (sky, [112u8, 160, 244]),
+                (foliage, [35, 129, 101]),
+                (skin, [172, 156, 171]),
+            ],
+        ),
+        (
+            75.,
+            0.,
+            vec![(sky, [203, 206, 193]), (foliage, [173, 175, 15])],
+        ),
+        (-75., 75., vec![(grey, [35, 47, 0])]),
+    ] {
+        let tolerance = if tint > 50. { 6 } else { 4 };
+        let mut r = Recipe::for_rendered(&im.metadata);
+        r.incremental_temperature = temperature;
+        r.incremental_tint = tint;
+        r.update_wb(&im.metadata);
+        let out = rendered_levels(&im, &r)?;
+        for (patch, want) in levels {
+            let got = out[patch];
+            assert!(
+                near(got, want, tolerance),
+                "Temp {temperature} Tint {tint}: patch {patch} -> {got:?}, Lightroom {want:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Whites and Blacks act on the pseudo-scene as on a raw scene: Whites +50 lifts the
+/// upper tones more than the mid-tones and keeps white white; Blacks −50 darkens shadows.
+#[test]
+fn whites_and_blacks_move_a_rendered_file() -> anyhow::Result<()> {
+    let im = grey_ramp();
+    let base = Recipe::for_rendered(&im.metadata);
+    let whites = rendered_levels(
+        &im,
+        &Recipe {
+            whites: 0.5,
+            ..base.clone()
+        },
+    )?;
+    assert!(
+        whites[192][1] as i16 - 192 > whites[96][1] as i16 - 96,
+        "{:?} {:?}",
+        whites[96],
+        whites[192]
+    );
+    assert_eq!(whites[255], [255; 3]);
+    let blacks = rendered_levels(
+        &im,
+        &Recipe {
+            blacks: -0.5,
+            ..base
+        },
+    )?;
+    assert!(
+        blacks[32][1] < 32 && blacks[255] == [255; 3],
+        "{:?} {:?}",
+        blacks[32],
+        blacks[255]
+    );
+    Ok(())
+}
+/// At a rendered file's defaults the render is the file, finer than 8-bit rounding, so
+/// a 16-bit export reproduces it too.
+#[test]
+fn a_rendered_file_at_its_defaults_renders_as_it_is_in_16_bits() -> anyhow::Result<()> {
+    let mut srgb: Vec<[u8; 3]> = [0u8, 1, 4, 8, 16, 32, 64, 118, 200, 250, 255]
+        .iter()
+        .map(|&v| [v; 3])
+        .collect();
+    srgb.extend([[200, 30, 40], [20, 160, 60], [30, 60, 220], [255, 250, 240]]);
+    let im = rendered_fixture(&srgb);
+    let r = Recipe::for_rendered(&im.metadata);
+    let out = crate::develop::render(&im, &r.checked()?, 0)?;
+    for (got, want) in out.pixels.iter().zip(&srgb) {
+        // Saturated colours get a wider tolerance than greys: the f32 rounding of the
+        // round trip (about 1e-7 relative in ProPhoto, not the inverse table's error) is
+        // amplified by the ProPhoto to sRGB conversion, whose large opposing
+        // coefficients and sRGB's steep slope at dark channels turn it into up to ~3
+        // 16-bit levels. Greys pass through that conversion unamplified.
+        let grey = want[0] == want[1] && want[1] == want[2];
+        let tolerance = if grey { 2. } else { 4. } / 65535.;
+        for c in 0..3 {
+            let want = want[c] as f32 / 255.;
+            assert!((got[c] - want).abs() < tolerance, "{got:?} vs {want}");
+        }
+    }
+    Ok(())
 }
 /// Settings earlier releases saved to choose a rendering engine and its operators are
 /// dropped as they are read: one engine renders every recipe.
@@ -367,8 +634,8 @@ fn temperature_leaves_the_photos_maximum_in_place() -> anyhow::Result<()> {
             temperature,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        CurveSet::with_photo_measures((&im).into(), &r, matrix)
+        let camera = camera_stage(&im.metadata, &r);
+        CurveSet::with_photo_measures((&im).into(), &r, camera)
             .measures
             .max
     };
@@ -390,8 +657,8 @@ fn a_few_dark_pixels_move_the_minimum_but_not_the_dark_level() {
         .map(|i| [0.05 + (i % 128) as f32 / 400.; 3])
         .collect();
     let r = Recipe::default();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, matrix).measures;
+    let camera = camera_stage(&im.metadata, &r);
+    let measures = |im: &CameraImage| CurveSet::with_photo_measures(im.into(), &r, camera).measures;
     let plain = measures(&im);
     for (x, y) in [(60, 40), (61, 40), (60, 41), (61, 41)] {
         im.pixels[y * width as usize + x] = [0.001; 3];
@@ -426,14 +693,14 @@ fn scene_stage_recipe() -> Recipe {
 fn the_display_render_replays_the_stages_after_the_scene_stage() {
     let im = fixture();
     let r = scene_stage_recipe();
-    let matrix = profile_matrix(&im.metadata, &r);
-    let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let camera = camera_stage(&im.metadata, &r);
+    let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+    let mut tap = CurveSet::with_photo_measures((&im).into(), &r, camera);
     tap.output = PixelOutput::SceneOutput;
     for (i, p) in im.pixels.iter().enumerate() {
         let pos = [(i % 12) as f32, (i / 12) as f32];
-        let shown = process_pixel(*p, &r, &lut, matrix, pos, None);
-        let scene = process_pixel(*p, &r, &tap, matrix, pos, None);
+        let shown = process_pixel(*p, &r, &lut, camera, pos, None);
+        let scene = process_pixel(*p, &r, &tap, camera, pos, None);
         assert_eq!(shown, color_stage(profile_stage(scene, &r), &r, &lut, None));
     }
 }
@@ -482,9 +749,9 @@ fn exposure_reveals_retained_highlights() {
             exposure,
             ..Default::default()
         };
-        let matrix = profile_matrix(&im.metadata, &r);
-        let lut = CurveSet::with_photo_measures((&im).into(), &r, matrix);
-        process_pixel([v; 3], &r, &lut, matrix, [0., 0.], None)
+        let camera = camera_stage(&im.metadata, &r);
+        let lut = CurveSet::with_photo_measures((&im).into(), &r, camera);
+        process_pixel([v; 3], &r, &lut, camera, [0., 0.], None)
     };
     // At Exposure 0 everything above the sensor's white rolls on to the top; lower
     // Exposure separates the rebuilt levels again. The photo's maximum stays at the
@@ -564,15 +831,15 @@ fn neutral_color_fast_path_matches_general_processing() {
     let fast = CurveSet::new(&recipe);
     let mut general = CurveSet::new(&recipe);
     general.color_adjustments = true;
-    let matrix = profile_matrix(&metadata, &recipe);
+    let camera = camera_stage(&metadata, &recipe);
     for i in 0..4096 {
         let p = [
             (i % 16) as f32 / 8.,
             ((i / 16) % 16) as f32 / 8.,
             (i / 256) as f32 / 8.,
         ];
-        let a = process_pixel(p, &recipe, &fast, matrix, [0., 0.], None);
-        let b = process_pixel(p, &recipe, &general, matrix, [0., 0.], None);
+        let a = process_pixel(p, &recipe, &fast, camera, [0., 0.], None);
+        let b = process_pixel(p, &recipe, &general, camera, [0., 0.], None);
         for c in 0..3 {
             assert!((a[c] - b[c]).abs() < 2e-5, "{p:?}: {a:?} vs {b:?}");
         }
@@ -595,6 +862,8 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
             values: vec![1., 1.01],
         }),
         chromatic: None,
+        gain_map: None,
+        ..Default::default()
     });
     let on = Recipe::for_metadata(&im.metadata);
     assert!(on.lens_builtin);
@@ -618,6 +887,171 @@ fn builtin_lens_correction_brightens_corners_and_keeps_regions_consistent() {
             assert!((0..3).all(|c| (p[c] - q[c]).abs() < 2e-6));
         }
     }
+}
+/// A DNG's OpcodeList3 GainMap brightens each channel where its grid says, with the
+/// vignetting, and follows the lens Vignetting amount.
+#[test]
+fn opcode_gain_maps_scale_each_channel_where_the_grid_says() {
+    use crate::optics::{GainGrid, LensCorrection};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let w = im.width as f32;
+    // Two columns of points: gain 1 on the first column of pixels; on the last, red 2,
+    // green 1.5, blue 1.
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            // Points on the first and last pixels' centres.
+            origin: [0., 0.5 / w],
+            spacing: [1., (w - 1.) / w],
+            planes: 3,
+            gains: vec![1., 1., 1., 2., 1.5, 1.],
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let on = Recipe::for_metadata(&im.metadata);
+    let field = |r: &Recipe| GainField::new(&im, r).unwrap();
+    assert_eq!(field(&on).gain(0., 3.), [1.; 3]);
+    let right = field(&on).gain(w - 1., 3.);
+    assert!(
+        right
+            .iter()
+            .zip([2., 1.5, 1.])
+            .all(|(g, want)| (g - want).abs() < 1e-5),
+        "{right:?}"
+    );
+    let half = field(&on).gain((w - 1.) / 2., 0.);
+    assert!((half[0] - 1.5).abs() < 1e-5, "{half:?}");
+    // Outside the image, nothing.
+    assert_eq!(field(&on).gain(w, 0.), [1.; 3]);
+    let amount = |a: f32| {
+        field(&Recipe {
+            lens_vignetting: a,
+            ..on.clone()
+        })
+        .gain(w - 1., 0.)[0]
+    };
+    // Camera Raw applies a file's opcodes whatever the profile's Vignetting amount.
+    assert!((amount(0.) - 2.).abs() < 1e-5);
+    assert!((amount(2.) - 2.).abs() < 1e-5);
+    // Rendered: the right edge is brighter than the left, and nothing changes with the
+    // built-in correction off.
+    let off = Recipe {
+        lens_builtin: false,
+        ..on.clone()
+    };
+    let lum = |p: [f32; 3]| p.iter().sum::<f32>();
+    let a = render(&im, &on.checked().unwrap(), 0).unwrap();
+    let b = render(&im, &off.checked().unwrap(), 0).unwrap();
+    let at = |r: &Rendered, x: u32| lum(r.pixels[(4 * r.width + x) as usize]);
+    assert!(at(&a, a.width - 1) > at(&a, 0) + 0.05);
+    assert!((at(&b, b.width - 1) - at(&b, 0)).abs() < 1e-5);
+}
+/// The copy the photo is measured on carries its GainMap, as the render corrects it.
+#[test]
+fn measurement_copies_carry_the_gain_map() {
+    use crate::optics::{GainGrid, LensCorrection};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            spacing: [1., 1.],
+            gains: vec![1., 1., 1., 3., 2., 1.],
+            planes: 3,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let copy = measurement_source((&im).into(), 4);
+    let (w, row) = (copy.width as usize, copy.width as usize);
+    let (left, right) = (copy.pixels[row], copy.pixels[row + w - 1]);
+    assert!(
+        right[0] > left[0] * 2. && right[1] > left[1] * 1.5 && (right[2] - left[2]).abs() < 1e-6,
+        "{left:?} {right:?}"
+    );
+    // Without a GainMap the copy is the photo reduced.
+    im.metadata.lens = None;
+    assert_eq!(
+        measurement_source((&im).into(), 4).pixels,
+        preview_source((&im).into(), 4).pixels
+    );
+}
+/// Before a per-channel warp (lateral chromatic aberration), each channel reads the
+/// GainMap where it samples the photo, not where green does.
+#[test]
+fn gain_maps_before_a_warp_follow_each_channels_source() {
+    use crate::optics::{GainGrid, LensCorrection, Radial};
+    let mut im = fixture();
+    im.pixels = vec![[0.1; 3]; 96];
+    let w = im.width as f32;
+    im.metadata.lens = Some(LensCorrection {
+        source: "DNG opcodes".into(),
+        default_on: true,
+        // Red samples well inside green at the edges.
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 0.8],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1., 1.],
+            },
+        ]),
+        // Every channel's gain rises from 1 on the left to 3 on the right.
+        gain_map: Some(GainGrid {
+            points: [1, 2],
+            spacing: [1., 1.],
+            gains: vec![1., 1., 1., 3., 3., 3.],
+            planes: 3,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let r = Recipe::for_metadata(&im.metadata);
+    let (x, y) = (w - 1., 3.);
+    let red_before = {
+        let warp = LensWarp::new(&im, &r).unwrap();
+        let p = warp.sample(Source::new(&im), x, y, &r, 0.);
+        let m = &warp.map;
+        let ([dx, dy], scale) = m.scales(x, y);
+        let field = warp.gain_map.as_ref().unwrap();
+        let want = |c: usize| {
+            let at = [
+                m.center[0] + dx * scale[c] - 0.5,
+                m.center[1] + dy * scale[c] - 0.5,
+            ];
+            0.1 * field.gain(at[0], at[1])[c]
+        };
+        assert!(want(1) - want(0) > 0.01, "{} {}", want(0), want(1));
+        for c in 0..3 {
+            assert!((p[c] - want(c)).abs() < 1e-5, "{c}: {p:?} {}", want(c));
+        }
+        want(0) / 0.1
+    };
+    // After the warp: every channel at the corrected position, at the fill's scale.
+    if let Some(l) = im.metadata.lens.as_mut() {
+        l.gain_map.as_mut().unwrap().after_warp = true;
+    }
+    let warp = LensWarp::new(&im, &r).unwrap();
+    let p = warp.sample(Source::new(&im), x, y, &r, 0.);
+    let m = &warp.map;
+    let ([dx, dy], _) = m.scales(x, y);
+    let g = warp
+        .gain_map
+        .as_ref()
+        .unwrap()
+        .gain(m.center[0] + dx - 0.5, m.center[1] + dy - 0.5);
+    for c in 0..3 {
+        assert!((p[c] - 0.1 * g[c]).abs() < 1e-5, "{c}: {p:?} {g:?}");
+    }
+    assert!(g[0] > red_before + 0.01);
 }
 #[test]
 fn transform_scales_and_fills_uncovered_area_with_white() {
@@ -768,6 +1202,68 @@ fn rgb_tables_follow_the_colour_controls() {
     let mut mono = r;
     mono.effects.monochrome = true;
     assert!(spread(&mono) < 1e-3);
+}
+/// A `.cube` imports as a look whose RGB table is the cube: an identity cube at 100%
+/// renders as the base profile does, within the table's 16-bit rounding, at 0% exactly
+/// as it does, and a cube that changes colour changes it.
+#[test]
+fn an_identity_cube_renders_as_its_base_profile() {
+    let m = Metadata {
+        make: "Test".into(),
+        model: "Camera".into(),
+        cam_xyz: [[0.8, -0.2, -0.1], [-0.3, 1.1, 0.2], [-0.05, 0.15, 0.6]],
+        ..Default::default()
+    };
+    let base = crate::camera_profiles::open::standard(&m).unwrap();
+    let cube = |size: usize, f: &dyn Fn([f32; 3]) -> [f32; 3]| {
+        let last = (size - 1) as f32;
+        let mut text = format!("LUT_3D_SIZE {size}\n");
+        for b in 0..size {
+            for g in 0..size {
+                for r in 0..size {
+                    let [x, y, z] = f([r as f32 / last, g as f32 / last, b as f32 / last]);
+                    text += &format!("{x} {y} {z}\n");
+                }
+            }
+        }
+        text
+    };
+    let identity = base.with_cube_for_test(&cube(33, &|p| p)).unwrap();
+    let swap = base
+        .with_cube_for_test(&cube(17, &|[r, g, b]| [g, b, r]))
+        .unwrap();
+    let recipe = |profile: &crate::camera_profiles::CameraProfile, amount: f32| Recipe {
+        profile: Some(Arc::new(profile.clone())),
+        profile_amount: amount,
+        ..Default::default()
+    };
+    let plain = recipe(&base, 1.);
+    // Profile Amount is folded into the look where rendering starts.
+    let colour = |r: &Recipe, rgb: [f32; 3]| {
+        let r = r.with_profile_adjustments();
+        color_stage(rgb, &r, &CurveSet::new(&r), None)
+    };
+    let mut worst = 0f32;
+    for i in 0..400u32 {
+        let rgb = [
+            (i * 37 % 101) as f32 / 101.,
+            (i * 91 % 97) as f32 / 97.,
+            (i * 53 % 89) as f32 / 89.,
+        ]
+        .map(|v| 0.6 * v);
+        let want = colour(&plain, rgb);
+        let got = colour(&recipe(&identity, 1.), rgb);
+        worst = (0..3).fold(worst, |w, c| w.max((got[c] - want[c]).abs()));
+        assert_eq!(colour(&recipe(&identity, 0.), rgb), want, "{rgb:?}");
+        assert_eq!(colour(&recipe(&swap, 0.), rgb), want, "{rgb:?}");
+    }
+    assert!(worst < 2e-5, "{worst}");
+    let rgb = [0.3, 0.1, 0.05];
+    let (want, got) = (colour(&plain, rgb), colour(&recipe(&swap, 1.), rgb));
+    assert!(
+        got[2] > want[2] + 0.05 && got[0] < want[0] - 0.05,
+        "{want:?} {got:?}"
+    );
 }
 #[test]
 fn point_colors_render_in_color_only_and_round_trip() -> anyhow::Result<()> {
@@ -1239,14 +1735,14 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         shadows: 0.3,
         ..Default::default()
     };
-    let matrix = profile_matrix(&im.metadata, &r);
-    let plain = CurveSet::for_image((&im).into(), &r, matrix, false);
+    let camera = camera_stage(&im.metadata, &r);
+    let plain = CurveSet::for_image((&im).into(), &r, camera, false);
     let pivot = plain.photo.contrast_pivot;
     assert!((pivot - TYPICAL_PIVOT).abs() > 0.01, "{pivot}");
     assert_ne!(plain.measures, Default::default());
     let gpu = pixel_params::pixel_params((&im).into(), &r).unwrap();
     assert_eq!(gpu.get("LOCAL_PIVOT"), [pivot]);
-    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, matrix);
+    let map_pass = CurveSet::with_photo_measures((&im).into(), &r, camera);
     assert_eq!(map_pass.photo, plain.photo);
     assert_eq!(map_pass.measures, plain.measures);
     assert_eq!(
@@ -1265,9 +1761,35 @@ fn contrast_and_the_scene_stage_are_measured_on_the_photo_alone() {
         untextured: Some(&im),
         ..Source::new(&textured)
     };
-    let textured = CurveSet::with_photo_measures(source, &r, matrix);
+    let textured = CurveSet::with_photo_measures(source, &r, camera);
     assert_eq!(textured.photo, plain.photo);
     assert_eq!(textured.measures, plain.measures);
+}
+
+/// A rendered file's Contrast pivots higher than a raw photo's of the same scene, as
+/// Lightroom's does on JPEGs (`basic_tone::RENDERED_PIVOT_OFFSET`).
+#[test]
+fn a_rendered_photos_contrast_pivots_higher_than_a_raws() {
+    use crate::develop::basic_tone::RENDERED_PIVOT_OFFSET;
+    // Dark with a few bright pixels, so neither pivot is at its bounds.
+    let srgb: Vec<[u8; 3]> = (0..96u8)
+        .map(|i| if i % 9 == 0 { [240; 3] } else { [40 + i; 3] })
+        .collect();
+    let rendered = rendered_fixture(&srgb);
+    let mut raw = rendered.clone();
+    raw.metadata.source = rawmakase_model::camera_data::Source::Raw;
+    let r = Recipe {
+        contrast: 0.6,
+        ..Recipe::for_rendered(&rendered.metadata)
+    };
+    let camera = camera_stage(&rendered.metadata, &r);
+    let measures = CurveSet::with_photo_measures((&rendered).into(), &r, camera).measures;
+    let pivot = |im: &CameraImage| tone::contrast_pivot(im.into(), &r, camera, &measures, None);
+    let (rendered, raw) = (pivot(&rendered), pivot(&raw));
+    assert!(
+        (rendered - raw - RENDERED_PIVOT_OFFSET).abs() < 1e-6,
+        "rendered {rendered}, raw {raw}"
+    );
 }
 
 /// A look's parametric curve: a second curve after the user's, as Camera Raw 18.7
@@ -1614,4 +2136,144 @@ fn color_detail_does_not_control_luminance_noise_reduction() -> Result<()> {
     let high = render(&im, &r.checked()?, 0)?;
     assert_eq!(low.pixels, high.pixels);
     Ok(())
+}
+
+#[test]
+fn lens_ca_protects_finite_stripes_at_every_phase() {
+    for period in [3.03, 3.6, 3.8, 4.] {
+        for phase in [0., std::f32::consts::FRAC_PI_4, std::f32::consts::FRAC_PI_2] {
+            let error = lens_ca_stripe_error(period, phase);
+            assert!(error < 0.001, "period={period} phase={phase}: {error}");
+        }
+    }
+}
+
+fn lens_ca_stripe_error(period: f32, phase: f32) -> f32 {
+    use crate::optics::{LensCorrection, Radial};
+    let mut im = fixture();
+    im.width = 192;
+    im.height = 192;
+    im.metadata.width = im.width;
+    im.metadata.height = im.height;
+    im.metadata.xtrans = true;
+    im.pixels = (0..192 * 192)
+        .map(|i| {
+            let l = 0.1
+                + if (76..112).contains(&(i / 192)) {
+                    0.06 * (std::f32::consts::TAU * (i % 192) as f32 / period + phase).sin()
+                } else {
+                    0.
+                };
+            [1.08 * l, l, 0.92 * l]
+        })
+        .collect();
+    im.metadata.lens = Some(LensCorrection {
+        source: "test".into(),
+        default_on: true,
+        vignetting: None,
+        distortion: None,
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.004; 2],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.; 2],
+            },
+        ]),
+        gain_map: None,
+        ..Default::default()
+    });
+    let r = Recipe::for_metadata(&im.metadata);
+    let warp = LensWarp::new(&im, &r).unwrap();
+    let mut error = 0f32;
+    for y in 75..113 {
+        for x in 30..162 {
+            let p = warp.sample((&im).into(), x as f32, y as f32, &r, 0.);
+            error = error.max((p[0] / p[1] - 1.08).abs());
+        }
+    }
+    error
+}
+
+#[test]
+fn stripe_ca_guard_keeps_isolated_edges_resolved_colour_and_noise() {
+    use crate::optics::{LensCorrection, Radial};
+    let mut im = fixture();
+    im.width = 192;
+    im.height = 64;
+    im.metadata.width = im.width;
+    im.metadata.height = im.height;
+    im.metadata.xtrans = true;
+    im.metadata.lens = Some(LensCorrection {
+        source: "test".into(),
+        default_on: true,
+        vignetting: None,
+        distortion: None,
+        chromatic: Some([
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![1.004; 2],
+            },
+            Radial {
+                knots: vec![0., 1.],
+                values: vec![0.997; 2],
+            },
+        ]),
+        gain_map: None,
+        ..Default::default()
+    });
+    for case in 0..5 {
+        let mut seed = 0x23456789u32;
+        im.pixels = (0..192 * 64)
+            .map(|i| {
+                let x = (i % 192) as f32;
+                if case == 1 {
+                    let v = (std::f32::consts::TAU * x / 3.03).sin();
+                    [0.1 + 0.07 * v, 0.1 - 0.06 * v, 0.1 + 0.04 * v]
+                } else if case == 3 {
+                    seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                    let l = 0.08 + 0.04 * (seed >> 8) as f32 / 16777216.;
+                    [1.08 * l, l, 0.92 * l]
+                } else if case == 2 {
+                    std::array::from_fn(|_| {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        0.1 + 0.04 * ((seed >> 8) as f32 / 16777216. - 0.5)
+                    })
+                } else {
+                    let edge = |x: f32| 0.03 + 0.2 / (1. + (-(x - 70.) / 2.).exp());
+                    let slat = if case == 4 && x < 68. {
+                        1. + 0.25 * (std::f32::consts::TAU * (i / 192) as f32 / 3.03).sin()
+                    } else {
+                        1.
+                    };
+                    [edge(x + 0.3) * slat, edge(x) * slat, edge(x - 0.2) * slat]
+                }
+            })
+            .collect();
+        let mut unguarded = im.clone();
+        unguarded.metadata.xtrans = false;
+        let r = Recipe::for_metadata(&im.metadata);
+        let a = LensWarp::new(&im, &r).unwrap();
+        let b = LensWarp::new(&unguarded, &r).unwrap();
+        let mut changed = 0;
+        for y in 10..54 {
+            for x in 10..182 {
+                // The textured side may need alias protection; the ordinary
+                // CA edge beside it must retain the original correction.
+                if case == 4 && x < 68 {
+                    continue;
+                }
+                let p = a.sample((&im).into(), x as f32, y as f32, &r, 0.);
+                let q = b.sample((&unguarded).into(), x as f32, y as f32, &r, 0.);
+                if case == 3 {
+                    changed += usize::from(p.iter().zip(q).any(|(a, b)| (a - b).abs() > 1e-5));
+                } else {
+                    assert_eq!(p, q, "changed case={case} at {x},{y}");
+                }
+            }
+        }
+        assert!(changed < 44 * 172 / 20, "noise pixels changed: {changed}");
+    }
 }

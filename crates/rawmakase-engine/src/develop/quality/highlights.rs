@@ -192,14 +192,23 @@ pub(super) fn recover_highlights_cancellable(
                 weight_sum = 1.;
             }
         }
+        let blend = sensor.map(|v| ((v - 0.97) / 0.03).clamp(0., 1.));
         for c in 0..3 {
-            let blend = ((sensor[c] - 0.97) / 0.03).clamp(0., 1.);
             let target = if weight_sum > 0. {
                 estimate[c] / weight_sum
             } else {
                 neutral
             };
-            p[c] = p[c] * (1. - blend) + target * blend;
+            // With one channel clipped, its value is a floor: the light was at least
+            // that bright, and the other two hold its colour. With two clipped,
+            // Camera Raw renders the core whiter than the recorded pair (a sunset sun
+            // with red and blue clipped is yellow-white, not magenta), so the estimate
+            // stays as it is. The floor fades out as another channel's own blend
+            // comes in, so the floor adds no step at the cutoff (the estimate's own
+            // switch of reference channels there is unchanged).
+            let alone: f32 = (0..3).filter(|d| *d != c).map(|d| 1. - blend[d]).product();
+            let target = target + (target.max(p[c]) - target) * alone;
+            p[c] = p[c] * (1. - blend[c]) + target * blend[c];
         }
     });
     check_cancel(cancel)?;

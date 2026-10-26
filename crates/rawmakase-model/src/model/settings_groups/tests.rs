@@ -47,6 +47,8 @@ fn everything_changed() -> Recipe {
         camera_exposure: 0.3,
         temperature: 4000.,
         tint: 12.,
+        incremental_temperature: 20.,
+        incremental_tint: -10.,
         wb: [1.5, 1., 0.8],
         auto_white_balance: Some([4000., 12.]),
         contrast: 0.1,
@@ -70,6 +72,7 @@ fn everything_changed() -> Recipe {
         sharpening: 0.5,
         crop: [0.1, 0.1, 0.9, 0.9],
         straighten: 2.,
+        straighten_auto: Some(crate::model::transform::AutoStraighten::Measured(2.)),
         constrain_crop: true,
         rotation: 1,
         flip_x: true,
@@ -220,6 +223,11 @@ fn each_group_transfers_exactly_its_settings() {
             SettingGroup::TreatmentAndProfile => {
                 expected.extend(["camera_exposure", "temperature", "tint", "wb"].map(String::from));
             }
+            // The source's angle is Auto's: it is measured on the target, which keeps
+            // its own until then.
+            SettingGroup::Crop => {
+                expected.remove("straighten");
+            }
             // The whole of Upright, its mode with it.
             SettingGroup::UprightTransforms => {
                 expected.insert("upright".into());
@@ -364,6 +372,50 @@ fn upright_moves_its_mode_and_guided_needs_this_photos_guides() {
     let out = transfer(from(&source, &m), &to, &GroupSelection::default(), target);
     assert_eq!(out.recipe.upright.mode, UprightMode::Level);
     assert_eq!(out.recipe.upright.corrections, to.upright.corrections);
+}
+
+/// Lightroom copies the angle the Crop panel's Auto measured; here each photo is
+/// measured instead, keeping its own angle until it is. An angle changed since Auto
+/// is copied as it is.
+#[test]
+fn an_auto_straighten_is_measured_again_on_each_photo() {
+    use crate::model::transform::AutoStraighten;
+    let m = camera("Fujifilm", "X100F");
+    let target = Target {
+        metadata: &m,
+        profiles: &[],
+    };
+    let mut crop = GroupSelection::none();
+    crop.set(SettingGroup::Crop, GroupInclusion::Included);
+    let mut source = Recipe::default();
+    source.set_auto_straighten(Some(2.5));
+    assert_eq!(source.straighten, 2.5);
+    let to = Recipe {
+        straighten: -1.,
+        ..Default::default()
+    };
+    let out = transfer(from(&source, &m), &to, &crop, target).recipe;
+    assert_eq!(out.straighten, -1.);
+    assert_eq!(out.straighten_auto, Some(AutoStraighten::Pending(-1.)));
+    assert!(out.straighten_pending());
+    // Paste's default groups include the Crop.
+    let pasted = transfer(from(&source, &m), &to, &GroupSelection::default(), target).recipe;
+    assert!(pasted.straighten_pending());
+    // A photo pasted to and not yet measured passes it on.
+    let again = transfer(from(&out, &m), &Recipe::default(), &crop, target).recipe;
+    assert_eq!(again.straighten_auto, Some(AutoStraighten::Pending(0.)));
+    // Without the Crop, nothing moves.
+    let out = transfer(from(&source, &m), &to, &GroupSelection::none(), target).recipe;
+    assert_eq!(out, to);
+    // Moved since Auto: an angle like any other, copied as Lightroom does.
+    source.straighten = 3.;
+    assert_eq!(source.auto_straighten(), None);
+    let out = transfer(from(&source, &m), &to, &crop, target).recipe;
+    assert_eq!((out.straighten, out.straighten_auto), (3., None));
+    // A waiting photo's angle changed by hand is no longer waiting.
+    let mut moved = again;
+    moved.straighten = 4.;
+    assert!(!moved.straighten_pending());
 }
 
 #[test]
@@ -690,4 +742,119 @@ fn masks_made_from_a_selection_stay_on_their_photo() {
     let out = transfer(from(&full, &m), &to, &selection, target);
     assert_eq!(out.recipe.masks.len(), crate::model::masks::MAX_GROUPS);
     assert_eq!(out.recipe.masks.last(), Some(&own));
+}
+
+const SEPARATE: &str = "White balance and profile apply to RAW and rendered files separately";
+
+fn jpeg() -> Metadata {
+    Metadata {
+        source: crate::camera_data::Source::Rendered,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn syncing_from_a_raw_to_a_jpeg_keeps_the_jpegs_white_balance_and_profile() {
+    use crate::camera_profiles::open;
+    let raw = camera("Sony", "ILCE-7M2");
+    let jpeg = jpeg();
+    let mut source = Recipe {
+        profile: open::color(&raw).map(Arc::new),
+        profile_amount: 0.5,
+        temperature: 4200.,
+        tint: 8.,
+        exposure: 0.5,
+        ..Default::default()
+    };
+    source.update_wb(&raw);
+    let mut to = Recipe::for_rendered(&jpeg);
+    to.incremental_temperature = 30.;
+    to.update_wb(&jpeg);
+    let profiles = crate::camera_profiles::installed(&jpeg).0;
+    let out = transfer(
+        from(&source, &raw),
+        &to,
+        &GroupSelection::default(),
+        Target {
+            metadata: &jpeg,
+            profiles: &profiles,
+        },
+    );
+    let r = &out.recipe;
+    assert_eq!(r.exposure, 0.5);
+    assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
+    assert_eq!(
+        (
+            r.profile_amount,
+            r.temperature,
+            r.tint,
+            r.incremental_temperature,
+            r.incremental_tint,
+            r.wb
+        ),
+        (to.profile_amount, to.temperature, to.tint, 30., 0., to.wb)
+    );
+    assert_eq!(r.camera_exposure, 0.);
+    assert_eq!(out.notes, vec![SEPARATE.to_string()]);
+}
+
+#[test]
+fn syncing_from_a_jpeg_to_a_raw_keeps_the_raws_white_balance_and_profile() {
+    use crate::camera_profiles::open;
+    let raw = camera("Sony", "ILCE-7M2");
+    let jpeg = jpeg();
+    let mut source = Recipe::for_rendered(&jpeg);
+    source.incremental_temperature = 30.;
+    source.incremental_tint = -10.;
+    source.exposure = 0.5;
+    source.update_wb(&jpeg);
+    let profiles: Vec<_> = open::color(&raw).map(Arc::new).into_iter().collect();
+    let mut to = Recipe {
+        profile: profiles.first().cloned(),
+        temperature: 5000.,
+        tint: 4.,
+        ..Default::default()
+    };
+    to.update_wb(&raw);
+    let out = transfer(
+        from(&source, &jpeg),
+        &to,
+        &GroupSelection::default(),
+        Target {
+            metadata: &raw,
+            profiles: &profiles,
+        },
+    );
+    let r = &out.recipe;
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!(r.profile, to.profile);
+    assert_eq!(
+        (
+            r.temperature,
+            r.tint,
+            r.incremental_temperature,
+            r.incremental_tint,
+            r.wb
+        ),
+        (5000., 4., 0., 0., to.wb)
+    );
+    assert_eq!(out.notes, vec![SEPARATE.to_string()]);
+    // Without white balance or profile in the selection, nothing is said.
+    let mut exposure = GroupSelection::default();
+    for group in SettingGroup::ALL {
+        if group != SettingGroup::Exposure {
+            exposure.set(group, GroupInclusion::Excluded);
+        }
+    }
+    let out = transfer(
+        from(&source, &jpeg),
+        &to,
+        &exposure,
+        Target {
+            metadata: &raw,
+            profiles: &profiles,
+        },
+    );
+    assert_eq!(out.recipe.exposure, 0.5);
+    assert!(out.notes.is_empty(), "{:?}", out.notes);
 }

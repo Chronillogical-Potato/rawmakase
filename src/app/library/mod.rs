@@ -1,25 +1,26 @@
 //! Catalog browsing; thumbnail work is bounded and independent of RAW development.
+use crate::app::widgets::plural;
 use crate::catalog::{Catalog, FolderId, Photo, PhotoId, RootId};
 use crate::catalog_session::{CatalogSession, Committed, Opened};
 use anyhow::Result;
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Action {
     None,
     Develop(PhotoId),
     RelinkRoot(RootId),
-    RelinkFolder(FolderId),
+    /// The folder of a root at a logical path.
+    RelinkFolder(RootId, String),
     AddFolder,
 }
 impl Action {
     /// Combines the actions of panels drawn in turn: a later panel's action
     /// replaces an earlier one, and none keeps it.
-    pub(crate) fn then(self, later: Action) -> Action {
-        match later {
-            Action::None => self,
-            later => later,
+    pub(crate) fn then(&mut self, later: Action) {
+        if later != Action::None {
+            *self = later;
         }
     }
 }
@@ -33,13 +34,15 @@ pub(crate) struct FolderRemoval {
     pub(crate) folders: HashSet<FolderId>,
     /// Photos in it and its subfolders, as the panel counts them.
     pub(crate) photos: usize,
+    /// A root with no folder left in the catalog, removed on its own.
+    pub(crate) empty_root: Option<RootId>,
 }
 /// Where the Library was: its source, filter bar and selection, for undo to
 /// return to.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Place {
     filters: filter::Filters,
-    folder: String,
+    folders: folder_selection::FolderSelection,
     selection: selection::Selection,
 }
 impl Place {
@@ -63,6 +66,75 @@ pub(crate) enum CopyAction {
     /// Asks first, as Lightroom does.
     Remove(PhotoId),
 }
+/// A file operation the Library asked for, for the editor to plan and
+/// confirm.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum FileRequest {
+    /// Remove from Catalog.
+    Remove(Vec<PhotoId>),
+    /// Delete: Move to Trash, or Remove from Catalog.
+    Delete(Vec<PhotoId>),
+    /// Move to Trash alone.
+    Trash(Vec<PhotoId>),
+    /// Delete Rejected Photos, of the source shown.
+    DeleteRejected,
+    /// Rename Photo… (one) or Rename Photos… (several).
+    Rename(Vec<PhotoId>),
+    /// Move Folder…: where the folder of `root` at logical path `from`
+    /// goes is to be chosen.
+    ChooseParent {
+        root: crate::catalog::RootId,
+        from: String,
+    },
+    /// Moves the folder of `root` at logical path `from` into logical
+    /// folder `to` of `to_root` (a drop).
+    MoveFolder {
+        root: crate::catalog::RootId,
+        from: String,
+        to_root: crate::catalog::RootId,
+        to: String,
+    },
+    /// Rename Folder… for the folder of `root` at logical path `logical`.
+    RenameFolder {
+        root: crate::catalog::RootId,
+        logical: String,
+    },
+    /// Move to Trash… for the folder of `root` at logical path `logical`.
+    TrashFolder {
+        root: crate::catalog::RootId,
+        logical: String,
+    },
+    /// Move photos into the folder of `root` at logical path `to`, named
+    /// `name` (a drop on it).
+    Move {
+        photos: Vec<PhotoId>,
+        root: RootId,
+        to: String,
+        name: String,
+    },
+    /// Move to Folder…: photos to move, once a folder is chosen.
+    ChooseFolder(Vec<PhotoId>),
+    /// New Folder Inside… logical folder `parent` of `root`, named `name`;
+    /// the selection, and whether it is all in that folder.
+    NewFolder {
+        root: crate::catalog::RootId,
+        parent: String,
+        name: String,
+        photos: Vec<PhotoId>,
+        inside: bool,
+    },
+}
+/// A folder being dragged in the Folders panel: the folder of `root` at
+/// logical path `from`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DraggedFolder {
+    pub root: crate::catalog::RootId,
+    pub from: String,
+}
+/// Photos being dragged from the grid: the selection, or the photo dragged
+/// when it isn't in it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DraggedPhotos(pub Vec<PhotoId>);
 /// The thumbnail menu's preview commands, for the photos chosen.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PreviewsRequest {
@@ -91,9 +163,15 @@ pub(crate) struct Library {
     sidebar_trees: Option<std::sync::Arc<sidebar::Trees>>,
     /// The source and filter bar; `visible` is their result.
     filters: filter::Filters,
-    /// The folder shown, as a tree key ("" is All Photographs).
-    selected_folder: String,
+    /// The folders shown, as tree keys (none is All Photographs).
+    selected_folders: folder_selection::FolderSelection,
+    /// Show Photos in Subfolders: whether a folder shows its subfolders'
+    /// photos too; see `show_subfolders`.
+    subfolders_shown: bool,
     expanded: HashSet<String>,
+    /// The tree key of the folder New Folder Inside was last asked in,
+    /// unfolded once the folder is made.
+    new_folder_in: Option<String>,
     thumb_size: f32,
     /// How grid cells show their photos (J).
     cell_style: cell::Style,
@@ -170,11 +248,19 @@ pub(crate) struct Library {
     message_detail: (String, String),
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<PhotoId>>,
+    /// A file operation asked for (Delete, the thumbnail menu), for the
+    /// editor to confirm.
+    file_request: Option<FileRequest>,
+    /// Background reads are held off while a file operation holds the
+    /// catalog: nothing starts them until it lets go.
+    reads_suspended: bool,
     /// A thumbnail menu's Build or Discard Previews, for the editor to carry out.
     previews_request: Option<PreviewsRequest>,
     /// The offline RAW in the Loupe and its stored preview's identity, as the
     /// editor works it out.
     loupe_stored: Option<(PhotoId, String)>,
+    /// The photo whose refusal the right panel last showed, and that refusal.
+    refusal_shown: Option<((PhotoId, std::path::PathBuf, bool), Option<Refusal>)>,
     /// Read Metadata from Files while it reads.
     reread: Option<descriptive::Reread>,
     /// Read Metadata from Files finished since the editor last asked.
@@ -208,8 +294,10 @@ impl Library {
             volumes: Default::default(),
             sidebar_trees: None,
             filters: Default::default(),
-            selected_folder: String::new(),
+            selected_folders: Default::default(),
+            subfolders_shown: true,
             expanded: HashSet::new(),
+            new_folder_in: None,
             thumb_size: 190.,
             cell_style: Default::default(),
             drawn_style: Default::default(),
@@ -250,8 +338,11 @@ impl Library {
             message: String::new(),
             message_detail: Default::default(),
             read_request: None,
+            file_request: None,
+            reads_suspended: false,
             previews_request: None,
             loupe_stored: None,
+            refusal_shown: None,
             reread: None,
             reread_finished: false,
         };
@@ -310,7 +401,7 @@ impl Library {
                 self.session.collection_photos.clear();
                 self.session.previous_import.clear();
                 self.filters.folder_scope = None;
-                self.selected_folder.clear();
+                self.selected_folders.clear();
                 self.reloaded();
             }
         }
@@ -342,6 +433,11 @@ impl Library {
                 self.filters.collection = None;
                 self.filters.members.clear();
             }
+        }
+        // The folders shown as the catalog has them now: one may have
+        // gained a catalog folder (photos moved into it) or subfolders.
+        if let Some(scope) = self.current_scope(&self.selected_folders) {
+            self.filters.folder_scope = Some(scope);
         }
         // Copy commands save a name being typed before they run, and so
         // does anything else that reads the catalog again.
@@ -401,19 +497,35 @@ impl Library {
     fn is_available(&self, path: &std::path::Path) -> bool {
         self.availability.is_available(path)
     }
-    /// Why photo `id` can't be exported, if it can't: what keeps Develop from
-    /// opening it.
+    /// Why photo `id` can't be exported or built, if it can't, for work over many
+    /// photos: [`availability_refusal`], as no file is read for it. A file Develop
+    /// can't edit fails as that photo's export or build, with the reason.
     /// The file is looked at directly: the availability scan counts every photo
     /// as there until it has checked.
     pub(in crate::app) fn export_refusal(&self, id: PhotoId) -> Option<Refusal> {
         let photo = self.photo(id)?;
-        develop_refusal(photo, photo.path.is_file())
+        availability_refusal(photo.path.is_file())
     }
     /// Whether Develop could open photo `id`, by what the Library last found
-    /// online rather than by asking the file system.
+    /// online rather than by asking the file system: a file Develop can't read
+    /// is found when it is opened.
     pub(in crate::app) fn known_developable(&self, id: PhotoId) -> bool {
-        self.photo(id)
-            .is_some_and(|p| develop_refusal(p, self.is_available(&p.path)).is_none())
+        self.photo(id).is_some_and(|p| self.is_available(&p.path))
+    }
+    /// Why Develop cannot open `photo`, for the Library to show: as
+    /// [`develop_refusal`] finds, with a file's header read once while it stays
+    /// selected and online.
+    pub(super) fn shown_refusal(&mut self, photo: &Photo) -> Option<Refusal> {
+        let available = self.is_available(&photo.path);
+        let key = (photo.id, photo.path.clone(), available);
+        match &self.refusal_shown {
+            Some((shown, refusal)) if *shown == key => refusal.clone(),
+            _ => {
+                let refusal = develop_refusal(photo, available);
+                self.refusal_shown = Some((key, refusal.clone()));
+                refusal
+            }
+        }
     }
     pub(crate) fn available_count(&self) -> usize {
         self.availability.count(&self.session.photos)
@@ -488,7 +600,6 @@ impl Library {
         // The file and the demosaic too: a RAW replaced in place, or decoded another
         // way, is developed again.
         let file = crate::storage::Stamp::read(&photo.path).ok();
-        let demosaic = demosaic.effective();
         Some(Ok(DevelopSource {
             path: photo.path.clone(),
             tag: format!("{}-{file:?}-{demosaic:?}", edit.tag()),
@@ -556,7 +667,7 @@ impl Library {
     pub(in crate::app) fn place(&self) -> Place {
         Place {
             filters: self.filters.clone(),
-            folder: self.selected_folder.clone(),
+            folders: self.selected_folders.clone(),
             selection: self.selection.clone(),
         }
     }
@@ -564,10 +675,10 @@ impl Library {
     /// there, and scrolls to its active photo.
     pub(in crate::app) fn go_to_place(&mut self, place: &Place) {
         self.filters = place.filters.clone();
-        self.selected_folder = place.folder.clone();
+        self.selected_folders = place.folders.clone();
         // The source as the catalog has it now, e.g. after a folder gained
         // subfolders since.
-        if let Some(scope) = self.folder_scope(&place.folder) {
+        if let Some(scope) = self.current_scope(&place.folders) {
             self.filters.folder_scope = Some(scope);
         }
         if let Some(id) = self.filters.collection {
@@ -597,6 +708,214 @@ impl Library {
     pub(in crate::app) fn take_read_request(&mut self) -> Option<Vec<PhotoId>> {
         self.read_request.take()
     }
+    /// The file operation asked for, for the editor to confirm.
+    pub(in crate::app) fn take_file_request(&mut self) -> Option<FileRequest> {
+        self.file_request.take()
+    }
+    /// Delete and Backspace (with Option too): in the Quick Collection, takes
+    /// `ids` out of it, as one undoable step; in an imported collection, which
+    /// can't be changed, nothing; elsewhere, asks to remove them from the
+    /// catalog.
+    pub(in crate::app) fn delete_key(&mut self, ids: Vec<PhotoId>) {
+        if ids.is_empty() {
+            return;
+        }
+        if self.showing_quick() {
+            let Some(quick) = self.quick() else {
+                return;
+            };
+            let summary = format!(
+                "Removed from Quick Collection · {}",
+                plural(ids.len(), "photo", "photos")
+            );
+            if let Err(e) = self.record_collection(quick, Vec::new(), ids, summary) {
+                self.message = format!("Quick Collection not changed: {e}");
+            }
+        } else if self.filters.collection.is_some() {
+            self.message = "Imported collections can't be changed".into();
+        } else {
+            self.file_request = Some(FileRequest::Delete(ids));
+        }
+    }
+    /// Delete and Backspace with `modifiers`, for `ids`: alone, as
+    /// [`Self::delete_key`]; with Option, Remove from Catalog, even in a
+    /// collection; with ⌘⌥⇧, Move to Trash; with ⌘, Delete Rejected Photos
+    /// (Ctrl for ⌘ off the Mac).
+    pub(in crate::app) fn delete_press(&mut self, modifiers: egui::Modifiers, ids: Vec<PhotoId>) {
+        match (modifiers.command, modifiers.alt, modifiers.shift) {
+            (true, true, true) => self.request_trash(ids),
+            (true, false, false) => self.file_request = Some(FileRequest::DeleteRejected),
+            (false, alt, false) if !modifiers.ctrl => {
+                if alt {
+                    self.request_removal(ids)
+                } else {
+                    self.delete_key(ids)
+                }
+            }
+            _ => {}
+        }
+    }
+    /// Rename Photo… or Rename Photos… for `ids` (F2, the thumbnail menu),
+    /// for the editor to ask.
+    pub(in crate::app) fn request_rename(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.file_request = Some(FileRequest::Rename(ids));
+        }
+    }
+    /// Move to Trash for `ids` (⌘⌥⇧Delete, the thumbnail menu), whatever is
+    /// shown, for the editor to confirm.
+    pub(in crate::app) fn request_trash(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.file_request = Some(FileRequest::Trash(ids));
+        }
+    }
+    /// The rejected photos of the source shown (its folders, collection,
+    /// previous import or offline photos), whatever the filter bar shows:
+    /// Delete Rejected Photos'.
+    pub(in crate::app) fn rejected_in_source(&self) -> Vec<PhotoId> {
+        self.session
+            .photos
+            .iter()
+            .filter(|p| {
+                p.flag == -1 && self.filters.source_holds(p, |path| self.is_available(path))
+            })
+            .map(|p| p.id)
+            .collect()
+    }
+    /// Remove from Catalog for `ids` (⌥Delete, the thumbnail menu), whatever
+    /// is shown, for the editor to confirm.
+    pub(in crate::app) fn request_removal(&mut self, ids: Vec<PhotoId>) {
+        if !ids.is_empty() {
+            self.file_request = Some(FileRequest::Remove(ids));
+        }
+    }
+    /// Moves `photos` into the folder of `root` at logical path `to`
+    /// (dropped on it), for the editor to confirm; a drop where they all
+    /// are already does nothing.
+    pub(super) fn request_move(
+        &mut self,
+        photos: Vec<PhotoId>,
+        root: RootId,
+        to: String,
+        name: String,
+    ) {
+        let place = Some((root, to.clone()));
+        let there = photos.iter().all(|id| {
+            self.photo(*id)
+                .is_some_and(|p| self.folder_place(p.folder) == place)
+        });
+        if !photos.is_empty() && !there {
+            self.file_request = Some(FileRequest::Move {
+                photos,
+                root,
+                to,
+                name,
+            });
+        }
+    }
+    /// New Folder Inside… folder `parent` of `root` (catalog folder
+    /// `folder`, if it is one), offering to move the selection into it.
+    pub(super) fn request_new_folder(
+        &mut self,
+        root: crate::catalog::RootId,
+        parent: String,
+        name: String,
+        folder: Option<FolderId>,
+    ) {
+        let photos = self.selected_ids();
+        let inside = !photos.is_empty()
+            && photos
+                .iter()
+                .all(|id| self.photo(*id).is_some_and(|p| Some(p.folder) == folder));
+        self.file_request = Some(FileRequest::NewFolder {
+            root,
+            parent,
+            name,
+            photos,
+            inside,
+        });
+    }
+    /// Notes that New Folder Inside asks for a folder in logical folder
+    /// `parent` of `root`, to unfold it once the folder is made.
+    pub(in crate::app) fn new_folder_in(&mut self, root: crate::catalog::RootId, parent: &str) {
+        self.new_folder_in = Some(match parent {
+            "" => format!("root:{root}"),
+            parent => format!("root:{root}/{parent}"),
+        });
+    }
+    /// Follows a folder of `root` renamed or moved from logical path `from`
+    /// to `to` in the tree: what was selected or unfolded in it still is.
+    pub(in crate::app) fn folder_renamed(
+        &mut self,
+        root: crate::catalog::RootId,
+        from: &str,
+        to_root: crate::catalog::RootId,
+        to: &str,
+    ) {
+        let (from, to) = (
+            format!("root:{root}/{from}"),
+            format!("root:{to_root}/{to}"),
+        );
+        self.selected_folders.rekey(&from, &to);
+        self.expanded = std::mem::take(&mut self.expanded)
+            .into_iter()
+            .map(|key| match folder_selection::rekeyed(&key, &from) {
+                Some(rest) => format!("{to}{rest}"),
+                None => key,
+            })
+            .collect();
+    }
+    /// After the folder of `root` at logical path `logical` went to the
+    /// Trash: a selection in it moves to the folder it was in, which the
+    /// catalog read again shows.
+    pub(in crate::app) fn folder_trashed(&mut self, root: crate::catalog::RootId, logical: &str) {
+        let key = format!("root:{root}/{logical}");
+        let inside = self
+            .selected_folders
+            .keys()
+            .iter()
+            .any(|k| folder_selection::rekeyed(k, &key).is_some());
+        if !inside {
+            return;
+        }
+        let parent = match logical.rsplit_once('/') {
+            Some((parent, _)) => format!("root:{root}/{parent}"),
+            None => format!("root:{root}"),
+        };
+        self.selected_folders = folder_selection::FolderSelection::one(&parent);
+        // Its folders as the catalog has them once read again; none until.
+        self.filters.folder_scope = Some(HashSet::new());
+    }
+    /// Unfolds the folder New Folder Inside made a folder in, so the tree
+    /// shows it.
+    pub(in crate::app) fn unfold_new_folder(&mut self) {
+        if let Some(key) = self.new_folder_in.take() {
+            self.expanded.insert(key);
+        }
+    }
+    /// Whether the folder tree shows the rows below tree key `key`.
+    #[cfg(test)]
+    pub(in crate::app) fn is_unfolded(&self, key: &str) -> bool {
+        self.expanded.contains(key)
+    }
+    /// Holds off the background reads while a file operation holds the
+    /// catalog: the readers stop, Read Metadata from Files with them, what
+    /// they read before is dropped when it comes back, and nothing starts
+    /// them again until [`Self::resume_background_reads`].
+    pub(in crate::app) fn suspend_background_reads(&mut self) {
+        self.reads_suspended = true;
+        self.cancel_reread();
+        self.session.stop_background_reads();
+        self.session.bump_generation();
+    }
+    /// Background reads go on after a file operation let the catalog go:
+    /// capture times, photo info and checksums, for what is still missing.
+    pub(in crate::app) fn resume_background_reads(&mut self) {
+        self.reads_suspended = false;
+        self.start_capture_times();
+        self.start_photo_info();
+        self.start_checksums();
+    }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
     pub(in crate::app) fn take_previews_request(&mut self) -> Option<PreviewsRequest> {
         self.previews_request.take()
@@ -624,12 +943,13 @@ impl Library {
         self.sync_request.take()
     }
     /// What Synchronize Folder covers for the folder selected in the
-    /// Folders panel, and its name; none for All Photographs or a collection.
+    /// Folders panel, and its name; none for All Photographs, a collection
+    /// or several folders.
     pub(in crate::app) fn selected_sync_scope(
         &self,
     ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
         use crate::catalog::folder_sync::SyncScope;
-        let rest = self.selected_folder.strip_prefix("root:")?;
+        let rest = self.selected_folders.single()?.strip_prefix("root:")?;
         let (root, relative) = rest.split_once('/').unwrap_or((rest, ""));
         let root = root.parse::<i64>().ok().map(RootId)?;
         if relative.is_empty() {
@@ -655,6 +975,11 @@ impl Library {
             .find(|f| f.root == root && f.relative.trim_end_matches('/') == relative)?;
         let name = relative.rsplit('/').next().unwrap_or(relative).to_string();
         Some((SyncScope::Folder(folder.id), name))
+    }
+    /// The root and logical path of catalog folder `id`, as the Library has it.
+    pub(in crate::app) fn folder_place(&self, id: FolderId) -> Option<(RootId, String)> {
+        let folder = self.session.folders.iter().find(|f| f.id == id)?;
+        Some((folder.root, folder.relative.clone()))
     }
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()
@@ -695,6 +1020,32 @@ impl Library {
             }
         }
     }
+    /// Removes root `root`, named `name`, which has no folder left in the
+    /// catalog; its folder stays on disk.
+    pub(in crate::app) fn remove_empty_root(
+        &mut self,
+        root: crate::catalog::RootId,
+        name: &str,
+    ) -> Result<()> {
+        let removed = self.session.remove_empty_root(root)?;
+        let key = format!("root:{root}");
+        if self
+            .selected_folders
+            .keys()
+            .iter()
+            .any(|k| folder_selection::rekeyed(k, &key).is_some())
+        {
+            self.selected_folders.clear();
+            self.filters.folder_scope = None;
+        }
+        if self.listed_after(&removed.listed, "Root removed") {
+            self.message = match removed.value {
+                true => format!("Removed {name} from the catalog. Its folder is still on disk."),
+                false => format!("{name} was not removed: it has folders in the catalog again."),
+            };
+        }
+        Ok(())
+    }
     /// Removes `folders` and their photos from the catalog, leaving the files;
     /// returns the photos removed. The Library shows All Photographs if it
     /// showed one of them. An error means nothing was removed.
@@ -719,15 +1070,19 @@ impl Library {
                 self.screen.forget(photo.id);
             }
         }
+        // The folders chosen with their subfolders, shown or not: a folder
+        // of folders shown alone has no photos of its own to tell.
+        let shown_going = self
+            .selected_folders
+            .keys()
+            .iter()
+            .filter_map(|key| self.folder_ids(key, true))
+            .flatten()
+            .any(|f| folders.contains(&f));
         let ids: Vec<FolderId> = folders.iter().copied().collect();
         let removed = self.session.remove_folders(&ids)?;
-        if self
-            .filters
-            .folder_scope
-            .as_ref()
-            .is_some_and(|scope| scope.iter().any(|f| folders.contains(f)))
-        {
-            self.selected_folder.clear();
+        if shown_going {
+            self.selected_folders.clear();
             self.filters.folder_scope = None;
         }
         for id in &removed.value {
@@ -802,7 +1157,7 @@ impl Library {
             self.filters.collection = None;
             self.filters.previous_import = false;
             self.filters.only_missing = false;
-            self.selected_folder.clear();
+            self.selected_folders.clear();
             self.filter();
         }
         self.select(Some(id));
@@ -916,20 +1271,40 @@ impl Library {
         self.fields.clear();
     }
 }
-/// Why Develop cannot open a photo: it edits camera RAW files that are
-/// online.
+/// Why Develop cannot open a photo: it edits RAW, JPEG, PNG, TIFF, WebP, AVIF
+/// and JPEG XL files that are online and whose pixels it can read.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::app) enum Refusal {
     Offline,
-    /// Not a camera RAW: the file's format, e.g. "JPEG".
-    NotRaw(String),
+    /// A JPEG, PNG, TIFF, WebP, AVIF or JPEG XL of a kind Develop can't edit: its `format` (e.g. "JPG")
+    /// and the `reason` (e.g. "CMYK").
+    Unsupported {
+        format: String,
+        reason: String,
+    },
 }
 impl Refusal {
+    /// What opening `path` failed with, when it is a refusal rather than an error:
+    /// a JPEG, PNG, TIFF, WebP, AVIF or JPEG XL of a kind Develop can't edit.
+    pub(in crate::app) fn opening(path: &std::path::Path, error: &anyhow::Error) -> Option<Self> {
+        error
+            .downcast_ref::<crate::raster::Unsupported>()
+            .map(|unsupported| Self::unsupported(path, unsupported))
+    }
+    fn unsupported(path: &std::path::Path, unsupported: &crate::raster::Unsupported) -> Self {
+        Self::Unsupported {
+            format: path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_uppercase())
+                .unwrap_or_default(),
+            reason: unsupported.0.clone(),
+        }
+    }
     /// A word or two, shown beside a greyed-out Open in Develop.
     pub(in crate::app) fn label(&self) -> String {
         match self {
             Self::Offline => "Offline".into(),
-            Self::NotRaw(format) => format!("{format} file"),
+            Self::Unsupported { format, .. } => format!("{format} file"),
         }
     }
     /// The reason in full, with what to do about it.
@@ -939,9 +1314,7 @@ impl Refusal {
                 "The photo is offline. Use Locate root folder or right-click its folder to relink it."
                     .into()
             }
-            Self::NotRaw(format) => format!(
-                "{format} files can be browsed in Library; Develop edits camera RAW files."
-            ),
+            Self::Unsupported { reason, .. } => format!("RAWmakase can't edit {reason} images"),
         }
     }
 }
@@ -954,16 +1327,28 @@ pub(in crate::app) struct DevelopSource {
     /// changes whenever any of them does.
     pub tag: String,
 }
+/// Why Develop cannot open a photo whose file is `available` or not, by what is
+/// known without reading the file: for work over many photos (export, preview
+/// builds), where reading every file's header first would hold the app up. Such
+/// work meets a file Develop can't edit when it opens it, as that photo's failure.
+pub(in crate::app) fn availability_refusal(available: bool) -> Option<Refusal> {
+    (!available).then_some(Refusal::Offline)
+}
 /// Why Develop cannot open `photo`, if it cannot, given whether its file is
-/// `available`.
+/// `available`: [`availability_refusal`], or a JPEG, PNG, TIFF, WebP, AVIF or JPEG XL whose header
+/// says Develop can't edit its pixels (`raster::probe`). It reads the file (a
+/// whole JPEG), so it is for one photo at a time: opening it, or showing why it
+/// can't be. A RAW's file is not read.
 pub(in crate::app) fn develop_refusal(photo: &Photo, available: bool) -> Option<Refusal> {
-    if !available {
-        Some(Refusal::Offline)
-    } else if !crate::storage::is_raw(&photo.path) {
-        Some(Refusal::NotRaw(photo.format.clone()))
-    } else {
-        None
+    if let Some(refusal) = availability_refusal(available) {
+        return Some(refusal);
     }
+    if crate::storage::is_raw(&photo.path) {
+        return None;
+    }
+    crate::raster::probe(&photo.path)
+        .err()
+        .map(|unsupported| Refusal::unsupported(&photo.path, &unsupported))
 }
 /// The edit a photo's previews are rendered with: its RAWmakase recipe, or
 /// else its Lightroom settings.
@@ -987,6 +1372,7 @@ mod descriptive;
 pub(crate) mod filmstrip;
 mod filter;
 mod filter_bar;
+mod folder_selection;
 mod grid;
 mod info;
 mod kinetic;
@@ -1009,6 +1395,7 @@ mod thumbnails;
 mod tree;
 mod views;
 mod volumes;
+pub(crate) use volumes::remember_drives_in;
 mod zoom;
 use thumbnails::thumbnail;
 #[cfg(test)]

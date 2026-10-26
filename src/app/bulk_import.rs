@@ -19,7 +19,7 @@ pub(crate) enum ImportKind {
 impl ImportKind {
     fn extensions(self) -> &'static [&'static str] {
         match self {
-            Self::CameraProfiles => &["dcp", "xmp"],
+            Self::CameraProfiles => &["dcp", "xmp", "cube"],
             Self::LensProfiles => &["lcp"],
             Self::Presets => &["xmp"],
         }
@@ -37,7 +37,7 @@ impl ImportKind {
     /// Label for the multi-file chooser's filter.
     pub(super) fn filter(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            Self::CameraProfiles => ("Camera profiles", &["dcp", "xmp"]),
+            Self::CameraProfiles => ("Camera profiles and .cube LUTs", &["dcp", "xmp", "cube"]),
             Self::LensProfiles => ("Adobe lens profiles", &["lcp"]),
             Self::Presets => ("Lightroom presets", &["xmp"]),
         }
@@ -127,7 +127,7 @@ fn gather(kind: ImportKind, picks: &[PathBuf]) -> Vec<Found> {
 
 /// What an import did.
 #[derive(Debug)]
-pub(crate) struct Summary {
+pub struct Summary {
     pub(super) kind: ImportKind,
     pub(super) imported: usize,
     /// Identical to one already imported, or repeated within this import.
@@ -136,6 +136,9 @@ pub(crate) struct Summary {
     pub(super) without_base: usize,
     /// Files that couldn't be imported, with the reason.
     pub(super) failed: Vec<(PathBuf, String)>,
+    /// What became of each `.cube`: its look's name and how faithfully it holds
+    /// the cube.
+    pub(super) cubes: Vec<(PathBuf, crate::camera_profiles::CubeImport)>,
 }
 impl Summary {
     fn new(kind: ImportKind) -> Self {
@@ -145,13 +148,14 @@ impl Summary {
             already: 0,
             without_base: 0,
             failed: Vec::new(),
+            cubes: Vec::new(),
         }
     }
     fn fail(&mut self, path: &Path, reason: impl Into<String>) {
         self.failed.push((path.to_path_buf(), reason.into()));
     }
     /// One line: "Imported 40 presets · 3 already imported · 2 skipped".
-    pub(super) fn message(&self) -> String {
+    pub fn message(&self) -> String {
         let (imported, already, failed) = (self.imported, self.already, self.failed.len());
         if imported + already + failed + self.without_base == 0 {
             return format!("No {} found there", self.kind.noun(2));
@@ -166,29 +170,67 @@ impl Summary {
                 self.without_base
             ));
         }
+        let fresh = || self.cubes.iter().map(|(_, c)| c).filter(|c| !c.already);
+        let approximated = fresh()
+            .filter(|c| c.fidelity != crate::camera_profiles::Fidelity::Exact)
+            .count();
+        if approximated > 0 {
+            let luts = if approximated == 1 { "LUT" } else { "LUTs" };
+            parts.push(format!("{approximated} {luts} approximated"));
+        }
+        let renamed = fresh().filter(|c| c.renamed()).count();
+        if renamed > 0 {
+            parts.push(format!("{renamed} renamed"));
+        }
         if failed > 0 {
             parts.push(format!("{failed} skipped"));
         }
         parts.join(" · ")
     }
-    /// The skipped files, one per line, at most `limit` of them.
+    /// The skipped files, then the `.cube` files approximated or renamed, one per
+    /// line, at most `limit` of them.
     pub(super) fn details(&self, limit: usize) -> String {
-        let mut lines: Vec<String> = self
+        let noted = self.cubes.iter().filter(|(_, c)| {
+            !c.already && (c.renamed() || c.fidelity != crate::camera_profiles::Fidelity::Exact)
+        });
+        let all: Vec<String> = self
             .failed
             .iter()
-            .take(limit)
-            .map(|(path, reason)| {
-                format!(
-                    "{}: {reason}",
-                    path.file_name().unwrap_or_default().to_string_lossy()
-                )
-            })
+            .map(|(path, reason)| line(path, reason))
+            .chain(noted.map(|(path, cube)| line(path, cube)))
             .collect();
-        if self.failed.len() > limit {
-            lines.push(format!("…and {} more", self.failed.len() - limit));
+        let mut lines: Vec<String> = all.iter().take(limit).cloned().collect();
+        if all.len() > limit {
+            lines.push(format!("…and {} more", all.len() - limit));
         }
         lines.join("\n")
     }
+    /// Whether [`Self::details`] has anything to say.
+    pub(super) fn has_details(&self) -> bool {
+        !self.details(1).is_empty()
+    }
+    /// Every `.cube` and every file that couldn't be imported, one line each.
+    pub fn lines(&self) -> Vec<String> {
+        self.cubes
+            .iter()
+            .map(|(path, cube)| line(path, cube))
+            .chain(self.failed.iter().map(|(path, reason)| line(path, reason)))
+            .collect()
+    }
+    /// Files that couldn't be imported.
+    pub fn failures(&self) -> usize {
+        self.failed.len()
+    }
+    /// Files imported, or found imported already.
+    pub fn done(&self) -> usize {
+        self.imported + self.already
+    }
+}
+fn line(path: &Path, what: impl std::fmt::Display) -> String {
+    format!(
+        "{}: {what}",
+        path.file_name().unwrap_or_default().to_string_lossy()
+    )
 }
 
 fn content_hash(bytes: &[u8]) -> u64 {
@@ -278,17 +320,28 @@ fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary
     let mut summary = Summary::new(ImportKind::CameraProfiles);
     let destination = crate::storage::data_dir().join("camera-profiles");
     let mut names = BTreeMap::new();
-    let (mut dcps, mut looks) = (Vec::new(), Vec::new());
+    let (mut dcps, mut looks, mut cubes) = (Vec::new(), Vec::new(), Vec::new());
     for (i, file) in found.iter().enumerate() {
         report(progress, i, found.len(), "profiles");
         let Ok(bytes) = std::fs::read(&file.path) else {
             summary.fail(&file.path, "unreadable");
             continue;
         };
-        let xmp = file
-            .path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("xmp"));
+        let extension = |e: &str| {
+            file.path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case(e))
+        };
+        let xmp = extension("xmp");
+        if extension("cube") {
+            // Its look's name is the import's to choose, so it is checked by its
+            // table rather than its file name (`camera_profiles::import_files`).
+            match crate::camera_profiles::read_cube(&bytes) {
+                Ok(_) => cubes.push(file.path.clone()),
+                Err(e) => summary.fail(&file.path, format!("{e:#}")),
+            }
+            continue;
+        }
         if xmp {
             // Folders of profiles often hold presets too; only looks belong here.
             if !std::str::from_utf8(&bytes).is_ok_and(is_look) {
@@ -351,7 +404,29 @@ fn import_camera_profiles(found: &[Found], progress: &ImportProgress) -> Summary
             }
         }
     }
+    // Cubes after the looks, so their names avoid the looks' too. Every one was
+    // read above, so a batch fails only on a write error.
+    for batch in cubes.chunks(1000) {
+        progress.set(format!("Importing LUTs… {} done", summary.imported));
+        match crate::camera_profiles::import_files(batch) {
+            Ok(done) => done.into_iter().for_each(|done| summary.add_cube(done)),
+            Err(e) => batch.iter().for_each(|p| summary.fail(p, format!("{e:#}"))),
+        }
+    }
     summary
+}
+impl Summary {
+    fn add_cube(&mut self, done: crate::camera_profiles::ImportedProfile) {
+        let Some(cube) = done.cube else {
+            return;
+        };
+        if cube.already {
+            self.already += 1;
+        } else {
+            self.imported += 1;
+        }
+        self.cubes.push((done.source, cube));
+    }
 }
 
 fn import_lens_profiles(found: &[Found], progress: &ImportProgress) -> Summary {
@@ -484,6 +559,16 @@ fn run(kind: ImportKind, picks: &[PathBuf], progress: &ImportProgress) -> Summar
     }
 }
 
+/// The `import-profiles` command: imports `picks` (files and folders) as the app's
+/// Import does, waiting for it.
+pub fn import_profiles(picks: &[PathBuf]) -> Summary {
+    run(
+        ImportKind::CameraProfiles,
+        picks,
+        &ImportProgress::default(),
+    )
+}
+
 impl Editor {
     /// Starts importing `picks` in the background; the status line follows it.
     pub(super) fn import(&mut self, kind: ImportKind, picks: Vec<PathBuf>, ctx: &egui::Context) {
@@ -521,9 +606,10 @@ impl Editor {
             match summary.kind {
                 ImportKind::CameraProfiles => {
                     if let Some(m) = &self.document.metadata {
-                        let (profiles, errors) = crate::camera_profiles::installed(m);
-                        self.document.profiles = profiles;
-                        self.document.profile_errors = errors;
+                        let listed = crate::camera_profiles::listed(m);
+                        self.document.profiles = listed.profiles;
+                        self.document.profile_errors = listed.errors;
+                        self.document.profile_groups = listed.groups;
                         // Importing never changes an edit: the user picks a
                         // profile. A photo without one follows the raw defaults,
                         // which may now resolve to an imported profile.
@@ -545,7 +631,7 @@ impl Editor {
             }
         }
         self.status = summary.message();
-        if !summary.failed.is_empty() {
+        if summary.has_details() {
             self.status.push_str(": ");
             self.status.push_str(&summary.details(1));
         }
@@ -613,6 +699,35 @@ mod tests {
         let summary = import_presets(&found, &progress, &root, std::slice::from_ref(&root));
         assert_eq!(summary.imported, 1);
         assert!(root.join("Imported/Other/One 2.xmp").is_file());
+    }
+
+    /// Renamed or approximated LUTs are listed even when nothing failed.
+    #[test]
+    fn renamed_and_approximated_cubes_are_detailed() {
+        use crate::camera_profiles::{CubeImport, Fidelity};
+        let mut summary = Summary::new(ImportKind::CameraProfiles);
+        let cube = |name: &str, fidelity| CubeImport {
+            name: name.into(),
+            stem: "Portra".into(),
+            already: false,
+            fidelity,
+        };
+        summary.imported = 1;
+        summary
+            .cubes
+            .push(("Portra.cube".into(), cube("Portra", Fidelity::Exact)));
+        assert!(!summary.has_details());
+        summary.imported = 2;
+        summary.cubes.push((
+            "Cool/Portra.cube".into(),
+            cube("Portra (Cool)", Fidelity::Exact),
+        ));
+        assert!(summary.has_details());
+        assert_eq!(summary.message(), "Imported 2 profiles · 1 renamed");
+        assert_eq!(
+            summary.details(8),
+            "Portra.cube: imported as look \"Portra (Cool)\", as another profile is named \"Portra\": exact"
+        );
     }
 
     #[test]

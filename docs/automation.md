@@ -94,6 +94,9 @@ window itself is not changed.
 
 Dialog actions report that the action was applied, but require user interaction.
 `auto_running` and `treatment_pending` describe asynchronous editor work.
+`open_failed` names the photo Develop could not open (a cut-short or
+unreadable file), with the reason in `open_error`, which stays while `message`
+moves on; `open` and MCP `open_photo` stop waiting for it with that error.
 Prefer the explicit `export` command for unattended output.
 
 ## Guard the target
@@ -194,7 +197,7 @@ use target guards for a sequence that must refer to the same edit.
 | `preview`, `export` | absolute `path`, optional `max_edge`, optional `target` | Captured output job |
 | `job` | `job_id` | Output status |
 | `build_previews` | optional `kind`: `standard` (the default) or `one_to_one` | `queued` and `skipped` (offline or not RAW) counts for the selection, as the thumbnail menu's Build Standard-Sized Previews; state's `building_previews` (`done`, `total`) shows progress while they build |
-| `wait` | `until`: `loaded` with `photo_id`, or `job` with `job_id`; optional `timeout_ms` (1…5000, default 1000) | State once the photo is loaded (or replaced by another) or the job finished, status `applied`; or at `timeout_ms`, status `timed_out` |
+| `wait` | `until`: `loaded` with `photo_id`, or `job` with `job_id`; optional `timeout_ms` (1…5000, default 1000) | State once the photo is loaded (or replaced by another, or could not be opened) or the job finished, status `applied`; or at `timeout_ms`, status `timed_out` |
 | `cc` | integer `cc`, `value` (0…127) | Legacy device mapping |
 | `note` | integer `note` (0…127), `press`: `click`, `down`, `up` | Legacy device mapping |
 
@@ -220,7 +223,10 @@ different command ends that group. Auto tone and white-balance commands return
 Common error codes include `invalid_request`, `unsupported_protocol`,
 `unauthorized`, `busy`, `stale_target`, `target_required`, `no_document`,
 `not_ready`, `unsupported_parameter`, `not_editable`, `protected`, `save_failed`,
-`already_exists` and `unknown_job`.
+`already_exists` and `unknown_job`. `open` returns `not_editable` for a photo whose
+file is offline, or a JPEG, PNG or TIFF Develop can't edit (a CMYK JPEG, say);
+any other JPEG, PNG or TIFF opens as a RAW does. On a JPEG, PNG or TIFF,
+`temperature` and `tint` move its relative Temp and Tint (−100 to 100).
 
 The request limit is 64 KiB, the input queue is bounded and at most 16 socket
 clients are served concurrently. If a request has not started within three

@@ -101,8 +101,10 @@ pub(in crate::app) enum EditSource {
 impl EditSource {
     /// The recipe a photo is rendered with: its edit, or the defaults
     /// Develop would open it with (Adobe Default unless given).
-    pub(crate) fn recipe(edit: Option<&Self>, raw: &crate::raw::Raw) -> anyhow::Result<Recipe> {
-        let m = &raw.metadata;
+    pub(crate) fn recipe(
+        edit: Option<&Self>,
+        m: &crate::camera_data::Metadata,
+    ) -> anyhow::Result<Recipe> {
         let (profiles, _) = crate::camera_profiles::installed(m);
         Ok(match edit {
             Some(Self::Recipe(json)) => serde_json::from_str(json)?,
@@ -113,7 +115,8 @@ impl EditSource {
             None => Recipe::with_profiles(m, &profiles),
         })
     }
-    /// Identifies this edit in the preview cache.
+    /// Identifies this edit, developed by this build's RAW decoder
+    /// (`raw::developed`), in the preview cache.
     pub(crate) fn tag(&self) -> String {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -122,6 +125,7 @@ impl EditSource {
             Self::Lightroom(text) => ("lightroom", text).hash(&mut h),
             Self::Defaults(defaults) => ("defaults", format!("{defaults:?}")).hash(&mut h),
         }
+        crate::raw::developed().hash(&mut h);
         format!("edit-{:016x}", h.finish())
     }
 }
@@ -263,18 +267,30 @@ fn spawn_edited_with(
     });
     (tx, result_rx, thread)
 }
-/// A 640 px preview of `path` developed with `source`, from the fast
-/// half-size decode.
+/// A 640 px preview of `path` developed with `source`.
 fn render_edited(
     path: &Path,
     source: &EditSource,
     cancel: &AtomicBool,
 ) -> anyhow::Result<image::RgbImage> {
-    let raw = crate::photo::open(path)?;
-    let recipe = EditSource::recipe(Some(source), &raw)?;
-    let image = raw.develop(crate::camera_data::Decode::Half, cancel)?;
+    develop_quickly(path, Some(source), 640, cancel)
+}
+/// `path` developed with `edit` (see [`EditSource::recipe`]) within `edge` pixels:
+/// a RAW from the fast half-size decode, a JPEG, PNG or TIFF from the file.
+pub(super) fn develop_quickly(
+    path: &Path,
+    edit: Option<&EditSource>,
+    edge: u32,
+    cancel: &AtomicBool,
+) -> anyhow::Result<image::RgbImage> {
+    let opened = crate::photo::open_source(path, cancel)?;
+    let recipe = EditSource::recipe(edit, opened.metadata())?;
+    let image = match opened {
+        crate::photo::Opened::Raw(raw) => raw.develop(crate::camera_data::Decode::Half, cancel)?,
+        crate::photo::Opened::Rendered(image) => image,
+    };
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "Cancelled");
-    let out = crate::develop::render(&image, &recipe.checked()?, 640)?;
+    let out = crate::develop::render(&image, &recipe.checked()?, edge)?;
     image::RgbImage::from_raw(out.width, out.height, out.rgb8())
         .ok_or_else(|| anyhow::anyhow!("Invalid preview size"))
 }
@@ -350,9 +366,39 @@ impl Progress {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// A grey JPEG at `path`, and a saved edit of it one stop brighter.
+    pub(in crate::app::library) fn edited_jpeg(path: &Path) -> anyhow::Result<EditSource> {
+        image::RgbImage::from_pixel(64, 48, image::Rgb([60, 60, 60])).save(path)?;
+        let m = crate::camera_data::Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let recipe = crate::model::recipe::Recipe {
+            exposure: 1.,
+            ..crate::model::recipe::Recipe::for_rendered(&m)
+        };
+        Ok(EditSource::Recipe(serde_json::to_string(&recipe)?))
+    }
+
+    #[test]
+    fn an_edited_jpeg_renders_with_its_edit() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("photo.jpg");
+        let edit = edited_jpeg(&path)?;
+        let image = render_edited(&path, &edit, &AtomicBool::new(false))?;
+        assert_eq!(image.dimensions(), (64, 48));
+        // One stop brighter than the file's 60.
+        assert!(
+            image.pixels().all(|p| p.0[1] > 75),
+            "{:?}",
+            image.get_pixel(0, 0)
+        );
+        Ok(())
+    }
 
     #[test]
     fn worker_persists_previews_and_reuses_them_when_original_is_offline() -> anyhow::Result<()> {

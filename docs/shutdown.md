@@ -39,9 +39,17 @@ changes what one waits on, updates its row here.
 Each worker the exit hook waits for keeps its `JoinHandle`, and hands it over as a
 `task::Stopping` when asked to stop.
 
+Workers that read or decode photos behind the user's back start from
+`raw::spawn_background` or `raw::background_pool` (`crates/rawmakase-decode`):
+their threads run at a lower scheduling priority (Linux and Windows), and parallel
+work they start runs on a pool of two background threads, never the shared pool.
+That pool belongs to the worker: dropping it, when the worker's work returns, lets
+its threads end on their own; nothing joins them, so a pool never blocks the thread
+that drops it.
+
 | Worker | Where | Blocks on | Stop | Join |
 | --- | --- | --- | --- | --- |
-| Develop loader, with its full-size loader and prefetcher | `app/worker/loader.rs` | A job; file I/O and LibRaw decodes; decode cache reads and writes | All three `Latest`s stopped, between jobs; the load `Task`'s cancel within one; `prefetch_cancel` for a prefetch | Yes, all three, after cancelling the load and the prefetch |
+| Develop loader, with its full-size loader and prefetcher | `app/worker/loader.rs` | A job; file I/O, RAW decodes and JPEG, PNG or TIFF decodes (cancellable between rows); decode cache reads and writes | All three `Latest`s stopped, between jobs; the load `Task`'s cancel within one; `prefetch_cancel` for a prefetch | Yes, all three, after cancelling the load and the prefetch |
 | Preview renderer | `app/worker/renderer.rs` | A job; CPU and GPU renders, up to 10 s per GPU submission; the egui renderer lock, briefly | `Latest` stopped; the After and Before render `Task`s | Yes, before the painter and device are dropped |
 | Reference View loader | `app/worker/reference.rs` | A job; file I/O and decodes | `Latest` stopped; the reference `Task` | Yes |
 | Autosave | `app/autosave.rs` | The job channel; one SQLite commit | Its job sender dropped | Yes, after the save at exit and dropping the job sender, which lets a save in flight finish |
@@ -58,7 +66,7 @@ Each worker the exit hook waits for keeps its `JoinHandle`, and hands it over as
 | Library background readers | `catalog_session/background.rs` | File reads in batches, possibly on a network share | The reader's cancel, per batch | No: a stalled share can hang a read |
 | Synchronize Folder scan | `app/folder_sync.rs` | Listing folders and hashing files, possibly on a network share | Its cancel flag, between files and hash chunks | Yes, under the deadline: a stalled read can't be interrupted |
 | Checksum reader | `catalog_session/checksums.rs` | Reading one file in 1 MiB chunks, possibly on a network share; the rate limit's sleeps; a pause | The reader's cancel, between chunks and while paused | No: a stalled share can hang a read |
-| Volume probe | `app/library/volumes.rs` | `is_dir` and free space on every mount | None (one check per thread) | No: it can hang on a stalled mount |
+| Volume probe | `app/library/volumes.rs` | Each root's mount (`statfs`, the volume's name, mountinfo or `GetVolumePathNameW`), whether each drive is mounted and its free space; writing `drives.json` | None (one check per thread) | No: it can hang on a stalled mount |
 | Subject selection | `app/subject_mask/worker.rs` | A job: the input render, then the photo's analysis (a few seconds: embedding, saliency, a grid of decodes) when not kept, then a decode for a click — locally, or over the remote worker, where every wait is a bounded socket read (at most 3 min) and the cancel flag is forwarded to the worker, which stops its model run; it keeps its session until it ends | Its cancel flag, raised at exit and forwarded mid-request; its mailbox dropped | Yes, under the deadline; the thread owns the runtime, which is never unloaded under a running call, and no socket wait outlasts the deadline without the cancel ending it |
 | Selection model install | `app/subject_mask/models.rs` | HTTP for five files, as requests resuming where the file stopped (connect 20 s, 30 s per response, 60 s for each body in total, 2 min each request) and file writes, in 256 KB chunks | Its cancel flag, between chunks and requests, and while waiting for another window's install | Yes, under the deadline; a partial download is kept for the next install to resume, under the folder's install lock |
 | Availability check | `app/library/availability.rs` | File metadata for every photo | None | No, for the same reason |
@@ -69,6 +77,10 @@ Each worker the exit hook waits for keeps its `JoinHandle`, and hands it over as
 One-shot jobs stay detached: Auto, Upright, Auto straighten, the Point Color and
 Targeted Adjustment samples, the onboarding scan, catalog open and import, file
 dialogs, bulk import, the preset scan, Sync Settings, folder relink and move, the
+file operations' plan, run and recovery (Remove from Catalog, moving photos, New
+Folder Inside, and deciding what a crash left when a catalog opens; the close guard
+waits for a run, with Close anyway, and the journal leaves anything cut short to
+recovery), the
 folder availability probe (which can hang on a stalled mount like the volume
 probe), the update receipt acknowledgement, usage stats collection (which can run
 the package manager) and the watermark fonts. They report through the event channel or a generation check,
@@ -118,6 +130,21 @@ that fails, restoring a minimized window to show its question. With nothing
 pending it lets the quit go at once, as before. A logout the app cancels this way stops, and
 macOS says the app interrupted it.
 
+## File operations
+
+`catalog::file_ops` runs a confirmed operation on the thread that calls it (in the
+app, a one-shot worker of `app::file_ops`), item by item, holding the catalog's
+operation lock (an OS lock on a file beside the catalog) for the whole run of an
+operation that changes files; Remove from Catalog changes none and takes no lock. Its cancel flag is checked between
+items only: a step under way finishes, or fails, and is journalled before the next.
+It is never interrupted mid-step from outside. When the process ends while it runs,
+the lock dies with it and the journal leaves the unfinished item to recovery,
+which runs before the next file operation and when the Library opens the catalog,
+and finishes it on the evidence on disk or reports it. The top bar's Stop, and any request to close the window, set the run's cancel
+flag, so it stops after the photo under way; the close guard then waits for it.
+Close anyway closes at once without saving: the open edit was saved before the
+operation began, and nothing may be written while it holds the catalog.
+
 ## Where the code stands
 
 The exit hook (`app/exit.rs`) runs the sequence above (#269, #270, #330). Two
@@ -126,3 +153,8 @@ field being typed in the Library, which the close guard and the exit hook save
 through the catalog session before the edit, and the session file. Neither is
 expected to stall the way a photo's catalog on a network share can, but a catalog
 that stops answering mid-typing would still hold up closing.
+
+The macOS menu adapter owns no workers. At `on_exit` it disconnects native menu
+targets before releasing their main-thread owner; callbacks only enqueue typed
+actions and request a repaint. File > Close Window and the existing app-menu Quit
+both enter the window-close guard above.

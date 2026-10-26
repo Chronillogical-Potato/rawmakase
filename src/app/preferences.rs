@@ -5,7 +5,6 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
-use crate::camera_data::Demosaic;
 use crate::catalog::CatalogLocation;
 use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
@@ -91,9 +90,6 @@ fn lens_profiles_dir() -> PathBuf {
 fn presets_dir() -> PathBuf {
     crate::storage::data_dir().join("xmp-presets")
 }
-fn decode_cache_dir() -> PathBuf {
-    crate::decode_cache::cache_dir().join("decoded")
-}
 
 /// Files under `dir` (with one of `extensions`, if any) and their total size.
 fn files(dir: &Path, extensions: &[&str]) -> (usize, u64) {
@@ -155,7 +151,7 @@ impl Editor {
         self.preferences.usage = Usage {
             camera_profiles: files(&camera_profiles_dir(), &["dcp", "xmp"]).0,
             lens_profiles: files(&lens_profiles_dir(), &["lcp"]).0,
-            decode_cache: files(&decode_cache_dir(), &["decoded"]),
+            decode_cache: files(&self.decode_cache.dir(), &["decoded"]),
             previews: std::fs::metadata(PreviewCache::path()).map_or(0, |m| m.len()),
             preview_kinds: PreviewCache::open(&PreviewCache::path())
                 .and_then(|cache| cache.usage())
@@ -266,7 +262,12 @@ impl Editor {
                             .auto_shrink(false)
                             .show(&mut content, |ui| self.profiles_page(ui));
                     }
-                    Tab::Performance => self.performance_page(&mut content),
+                    // Taller than the window while a chosen folder is missing.
+                    Tab::Performance => {
+                        egui::ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(&mut content, |ui| self.performance_page(ui));
+                    }
                     Tab::Display => self.display_page(&mut content),
                     Tab::Automation => {
                         egui::ScrollArea::vertical()
@@ -351,7 +352,7 @@ impl Editor {
             ui.add_space(8.);
             self.update_status(ui);
         });
-        form_row(ui, "LibRaw", |ui| {
+        form_row(ui, "RAW decoder", |ui| {
             value(ui, &crate::raw::version());
         });
         form_row(ui, "Updates", |ui| self.automatic_updates_checkbox(ui));
@@ -524,6 +525,41 @@ impl Editor {
             });
         }
         gap(ui);
+        group(ui, "Decoded images");
+        let mut cache_size = (self.decode_cache.limit() >> 30) as u32;
+        let mut field = None;
+        form_row(ui, "Cache size limit", |ui| {
+            // A typed size applies once entered, so a cache write while typing
+            // 128 never trims to 1 GiB.
+            field = Some(
+                ui.add(
+                    egui::DragValue::new(&mut cache_size)
+                        .range(super::session::DECODED_CACHE_SIZE_RANGE)
+                        .suffix(" GiB")
+                        .update_while_editing(false),
+                ),
+            );
+        });
+        if u64::from(cache_size) << 30 != self.decode_cache.limit() {
+            self.decode_cache.set_limit(u64::from(cache_size) << 30);
+        }
+        // A drag changes the size every frame; the session is written once it ends.
+        if field.is_some_and(|r| r.drag_stopped() || (r.changed() && !r.dragged())) {
+            let _ = self.save_session();
+        }
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "Keeps decoded RAWs for faster reopening. Shared by all catalogs; default 4 GiB.",
+            );
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "A smaller limit removes older entries on the next cache write.",
+            );
+        });
+        gap(ui);
         self.folder_locations_block(ui);
         group(ui, "Metadata defaults");
         let defaults = &mut self.preferences.defaults;
@@ -638,88 +674,91 @@ impl Editor {
     }
 
     fn performance_page(&mut self, ui: &mut egui::Ui) {
-        group(ui, "Demosaic");
-        let current = self.demosaic.effective();
-        let mut picked = None;
-        for (choice, label, note) in [
-            (
-                Demosaic::Rawmakase,
-                "RAWmakase",
-                "Faster, with equal or better detail.",
-            ),
-            (
-                Demosaic::Libraw,
-                "LibRaw",
-                "AHD for Bayer sensors, Markesteijn for X-Trans.",
-            ),
-        ] {
-            form_row(
-                ui,
-                if choice == Demosaic::Rawmakase {
-                    "Engine"
-                } else {
-                    ""
-                },
-                |ui| {
-                    if ui.radio(current == choice, label).clicked() && current != choice {
-                        picked = Some(choice);
-                    }
-                    hint(ui, note);
-                },
-            );
-        }
-        if let Some(choice) = picked {
-            self.demosaic = choice;
-            let _ = self.save_session();
-            // Takes effect on the next full-size decode, so the open photo is
-            // reopened.
-            if let Some(path) = self.document.path.clone() {
-                let photo = self.document.catalog_photo;
-                self.open_raw(path, photo);
-            }
-        }
-        gap(ui);
         group(ui, "Decoded photo cache");
         let (entries, size) = self.preferences.usage.decode_cache;
-        let dir = decode_cache_dir();
+        let dir = self.decode_cache.dir();
+        let folder = self.decode_cache.folder();
         form_row(ui, "Location", |ui| path_value(ui, &dir));
         form_row(ui, "Size", |ui| {
             value(
                 ui,
                 &format!(
-                    "{} of 4 GB · {}",
+                    "{} of {} GiB · {}",
                     bytes(size),
+                    self.decode_cache.limit() >> 30,
                     plural(entries, "photo", "photos")
                 ),
             );
         });
-        let mut purge = false;
+        let (mut purge, mut choose, mut default) = (false, false, false);
+        form_row(ui, "", |ui| {
+            choose = ui.button("Choose Folder…").clicked();
+            default = ui
+                .add_enabled(folder.is_some(), egui::Button::new("Use Default"))
+                .clicked();
+        });
         form_row(ui, "", |ui| {
             purge = ui
                 .add_enabled(entries > 0, egui::Button::new("Purge Cache"))
                 .clicked();
             reveal_button(ui, &dir);
         });
+        if let Some(folder) = folder.as_deref().filter(|f| !f.is_dir()) {
+            form_row(ui, "", |ui| {
+                hint(
+                    ui,
+                    &format!(
+                        "{} is not available, so photos are not cached until it is.",
+                        pretty_path(folder)
+                    ),
+                );
+            });
+        }
         form_row(ui, "", |ui| {
             hint(
                 ui,
-                "Reopening a photo skips decoding while it is cached. Purging only removes decoded copies, never photos or edits.",
+                "Reopening a photo skips decoding while it is cached. Choose a folder on another drive to save space on this one; moving the cache removes the decoded copies in the old location. Purging only removes decoded copies, never photos or edits.",
             );
         });
         if purge {
-            let removed = std::fs::read_dir(&dir)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter(|e| e.path().extension().is_some_and(|x| x == "decoded"))
-                .filter(|e| std::fs::remove_file(e.path()).is_ok())
-                .count();
+            let removed = self.decode_cache.purge();
             self.status = format!(
                 "Purged {} from the cache",
                 plural(removed, "photo", "photos")
             );
             self.measure_usage();
         }
+        if choose {
+            self.dialog(FileDialog::DecodeCacheFolder, &ui.ctx().clone());
+        }
+        if default {
+            self.move_decode_cache(None);
+        }
+    }
+    /// Caches decoded images in `folder`, or the default directory for `None`,
+    /// and removes those in the old location: moving is usually meant to free
+    /// that drive. A folder that cannot be written keeps the cache where it is.
+    pub(super) fn move_decode_cache(&mut self, folder: Option<PathBuf>) {
+        let removed = match self.decode_cache.relocate(folder.as_deref()) {
+            Ok(removed) => removed,
+            Err(e) => {
+                self.status = format!("The cache can't be moved there: {e}");
+                return;
+            }
+        };
+        self.status = match self.save_session() {
+            Ok(()) if removed > 0 => format!(
+                "Photos are now cached in {}; {} removed from the old location",
+                self.decode_cache.dir().display(),
+                plural(removed, "decoded photo", "decoded photos")
+            ),
+            Ok(()) => format!(
+                "Photos are now cached in {}",
+                self.decode_cache.dir().display()
+            ),
+            Err(e) => format!("Cache folder not saved: {e:#}"),
+        };
+        self.measure_usage();
     }
 
     fn display_page(&mut self, ui: &mut egui::Ui) {
@@ -764,38 +803,47 @@ impl Editor {
         }
         gap(ui);
         group(ui, "Monitor profile");
+        use super::monitor::MonitorProfile;
         let monitor = self.view.monitor.clone();
-        form_row(ui, "Profile", |ui| match &monitor {
-            Some(path) => {
-                value(ui, &path.file_name().unwrap_or_default().to_string_lossy());
-            }
-            None => {
-                value(ui, "sRGB");
-            }
+        form_row(ui, "Profile", |ui| {
+            value(
+                ui,
+                &super::monitor::describe(&monitor, self.view.system_display.display()),
+            )
         });
         let mut choose = false;
-        let mut srgb = false;
+        let mut chosen = None;
         form_row(ui, "", |ui| {
             choose = ui.button("Choose Profile…").clicked();
-            srgb = ui
-                .add_enabled(monitor.is_some(), egui::Button::new("Use sRGB"))
-                .clicked();
+            for (choice, label) in [
+                (MonitorProfile::System, "Use System Profile"),
+                (MonitorProfile::Srgb, "Use sRGB"),
+            ] {
+                if ui
+                    .add_enabled(monitor != choice, egui::Button::new(label))
+                    .clicked()
+                {
+                    chosen = Some(choice);
+                }
+            }
         });
         form_row(ui, "", |ui| {
             hint(
                 ui,
                 if cfg!(target_os = "macos") {
-                    "Keep sRGB to let macOS match colors to the current display automatically. A custom profile overrides this with manual monitor conversion."
+                    "The system profile lets macOS match colors to the current display. A chosen profile, or sRGB for a display set to sRGB, is applied instead with no matching by macOS."
+                } else if cfg!(windows) {
+                    "The system profile is the one Windows assigns to the display the window is on, unless Windows manages color itself. Choose another ICC profile, or sRGB for a display set to sRGB."
                 } else {
-                    "Photos are shown in this profile. Choose your display's calibrated ICC profile, or keep sRGB."
+                    "The system profile is not read on Linux yet, so photos are shown as sRGB. Choose your display's calibrated ICC profile."
                 },
             );
         });
         if choose {
             self.dialog(FileDialog::MonitorProfile, &ctx);
         }
-        if srgb {
-            self.view.monitor = None;
+        if let Some(choice) = chosen {
+            self.view.monitor = choice;
             let _ = self.save_session();
             self.schedule();
         }
@@ -868,6 +916,178 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_cache_preference_is_loaded_and_saved_with_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let session = crate::app::session::Session {
+            decoded_cache_size_gib: Some(32),
+            ..Default::default()
+        };
+        let mut e = Editor::with_context(&egui::Context::default(), None, session, None);
+        e.session_file = Some(path.clone());
+        assert_eq!(e.decode_cache.limit(), 32 << 30);
+        e.decode_cache.set_limit(1 << 50);
+        e.save_session().unwrap();
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved.decoded_cache_size_gib(), 1_048_576);
+    }
+
+    /// Issue 609: decoded images can move to another drive. The old location's
+    /// entries go, the choice reaches the workers' cache and survives a restart,
+    /// and Use Default moves them back.
+    #[test]
+    fn the_decoded_cache_moves_to_a_chosen_folder_and_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.session_file = Some(path.clone());
+        // Set, not relocated: relocating would purge the user's real cache.
+        let old = dir.path().join("old");
+        e.decode_cache.set_folder(Some(&old));
+        std::fs::create_dir(&old).unwrap();
+        std::fs::create_dir(e.decode_cache.dir()).unwrap();
+        let entry = e.decode_cache.dir().join("0123456789abcdef.decoded");
+        std::fs::write(&entry, "pixels").unwrap();
+        let worker = e.decode_cache.clone();
+        let chosen = dir.path().join("other drive");
+        std::fs::create_dir(&chosen).unwrap();
+        e.move_decode_cache(Some(chosen.clone()));
+        assert!(!entry.exists(), "{}", e.status);
+        assert_eq!(
+            worker.dir(),
+            chosen.join(crate::decode_cache::CHOSEN_SUBFOLDER)
+        );
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            saved.decoded_cache_folder.as_deref(),
+            Some(chosen.as_path())
+        );
+        let restarted = Editor::with_context(&ctx, None, saved, None);
+        assert_eq!(restarted.decode_cache.dir(), worker.dir());
+
+        // Moving back purges only the chosen folder, never the default one.
+        e.move_decode_cache(None);
+        assert_eq!(worker.folder(), None);
+        let saved: crate::app::session::Session =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.decoded_cache_folder, None);
+    }
+
+    /// A folder that cannot be written keeps the cache, and its entries, where
+    /// they are.
+    #[test]
+    fn an_unwritable_cache_folder_keeps_the_cache_where_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = Editor::with_context(
+            &egui::Context::default(),
+            None,
+            crate::app::session::Session::default(),
+            None,
+        );
+        let current = dir.path().join("current");
+        std::fs::create_dir(&current).unwrap();
+        e.decode_cache.set_folder(Some(&current));
+        e.move_decode_cache(Some(dir.path().join("missing")));
+        assert_eq!(e.decode_cache.folder(), Some(current));
+        assert!(e.status.contains("can't be moved"), "{}", e.status);
+    }
+
+    #[test]
+    fn a_cache_size_applies_once_entered_and_is_saved_once_a_drag_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        let ctx = egui::Context::default();
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.session_file = Some(path.clone());
+        e.onboarding.visible = false;
+        e.preferences.open = true;
+        e.preferences.tab = Tab::Catalog;
+        let frame = |e: &mut Editor, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1600., 1000.),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| e.preferences_window(ui.ctx()));
+            out.textures_delta.clear();
+            out.shapes
+        };
+        let saved = || {
+            std::fs::read(&path).ok().map(|bytes| {
+                serde_json::from_slice::<crate::app::session::Session>(&bytes)
+                    .unwrap()
+                    .decoded_cache_size_gib()
+            })
+        };
+        let mut field = None;
+        for _ in 0..3 {
+            field = frame(&mut e, vec![])
+                .into_iter()
+                .find_map(|s| match s.shape {
+                    egui::Shape::Text(t) if t.galley.text().contains("GiB") => {
+                        Some(t.visual_bounding_rect().center())
+                    }
+                    _ => None,
+                });
+        }
+        let pos = field.expect("the cache size field is shown");
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut e, vec![egui::Event::PointerMoved(pos), button(true)]);
+        frame(&mut e, vec![button(false)]);
+        frame(&mut e, vec![]);
+        // Part way through typing 128, neither 1 GiB nor 12 GiB evicts or is saved.
+        for text in ["1", "2"] {
+            frame(&mut e, vec![egui::Event::Text(text.into())]);
+            assert_eq!(e.decode_cache.limit(), 4 << 30);
+            assert!(saved().is_none_or(|size| size == 4));
+        }
+        frame(&mut e, vec![egui::Event::Text("8".into())]);
+        frame(
+            &mut e,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut e, vec![]);
+        assert_eq!(e.decode_cache.limit(), 128 << 30);
+        assert_eq!(saved(), Some(128));
+        // A drag applies as it goes and is saved when released.
+        frame(&mut e, vec![egui::Event::PointerMoved(pos), button(true)]);
+        for x in 1..=10 {
+            let to = pos + Vec2::new(x as f32 * 5., 0.);
+            frame(&mut e, vec![egui::Event::PointerMoved(to)]);
+        }
+        let dragged = e.decode_cache.limit() >> 30;
+        assert!(dragged > 128);
+        assert_eq!(saved(), Some(128));
+        frame(
+            &mut e,
+            vec![egui::Event::PointerButton {
+                pos: pos + Vec2::new(50., 0.),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(saved(), Some(dragged as u32));
+    }
 
     /// What a page paints past the right edge it is clipped to: text or
     /// controls cut off by the window.

@@ -6,7 +6,7 @@ See [preview performance](preview-performance.md) for how previews are rendered 
 
 ## Preview and detail
 
-There is no reduced interactive draft: every change renders the real pipeline at viewport size in physical pixels (including display scale), from a resolution pyramid for Fit. At 100%, an edit or pan whose full-resolution region takes more than a moment publishes a reduced render of the region first, labeled **Draft • refining**, and the full-resolution region replaces it; fast renders and regions still cached go straight to full resolution. A resize schedules a new render; superseded jobs are canceled and stale results cannot replace current edits ([architecture](architecture.md#preview-compute-backend)).
+Every change renders the real pipeline at viewport size in physical pixels (including display scale), from a resolution pyramid for Fit and zoomed-out views. When a render takes more than a moment, an edit publishes a reduced render first, labeled **Draft • refining**, and the full render replaces it: at 100% a reduced render of the region (also when panning), and for the whole photo one with at most a megapixel. Fast renders, and views still cached, go straight to full resolution. While an edit continues, the running render finishes and shows before the next one starts; a new photo, view or size cancels it, and an older result never replaces a newer one ([architecture](architecture.md#preview-compute-backend)).
 
 Sharpening (`develop/sharpening.rs`) is applied before resizing. New edits and Lightroom imports start at Lightroom Classic's raw defaults (Amount 40, Radius 1.0, Detail 25, Masking 0; every raw and DNG import in the catalogue sampled, process versions 2012 to 6) and render with an unsharp mask fitted to Camera Raw 18.7 on a synthetic chart (slanted edges, sine gratings of 0.04 to 0.3 cycles per pixel, texture, noisy flats; 45 renders). It is about 2.4 times the strength of RAWmakase's earlier operator (a luminance-only Gaussian unsharp mask, no longer rendered) on fine detail per Amount, shapes the high-pass as `d / (1 + (|d|/halo)³)` so strong edges get small halos, makes dark halos 0.57 of light ones, scales the strength with Detail (0.3× at 0, 2.1× at 100) and fades out detail below a Masking threshold. The Detail panel's reset gives the Lightroom defaults. Camera Raw's ringing at Detail above 50 and its gentler sharpening of noise in deep shadows are not modelled. Full-resolution region rendering includes the required sharpening halo, and its pixels match the full render. No separate Fit-only sharpening changes the result. Luminance noise reduction is described below.
 
@@ -61,6 +61,16 @@ Only smooth, unclipped samples contribute; dark gaps separate areas so an unrela
 bright object cannot provide the reference. The surviving channels stay unchanged;
 only clipped channels are estimated, with the existing blend near saturation.
 Fully clipped pixels and areas without a usable reference keep the neutral fallback.
+Where one channel is clipped, no estimate lowers it below the value the sensor
+recorded, which is only a lower bound on the light: a neighbour ratio or a neutral
+fallback that comes out lower keeps the recorded value. Darkening it rendered bright
+lights duller and darker than Camera Raw (on the test dataset's own-stress sets, the
+highlight-region error fell from about 3–4 to 1.3–1.8 ΔE00). Where two are clipped
+the estimate is kept: Camera Raw renders such a core whiter than the recorded pair
+(a sunset sun with red and blue clipped is yellow-white), and the floor turned it
+magenta. The floor fades out with the second channel's own recovery blend (0.97 to
+1.0 of its clip), so it adds no step where a second channel reaches the cutoff. The
+estimate itself still switches its reference channels there, as it did before.
 This infers missing colour, not missing detail, and is not Adobe's recovery algorithm.
 Cancellation discards the map and recovered image together. Tests cover a wide
 partially clipped area, dark gaps, untouched surviving channels, fully clipped
@@ -72,7 +82,7 @@ DCP ColorMatrix1/2 now support DNG temperature/tint and camera-neutral inversion
 
 RAWmakase supports a bounded DCP subset: three-channel forward matrices, one or two standard illuminants, reciprocal-temperature interpolation, interpolated HSV calibration tables, linear/sRGB-indexed look tables, profile tone curves and baseline exposure offsets. The profile curve processes the low/high channels and interpolates the middle channel to preserve hue. DCPs without an embedded curve use the Adobe DNG SDK default curve. The profile tone stage clips to the SDR domain. This is an independent implementation, not exact Adobe processing-order parity.
 
-No Adobe profiles are bundled. New edits prefer a matching imported Adobe Color, then Adobe Standard profile, then a DNG's embedded profile; without those, every camera uses RAWmakase Color, our own look over its LibRaw matrix (see [RAWmakase profiles](lightroom-profiles.md#rawmakase-profiles)). Published third-party DCPs, such as RawTherapee's, can be imported like any other profile. Profiles for another model are rejected, never substituted.
+No Adobe profiles are bundled. New edits prefer a matching imported Adobe Color, then Adobe Standard profile, then a DNG's embedded profile; without those, every camera uses RAWmakase Color, our own look over its camera matrix (see [RAWmakase profiles](lightroom-profiles.md#rawmakase-profiles)). Published third-party DCPs, such as RawTherapee's, can be imported like any other profile. Profiles for another model are rejected, never substituted.
 
 The **Profile** selector lists compatible DCPs in the local `camera-profiles` library. Each photo opened lists them again; the camera each DCP was made for is remembered while the app runs, keyed by the file's size, modification time and (on Unix) status change time, so after the first scan only the photo's camera's profiles are read. **Import profile…** loads a matching DCP file. Profile data and copyright are embedded into JSON recipes, so moving the profile file doesn't change an existing edit. Histories share immutable profile data. Matrix-only DCPs, HDR/triple-illuminant profiles and profiles forbidding embedding are rejected with an explanation. Compatible enhanced XMP look profiles can be explicitly imported together with their base DCP; see [supported look features and comparisons](lightroom-profiles.md). Profiles alone cannot reproduce Lightroom's demosaicing, local tone operators or detail algorithms.
 

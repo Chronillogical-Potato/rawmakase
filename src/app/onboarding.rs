@@ -572,7 +572,7 @@ impl Editor {
                 Mark::Failed
             };
             row.status = result.message();
-            if !result.failed.is_empty() {
+            if result.has_details() {
                 row.hover = Some(result.details(8));
             }
         } else if scanning && n == 0 {
@@ -630,7 +630,7 @@ impl Editor {
             ),
             Some(n) => (
                 format!("No photos in the {} added", count(n, "folder")),
-                "RAWmakase reads RAW, DNG, JPEG and TIFF files. Add a folder that holds \
+                "RAWmakase reads RAW, DNG, JPEG, PNG and TIFF files. Add a folder that holds \
                  some, or find the folder again if it has moved.",
             ),
             None => (
@@ -680,10 +680,8 @@ impl Editor {
                     {
                         self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx);
                     }
-                    if crate::platform::accepts_dropped_files() {
-                        ui.add_space(14.);
-                        hint(ui, "Or drag a folder onto this window.");
-                    }
+                    ui.add_space(14.);
+                    hint(ui, "Or drag a folder onto this window.");
                 } else {
                     if primary(ui, default_catalog_label(&default))
                         .on_hover_text(pretty_path(&default))

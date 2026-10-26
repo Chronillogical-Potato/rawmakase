@@ -3,14 +3,15 @@
 RAWmakase is the app crate with explicit domain modules, on top of
 `crates/rawmakase-model`: what an edit is, as values (the recipe and its settings,
 camera and lens profiles, colour primitives, DNG hints, output buffers, storage helpers), which
-Cargo builds without LibRaw, the renderer, wgpu or the GUI, and
+Cargo builds without the RAW decoders, the renderer, wgpu or the GUI, and
 `crates/rawmakase-interop`: the file formats and presets over it (XMP, Lightroom's
 Develop settings, presets, raw defaults, EXIF and JPEG, export settings),
 built the same way, and `crates/rawmakase-catalog`: the SQLite catalog, Lightroom
 catalog import and which edit a photo develops with. Above the model,
 `crates/rawmakase-engine` is the renderer (`develop`, CPU and the GPU preview port),
-built without LibRaw, the catalog or the GUI; `crates/rawmakase-native` is the only
-crate that compiles and links LibRaw and Little CMS (`raw`, `demosaic`, `photo`,
+built without the RAW decoders, the catalog or the GUI; `crates/rawmakase-decode` is the only
+crate that reaches RAWmakase's own RAW decoders (`crates/rawmakase-raw`) and does
+colour management (`raw`, `demosaic`, `photo`,
 and the full-size decode in `decode` and `decode_cache`, which uses the engine's
 highlight recovery); `crates/rawmakase-export` develops and writes exports with
 their watermarks over both; `crates/rawmakase-inference` is the one leaf that runs
@@ -35,14 +36,15 @@ files should preserve.
 | Module | Owns | Main extension points |
 | --- | --- | --- |
 | `camera_data` | A RAW's metadata, the demosaic and decode choices and the decoded camera-space image, as values with no native code | `camera_data.rs` |
-| `raw` | LibRaw/Little CMS boundary: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails | RAW decoding and native color management |
-| `photo` | Opening a photo: LibRaw's facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
-| `raster` | Opening a JPEG, PNG or TIFF, which RAWmakase shows without developing: decoded upright and converted from its embedded ICC profile to 8-bit sRGB (pure Rust, `moxcms`) | `raster.rs` |
+| `raw` | RAW files: reading metadata, decoding into `camera_data` images, oriented embedded thumbnails, with RAWmakase's own decoders (`crates/rawmakase-raw`, see [RAW decoding](raw-decoding.md)) | RAW decoding |
+| `color_management` | The sRGB profile exports embed and the transform of 8-bit sRGB to a monitor profile, in pure Rust (moxcms reads the profiles) | `color_management.rs` |
+| `photo` | Opening a photo: `open_source` is the one entry point, sending a RAW to `raw` and a JPEG, PNG, TIFF, WebP, AVIF or JPEG XL to `raster`; a RAW's decoder facts from `raw`, then the camera's lens tables, a DNG's profile and hints, and the imported lens profiles that fit | `photo.rs` |
+| `raster` | Opening a JPEG, PNG, TIFF, WebP, AVIF or JPEG XL: decoded upright and converted from its embedded ICC profile or CICP colour to 8-bit sRGB for previews, or to linear ProPhoto f32 for Develop (pure Rust: `image`, `jxl-oxide`, `rav1d` without assembly, `moxcms`) | `raster.rs`, `raster/` |
 | `demosaic` | RAWmakase's own Bayer and X-Trans demosaicing of the unpacked sensor data | `demosaic.rs` |
-| `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them | `dng.rs`, `tiff.rs` |
+| `dng`, `tiff` | A DNG's rendering hints (embedded profile, baseline exposure, crop, opcodes) and the bounded TIFF reader behind them (`crates/rawmakase-tiff`, a leaf crate with no RAW knowledge, re-exported as `model::tiff`) | `dng.rs`, `rawmakase-tiff/src/lib.rs` |
 | `decode` | A photo's full-size image, made one way for Develop, prefetch, Reference View and export: the cache's copy, else a decode with highlights recovered and stored, as a `DecodePolicy` asks | `decode.rs` |
-| `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build | `decode_cache.rs` |
-| `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `reference.rs` |
+| `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build; the app shares one live size limit and folder across Develop, prefetch, Reference View, export and preview builds, persisted in its session | `decode_cache.rs` |
+| `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, `.cube` LUTs imported as look profiles, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `cube_look.rs`, `reference.rs` |
 | `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), and Adobe lens profiles (LCP) as data; depends only on `xml` | `mod.rs`, `lcp.rs` |
 | `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement, plus profile selection | `embedded.rs`, `lcp.rs`, `auto_ca.rs`, `choice.rs` |
 | `rendered` | Developed pixels as values: an output image, its histogram and clipping overlay, which the renderer produces and export and watermarks use; depends on nothing | `rendered.rs` |
@@ -51,9 +53,9 @@ files should preserve.
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes. Settings that ask for Auto measure the photo through `PhotoMeasures`, which `develop::Measures` provides, and packets take the crop as rendered from the caller, so XMP needs no rendering code | `parse.rs`, `apply.rs` |
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
 | `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
-| `storage` | RAW identity checks, application paths and atomic JSON writes. Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs` |
-| `export_settings` | Export choices as values: the Export dialog's settings and a photo's saved `ExportOptions` | `export_settings.rs` |
-| `export` | JPEG/16-bit TIFF encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
+| `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts and free space, and a copy's steps; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
+| `export_settings` | Export choices as values: the Export dialog's settings, a photo's saved `ExportOptions`, and the naming templates (`NameTemplate`: Lightroom's presets and Filename Template Editor templates, `TokenTemplate`) exports and renames name files by, from the `NameFields` taken once per export | `export_settings.rs`, `export_settings/tokens.rs` |
+| `export` | JPEG, 16-bit TIFF and PNG encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
 | `ids` | Typed catalog row ids (`PhotoId`, `FolderId`, `RootId`, `CollectionId`), stored and serialized as their integers; a leaf, so edit resolution and export use them below the catalog | `ids.rs` |
 | `metadata` | Photo metadata as values: descriptive fields (title, caption, copyright, creator, capture, location), keywords and camera settings; depends on nothing else | `metadata.rs` |
 | `edit_session` | The edit of the photo open in Develop apart from the window: its bounded History (named steps, one per gesture, saved with the edit) and save state; no egui | `history.rs`, `save_state.rs` |
@@ -61,10 +63,11 @@ files should preserve.
 | `catalog` | RAWmakase SQLite database, schema, photo/folder/collection models, edits, relinking, Synchronize Folder's engine (`folder_sync`: scan, matching, apply, family digest; named apart from `app/sync.rs`, which is Sync Settings) and disposable preview cache | `schema.sql`, `models.rs`, `mod.rs`, `folder_sync.rs`, `preview_cache.rs` |
 | `catalog::db` | The catalog's one connection boundary: an opaque `Db` with checked reads, `snapshot` for consistent reads, `write` as the only way to write, and `with_lightroom` for import; statements are `Sql` (portable) or `SqliteSql` (Lightroom), shape-checked at compile time; values go through the catalog's own `ToValue`/`FromRow` (`catalog::value`) | `mod.rs`, `sql.rs` |
 | `catalog::lightroom` | Read-only Lightroom snapshot import | `mod.rs`, `history.rs` |
+| `catalog::file_ops` | The one owner of changing where a photo or folder is or what it is named, on disk and in the catalog (#370, planned in #556): planning against a snapshot, the refusals, destination conflicts, names, which companion files go with a photo (by `catalog::sidecar`'s candidate rule), the journal, the operation lock, execution and recovery. Names photos from `interop::export_settings::NameTemplate`, the one owner of naming templates. Reaches the file system through its `Disk` seam over `storage::fsops` and the Trash through a `Trash` the app passes in | `plan.rs`, `execute.rs`, `recover.rs`, `journal.rs`, `rename.rs`, `tree.rs` |
 | `catalog_session` | The open catalog and the lists read from it, with no window: opening it, reading it again, writes that must keep those lists in step (ratings, descriptive metadata, collections, virtual copies and their names), the background reads that fill in capture times and photo info for photos added from folders, and the throttled checksum reader, whose results a structural generation guards. Above `photo` and `raw`, as reading a RAW's info opens it; `app::library` decides which photos are online and shows the lists | `mod.rs`, `backfill.rs`, `background.rs`, `checksums.rs` |
 | `lr_develop` | Best-effort conversion of Lightroom's serialized Develop settings into a recipe, through XMP; below the catalog, so edit resolution can use it | `lr_develop.rs` |
 | `app` | Desktop editor state, UI, dialogs, background task coordination and presentation | Components described below |
-| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager, the browser and the desktop's text size | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs`, `text_scale.rs` |
+| `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager, the browser, the system Trash file operations get (`trash::SystemTrash`, failing closed, and whether a drive has one; no policy), and the display's color management (macOS surface tagging, the Windows display profile) | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs`, `trash.rs`, `display.rs` |
 | `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 
@@ -81,22 +84,57 @@ private. UI and workflow methods have visibility limited to the app module, one
 file per tool, workflow or policy; the Develop adjustment panels currently share
 `inspector.rs`. The [code map](code-map.md#desktop-application) lists them.
 
+`platform::menu` owns the macOS menu objects and queues typed actions, waking the
+UI without reaching editor state. The AppKit objects stay on the main thread;
+`app::native_menu` owns availability and revalidates each action before calling
+the existing editor operations. Close and Quit retain the normal save guard.
+
 `Editor` deliberately remains the coordinator for state shared across panels.
 A panel should call the domain API responsible for an operation, rather than
 implementing file formats, SQL or pixel processing itself. Thumbnail decoding
 belongs to `raw`; library browsing does not call into the preview renderer.
 
-`app::display` installs a paint callback for the macOS surface color declaration;
-`platform::display` owns the AppKit/Metal layer access. The default sRGB mode lets
-the compositor match the current display. Manual monitor conversion keeps its
-existing device-RGB output and bypasses compositor conversion. Neither mode
-changes the renderer's output color space or export profiles.
+Whether Develop opens a catalog photo has one owner, `app::library::Refusal`:
+`develop_refusal` refuses an offline file, and a JPEG, PNG, TIFF, WebP, AVIF or JPEG XL whose header
+`raster::probe` finds Develop can't edit (`raster::Unsupported`, such as a CMYK
+JPEG, an HDR or animated file, or a tiled AVIF), before anything opens it. The probe reads the file, so only work on one
+photo uses it (opening it, its dialog, Quick Develop, the context menu,
+automation's `open`); export and preview builds over many photos use
+`availability_refusal` and meet such a file as that photo's failure; `Refusal::opening` turns the same error, should
+opening find it, into the reason the loader reports. Whether the Library shows a photo developed or as its file is
+`Library::develops`: a RAW always, any other format once it has an edit, since
+its defaults reproduce the file. Preview builds and stored previews follow the
+same rule from the photo's edit record.
+
+`app::monitor` owns the Monitor profile choice (System, sRGB or a chosen ICC
+profile) and resolves it, with what `platform::display` reports about the
+window's display, into the profile each render job captures. `app::display`
+installs a paint callback for the macOS surface color declaration;
+`platform::display` owns the AppKit/Metal layer access and the Windows display
+profile and advanced-color queries. Following the system lets macOS's
+compositor match the display, and on Windows converts to the display's assigned
+profile unless Windows manages color itself. sRGB and a chosen profile output
+device RGB and bypass compositor conversion. No mode changes the renderer's
+output color space or export profiles.
+
+Folder-drop workers resolve the imported folder tree keys against actual local
+locations (including mapped symlinks). The source keys travel with the reopened
+Library result; the UI applies them after restoring layout and filters, so the
+result's source cannot be replaced by the old view. Filesystem resolution stays
+on the worker.
 
 Each load/render task owns its generation, cancellation token and lifecycle.
 The single-slot mailbox replaces pending work. The app discards obsolete results,
 and a failure only finishes its owning task. Worker messages use named fields;
 render stages are enums, independent of user-facing status text. Exports capture
 their recipe before starting, and overwrite confirmation holds the current photo.
+Choosing what to export commits Library typing and reads every chosen photo's
+name fields from the catalog in one snapshot; what only the files have (the
+camera's make and model, and a photo without a catalog's capture time and info)
+is read by one background read per scope, started only when the file-name
+template needs it. The dialog's Example and the planned names both come from
+these fields; a read of a replaced or cancelled scope is dropped, and Export
+waits for, or says it goes on without, what its names need.
 
 Document reset clears its edit history and decoded images together; a catalog
 photo's History then comes back from the catalog with its edit. A frame's
@@ -113,13 +151,15 @@ inject a temporary file, without changing the process-wide environment.
   fails on a new one or on a cycle; add a line only when the new dependency
   points down the intended layering. `scripts/deps-closures.txt` lists what some
   modules must never reach, even through others: the edit session never reaches
-  LibRaw, the renderer or the app, and the renderer never reaches the app or
+  the RAW decoders, the renderer or the app, and the renderer never reaches the app or
   export. The check prints the chain that breaks a rule.
 - The model, file formats, catalog and control protocol are crates, so Cargo
   rules out a dependency back on the app. `scripts/crate-closures.sh` (CI and
   `make check`) fails when one of them gains the app, a GPU or GUI crate, or a
-  LibRaw or Little CMS binding; CI also builds and tests them on a machine
-  without LibRaw or Little CMS. The catalog's bundled SQLite is intended.
+  C RAW library or Little CMS binding, and when any workspace crate depends on
+  one or a build script links one (`rawmakase-decode` has no build script). The
+  whole workspace is Rust apart from the catalog's bundled SQLite, which is
+  intended.
 - Keep `eframe`, `egui` and native chooser code in `app`. The CLI must be able to
   use domain operations without creating an editor or UI context. The crate still
   links its existing GUI dependencies; this is module separation, not a separate
@@ -167,9 +207,12 @@ inject a temporary file, without changing the process-wide environment.
   migrations are shared by native presets, catalog edits and legacy sidecars. Every saved recipe renders
   with the one engine, and fields it lacks take the recipe defaults, so changes to
   recipe defaults must account for older saved edits.
-- Keep original RAWs and Lightroom sources read-only. Preserve unsupported source
-  data, legacy sidecars, no-clobber publication, ICC/EXIF handling and
-  temporary-file write behavior.
+- Never change an original's contents or a Lightroom source. A photo's file is
+  moved, renamed or put in the Trash only by a file operation the user
+  confirmed (`catalog::file_ops`); nothing copies over, replaces or deletes
+  one. A move to another volume copies it, verified, and puts the original in
+  the Trash only once the catalog follows the copy. Preserve unsupported source data, legacy sidecars, no-clobber
+  publication, ICC/EXIF handling and temporary-file write behavior.
 - Rendering math stays in `develop` and `camera_profiles`. Fit previews, regions
   and exports must continue to share the relevant processing paths. What the
   [scene tone stage](scene-tone-stage.md) measures of a photo comes from one
@@ -200,6 +243,40 @@ inject a temporary file, without changing the process-wide environment.
 - Autosave writes on its own thread and catalog connection, so a slow disk
   cannot stall editing. Saves before navigation and close wait for it, then
   save synchronously.
+- File operations change catalog rows only on positive evidence: rows follow a
+  file proven at its new path (the same file object, by its exact name in the
+  folder's listing), and go only with a Trash receipt and the file gone from
+  its path; a file's absence alone authorises nothing. A file leaves its path
+  only by an exclusive rename on the same volume (never a link and unlink) or
+  by the system Trash, which fails closed: a volume without one is refused,
+  never deleted from. To another volume a file is copied (into a hidden
+  partial copy, hashed as read, synced, read back, then renamed exclusively),
+  the catalog follows only proven copies, and the original goes to the Trash
+  only after that, while it is still the file copied and its extras
+  (extended attributes, resource forks, alternate data streams) are still
+  its copy's; a drive that can't keep them leaves it where it is; the one
+  file ever unlinked is a partial copy the run made and never named. Such copies are
+  made only between volumes whose file ids stay (local APFS, HFS+, ext,
+  XFS, Btrfs or NTFS ones) or FAT and exFAT ones, where a copy is proven by
+  its exact name and SHA-256 instead and no file id is journalled (#573);
+  and a name held by another file object, or not proven, is never taken for
+  a copy gone. A folder moved to another volume is copied whole into one
+  hidden folder there, then named by one exclusive rename; its originals go
+  to the Trash whole only when the folder holds exactly what was copied, and
+  the only folders ever removed are empty ones that copy made. On FAT and
+  exFAT both are proven by names, as photos are (#573). A folder put in the
+  Trash goes in one Trash call, only while its whole tree is exactly as the
+  user was asked about (`file_ops::tree_trash`), and its subtree's rows go
+  only with the receipt, the folder gone from its path and, where it can be
+  read, the trashed folder proven the one planned. Every disk step is journalled, after its folders
+  are synced, before the next, and recovery decides whatever a crash left from
+  the journal and the disk, putting back only what it proves. One process at a
+  time changes a catalog's files, under an OS lock on a file beside the
+  catalog named after its canonical path; catalogs on network volumes or with
+  several hard links are refused. Each item's preconditions (its family's
+  placement and user-state digests, its folders' resolved paths) are captured
+  once in the plan and checked again in the transaction that journals it, the
+  one that completes it, and by recovery.
 
 ## Compatibility
 
@@ -247,11 +324,15 @@ equivalent performance or numerical precision.
 The per-pixel color and tone stage runs on the GPU for previews
 (`gpu/develop.wgsl`, fed by `pipeline/pixel_params.rs`), on the stage cache's
 samples, for every recipe resolved with a camera profile; unresolved recipes and
-all exports use the CPU stage, which is the reference.
+all exports use the CPU stage, which is the reference. Each pass is compiled for the
+features its parameters use (`gpu::develop::Variant`); the Shadows/Highlights map's
+grids stay on the device per map base, and each sample set's camera colour per the
+recipe fields it reads (`gpu::develop::Kept`), written once a second render with the
+same settings asks for it and read after its pass is submitted.
 When the GPU renders a preview, the developed pixels stay on the device and
 `gpu/present.wgsl` finishes them into a texture that egui draws directly (registered
 as a native texture by the render worker): sharpening, vignettes and grain, the
-clipping overlay, the monitor profile (a 52³ lattice sampled from lcms once per
+clipping overlay, the monitor profile (a 52³ lattice sampled from `color_management` once per
 profile, interpolated trilinearly) and 8-bit encoding, in the CPU reference's order.
 The histogram is counted in the same pass and the Navigator copy is reduced on the
 GPU; only the histogram (3 KB) and, for catalog photos, a 640-pixel library
@@ -280,8 +361,8 @@ Texture renders the whole preview on the CPU. A failure in these stages turns of
 only this path for the session.
 
 Presented textures are kept per view (the whole photo, or a 100% region) and size,
-two of each, so a slider moving at 100% alternates between the reduced preview's and
-the full region's textures without allocating. Each texture carries a generation that
+two of each, so a slider moving alternates between the reduced preview's and the
+full render's textures without allocating. Each texture carries a generation that
 changes whenever it is written; the worker reuses a finished frame when switching
 views only while its texture still holds it.
 
@@ -293,11 +374,16 @@ creates a new backend. GPU execution already submitted cannot be interrupted;
 obsolete results are discarded before they are published. Full-quality CPU stages check cancellation
 within pixel/row/column work. Pending jobs still coalesce in a single-slot mailbox.
 
-There is no separate interactive draft. Fit renders the current pipeline from the
-smallest pyramid level at or above the physical viewport size on every change;
-at 100% a reduced region from the pyramid is published first (as a draft stage),
-then the full-resolution region. The single-slot mailbox and cancellation keep
-continuous editing on the latest change.
+There is no separate draft pipeline. Fit renders the current pipeline from the
+smallest pyramid level at or above the physical viewport size on every change. While
+an edit is slower to present than 40 ms, a reduced render from the pyramid is
+published first as a draft stage: at 100% the region at half resolution or less, and
+for the whole photo at an edge halved until it has at most a megapixel. The
+single-slot mailbox keeps only the latest pending job. An edit of the same document
+and view (`Editor::schedule_edit`, `Task::supersede`) lets the running render finish,
+and its frame shows with the settings it was asked for, so a GPU slower than the
+slider still shows frames during a drag; any other render, and the next view or
+photo, cancels the running ones, and a result older than the one shown is dropped.
 
 ## Live application control
 

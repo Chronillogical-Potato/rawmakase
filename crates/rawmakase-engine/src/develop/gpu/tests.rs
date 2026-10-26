@@ -3,6 +3,126 @@ use crate::develop::masks::local::LocalDeltas;
 
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn gpu_clarity_reconstructs_fine_edges_like_the_cpu() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::pipeline::{Samples, Source, develop_samples, pixel_params::pixel_params},
+    };
+    use crate::{
+        develop::masks::MaskWeights,
+        model::masks::{LocalAdjust, MaskComponent, MaskGroup, MaskShape},
+    };
+    use std::sync::Arc;
+    let (w, h) = (1024, 32);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [1.; 3],
+        daylight_wb: [1.; 3],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                // A one-pixel rail is finer than the measurement grid. Both sides,
+                // different brightnesses and the floor exercise reconstruction.
+                let x = i % w;
+                let level = if x % 64 == 31 {
+                    0.6
+                } else if x < w / 2 {
+                    0.08
+                } else {
+                    0.00001
+                };
+                [level; 3]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let samples = Arc::new(Samples {
+        width: w,
+        height: h,
+        pixels: image.pixels.clone(),
+        positions: (0..w * h)
+            .map(|i| [(i % w) as f32, (i / w) as f32])
+            .collect(),
+    });
+    let mut recipe = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let source = Source::new(&image);
+    // Reusing the processor while crossing zero also checks the absent/present
+    // coefficient tables and changing slider positions in the cached path.
+    for amount in [1., 0., -1., -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.] {
+        recipe.effects.clarity = amount;
+        for adjust in [
+            None,
+            Some(LocalAdjust {
+                exposure: 2.,
+                ..Default::default()
+            }),
+            Some(LocalAdjust {
+                temperature: 0.5,
+                ..Default::default()
+            }),
+            Some(LocalAdjust {
+                color: [30. / 360., 0.8],
+                ..Default::default()
+            }),
+        ] {
+            recipe.masks = adjust
+                .map(|adjust| {
+                    vec![MaskGroup {
+                        adjust,
+                        components: vec![MaskComponent::new(MaskShape::Linear {
+                            from: [0.5, -2.],
+                            to: [0.5, -1.],
+                        })],
+                        ..Default::default()
+                    }]
+                })
+                .unwrap_or_default();
+            let weights = adjust.map(|adjust| MaskWeights {
+                deltas: vec![adjust.delta(1.)],
+                data: Arc::new(vec![255; image.pixels.len()]),
+            });
+            let mut params = pixel_params(source, &recipe).expect("supported recipe");
+            if let Some(weights) = &weights {
+                assert!(params.set_masks(source, &recipe, Some(weights)));
+            }
+            let expected = develop_samples(source, &recipe, &samples, &cancel, weights.as_ref())?;
+            let actual = gpu.develop(&samples, &params, &cancel)?;
+            let max = actual
+                .pixels
+                .iter()
+                .flatten()
+                .zip(expected.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f32::max);
+            assert!(
+                max < 1e-4,
+                "Clarity {amount}, {adjust:?}: CPU/GPU difference {max}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn gpu_measured_tails_match_cpu_globally_and_in_masks() -> Result<()> {
     use crate::{
         camera_data::{CameraImage, Metadata},
@@ -26,8 +146,13 @@ fn gpu_measured_tails_match_cpu_globally_and_in_masks() -> Result<()> {
         height: 240,
         pixels: (0..240 * 240)
             .map(|i| {
-                let radius = ((i % 240) as f32 - 120.).hypot((i / 240) as f32 - 120.);
-                [(-7. + 7. * ((45. - radius) / 25.).clamp(0., 1.)).exp2(); 3]
+                let (x, y) = (i % 240, i / 240);
+                let radius = (x as f32 - 120.).hypot(y as f32 - 120.);
+                // 10 stops over the background, past the Highlights table's top (7);
+                // the left half in 2-pixel stripes, where the tail reads the fine mean.
+                let stripe = x < 120 && y / 2 % 2 == 0;
+                let level = if stripe { 0. } else { (45. - radius) / 25. };
+                [(-7. + 10. * level.clamp(0., 1.)).exp2(); 3]
             })
             .collect(),
         metadata: metadata.clone(),
@@ -367,6 +492,11 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     r.saturation = 0.3;
     r.grading[1] = [0.1, 0.3, 0.];
     recipes.push(r);
+    // Over 100% a clipping table clips its blend to 0–1, which Color Grading's
+    // ProPhoto gains would otherwise carry into the other channels.
+    let mut r = base(&rgb_tables[3]);
+    r.grading[1] = [0.1, 0.3, 0.];
+    recipes.push(r);
     let mut r = base(&tables);
     r.exposure = 0.7;
     r.contrast = 0.4;
@@ -386,6 +516,15 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
     let mut negative = r.clone();
     negative.effects.dehaze = -0.5;
     recipes.push(negative);
+    // #600: darkened highlights with maximum Dehaze must transform the haze's
+    // airlight by the same per-pixel gain on both backends.
+    let mut dehaze_highlights = r.clone();
+    dehaze_highlights.effects.dehaze = 1.;
+    dehaze_highlights.highlights = -1.;
+    recipes.push(dehaze_highlights.clone());
+    // #606 supplies a separate Clarity guide; Dehaze still needs the resulting gain.
+    dehaze_highlights.effects.clarity = 0.7;
+    recipes.push(dehaze_highlights);
     // The measured parametric curve, with moved splits, from here on.
     r.effects.parametric = [0.3, 0.2, -0.3, -0.2];
     r.effects.splits = [0.2, 0.45, 0.8];
@@ -460,13 +599,86 @@ fn gpu_develop_matches_cpu_pixel_stage() -> Result<()> {
         .count();
     assert!(changed > with.pixels.len() / 50, "{changed} pixels changed");
     let lifted_recipes = [recipes[1].clone(), recipes[toned].clone()];
-    let cases =
-        (recipes.iter().map(|r| (&image, r))).chain(lifted_recipes.iter().map(|r| (&lifted, r)));
-    for (i, (image, recipe)) in cases.enumerate() {
+    // A rendered file (its pseudo-scene, as `photo::open_source` gives it): its 8-bit
+    // levels and colours as its own samples, and the wide samples above, at its
+    // defaults, with Whites and Blacks, and edited as a photo is.
+    let srgb: Vec<[u8; 3]> = (0..=255u8)
+        .map(|v| [v; 3])
+        .chain((0..256).map(|i| {
+            let w = |k: f32| (wave(i, k) * 255.).round() as u8;
+            [w(0.71), w(0.53), w(0.29)]
+        }))
+        .collect();
+    let rendered = Arc::new(crate::develop::pipeline::rendered_fixture(&srgb));
+    let rendered_samples = Arc::new(Samples {
+        width: srgb.len() as u32,
+        height: 1,
+        pixels: rendered.pixels.clone(),
+        positions: (0..srgb.len()).map(|i| [i as f32, 0.]).collect(),
+    });
+    let untouched = Recipe::for_rendered(&rendered.metadata);
+    let rendered_recipes = [
+        untouched.clone(),
+        Recipe {
+            whites: 0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            blacks: -0.5,
+            ..untouched.clone()
+        },
+        Recipe {
+            whites: -0.4,
+            blacks: 0.3,
+            exposure: 0.5,
+            ..untouched.clone()
+        },
+        {
+            let mut r = Recipe {
+                exposure: 1.,
+                whites: 0.3,
+                contrast: 0.5,
+                incremental_temperature: 25.,
+                ..untouched.clone()
+            };
+            r.update_wb(&rendered.metadata);
+            r
+        },
+        // The cool magenta corner, where the camera stage holds blue at 0.
+        Recipe {
+            incremental_temperature: -75.,
+            incremental_tint: 75.,
+            ..untouched
+        },
+    ];
+    let cases = (recipes.iter().map(|r| (&image, r, &samples)))
+        .chain(lifted_recipes.iter().map(|r| (&lifted, r, &samples)))
+        .chain(
+            rendered_recipes
+                .iter()
+                .flat_map(|r| [(&rendered, r, &rendered_samples), (&rendered, r, &samples)]),
+        );
+    for (i, (image, recipe, samples)) in cases.enumerate() {
         let source = Source::new(image);
         let params = pixel_params(source, recipe).expect("GPU port covers this recipe");
-        let expected = develop_samples(source, recipe, &samples, &cancel, None)?;
-        let actual = gpu.develop(&samples, &params, &cancel)?;
+        let expected = develop_samples(source, recipe, samples, &cancel, None)?;
+        let actual = gpu.develop(samples, &params, &cancel)?;
+        // At a rendered file's defaults the GPU reproduces the file, as the CPU does.
+        if std::ptr::eq(samples, &rendered_samples) && std::ptr::eq(recipe, &rendered_recipes[0]) {
+            let off = |pixels: &[[f32; 3]]| -> Vec<_> {
+                (pixels.iter().zip(&srgb))
+                    .filter(|(got, want)| {
+                        (0..3).any(|c| (got[c] * 255. - want[c] as f32).abs() > 1.)
+                    })
+                    .map(|(got, want)| (*want, got.map(|v| v * 255.)))
+                    .collect()
+            };
+            let (cpu, gpu) = (off(&expected.pixels), off(&actual.pixels));
+            assert!(
+                cpu.is_empty() && gpu.is_empty(),
+                "recipe {i}: CPU {cpu:?}, GPU {gpu:?}"
+            );
+        }
         let d: Vec<f32> = actual
             .pixels
             .iter()
@@ -527,15 +739,20 @@ fn read_texture(gpu: &Processor, texture: &wgpu::Texture) -> Result<Vec<u8>> {
 /// 100% region.
 #[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
-#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
 fn presented_previews_match_the_cpu_render() -> Result<()> {
+    check_presented_previews(157, 103, false)?;
+    // Exact half-size CA sampling, without the geometry/spatial-effects stack.
+    check_presented_previews(156, 104, true)
+}
+
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn check_presented_previews(w: u32, h: u32, ca_only: bool) -> Result<()> {
     use crate::{
         camera_data::{CameraImage, Metadata},
         camera_profiles::CameraProfile,
         develop::{PreviewRenderer, quality::Output},
     };
     use std::sync::Arc;
-    let (w, h) = (157, 103);
     let radial = |values: Vec<f32>| crate::optics::Radial {
         knots: (0..values.len())
             .map(|i| i as f32 / (values.len() - 1) as f32)
@@ -545,6 +762,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     let metadata = Metadata {
         make: "Fujifilm".into(),
         model: "X100F".into(),
+        xtrans: true,
         width: w,
         height: h,
         lens: Some(crate::optics::LensCorrection {
@@ -554,6 +772,25 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 radial(vec![1., 1.001, 1.002]),
                 radial(vec![1., 0.999, 0.998]),
             ]),
+            gain_map: Some(crate::optics::GainGrid {
+                // Before the warp: each channel reads it where the built-in
+                // aberration has it sample.
+                area: [0.05, 0.1, 0.95, 0.9],
+                after_warp: false,
+                points: [3, 4],
+                origin: [0., 0.],
+                spacing: [0.5, 1. / 3.],
+                planes: 3,
+                gains: (0..12)
+                    .flat_map(|i| [1. + i as f32 * 0.05, 1.1, 1.3 - i as f32 * 0.02])
+                    .collect(),
+            }),
+            // Off the image centre, as Nikon's and DNG opcodes' centres are. This image's
+            // three-pixel stripes, with colour noise reduction and sharpening, turn the
+            // GPU's rounding of sample positions (a few ulps, 4e-5 px at x = 144) into
+            // up to 7 levels at single pixels for some centres left of the middle (0.46,
+            // 0.47), where the samples themselves agree within 2e-5.
+            centre: [0.53, 0.47],
             ..Default::default()
         }),
         wb: [2.02, 1., 1.89],
@@ -575,7 +812,23 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         pixels: (0..w * h)
             .map(|i| {
                 let (x, y) = ((i % w) as f32, (i / w) as f32);
-                let v = 0.25 + 0.2 * (x * 0.21).sin() * (y * 0.13).cos() + 0.1 * (x * 0.9).sin();
+                // A finite constant-colour strip exercises one-sided coherence
+                // at its boundary, alongside the varied surrounding texture.
+                if (32..68).contains(&(i / w)) {
+                    let period = if ca_only && y >= 50. { 3.8 } else { 3.03 };
+                    let phase = if ca_only {
+                        std::f32::consts::FRAC_PI_4
+                    } else {
+                        0.
+                    };
+                    let v = 0.1 + 0.06 * (std::f32::consts::TAU * x / period + phase).sin();
+                    return [1.08 * v, v, 0.92 * v];
+                }
+                // Fine stripes exercise the CPU/GPU CA chromaticity safeguard too.
+                let v = 0.3
+                    + 0.15 * (x * 0.21).sin() * (y * 0.13).cos()
+                    + 0.08 * (x * 0.9).sin()
+                    + 0.06 * (std::f32::consts::TAU * x / 3.03).sin();
                 [v * 1.3, v, v * 0.8 + x / w as f32 * 0.3]
             })
             .collect(),
@@ -624,6 +877,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
     // data, where the manual gain alone makes the lens stage.
     for (spatial, clipping, ca, (style, vignette), lens_alone) in [
         (false, shadows, 0, (HighlightPriority, 0.), false),
+        (false, none, 1, (HighlightPriority, 0.), false),
         (true, none, 0, (HighlightPriority, -0.3), false),
         (true, both, 0, (ColorPriority, -0.6), false),
         (true, highlights, 0, (PaintOverlay, -0.5), false),
@@ -632,6 +886,9 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
         (true, none, 0, (PaintOverlay, 0.7), false),
         (true, none, 0, (ColorPriority, 0.), true),
     ] {
+        if ca_only != (!spatial && ca == 1) {
+            continue;
+        }
         let mut recipe = base.clone();
         if spatial {
             recipe.effects.grain = 0.4;
@@ -665,7 +922,15 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
             recipe.lens_builtin = false;
             recipe.effects.lens_vignette = -0.6;
         }
-        for (max_edge, region) in [(60, None), (0, None), (0, Some([10, 7, 50, 40]))] {
+        for (max_edge, region) in [
+            (78, None),
+            (60, None),
+            (0, None),
+            (0, Some([10, 7, 50, 40])),
+        ] {
+            if max_edge == 78 && !ca_only {
+                continue;
+            }
             let display = super::Display {
                 slot: if region.is_some() {
                     super::Slot::Region
@@ -723,7 +988,7 @@ fn presented_previews_match_the_cpu_render() -> Result<()> {
                 .max()
                 .unwrap();
             let label = format!(
-                "spatial={spatial} clipping={clipping:?} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
+                "{w}x{h} spatial={spatial} clipping={clipping:?} ca={ca} {style:?} {vignette} {max_edge} {region:?}"
             );
             let changed = actual.iter().zip(&rgb).filter(|(a, b)| a != b).count();
             eprintln!(
@@ -987,10 +1252,24 @@ fn shaders_are_valid_wgsl() {
         valid::{Capabilities, ValidationFlags, Validator},
     };
     let prelude = crate::develop::pipeline::pixel_params::wgsl_prelude();
-    let modules: [(&str, String, &[&str]); 5] = [
+    // Every develop variant: each leaves out different code.
+    let lean = super::develop::Variant {
+        masks: false,
+        color: false,
+        local: false,
+        dehaze: false,
+    };
+    let modules: [(&str, String, &[&str]); 6] = [
         (
             "develop.wgsl",
-            prelude + include_str!("develop.wgsl"),
+            prelude.clone()
+                + &super::develop::Variant::FULL.constants()
+                + include_str!("develop.wgsl"),
+            &["develop"],
+        ),
+        (
+            "develop.wgsl, lean variant",
+            prelude + &lean.constants() + include_str!("develop.wgsl"),
             &["develop"],
         ),
         (
@@ -1049,4 +1328,366 @@ fn previews_submit_only_once_the_window_surface_is_reconfigured() {
     drop(surface);
     rx.recv_timeout(Duration::from_secs(10)).unwrap();
     preview.join().unwrap();
+}
+
+/// While the Basic sliders move, the Contrast pivot and the Shadows/Highlights map's
+/// base are kept with the photo's measures, the map's grids on the device, and the
+/// develop pass keeps its camera colour: every frame is the one a renderer that
+/// measures and builds everything again presents.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+#[allow(clippy::approx_constant)] // Exact camera matrix coefficients.
+fn kept_stages_present_the_frames_of_a_fresh_renderer() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::{PreviewRenderer, quality::Output},
+    };
+    use std::sync::Arc;
+    let (w, h) = (157, 103);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [2.02, 1., 1.89],
+        cam_xyz: [
+            [1.1434, -0.4948, -0.121],
+            [-0.3746, 1.2042, 0.1903],
+            [-0.0666, 0.1479, 0.5235],
+        ],
+        ..Default::default()
+    };
+    let image = Arc::new(CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                let (x, y) = ((i % w) as f32, (i / w) as f32);
+                let v = 0.2 + 0.25 * (x * 0.17).sin() * (y * 0.11).cos() + 0.15 * (x / w as f32);
+                [v * 1.3, v, v * 0.8]
+            })
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    let profile = CameraProfile::camera_matrix_default(&metadata)
+        .unwrap()
+        .with_test_tables();
+    let mut recipe = Recipe {
+        profile: Some(Arc::new(profile)),
+        contrast: 0.3,
+        highlights: -0.3,
+        ..Default::default()
+    };
+    let display = super::Display {
+        slot: super::Slot::Whole,
+        clipping: crate::rendered::ClipOverlay::NONE,
+        monitor: None,
+        navigator: None,
+        thumbnail: None,
+        samples: false,
+        drawn: Vec::new(),
+    };
+    let cancel = AtomicBool::new(false);
+    let mut warm = PreviewRenderer::with_gpu();
+    let edits: [&dyn Fn(&mut Recipe); 12] = [
+        &|_| {},
+        &|_| {},
+        &|r| r.contrast = -0.4,
+        &|r| r.whites = 0.3,
+        &|r| r.blacks = -0.2,
+        &|r| r.shadows = 0.4,
+        &|r| r.highlights = -0.6,
+        &|r| r.exposure = 0.5,
+        &|r| r.shadows = -0.3,
+        &|r| r.effects.dehaze = 0.3,
+        &|r| r.wb = [2.2, 1., 1.7],
+        &|r| r.exposure = 0.,
+    ];
+    let frame = |renderer: &mut PreviewRenderer, r: &Recipe| -> Result<Vec<u8>> {
+        let Output::Frame(frame) =
+            renderer.render_to(&image, r, 90, None, &cancel, Some(&display))?
+        else {
+            panic!("{:?}", renderer.fallback_reason());
+        };
+        read_texture(renderer.gpu().unwrap(), &frame.texture)
+    };
+    for edit in edits {
+        edit(&mut recipe);
+        let kept = frame(&mut warm, &recipe)?;
+        let fresh = frame(&mut PreviewRenderer::with_gpu(), &recipe)?;
+        assert!(kept == fresh, "{recipe:?}");
+    }
+    // The camera colour was kept and read, not computed per frame.
+    let gpu = warm.gpu().unwrap();
+    assert!(gpu.kept.iter().any(|k| k.read_once()));
+    Ok(())
+}
+
+/// A develop pass recorded but never submitted, a render cancelled on the way, writes
+/// no kept camera colour, even once a pass over other samples is submitted: the next
+/// render of its samples computes the colour again rather than read what is not there.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn an_unsubmitted_pass_leaves_its_kept_colour_unwritten() -> Result<()> {
+    use crate::{
+        camera_data::{CameraImage, Metadata},
+        camera_profiles::CameraProfile,
+        develop::{
+            pipeline::{Samples, Source, pixel_params::pixel_params},
+            stage_cache::color_recipe,
+        },
+    };
+    use std::sync::Arc;
+    let (w, h) = (24, 16);
+    let metadata = Metadata {
+        width: w,
+        height: h,
+        wb: [2., 1., 1.5],
+        cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        ..Default::default()
+    };
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| [0.1 + (i % w) as f32 / 60., 0.2, 0.15])
+            .collect(),
+        metadata: metadata.clone(),
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let samples = |step: usize| {
+        Arc::new(Samples {
+            width: w / step as u32,
+            height: h / step as u32,
+            pixels: image.pixels.iter().step_by(step).copied().collect(),
+            positions: (0..w * h)
+                .step_by(step)
+                .map(|i| [(i % w) as f32, (i / w) as f32])
+                .collect(),
+        })
+    };
+    // A Fit and a 100% region of the same photo.
+    let (fit, region) = (samples(1), samples(2));
+    let recipe = Recipe {
+        profile: Some(Arc::new(
+            CameraProfile::camera_matrix_default(&metadata).unwrap(),
+        )),
+        ..Default::default()
+    };
+    let mut params = pixel_params(Source::new(&image), &recipe).expect("supported recipe");
+    params.color = Some(color_recipe(&recipe));
+    let mut gpu = Processor::new()?;
+    let cancel = AtomicBool::new(false);
+    let expected = gpu.develop(&fit, &params, &cancel)?;
+    // The second render of the recipe would keep the colour, but is cancelled after
+    // recording its pass.
+    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+    gpu.record_develop(Input::Cpu(&fit), &params, &mut encoder);
+    drop(encoder);
+    // Zoomed in, the region renders and submits.
+    gpu.develop(&region, &params, &cancel)?;
+    // Back at Fit.
+    let actual = gpu.develop(&fit, &params, &cancel)?;
+    assert_eq!(actual.pixels, expected.pixels);
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn imported_zoom_profile_matches_cpu_and_image_space_oracle() -> Result<()> {
+    use crate::{
+        camera_data::Metadata,
+        lens::lcp::Library,
+        optics::{LensCorrection, Radial},
+    };
+    let mut entries = String::new();
+    for (focal, fx) in [(36., 1f32), (144., 4.)] {
+        let q = fx * fx * 36. / 13.;
+        entries.push_str(&format!(r#"
+<rdf:li stCamera:Make="Synthetic" stCamera:Lens="Zoom" stCamera:FocalLength="{focal}">
+<stCamera:PerspectiveModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}">
+<stCamera:VignetteModel stCamera:FocalLengthX="{fx}" stCamera:VignetteModelParam1="{}" stCamera:VignetteModelParam2="{}" stCamera:VignetteModelParam3="{}"/>
+<stCamera:ChromaticRedGreenModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}"/>
+<stCamera:ChromaticBlueGreenModel stCamera:FocalLengthX="{fx}" stCamera:RadialDistortParam1="{}"/>
+</stCamera:PerspectiveModel></rdf:li>"#, 0.02*q, -0.6*q, 0.2*q*q, -0.1*q*q*q, 0.002*q, -0.002*q));
+    }
+    let text = format!(
+        r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:stCamera="http://ns.adobe.com/photoshop/1.0/camera-profile">{entries}</rdf:RDF>"#
+    );
+    let library = Library::from_texts([("zoom.lcp", text.as_str())]);
+    let radial = |f: fn(f32) -> f32| Radial {
+        knots: (0..=32).map(|i| i as f32 / 32.).collect(),
+        values: (0..=32).map(|i| f(i as f32 / 32.)).collect(),
+    };
+    let oracle = LensCorrection {
+        distortion: Some(radial(|r| 1. + 0.02 * r * r)),
+        vignetting: Some(radial(|r| {
+            1. / (1. - 0.6 * r * r + 0.2 * r.powi(4) - 0.1 * r.powi(6))
+        })),
+        chromatic: Some([
+            radial(|r| 1. + 0.002 * r * r),
+            radial(|r| 1. - 0.002 * r * r),
+        ]),
+        ..Default::default()
+    };
+    for focal in [18., 36., 90., 144., 288.] {
+        let mut metadata = Metadata {
+            make: "Synthetic".into(),
+            lens_model: "Zoom".into(),
+            focal,
+            ..Default::default()
+        };
+        metadata.width = 150;
+        metadata.height = 100;
+        metadata.lens_profiles = library.for_photo(&metadata);
+        check_imported_profile_render(metadata, Some(oracle.clone()))?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "Requires GPU and read-only local LCP; set RAWMAKASE_LCP"]
+fn installed_zoom_profile_cpu_gpu_agree() -> Result<()> {
+    use crate::{camera_data::Metadata, lens::lcp::Library, optics::lcp::parse};
+    let text =
+        std::fs::read_to_string(std::env::var_os("RAWMAKASE_LCP").expect("set RAWMAKASE_LCP"))?;
+    let entries = parse(&text)?;
+    let first = &entries[0];
+    let library = Library::from_texts([("local.lcp", text.as_str())]);
+    let min = entries
+        .iter()
+        .map(|e| e.focal)
+        .fold(f32::INFINITY, f32::min);
+    let max = entries.iter().map(|e| e.focal).fold(0., f32::max);
+    for focal in [min, (min + max) * 0.5, max] {
+        let mut metadata = Metadata {
+            make: first.make.clone(),
+            lens_model: first.lens[0].clone(),
+            focal,
+            aperture: 5.6,
+            width: 150,
+            height: 100,
+            ..Default::default()
+        };
+        metadata.lens_profiles = library.for_photo(&metadata);
+        check_imported_profile_render(metadata, None)?;
+    }
+    Ok(())
+}
+
+fn check_imported_profile_render(
+    mut metadata: crate::camera_data::Metadata,
+    oracle: Option<crate::optics::LensCorrection>,
+) -> Result<()> {
+    use crate::{
+        camera_data::CameraImage,
+        camera_profiles::CameraProfile,
+        develop::{PreviewRenderer, quality::Output},
+    };
+    metadata.wb = [1.; 3];
+    metadata.daylight_wb = [1.; 3];
+    metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    let (w, h) = (metadata.width, metadata.height);
+    let recipe = Recipe {
+        profile: Some(std::sync::Arc::new(
+            CameraProfile::camera_matrix_default(&metadata)
+                .unwrap()
+                .with_test_tables(),
+        )),
+        lens_profile: true,
+        effects: crate::model::effects::Effects {
+            clarity: 0.2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    assert!(
+        recipe.lens_correction(&metadata).is_some(),
+        "profile must be active"
+    );
+    let image = CameraImage {
+        width: w,
+        height: h,
+        pixels: (0..w * h)
+            .map(|i| {
+                let v = 0.1 + 0.03 * (i as f32 * 0.13).sin();
+                [v * 1.1, v, v * 0.9]
+            })
+            .collect(),
+        metadata,
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let cancel = AtomicBool::new(false);
+    let mut cpu = PreviewRenderer::default();
+    let mut gpu = PreviewRenderer::with_gpu();
+    for (max_edge, region) in [(75, None), (0, None), (0, Some([10, 10, 80, 60]))] {
+        let expected = cpu.render(&image, &recipe, max_edge, region, &cancel)?;
+        if let Some(ref oracle) = oracle {
+            // Recovery captures metadata with its pixels; use an independent
+            // source for the oracle rather than mutating an already rendered image.
+            let mut oracle_image = image.clone();
+            oracle_image.recovered = Default::default();
+            oracle_image.metadata.lens = Some(oracle.clone());
+            let oracle_recipe = Recipe {
+                lens_profile: false,
+                lens_builtin: true,
+                ..recipe.clone()
+            };
+            let direct = PreviewRenderer::default().render(
+                &oracle_image,
+                &oracle_recipe,
+                max_edge,
+                region,
+                &cancel,
+            )?;
+            let worst = expected
+                .pixels
+                .iter()
+                .flatten()
+                .zip(direct.pixels.iter().flatten())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0f32, f32::max);
+            assert!(worst < 2e-5, "image-space oracle differs by {worst}");
+        }
+        let display = super::Display {
+            slot: if region.is_some() {
+                super::Slot::Region
+            } else {
+                super::Slot::Whole
+            },
+            clipping: crate::rendered::ClipOverlay::NONE,
+            monitor: None,
+            navigator: None,
+            thumbnail: None,
+            samples: false,
+            drawn: Vec::new(),
+        };
+        let Output::Frame(frame) =
+            gpu.render_to(&image, &recipe, max_edge, region, &cancel, Some(&display))?
+        else {
+            panic!("GPU fallback: {:?}", gpu.fallback_reason());
+        };
+        let processor = gpu.gpu().unwrap();
+        assert!(!processor.resident.as_ref().unwrap().samples.is_empty());
+        let actual = read_texture(processor, &frame.texture)?;
+        let expected = expected.rgb8();
+        assert_eq!(actual.len(), expected.len());
+        let worst = actual
+            .iter()
+            .zip(&expected)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        assert!(worst <= 1, "CPU/GPU differ by {worst}");
+    }
+    Ok(())
 }

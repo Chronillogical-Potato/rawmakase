@@ -46,22 +46,11 @@ fn list(directory: &Path) -> Listing {
         }
         if kind.is_dir() {
             directories.push(path);
-        } else if is_photo(&path) {
+        } else if crate::storage::is_photo(&path) {
             files.insert(entry.file_name());
         }
     }
     Listing::Listed { files, directories }
-}
-
-/// A file Add Folder would add.
-fn is_photo(path: &Path) -> bool {
-    crate::storage::is_raw(path)
-        || path.extension().is_some_and(|x| {
-            matches!(
-                x.to_string_lossy().to_ascii_lowercase().as_str(),
-                "jpg" | "jpeg" | "png" | "tif" | "tiff"
-            )
-        })
 }
 
 /// What one unknown file matched.
@@ -195,6 +184,21 @@ pub fn scan(
             Some((f.path.as_ref()?, (f.root, f.logical.clone())))
         })
         .collect();
+    // A catalog folder listed under another spelling of its name, as a
+    // photo's file may be (macOS's FAT and exFAT list every name
+    // decomposed): by parent directory and folded name.
+    let folder_aliases: HashSet<(PathBuf, String)> = all_paths
+        .iter()
+        .filter_map(|p| {
+            let (parent, name) = (p.parent()?, p.file_name()?);
+            let Some(Listing::Listed { directories, .. }) = listings.get(parent) else {
+                return None;
+            };
+            let aliased =
+                !directories.contains(*p) && std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+            aliased.then(|| (parent.to_path_buf(), super::folded(name)))
+        })
+        .collect();
     let mut pending: Vec<PathBuf> = Vec::new();
     for (path, listing) in &listings {
         let Listing::Listed { files, directories } = listing else {
@@ -212,6 +216,10 @@ pub fn scan(
             directories
                 .iter()
                 .filter(|d| !all_paths.contains(d))
+                .filter(|d| {
+                    let name = super::folded(d.file_name().unwrap_or_default());
+                    !folder_aliases.contains(&(path.clone(), name))
+                })
                 .cloned(),
         );
     }
@@ -578,5 +586,57 @@ impl Matching<'_> {
             (false, false) => Found::Contested(missing),
         };
         Ok(Some((identity, found)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn add_folder_and_synchronize_folder_take_the_same_photos() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let photos = [
+            "A.NEF", "b.dng", "C.jpg", "D.JPG", "E.jpeg", "F.JPEG", "G.png", "H.PNG", "I.tif",
+            "J.TIF", "K.tiff", "L.Tiff", "N.webp", "O.avif", "P.jxl", "Q2.WEBP", "R2.Avif",
+            "S2.JXL",
+        ];
+        let others = [
+            "A.NEF.xmp",
+            "C.xmp",
+            "M.heic",
+            "Q.gif",
+            "R.psd",
+            "S.mov",
+            "T.txt",
+            "noextension",
+            ".U.jpg",
+            "._A.NEF",
+            "._C.jpg",
+        ];
+        for name in photos.iter().chain(&others) {
+            std::fs::write(dir.path().join(name), b"synthetic")?;
+        }
+        std::fs::create_dir(dir.path().join("sub.jpg"))?;
+        std::fs::write(dir.path().join("sub.jpg").join("V.png"), b"synthetic")?;
+        std::fs::create_dir(dir.path().join(".hidden"))?;
+        std::fs::write(dir.path().join(".hidden").join("W.jpg"), b"synthetic")?;
+
+        let expected: HashSet<OsString> = photos.iter().map(OsString::from).collect();
+        let Listing::Listed { files, directories } = list(dir.path()) else {
+            panic!("the folder is there");
+        };
+        assert_eq!(files, expected);
+        assert_eq!(directories, [dir.path().join("sub.jpg")]);
+
+        let mut walked: Vec<_> = crate::catalog::ingest::walk(dir.path())?
+            .into_iter()
+            .map(|p| p.strip_prefix(dir.path()).unwrap().to_path_buf())
+            .collect();
+        walked.sort();
+        let mut expected: Vec<_> = photos.iter().map(PathBuf::from).collect();
+        expected.push(PathBuf::from("sub.jpg").join("V.png"));
+        expected.sort();
+        assert_eq!(walked, expected);
+        Ok(())
     }
 }

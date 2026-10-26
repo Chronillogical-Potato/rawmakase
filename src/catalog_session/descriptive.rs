@@ -131,6 +131,19 @@ impl CatalogSession {
             listed: self.reload(),
         })
     }
+    /// Removes root `root`, which has no folder left in the catalog, and
+    /// reads the lists again; whether it was removed (not when a folder
+    /// was added to it meanwhile).
+    pub(crate) fn remove_empty_root(
+        &mut self,
+        root: crate::catalog::RootId,
+    ) -> Result<Committed<bool>> {
+        let removed = self.catalog.remove_empty_root(root)?;
+        Ok(Committed {
+            value: removed,
+            listed: self.reload(),
+        })
+    }
     /// Removes virtual copy `id` and reads the lists again. An error means the
     /// copy is still there; once this returns, it is gone and its id may be
     /// given to a new photo, even when reading the lists failed.

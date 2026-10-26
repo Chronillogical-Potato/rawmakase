@@ -2,7 +2,7 @@
 
 */raw·muh·KAH·say/, RAW + omakase*
 
-RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It opens RAW files from the cameras LibRaw supports, develops them with a Lightroom-style set of controls, and exports JPEG or 16-bit TIFF. It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
+RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Windows, written in Rust. It develops RAW, JPEG, PNG, TIFF, WebP, AVIF and JPEG XL files with a Lightroom-style set of controls and exports JPEG, 16-bit TIFF or PNG (exporting to WebP, AVIF and JPEG XL is not available yet). It can also import a Lightroom Classic catalog with its ratings, flags, labels, keywords and compatible develop settings, without ever writing to the original catalog or your photos.
 
 ![RAWmakase Develop view with presets, the photo, and the Basic and Tone Curve panels](docs/images/screenshot-2026-10-13-1111.png)
 
@@ -11,18 +11,18 @@ RAWmakase is a fast, non-destructive RAW photo developer for Linux, macOS and Wi
   <sub>macOS (Apple Silicon, Intel) · Linux (.deb, .rpm, Arch) · Windows (x86_64, ARM64) · <a href="#install">install notes</a></sub>
 </p>
 
-It is a personal project in active development. It develops photos from almost every current camera; the exceptions are Sigma's Foveon cameras, monochrome cameras such as the Leica Monochrom, and DNGs that are already demosaiced ("linear" DNGs, such as merged HDR or panorama files). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
+It is a personal project in active development. It develops photos from almost every current camera, including monochrome DNGs (such as the Leica Monochrom's), linear DNGs (such as iPhone ProRAW) and Lightroom's HDR and panorama merges; the exceptions are Sigma's Foveon cameras, GoPro's GPR files, the Pentax K-3 Mark III Monochrome's PEFs (its DNGs open), and Adobe's older lossy DNGs (JPEG-compressed, as Adobe DNG Converter's "lossy compression" writes them). Rendering aims for close, not exact, Lightroom parity; see [parity gaps](docs/parity-gaps.md).
 
 > [!WARNING]
-> **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. Your originals are never modified, but keep exports of finished work.
+> **RAWmakase is early software in active development.** The rendering engine may change from one version to the next, so photos you have already edited can look different after an upgrade. Until 1.0, backwards compatibility is limited and not guaranteed. The contents of your originals are never modified, but keep exports of finished work.
 
 ## Features
 
 - **Develop**: white balance and picker, one-click Auto tone and Auto white balance, exposure and tone, Shadows/Highlights, Clarity, Dehaze, point curves and levels, HSL color mixer, three-way color grading, detail (denoise and sharpening), crop, straighten and Transform, lens corrections, effects and calibration.
 - **Spot removal and masks (experimental, early)**: Heal and Clone spots and brushed areas with automatic sources, and brush, gradient and range masks with local adjustments, also imported from Lightroom. Not yet measured against Lightroom.
 - **Library**: SQLite catalogs, folders, ratings, flags, color labels, filtering, and non-destructive Lightroom `.lrcat` import with folder relinking.
-- **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself.
-- **Non-destructive**: originals are never modified. Edits live in the catalog, and all writes are atomic.
+- **Presets and profiles**: 26 built-in presets and your Lightroom XMP presets; RAWmakase's own Standard and Color profiles for every camera with a usable color matrix, plus DCP and XMP camera profiles you import yourself, and `.cube` LUTs imported as looks, as Camera Raw makes them.
+- **Non-destructive**: the contents of your originals are never modified. Edits live in the catalog, and all writes are atomic.
 - **Fast previews**: every change renders at viewport size, with the color and tone stage on the GPU (Metal on macOS, Vulkan on Linux, DirectX 12 or Vulkan on Windows) and a CPU fallback.
 - **Command line**: inspect, render, export thumbnails, import catalogs and profiles, and benchmark without the GUI.
 - **External control**: [MIDI controllers](docs/midi.md), [scripts](docs/automation.md), and a built-in [MCP server](docs/mcp.md) for agents to adjust the running editor, inspect previews, save and export.
@@ -30,7 +30,6 @@ It is a personal project in active development. It develops photos from almost e
 
 ## Coming soon
 
-- LUT support
 - AI object removal
 - Agentic features: e.g. culling assistance
 
@@ -56,6 +55,13 @@ omarchy pkg add rawmakase-bin
 
 It updates with the rest of the system.
 
+Omarchy makes windows slightly transparent by default, which changes how photos look. To keep RAWmakase fully opaque, add this to your Hyprland `looknfeel.lua`:
+
+```lua
+-- Keep RAWmakase fully opaque (opt out of Omarchy's default window opacity)
+o.window("^RAWmakase$", { tag = "-default-opacity", opacity = "1 1" })
+```
+
 ### macOS (15 or newer)
 
 Install with Homebrew:
@@ -80,7 +86,7 @@ Download the package for your architecture (`amd64`/`x86_64` or `arm64`/`aarch64
 | Fedora 43+ | `.rpm` | `sudo dnf install ./rawmakase-<version>-1.x86_64.rpm` |
 | Arch Linux (x86_64) | `.pkg.tar.zst` | `sudo pacman -U ./rawmakase-<version>-1-x86_64.pkg.tar.zst` |
 
-DEB/RPM packages include LibRaw and Little CMS. Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
+Arch packages use system dependencies. A working graphics driver is required; install your desktop's `xdg-desktop-portal` backend for native file dialogs.
 
 **AUR publication is paused.** Install the Arch package directly, or (on Arch Linux ARM too) download and extract `rawmakase-<version>-arch-recipe.tar.gz` into an empty folder and build as a normal user:
 
@@ -92,7 +98,7 @@ The development recipe is in [packaging/arch/rawmakase-git](packaging/arch/rawma
 
 The `rawmakase-<version>-<arch>-linux.tar.gz` download contains the same bundled imaging libraries as the DEB/RPM packages. Extract it and run `./usr/bin/rawmakase` from the extracted folder. Keep the whole directory together. It requires the same OS/runtime baseline as the packages above; it is not a fully static build.
 
-The `rawmakase-<version>-<arch>.AppImage` download is the same build as a single file: make it executable (`chmod +x`) and run it. It needs the same OS baseline as the packages above (Ubuntu 24.04+, Debian 13+, Fedora 43+; glibc 2.39 or newer), so it does not run on older distributions. On systems without FUSE 2, run it with `APPIMAGE_EXTRACT_AND_RUN=1`.
+The `rawmakase-<version>-<arch>.AppImage` download is the same build as a single file: make it executable (`chmod +x`) and run it. It needs the same OS baseline as the packages above (Ubuntu 24.04+, Debian 13+, Fedora 43+; glibc 2.39 or newer), so it does not run on older distributions. On systems without FUSE 2, run it with `APPIMAGE_EXTRACT_AND_RUN=1`. It carries update information, so AppImageUpdate, Gear Lever and similar tools can update it to the newest release, downloading only what changed.
 
 ### Windows (10 or newer on x86_64, 11 on ARM64)
 
@@ -110,10 +116,10 @@ Each new packaged release includes `SHA256SUMS`. After downloading it beside you
 
 ### From source (Linux and macOS)
 
-You need Rust 1.98 or newer, a C++17 compiler with OpenMP, pkg-config, LibRaw 0.22 or newer, and Little CMS 2.
+You need Rust 1.98 or newer and a C compiler (a few Rust crates, such as the catalog's bundled SQLite, compile C); no RAW or colour-management library is needed.
 
-- Arch Linux: `sudo pacman -S rust base-devel pkgconf libraw lcms2`
-- macOS: `brew install pkg-config libraw little-cms2 libomp`. Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon); `LIBOMP_PREFIX` points the build at a non-Homebrew OpenMP.
+- Arch Linux: `sudo pacman -S rust base-devel`
+- macOS: the Xcode command-line tools (`xcode-select --install`). Use a native rustup toolchain (`aarch64-apple-darwin` on Apple Silicon).
 
 ```sh
 make                                  # cargo build --release --locked
@@ -132,7 +138,7 @@ rawmakase Photos.rawmakase    # open a catalog
 rawmakase photo.dng           # add the photo's folder to the last catalog and edit it
 ```
 
-Photos are edited through the Library. The first launch starts a catalog named Photos in RAWmakase's data folder and asks for a folder of photos; to keep your Lightroom Classic folders, ratings and edits, import its catalog instead. Both, and other catalogs, are available later from the **Catalog** menu. Folders dropped onto the window, one or several, are added to the open catalog; right-click a folder in the Library's Folders panel to remove it and its photos from the catalog (the files stay on disk). A photo dropped there or passed on the command line has its folder added, then opens in Develop; edits it got in earlier releases (its `photo.rawmakase.json`) come along. You can also drop a catalog onto the window. On Linux, dropping works under X11 but not yet under Wayland: the windowing library RAWmakase uses doesn't receive drops there. The camera's embedded JPEG shows immediately while the RAW develops.
+Photos are edited through the Library. The first launch starts a catalog named Photos in RAWmakase's data folder and asks for a folder of photos; to keep your Lightroom Classic folders, ratings and edits, import its catalog instead. Both, and other catalogs, are available later from the **Catalog** menu. Folders dropped onto the window, one or several, are added to the open catalog; right-click a folder in the Library's Folders panel to remove it and its photos from the catalog (its files stay on disk), or select photos and press Delete to move their files to the Trash or just remove them from the catalog. Drag photos onto a folder, or use Move to Folder… in their menu, to move their files there; New Folder Inside… in a folder's menu makes a folder and can move the selection into it. F2 renames a photo, or several by a template in the order they were taken; Rename Folder… renames a folder, and a folder dragged onto another (or Move Folder…) moves there. A photo dropped there or passed on the command line has its folder added, then opens in Develop; edits it got in earlier releases (its `photo.rawmakase.json`) come along. You can also drop a catalog onto the window. The camera's embedded JPEG shows immediately while the RAW develops. A JPEG, PNG, TIFF, WebP, AVIF or JPEG XL opens in Develop like a RAW: untouched it looks as the file does, and its white balance is Lightroom's relative Temp and Tint (−100 to 100) rather than Kelvin. WebP, AVIF and JPEG XL are read only for now, and Develop does not edit HDR (PQ or HLG), animated or tiled AVIF files; HDR and animated ones still show in the Library.
 
 Useful shortcuts:
 
@@ -154,7 +160,7 @@ Useful shortcuts:
 | Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z | Undo / redo |
 | Cmd/Ctrl+Shift+U | Auto tone |
 
-Double-click a slider or a color grading wheel to reset it, type its value for precision, or hover a slider and press Up or Down (Shift for ten steps). On a grading wheel, Shift keeps a drag to hue or saturation and Cmd/Ctrl moves it finely. Drag sideways in the histogram to move Blacks, Shadows, Exposure, Highlights or Whites, whichever region you start in.
+Double-click a slider or a color grading wheel to reset it, type its value for precision, or hover a slider and press Up or Down (Shift for ten steps). As in Lightroom, `.` and `,` select the next or previous Basic slider (or click its name), and `=` and `-` step it by Lightroom's amounts (Shift for more, Option for less), even with the panel folded. On a grading wheel, Shift keeps a drag to hue or saturation and Cmd/Ctrl moves it finely. Drag sideways in the histogram to move Blacks, Shadows, Exposure, Highlights or Whites, whichever region you start in.
 
 Tab hides the side panels to give the photo the window, and Shift+Tab the filmstrip too; pressed again, each brings back the panels it hid. The panel buttons at either end of the top bar hide or show the left panel, the right panel or the filmstrip alone.
 
@@ -162,7 +168,7 @@ The switch in a panel's header turns the panel off without losing its settings, 
 
 ### Camera profiles
 
-Every camera with a usable color matrix gets two profiles of RAWmakase's own: **RAWmakase Standard** (the camera's color matrix with the DNG default tone curve) and **RAWmakase Color** (a mild look on top of it). A new photo uses a compatible imported Adobe Color, then Adobe Standard, then a DNG's own profile, and RAWmakase Color when it has none of those. No Adobe profiles are bundled. For Lightroom's color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) from the **Profile** menu in Develop, from **Preferences**, or with `rawmakase import-profiles`. On a Mac or PC, the Profile menu also looks in Camera Raw's profile folder and, when it finds profiles filed under the camera's name, offers to import them in one click. Imported profiles are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
+Every camera with a usable color matrix gets two profiles of RAWmakase's own: **RAWmakase Standard** (the camera's color matrix with the DNG default tone curve) and **RAWmakase Color** (a mild look on top of it). A new photo uses a compatible imported Adobe Color, then Adobe Standard, then a DNG's own profile, and RAWmakase Color when it has none of those. No Adobe profiles are bundled. For Lightroom's color, import DCP and XMP profiles you are licensed to use (for example from your own Lightroom or Camera Raw installation, or published third-party DCPs such as RawTherapee's) from the **Profile** menu in Develop, from **Preferences**, or with `rawmakase import-profiles`. The same import takes `.cube` LUTs, which become look profiles with a Profile Amount, as Camera Raw's Create Profile makes them. On a Mac or PC, the Profile menu also looks in Camera Raw's profile folder and, when it finds profiles filed under the camera's name, offers to import them in one click. Imported profiles are copied into RAWmakase's own data directory. See [Lightroom profiles](docs/lightroom-profiles.md).
 
 ### Command line
 
@@ -219,6 +225,6 @@ Application CI runs `make check`, a release build, an Arch package build and a `
 
 ## License
 
-RAWmakase is released under the [MIT License](LICENSE). The DNG default tone curve and temperature table come from the Adobe DNG SDK, under the license in [licenses/Adobe-DNG-SDK.txt](licenses/Adobe-DNG-SDK.txt). The interface font, Inter, is under the SIL Open Font License ([licenses/Inter-OFL.txt](licenses/Inter-OFL.txt)), and the icons are Lucide's, under the ISC License ([licenses/Lucide-ISC.txt](licenses/Lucide-ISC.txt)). egui's bundled fallback fonts are compiled into the binary as well: Hack ([licenses/Hack-MIT-BitstreamVera.txt](licenses/Hack-MIT-BitstreamVera.txt)), Noto Emoji ([licenses/NotoEmoji-OFL.txt](licenses/NotoEmoji-OFL.txt)), Ubuntu Light ([licenses/Ubuntu-UFL.txt](licenses/Ubuntu-UFL.txt)) and the emoji icon font ([licenses/emoji-icon-font-MIT.txt](licenses/emoji-icon-font-MIT.txt)). LibRaw, Little CMS and the Rust dependencies keep their own licenses; see [dependencies](docs/dependencies.md).
+RAWmakase is released under the [MIT License](LICENSE). The DNG default tone curve and temperature table come from the Adobe DNG SDK, under the license in [licenses/Adobe-DNG-SDK.txt](licenses/Adobe-DNG-SDK.txt). The interface font, Inter, is under the SIL Open Font License ([licenses/Inter-OFL.txt](licenses/Inter-OFL.txt)), and the icons are Lucide's, under the ISC License ([licenses/Lucide-ISC.txt](licenses/Lucide-ISC.txt)). egui's bundled fallback fonts are compiled into the binary as well: Hack ([licenses/Hack-MIT-BitstreamVera.txt](licenses/Hack-MIT-BitstreamVera.txt)), Noto Emoji ([licenses/NotoEmoji-OFL.txt](licenses/NotoEmoji-OFL.txt)), Ubuntu Light ([licenses/Ubuntu-UFL.txt](licenses/Ubuntu-UFL.txt)) and the emoji icon font ([licenses/emoji-icon-font-MIT.txt](licenses/emoji-icon-font-MIT.txt)). The Rust dependencies and ONNX Runtime keep their own licenses; see [dependencies](docs/dependencies.md).
 
 Adobe, Lightroom and Camera Raw are trademarks of Adobe Inc. RAWmakase is not affiliated with or endorsed by Adobe.

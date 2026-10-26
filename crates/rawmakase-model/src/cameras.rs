@@ -65,6 +65,21 @@ pub struct Camera {
     /// 0 for Bayer); the GFX bodies record -0.49.
     #[serde(default)]
     pub fujifilm_dr100_shift: Option<f32>,
+    /// The body's lowest native ISO, when it has extended ISO settings below it
+    /// (Sony's 50, 64 and 80 under 100): Camera Raw takes a stop off there.
+    #[serde(default)]
+    pub lowest_iso: Option<f32>,
+    /// Canon only: the baseline of the body's sRAW and mRAW, Adobe's small RAW
+    /// BaselineExposure, which differs from the body's.
+    #[serde(default)]
+    pub sraw_baseline_exposure: Option<f32>,
+    /// The black and white level of the sample `baseline_exposure` was read
+    /// from, as Adobe wrote them, and its samples' maximum: a body whose white
+    /// Adobe takes by ISO speed (Canon) moves its BaselineExposure with the
+    /// white, so a photo of other levels gets the difference
+    /// (`camera_profiles::reference`).
+    #[serde(default)]
+    pub levels: Option<[f32; 3]>,
     pub source: Source,
     /// When the values were checked (YYYY-MM-DD) and on what.
     pub checked: String,
@@ -201,6 +216,13 @@ pub struct Baseline {
     pub origin: BaselineOrigin,
     pub exposure_shift: ExposureShift,
     pub dr100_shift: Option<f32>,
+    pub lowest_iso: Option<f32>,
+    /// The baseline of a small raw (sRAW, mRAW): the row's, else the median of the
+    /// make's, else `ev`.
+    pub sraw_ev: f32,
+    /// The black, white and samples' maximum `ev` holds at, for a row that
+    /// says them.
+    pub levels: Option<[f32; 3]>,
 }
 
 /// Camera Raw's baseline exposure for a camera. A camera without a row takes the
@@ -238,31 +260,42 @@ pub fn neutral_calibration(make: &str, model: &str, presets: &WhiteBalancePreset
 }
 
 fn baseline_in(rows: &[Camera], make: &str, model: &str) -> Baseline {
+    let same_make = || rows.iter().filter(|c| c.make.eq_ignore_ascii_case(make));
+    let sraw_median = median(same_make().filter_map(|c| c.sraw_baseline_exposure));
     if let Some(c) = find_in(rows, make, model) {
         return Baseline {
             ev: c.baseline_exposure,
             origin: BaselineOrigin::Listed(c.source),
             exposure_shift: c.fujifilm_exposure_shift,
             dr100_shift: c.fujifilm_dr100_shift,
+            lowest_iso: c.lowest_iso,
+            sraw_ev: c
+                .sraw_baseline_exposure
+                .or(sraw_median)
+                .unwrap_or(c.baseline_exposure),
+            levels: c.levels,
         };
     }
-    let same_make = rows
-        .iter()
-        .filter(|c| c.make.eq_ignore_ascii_case(make))
-        .map(|c| c.baseline_exposure);
-    if let Some(ev) = median(same_make) {
+    if let Some(ev) = median(same_make().map(|c| c.baseline_exposure)) {
         return Baseline {
             ev,
             origin: BaselineOrigin::MakeMedian,
             exposure_shift: ExposureShift::Followed,
             dr100_shift: None,
+            lowest_iso: None,
+            sraw_ev: sraw_median.unwrap_or(ev),
+            levels: None,
         };
     }
+    let ev = median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.);
     Baseline {
-        ev: median(rows.iter().map(|c| c.baseline_exposure)).unwrap_or(0.),
+        ev,
         origin: BaselineOrigin::TableMedian,
         exposure_shift: ExposureShift::Followed,
         dr100_shift: None,
+        lowest_iso: None,
+        sraw_ev: ev,
+        levels: None,
     }
 }
 
@@ -369,6 +402,9 @@ mod tests {
             unit_calibration: None,
             fujifilm_exposure_shift: ExposureShift::Followed,
             fujifilm_dr100_shift: None,
+            lowest_iso: None,
+            sraw_baseline_exposure: None,
+            levels: None,
             source: Source::Fitted,
             checked: "2026-10-05".into(),
             sample: "test".into(),

@@ -9,6 +9,9 @@ use crate::catalog::{
     Catalog, CatalogLocation, Collection, CollectionId, Folder, FolderId, Photo, PhotoId, RootId,
 };
 use anyhow::Result;
+/// A file's photo info as the catalog reads it for photos added from
+/// folders; export names read a photo's without a catalog the same way.
+pub(crate) use backfill::{capture_time as file_capture_time, read_info as file_photo_info};
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
@@ -59,6 +62,9 @@ impl CatalogSession {
         let _ = catalog.backfill_lightroom_snapshots();
         let _ = catalog.backfill_lightroom_info();
         let _ = catalog.backfill_lightroom_metadata();
+        // PNGs whose info earlier releases stored without their EXIF; read by
+        // the photo info backfill.
+        let _ = catalog.reread_png_info_once();
         // Unlike those, a failure here could export keywords Lightroom keeps
         // out, so it is said; it is tried again on the next open.
         let keyword_export = catalog.backfill_keyword_export().err();
@@ -84,6 +90,12 @@ impl CatalogSession {
     /// under another applies to nothing.
     pub(crate) fn generation(&self) -> u64 {
         self.generation
+    }
+    /// Starts a new structural generation without reading the catalog
+    /// again: what background readers read before is dropped when it comes
+    /// back, as before a change that may free photos' ids.
+    pub(crate) fn bump_generation(&mut self) {
+        self.generation = GENERATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     }
     /// Calls `wake` whenever a background read has something to save, for
     /// whoever shows the catalog to poll it.
@@ -306,6 +318,235 @@ mod tests {
         // Tried once: not read again until asked to retry.
         session.start_capture_times(|_| true);
         assert!(!session.reading_capture_times());
+        Ok(())
+    }
+
+    /// A little-endian TIFF of one directory of ASCII tags, values of up to
+    /// four bytes in their entries.
+    fn ascii_tiff(tags: &[(u16, &str)]) -> Vec<u8> {
+        let end = 8 + 2 + 12 * tags.len() + 4;
+        let mut out = b"II*\0".to_vec();
+        out.extend(8u32.to_le_bytes());
+        out.extend((tags.len() as u16).to_le_bytes());
+        let mut values = Vec::new();
+        for (tag, text) in tags {
+            let mut v = text.as_bytes().to_vec();
+            v.push(0);
+            out.extend(tag.to_le_bytes());
+            out.extend(2u16.to_le_bytes());
+            out.extend((v.len() as u32).to_le_bytes());
+            if v.len() <= 4 {
+                v.resize(4, 0);
+                out.extend(v);
+            } else {
+                out.extend(((end + values.len()) as u32).to_le_bytes());
+                values.extend(v);
+            }
+        }
+        out.extend(0u32.to_le_bytes());
+        out.extend(values);
+        out
+    }
+
+    /// A CR3 of its metadata alone: IFD0 (`CMT1`) and the EXIF directory
+    /// (`CMT2`) in Canon's box in `moov`.
+    fn dated_cr3(original: &str, subseconds: &str) -> Vec<u8> {
+        let bx = |kind: &[u8], body: &[u8]| {
+            let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+            v.extend(kind);
+            v.extend(body);
+            v
+        };
+        let canon = [
+            0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b,
+            0x6a, 0x48,
+        ];
+        let cmt1 = ascii_tiff(&[(271, "Canon"), (306, "2030:01:01 00:00:00")]);
+        let cmt2 = ascii_tiff(&[(36867, original), (37521, subseconds)]);
+        let uuid = [canon.to_vec(), bx(b"CMT1", &cmt1), bx(b"CMT2", &cmt2)].concat();
+        [
+            bx(b"ftyp", b"crx \0\0\0\x01crx isom"),
+            bx(b"moov", &bx(b"uuid", &uuid)),
+        ]
+        .concat()
+    }
+
+    /// A CRW whose heap holds ImageProps with its TimeStamp record alone:
+    /// seconds since 1970 in the camera's time.
+    fn dated_crw(seconds: u32) -> Vec<u8> {
+        // A heap block: the records' values, the directory, its offset.
+        let block = |records: &[(u16, Vec<u8>)]| {
+            let mut data = Vec::new();
+            let mut entries = Vec::new();
+            for (tag, value) in records {
+                entries.extend(tag.to_le_bytes());
+                entries.extend((value.len() as u32).to_le_bytes());
+                entries.extend((data.len() as u32).to_le_bytes());
+                data.extend(value);
+            }
+            let dir = data.len() as u32;
+            data.extend((records.len() as u16).to_le_bytes());
+            data.extend(entries);
+            data.extend(dir.to_le_bytes());
+            data
+        };
+        let stamp = [seconds, 0, 0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let props = block(&[(0x180e, stamp)]);
+        let mut file = b"II".to_vec();
+        file.extend(26u32.to_le_bytes());
+        file.extend(b"HEAPCCDR");
+        file.extend([0; 12]);
+        file.extend(block(&[(0x300a, props)]));
+        file
+    }
+
+    #[test]
+    fn canon_raws_added_from_a_folder_are_dated_from_their_own_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        std::fs::write(folder.join("a.CR3"), dated_cr3("2024:03:02 10:00:01", "12"))?;
+        // 2004-05-01 10:43:58.
+        std::fs::write(folder.join("b.CRW"), dated_crw(1_083_408_238))?;
+        let path = directory.path().join("library.rawmakase");
+        Catalog::create(&path)?.add_folder(&folder)?;
+        // Catalogued without a date, as releases that could not read these
+        // files left them: the next start reads them.
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
+        assert!(session.photos.iter().all(|p| p.captured.is_empty()));
+        session.start_capture_times(|_| true);
+        let started = std::time::Instant::now();
+        while session.reading_capture_times() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            assert!(session.poll_capture_times().error.is_none());
+            std::thread::yield_now();
+        }
+        session.reload()?;
+        let mut dated: Vec<_> = session
+            .photos
+            .iter()
+            .map(|p| (p.filename.as_str(), p.captured.as_str()))
+            .collect();
+        dated.sort();
+        assert_eq!(
+            dated,
+            [
+                ("a.CR3", "2024-03-02T10:00:01.120"),
+                ("b.CRW", "2004-05-01T10:43:58.000"),
+            ]
+        );
+        // Dated photos are not read again, even once retried.
+        session.retry_capture_times();
+        session.start_capture_times(|_| true);
+        assert!(!session.reading_capture_times());
+        Ok(())
+    }
+
+    /// Export names of a photo opened without a catalog read its capture
+    /// time by the same rule.
+    #[test]
+    fn a_file_alone_is_dated_as_the_catalog_dates_it() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (cr3, crw) = (
+            directory.path().join("a.CR3"),
+            directory.path().join("b.CRW"),
+        );
+        std::fs::write(&cr3, dated_cr3("2024:03:02 10:00:01", "12"))?;
+        std::fs::write(&crw, dated_crw(1_083_408_238))?;
+        assert_eq!(
+            file_capture_time(&cr3).as_deref(),
+            Some("2024-03-02T10:00:01.120")
+        );
+        assert_eq!(
+            file_capture_time(&crw).as_deref(),
+            Some("2004-05-01T10:43:58.000")
+        );
+        Ok(())
+    }
+
+    /// Reads photo info until the reader is done.
+    fn read_photo_info(session: &mut CatalogSession) {
+        let started = std::time::Instant::now();
+        while session.reading_photo_info() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            assert!(session.poll_photo_info().error.is_none());
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn pngs_stored_with_their_size_alone_get_their_camera_once() -> Result<()> {
+        use crate::metadata::PhotoInfo;
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        std::fs::write(
+            folder.join("a.png"),
+            crate::export::exif::camera_png(6, 4, ("SONY", "ILCE-7M4"), "Test lens"),
+        )?;
+        image::RgbImage::new(8, 2).save(folder.join("b.png"))?;
+        image::RgbImage::new(2, 2).save(folder.join("c.jpg"))?;
+        let path = directory.path().join("library.rawmakase");
+        let mut catalog = Catalog::create(&path)?;
+        catalog.add_folder(&folder)?;
+        let id = |name: &str, catalog: &Catalog| -> Result<PhotoId> {
+            Ok(catalog
+                .photos()?
+                .iter()
+                .find(|p| p.filename == name)
+                .unwrap()
+                .id)
+        };
+        let (a, b, c) = (
+            id("a.png", &catalog)?,
+            id("b.png", &catalog)?,
+            id("c.jpg", &catalog)?,
+        );
+        // What releases that read no EXIF from PNGs stored: the size alone.
+        let size = |dimensions| PhotoInfo {
+            dimensions: Some(dimensions),
+            ..PhotoInfo::default()
+        };
+        catalog.fill_photo_info(&[
+            (a, Some(size((6, 4)))),
+            (b, Some(size((8, 2)))),
+            (c, Some(size((2, 2)))),
+        ])?;
+        drop(catalog);
+        let open = || -> Result<CatalogSession> {
+            Ok(CatalogSession::open(&CatalogLocation::from(&path))?.session)
+        };
+
+        // Offline, nothing is read, and they wait for the next open.
+        let mut session = open()?;
+        // JPEGs' EXIF always was read: only the PNGs are read again.
+        let mut listed = session.catalog.photos_to_read_info()?;
+        let mut pngs = [a, b];
+        listed.sort();
+        pngs.sort();
+        assert_eq!(listed, pngs);
+        session.start_photo_info(|_| false);
+        assert!(!session.reading_photo_info());
+        drop(session);
+        let mut session = open()?;
+        session.start_photo_info(|_| true);
+        assert!(session.reading_photo_info());
+        read_photo_info(&mut session);
+        let info = session.catalog.photo_info(a)?.unwrap();
+        assert_eq!(info.camera.as_deref(), Some("SONY ILCE-7M4"));
+        assert_eq!(info.lens.as_deref(), Some("Test lens"));
+        assert_eq!(info.dimensions, Some((6, 4)));
+        assert_eq!(session.catalog.photo_info(b)?, Some(size((8, 2))));
+        // Read once: neither is read again, after reopening either.
+        session.start_photo_info(|_| true);
+        assert!(!session.reading_photo_info());
+        drop(session);
+        let mut session = open()?;
+        session.start_photo_info(|_| true);
+        assert!(!session.reading_photo_info());
         Ok(())
     }
 

@@ -8,9 +8,10 @@ Lanczos3 resizing of full resolution renders, and finishes previews (sharpening,
 grain, vignettes, clipping overlay, monitor profile) straight into the texture the
 viewport draws (see [presenting on the UI's GPU](#presenting-on-the-uis-gpu)). RAW
 decoding, geometry sampling, local tones and export stay on the CPU. There is no
-separate draft: every slider change renders the real pipeline at Fit size, and at
-100% a half-resolution preview of the region comes first (see
-[slider responsiveness](#slider-responsiveness)). The status line shows `GPU` for
+separate draft pipeline: every slider change renders the real pipeline at Fit size,
+and where that takes more than 40 ms a reduced render of the photo, or at 100% of the
+region, comes first (see [slider responsiveness](#slider-responsiveness) and
+[slow GPUs](#slow-gpus--2026-10-09)). The status line shows `GPU` for
 presented frames and `GPU finish` when only finishing used compute.
 
 The shaders are portable WGSL through wgpu, with no CUDA or Metal-specific code.
@@ -75,6 +76,10 @@ pipeline (`crates/rawmakase-engine/src/develop/stage_cache.rs`), each keyed by t
 - the scene tone stage's measures of that copy, keyed by the copies, the profile
   matrix, white balance, Temperature and Tint, the profile and its amount, the
   camera's exposure and Camera Calibration (the measures are taken at Exposure 0);
+  with them, what renders measure on the same scene values with one more setting:
+  the Contrast pivot by Dehaze, the copy's camera colour, and the
+  Shadows/Highlights map's base (guided filter, keys, regional level, Clarity's
+  detail) by Exposure, so the Basic sliders only rebuild the map's curves;
 - the textured image, when Texture is on;
 - samples: each output pixel's camera value after geometry and lens correction,
   and its source position.
@@ -121,11 +126,11 @@ frame shown while dragging is the real rendering.
 At 100%, each change first renders the visible region from the pyramid at half
 resolution or less (at most 0.6 megapixels), which the viewport stretches over the
 region, then the full-resolution region. The worker's mailbox keeps only the latest
-job and a newer job cancels the running one, so while a slider moves the view
-follows the reduced previews, and the sharp region appears when it stops. Pending
-region or quality work never delays a newer slider job beyond the next cancellation
-check (per row in blurs and per pixel in the color stage; a GPU command already
-submitted finishes first).
+job, so while a slider moves the view follows the reduced previews, and the sharp
+region appears when it stops. A newer edit of the same view lets the running render
+finish rather than cancelling it (see [slow GPUs](#slow-gpus--2026-10-09)); a new
+photo or view cancels it at the next cancellation check (per row in blurs and per
+pixel in the color stage; a GPU command already submitted finishes first).
 
 Renderer times per change, same conditions as the stage cache table, but with the
 machine even busier (load average 40–58), so these are upper bounds. Before this
@@ -147,6 +152,69 @@ change the first update was the 50 ms legacy draft, and the real rendering came
 | | 100% preview, local | 41 ms |
 | | 100% preview, Clarity edits | 116 ms |
 | | 100% full region, local | 1469 ms |
+
+## Slow GPUs — 2026-10-09
+
+On an Intel UHD Graphics 620 laptop (i5-8365U, Linux, Vulkan) at display scale 2, a
+Fit render took 235–314 ms by the status line, and dragging a slider showed no frame
+until it stopped. Each changed value cancelled the running render, and with renders
+slower than the slider's changes none ever finished. Two changes address it:
+
+- An edit of the same document and view no longer cancels the running render; it
+  finishes and shows with the settings it was asked for, and the latest change is
+  rendered next. A new photo, view or size still cancels it, and a result older than
+  the one shown is dropped.
+- While the whole photo is edited, a full render slower than 40 ms is preceded by a
+  reduced one, its long edge halved until it has at most a megapixel (701 pixels
+  for that laptop's 934 × 1402 Fit), as 100% regions already were.
+
+`examples/preview_benchmark` on that laptop, release build, a Nikon Z f DNG
+(6064×4040), Adobe Standard, 1600-pixel Fit, median of three; "local" adds Shadows,
+Highlights and Clarity as above. Presented times, until the frame can be drawn:
+
+| Render | Neutral | Local |
+| --- | ---: | ---: |
+| Fit | 63 ms | 449 ms |
+| 100% preview (reduced region) | 14 ms | 256 ms |
+
+Without local adjustments a reduced render is several times faster. With them, the
+CPU work per render that does not depend on the output size (the Shadows/Highlights
+map, the contrast measure, the histogram readback) dominates, and a reduced render
+saves less; that work is the next target on slow machines.
+
+`examples/slider_benchmark` times what the desktop does while each Basic slider is
+dragged at Fit: a frame presented for each new value, from a new photo's recipe with
+Contrast −76 and Highlights −3, on the 934 × 1402 Fit and its half-size draft. On the
+same laptop and photo, per change, the CPU and GPU work that did not depend on the
+slider dominated:
+
+| Per render | Before | After |
+| --- | ---: | ---: |
+| Contrast pivot, measured on the CPU | 88 ms | kept with the measures, by Dehaze |
+| Shadows/Highlights map base on the CPU | 65 ms | kept by Exposure; the copy's camera colour kept |
+| Develop inputs created and uploaded (mostly the map's grids) | 25 ms | grids kept on the device |
+| Histogram with global atomics | about 20 ms | counted per workgroup, 64 × 64 tiles |
+
+The develop pass is also compiled for the features a render uses (masks, colour
+stages, the map, Dehaze: about 7,500 instructions became 2,600 without masks and
+colour), and keeps each sample set's camera colour (white balance, the profile's
+matrix and HueSatMap, calibration), which no Basic slider nor Exposure changes, from
+the second render with the same settings. A hardware test checks that a warm
+renderer presents the frames of a fresh one across these edits.
+
+Per change, median of 8, two runs:
+
+| Slider | Fit before | Fit after | Draft before | Draft after |
+| --- | ---: | ---: | ---: | ---: |
+| Exposure | 241–244 ms | 27–28 ms | 202–208 ms | 30–42 ms |
+| Contrast | 244–247 ms | 35 ms | 205–207 ms | 19 ms |
+| Highlights | 241–242 ms | 35 ms | 203–207 ms | 19 ms |
+| Shadows | 331–333 ms | 47–59 ms | 410–415 ms | 34–46 ms |
+| Whites | 242–243 ms | 35–39 ms | 204–207 ms | 19 ms |
+| Blacks | 228–231 ms | 33–34 ms | 191–193 ms | 18 ms |
+
+Positive Shadows still measures its black response per value (the median gain over
+the copy), and Exposure builds the map's guided filter per value, on the CPU.
 
 ## GPU develop stage
 
@@ -204,12 +272,12 @@ by the full-resolution local-tone blurs on the CPU (see the next section).
 
 The render worker used to read every GPU result back with a blocking wait, sharpen
 and apply grain and vignettes on the CPU, convert to 8 bits, apply the monitor
-profile with a new lcms transform, draw the clipping overlay and compute the
+profile with a new colour transform, draw the clipping overlay and compute the
 histogram; the UI thread then built an egui image, reduced it for the Navigator and
 uploaded it again. The GPU stage now runs on eframe's own wgpu device, and
 `gpu/present.wgsl` finishes the developed pixels on the device into a texture the
 viewport draws: sharpening, vignettes and grain, the clipping overlay, the monitor
-profile (a lattice sampled from lcms once per profile) and 8-bit encoding, with the
+profile (a lattice sampled once per profile) and 8-bit encoding, with the
 histogram counted in the same pass and the Navigator copy reduced on the GPU. Only
 the histogram (3 KB) and, for catalog photos, the library thumbnail come back.
 When the GPU does not render a recipe, the worker prepares the display bytes,
@@ -345,21 +413,34 @@ Clarity drags.
 ## Decode cache and prefetch
 
 Opening a photo stores the developed camera image, exactly as decoded, in a disk
-cache (`crates/rawmakase-native/src/decode_cache.rs`), together with the pixels highlight recovery changed
+cache (`crates/rawmakase-decode/src/decode_cache.rs`), together with the pixels highlight recovery changed
 (0.7% of pixels on DSCF7853, 46 pixels on the A7CR file), so the recovered image is
 restored without recomputing it. The loader recovers highlights itself before
 announcing the full image, which the first render would otherwise do. A later open
 of the same photo reads the cache and skips both the half-size and the full decode.
 After a photo opens, the loader develops the next and previous photos of the folder
 into the cache on a two-thread pool, leaving the other cores to rendering; opening
-another photo cancels the prefetch.
+another photo cancels the prefetch. A JPEG, PNG or TIFF neighbour is never cached:
+the prefetch opens it into memory instead, and the next load takes it if it is that
+file, unchanged in size and modification time, and drops it otherwise.
 
 Entries are keyed by the RAW file's identity (size, modification time and a hash of
 its first 64 KB), the demosaic setting and the running executable's size and time,
 so a rebuilt or updated app never uses another build's pixels. The cache lives in
 `decoded/` under the per-user cache directory (`~/Library/Caches/RAWmakase` on macOS,
-`$XDG_CACHE_HOME/rawmakase` or `~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR`
-to override), is capped at 4 GB and drops the least recently used entries first.
+`%LOCALAPPDATA%\RAWmakase\Cache` on Windows, `$XDG_CACHE_HOME/rawmakase` or
+`~/.cache/rawmakase` on Linux, `RAWMAKASE_CACHE_DIR` to override), defaults to a 4 GiB cap and drops the least recently used entries first.
+Preferences > Catalog > Decoded images sets the cap from 1 GiB to 1 PiB (1,048,576 GiB), saved
+between launches. Changes reach Develop, neighbour prefetch and Reference View
+without restarting; a reduced cap is enforced on the next cache write.
+Preferences > Performance > Choose Folder… moves the cache to `RAWmakase Cache/` in
+a folder of the user's choice, such as another drive, and Use Default moves it back.
+Moving removes the old location's entries, and an entry being written during the move
+removes itself, so the old drive is freed. The folder must be writable when chosen;
+its subfolder is created only while the folder exists, so an unplugged drive is never
+recreated on the system disk, and photos are just not cached until it returns.
+Develop, prefetch, Reference View, export and preview builds share the app's cache,
+so they all follow the choice without restarting.
 An entry is the image's size in 32-bit floats: 278 MB for the X100F, 697 MB for the
 A7CR. RAW files, sidecars and catalogs are not touched.
 
@@ -374,6 +455,14 @@ machine:
 Through the real loader, in a folder of three X100F photos: the first open showed
 the half-size image at 166 ms and the full image at 884 ms; reopening it showed the
 full image at 140 ms, and the two prefetched neighbours opened in 190 and 300 ms.
+
+## Decoder speed — 2026-10-18
+
+RAWmakase's own decoders against LibRaw, measured at the switch to them on 45
+dataset files (three per format), the median of RAWmakase's time over LibRaw's:
+0.79 to open and decode, 0.80 to open and develop at full and half size. No
+format is slower beyond noise; the largest gains are compressed RAF (0.25),
+IIQ and 3FR (0.45) and PEF (0.53).
 
 ## Stored Standard previews — 2026-10-08
 
@@ -469,7 +558,7 @@ crops, regions, spatial effects, cancellation and fallback. The neutral-color CP
 fast path is also checked against its general processing path.
 
 Full-quality rendering still takes seconds on this photograph. The GPU work does
-not accelerate LibRaw decoding or the complete color pipeline. High-resolution
+not accelerate RAW decoding or the complete color pipeline. High-resolution
 color processing, local effects and memory transfers remain targets for future
 profiling. Cancellation now interrupts recovery, local-tone and sharpening CPU
 work; an already-submitted GPU command must finish, after which a stale result is

@@ -1,6 +1,6 @@
 schema: 1
 tool:
-  version: '0.7.0'
+  version: '0.10.0'
   nfpm: '2.47.0'
 nfpm:
   name: rawmakase
@@ -14,8 +14,13 @@ release:
   checksums: SHA256SUMS
 version_file: Cargo.toml
 # Host libraries the Linux build links against; packaging/linux/bundle.py
-# bundles the imaging libraries and leaves these to the distribution.
+# leaves these to the distribution. The DEB, RPM and AppImage all use the
+# host's copies.
 libraries:
+  # Current builds link no OpenMP; the packaging rehearsal still packages the
+  # published v0.1.8 Linux archive (.github/workflows/packaging.yml), whose
+  # binary needs libgomp, and native-packages maps only libraries listed here.
+  # Remove with that fixture.
   libgomp.so.1: {deb: libgomp1, rpm: libgomp}
   libz.so.1: {deb: zlib1g, rpm: zlib}
   libvulkan.so.1: {deb: libvulkan1, rpm: vulkan-loader}
@@ -101,7 +106,12 @@ targets:
     platform: linux
     arch: amd64
     libc: glibc
-    formats: [deb, rpm]
+    formats: [deb, rpm, appimage]
+    # AppImageUpdate and similar tools fetch the newest stable release's
+    # .zsync file, published beside the AppImage. The app itself only points
+    # AppImage users at the release page.
+    appimage:
+      update_information: gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-x86_64.AppImage.zsync
     input:
       local: dist/rawmakase-@VERSION@-x86_64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-x86_64-linux.tar.gz
@@ -117,6 +127,11 @@ targets:
         - src: '@PAYLOAD@/usr/share/'
           dst: /usr/share/
           type: tree
+        # The AppImage runtime native-packages appends (type2-runtime
+        # 20251108 in 0.10.0) carries this licence; only the AppImage ships it.
+        - src: packaging/linux/AppImage-runtime-LICENSE
+          dst: /usr/share/licenses/rawmakase/AppImage-runtime-LICENSE
+          packager: appimage
       # Loaded at runtime by the windowing and GPU stack, so not found by
       # inspecting the binary.
       overrides:
@@ -125,7 +140,6 @@ targets:
             - libc6 (>= 2.39)
             - libstdc++6 (>= 14)
             - libgcc-s1
-            - libgomp1
             - zlib1g
             - libvulkan1
             - libxkbcommon0
@@ -148,7 +162,6 @@ targets:
             - glibc >= 2.39
             - libstdc++ >= 14
             - libgcc
-            - libgomp
             - zlib
             - vulkan-loader
             - libxkbcommon
@@ -169,7 +182,12 @@ targets:
     platform: linux
     arch: arm64
     libc: glibc
-    formats: [deb, rpm]
+    formats: [deb, rpm, appimage]
+    # AppImageUpdate and similar tools fetch the newest stable release's
+    # .zsync file, published beside the AppImage. The app itself only points
+    # AppImage users at the release page.
+    appimage:
+      update_information: gh-releases-zsync|pch|rawmakase|latest|rawmakase-*-aarch64.AppImage.zsync
     input:
       local: dist/rawmakase-@VERSION@-aarch64-linux.tar.gz
       release_asset: rawmakase-@VERSION@-aarch64-linux.tar.gz
@@ -185,6 +203,11 @@ targets:
         - src: '@PAYLOAD@/usr/share/'
           dst: /usr/share/
           type: tree
+        # The AppImage runtime native-packages appends (type2-runtime
+        # 20251108 in 0.10.0) carries this licence; only the AppImage ships it.
+        - src: packaging/linux/AppImage-runtime-LICENSE
+          dst: /usr/share/licenses/rawmakase/AppImage-runtime-LICENSE
+          packager: appimage
       # Loaded at runtime by the windowing and GPU stack, so not found by
       # inspecting the binary.
       overrides:
@@ -193,7 +216,6 @@ targets:
             - libc6 (>= 2.39)
             - libstdc++6 (>= 14)
             - libgcc-s1
-            - libgomp1
             - zlib1g
             - libvulkan1
             - libxkbcommon0
@@ -216,7 +238,6 @@ targets:
             - glibc >= 2.39
             - libstdc++ >= 14
             - libgcc
-            - libgomp
             - zlib
             - vulkan-loader
             - libxkbcommon

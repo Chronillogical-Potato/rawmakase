@@ -36,3 +36,5 @@ pub(crate) use tone::*;
 pub(crate) mod pixel_params;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::rendered_fixture;

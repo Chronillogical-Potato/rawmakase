@@ -23,7 +23,8 @@ enum Command {
     Control(rawmakase_ctl::Cli),
     /// Serve editing tools over MCP stdio, connected to the running desktop app.
     Mcp(mcp::Cli),
-    /// Import user-selected Lightroom DCP/XMP files into RAWmakase's profile library.
+    /// Import Lightroom DCP and look XMP profiles and .cube LUTs (as looks), or the
+    /// folders holding them, into RAWmakase's profile library.
     ImportProfiles {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
@@ -116,11 +117,36 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
+    /// Print each file's develop fingerprint as a line of JSON: the image each
+    /// decode mode (full, half) makes, hashed, for decoder regression checks.
+    DecodeDump {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+        /// Also write each full decode that is not a mosaic here, as raw floats.
+        #[arg(long)]
+        floats: Option<PathBuf>,
+    },
+    /// Print each file's half-size check as a line of JSON: RAWmakase's
+    /// half-size decode against its full decode reduced (colour, detail) and
+    /// its time over the full develop's.
+    HalfCheck {
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<PathBuf>,
+        /// The files' reference as JSON (`{"ratio":…,"de_mean":…,"de_p95":…,
+        /// "detail":…}`): LibRaw's half-size decode, recorded, which
+        /// scripts/corpus/dataset-half.py passes. Without one, absolute limits.
+        #[arg(long, value_parser = parse_reference)]
+        reference: Option<rawmakase::half_check::Reference>,
+    },
     Benchmark {
         input: PathBuf,
         #[arg(long, default_value_t = 20)]
         iterations: usize,
     },
+}
+/// A half-size check's `--reference`.
+fn parse_reference(json: &str) -> Result<rawmakase::half_check::Reference, String> {
+    serde_json::from_str(json).map_err(|e| e.to_string())
 }
 /// A stage `render --tap` writes.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -189,9 +215,18 @@ fn main() -> Result<()> {
             anyhow::ensure!(!done.imported.is_empty(), "No lens profiles imported");
         }
         Some(Command::ImportProfiles { files }) => {
-            for p in rawmakase::camera_profiles::import_files(&files)? {
-                println!("Imported {}", p.display());
+            // Files and folders, imported as the app's Import does: a file that
+            // can't be imported is reported and leaves the rest importing.
+            let summary = rawmakase::app::import_profiles(&files);
+            for line in summary.lines() {
+                println!("{line}");
             }
+            println!("{}", summary.message());
+            anyhow::ensure!(
+                summary.failures() == 0 && summary.done() > 0,
+                "{}",
+                summary.message()
+            );
         }
         Some(Command::ImportCatalog { source, output }) => {
             let path = rawmakase::catalog::lightroom::import_lightroom(&source, &output)?;
@@ -259,7 +294,7 @@ fn main() -> Result<()> {
                 errors
             );
             println!(
-                "LibRaw {}\n{}",
+                "{}\n{}",
                 raw::version(),
                 serde_json::to_string_pretty(&r.metadata)?
             );
@@ -341,7 +376,7 @@ fn main() -> Result<()> {
             let t = Instant::now();
             let r = rawmakase::photo::open(&input)?;
             let mut edit = if let Some(p) = recipe {
-                rawmakase::presets::load_preset(&p)?
+                rawmakase::presets::load_preset(&p)?.recipe
             } else {
                 rawmakase::catalog::legacy_sidecar::load(&input)?
                     .map(|s| s.recipe)
@@ -410,7 +445,7 @@ fn main() -> Result<()> {
             }
             if let Some(path) = save_recipe {
                 anyhow::ensure!(!path.exists(), "Recipe output already exists");
-                rawmakase::presets::save_preset(&path, &edit)?;
+                rawmakase::presets::save_preset(&path, &edit, &im.metadata)?;
             }
             if let Some(tap) = tap {
                 let stage = match tap {
@@ -458,11 +493,21 @@ fn main() -> Result<()> {
             );
         }
         Some(Command::Fingerprint { files }) => {
-            // One file at a time: LibRaw opening files side by side can give one
-            // of them different white balance multipliers (issue #420).
             for path in &files {
                 let line = serde_json::to_string(&rawmakase::fingerprint::fingerprint(path))?;
                 println!("{line}");
+            }
+        }
+        Some(Command::DecodeDump { files, floats }) => {
+            for path in &files {
+                let dump = rawmakase::decode_dump::dump(path, floats.as_deref());
+                println!("{}", serde_json::to_string(&dump)?);
+            }
+        }
+        Some(Command::HalfCheck { files, reference }) => {
+            for path in &files {
+                let check = rawmakase::half_check::check(path, reference);
+                println!("{}", serde_json::to_string(&check)?);
             }
         }
         Some(Command::Benchmark { input, iterations }) => {
@@ -604,8 +649,12 @@ fn save_stage(
     out: rawmakase::rendered::Rendered,
     overwrite: bool,
 ) -> Result<()> {
-    use rawmakase::storage::{Replace, is_raw, write_atomic};
+    use rawmakase::storage::{RasterFormat, Replace, is_raw, write_atomic};
     anyhow::ensure!(!is_raw(output), "A stage tap cannot overwrite a RAW file");
+    anyhow::ensure!(
+        RasterFormat::of(output) == Some(RasterFormat::Tiff),
+        "A stage tap is a TIFF: name the output .tif or .tiff"
+    );
     if output.exists() {
         anyhow::ensure!(
             std::fs::canonicalize(output)? != std::fs::canonicalize(input)?,
@@ -670,5 +719,20 @@ mod tests {
         let written = image::open(&output).unwrap().to_rgb32f();
         assert_eq!(written.dimensions(), (2, 1));
         assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn a_stage_tap_is_only_written_under_a_tiff_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("photo.dng");
+        for name in ["tap.jpg", "tap.png", "tap.exr", "tap"] {
+            let output = dir.path().join(name);
+            let refused = save_stage(&output, &source, tap(), false).unwrap_err();
+            assert!(refused.to_string().contains(".tif"), "{name}: {refused}");
+            assert!(!output.exists(), "{name}");
+        }
+        for name in ["tap.tif", "tap.TIFF"] {
+            save_stage(&dir.path().join(name), &source, tap(), false).unwrap();
+        }
     }
 }

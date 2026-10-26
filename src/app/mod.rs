@@ -18,6 +18,8 @@ use std::{
 };
 
 pub(crate) struct Editor {
+    #[cfg(target_os = "macos")]
+    native_menu: bool,
     activity: activity::Activity,
     load: task::Task,
     presets: PresetBrowser,
@@ -35,6 +37,8 @@ pub(crate) struct Editor {
     tx: Sender<Event>,
     rx: Receiver<Event>,
     loader: worker::Loader,
+    /// Shared size policy for Develop, neighbour prefetch and Reference View.
+    decode_cache: crate::decode_cache::DecodeCache,
     renderer: worker::Renderer,
     /// Develop's Reference View, and the worker developing its photo.
     reference: reference::ReferenceView,
@@ -52,6 +56,10 @@ pub(crate) struct Editor {
     solo: std::collections::BTreeSet<String>,
     /// Pinned panel sections as last saved to the session.
     pinned: std::collections::BTreeSet<String>,
+    /// Whether the window is maximized, as last saved to the session.
+    maximized: bool,
+    /// Reopening it maximized, until the window manager has done so.
+    restoring_maximized: workspace::RestoreMaximized,
     /// The panels each module shows (Tab, Shift+Tab, F6–F8).
     panels: panels::WorkspacePanels,
     /// What the last Tab or Shift+Tab hid, and in which module.
@@ -120,6 +128,8 @@ pub(crate) struct Editor {
     auto_advance: bool,
     /// Synchronize Folder: the scan under way or the plan waiting for review.
     folder_sync: folder_sync::FolderSync,
+    /// The file operation under way, from its plan to its outcome.
+    file_ops: file_ops::FileOps,
     /// The photo open in Develop when a synchronization was applied, and its
     /// file's new path if it was found moved: the reload that follows keeps
     /// the document, unsaved edit included, following the file (see
@@ -145,6 +155,7 @@ impl Editor {
     pub(crate) fn new(
         cc: &eframe::CreationContext<'_>,
         path: Option<PathBuf>,
+        session: crate::app::session::Session,
         launch: crate::updates::Launch,
     ) -> Self {
         // The desktop's hinting and antialiasing, read once (a D-Bus call on
@@ -156,12 +167,14 @@ impl Editor {
         install_fonts(&cc.egui_ctx, &text);
         icons::install(&cc.egui_ctx);
         // The desktop's text size (Omarchy's, GNOME's Large Text) zooms the
-        // interface, now and when it changes.
-        crate::platform::text_scale::follow(&cc.egui_ctx);
+        // interface, now and when it changes. The whole interface zooms rather
+        // than only its fonts, so panels sized for their labels grow with them.
+        follow_text_scale(&cc.egui_ctx);
+        library::remember_drives_in(crate::storage::data_dir().join("drives.json"));
         let mut editor = Self::with_backend(
             &cc.egui_ctx,
             path,
-            crate::app::session::load_session(),
+            session,
             Some(crate::storage::data_dir().join("session.json")),
             worker::RenderBackend::Gpu(cc.wgpu_render_state.clone()),
         );
@@ -246,9 +259,13 @@ impl Editor {
         // is missing now (an unplugged drive) is not replaced by it.
         let first_catalog = session.last_path.is_none() && session_file.is_some();
         let (tx, rx) = mpsc::channel();
-        let loader = worker::Loader::new(tx.clone(), ctx.clone());
+        let decode_cache = crate::decode_cache::DecodeCache::default();
+        decode_cache.set_limit(u64::from(session.decoded_cache_size_gib()) << 30);
+        decode_cache.set_folder(session.decoded_cache_folder.as_deref());
+        let loader = worker::Loader::new(tx.clone(), ctx.clone(), decode_cache.clone());
         let renderer = worker::renderer_with_backend(tx.clone(), ctx.clone(), backend);
-        let reference_loader = worker::reference_loader(tx.clone(), ctx.clone());
+        let reference_loader =
+            worker::reference_loader(tx.clone(), ctx.clone(), decode_cache.clone());
         let standard_preview_size = session.standard_preview_size();
         let discard_one_to_one_after = session.discard_one_to_one_after();
         let stand_ins = stand_in::StandIns::new(
@@ -257,6 +274,8 @@ impl Editor {
             crate::catalog::preview_cache::PreviewCache::path(),
         );
         let mut app = Self {
+            #[cfg(target_os = "macos")]
+            native_menu: false,
             activity: Default::default(),
             load: Default::default(),
             presets: PresetBrowser {
@@ -264,7 +283,10 @@ impl Editor {
                 ..Default::default()
             },
             view: ViewState {
-                monitor: session.monitor,
+                monitor: monitor::MonitorProfile::from_session(
+                    session.monitor,
+                    session.monitor_srgb,
+                ),
                 crop_guides: crop_tool::CropGuides::from_session(&session.crop_guides),
                 ..Default::default()
             },
@@ -278,6 +300,7 @@ impl Editor {
             tx,
             rx,
             loader,
+            decode_cache,
             renderer,
             reference: Default::default(),
             reference_loader,
@@ -288,6 +311,12 @@ impl Editor {
             collapsed: session.collapsed.clone(),
             solo: session.solo.clone(),
             pinned: session.pinned.clone(),
+            maximized: session.maximized,
+            restoring_maximized: if session.maximized {
+                workspace::RestoreMaximized::Pending
+            } else {
+                workspace::RestoreMaximized::Done
+            },
             panels: session.panels,
             tabbed: None,
             onboarding: onboarding::Onboarding::new(show_onboarding),
@@ -330,6 +359,7 @@ impl Editor {
             selection: Default::default(),
             auto_advance: session.auto_advance,
             folder_sync: Default::default(),
+            file_ops: Default::default(),
             relink_open: None,
             checksums_paused: session.pause_checksums,
             first_conversion: if session.no_auto_black_white_mix {
@@ -369,7 +399,9 @@ impl Editor {
                 path,
                 &crate::app::session::Session {
                     last_path: self.session_path(),
-                    monitor: self.view.monitor.clone(),
+                    monitor: self.view.monitor.session_path(),
+                    monitor_srgb: self.view.monitor.session_srgb(),
+                    maximized: self.maximized,
                     collapsed: self.collapsed.clone(),
                     solo: self.solo.clone(),
                     pinned: self.pinned.clone(),
@@ -392,6 +424,8 @@ impl Editor {
                     crop_guides: self.view.crop_guides.to_session(),
                     raw_defaults: self.raw_defaults.settings().clone(),
                     standard_preview_size: Some(self.preview_builds.standard_size),
+                    decoded_cache_size_gib: Some((self.decode_cache.limit() >> 30) as u32),
+                    decoded_cache_folder: self.decode_cache.folder(),
                     one_to_one_discard_days: Some(
                         self.preview_builds.discard_one_to_one_after.unwrap_or(0),
                     ),
@@ -495,17 +529,30 @@ impl eframe::App for Editor {
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // AppKit moves the traffic lights back during layout passes.
-        fastframe_macos::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
+        fastframe_titlebar::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
         #[cfg(windows)]
         crate::platform::taskbar_icon(frame);
         self.draw(ui);
-        display::paint(ui, frame, self.view.monitor.is_some());
+        if self.view.monitor.follows_system() {
+            if self.view.system_display.update(frame) {
+                self.schedule();
+            }
+            // Recheck for a newly assigned profile while nothing else repaints.
+            if cfg!(windows) {
+                ui.ctx().request_repaint_after(monitor::RECHECK);
+            }
+        }
+        display::paint(ui, frame, self.view.monitor.device_rgb());
     }
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         workspace::clipboard_shortcut_keys(ctx, raw_input);
     }
-    // fastframe-macos turns on eframe's glow feature, which adds the context.
+    // fastframe-titlebar turns on eframe's glow feature, which adds the context.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        #[cfg(target_os = "macos")]
+        if self.native_menu {
+            crate::platform::menu::clear();
+        }
         self.exit();
     }
 }
@@ -555,6 +602,7 @@ fn windows_window_icon() -> Option<egui::IconData> {
 }
 
 pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Result<()> {
+    let session = crate::app::session::load_session();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RAWmakase")
@@ -565,12 +613,15 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
             .with_icon(window_icon())
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.])
+            // Restoring leaves it at the size above. X11 window managers ignore
+            // this while the window is hidden; the first frame asks again.
+            .with_maximized(workspace::KEEPS_MAXIMIZED && session.maximized)
             // On macOS the workspace bar is the title bar, under the traffic
             // lights; elsewhere the window keeps its decorations.
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),
-        // fastframe-macos turns on eframe's glow renderer too; previews
+        // fastframe-titlebar turns on eframe's glow renderer too; previews
         // share the UI's wgpu device.
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: wgpu_options(),
@@ -588,7 +639,15 @@ pub fn run(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::Res
         Box::new(move |cc| {
             // The event loop has built the app menu by now.
             crate::platform::quit::through_close_guard(cc);
-            Ok(Box::new(Editor::new(cc, path, launch)))
+            #[allow(unused_mut)]
+            let mut editor = Editor::new(cc, path, session, launch);
+            #[cfg(target_os = "macos")]
+            {
+                let ctx = cc.egui_ctx.clone();
+                editor.native_menu = crate::platform::menu::install(move || ctx.request_repaint());
+                editor.update_native_menu(&cc.egui_ctx);
+            }
+            Ok(Box::new(editor))
         }),
         &event_loop,
     ));
@@ -785,9 +844,11 @@ fn survive_surface_errors(device: &wgpu::Device) {
 
 mod auto;
 mod automation;
+mod basic_keys;
 mod before_after;
 mod brush_scroll;
 mod bulk_import;
+pub use bulk_import::import_profiles;
 mod catalog;
 mod chrome;
 mod clipping;
@@ -798,6 +859,7 @@ mod curve_menu;
 mod dialogs;
 mod display;
 mod export;
+mod file_ops;
 pub(crate) mod folder_locations;
 mod folder_sync;
 mod guided_tool;
@@ -805,6 +867,7 @@ mod history_panel;
 mod inspector;
 pub(crate) mod library;
 mod mask_tool;
+mod monitor;
 mod navigator;
 mod onboarding;
 mod overlay;
@@ -866,6 +929,23 @@ mod updates;
 mod user_presets;
 
 mod events;
+#[cfg(any(target_os = "macos", test))]
+mod native_menu;
+
+/// Zooms the interface to the desktop's text size, read through the portal
+/// under Wayland (1 elsewhere), and follows its changes on fastframe-text's
+/// watch thread, which lives as long as the process.
+fn follow_text_scale(ctx: &egui::Context) {
+    let scale = fastframe_text::text_scale();
+    ctx.set_zoom_factor(scale);
+    let watched = ctx.clone();
+    match fastframe_text::watch::watch_text_scale(scale, move |scale| {
+        watched.set_zoom_factor(scale);
+    }) {
+        Ok(()) | Err(fastframe_text::watch::WatchError::Unsupported) => {}
+        Err(error) => eprintln!("RAWmakase: not following the desktop's text size: {error}"),
+    }
+}
 
 /// Inter, with tabular figures so values keep their width as they change,
 /// and an installed face for every script and symbol it lacks (fastframe-fonts),

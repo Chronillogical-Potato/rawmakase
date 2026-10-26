@@ -15,7 +15,7 @@ type Shortcut = (&'static str, &'static str);
 /// A titled group of shortcuts.
 type Group<'a> = (&'a str, &'a [Shortcut]);
 
-const LIBRARY: [Shortcut; 9] = [
+const LIBRARY: [Shortcut; 15] = [
     ("Arrows", "Move the active photo"),
     ("Home / End", "First / last photo"),
     ("Shift+Arrows / Shift+click", "Extend the selection"),
@@ -25,6 +25,18 @@ const LIBRARY: [Shortcut; 9] = [
     ("/", "Deselect the active photo"),
     ("Cmd+L", "Turn the filters off / on"),
     ("J", "Cycle the grid cell style"),
+    ("Delete", "Move to Trash, or remove from the catalog"),
+    ("Alt+Delete", "Remove from the catalog"),
+    ("Cmd+Alt+Shift+Delete", "Move to Trash"),
+    ("Cmd+Delete", "Delete the rejected photos"),
+    (
+        "F2",
+        "Rename the photo, or the selected photos in capture order",
+    ),
+    (
+        "Cmd+Shift+S",
+        "Sync the active photo's settings to the selection",
+    ),
 ];
 const LOUPE: [Shortcut; 7] = [
     ("E / Return / double-click", "Open the Loupe"),
@@ -78,7 +90,7 @@ const GENERAL: [Shortcut; 11] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 49] = [
+const DEVELOP: [Shortcut; 51] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -135,6 +147,11 @@ const DEVELOP: [Shortcut; 49] = [
     ("Shift+drag", "Grading wheel: hue or saturation only"),
     ("Cmd+drag", "Grading wheel: fine adjustment"),
     ("Up / Down", "Nudge the hovered slider (Shift: 10)"),
+    (". / ,", "Select the next / previous Basic slider"),
+    (
+        "= / -",
+        "Step the selected Basic slider (Shift: more, Option: less)",
+    ),
     ("right-click", "Panel header: Solo Mode"),
     ("E", "Show the photo in the Loupe"),
 ];

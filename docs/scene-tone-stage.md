@@ -10,8 +10,8 @@ gates a change to it must pass. Tracking issue: #374 (from #354).
 
 | # | Stage | Domain |
 |---|---|---|
-| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels | camera RGB |
-| S1 | White balance, the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
+| S0 | Decode, demosaic, highlight recovery of sensor-clipped channels (none for rendered files) | camera RGB |
+| S1 | White balance (a rendered file's: a clip and a matrix), the profile's matrix and HueSatMap, Camera Calibration | linear, sRGB primaries |
 | S2 | Exposure and the DNG exposure ramp (black point) | linear Rec.2020 |
 | S3 | **Scene tone**: Highlights, Shadows, Clarity, Dehaze, the white point and Whites, Blacks | linear ProPhoto, unclamped |
 | S4 | Profile LookTable, enhanced look's HSV table, ProfileToneCurve, look curve | as before |
@@ -95,6 +95,26 @@ alone (identity when W* = 1), with the toe of its black point below about 0.02:
 Engine 4 clipped at 1 instead: a probe whose sensor white is at scene 4 rendered
 scene 1.0 at 1.0, where Camera Raw renders 0.69.
 
+### Rendered files
+
+A JPEG, PNG or TIFF is treated as Lightroom treats it: as Camera Raw's default rendering
+of a scene. `develop::rendered` inverts that rendering — the white curve at keys 0 (sensor
+white, maximum, Whites level and white point all 1; no black point) followed by the ACR3
+default tone curve, both DNG RGBTone — once, when `photo::open_source` opens the file. The
+resulting pseudo-scene renders through the raw path with the Embedded profile, whose tone
+curve is ACR3. `photo_measures` pins a rendered file's sensor white and maximum to 1, so at
+default settings the render is the file (±1/255; finer in 16 bits). S0 highlight recovery
+is skipped (`quality::samples::recovered`): a rendered file's bright colours are its
+rendering, not clipping.
+
+Measured against Lightroom Classic 15.6 (Camera Raw 18.7) on synthetic charts and 32
+photos: Exposure, Whites, Blacks and their combinations within about 1–2/255 on greys;
+Contrast with `basic_tone::RENDERED_PIVOT_OFFSET`. White balance is a matrix and a clip
+in S1 (`model::white_balance::rendered_white_balance`, see
+[colour pipeline](color-pipeline.md)). Known gaps: Highlights/Shadows on very dark or
+bright files, Saturation, Vibrance, Clarity, Dehaze, fully saturated colours at large
+Exposure, and parts of the cool magenta corner of Temp and Tint.
+
 ### Whites and Blacks
 
 - **Whites** is a curve family over scene values, applied RGBTone. Negative Whites
@@ -125,7 +145,10 @@ scene 1.0 at 1.0, where Camera Raw renders 0.69.
   prepared curves at steps of 0.1; pixels outside it keep the global response.
   Full-frame masked Shadows matches the global adjustment in Camera Raw probes
   with both Auto and None default-black rendering. Blacks retains its separate
-  minimum-based key.
+  minimum-based key. On photos that key is almost always below `BLACK_KEYS`'s first
+  row (−8 stops), so Blacks renders photos through that row; keying it on the 0.1th
+  percentile changes nothing, and a key relative to the median gains under 0.1 ΔE00
+  on the train photos ([parity gaps](parity-gaps.md), 2026-10-20).
 
   Camera Raw 18.7 neutral ramps with the same scene values and different camera
   baselines produce the same dark outputs; raising Exposure moves the response.
@@ -236,6 +259,42 @@ rule's material improvement (1.53 against engine 4's 1.67). A median key for Hig
 fitted the photos' scene gain better in cross-validation at every position but rendered
 the training photos worse (+100 1.37 → 1.44, −100 1.30 → 1.41), so the key is unchanged.
 
+**Negative Highlights past the table.** The table spans base levels up to 7 stops over
+the key, and past it each row used to hold its last column, so Highlights −100 stopped at
+about −3.5 EV. On synthetic probes (a flat object 2–10 stops over a flat background,
+clipped or just under the clip: clipping makes no difference) Camera Raw keeps pulling:
+−6.6, −7.9, −9.1 and −10.2 EV at 7, 8, 9 and 10 stops, about 1.2 EV more per stop, and
+at −50 and −25 about 0.5 and 0.25 more per stop. Past 7 stops the −100 row now continues
+with the slope of its last 7 columns (`Family::tail`, −0.95 EV per stop over the key
+after `monotone`, whose steps are never steeper than −1, so the output stays
+nondecreasing); the other rows hold their last column, and positions between −100
+and −50 take their share of the tail. On the six
+highlights validation sets (56 photos) this left −50 and −25 unchanged and improved −100
+in the photos with such areas, most in low-key photos with blown lights (the worst region
+of three photos 17–18 ΔE00 better, the worst regional loss 0.8). Extending −50 and −25
+with their own slopes, even scaled to Camera Raw's ratios, made regions of two photos up
+to 2.4 ΔE00 worse, so they hold. The probes' pull at 2–6 stops is about twice the
+table's, which is fitted on photos, where it is right; flat probes are not photos there.
+
+The tail reads a finer level than the table. Camera Raw's pull depends on the object's
+size, which the first probes (one 12% object) did not show: on a 7-stop block in a dark
+1024-pixel frame, −100 pulls a 4-pixel square −1.1 EV, 8–32 pixels −2.8 and 64 pixels
+and up −6.4. In one photo (a window with blinds in a dark kitchen) Camera Raw also left
+the bright slats nearly untouched: its mask of reference pixels at L* ≥ 90 averaged
+L* 92 where the main branch rendered 60 and the first tail 53, flattening the slats to
+one grey (that mask's ΔE00 went from 23.1 to 29.5). A guided base follows contrasty fine
+structure pixel by pixel, so a steep tail turns its detail into a plateau. The tail now
+reads the base capped at 0.5 stops over the mean of log luminance in a 5 × 5 window of
+the map, taken as the largest such mean within the same reach (`TAIL_RADIUS`,
+`TAIL_MARGIN`; the `LOCAL_FINE` grid on the GPU): unchanged on a block or a lamp,
+lower on stripes and specks. Without the largest-mean step the block's first two map
+pixels, whose window includes the dark frame, were pulled up to 3 stops less than its
+inside, a bright rim. A larger window (9 × 9 and up), or no
+margin, gave back some of the gain of the lamp and ceiling-light photos. This follows
+Camera Raw's size dependence only where it mattered in the photos: squares of 4 and
+16 pixels are pulled −0.3 and −2.3 EV against Camera Raw's −1.1 and −2.9, and a large
+block −3.6 against −6.4.
+
 **Positive Shadows: the two-scale lift.** On the training photos Shadows +100 left the
 darkest display tones (L* below 15) 5–7 L* too light, almost all of it from small dark
 areas (0.2–3.5% of the frame) inside brighter surroundings, which Camera Raw lifts less
@@ -343,7 +402,12 @@ few stops below at +40. A curve per amount explains ±40 to 0.10 (doing nothing:
 training photos the same curves fitted on the photos themselves do better at every
 amount (cross-validated by photo, per-channel gain in EV): +100 0.54 against 0.69 for
 the synthetic curves and 0.90 for doing nothing, +40 0.16 (0.18, 0.30), −40 0.14 (0.16,
-0.57), −100 0.34 (0.39, 1.45). **Negative Dehaze** uses these photo-fitted curves.
+0.57), −100 0.34 (0.39, 1.45). **Negative Dehaze** uses these photo-fitted curves. In Camera
+Raw's renders of the train photos it is rather a veil: sized by the photo's median luminance,
+coloured like the airlight, fading toward black, with a contrast change per photo (display
+slope 0.34–1.33) that follows the airlight's brightness. A veil model without that per-photo
+contrast term improved the median but made 11 of 26 photos worse ([parity
+gaps](parity-gaps.md), 2026-10-20).
 
 **Positive Dehaze** is a dark-channel haze removal model (`scene_tone/haze.rs`), on the
 scene tone stage's input (linear ProPhoto), measured on the photo's measurement copy (512
@@ -357,7 +421,11 @@ pixels on the long edge) at Exposure 0:
    filter with itself as the guide (box radius 2r, ε = 0.01).
 3. A pixel p at Dehaze s > 0 (the slider plus the masks' Dehaze there) becomes
    J = (p − g·A) / t + g·A, with t = max(1 − ω(s)·density, 0.3), the density read
-   bilinearly at the pixel's position and g = 2^Exposure. ω is linear between (0, 0),
+   bilinearly at the pixel's position. The gain g includes 2^Exposure, mask Exposure,
+   and the Shadows/Highlights/Clarity gain already applied to p. Transforming the
+   airlight consistently prevents negative Highlights from turning the sky black
+   when combined with positive Dehaze (#600). The density measurement and
+   interpolation stay independent of those tone edits. ω is linear between (0, 0),
    (+20, 0.3), (+40, 0.45) and (+100, 0.9). No channel falls below half of p scaled by
    the luminance's change, so weak channels of bright saturated colours are not driven
    to black (on the training photos: +100 3.06 → 3.04; a floor of 0.7 costs 3.18, 1.0

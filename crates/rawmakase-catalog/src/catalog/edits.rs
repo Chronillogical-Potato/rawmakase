@@ -150,6 +150,16 @@ impl Catalog {
         [texts.recipe, texts.lightroom, texts.local].hash(&mut hasher);
         Ok(hasher.finish())
     }
+    /// Whether the photo has an edit of its own: a saved recipe or Lightroom
+    /// settings. Cheaper than reading either.
+    pub fn has_edit(&self, id: PhotoId) -> Result<bool> {
+        self.db.read_one(
+            sql!(
+                "SELECT recipe IS NOT NULL OR COALESCE(lightroom_develop, '') <> '' FROM photos WHERE id=?"
+            ),
+            &[&id],
+        )
+    }
     /// The saved RAWmakase recipe (JSON, with its spots and masks) and Lightroom
     /// develop text, if any.
     pub fn edit_texts(&self, id: PhotoId) -> Result<(Option<String>, Option<String>)> {

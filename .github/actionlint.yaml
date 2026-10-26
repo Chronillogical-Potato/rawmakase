@@ -1,0 +1,6 @@
+paths:
+  .github/workflows/triage.yml:
+    ignore:
+      # GitHub supports job cache-mode, but actionlint through v1.7.12 does not.
+      # Remove when actionlint supports it; triage needs write to persist state.
+      - '^unexpected key "cache-mode" for "job" section\.'

@@ -1,16 +1,19 @@
 # Imported Lightroom camera and look profiles
 
-RAWmakase renders with profiles from its own library and files the user explicitly selects. Proprietary profile assets are not shipped with the application; RAWmakase ships its own profiles instead (see [RAWmakase profiles](#rawmakase-profiles)). On macOS and Windows, the Develop **Profile** menu looks in Camera Raw's profile folder (`/Library/Application Support/Adobe/CameraRaw/CameraProfiles`, `C:\ProgramData\Adobe\CameraRaw\CameraProfiles`) for the current camera's Adobe Standard and Camera Matching profiles, and offers **Import Adobe profiles for this camera** when it finds some that are not imported yet. To decide whether to offer the button it only lists that folder's file names for the current camera; no profile is opened, parsed or copied until the button is used, and then the files are copied like any other import.
+RAWmakase renders with profiles from its own library and files the user explicitly selects. Proprietary profile assets are not shipped with the application; RAWmakase ships its own profiles instead (see [RAWmakase profiles](#rawmakase-profiles)). On macOS and Windows, the Develop **Profile** menu looks in Camera Raw's profile folder (`/Library/Application Support/Adobe/CameraRaw/CameraProfiles`, `C:\ProgramData\Adobe\CameraRaw\CameraProfiles`) for the current camera's Adobe Standard and Camera Matching profiles, and offers **Import Adobe profiles for this camera** when it finds some that are not imported yet. To decide whether to offer the button it only lists that folder's file names for the current camera; no profile is opened, parsed or copied until the button is used, and then the files are copied like any other import, except that a profile RAWmakase can't read (Camera Raw files HDR Camera Matching profiles alongside the others for newer bodies such as Nikon's Z 8) is skipped and named in the status line instead of failing the rest.
 
 ## Import and select
 
-Use **Import profiles…** in the Develop Profile menu or **Import Profiles…** in Preferences. Select one or more `.dcp` / `.xmp` files. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
+Use **Import profiles…** in the Develop Profile menu or **Import Profiles…** in Preferences. Select one or more `.dcp` / `.xmp` files, `.cube` LUTs (see [.cube LUTs](#cube-luts)), or folders holding them. For Adobe Color and the other Adobe Raw looks, import both the camera model's **Adobe Standard DCP** and the desired **XMP look profiles**. You can select these together or import the DCP first. Missing dependencies produce an error; another camera's profile is never substituted.
 
 The CLI uses the same importer:
 
 ```sh
 rawmakase import-profiles '/selected/Fujifilm X100F Adobe Standard.dcp' '/selected/Adobe Color.xmp'
+rawmakase import-profiles '/selected/Film LUTs'
 ```
+
+It prints a line for each `.cube` and for each file it could not import, and fails when any file was not imported or nothing was found.
 
 Selected files are validated and copied into `camera-profiles` under RAWmakase's application data directory (`~/Library/Application Support/RAWmakase` on macOS, `$XDG_DATA_HOME/rawmakase` on Linux). An identical reimport is harmless. A different file with the same filename is reported instead of overwritten. The entire selection is validated before copying starts. Source files remain unchanged.
 
@@ -20,7 +23,7 @@ Importing does not change the current edit. Choose the imported look in **Profil
 
 Two profiles of our own are listed for every camera with a colour matrix, with no files to import. They follow Adobe's two layers: a per-camera base and a camera-independent look.
 
-- **RAWmakase Standard**: the camera's colour matrix (LibRaw's, or the D65 matrix of a DNG's own profile) with the DNG default tone curve. It uses the same colour data as "Default (camera matrix)", which stays in the Profile menu as the entry for no profile and renders through the same matrix and DNG default tone curve.
+- **RAWmakase Standard**: the camera's colour matrix (the decoder's, or the D65 matrix of a DNG's own profile) with the DNG default tone curve. It uses the same colour data as "Default (camera matrix)", which stays in the Profile menu as the entry for no profile and renders through the same matrix and DNG default tone curve.
 - **RAWmakase Color**: a look on top of Standard, as Adobe Color is on Adobe Standard. A mild contrast curve and a few smooth hue, saturation and brightness shifts (reds, skin, yellows, foliage, aqua, sky), plus a slight saturation roll-off near white. Neutrals stay neutral. The table is generated from the parameters in `src/camera_profiles/open.rs`, not stored or derived from Adobe data.
 
 Both are embedded in the recipe like any other profile, so later changes to the look don't change existing edits. The look was tuned conservatively and has not yet been compared with Camera Raw renders; measured base profiles (ColorChecker shots per camera) can replace the matrix later without changing any preset.
@@ -62,14 +65,14 @@ The look goes in the same place as at 100%: the table after the camera profile's
 
 ## RGB tables
 
-Lightroom's Artistic, Vintage and most Modern looks, and Adobe's camera-matching XMPs for Nikon, Panasonic, Sigma and others, carry an RGB table (`crs:RGBTable`, a `Table_<md5>` attribute in the DNG SDK's big-table encoding) beside or instead of an HSV look table. A table is a curve per channel (1D) or a grid over all three (3D, up to 64 divisions per side), stored as 16-bit differences from the identity, with the primaries and encoding it works in, whether colours outside it are clipped or extended, and the amounts it may be applied at. RAWmakase interpolates 3D tables tetrahedrally, as the DNG SDK does, on the CPU and in the GPU shader, which agree within 0.0007 of the output range.
+Lightroom's Artistic, Vintage and most Modern looks, and Adobe's camera-matching XMPs for Nikon, Panasonic, Sigma and others, carry an RGB table (`crs:RGBTable`, a `Table_<md5>` attribute in the DNG SDK's big-table encoding) beside or instead of an HSV look table. A table is a curve per channel (1D) or a grid over all three (3D, up to 64 divisions per side: Camera Raw 18.7 renders a table of 65, 66 or 96 divisions as if the look had none), stored as 16-bit differences from the identity, with the primaries and encoding it works in, whether colours outside it are clipped or extended, and the amounts it may be applied at. RAWmakase interpolates 3D tables tetrahedrally, as the DNG SDK does, on the CPU and in the GPU shader, which agree within 0.0007 of the output range.
 
 Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table looks (`tests/corpus/looks/synthetic-rgb*.xmp`, from formulas in `scripts/corpus/synthetic-looks.py`):
 
 | Question | Camera Raw's answer | Cases |
 |---|---|---|
 | Where it applies | After the user's tone controls, point curves, HSL and Saturation, before color grading: `rgb-table-point-curve` is 0.87 ΔE00 from Camera Raw with the table there and 2.80 with it at the end of the profile; with Saturation +50 1.78 against 3.75. | `rgb-table-*` |
-| Amount | `r + amount·(table(r) − r)` in the table's encoding, at the look's `RGBTableAmount` (1 when absent) times the Profile Amount, clamped to the bounds the table stores. A 0.5 look at 200% renders as the full table at 100%, identical to the 16-bit level; bounds 0.5–1.5 hold 0% at half and 200% at 1.5. At an amount of 0 RAWmakase leaves the table out, so it clips nothing either. | `rgb-table-50/100/200`, `rgb-half-*`, `rgb-bounds-*` |
+| Amount | `r + amount·(table(r) − r)` in the table's encoding, at the look's `RGBTableAmount` (1 when absent) times the Profile Amount, clamped to the bounds the table stores. A 0.5 look at 200% renders as the full table at 100%, identical to the 16-bit level; bounds 0.5–1.5 hold 0% at half and 200% at 1.5. Over 100% the blend can leave 0–1; a table that clips its gamut clips the blend there too, per channel (a dark gray the table turns teal loses its red and green at 200%, rather than its hue). At an amount of 0 RAWmakase leaves the table out, so it clips nothing either. | `rgb-table-50/100/200`, `rgb-half-*`, `rgb-bounds-*`, `cube-creative-33-200` |
 | Primaries and encoding | Codes 0, 1, 2 are sRGB, Adobe RGB and ProPhoto; gamma codes 0–3 linear, sRGB, 1.8 and 2.2. | `rgb-srgb-100`, `rgb-linear-100` |
 | 1D tables | A curve per channel, stored like the 3D samples. | `rgb-1d-100` |
 | The extra word some camera-matching tables end with | No visible effect at 0 or 1. | `rgb-flag-100` |
@@ -77,6 +80,70 @@ Measured with Camera Raw 18.7 on the synthetic chart and synthetic RGB-table loo
 The table-only cases sit at mean ΔE00 0.68–0.81 from Camera Raw (RAWmakase's default render is 0.91), and the look combining an HSV table, a curve and an RGB table at 1.0–1.14. Gamut extension (used by Modern 02 only) adds back what clipping into the table's space removed, in its encoding; it was not checked closely, because RAWmakase compressed out-of-gamut colours toward gray where Camera Raw clips them; RAWmakase now clips per channel too ([out-of-gamut colors](color-pipeline.md#out-of-gamut-colors)).
 
 A look's HSV table and curve stay where they were, with the camera profile; only the RGB table goes late. Recipes with an RGB-table look save as version 9, which earlier releases refuse as newer instead of dropping the table; the table is stored in Adobe's encoding, about 180 KB for a 32-division table.
+
+## .cube LUTs
+
+Camera Raw and Lightroom have no LUT stage: Photoshop's Camera Raw **Create Profile** turns a `.cube` into a creative look profile whose RGB table is the cube, and the third-party LUT packs that ship Lightroom profiles beside their cubes store each cube node for node as such a table. RAWmakase does the same. Importing a `.cube` (from the Profile menu, Preferences or `rawmakase import-profiles`, files or folders) writes a look XMP into the profile library; the cube itself is not kept. From then on it is an ordinary look: it is listed in **Profile**, renders through the [RGB table](#rgb-tables) path on the CPU and GPU, takes a Profile Amount of 0–200%, and is embedded in the recipe with its table, so presets, snapshots and History carry it and deleting the library file later does not change an edit. There is no Recipe field or format change for it.
+
+- **Where it applies.** Where Camera Raw applies RGB tables: after the tone controls, point curves, HSL and Saturation, before Color Grading, which therefore applies on top of the LUT. Like other creative looks it names no base profile and goes over the photo's own: Adobe Standard when imported, else a DNG's own profile, else RAWmakase Standard. A LUT made for a log or HDR input is not a look and renders wrongly here, as in Lightroom.
+- **Switching it off and strength.** Choose another profile, or set Amount to 0%, which leaves the table out entirely. Amount blends in the table's encoding as for any RGB table, up to 200%.
+- **Conversion.** The table is in sRGB primaries and sRGB encoding, colours outside sRGB clipped before the lookup, amount bounds 0–2: what Camera Raw's Create Profile gives a cube by default ([below](#camera-raws-create-profile)). A 3D cube of 2–64 divisions keeps its grid, node for node, where Create Profile samples it onto 32: resampling onto another grid is lossy. A larger cube (65 is common, and Create Profile refuses it) is sampled onto 64 divisions, the most a table holds, by tetrahedral lookup in the cube, as Create Profile resamples; on `creative-65` from `scripts/corpus/synthetic-cubes.py` that is at most 4.9 8-bit levels off (mean 0.12), where every other node (33) would be 10.6 (0.26) and 32 divisions 9.3 (0.35). A cube with a 1D shaper in front of its 3D table is sampled the same way, shaper first, onto 64 divisions. A 1D cube becomes a 1D table, resampled to 4096 entries above that. Outputs outside 0–1 are clamped, as the table holds no more.
+- **Fidelity report.** Each file is measured at import against its cube, on its nodes and cell centres and the table's: *exact* (within 16-bit rounding), *approximated* with its largest sampled error in 8-bit levels and why (resampled, shaper baked in, outputs clamped), or *refused* with the reason. A baked shaper is always reported as approximated; its breakpoints are also probed along the gray axis. The sampled maximum is not a mathematical error bound. The status line counts approximated and renamed files, and its tooltip lists them; the CLI prints every file.
+- **Refused.** Cubes whose `DOMAIN_MIN`/`DOMAIN_MAX` (or input range) is not 0–1, which Create Profile refuses too, cubes whose shaper reads another range than 0–1 (`LUT_1D_INPUT_RANGE`, as cubes for log or scene-linear input have), `LUT_3D_OUTPUT_RANGE`, and files that are not cubes (such as the macOS `._` files zips carry beside them, which folder imports skip). Other LUT formats (`.3dl`, Hald, `.csp`) and zips are not read.
+- **Names and groups.** The look is named after the file (`Portra.cube` lists as **Portra**); the cube's `TITLE` becomes its description, as packs often repeat one title across files, and its folder its group. LUT packs often keep each format in a folder of its own ("Cube Files", "LUTs", "For Other Programs"), so the group is the nearest folder, up to four up, whose name says more than that: `Moody Pack/For Other Programs/Cube Files/Dusk.cube` is grouped under **Moody Pack**. The search stops at a standard folder such as Downloads or Desktop and at the user's home folder, so a group never names the user: a cube in only such folders takes its own folder's name, and one right in the home folder has no group. A disk's name can be the group, as packs often ship as disk images named after them. Only the path decides, so the same file always gets the same group. Profile names identify looks in the profile list, in recipes and in XMP sidecars, so a name a different profile already has — another folder's Portra, one of the library's DCPs or looks (an Adobe one included), RAWmakase Standard or Color, or Adobe Standard or Color, which Lightroom edits fall back from by name — is never shadowed: the cube is named **Portra (Cool)** after its group, then **Portra (Cool 2)**, and the import reports the rename. The table's MD5 names the table and the look's UUID, so importing the same cube again is recognised by its table under its name or any name it was renamed to, whatever folder or group it comes from or how its text is written, and reported as already imported.
+- **Profile menu.** Looks are listed by their group (`crs:Group`), one submenu per group, as in Lightroom's profile browser: imported LUTs under their folder's group, and other looks, such as Adobe's Artistic or Vintage ones, under theirs. Camera profiles, RAWmakase Standard and Color, looks without a group and Adobe's looks in Lightroom's "Profiles" group (Adobe Color, Vivid and the other Adobe Raw and Camera Matching looks) stay at the top level, by name. The group belongs to the library's file, not the profile embedded in an edit, so recipes are unchanged; a look whose library file is gone keeps rendering, but no longer appears in the menu.
+- **Lightroom.** The generated XMP is a standard look profile: installed in Lightroom or Camera Raw it renders there, and sidecars that name it resolve back in RAWmakase by name and UUID. The other way does not work: a profile Lightroom creates from the same cube has a UUID of Adobe's own and does not resolve to RAWmakase's import.
+
+### Camera Raw's Create Profile
+
+Measured with Camera Raw 18.7's **Create Profile** (Option-click Create Preset) in Photoshop on the synthetic cubes of `scripts/corpus/synthetic-cubes.py`, its profiles read back with `RgbTable::decode`. Errors are against the cube's own tetrahedral lookup, in 8-bit levels, over 400,000 random inputs.
+
+| | Create Profile | RAWmakase |
+|---|---|---|
+| Table size | The cube's, up to 32: its **Samples** field takes 2–32 and starts at the cube's size or 32. A 1D cube keeps its entries (1024 here). | The cube's, up to 64. |
+| 33³ (`creative-33`) | 32 divisions: up to 9.4 off, mean 0.43. | 33: exact. |
+| 64³ | 32 divisions: up to 9.1, mean 0.37. | 64: exact. |
+| 65³ (`creative-65`) | Refused: "Unable to load the color lookup table. There was an error parsing the file." | 64 divisions: up to 4.9, mean 0.12. |
+| Resampling | Tetrahedral lookup in the cube at the new grid's nodes (within 0.007 levels of it). | The same. |
+| 1D shaper (`shaper-33`) | Accepted, but the shaper is not applied: up to 255 off, mean 62. | Baked in, 64 divisions: up to 4.7, mean 0.12. |
+| `DOMAIN_MIN`/`MAX` | 0–1 accepted; −0.1–1.2 (`domain-33`) refused, as the 65³ cube. | The same. |
+| Space | sRGB by default; Adobe RGB, Display P3, ProPhoto RGB or Rec. 2020 on request, written as primaries 1, 3, 2, 4 with encodings 2.2, sRGB, 1.8 and code 4. | sRGB. RAWmakase reads tables in primaries 0–2 with encodings 0–3, so a Display P3 or Rec. 2020 profile made in Camera Raw is refused when imported. |
+| Gamut, amounts | Clip; Min 0%, Amount 100%, Max 200% (bounds 0–2). | The same. |
+| Flags | `SupportsMonochrome` and `SupportsOutputReferred` true, so Lightroom offers the look for B&W and for JPEG and TIFF photos. | The same. |
+
+### Parity with Camera Raw
+
+Camera Raw photo sidecars store a look's Amount and UUID as child elements. Both
+these and the attribute form are read, so 50% and 200% survive XMP import and a
+UUID mismatch cannot silently select a same-named look.
+
+The chart cases `cube-*` render the synthetic cubes' looks, as RAWmakase imports them, on the synthetic chart, each look embedded in Camera Raw's sidecar as `synthetic-looks.py`'s are (`tests/corpus/camera-raw/synthetic-d65.json`, checked by `camera_raw_parity_does_not_regress`). Every one sits at mean ΔE00 0.21–0.35 from Camera Raw 18.7, the chart's default render being 0.28: identity, channel swap, hue rotation, posterize, black and white, clamped outputs, a 1D cube, 32, 33 and 65 divisions, Amount 0, 50, 100 and 200%, and Color Grading on top (0.30–0.33). A point curve under the look is 0.47, and Saturation +50 1.28, Saturation's own difference (the same table without a cube, `rgb-table-saturation+50`, is 1.27).
+
+One observed chart difference remains: Camera Raw renders a photo whose sidecar has both a look and `ConvertToGrayscale` in colour in the tested cases, and writes no `ConvertToGrayscale` back, while RAWmakase renders it in black and white over the look (`cube-creative-33-bw`, 18.1). This was also observed with non-cube looks.
+
+On 12 CC0 raw.pixls.us photos, four synthetic looks at 100% were also rendered over
+Adobe Standard and compared at 1024 px (48 pairs, Camera Raw 18.7). The table reports
+the median across photos of each photo's median pixel ΔE00, and its full range.
+These are descriptive measurements, not a passed photographic regression gate.
+
+| Synthetic look | Median ΔE00 | Per-photo range |
+|---|---:|---:|
+| Black and white, 33³ | 0.58 | 0.08–16.11 |
+| Creative, 33³ | 1.37 | 0.18–23.84 |
+| Creative, 65³ sampled onto 64³ | 1.38 | 0.18–23.85 |
+| Hue rotation, 33³ | 1.13 | 0.23–16.33 |
+
+The same photos without a look already differ from Camera Raw by 0.25–17.03
+median ΔE00. Subtracting that default distance from the distance with a look is
+not an isolated measure of LUT error: a look can amplify or suppress an existing
+rendering difference. The photo results therefore do not establish the plan's
+no-regression acceptance criterion. The chart covers Amount 0/50/100/200 and the
+slider interactions above; the photographic synthetic set covers 100% only.
+
+The importer currently assumes sRGB. Offering Adobe RGB and ProPhoto RGB input
+choices, as planned after inspecting Create Profile, remains unimplemented;
+Display P3 and Rec. 2020 also require table-decoder support. Together with the
+B&W interaction above, these are limits on claiming complete Camera Raw parity.
 
 ## Settings inside looks
 

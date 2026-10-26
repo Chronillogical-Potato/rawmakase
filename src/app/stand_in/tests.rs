@@ -183,6 +183,40 @@ fn an_offline_raw_in_the_loupe_gets_its_stored_preview_identity() {
     );
 }
 
+/// An edited JPEG is developed, so it has a stored preview as a RAW does; an
+/// unedited one, shown as its file is, has none.
+#[test]
+fn an_edited_jpeg_has_a_stored_preview_and_an_unedited_one_does_not() {
+    let (_dir, mut e, ids, _) = editor(&["a.jpg"]);
+    assert!(e.stand_in_for(ids[0]).is_none());
+    let library = e.library.as_mut().unwrap();
+    let path = library.photo(ids[0]).unwrap().path.clone();
+    library
+        .session
+        .catalog
+        .save_edit(
+            ids[0],
+            &path,
+            &Default::default(),
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )
+        .unwrap();
+    let wanted = e.stand_in_for(ids[0]).expect("a stored preview");
+    // Offline in the Loupe, it is shown.
+    std::fs::remove_file(&path).unwrap();
+    let library = e.library.as_mut().unwrap();
+    library.refresh().unwrap();
+    library.wait_for_availability();
+    library.select(Some(ids[0]));
+    library.open_loupe();
+    e.loupe_stored_preview();
+    assert_eq!(
+        e.library.as_ref().unwrap().loupe_stored(),
+        Some(&(ids[0], wanted.identity))
+    );
+}
+
 #[test]
 fn a_load_that_fails_lets_go_of_the_stored_preview() {
     let (_dir, mut e, ids, cache) = editor(&["a.ARW"]);

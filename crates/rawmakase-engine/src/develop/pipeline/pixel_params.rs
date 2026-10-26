@@ -1,7 +1,7 @@
 //! The per-pixel stage's inputs, flattened for the GPU port in `gpu/develop.wgsl`.
 //! Recipes with a camera profile are ported (every photo has one once resolved); the
 //! rest return `None` and render on the CPU, which stays the reference.
-use super::{CurveSet, Source, profile_matrix};
+use super::{Camera, CurveSet, Source, camera_stage};
 use crate::develop::local_tone::LocalToneMap;
 use crate::model::recipe::Recipe;
 
@@ -9,6 +9,8 @@ use crate::model::recipe::Recipe;
 /// `P_*` index constants for the shader.
 const FIELDS: &[(&str, usize)] = &[
     ("CAMERA", 9),
+    // `Camera::clip`, each channel's.
+    ("CAMERA_CLIP", 3),
     ("WB", 3),
     ("HUE", 5),
     ("HUE2", 1),
@@ -43,6 +45,8 @@ const FIELDS: &[(&str, usize)] = &[
     ("LOCAL_SIZE", 2),
     ("LOCAL_SCALE", 2),
     ("LOCAL_A", 3),
+    // The fine mean's offset into the grid (`local_tone::MapGrid::fine_at`).
+    ("LOCAL_FINE", 1),
     ("SHADOWS", 4),
     ("HIGHLIGHTS", 4),
     // Positive Shadows' detail and region curves (as SHADOWS), and the regional level's
@@ -125,8 +129,30 @@ pub(crate) struct PixelParams {
     /// Mask weights, four bytes per word, `MASK_WORDS` words per pixel; empty
     /// without masks.
     pub(crate) weights: Vec<u32>,
+    /// The Shadows/Highlights map's grids, which the shader reads from a buffer of their
+    /// own (`LOCAL_A`, `LOCAL_FINE` and `LOCAL_REGION` offsets into it; Clarity's into `tables`).
+    pub(crate) grid: Option<crate::develop::local_tone::MapGrid>,
+    /// The recipe as the camera colour reads it (`stage_cache::color_recipe`), when the
+    /// develop pass may keep that colour for its samples and reuse it while the stages
+    /// after it change (see `gpu::develop::Kept`). `None` computes it every time.
+    pub(crate) color: Option<Recipe>,
 }
 impl PixelParams {
+    /// Parameters of zeros but for `values`, without tables.
+    #[cfg(test)]
+    pub(crate) fn with(values: &[(&str, &[f32])]) -> Self {
+        let mut p = Self {
+            params: vec![0.; FIELDS.iter().map(|f| f.1).sum()],
+            tables: Vec::new(),
+            weights: Vec::new(),
+            grid: None,
+            color: None,
+        };
+        for (name, v) in values {
+            p.set(name, v);
+        }
+        p
+    }
     fn set(&mut self, name: &str, values: &[f32]) {
         let mut at = 0;
         for (field, len) in FIELDS {
@@ -140,7 +166,6 @@ impl PixelParams {
         unreachable!("Unknown parameter {name}");
     }
     /// The values of parameter `name`.
-    #[cfg(test)]
     pub(crate) fn get(&self, name: &str) -> &[f32] {
         let mut at = 0;
         for (field, len) in FIELDS {
@@ -179,11 +204,11 @@ pub(crate) fn pixel_params(im: Source, r: &Recipe) -> Option<PixelParams> {
     if !supported(r) {
         return None;
     }
-    let matrix = profile_matrix(&im.metadata, r);
+    let camera = camera_stage(&im.metadata, r);
     fill(
         r,
-        CurveSet::for_image(im, r, matrix, masks_need_map(r)),
-        matrix,
+        CurveSet::for_image(im, r, camera, masks_need_map(r)),
+        camera,
     )
 }
 /// Whether active masks change Shadows or Highlights, which read the map.
@@ -197,20 +222,26 @@ fn set_local(p: &mut PixelParams, local: &LocalToneMap) {
     p.set("LOCAL_KEYS", &local.keys);
     p.set("LOCAL_SIZE", &[local.width as f32, local.height as f32]);
     p.set("LOCAL_SCALE", &local.scale);
-    let a = p.push(local.a.iter().copied());
-    let b = p.push(local.b.iter().copied());
+    let grid = local.grid();
     let clarity = match &local.clarity {
-        Some(c) => p.push(c.iter().copied()),
+        Some(c) => p.push(c.values()),
         None => -1.,
     };
-    p.set("LOCAL_A", &[a, b, clarity]);
-    let region = match &local.region {
-        Some(k) => p.push(k.iter().copied()),
-        None => -1.,
-    };
-    p.set("LOCAL_REGION", &[region]);
+    p.set("LOCAL_A", &[0., grid.cells() as f32, clarity]);
+    p.set("LOCAL_FINE", &[grid.fine_at() as f32]);
+    p.set(
+        "LOCAL_REGION",
+        &[grid.region_at().map_or(-1., |at| at as f32)],
+    );
+    p.grid = Some(grid);
     let mut curve = |c: Option<&crate::develop::local_tone::Curve>| match c {
-        Some(c) => [p.push(c.table), c.key, c.lo, c.hi],
+        // The table, then its tail (`local_curve` reads it after the 48 columns).
+        Some(c) => [
+            p.push(c.table.into_iter().chain([c.tail])),
+            c.key,
+            c.lo,
+            c.hi,
+        ],
         None => [-1., 0., 0., 0.],
     };
     let shadows = curve(local.shadows.as_ref());
@@ -253,15 +284,18 @@ fn set_rgb_table(p: &mut PixelParams, look: Option<&crate::camera_profiles::RgbL
     p.set("RGB_INTO", into.as_flattened());
     p.set("RGB_BACK", back.as_flattened());
 }
-fn fill(r: &Recipe, lut: CurveSet, matrix: [[f32; 3]; 3]) -> Option<PixelParams> {
+fn fill(r: &Recipe, lut: CurveSet, camera: Camera) -> Option<PixelParams> {
     let profile = r.profile.as_ref()?;
     let len = FIELDS.iter().map(|f| f.1).sum();
     let mut p = PixelParams {
         params: vec![0.; len],
         tables: Vec::new(),
         weights: Vec::new(),
+        grid: None,
+        color: None,
     };
-    p.set("CAMERA", matrix.as_flattened());
+    p.set("CAMERA", camera.matrix.as_flattened());
+    p.set("CAMERA_CLIP", &camera.clip);
     p.set("WB", &r.wb);
     let t = profile.gpu_tables(r.temperature);
     p.table("HUE", t.hue.map(|h| h.0));

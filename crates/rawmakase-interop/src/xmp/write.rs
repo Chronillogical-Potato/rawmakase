@@ -56,7 +56,7 @@ pub struct Photo {
     pub lens: bool,
     /// Include the develop settings, not only the descriptive metadata.
     pub settings: bool,
-    /// "image/jpeg" or "image/tiff".
+    /// The export's MIME type: "image/jpeg", "image/tiff" or "image/png".
     pub format: String,
     /// The crop as rendered, `[left, top, right, bottom]`: with Constrain Crop, the
     /// crop constrained to the photo (`develop::rendered_crop`). `None` writes the
@@ -173,9 +173,25 @@ pub(super) fn settings(r: &Recipe, shown: &Metadata, photo: Option<Frame<'_>>) -
         };
         s.text("CameraProfile", name.clone());
     }
-    s.text("WhiteBalance", "Custom");
-    s.put("Temperature", r.temperature, 1., 0, false);
-    s.put("Tint", r.tint, 1., 0, true);
+    // A rendered file's white balance is Lightroom's relative Temp and Tint; only
+    // its recipes carry the Embedded profile, so this holds without the photo.
+    if r.profile.as_ref().is_some_and(|p| p.is_embedded()) {
+        // As written, in whole steps.
+        let as_shot = r.incremental_temperature.round() == 0. && r.incremental_tint.round() == 0.;
+        s.text("WhiteBalance", if as_shot { "As Shot" } else { "Custom" });
+        s.put(
+            "IncrementalTemperature",
+            r.incremental_temperature,
+            1.,
+            0,
+            true,
+        );
+        s.put("IncrementalTint", r.incremental_tint, 1., 0, true);
+    } else {
+        s.text("WhiteBalance", "Custom");
+        s.put("Temperature", r.temperature, 1., 0, false);
+        s.put("Tint", r.tint, 1., 0, true);
+    }
     s.put("Exposure2012", r.exposure, 1., 2, true);
     for (key, value) in [
         ("Contrast2012", r.contrast),

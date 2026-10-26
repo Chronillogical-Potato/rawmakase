@@ -5,7 +5,9 @@
 //! one that fits its lens best is the automatic choice. The profiles' data and the
 //! correction model are in `optics::lcp`; matching them to a photo is here.
 use crate::camera_data::Metadata;
-use crate::optics::lcp::{Candidate, Chromatic, Entry, ImportedProfile, PhotoProfiles, parse};
+use crate::optics::lcp::{
+    Candidate, Chromatic, Entry, ImportedProfile, PhotoProfiles, RadialModel, parse,
+};
 use crate::optics::{LensCorrection, Radial};
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -22,9 +24,22 @@ impl Entry {
         self.distortion.is_some()
             || self.vignette.is_some()
             || (self.red.is_some() && self.blue.is_some())
-            || (self.prefer_metadata_distortion
-                && m.lens.as_ref().is_some_and(|l| l.distortion.is_some()))
+            || (self.prefer_metadata_distortion && camera_distortion(m).is_some())
     }
+}
+
+/// The distortion the camera stores, which a profile with PreferMetadataDistort keeps:
+/// from its fuller data where the file has some (Sony's, of which Lightroom otherwise
+/// applies only the lateral CA).
+fn camera_distortion(m: &Metadata) -> Option<&crate::optics::Radial> {
+    camera_lens(m)?.distortion.as_ref()
+}
+/// The centre of the camera's own correction, which its distortion is measured from.
+fn camera_centre(m: &Metadata) -> [f32; 2] {
+    camera_lens(m).map_or(LensCorrection::image_centre(), |l| l.centre)
+}
+fn camera_lens(m: &Metadata) -> Option<&LensCorrection> {
+    (m.lens_stand_in.as_ref().or(m.lens.as_ref())).filter(|l| l.distortion.is_some())
 }
 
 fn key(s: &str) -> String {
@@ -33,15 +48,28 @@ fn key(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+/// Canon RAWs can spell the mount "EF 24-105mm" where an LCP says
+/// "EF24-105mm". Only join EF to a following focal length: keep the rest
+/// of the name, including mount and lens-version suffixes, distinct.
+fn lens_key(s: &str) -> String {
+    let mut name = key(s);
+    if name
+        .strip_prefix("ef ")
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+    {
+        name.remove(2);
+    }
+    name
+}
 /// Whether an entry describes the photo's lens: it names the lens the file records,
 /// or, for a file recording no lens at all, it carries the maker's lens ID. Nikon
 /// bodies that write no lens model (the D600 among them) leave `stCamera:LensID`
 /// and the maker note's `LensIDNumber` as the only identity, and they are the same
 /// number.
 fn lens_matches(e: &Entry, m: &Metadata) -> bool {
-    let lens = key(&m.lens_model);
+    let lens = lens_key(&m.lens_model);
     if !lens.is_empty() {
-        return e.lens.iter().any(|l| key(l) == lens);
+        return e.lens.iter().any(|l| lens_key(l) == lens);
     }
     lens_id_matches(e, m)
 }
@@ -55,9 +83,13 @@ fn lens_id_matches(e: &Entry, m: &Metadata) -> bool {
         && maker(&e.make) == maker(&m.make)
 }
 /// The maker's first word, so Adobe's "NIKON CORPORATION" is the "Nikon" a camera
-/// records: lens IDs only compare within one maker.
+/// records: lens IDs only compare within one maker. Ricoh makes Pentax cameras and
+/// profiles their lenses as "RICOH IMAGING COMPANY, LTD.", with Pentax's numbering.
 fn maker(s: &str) -> String {
-    key(s).split(' ').next().unwrap_or("").to_string()
+    match key(s).split(' ').next().unwrap_or("") {
+        "ricoh" => "pentax".to_string(),
+        first => first.to_string(),
+    }
 }
 /// The photo's crop factor, when its 35mm-equivalent focal length is recorded.
 fn crop_factor(m: &Metadata) -> Option<f32> {
@@ -186,44 +218,93 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
     let first = *found.first()?;
     let focal = if m.focal > 0. { m.focal } else { first.focal };
     let av = (m.aperture > 0.).then(|| 2. * m.aperture.log2());
-    // Convert our radius (1 = half diagonal) to the model's.
-    let (w, h) = if m.crop_width > 0 && m.crop_height > 0 {
+    // Convert our radius (1 = the decoded image's half diagonal) to the model's, whose
+    // unit is a fraction of the photo's long edge, the camera's default crop.
+    let cropped = m.crop_width > 0 && m.crop_height > 0;
+    let (w, h) = if cropped {
         (m.crop_width as f32, m.crop_height as f32)
     } else {
         (m.width as f32, m.height as f32)
     };
     let long = w.max(h);
-    let half = (w * w + h * h).sqrt() * 0.5;
-    // The model is normalised to the profiled sensor; rescale to this one when
-    // their formats differ (a full-frame profile on an APS-C body).
-    let format = crop_factor(m)
-        .map(|c| c / first.sensor_factor)
-        .filter(|r| (r.ln()).abs() > 1.1f32.ln())
-        .unwrap_or(1.);
-    let fx = (first.focal_x.unwrap_or(focal * first.sensor_factor / 36.) * format).max(1e-3);
-    let to_model = half / (fx * long);
-    let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32.).collect();
+    let size = [m.width as f32, m.height as f32];
+    let half = size[0].hypot(size[1]) * 0.5;
+    // The profile's optical centre is a fraction of the photo; ours of the decoded
+    // image. Distortion the camera keeps (PreferMetadataDistort) brings its own.
+    let builtin = camera_distortion(m).filter(|_| first.prefer_metadata_distortion);
+    let centre = match builtin {
+        Some(_) => camera_centre(m),
+        None => interpolate(
+            &found,
+            focal,
+            None,
+            |e| e.centre,
+            |a, b, t| std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t),
+        )
+        .map_or(LensCorrection::image_centre(), |(c, _)| {
+            let (left, top) = if cropped {
+                (m.crop_left as f32, m.crop_top as f32)
+            } else {
+                (0., 0.)
+            };
+            [(left + c[0] * w) / size[0], (top + c[1] * h) / size[1]]
+        }),
+    };
+    // Put every model in our half-diagonal coordinate before interpolating.
+    // Raw coefficients from different focal normalizations are not comparable:
+    // k_n * (r * scale)^(2n) becomes (k_n * scale^(2n)) * r^(2n).
+    // Use the calibration entry's focal length for missing FocalLengthX, including
+    // at clamped endpoints, never the requested photo focal length.
+    let normalized = |e: &Entry, model: RadialModel| {
+        let format = crop_factor(m)
+            .map(|c| c / e.sensor_factor)
+            .filter(|r| (r.ln()).abs() > 1.1f32.ln())
+            .unwrap_or(1.);
+        let fx = (model.focal_x.unwrap_or(e.focal * e.sensor_factor / 36.) * format).max(1e-3);
+        let scale2 = (half / (fx * long)).powi(2);
+        [
+            model.params[0] * scale2,
+            model.params[1] * scale2 * scale2,
+            model.params[2] * scale2 * scale2 * scale2,
+        ]
+    };
+    let reach = crate::optics::reach(centre, size);
+    let knots: Vec<f32> = (0..=32).map(|i| i as f32 / 32. * reach).collect();
     let poly = |k: [f32; 3], r: f32| {
-        let r2 = (r * to_model).powi(2);
+        let r2 = r * r;
         1. + k[0] * r2 + k[1] * r2 * r2 + k[2] * r2 * r2 * r2
     };
     let curve = |f: &dyn Fn(f32) -> f32| Radial {
         knots: knots.clone(),
         values: knots.iter().map(|r| f(*r)).collect(),
     };
-    let distortion = match &m.lens {
-        Some(builtin) if first.prefer_metadata_distortion && builtin.distortion.is_some() => {
-            builtin.distortion.clone()
-        }
-        _ => interpolate(&found, focal, None, |e| e.distortion, mix3)
-            .map(|(k, _)| curve(&|r| poly(k, r))),
+    let distortion = match builtin {
+        Some(builtin) => Some(builtin.clone()),
+        None => interpolate(
+            &found,
+            focal,
+            None,
+            |e| e.distortion.map(|p| normalized(e, p)),
+            mix3,
+        )
+        .map(|(k, _)| curve(&|r| poly(k, r))),
     };
-    let vignetting = interpolate(&found, focal, av, |e| e.vignette, mix3)
-        .map(|(k, _)| curve(&|r| 1. / poly(k, r).max(0.2)));
+    let vignetting = interpolate(
+        &found,
+        focal,
+        av,
+        |e| e.vignette.map(|p| normalized(e, p)),
+        mix3,
+    )
+    .map(|(k, _)| curve(&|r| 1. / poly(k, r).max(0.2)));
     let chroma = |get: fn(&Entry) -> Option<Chromatic>| {
-        interpolate(&found, focal, None, get, |a, b, t| {
-            (a.0 + (b.0 - a.0) * t, mix3(a.1, b.1, t))
-        })
+        interpolate(
+            &found,
+            focal,
+            None,
+            |e| get(e).map(|(s, p)| (s, normalized(e, p))),
+            |a, b, t| (a.0 + (b.0 - a.0) * t, mix3(a.1, b.1, t)),
+        )
         .map(|((s, k), _)| curve(&|r| s * poly(k, r)))
     };
     let chromatic = chroma(|e| e.red)
@@ -235,6 +316,8 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         vignetting,
         distortion,
         chromatic,
+        gain_map: None,
+        centre,
     };
     (!c.is_empty() && c.validate()).then_some(c)
 }
@@ -304,7 +387,12 @@ impl Library {
             if maker(&e.make) != maker(&m.make) {
                 continue;
             }
-            let lens = e.lens.iter().map(|l| key(l)).collect::<Vec<_>>().join("|");
+            let lens = e
+                .lens
+                .iter()
+                .map(|l| lens_key(l))
+                .collect::<Vec<_>>()
+                .join("|");
             lenses.entry(id).or_default().insert(lens);
         }
         lenses
@@ -337,14 +425,14 @@ impl Library {
             .iter()
             .filter(|q| q.has_raw())
             .flat_map(|q| q.entries.iter().flat_map(|e| &e.lens))
-            .map(|l| key(l))
+            .map(|l| lens_key(l))
             .collect();
         let shadowed = |p: &ImportedProfile| {
             !p.has_raw()
                 && p.entries
                     .iter()
                     .flat_map(|e| &e.lens)
-                    .any(|k| raw_lenses.contains(&key(k)))
+                    .any(|k| raw_lenses.contains(&lens_key(k)))
         };
         let candidates: Vec<Candidate> = fits
             .iter()
@@ -472,6 +560,29 @@ impl PhotoProfiles {
         matching.sort_by_key(|c| c.lens_rank);
         matching.into_iter().find(|c| c.correction(m).is_some())
     }
+    /// The lens of a photo that records only the maker's lens ID, as the imported
+    /// profile identifying it names it (`stCamera:Lens`, the name Camera Raw records
+    /// for the lens); `None` when the file names its lens or no profile identifies
+    /// it. Pentax bodies write no lens name, only the ID.
+    pub fn lens_by_id(&self, m: &Metadata) -> Option<&str> {
+        if !m.lens_model.is_empty() || m.lens_id == 0 {
+            return None;
+        }
+        // A candidate ranks for the lens only when an entry identifies it, which for
+        // a file without a lens name means by an ID no other lens carries.
+        let mut matching: Vec<&Candidate> = self
+            .candidates
+            .iter()
+            .filter(|c| c.lens_rank.is_some())
+            .collect();
+        matching.sort_by_key(|c| c.lens_rank);
+        matching
+            .into_iter()
+            .flat_map(|c| c.profile.usable())
+            .filter(|e| lens_id_matches(e, m))
+            .find_map(|e| e.lens.first())
+            .map(String::as_str)
+    }
 }
 /// Lens profiles imported one by one, so a file that can't be used doesn't
 /// stop the rest.
@@ -545,13 +656,14 @@ fn import_into(paths: &[PathBuf], destination: &Path) -> Result<Vec<PathBuf>> {
 pub fn test_profile(make: &str, lens: &str, name: &str, distortion: f32, vignette: f32) -> String {
     test_profile_with_lens_id(make, lens, name, None, distortion, vignette)
 }
-/// `test_profile` with the profile's `stCamera:LensID` (Nikon's `LensIDNumber`) set.
+/// `test_profile` with the profile's `stCamera:LensID` set, as Adobe writes it:
+/// Nikon's `LensIDNumber` ("138") or Pentax's `LensType` bytes ("4 252").
 #[cfg(any(test, feature = "test-support"))]
 pub fn test_profile_with_lens_id(
     make: &str,
     lens: &str,
     name: &str,
-    lens_id: Option<u32>,
+    lens_id: Option<&str>,
     distortion: f32,
     vignette: f32,
 ) -> String {
@@ -685,6 +797,39 @@ mod tests {
         assert!((crop.vignetting_gain(1.) - c.vignetting_gain(2. / 3.)).abs() < 0.01);
         assert!(parse("<x/>").is_err());
     }
+    /// The profile's optical centre is a fraction of the photo, the default crop; the
+    /// correction's of the decoded image. Distortion the camera keeps keeps its centre.
+    #[test]
+    fn a_profiles_optical_centre_is_kept() {
+        let text = SAMPLE.replace(
+            "stCamera:RadialDistortParam1=\"0.111952\"",
+            "stCamera:ImageXCenter=\"0.46\" stCamera:ImageYCenter=\"0.52\" stCamera:RadialDistortParam1=\"0.111952\"",
+        );
+        let entries = parse(&text).unwrap();
+        assert_eq!(entries[0].centre, Some([0.46, 0.52]));
+        let mut m = a7ii(1.8);
+        m.width = 6048;
+        m.height = 4024;
+        m.crop_left = 8;
+        m.crop_top = 4;
+        m.crop_width = 6000;
+        m.crop_height = 4000;
+        let c = correction(&entries, &m).unwrap();
+        let [x, y] = c.centre_in([6048., 4024.]);
+        assert!(
+            (x - 2768.).abs() < 0.01 && (y - 2084.).abs() < 0.01,
+            "{x} {y}"
+        );
+        // The knots reach the decoded image's corner farthest from it.
+        let far = crate::optics::reach(c.centre, [6048., 4024.]);
+        assert!(*c.vignetting.as_ref().unwrap().knots.last().unwrap() >= far - 1e-5);
+        // Without a centre, the image's.
+        assert_eq!(parse(SAMPLE).unwrap()[0].centre, None);
+        assert_eq!(
+            correction(&parse(SAMPLE).unwrap(), &m).unwrap().centre,
+            [0.5, 0.5]
+        );
+    }
     #[test]
     fn a_lens_id_matches_when_the_file_records_no_lens() {
         // A D600 writes no lens model, leaving the maker note's LensIDNumber, which
@@ -693,7 +838,7 @@ mod tests {
             "NIKON CORPORATION",
             "105.0 mm f/2.8",
             "Adobe (Nikon AF-S VR Micro-Nikkor 105mm f/2.8G IF-ED)",
-            Some(138),
+            Some("138"),
             -0.28,
             -0.5,
         );
@@ -745,7 +890,7 @@ mod tests {
                 "NIKON CORPORATION",
                 lens,
                 &format!("Adobe (Nikon {lens})"),
-                Some(id),
+                Some(&id.to_string()),
                 -0.1,
                 -0.5,
             )
@@ -758,7 +903,7 @@ mod tests {
             "Canon",
             "50.0 mm f/1.4",
             "Adobe (Canon 50mm f/1.4)",
-            Some(138),
+            Some("138"),
             -0.1,
             -0.5,
         );
@@ -795,6 +940,66 @@ mod tests {
                 .map(|c| c.profile.filename.as_str()),
             Some("micro.lcp")
         );
+    }
+    #[test]
+    fn a_pentax_lens_type_identifies_and_names_the_lens() {
+        // Pentax bodies write no lens model (a K-x DNG among them, issue #501), only
+        // the maker note's two-byte LensType, which LibRaw reads as one number and
+        // Adobe's Pentax profiles write as stCamera:LensID "4 252". Profiles of newer
+        // lenses are made by Ricoh, which makes Pentax cameras.
+        let pentax = |make: &str, lens: &str, id: &str| {
+            test_profile_with_lens_id(make, lens, &format!("Adobe ({lens})"), Some(id), -0.1, -0.5)
+        };
+        let da = pentax("PENTAX", "smc PENTAX-DA 18-55mm F3.5-5.6 AL", "4 252");
+        let hd = pentax(
+            "RICOH IMAGING COMPANY, LTD.",
+            "HD PENTAX-DA 16-85mm F3.5-5.6 ED DC WR",
+            "8 236",
+        );
+        assert_eq!(parse(&da).unwrap()[0].lens_id, Some(4 << 8 | 252));
+        let library = Library::from_texts([("da.lcp", da.as_str()), ("hd.lcp", hd.as_str())]);
+        let photo = |lens_id: u32| {
+            let mut m = Metadata {
+                make: "Pentax".into(),
+                model: "K-x".into(),
+                lens_id,
+                focal: 35.,
+                aperture: 2.,
+                width: 4288,
+                height: 2848,
+                ..Default::default()
+            };
+            m.lens_profiles = library.for_photo(&m);
+            m
+        };
+        let auto = |m: &Metadata| m.lens_profiles.auto(m).map(|c| c.profile.filename.clone());
+        let lens = |m: &Metadata| m.lens_profiles.lens_by_id(m).map(str::to_string);
+        let k_x = photo(4 << 8 | 252);
+        assert_eq!(auto(&k_x).as_deref(), Some("da.lcp"));
+        assert_eq!(
+            lens(&k_x).as_deref(),
+            Some("smc PENTAX-DA 18-55mm F3.5-5.6 AL")
+        );
+        let k_1 = photo(8 << 8 | 236);
+        assert_eq!(auto(&k_1).as_deref(), Some("hd.lcp"));
+        // A lens no imported profile carries stays unnamed.
+        let sigma = photo(3 << 8 | 255);
+        assert_eq!(auto(&sigma), None);
+        assert_eq!(lens(&sigma), None);
+        // Named so, it matches the same profile, with the same correction, by name.
+        let mut named = photo(4 << 8 | 252);
+        named.lens_model = lens(&k_x).unwrap();
+        named.lens_profiles = library.for_photo(&named);
+        assert_eq!(auto(&named).as_deref(), Some("da.lcp"));
+        let gain = |m: &Metadata| {
+            m.lens_profiles
+                .auto(m)?
+                .correction(m)
+                .map(|c| c.vignetting_gain(1.))
+        };
+        assert_eq!(gain(&named), gain(&k_x));
+        // A file that records its lens keeps the camera's name.
+        assert_eq!(lens(&named), None);
     }
     #[test]
     fn reads_entries_written_as_parse_type_resource() {
@@ -868,3 +1073,7 @@ mod tests {
         assert_ne!(stamp(&dirs), before);
     }
 }
+
+#[cfg(test)]
+#[path = "lcp_normalization_tests.rs"]
+mod normalization_tests;

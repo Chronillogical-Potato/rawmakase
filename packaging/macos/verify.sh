@@ -12,6 +12,14 @@ app="$mount/RAWmakase.app"
 test -s "$app/Contents/Resources/Assets.car"
 test -s "$app/Contents/Resources/rawmakase.icns"
 test -s "$app/Contents/Frameworks/libonnxruntime.dylib"
+# The selection runtime is the one library the app bundles: RAW decoding and
+# colour management are RAWmakase's own Rust code.
+for library in "$app/Contents/Frameworks/"*; do
+  if [ "$(basename "$library")" != libonnxruntime.dylib ]; then
+    echo "Unexpected bundled library: $library" >&2
+    exit 1
+  fi
+done
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist")" = RAWmakase
 codesign --verify --strict --deep "$app"
 spctl --assess --type execute --verbose=2 "$app"

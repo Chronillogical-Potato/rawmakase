@@ -1,14 +1,17 @@
-//! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG
-//! and TIFF files: when a folder is added, for its new photos, and on Read
-//! Metadata from Files, for photos already in the catalog. Never at render
-//! time; the catalog stays the source of truth.
+//! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG,
+//! TIFF, PNG, WebP, AVIF and JPEG XL files: when a folder is added, for its
+//! new photos, and on Read Metadata from Files, for photos already in the
+//! catalog. Never at render time; the catalog stays the source of truth.
 use super::db::{LightroomWrite, Write, sql, sqlite_sql};
 use super::value::{TextOrBlob, row};
 use super::{Catalog, PhotoId};
 use crate::jpeg::{APP1, Segments};
+use crate::storage::RasterFormat;
 use crate::xml::ns::JPEG_HEADER;
 use crate::xmp::descriptive::{self, Read};
+use crate::{isobmff, riff};
 use anyhow::{Context, Result};
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// What reading sidecars found besides the metadata.
@@ -53,9 +56,12 @@ impl SidecarReport {
     }
 }
 
-/// `path` with `extension` added, in lower or upper case, if it exists.
-fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
-    [suffix.to_ascii_lowercase(), suffix.to_ascii_uppercase()]
+/// The suffix a sidecar's name adds, in the case lookup tries first.
+const SUFFIX: &str = ".xmp";
+
+/// `base` with [`SUFFIX`] added, in lower or upper case, if it exists.
+fn existing(base: &Path) -> Option<PathBuf> {
+    [SUFFIX.to_ascii_lowercase(), SUFFIX.to_ascii_uppercase()]
         .into_iter()
         .map(|s| {
             let mut name = base.as_os_str().to_owned();
@@ -65,27 +71,93 @@ fn existing(base: &Path, suffix: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The sidecars of `file`, the one used first. A RAW's are digiKam's
-/// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG or TIFF has only
+/// What the sidecars `file` could have are named after, in the order lookup
+/// tries them; each takes [`SUFFIX`]. A RAW's are digiKam's
+/// "IMG_1234.NEF.xmp", then "IMG_1234.xmp"; a JPEG, TIFF or PNG has only
 /// "IMG_1234.JPG.xmp", as "IMG_1234.xmp" beside a RAW of the same name is the
-/// RAW's.
-pub fn sidecars(file: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = existing(file, ".xmp").into_iter().collect();
+/// RAW's. The one rule of which file reads which sidecar.
+pub(super) fn sidecar_candidates(file: &Path) -> Vec<PathBuf> {
+    let mut bases = vec![file.to_path_buf()];
     if crate::storage::is_raw(file) {
-        found.extend(existing(&file.with_extension(""), ".xmp"));
+        bases.push(file.with_extension(""));
     }
+    bases.dedup();
+    bases
+}
+
+/// `name` compared as loosely as a volume may compare names: in Unicode
+/// compatibility form (NFKC) and case-folded through lower and upper case,
+/// so `ẞ`, `ß` and `SS` are `ss` and `ﬁ` is `fi`. Meant to be at least as
+/// coarse as APFS's and NTFS's own comparisons, so it may take two names
+/// for one that no volume does: what refusals compare (whether a name is
+/// taken, whether another file reads a sidecar), never what picks a file
+/// to move.
+pub(super) fn caseless(name: &OsStr) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let text: String = name.to_string_lossy().nfkc().collect();
+    // Lower first, so `ẞ` becomes `ß` and then, through upper case, `ss`.
+    text.to_lowercase()
+        .to_uppercase()
+        .to_lowercase()
+        .nfkc()
+        .collect()
+}
+
+/// The sidecar names `file` reads by [`sidecar_candidates`], exactly.
+pub(super) fn sidecar_names(file: &Path) -> Vec<OsString> {
+    sidecar_candidates(file)
+        .into_iter()
+        .map(|base| {
+            let mut name = base.into_os_string();
+            name.push(SUFFIX);
+            name
+        })
+        .collect()
+}
+
+/// The sidecar names `file` reads by [`sidecar_candidates`], as
+/// [`caseless`] compares them.
+pub(super) fn sidecar_names_caseless(file: &Path) -> Vec<String> {
+    sidecar_candidates(file)
+        .into_iter()
+        .map(|base| {
+            let mut name = base.into_os_string();
+            name.push(SUFFIX);
+            caseless(&name)
+        })
+        .collect()
+}
+
+/// The names in a folder's listing `names` that would read the file named
+/// `sidecar` as their sidecar, by [`sidecar_candidates`], compared as
+/// [`sidecar_names_caseless`] does: every file there, in the catalog or not.
+pub(super) fn readers_of<'a>(sidecar: &OsStr, names: &'a [OsString]) -> Vec<&'a OsString> {
+    let Some(wanted) = sidecar.to_str().map(|s| caseless(OsStr::new(s))) else {
+        return Vec::new();
+    };
+    names
+        .iter()
+        .filter(|n| n.as_os_str() != sidecar && n.to_str().is_some())
+        .filter(|n| sidecar_names_caseless(Path::new(n)).contains(&wanted))
+        .collect()
+}
+
+/// The sidecars of `file`, the one used first (see [`sidecar_candidates`]).
+pub fn sidecars(file: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = sidecar_candidates(file)
+        .iter()
+        .filter_map(|base| existing(base))
+        .collect();
     found.dedup();
     found
 }
 
-/// The XMP inside a JPEG (its standard APP1 packet) or TIFF (tag 700).
+/// The XMP inside a JPEG (its standard APP1 packet), TIFF (tag 700), PNG (its
+/// XMP text chunk), WebP ("XMP " chunk), AVIF (its XMP item) or JPEG XL ("xml "
+/// box, or "brob" box compressing one).
 fn embedded(file: &Path) -> Result<Option<String>> {
-    let extension = file
-        .extension()
-        .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    match extension.as_str() {
-        "jpg" | "jpeg" => {
+    match RasterFormat::of(file) {
+        Some(RasterFormat::Jpeg) => {
             use std::io::Read as _;
             // Segment by segment up to the image data, not the whole file.
             let Some(mut segments) = Segments::new(std::fs::File::open(file)?)? else {
@@ -105,23 +177,119 @@ fn embedded(file: &Path) -> Result<Option<String>> {
             }
             Ok(None)
         }
+        Some(RasterFormat::Tiff) => in_tiff(file),
+        Some(RasterFormat::Png) => in_png(file),
+        Some(RasterFormat::Webp) => in_webp(file),
+        Some(RasterFormat::Avif) => in_heif(file),
+        Some(RasterFormat::Jxl) => in_jxl(file),
         // A DNG keeps its XMP in the same TIFF tag.
-        "tif" | "tiff" | "dng" => {
-            let Some(mut t) = crate::tiff::Tiff::open(std::fs::File::open(file)?, 0) else {
-                return Ok(None);
-            };
-            let Some(main) = t.ifd(t.first) else {
-                return Ok(None);
-            };
-            Ok(main
-                .get(&crate::exif::tag::XMP)
-                .and_then(|e| t.raw(e))
-                .map(String::from_utf8)
-                .transpose()
-                .context("embedded XMP is not valid UTF-8")?)
+        None if file
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dng")) =>
+        {
+            in_tiff(file)
         }
-        _ => Ok(None),
+        None => Ok(None),
     }
+}
+
+/// The XMP in a WebP's "XMP " chunk.
+fn in_webp(file: &Path) -> Result<Option<String>> {
+    let mut f = std::fs::File::open(file)?;
+    let Some(chunk) =
+        riff::webp_chunks(&mut f).and_then(|c| c.into_iter().find(|c| &c.kind == b"XMP "))
+    else {
+        return Ok(None);
+    };
+    text(riff::chunk_data(&mut f, &chunk))
+}
+
+/// The XMP item ("application/rdf+xml") describing an AVIF's primary image.
+fn in_heif(file: &Path) -> Result<Option<String>> {
+    let mut f = std::fs::File::open(file)?;
+    let Some(heif) = isobmff::Heif::read(&mut f) else {
+        return Ok(None);
+    };
+    let xmp = heif
+        .describing(*b"cdsc", heif.primary)
+        .into_iter()
+        .find(|id| {
+            heif.item(*id)
+                .is_some_and(|i| &i.kind == b"mime" && i.content_type == "application/rdf+xml")
+        });
+    match xmp {
+        // No larger than a WebP chunk or a JPEG XL box read for its XMP.
+        Some(id) => text(heif.data_up_to(&mut f, id, 16 << 20)),
+        None => Ok(None),
+    }
+}
+
+/// The XMP in a JPEG XL container's "xml " box, brotli-compressed ("brob")
+/// or not.
+fn in_jxl(file: &Path) -> Result<Option<String>> {
+    let mut f = std::fs::File::open(file)?;
+    text(isobmff::jxl_metadata(&mut f, *b"xml "))
+}
+
+/// Embedded XMP bytes as text; malformed containers (`None`) have none.
+fn text(bytes: Option<Vec<u8>>) -> Result<Option<String>> {
+    bytes
+        .map(|b| String::from_utf8(b).context("embedded XMP is not valid UTF-8"))
+        .transpose()
+}
+
+/// The XMP in a PNG's "XML:com.adobe.xmp" text chunk, uncompressed as the
+/// XMP standard has it, before or after the image data.
+fn in_png(file: &Path) -> Result<Option<String>> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    const KEYWORD: &[u8] = b"XML:com.adobe.xmp\0";
+    let mut f = std::fs::File::open(file)?;
+    let mut at = 8u64;
+    loop {
+        f.seek(SeekFrom::Start(at))?;
+        let mut header = [0u8; 8];
+        if f.read_exact(&mut header).is_err() {
+            return Ok(None);
+        }
+        let length = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+        match &header[4..] {
+            b"iTXt" if length <= 16_000_000 => {
+                let mut data = vec![0u8; length as usize];
+                f.read_exact(&mut data)?;
+                // Keyword, then compression flag and method, language and
+                // translated keyword, each ended by a NUL, then the text.
+                if let Some([0, _, rest @ ..]) = data.strip_prefix(KEYWORD) {
+                    let mut parts = rest.splitn(3, |b| *b == 0);
+                    if let (Some(_), Some(_), Some(text)) =
+                        (parts.next(), parts.next(), parts.next())
+                    {
+                        return Ok(Some(
+                            String::from_utf8(text.to_vec())
+                                .context("embedded XMP is not valid UTF-8")?,
+                        ));
+                    }
+                }
+            }
+            b"IEND" => return Ok(None),
+            _ => {}
+        }
+        at += 12 + length;
+    }
+}
+
+/// The XMP in a TIFF's tag 700.
+fn in_tiff(file: &Path) -> Result<Option<String>> {
+    let Some(mut t) = crate::tiff::Tiff::open(std::fs::File::open(file)?, 0) else {
+        return Ok(None);
+    };
+    let Some(main) = t.ifd(t.first) else {
+        return Ok(None);
+    };
+    main.get(&crate::exif::tag::XMP)
+        .and_then(|e| t.raw(e))
+        .map(String::from_utf8)
+        .transpose()
+        .context("embedded XMP is not valid UTF-8")
 }
 
 /// A sidecar's text: UTF-8, or UTF-16 by its byte order mark, as XML allows.
@@ -150,7 +318,8 @@ fn decode(bytes: &[u8]) -> Result<String> {
     }
 }
 
-/// The metadata of `file`'s sidecar and, for a JPEG or TIFF, its own XMP:
+/// The metadata of `file`'s sidecar and, for a JPEG, TIFF, PNG, WebP, AVIF or
+/// JPEG XL, its own XMP:
 /// field by field the sidecar's where it has one, an explicitly empty value
 /// included, else the file's. `None` when neither has any.
 pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {

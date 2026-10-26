@@ -226,6 +226,90 @@
         0.378,
         0.925
       ],
+      "cube-bw-33-100": [
+        0.211,
+        0.723
+      ],
+      "cube-creative-32-100": [
+        0.308,
+        0.91
+      ],
+      "cube-creative-33-0": [
+        0.275,
+        0.897
+      ],
+      "cube-creative-33-100": [
+        0.306,
+        0.889
+      ],
+      "cube-creative-33-200": [
+        0.329,
+        1.327
+      ],
+      "cube-creative-33-50": [
+        0.279,
+        0.847
+      ],
+      "cube-creative-33-bw": [
+        18.08,
+        31.393
+      ],
+      "cube-creative-33-grading-midtones-h30": [
+        0.3,
+        0.922
+      ],
+      "cube-creative-33-grading-shadows-h210": [
+        0.332,
+        0.934
+      ],
+      "cube-creative-33-point-curve": [
+        0.474,
+        1.927
+      ],
+      "cube-creative-33-saturation+50": [
+        1.285,
+        5.483
+      ],
+      "cube-creative-65-100": [
+        0.308,
+        0.923
+      ],
+      "cube-creative-65-200": [
+        0.331,
+        1.322
+      ],
+      "cube-creative-65-50": [
+        0.28,
+        0.847
+      ],
+      "cube-curve-1d-1024-100": [
+        0.301,
+        0.915
+      ],
+      "cube-hue-rotation-33-100": [
+        0.274,
+        0.831
+      ],
+      "cube-identity-17-100": [
+        0.275,
+        0.897
+      ],
+      "cube-identity-33-100": [
+        0.275,
+        0.897
+      ],
+      "cube-out-of-range-17-100": [
+        0.263,
+        0.871
+      ],
+      "cube-posterize-17-100": [
+        0.35,
+        1.824
+      ],
+      "cube-swap-17-100": [
+        0.237,
+        0.72
+      ],
       "curve-green-blue": [
         0.335,
         0.997
@@ -839,8 +923,8 @@
         1.132
       ],
       "pair-exposure-1.5-whites+100": [
-        0.976,
-        2.508
+        1.516,
+        3.399
       ],
       "pair-exposure-1.5-whites+50": [
         0.387,
@@ -1455,16 +1539,16 @@
         3.796
       ],
       "whites+100": [
-        1.115,
-        3.501
+        1.548,
+        4.302
       ],
       "whites+25": [
         0.382,
         1.19
       ],
       "whites+50": [
-        0.595,
-        1.742
+        0.7,
+        1.864
       ],
       "whites-100": [
         1.995,

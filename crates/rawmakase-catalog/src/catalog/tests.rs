@@ -289,6 +289,23 @@ fn lightroom_table_parser_never_executes_and_reports_unsupported_edits() -> Resu
     Ok(())
 }
 #[test]
+fn lightroom_jpeg_edits_import_with_embedded_and_relative_white_balance() -> Result<()> {
+    let m = crate::camera_data::Metadata {
+        source: crate::camera_data::Source::Rendered,
+        ..Default::default()
+    };
+    let profiles = crate::camera_profiles::installed(&m).0;
+    // A synthetic record, shaped as Lightroom stores a JPEG's Develop settings.
+    let text = r#"s = { CameraProfile = "Embedded", Exposure2012 = 0.5, IncrementalTemperature = 25, IncrementalTint = -10, ProcessVersion = "15.4", WhiteBalance = "Custom" }"#;
+    let (r, w) = convert_develop(text, &m, &profiles, None)?;
+    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(r.exposure, 0.5);
+    assert_eq!((r.incremental_temperature, r.incremental_tint), (25., -10.));
+    assert_eq!(r.wb, [1.; 3]);
+    assert!(r.profile.as_ref().is_some_and(|p| p.is_embedded()));
+    Ok(())
+}
+#[test]
 fn lightroom_point_colors_import() -> Result<()> {
     let m = crate::camera_data::Metadata::default();
     let swatch = "0.425300, 0.729800, 0.603400, 0.500000, -0.300000, 0.200000, 0.500000, 0.000000, 0.333333, 0.666667, 1.000000, 0.000000, 0.549800, 0.909800, 1.000000, 0.072700, 0.622700, 0.982700, 1.000000";
@@ -1254,6 +1271,8 @@ fn profile_corrections_without_the_adobe_profile_use_the_built_in_correction_and
             vignetting: None,
             distortion: None,
             chromatic: None,
+            gain_map: None,
+            ..Default::default()
         }),
         ..Default::default()
     };

@@ -7,7 +7,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 type Matrix = [[f32; 3]; 3];
-const XYZ_TO_PRO: Matrix = [
+pub(crate) const XYZ_TO_PRO: Matrix = [
     [1.345943, -0.255608, -0.051111],
     [-0.544599, 1.508167, 0.020535],
     [0., 0., 1.211813],
@@ -425,7 +425,16 @@ impl CameraProfile {
         }
         .into())
     }
+    /// The per-channel gains from the profile's camera neutral to the
+    /// samples': the DNG's diagonal CameraCalibration when it is the
+    /// profile's, Adobe's reference calibration, and a linear raw DNG's
+    /// AnalogBalance, whatever the profile.
     fn neutral_calibration(&self, m: &Metadata) -> [f32; 3] {
+        let analog = m.dng_analog_balance.unwrap_or([1.; 3]);
+        let calibration = self.camera_calibration(m);
+        std::array::from_fn(|c| calibration[c] * analog[c])
+    }
+    fn camera_calibration(&self, m: &Metadata) -> [f32; 3] {
         if m.baseline_exposure.is_some() {
             m.dng_neutral_calibration
                 .as_ref()
@@ -531,18 +540,7 @@ impl CameraProfile {
         if let Some(look) = &self.enhanced {
             p = look.apply_table(p);
         }
-        let evaluate = |v: f32| {
-            let x = v.clamp(0., 1.);
-            let i = self
-                .tone
-                .partition_point(|p| p[0] <= x)
-                .saturating_sub(1)
-                .min(self.tone.len() - 2);
-            let a = self.tone[i];
-            let b = self.tone[i + 1];
-            let t = ((x - a[0]) / (b[0] - a[0])).clamp(0., 1.);
-            a[1] * (1. - t) + b[1] * t
-        };
+        let evaluate = |v: f32| evaluate_tone(&self.tone, v);
         // Map the darkest and brightest channels; preserve the middle channel's
         // relative position. This preserves hue without flattening saturation.
         p = p.map(|v| v.clamp(0., 1.));
@@ -617,7 +615,7 @@ impl CameraProfile {
     pub fn with_test_rgb_tables(self) -> Vec<Self> {
         rgb_table::tests::variety()
             .into_iter()
-            .zip([0.7, 1., 1.5])
+            .zip([0.7, 1., 1.5, 2.])
             .map(|(table, amount)| {
                 let mut p = self.clone();
                 let look = p.enhanced.as_mut().expect("a profile with a look");
@@ -625,6 +623,12 @@ impl CameraProfile {
                 p
             })
             .collect()
+    }
+    /// `self` with the look a `.cube` imports as over it.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_cube_for_test(&self, cube: &str) -> Result<Self> {
+        let converted = cube_look::convert(cube.as_bytes())?;
+        enhanced::LookFile::parse(&cube_look::look_xmp(&converted, "Cube", ""))?.compose(self)
     }
     /// A profile with hue/saturation, look and enhanced-look tables for GPU tests.
     #[cfg(any(test, feature = "test-support"))]
@@ -660,7 +664,48 @@ const D65_TO_D50: Matrix = [
     [-0.0092345, 0.0150436, 0.7521316],
 ];
 const D65: [f32; 3] = [0.95047, 1., 1.08883];
+/// Lightroom's profile for rendered files.
+pub const EMBEDDED: &str = "Embedded";
 impl CameraProfile {
+    /// Lightroom's "Embedded" profile for rendered files: it renders a rendered file's
+    /// pseudo-scene (`develop::rendered`) with Camera Raw's default tone curve; its
+    /// colour is linear ProPhoto as it is (no matrix or tables).
+    pub fn embedded(m: &Metadata) -> Self {
+        // camera RGB is linear ProPhoto D50, so XYZ_TO_PRO · forward = identity.
+        let forward = crate::color::inverse(XYZ_TO_PRO);
+        Self {
+            name: EMBEDDED.into(),
+            camera: format!("{} {}", m.make, m.model),
+            copyright: String::new(),
+            enhanced: None,
+            color1: None,
+            calibration_signature: String::new(),
+            matrix_calibration_signature: None,
+            color2: None,
+            forward1: forward,
+            forward2: forward,
+            kelvin1: 6504.,
+            kelvin2: 6504.,
+            hue1: None,
+            hue2: None,
+            look: None,
+            tone: default_tone(),
+            exposure: 0.,
+            black_render: BlackRender::None,
+        }
+    }
+    pub fn is_embedded(&self) -> bool {
+        self.name == EMBEDDED && self.color1.is_none() && self.look.is_none()
+    }
+    /// The profile as loaded from a saved edit: the Embedded profile takes Camera
+    /// Raw's default tone curve, whatever curve it was saved with (the profile is a
+    /// definition, not something the photo carries). Any other profile is unchanged.
+    pub(crate) fn loaded(mut self) -> Self {
+        if self.is_embedded() {
+            self.tone = default_tone();
+        }
+        self
+    }
     /// The DNG rendering of a file that carries only a ColorMatrix: LibRaw's XYZ-to-camera
     /// matrix, no hue/look tables, and the published ACR 3 default tone curve. This is the
     /// neutral starting point when the user has imported no camera profile.
@@ -697,11 +742,7 @@ impl CameraProfile {
             hue1: None,
             hue2: None,
             look: None,
-            tone: dng_tone::DEFAULT_TONE
-                .iter()
-                .enumerate()
-                .map(|(i, y)| [i as f32 / 1024., *y])
-                .collect(),
+            tone: default_tone(),
             exposure: 0.,
             black_render: BlackRender::Auto,
         };
@@ -709,21 +750,55 @@ impl CameraProfile {
         Some(p)
     }
 }
+/// A profile tone curve's `points` at `x` (clamped to 0…1), linearly between points.
+fn evaluate_tone(points: &[[f32; 2]], x: f32) -> f32 {
+    let x = x.clamp(0., 1.);
+    let i = points
+        .partition_point(|p| p[0] <= x)
+        .saturating_sub(1)
+        .min(points.len() - 2);
+    let a = points[i];
+    let b = points[i + 1];
+    let t = ((x - a[0]) / (b[0] - a[0])).clamp(0., 1.);
+    a[1] * (1. - t) + b[1] * t
+}
+
+/// The DNG SDK's default tone curve (ACR3) as profile tone points.
+pub fn default_tone() -> Vec<[f32; 2]> {
+    dng_tone::DEFAULT_TONE
+        .iter()
+        .enumerate()
+        .map(|(i, y)| [i as f32 / 1024., *y])
+        .collect()
+}
+
+/// [`default_tone`] at `x`, as [`CameraProfile::finish`] evaluates a tone curve.
+pub fn default_tone_at(x: f32) -> f32 {
+    static POINTS: std::sync::OnceLock<Vec<[f32; 2]>> = std::sync::OnceLock::new();
+    evaluate_tone(POINTS.get_or_init(default_tone), x)
+}
+
 fn matmul(a: Matrix, b: Matrix) -> Matrix {
     std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
 
+mod cube;
+mod cube_look;
 mod dcp;
 mod enhanced;
 mod library;
 mod look_settings;
 pub mod open;
 mod rgb_table;
+pub use cube_look::Fidelity;
 pub use dcp::{d65_color_matrix, from_bytes};
 pub use enhanced::RgbLook;
 pub use library::{
-    adobe_installed, builtin, compose_look, import_files, installed, library_dirs, load,
+    CubeImport, Groups, Imported, ImportedProfile, Listed, MenuEntry, adobe_installed, builtin,
+    compose_look, import_files, import_readable, installed, library_dirs, listed, load, read_cube,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use library::{import_into_dir, listed_from};
 pub use look_settings::LookSettings;
 pub use rgb_table::{Dimensions, Gamut};
 #[cfg(test)]

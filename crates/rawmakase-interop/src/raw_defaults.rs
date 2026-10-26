@@ -232,7 +232,16 @@ impl DevelopDefaults {
     /// What a photo from this camera starts from. Never fails: a preset that is
     /// missing or does not apply, or a camera-matching profile that isn't
     /// imported, leaves Adobe Default, with a note saying so.
+    /// Raw Defaults are for raw files: a JPEG, PNG or TIFF starts from
+    /// [`Recipe::for_rendered`] whatever they say.
     pub fn resolve(&self, m: &Metadata, profiles: &[Arc<CameraProfile>]) -> Resolved {
+        if m.is_rendered() {
+            return Resolved {
+                recipe: Recipe::for_rendered(m),
+                name: DefaultChoice::Adobe.label(),
+                note: None,
+            };
+        }
         let choice = self.settings.choice_for(m);
         let adobe = || Recipe::with_profiles(m, profiles);
         let fallback = |note: String| Resolved {
@@ -450,6 +459,37 @@ mod tests {
             .collect();
         let r = defaults.resolve(&m, &only_adobe);
         assert_eq!(r.recipe.profile.unwrap().name, "Adobe Color");
+    }
+
+    #[test]
+    fn raw_defaults_leave_a_rendered_file_as_it_is() {
+        let rendered = Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..x100f()
+        };
+        let profiles = profiles(&rendered);
+        let mut per_camera = RawDefaults {
+            master: DefaultChoice::Adobe,
+            camera_overrides: true,
+            ..Default::default()
+        };
+        per_camera.set_camera("Fujifilm X100F", preset_choice("brighter"));
+        for settings in [
+            RawDefaults {
+                master: preset_choice("brighter"),
+                ..Default::default()
+            },
+            RawDefaults {
+                master: DefaultChoice::CameraSettings,
+                ..Default::default()
+            },
+            per_camera,
+        ] {
+            let r = load(settings).resolve(&rendered, &profiles);
+            assert_eq!(r.recipe, Recipe::for_rendered(&rendered));
+            assert_eq!(r.name, DefaultChoice::Adobe.label());
+            assert!(r.note.is_none());
+        }
     }
 
     #[test]

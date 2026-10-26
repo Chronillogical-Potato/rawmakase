@@ -2,7 +2,7 @@
 //! stage's probes: one IFD holding an RGGB mosaic as tiles. (RAWmakase rejects three-channel `LinearRaw` DNGs, so the
 //! charts are mosaics; flat patch interiors demosaic exactly.) Tiles are lossless
 //! JPEG with two interleaved components per row, as Adobe's DNG Converter writes
-//! mosaics; LibRaw reads Deflate only for floating-point data.
+//! mosaics.
 use super::chart::{Camera, Matrix};
 
 pub const TILE: u32 = 256;

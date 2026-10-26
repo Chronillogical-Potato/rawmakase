@@ -161,3 +161,25 @@ fn clearing_an_edit_leaves_nothing_of_it() -> Result<()> {
     assert_eq!(stored(&cat, id)?, [None, None, None, None, None, None]);
     Ok(())
 }
+
+#[test]
+fn a_photo_has_an_edit_once_one_is_saved() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let file = photos.join("a.jpg");
+    std::fs::write(&file, b"fixture")?;
+    let mut cat = Catalog::create(&dir.path().join("Edits.rawmakase"))?;
+    cat.add_folder(&photos)?;
+    let id = cat.photos()?[0].id;
+    assert!(!cat.has_edit(id)?);
+    cat.save_edit(
+        id,
+        &file,
+        &Recipe::default(),
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    assert!(cat.has_edit(id)?);
+    Ok(())
+}

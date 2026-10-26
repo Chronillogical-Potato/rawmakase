@@ -70,6 +70,8 @@ fn render_resident(
     else {
         return Ok(None);
     };
+    // The samples stay on the device, so their camera colour may too.
+    params.color = Some(develop::stage_cache::color_recipe(&base));
     let weights = develop::pipeline::mask_weights(
         &toned,
         &base,
@@ -94,9 +96,10 @@ fn render_resident(
     sampling[slot::SPREAD.start] = spread;
     sampling[slot::CROP.start..slot::HOMOGRAPHY.end].copy_from_slice(&g.gpu_params());
     sampling[slot::MANUAL].copy_from_slice(&g.gpu_manual());
+    sampling[slot::XTRANS.start] = f32::from(source.metadata.xtrans);
     let mut tables = Vec::new();
     let lens = develop::pipeline::lens_gpu_params(source, &base, slot::HEADER, &mut tables);
-    sampling[slot::LENS.start..slot::VIGNETTING_AMOUNT.end].copy_from_slice(&lens);
+    sampling[slot::LENS.start..slot::GAIN_MAP.end].copy_from_slice(&lens);
     sampling.extend(tables);
     let backend = &mut *stages.backend;
     // A region too large for the device renders on the CPU, without turning the GPU off.

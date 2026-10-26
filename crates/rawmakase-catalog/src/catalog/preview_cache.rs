@@ -16,13 +16,45 @@ const APP_ID: i64 = 0x4f4d5052;
 const VERSION: i64 = 1;
 // 2: previews keep their aspect ratio (generation 1 forced 360×240).
 // 3: the one engine renders every edit differently from earlier releases.
-const GENERATION: i64 = 3;
+// 4: highlight recovery keeps a lone clipped channel's recorded value, which saved
+//    edits of RAWs with clipped light sources render differently.
+// 5: a DNG's OpcodeList3 GainMaps apply (drones' lens shading), which saved edits of
+//    those DNGs render differently.
+// 6: Highlights -100, and the positions between -50 and -100, keep pulling areas more
+//    than 7 stops over the photo's key, which saved edits of photos with such areas
+//    render differently.
+// 7: built-in lens corrections apply as Lightroom applies them (Olympus, OM System
+//    and Panasonic distortion and CA, Nikon Z, Sony's lateral CA), and correction
+//    the camera always applies ignores the profile amounts while profile corrections
+//    are off, which saved edits of those RAWs render differently.
+// 8: Coolpix NRW lens tables apply.
+// 9: Samsung's built-in distortion and lateral CA apply, which saved edits of SRWs
+//    render differently.
+// 10: the EOS R5 Mark II's and R6 Mark III's built-in lens correction, which saved
+//     edits with Enable Profile Corrections on render with.
+// 11: lens corrections are centred on their optical centre and framed by green's
+//     samples for the photo's edge (Nikon Z, Olympus, OM System, Samsung, DNG
+//     opcodes, Adobe profiles).
+// 12: Fujifilm's distortion table is scaled as Adobe's warps of it are, so its photos
+//     frame as in Lightroom.
+const GENERATION: i64 = 12;
 // 3: a JPEG, PNG or TIFF is converted from its embedded ICC profile.
 // 4: the one engine, as `GENERATION` 3.
-const RASTER_GENERATION: i64 = 4;
+// 5: an edited JPEG, PNG or TIFF renders from the scene its rendering is of.
+// 6: Highlights, as `GENERATION` 6.
+const RASTER_GENERATION: i64 = 6;
 const LIMIT: i64 = 512 * 1024 * 1024;
 // 2: the one engine, as `GENERATION` 3.
-const SIZED_GENERATION: i64 = 2;
+// 3: highlight recovery, as `GENERATION` 4.
+// 4: OpcodeList3 GainMaps, as `GENERATION` 5.
+// 5: Highlights, as `GENERATION` 6.
+// 6: built-in lens corrections, as `GENERATION` 7.
+// 7: Coolpix NRW lens tables, as `GENERATION` 8.
+// 8: Samsung's built-in lens corrections, as `GENERATION` 9.
+// 9: Canon's built-in lens correction, as `GENERATION` 10.
+// 10: optical centres and framing, as `GENERATION` 11.
+// 11: Fujifilm's distortion framing, as `GENERATION` 12.
+const SIZED_GENERATION: i64 = 11;
 const SIZED_QUALITY: u8 = 85;
 /// Tables added after version 1, created on open so older builds, which ignore
 /// them, keep opening the file.

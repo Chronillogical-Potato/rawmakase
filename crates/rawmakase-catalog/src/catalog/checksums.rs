@@ -89,6 +89,37 @@ impl Catalog {
     }
 }
 
+/// Gives the checksum of `photo`, whose file was replaced by a copy with
+/// the same bytes (a move to another volume), the copy's identity `now`,
+/// only when it was read from exactly the version `was` names. Returns
+/// whether it did.
+pub(super) fn refresh_identity(
+    w: &mut super::db::Write<'_>,
+    photo: PhotoId,
+    was: &crate::storage::Identity,
+    now: &crate::storage::Identity,
+) -> Result<bool> {
+    let saved: Option<String> = w.read_optional(
+        sql!("SELECT identity FROM photo_checksums WHERE photo=?"),
+        &[&photo],
+    )?;
+    let Some(saved) = saved else {
+        return Ok(false);
+    };
+    if serde_json::from_str::<crate::storage::Identity>(&saved)
+        .ok()
+        .as_ref()
+        != Some(was)
+    {
+        return Ok(false);
+    }
+    w.execute(
+        sql!("UPDATE photo_checksums SET identity=? WHERE photo=?"),
+        &[&serde_json::to_string(now)?, &photo],
+    )?;
+    Ok(true)
+}
+
 /// The checksums on record, by master, of the current version, read in `db`.
 pub(super) fn stored(db: &impl Reads) -> Result<HashMap<PhotoId, FileChecksum>> {
     row! {

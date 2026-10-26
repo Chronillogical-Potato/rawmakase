@@ -1,8 +1,8 @@
-//! The camera's own EXIF, read from a RAW, JPEG or TIFF: for an export to carry
-//! as Lightroom's do (capture settings, lens, dates, serial numbers and GPS), and
-//! for the catalog's capture time and photo info. Maker notes, thumbnail offsets
-//! and other pointers into the RAW are left out; they would not survive the move
-//! to a new file.
+//! The camera's own EXIF, read from a RAW, JPEG, TIFF, PNG, WebP, AVIF or JPEG
+//! XL: for an export to carry as Lightroom's do (capture settings, lens, dates,
+//! serial numbers and GPS), and for the catalog's capture time and photo info.
+//! Maker notes, thumbnail offsets and other pointers into the RAW are left out;
+//! they would not survive the move to a new file.
 use crate::{
     jpeg::{APP1, Segments},
     tiff::{
@@ -10,7 +10,11 @@ use crate::{
         kind::{ASCII, IFD, LONG, RATIONAL, SHORT, SRATIONAL},
     },
 };
-use std::{fs::File, io::Read, path::Path};
+use std::{
+    fs::File,
+    io::{Read, Seek},
+    path::Path,
+};
 use tag::*;
 
 /// The tags RAWmakase reads or writes, by their EXIF names: of the main
@@ -165,7 +169,7 @@ impl CameraExif {
             .and_then(Field::text)
             .filter(|s| !s.is_empty())
     }
-    /// Capture settings LibRaw reports, for a RAW whose EXIF could not be read.
+    /// Capture settings the RAW decoder reports, for a RAW whose EXIF could not be read.
     pub fn from_libraw(m: &crate::camera_data::Metadata) -> Self {
         let rational =
             |tag, v: f32| Field::rational(tag, (v.max(0.) * 1_000_000.).round() as u32, 1_000_000);
@@ -204,7 +208,7 @@ const SKIP: [u16; 4] = [
 pub const MAX_VALUE: usize = 4096;
 
 /// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
-/// a JPEG or TIFF, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
+/// a JPEG, TIFF, PNG, WebP, AVIF or JPEG XL, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
 /// `None` when the file has none that can be read, e.g. a CR3.
 pub fn read(path: &Path) -> Option<CameraExif> {
     directories(path, |tag| MAIN.contains(&tag))
@@ -216,19 +220,24 @@ pub fn read(path: &Path) -> Option<CameraExif> {
 /// DateTimeDigitized, then DateTime, each with its own subseconds.
 pub fn capture_time(path: &Path) -> Option<String> {
     let exif = directories(path, |tag| tag == DATE_TIME)?;
-    [
-        (DATE_TIME_ORIGINAL, SUBSEC_TIME_ORIGINAL),
-        (DATE_TIME_DIGITIZED, SUBSEC_TIME_DIGITIZED),
-        (DATE_TIME, SUBSEC_TIME),
-    ]
-    .into_iter()
-    .find_map(|(date, subseconds)| {
-        let date = exif.get(date).and_then(Field::text)?;
-        lightroom_time(&date, exif.get(subseconds).and_then(Field::text).as_deref())
-    })
+    let text = |tag| exif.get(tag).and_then(Field::text);
+    capture_time_of([
+        (text(DATE_TIME_ORIGINAL), text(SUBSEC_TIME_ORIGINAL)),
+        (text(DATE_TIME_DIGITIZED), text(SUBSEC_TIME_DIGITIZED)),
+        (text(DATE_TIME), text(SUBSEC_TIME)),
+    ])
 }
 
-/// Camera, lens and exposure settings of a JPEG, TIFF or TIFF-based RAW
+/// [`capture_time`] of dates read elsewhere (a RAW container's own
+/// records): DateTimeOriginal, DateTimeDigitized and DateTime as EXIF
+/// writes them, each with its subseconds, the first that is a date.
+pub fn capture_time_of(dates: [(Option<String>, Option<String>); 3]) -> Option<String> {
+    dates
+        .into_iter()
+        .find_map(|(date, subseconds)| lightroom_time(&date?, subseconds.as_deref()))
+}
+
+/// Camera, lens and exposure settings of a JPEG, TIFF, PNG, WebP, AVIF, JPEG XL or TIFF-based RAW
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
 pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
@@ -262,6 +271,14 @@ pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
         dimensions: None,
     };
     (info != Default::default()).then_some(info)
+}
+
+/// The EXIF Make and Model of a JPEG, TIFF, PNG or TIFF-based RAW, trimmed, each
+/// empty when missing; `None` when the file has no EXIF at all.
+pub fn camera_names(path: &Path) -> Option<(String, String)> {
+    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
+    let text = |tag| exif.get(tag).and_then(Field::text).unwrap_or_default();
+    Some((text(MAKE), text(MODEL)))
 }
 
 /// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
@@ -334,19 +351,54 @@ pub fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
 
 fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
     let mut f = File::open(path).ok()?;
-    let mut head = [0u8; 108];
-    f.read_exact(&mut head).ok()?;
-    let base = if head.starts_with(b"FUJIFILMCCD-RAW") {
-        let jpeg = u32::from_be_bytes(head[84..88].try_into().ok()?) as u64;
-        let length = u32::from_be_bytes(head[88..92].try_into().ok()?) as usize;
-        jpeg + exif_in_jpeg(&mut File::open(path).ok()?, jpeg, length)?
+    // Enough to tell the containers apart and find a RAF's preview; a small
+    // PNG or JPEG can be shorter.
+    let mut head = Vec::with_capacity(108);
+    (&mut f).take(108).read_to_end(&mut head).ok()?;
+    // Where the TIFF starts, and how long it is when embedded in another
+    // container, whose other bytes are not read as part of it.
+    let (base, len) = if head.starts_with(b"FUJIFILMCCD-RAW") {
+        // Where its preview JPEG is, and how long.
+        let preview = head.get(84..92)?;
+        let jpeg = u32::from_be_bytes(preview[..4].try_into().ok()?) as u64;
+        let length = u32::from_be_bytes(preview[4..].try_into().ok()?) as usize;
+        let (at, len) = exif_in_jpeg(&mut File::open(path).ok()?, jpeg, length)?;
+        (jpeg + at, Some(len))
     } else if head.starts_with(&[0xff, 0xd8]) {
         let length = f.metadata().ok()?.len().min(1 << 16) as usize;
-        exif_in_jpeg(&mut File::open(path).ok()?, 0, length)?
+        let (at, len) = exif_in_jpeg(&mut File::open(path).ok()?, 0, length)?;
+        (at, Some(len))
+    } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let (at, len) = exif_in_png(&mut File::open(path).ok()?)?;
+        (at, Some(len))
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        let (at, len) = exif_in_webp(&mut File::open(path).ok()?)?;
+        (at, Some(len))
+    } else if head.get(4..8) == Some(b"ftyp") && has_heif_brand(&head) {
+        // Its Exif item may be stored in pieces, so the TIFF is read from the
+        // joined item in memory.
+        return exif_in_memory(exif_in_heif(&mut f)?, keep_main);
+    } else if head.starts_with(&crate::isobmff::JXL_CONTAINER) {
+        // Its Exif box may be brotli-compressed ("brob"), so the TIFF is read
+        // from the box's body in memory.
+        return exif_in_memory(crate::isobmff::jxl_metadata(&mut f, *b"Exif")?, keep_main);
     } else {
-        0
+        (0, None)
     };
-    let mut t = Tiff::open(File::open(path).ok()?, base)?;
+    let f = File::open(path).ok()?;
+    let t = match len {
+        Some(len) => Tiff::open_within(f, base, len)?,
+        None => Tiff::open(f, base)?,
+    };
+    camera_exif(t, keep_main)
+}
+
+/// The main, EXIF and GPS directories' fields of `t`, keeping the main
+/// directory's tags `keep_main` accepts.
+fn camera_exif<R: Read + Seek>(
+    mut t: Tiff<R>,
+    keep_main: impl Fn(u16) -> bool,
+) -> Option<CameraExif> {
     let main = t.ifd(t.first)?;
     let mut out = CameraExif {
         main: fields(&mut t, &main, keep_main),
@@ -369,10 +421,96 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
     (!out.exif.is_empty() || !out.main.is_empty()).then_some(out)
 }
 
-/// Offset of the TIFF header inside a JPEG's EXIF segment, relative to the JPEG.
-/// Only the first `length` bytes, at most 64 KB, are read.
-fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<u64> {
-    use std::io::{Cursor, Seek, SeekFrom};
+/// Whether an `ftyp` box lists the AVIF/HEIF-image brands (`avif`, `avis`,
+/// `mif1`) as major or compatible brand; other ISOBMFF files (Canon CR3, MP4)
+/// are left to the TIFF path.
+fn has_heif_brand(head: &[u8]) -> bool {
+    let Some(brands) = head.get(8..head.len().min(64)) else {
+        return false;
+    };
+    let (brands, _) = brands.as_chunks::<4>();
+    // brands[1] is the minor version, not a brand.
+    brands
+        .iter()
+        .enumerate()
+        .any(|(i, b)| i != 1 && matches!(b, b"avif" | b"avis" | b"mif1"))
+}
+
+/// Offset of the TIFF header in a WebP's EXIF chunk (some writers keep
+/// JPEG's "Exif" header in it), and the length of the TIFF the chunk holds.
+fn exif_in_webp(f: &mut File) -> Option<(u64, u64)> {
+    let chunk = crate::riff::webp_chunks(f)?
+        .into_iter()
+        .find(|c| &c.kind == b"EXIF")?;
+    tiff_after_header(f, chunk.start, chunk.start.checked_add(chunk.size)?)
+}
+
+/// An AVIF's Exif item, up to 16 MiB: the 4-byte offset to the TIFF header,
+/// then the TIFF.
+fn exif_in_heif(f: &mut File) -> Option<Vec<u8>> {
+    let heif = crate::isobmff::Heif::read(f)?;
+    let id = heif
+        .describing(*b"cdsc", heif.primary)
+        .into_iter()
+        .find(|id| heif.item(*id).is_some_and(|i| &i.kind == b"Exif"))?;
+    heif.data_up_to(f, id, 16 << 20)
+}
+
+/// The directories of the TIFF in `body`, an Exif item or box: the
+/// big-endian u32 offset to the TIFF header, then the TIFF.
+fn exif_in_memory(body: Vec<u8>, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
+    let len = body.len() as u64;
+    let mut body = std::io::Cursor::new(body);
+    let (at, len) = after_offset(&mut body, 0, len)?;
+    camera_exif(Tiff::open_within(body, at, len)?, keep_main)
+}
+
+/// The TIFF header of the `len` bytes at `start`, after the big-endian u32
+/// offset they begin with, and the bytes left to the TIFF from there; `None`
+/// when the offset leaves them.
+fn after_offset<R: Read + Seek>(f: &mut R, start: u64, len: u64) -> Option<(u64, u64)> {
+    use std::io::SeekFrom;
+    if len < 4 {
+        return None;
+    }
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut offset = [0u8; 4];
+    f.read_exact(&mut offset).ok()?;
+    let at = start
+        .checked_add(4)?
+        .checked_add(u64::from(u32::from_be_bytes(offset)))?;
+    tiff_after_header(f, at, start.checked_add(len)?)
+}
+
+/// `at`, or past an "Exif\0\0" header there, and the bytes from it to `end`,
+/// which the TIFF may not leave; `None` when `at` is not before `end` by at
+/// least a TIFF header. The "Exif" header is looked for only if a TIFF header
+/// still fits after it.
+fn tiff_after_header<R: Read + Seek>(f: &mut R, at: u64, end: u64) -> Option<(u64, u64)> {
+    use std::io::SeekFrom;
+    if at >= end {
+        return None;
+    }
+    // A TIFF header is 8 bytes.
+    if end - at < 8 {
+        return None;
+    }
+    if end - at >= 14 {
+        f.seek(SeekFrom::Start(at)).ok()?;
+        let mut signature = [0u8; 6];
+        f.read_exact(&mut signature).ok()?;
+        if signature == *b"Exif\0\0" {
+            return Some((at + 6, end - at - 6));
+        }
+    }
+    Some((at, end - at))
+}
+
+/// Offset of the TIFF header inside a JPEG's EXIF segment, relative to the
+/// JPEG, and the length of the TIFF the segment holds. Only the first `length`
+/// bytes, at most 64 KB, are read.
+fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<(u64, u64)> {
+    use std::io::{Cursor, SeekFrom};
     f.seek(SeekFrom::Start(jpeg)).ok()?;
     let mut head = vec![0u8; length.min(1 << 16)];
     f.read_exact(&mut head).ok()?;
@@ -383,14 +521,47 @@ fn exif_in_jpeg(f: &mut File, jpeg: u64, length: usize) -> Option<u64> {
             && segments.reader().read_exact(&mut signature).is_ok()
             && signature == *b"Exif\0\0"
         {
-            return Some(segment.offset + 6);
+            return Some((segment.offset + 6, segment.length.checked_sub(6)? as u64));
         }
     }
     None
 }
 
-fn fields(
-    t: &mut Tiff,
+/// Offset of the TIFF header inside a PNG's eXIf chunk and the length of the
+/// TIFF the chunk holds, found by its chunks' headers alone, before or after
+/// the image data. A chunk said to run past the file's end is not read.
+fn exif_in_png(f: &mut File) -> Option<(u64, u64)> {
+    use std::io::SeekFrom;
+    let size = f.metadata().ok()?.len();
+    let mut at = 8u64;
+    loop {
+        f.seek(SeekFrom::Start(at)).ok()?;
+        let mut header = [0u8; 8];
+        f.read_exact(&mut header).ok()?;
+        let length = u32::from_be_bytes(header[..4].try_into().ok()?) as u64;
+        match &header[4..] {
+            b"eXIf" => {
+                if at + 8 + length > size {
+                    return None;
+                }
+                // Some writers keep JPEG's "Exif" header in the chunk too.
+                let mut signature = [0u8; 6];
+                f.read_exact(&mut signature).ok()?;
+                let skip = if length >= 6 && signature == *b"Exif\0\0" {
+                    6
+                } else {
+                    0
+                };
+                return Some((at + 8 + skip, length - skip));
+            }
+            b"IEND" => return None,
+            _ => at += 12 + length,
+        }
+    }
+}
+
+fn fields<R: Read + Seek>(
+    t: &mut Tiff<R>,
     ifd: &std::collections::BTreeMap<u16, Entry>,
     keep: impl Fn(u16) -> bool,
 ) -> Vec<Field> {
@@ -416,4 +587,318 @@ fn fields(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod camera_names_tests {
+    use super::camera_names;
+
+    /// A little-endian TIFF whose only directory holds Make and Model.
+    fn tiff(make: &str, model: &str) -> Vec<u8> {
+        let mut t = b"II*\0\x08\0\0\0".to_vec();
+        t.extend(directory(8, make, model));
+        t
+    }
+
+    /// A directory holding Make and Model, then their text, for `at` bytes
+    /// into its TIFF; each is longer than the 4 bytes a value holds itself.
+    fn directory(at: usize, make: &str, model: &str) -> Vec<u8> {
+        let (make, model) = (format!("{make}\0"), format!("{model}\0"));
+        let data = at + 2 + 2 * 12 + 4;
+        let mut t = b"\x02\0".to_vec();
+        for (tag, len, at) in [
+            (0x010f_u16, make.len(), data),
+            (0x0110, model.len(), data + make.len()),
+        ] {
+            t.extend(tag.to_le_bytes());
+            t.extend(2u16.to_le_bytes());
+            t.extend((len as u32).to_le_bytes());
+            t.extend((at as u32).to_le_bytes());
+        }
+        t.extend([0; 4]);
+        t.extend(make.bytes().chain(model.bytes()));
+        t
+    }
+
+    #[test]
+    fn make_and_model_are_read_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.tif");
+        std::fs::write(&path, tiff("FUJIFILM", "X-T5")).unwrap();
+        assert_eq!(
+            camera_names(&path),
+            Some(("FUJIFILM".into(), "X-T5".into()))
+        );
+    }
+
+    /// A PNG of `chunks` (type and data) between its header and end; the
+    /// reader checks no CRCs, so they are left zero.
+    fn png(chunks: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+        let mut p = b"\x89PNG\r\n\x1a\n".to_vec();
+        let ihdr = [0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0];
+        for (kind, data) in [(b"IHDR", &ihdr[..])]
+            .into_iter()
+            .chain(chunks.iter().copied())
+            .chain([(b"IEND", &[][..])])
+        {
+            p.extend((data.len() as u32).to_be_bytes());
+            p.extend(kind);
+            p.extend(data);
+            p.extend([0; 4]);
+        }
+        p
+    }
+
+    #[test]
+    fn a_pngs_exif_is_read_wherever_its_chunk_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let exif = tiff("FUJIFILM", "X-T5");
+        let prefixed = [&b"Exif\0\0"[..], &exif].concat();
+        let idat: &[u8] = &[0; 300];
+        for (name, chunks) in [
+            ("before.png", vec![(b"eXIf", &exif[..]), (b"IDAT", idat)]),
+            ("after.png", vec![(b"IDAT", idat), (b"eXIf", &exif[..])]),
+            (
+                "prefixed.png",
+                vec![(b"eXIf", &prefixed[..]), (b"IDAT", idat)],
+            ),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, png(&chunks)).unwrap();
+            assert_eq!(
+                camera_names(&path),
+                Some(("FUJIFILM".into(), "X-T5".into())),
+                "{name}"
+            );
+        }
+        let path = dir.path().join("none.png");
+        std::fs::write(&path, png(&[(b"IDAT", idat)])).unwrap();
+        assert_eq!(camera_names(&path), None);
+    }
+
+    #[test]
+    fn a_pngs_exif_is_read_from_its_chunk_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let idat: &[u8] = &[0; 300];
+        // An 8-byte eXIf chunk whose directory is said to be in the next
+        // chunk's data: 8 bytes, the chunk's CRC and the next one's header
+        // into the TIFF.
+        let mut exif = b"II*\0".to_vec();
+        exif.extend(20u32.to_le_bytes());
+        let other = directory(20, "BAD make", "BAD model");
+        let path = dir.path().join("outside.png");
+        let chunks = [(b"eXIf", &exif[..]), (b"tEXt", &other[..]), (b"IDAT", idat)];
+        std::fs::write(&path, png(&chunks)).unwrap();
+        assert_eq!(camera_names(&path), None);
+        // A chunk longer than the file.
+        let mut long = png(&[(b"eXIf", &tiff("FUJIFILM", "X-T5")[..])]);
+        long[33..37].copy_from_slice(&u32::MAX.to_be_bytes());
+        let path = dir.path().join("long.png");
+        std::fs::write(&path, long).unwrap();
+        assert_eq!(camera_names(&path), None);
+    }
+
+    #[test]
+    fn a_jpegs_exif_is_read_from_its_segment_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        // An APP1 segment of 8 TIFF bytes whose directory is said to be in
+        // the next segment's data: after its marker and length.
+        let mut exif = b"Exif\0\0II*\0".to_vec();
+        exif.extend(12u32.to_le_bytes());
+        let other = directory(12, "BAD make", "BAD model");
+        let mut jpeg = vec![0xff, 0xd8, 0xff, 0xe1];
+        jpeg.extend(((exif.len() + 2) as u16).to_be_bytes());
+        jpeg.extend(&exif);
+        jpeg.extend([0xff, 0xe2]);
+        jpeg.extend(((other.len() + 2) as u16).to_be_bytes());
+        jpeg.extend(&other);
+        jpeg.extend([0xff, 0xd9]);
+        jpeg.resize(jpeg.len().max(108), 0);
+        let path = dir.path().join("outside.jpg");
+        std::fs::write(&path, jpeg).unwrap();
+        assert_eq!(camera_names(&path), None);
+    }
+
+    #[test]
+    fn a_tiny_pngs_exif_is_read() {
+        // A directory holding Model alone, its text in the entry itself.
+        let mut exif = b"II*\0\x08\0\0\0\x01\0".to_vec();
+        exif.extend(0x0110_u16.to_le_bytes());
+        exif.extend(2u16.to_le_bytes());
+        exif.extend(4u32.to_le_bytes());
+        exif.extend(b"X-T\0");
+        exif.extend([0; 4]);
+        let file = png(&[(b"eXIf", &exif[..])]);
+        assert!(file.len() < 108);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tiny.png");
+        std::fs::write(&path, file).unwrap();
+        assert_eq!(camera_names(&path), Some((String::new(), "X-T".into())));
+    }
+
+    #[test]
+    fn a_file_without_exif_has_no_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.bin");
+        std::fs::write(&path, [0u8; 200]).unwrap();
+        assert_eq!(camera_names(&path), None);
+    }
+}
+
+#[cfg(test)]
+mod container_tests {
+    fn fixture(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/data/formats")
+            .join(name)
+    }
+    #[test]
+    fn webp_avif_and_jxl_exif_is_read() {
+        // metadata-brob.jxl has its Exif box brotli-compressed, as cjxl
+        // writes by default; split-exif.avif has its Exif item in two pieces.
+        for name in [
+            "metadata.webp",
+            "metadata.avif",
+            "split-exif.avif",
+            "metadata.jxl",
+            "metadata-brob.jxl",
+        ] {
+            let path = fixture(name);
+            assert_eq!(
+                super::capture_time(&path).as_deref(),
+                Some("2024-05-04T10:21:33.000"),
+                "{name}"
+            );
+            assert_eq!(
+                super::camera_names(&path),
+                Some(("Fixture".into(), "Synthetic 1".into())),
+                "{name}"
+            );
+        }
+    }
+    #[test]
+    fn files_without_exif_have_none() {
+        for name in ["ten-bit.avif", "animated.webp", "sixteen-bit.jxl"] {
+            assert_eq!(super::camera_names(&fixture(name)), None, "{name}");
+        }
+    }
+    #[test]
+    fn other_isobmff_files_are_not_read_as_heif() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.cr3");
+        let mut bytes = vec![0, 0, 0, 24];
+        bytes.extend(b"ftypcrx \0\0\0\x01crx isom");
+        bytes.resize(200, 0);
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(super::camera_names(&path), None);
+    }
+    /// A copy of a fixture with the 4-byte Exif offset before its TIFF header
+    /// set to `offset`.
+    fn with_offset(name: &str, offset: u32) -> Vec<u8> {
+        let mut bytes = std::fs::read(fixture(name)).unwrap();
+        let tiff = bytes.windows(4).position(|w| w == b"MM\0*").unwrap();
+        // The AVIF item has "Exif\0\0" between its offset and the TIFF header.
+        let at = if name.ends_with("avif") {
+            tiff - 6
+        } else {
+            tiff
+        };
+        bytes[at - 4..at].copy_from_slice(&offset.to_be_bytes());
+        bytes
+    }
+    #[test]
+    fn an_exif_offset_past_the_item_or_box_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["metadata.avif", "metadata.jxl"] {
+            // The AVIF fixture's own offset is 6 ("Exif\0\0"), the JXL's 0.
+            for offset in [0xffff_ffff, 0x7fff_ffff, 1000] {
+                let path = dir.path().join(name);
+                std::fs::write(&path, with_offset(name, offset)).unwrap();
+                assert_eq!(super::camera_names(&path), None, "{name} {offset}");
+            }
+        }
+    }
+    #[test]
+    fn a_webp_exif_chunk_shorter_than_its_header_is_not_read_past() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = std::fs::read(fixture("metadata.webp")).unwrap();
+        let at = bytes.windows(4).position(|w| w == b"EXIF").unwrap();
+        bytes[at + 4..at + 8].copy_from_slice(&3u32.to_le_bytes());
+        let path = dir.path().join("short.webp");
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(super::camera_names(&path), None);
+    }
+    /// A copy of a fixture followed by a unit of its own container (a WebP
+    /// chunk, a box) holding a big-endian directory with Make "BAD make" and
+    /// Model "BAD model", and where that directory and the Model text are
+    /// from the start of the fixture's TIFF.
+    fn with_bad_directory_after(name: &str) -> (Vec<u8>, usize, usize, usize) {
+        let mut bytes = std::fs::read(fixture(name)).unwrap();
+        let tiff = bytes.windows(4).position(|w| w == b"MM\0*").unwrap();
+        let (make, model) = (b"BAD make\0", b"BAD model\0");
+        let ifd = bytes.len() + 8 - tiff;
+        let text = ifd + 2 + 2 * 12 + 4;
+        let mut body = 2u16.to_be_bytes().to_vec();
+        for (tag, len, at) in [
+            (0x010f_u16, make.len(), text),
+            (0x0110, model.len(), text + make.len()),
+        ] {
+            body.extend(tag.to_be_bytes());
+            body.extend(2u16.to_be_bytes());
+            body.extend((len as u32).to_be_bytes());
+            body.extend((at as u32).to_be_bytes());
+        }
+        body.extend([0; 4]);
+        body.extend(make.iter().chain(model));
+        if name.ends_with("webp") {
+            body.resize(body.len().next_multiple_of(2), 0);
+            bytes.extend(b"JUNK");
+            bytes.extend((body.len() as u32).to_le_bytes());
+            bytes.extend(&body);
+            let riff = (bytes.len() - 8) as u32;
+            bytes[4..8].copy_from_slice(&riff.to_le_bytes());
+        } else {
+            bytes.extend(((body.len() + 8) as u32).to_be_bytes());
+            bytes.extend(b"free");
+            bytes.extend(&body);
+        }
+        (bytes, tiff, ifd, text + make.len())
+    }
+    #[test]
+    fn an_exif_directory_or_value_past_its_chunk_item_or_box_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let u32_at = |b: &[u8], at: usize| u32::from_be_bytes(b[at..at + 4].try_into().unwrap());
+        for name in ["metadata.webp", "metadata.avif", "metadata.jxl"] {
+            let path = dir.path().join(name);
+            let (bytes, tiff, ifd, bad_model) = with_bad_directory_after(name);
+            // The added chunk or box alone leaves the camera as it was.
+            std::fs::write(&path, &bytes).unwrap();
+            assert_eq!(
+                super::camera_names(&path),
+                Some(("Fixture".into(), "Synthetic 1".into())),
+                "{name}"
+            );
+            // The first directory said to be in the added chunk or box.
+            let mut outside = bytes.clone();
+            outside[tiff + 4..tiff + 8].copy_from_slice(&(ifd as u32).to_be_bytes());
+            std::fs::write(&path, &outside).unwrap();
+            assert_eq!(super::camera_names(&path), None, "{name} directory");
+            // The Model's text said to be there.
+            let mut outside = bytes;
+            let first = tiff + u32_at(&outside, tiff + 4) as usize;
+            let count = u16::from_be_bytes([outside[first], outside[first + 1]]) as usize;
+            let entry = (0..count)
+                .map(|i| first + 2 + 12 * i)
+                .find(|&e| outside[e..e + 2] == 0x0110_u16.to_be_bytes())
+                .unwrap();
+            outside[entry + 4..entry + 8].copy_from_slice(&10u32.to_be_bytes());
+            outside[entry + 8..entry + 12].copy_from_slice(&(bad_model as u32).to_be_bytes());
+            std::fs::write(&path, &outside).unwrap();
+            let model = super::camera_names(&path).map(|(_, model)| model);
+            assert!(
+                model.as_deref().is_none_or(str::is_empty),
+                "{name} value: {model:?}"
+            );
+        }
+    }
 }

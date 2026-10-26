@@ -1,5 +1,5 @@
 use super::panels::PanelSwitches;
-use crate::model::white_balance::{estimate_temperature, illuminant_camera};
+use crate::model::white_balance::{estimate_temperature, illuminant_camera, rendered_controls};
 use crate::{camera_data::Metadata, color::curve::ToneCurve};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,9 @@ pub struct Recipe {
     pub effects: crate::model::effects::Effects,
     pub preset_name: String,
     pub preset_settings: std::collections::BTreeMap<String, String>,
+    /// A saved Embedded profile loads with today's tone curve (`CameraProfile::loaded`),
+    /// wherever a recipe is read: sessions, the catalog, History, presets and sidecars.
+    #[serde(deserialize_with = "loaded_profile")]
     pub profile: Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>,
     /// Lightroom's Profile Amount (`crs:Look` `Amount`, 0–2, 1 = 100%): the strength of
     /// a look that supports it. Other profiles render at 100% whatever it is. Omitted
@@ -64,9 +67,17 @@ pub struct Recipe {
     pub camera_exposure: f32,
     pub temperature: f32,
     pub tint: f32,
+    /// A rendered file's Temp and Tint, Lightroom's relative −100..+100 sliders; its
+    /// kelvin `temperature` and `tint` stay 6500 and 0 so older builds still read the
+    /// recipe. Omitted at 0, so RAW recipes save as before.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_temperature: f32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub incremental_tint: f32,
     pub wb: [f32; 3],
     /// Temperature and Tint that Auto white balance chose, so the WB menu shows Auto
-    /// while the photo still has them.
+    /// while the photo still has them: Kelvin for a RAW, the relative
+    /// `incremental_temperature` and `incremental_tint` for a rendered file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_white_balance: Option<[f32; 2]>,
     pub contrast: f32,
@@ -98,6 +109,11 @@ pub struct Recipe {
     pub sharpening: f32,
     pub crop: [f32; 4],
     pub straighten: f32,
+    /// Whether `straighten` is the Crop panel's Auto, which Copy, Paste and Sync of the
+    /// Crop measure on each photo again; see [`Recipe::auto_straighten`]. Omitted
+    /// when none, so releases that predate it read the recipe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub straighten_auto: Option<crate::model::transform::AutoStraighten>,
     /// Lightroom's Constrain Crop (`crs:CropConstrainToWarp`): the crop as rendered
     /// shrinks, keeping its aspect, to leave out the white areas Upright, the Transform
     /// sliders and manual Distortion uncover. `crop` stays as the user set it. Omitted
@@ -184,6 +200,8 @@ impl Default for Recipe {
             camera_exposure: 0.,
             temperature: 6500.,
             tint: 0.,
+            incremental_temperature: 0.,
+            incremental_tint: 0.,
             wb: [1.; 3],
             auto_white_balance: None,
             contrast: 0.,
@@ -207,6 +225,7 @@ impl Default for Recipe {
             sharpening: 0.35,
             crop: [0., 0., 1., 1.],
             straighten: 0.,
+            straighten_auto: None,
             constrain_crop: false,
             transform: Default::default(),
             upright: Default::default(),
@@ -349,6 +368,23 @@ impl Recipe {
             ..Default::default()
         }
     }
+    /// A rendered file's starting edit, as Lightroom's for JPEG and TIFF: the
+    /// Embedded profile, no baseline exposure, Sharpening and Color noise
+    /// reduction at 0, white balance as shot.
+    pub fn for_rendered(m: &Metadata) -> Self {
+        Self {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(m),
+            )),
+            sharpening: 0.,
+            noise_chroma: 0.,
+            camera_exposure: 0.,
+            temperature: 6500.,
+            tint: 0.,
+            wb: [1.; 3],
+            ..Self::default()
+        }
+    }
     /// Lightroom's Adobe Default: the settings a photo starts from.
     pub fn with_profiles(
         m: &Metadata,
@@ -362,6 +398,9 @@ impl Recipe {
         profiles: &[std::sync::Arc<crate::camera_profiles::CameraProfile>],
         preference: ProfilePreference,
     ) -> Self {
+        if m.is_rendered() {
+            return Self::for_rendered(m);
+        }
         let mut recipe = Self::for_metadata(m);
         let find = |name: &str| {
             profiles
@@ -415,6 +454,10 @@ impl Recipe {
             (TEMPERATURE_MIN..=TEMPERATURE_MAX).contains(&self.temperature)
                 && self.tint.abs() <= TINT_LIMIT,
             "White balance out of bounds"
+        );
+        ensure!(
+            self.incremental_temperature.abs() <= 100. && self.incremental_tint.abs() <= 100.,
+            "Relative white balance out of bounds"
         );
         ensure!(
             self.wb
@@ -529,7 +572,9 @@ impl Recipe {
     }
     /// Lightroom's Enable Profile Corrections: an imported Adobe lens profile, else the
     /// correction the camera stored in the RAW. Built-in data that is off by default
-    /// (Sony's) follows the switch; Fuji's and a DNG's stay on, as in Lightroom.
+    /// (Nikon's for lenses with an optional correction) follows the switch; Fuji's, a
+    /// DNG's and Sony's lateral CA stay on, as in Lightroom, while Sony's remaining
+    /// tables stand in for the profile (`builtin_correction`).
     pub fn set_profile_corrections(&mut self, m: &Metadata, state: ProfileCorrections) {
         self.lens_profile = state == ProfileCorrections::On;
         if m.lens.as_ref().is_some_and(|l| !l.default_on) {
@@ -565,7 +610,7 @@ impl Recipe {
             .as_ref()
             .filter(|id| id.embedded)
         {
-            return m.lens.as_ref().filter(|_| self.lens_builtin).is_none().then(|| {
+            return self.builtin_correction(m).is_none().then(|| {
                 format!(
                     "Lens profile \"{}\" comes with the camera, but this file has none; no lens correction",
                     id.label()
@@ -573,17 +618,17 @@ impl Recipe {
             });
         }
         let profile = match (resolved.missing, m.lens_model.as_str()) {
-            (Some(id), _) => format!("Lens profile \"{}\"", id.label()),
+            (Some(id), _) => format!("Lens profile \"{}\" isn't imported", id.label()),
             (None, _) if resolved.used.is_some() => return None,
-            (None, "") => "Adobe lens profile for this lens".to_string(),
-            (None, lens) => format!("Adobe lens profile for {lens}"),
+            (None, "") => "No matching imported Adobe lens profile for this lens".to_string(),
+            (None, lens) => format!("No matching imported Adobe lens profile for {lens}"),
         };
-        let instead = match (resolved.used, m.lens.as_ref().filter(|_| self.lens_builtin)) {
+        let instead = match (resolved.used, self.builtin_correction(m)) {
             (Some(used), _) => format!("using {}", used.profile.name),
             (None, Some(builtin)) => format!("using {}", builtin.source),
             (None, None) => "no lens correction".to_string(),
         };
-        Some(format!("{profile} isn't imported; {instead}"))
+        Some(format!("{profile}; {instead}"))
     }
     /// Adds a Heal or Clone operation.
     pub fn add_retouch(&mut self, op: crate::model::retouch::RetouchOp) {
@@ -606,6 +651,55 @@ impl Recipe {
         self.sharpening_detail = d.detail;
         self.sharpening_masking = d.masking;
     }
+    /// The built-in correction this edit renders when no Adobe profile is in use: with
+    /// Enable Profile Corrections on, the camera's fuller data where it has some (Sony's
+    /// tables, standing in for the Adobe profile Lightroom would use), else what the
+    /// camera applies; none with built-in corrections off.
+    pub fn builtin_correction<'a>(
+        &self,
+        m: &'a Metadata,
+    ) -> Option<&'a crate::optics::LensCorrection> {
+        if !self.lens_builtin {
+            return None;
+        }
+        (m.lens_stand_in.as_ref())
+            .filter(|_| self.lens_profile)
+            .or(m.lens.as_ref())
+    }
+    /// Lightroom's profile Distortion and Vignetting amounts (1 = 100%) as they apply
+    /// to the lens correction in use. They scale a profile: an imported Adobe one, or
+    /// the camera data standing in for it (Sony's tables, Nikon's optional "Camera
+    /// Settings" profile). A correction the camera always applies (a DNG's opcodes,
+    /// Fujifilm's, Olympus's, Panasonic's, Sony's CA and Nikon's required data)
+    /// renders in full whatever the amounts and the switch, as Camera Raw 18.7 renders
+    /// such files' opcodes, also where the stand-in repeats it (a Sony compact's
+    /// distortion).
+    pub fn lens_amounts(&self, m: &Metadata) -> [f32; 2] {
+        let amounts = [self.lens_distortion, self.lens_vignetting];
+        if self.lens_profile_in_use(m).used.is_some() {
+            return amounts;
+        }
+        if !self.lens_profile {
+            return [1., 1.];
+        }
+        match (&m.lens_stand_in, &m.lens) {
+            (Some(_), Some(always)) => [
+                if always.distortion.is_some() {
+                    1.
+                } else {
+                    amounts[0]
+                },
+                if always.vignetting.is_some() {
+                    1.
+                } else {
+                    amounts[1]
+                },
+            ],
+            (Some(_), None) => amounts,
+            (None, Some(lens)) if !lens.default_on => amounts,
+            _ => [1., 1.],
+        }
+    }
     /// The lens correction to apply: the Adobe profile in use, else the built-in
     /// correction if enabled and present in the file.
     pub fn lens_correction<'a>(
@@ -615,10 +709,11 @@ impl Recipe {
         self.lens_profile_in_use(m)
             .used
             .and_then(|c| c.correction(m))
-            .or_else(|| m.lens.as_ref().filter(|_| self.lens_builtin))
+            .or_else(|| self.builtin_correction(m))
     }
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
-    /// and the default profile.
+    /// and the default profile. A monochrome photo renders without white balance
+    /// gains, whatever an edit from another photo or a preset gave it.
     pub fn resolved(&self, m: &Metadata) -> std::borrow::Cow<'_, Self> {
         let mut r = match self.as_rendered() {
             std::borrow::Cow::Borrowed(r) => r.with_profile_adjustments(),
@@ -626,8 +721,11 @@ impl Recipe {
                 std::borrow::Cow::Owned(r.with_profile_adjustments().into_owned())
             }
         };
+        if m.monochrome && r.wb != [1.; 3] {
+            r.to_mut().wb = [1.; 3];
+        }
         // A Lens Corrections panel switched off also turns off built-in data that is
-        // off by default (Sony's), which Enable Profile Corrections turned on; what a
+        // off by default (Nikon's optional), which Enable Profile Corrections turned on; what a
         // camera always applies (Fuji, DNG) stays, as the panel bypass leaves it.
         if self
             .panels
@@ -654,10 +752,43 @@ impl Recipe {
         self.use_camera_baseline(m);
         self.sync_white_balance_controls(m);
     }
+    /// The Crop panel's Auto straighten, while Straighten still has the angle it is
+    /// about.
+    pub fn auto_straighten(&self) -> Option<crate::model::transform::AutoStraighten> {
+        self.straighten_auto
+            .filter(|auto| auto.angle() == self.straighten)
+    }
+    /// Whether Straighten waits to be measured on this photo (see
+    /// [`crate::model::transform::AutoStraighten::Pending`]).
+    pub fn straighten_pending(&self) -> bool {
+        matches!(
+            self.auto_straighten(),
+            Some(crate::model::transform::AutoStraighten::Pending(_))
+        )
+    }
+    /// Sets the angle Auto straighten measured on this photo. Without one (no horizon
+    /// or verticals to go by) the angle stays as it is, no longer Auto.
+    pub fn set_auto_straighten(&mut self, measured: Option<f32>) {
+        match measured {
+            Some(angle) => {
+                self.straighten = angle;
+                self.straighten_auto =
+                    Some(crate::model::transform::AutoStraighten::Measured(angle));
+            }
+            None => self.straighten_auto = None,
+        }
+    }
     pub fn use_camera_baseline(&mut self, m: &Metadata) {
         self.camera_exposure = crate::camera_profiles::reference::baseline_exposure(m);
     }
     pub fn reset_white_balance(&mut self, m: &Metadata) {
+        if m.is_rendered() {
+            self.incremental_temperature = 0.;
+            self.incremental_tint = 0.;
+            self.wb = [1.; 3];
+            self.auto_white_balance = None;
+            return;
+        }
         let values = self
             .color_profile(m)
             .and_then(|p| p.as_shot_white_balance(m))
@@ -668,6 +799,12 @@ impl Recipe {
         self.auto_white_balance = None;
     }
     pub fn sync_white_balance_controls(&mut self, m: &Metadata) {
+        if m.is_rendered() || m.monochrome {
+            // Temp and Tint are a rendered file's white balance (and keep Auto); its
+            // gains stay 1, as a monochrome photo's, which has none.
+            self.wb = [1.; 3];
+            return;
+        }
         let mut adjusted = m.clone();
         adjusted.wb = std::array::from_fn(|c| m.wb[c] * self.wb[c]);
         // A profile that cannot map gains back (no ColorMatrix1) is also left to the
@@ -727,7 +864,45 @@ impl Recipe {
             self.wb = shown.wb;
         }
     }
+    /// Between a RAW and a rendered file (JPEG, PNG, TIFF), which keep white balance in
+    /// different terms (Kelvin against relative) and have profiles of their own: this
+    /// recipe takes `own`'s white balance and profile, with the profile's baseline
+    /// exposure, as Copy, Sync and presets apply settings from the other kind of file.
+    pub fn keep_white_balance_and_profile(&mut self, own: &Recipe) {
+        self.temperature = own.temperature;
+        self.tint = own.tint;
+        self.incremental_temperature = own.incremental_temperature;
+        self.incremental_tint = own.incremental_tint;
+        self.wb = own.wb;
+        self.auto_white_balance = own.auto_white_balance;
+        self.profile = own.profile.clone();
+        self.profile_amount = own.profile_amount;
+        self.camera_exposure = own.camera_exposure;
+    }
+    /// White balance from `gains` that make a picked colour neutral (the eyedropper's,
+    /// Auto's): a RAW's gains, or for a rendered file the nearest Temp and Tint, which
+    /// carry its white balance (`white_balance::rendered_white_balance`).
+    pub fn pick_white_balance(&mut self, gains: [f32; 3], m: &Metadata) {
+        if m.is_rendered() {
+            [self.incremental_temperature, self.incremental_tint] = rendered_controls(gains);
+            self.wb = [1.; 3];
+            return;
+        }
+        if m.monochrome {
+            // Grey has no white balance to pick.
+            self.wb = [1.; 3];
+            return;
+        }
+        self.wb = gains;
+        self.sync_white_balance_controls(m);
+    }
     pub fn update_wb(&mut self, m: &Metadata) {
+        if m.is_rendered() || m.monochrome {
+            // Temp and Tint render as `white_balance::rendered_white_balance`; a
+            // monochrome photo has no white balance (Lightroom disables it).
+            self.wb = [1.; 3];
+            return;
+        }
         if let Some(wb) = self
             .color_profile(m)
             .and_then(|p| p.white_balance(self.temperature, self.tint, m))
@@ -750,6 +925,14 @@ impl Recipe {
 }
 fn is_zero(v: &f32) -> bool {
     *v == 0.
+}
+/// [`Recipe::profile`] as a saved edit stores it, with a stored Embedded profile given
+/// today's tone curve.
+fn loaded_profile<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<std::sync::Arc<crate::camera_profiles::CameraProfile>>, D::Error> {
+    let profile = Option::<crate::camera_profiles::CameraProfile>::deserialize(deserializer)?;
+    Ok(profile.map(|p| std::sync::Arc::new(p.loaded())))
 }
 fn is_one(v: &f32) -> bool {
     *v == 1.
@@ -781,6 +964,57 @@ fn one() -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A recipe as JSON whose profile is the Embedded one, edited by `change`.
+    fn saved_embedded(change: impl FnOnce(&mut serde_json::Value)) -> String {
+        let m = Metadata {
+            source: crate::camera_data::Source::Rendered,
+            ..Default::default()
+        };
+        let r = Recipe {
+            profile: Some(std::sync::Arc::new(
+                crate::camera_profiles::CameraProfile::embedded(&m),
+            )),
+            ..Recipe::default()
+        };
+        let mut v = serde_json::to_value(&r).unwrap();
+        v["profile"]["tone"] = serde_json::json!([[0., 0.], [1., 1.]]);
+        change(&mut v["profile"]);
+        v.to_string()
+    }
+    fn tone_of(json: &str) -> serde_json::Value {
+        let r: Recipe = serde_json::from_str(json).unwrap();
+        serde_json::to_value(r).unwrap()["profile"]["tone"].clone()
+    }
+
+    /// A rendered photo's edit saved while the Embedded profile had no tone curve
+    /// loads with Camera Raw's default tone curve, wherever the edit is read from:
+    /// the Embedded profile's curve comes from the code, not from storage.
+    #[test]
+    fn a_saved_embedded_profile_loads_with_todays_tone_curve() {
+        assert_eq!(
+            tone_of(&saved_embedded(|_| {})),
+            serde_json::to_value(crate::camera_profiles::default_tone()).unwrap()
+        );
+    }
+
+    /// Only the Embedded profile itself: one named so with a colour matrix or a look
+    /// table, or any other profile, keeps the tone curve it was saved with.
+    #[test]
+    fn other_profiles_keep_their_saved_tone_curve() {
+        let identity = serde_json::json!([[0., 0.], [1., 1.]]);
+        let with_color = saved_embedded(|p| {
+            p["color1"] = serde_json::json!([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
+        });
+        assert_eq!(tone_of(&with_color), identity);
+        let with_look = saved_embedded(|p| {
+            p["look"] =
+                serde_json::json!({"dims": [1, 1, 1], "data": [[0., 0., 0.]], "srgb": false})
+        });
+        assert_eq!(tone_of(&with_look), identity);
+        let other = saved_embedded(|p| p["name"] = "Adobe Standard".into());
+        assert_eq!(tone_of(&other), identity);
+    }
 
     /// The names a new recipe is saved with; renaming one would lose that setting
     /// from every saved edit. Settings at their defaults beyond these are left out.
@@ -866,6 +1100,7 @@ mod tests {
             "lens_vignetting": 0.5,
             "lens_manual_distortion": 0.25,
             "profile_amount": 0.5,
+            "incremental_temperature": 12.0,
             "auto_white_balance": [5000.0, 10.0],
             "curve_saturation": 0.5,
             "point_colors": [{
@@ -898,5 +1133,96 @@ mod tests {
             (local.retouch.len(), local.red_eye.len(), local.masks.len()),
             (1, 1, 1)
         );
+    }
+
+    #[test]
+    fn a_rendered_photo_starts_from_lightrooms_non_raw_defaults() {
+        use crate::camera_data::Source;
+        let m = Metadata {
+            source: Source::Rendered,
+            make: "Apple".into(),
+            model: "iPhone 15".into(),
+            ..Default::default()
+        };
+        let r = Recipe::with_profile_preference(&m, &[], ProfilePreference::Camera);
+        assert!(r.profile.as_ref().unwrap().is_embedded());
+        assert_eq!(
+            (r.sharpening, r.noise_chroma, r.camera_exposure),
+            (0., 0., 0.)
+        );
+        assert!(r.validate().is_ok());
+        assert_eq!(crate::camera_profiles::reference::baseline_exposure(&m), 0.);
+    }
+    /// Sony: Lightroom always applies the camera's lateral CA, while its other tables
+    /// stand in for an Adobe profile only with Enable Profile Corrections on.
+    #[test]
+    fn sony_ca_always_applies_and_its_tables_stand_in_for_a_profile() {
+        use crate::optics::{LensCorrection, Radial};
+        let ca = Radial::new(vec![0., 1.], vec![1., 1.001]).unwrap();
+        let full = LensCorrection {
+            source: LensCorrection::SONY_BUILTIN.into(),
+            default_on: true,
+            vignetting: Radial::new(vec![0., 1.], vec![1., 1.8]),
+            distortion: Radial::new(vec![0., 1.], vec![1., 1.02]),
+            chromatic: Some([ca.clone(), ca]),
+            gain_map: None,
+            ..Default::default()
+        };
+        let m = Metadata {
+            lens: Some(LensCorrection {
+                vignetting: None,
+                distortion: None,
+                ..full.clone()
+            }),
+            lens_stand_in: Some(full),
+            ..Default::default()
+        };
+        let mut r = Recipe::for_metadata(&m);
+        assert!(r.lens_builtin);
+        let vignetting = |r: &Recipe| r.lens_correction(&m).map(|c| c.vignetting.is_some());
+        assert!(r.lens_correction(&m).unwrap().chromatic.is_some());
+        assert_eq!(vignetting(&r), Some(false));
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert!(r.lens_builtin);
+        assert_eq!(vignetting(&r), Some(true));
+        assert!(
+            r.missing_lens_profile(&m)
+                .unwrap()
+                .ends_with("using Sony built-in")
+        );
+        r.set_profile_corrections(&m, ProfileCorrections::Off);
+        assert_eq!(vignetting(&r), Some(false));
+        // The profile's amounts scale the stand-in only: a Lightroom edit with profile
+        // corrections off keeps them for when they are turned on.
+        r.lens_distortion = 0.;
+        assert_eq!(r.lens_amounts(&m), [1., 1.]);
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert_eq!(r.lens_amounts(&m), [0., 1.]);
+        // A compact's distortion, which Lightroom always applies, ignores its amount
+        // with the stand-in in use too, while the stand-in's vignetting takes its own.
+        let compact = Metadata {
+            lens: Some(LensCorrection {
+                distortion: m.lens_stand_in.as_ref().unwrap().distortion.clone(),
+                ..m.lens.clone().unwrap()
+            }),
+            ..m.clone()
+        };
+        r.lens_vignetting = 0.5;
+        assert_eq!(r.lens_amounts(&compact), [1., 0.5]);
+        r.set_profile_corrections(&compact, ProfileCorrections::Off);
+        assert_eq!(r.lens_amounts(&compact), [1., 1.]);
+        r.set_profile_corrections(&compact, ProfileCorrections::On);
+        r.lens_vignetting = 1.;
+        // Without a stand-in, what the camera always applies ignores them either way.
+        let opcodes = Metadata {
+            lens_stand_in: None,
+            ..m.clone()
+        };
+        assert_eq!(r.lens_amounts(&opcodes), [1., 1.]);
+        r.set_profile_corrections(&m, ProfileCorrections::Off);
+        // An edit saved with built-in corrections off keeps them off.
+        r.lens_builtin = false;
+        r.set_profile_corrections(&m, ProfileCorrections::On);
+        assert!(r.lens_correction(&m).is_none());
     }
 }
