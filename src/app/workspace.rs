@@ -460,7 +460,8 @@ impl Editor {
     /// F: hides the open module's chrome, or brings it back (see `chrome`).
     /// The Library's info panel goes with the chrome, so a field still being
     /// typed in it is saved first, as hiding the panel does; false, with the
-    /// chrome still up, if it could not be.
+    /// chrome still up, if it could not be. With no photo for the Library's
+    /// next step, the chrome comes back.
     pub(super) fn toggle_chrome(&mut self) -> bool {
         if self.chrome.shown(self.module)
             && self.module == Module::Library
@@ -471,6 +472,14 @@ impl Editor {
         let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
         let view = self.chrome.toggle(self.module, loupe);
         self.chrome_view(view);
+        // No photo to give the window to, as a search matching none leaves
+        // the grid: the press brings the chrome back instead.
+        if view == super::chrome::View::OpenLoupe
+            && !self.library.as_ref().is_some_and(|l| l.loupe_open())
+        {
+            let shown = self.chrome.show();
+            self.chrome_view(shown);
+        }
         true
     }
     /// Applies what the whole-window mode did to the Library's view: the photo

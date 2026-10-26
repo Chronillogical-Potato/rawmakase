@@ -7140,6 +7140,34 @@ fn escape_closes_a_menu_before_it_leaves_the_mode() -> anyhow::Result<()> {
     Ok(())
 }
 #[test]
+fn f_leaves_the_mode_over_a_library_view_with_no_photo() -> anyhow::Result<()> {
+    let (_d, mut e, _) = editor_with_catalog(&["a.RAF"])?;
+    e.onboarding.visible = false;
+    let library = e.library.as_mut().unwrap();
+    let mut layout = library.layout();
+    layout.query = "nothing-matches-this".into();
+    layout.filters_off = false;
+    library.apply_layout(&layout);
+    assert!(library.selected_or_first().is_none());
+    // The grid takes the window; with no photo to give it to next, the next
+    // F brings the chrome back rather than asking for a Loupe forever.
+    let f = |e: &mut Editor| {
+        panel_frame(
+            e,
+            key_down(egui::Key::F, egui::Modifiers::NONE),
+            FocusedButton::No,
+        );
+        panel_frame(e, key_up(egui::Key::F), FocusedButton::No);
+        panel_frame(e, vec![], FocusedButton::No);
+    };
+    f(&mut e);
+    assert!(e.chrome.hidden(e.module));
+    f(&mut e);
+    assert!(!e.chrome.hidden(e.module));
+    assert!(!e.library.as_ref().unwrap().loupe_open());
+    Ok(())
+}
+#[test]
 fn tab_moves_the_focus_on_while_a_control_has_it() {
     use super::panels::WorkspacePanel;
     let ctx = egui::Context::default();
