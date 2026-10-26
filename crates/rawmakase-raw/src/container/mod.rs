@@ -25,3 +25,4 @@ pub(crate) mod sti;
 pub(crate) mod test_tiff;
 pub(crate) mod tiff;
 pub(crate) mod tiff_exif;
+pub(crate) mod x3f;

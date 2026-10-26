@@ -10,10 +10,11 @@
 //! files (the data after the blocks, the levels as the as-shot white
 //! balance in the filter's order).
 use super::tiff::TiffFile;
+use crate::captured::CaptureDates;
 use crate::codec::packed::{self, Packing};
 use crate::error::{Error, Result, corrupt};
 use crate::info::{Cfa, RawInfo};
-use crate::io::{Bytes, Order};
+use crate::io::{Bytes, Order, Pieces};
 use crate::sensor::Sensor;
 use crate::variant::{Plan, Variant};
 use std::sync::atomic::AtomicBool;
@@ -35,33 +36,72 @@ pub(crate) fn is_mrw(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\0MRM")
 }
 
-/// Reads the header facts.
-pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
+/// The blocks read, and where the sensor data starts.
+struct Blocks<'a> {
+    data: u64,
+    prd: Option<&'a [u8]>,
+    wbg: Option<&'a [u8]>,
+    rif: Option<&'a [u8]>,
+    /// Where TTW's TIFF starts.
+    ttw: Option<u64>,
+}
+
+fn blocks(bytes: &[u8]) -> Result<Blocks<'_>> {
     let b = Bytes::new(bytes, Order::Big);
-    let data = 8u64
-        .checked_add(u64::from(b.u32(4)?))
-        .ok_or_else(|| corrupt("MRW size"))?;
-    let mut prd = None;
-    let mut wbg = None;
-    let mut rif = None;
-    let mut ttw = None;
+    let mut out = Blocks {
+        data: 8u64
+            .checked_add(u64::from(b.u32(4)?))
+            .ok_or_else(|| corrupt("MRW size"))?,
+        prd: None,
+        wbg: None,
+        rif: None,
+        ttw: None,
+    };
     let mut at = 8u64;
     for _ in 0..MAX_BLOCKS {
-        if at.saturating_add(8) > data {
+        if at.saturating_add(8) > out.data {
             break;
         }
         let name = b.slice(at, 4)?;
         let size = u64::from(b.u32(at + 4)?);
         let body = at + 8;
         match name {
-            b"\0PRD" if size >= 24 => prd = Some(b.slice(body, 24)?),
-            b"\0WBG" if size >= 12 => wbg = Some(b.slice(body, 12)?),
-            b"\0RIF" if size >= 16 => rif = Some(b.slice(body, 16)?),
-            b"\0TTW" => ttw = Some(body),
+            b"\0PRD" if size >= 24 => out.prd = Some(b.slice(body, 24)?),
+            b"\0WBG" if size >= 12 => out.wbg = Some(b.slice(body, 12)?),
+            b"\0RIF" if size >= 16 => out.rif = Some(b.slice(body, 16)?),
+            b"\0TTW" => out.ttw = Some(body),
             _ => {}
         }
         at = body.saturating_add(size);
     }
+    Ok(out)
+}
+
+/// The capture dates of TTW's TIFF, the blocks before the sensor data read
+/// alone.
+pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
+    let mut dates = CaptureDates::default();
+    let head = f
+        .read(4, 4)
+        .and_then(|size| f.read(0, 8 + u64::from(u32::from_be_bytes(size.try_into().ok()?))));
+    if let Some(head) = head
+        && let Ok(Blocks { ttw: Some(at), .. }) = blocks(&head)
+        && let Some(t) = TiffFile::parse(&head, at)
+    {
+        super::tiff_exif::dates(&t, &mut dates);
+    }
+    dates
+}
+
+/// Reads the header facts.
+pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
+    let Blocks {
+        data,
+        prd,
+        wbg,
+        rif,
+        ttw,
+    } = blocks(bytes)?;
     let prd = prd.ok_or_else(|| corrupt("MRW without PRD"))?;
     let be16 = |o: usize| u32::from(u16::from_be_bytes([prd[o], prd[o + 1]]));
     let (height, width) = (be16(8), be16(10));
@@ -230,6 +270,11 @@ mod tests {
     /// An MRW of 4 × 2 samples stored as `storage` with Bayer pattern
     /// `bayer`, then `data`.
     fn mrw(storage: u8, bayer: u8, data: &[u8]) -> Vec<u8> {
+        mrw_with(storage, bayer, data, None)
+    }
+
+    /// As `mrw`, with the TTW block `ttw` after the others.
+    fn mrw_with(storage: u8, bayer: u8, data: &[u8], ttw: Option<&[u8]>) -> Vec<u8> {
         let mut prd = b"21810002".to_vec();
         for v in [2u16, 4, 2, 4] {
             prd.extend(v.to_be_bytes());
@@ -250,12 +295,15 @@ mod tests {
         }
         let mut rif = vec![0; 12];
         rif.extend([1, 0x7e, 1, 0x7c]);
-        let blocks = [
+        let mut blocks = [
             block(b"\0PRD", &prd),
             block(b"\0WBG", &wbg),
             block(b"\0RIF", &rif),
         ]
         .concat();
+        if let Some(ttw) = ttw {
+            blocks.extend(block(b"\0TTW", ttw));
+        }
         let mut out = block(b"\0MRM", &blocks);
         out.extend(data);
         out
@@ -289,6 +337,50 @@ mod tests {
         assert_eq!(info.variant, Variant::MrwUnpacked);
         assert_eq!(s.data, [1, 2, 3, 4, 5, 6, 7, 8]);
         assert_eq!(info.cam_mul, [256., 400., 256., 300.]);
+    }
+
+    /// TTW's TIFF dates an MRW; the sensor data after the blocks is not
+    /// read.
+    #[test]
+    fn the_tiff_block_dates_an_mrw() {
+        use super::super::test_tiff::{ascii, tiff};
+        let ttw = tiff(
+            b"MM\0*",
+            Order::Big,
+            vec![
+                ascii(271, "Minolta Co., Ltd."),
+                ascii(306, "2005:03:24 14:56:53"),
+            ],
+            vec![
+                ascii(36867, "2005:03:24 14:56:52"),
+                ascii(36868, "2005:03:24 14:56:52"),
+            ],
+            &[],
+        );
+        let file = mrw_with(0x59, 1, &[0; 12], Some(&ttw));
+        let dates = crate::capture_dates(&mut std::io::Cursor::new(&file));
+        let stamp = |date: &str| crate::Stamp {
+            date: Some(date.into()),
+            subseconds: None,
+        };
+        assert_eq!(
+            dates,
+            crate::CaptureDates {
+                original: stamp("2005:03:24 14:56:52"),
+                digitized: stamp("2005:03:24 14:56:52"),
+                modified: stamp("2005:03:24 14:56:53"),
+            }
+        );
+        // The decoder reads the same block.
+        assert_eq!(crate::open(&file).unwrap().make, "Minolta");
+        // Without TTW, no dates.
+        assert_eq!(
+            crate::capture_dates(&mut std::io::Cursor::new(&mrw(0x59, 1, &[0; 12]))),
+            crate::CaptureDates::default()
+        );
+        for end in 0..file.len() {
+            let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..end]));
+        }
     }
 
     #[test]

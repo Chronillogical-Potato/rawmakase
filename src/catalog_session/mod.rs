@@ -11,7 +11,7 @@ use crate::catalog::{
 use anyhow::Result;
 /// A file's photo info as the catalog reads it for photos added from
 /// folders; export names read a photo's without a catalog the same way.
-pub(crate) use backfill::read_info as file_photo_info;
+pub(crate) use backfill::{capture_time as file_capture_time, read_info as file_photo_info};
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
 use std::collections::{HashMap, HashSet};
@@ -318,6 +318,152 @@ mod tests {
         // Tried once: not read again until asked to retry.
         session.start_capture_times(|_| true);
         assert!(!session.reading_capture_times());
+        Ok(())
+    }
+
+    /// A little-endian TIFF of one directory of ASCII tags, values of up to
+    /// four bytes in their entries.
+    fn ascii_tiff(tags: &[(u16, &str)]) -> Vec<u8> {
+        let end = 8 + 2 + 12 * tags.len() + 4;
+        let mut out = b"II*\0".to_vec();
+        out.extend(8u32.to_le_bytes());
+        out.extend((tags.len() as u16).to_le_bytes());
+        let mut values = Vec::new();
+        for (tag, text) in tags {
+            let mut v = text.as_bytes().to_vec();
+            v.push(0);
+            out.extend(tag.to_le_bytes());
+            out.extend(2u16.to_le_bytes());
+            out.extend((v.len() as u32).to_le_bytes());
+            if v.len() <= 4 {
+                v.resize(4, 0);
+                out.extend(v);
+            } else {
+                out.extend(((end + values.len()) as u32).to_le_bytes());
+                values.extend(v);
+            }
+        }
+        out.extend(0u32.to_le_bytes());
+        out.extend(values);
+        out
+    }
+
+    /// A CR3 of its metadata alone: IFD0 (`CMT1`) and the EXIF directory
+    /// (`CMT2`) in Canon's box in `moov`.
+    fn dated_cr3(original: &str, subseconds: &str) -> Vec<u8> {
+        let bx = |kind: &[u8], body: &[u8]| {
+            let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+            v.extend(kind);
+            v.extend(body);
+            v
+        };
+        let canon = [
+            0x85, 0xc0, 0xb6, 0x87, 0x82, 0x0f, 0x11, 0xe0, 0x81, 0x11, 0xf4, 0xce, 0x46, 0x2b,
+            0x6a, 0x48,
+        ];
+        let cmt1 = ascii_tiff(&[(271, "Canon"), (306, "2030:01:01 00:00:00")]);
+        let cmt2 = ascii_tiff(&[(36867, original), (37521, subseconds)]);
+        let uuid = [canon.to_vec(), bx(b"CMT1", &cmt1), bx(b"CMT2", &cmt2)].concat();
+        [
+            bx(b"ftyp", b"crx \0\0\0\x01crx isom"),
+            bx(b"moov", &bx(b"uuid", &uuid)),
+        ]
+        .concat()
+    }
+
+    /// A CRW whose heap holds ImageProps with its TimeStamp record alone:
+    /// seconds since 1970 in the camera's time.
+    fn dated_crw(seconds: u32) -> Vec<u8> {
+        // A heap block: the records' values, the directory, its offset.
+        let block = |records: &[(u16, Vec<u8>)]| {
+            let mut data = Vec::new();
+            let mut entries = Vec::new();
+            for (tag, value) in records {
+                entries.extend(tag.to_le_bytes());
+                entries.extend((value.len() as u32).to_le_bytes());
+                entries.extend((data.len() as u32).to_le_bytes());
+                data.extend(value);
+            }
+            let dir = data.len() as u32;
+            data.extend((records.len() as u16).to_le_bytes());
+            data.extend(entries);
+            data.extend(dir.to_le_bytes());
+            data
+        };
+        let stamp = [seconds, 0, 0]
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect();
+        let props = block(&[(0x180e, stamp)]);
+        let mut file = b"II".to_vec();
+        file.extend(26u32.to_le_bytes());
+        file.extend(b"HEAPCCDR");
+        file.extend([0; 12]);
+        file.extend(block(&[(0x300a, props)]));
+        file
+    }
+
+    #[test]
+    fn canon_raws_added_from_a_folder_are_dated_from_their_own_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        std::fs::write(folder.join("a.CR3"), dated_cr3("2024:03:02 10:00:01", "12"))?;
+        // 2004-05-01 10:43:58.
+        std::fs::write(folder.join("b.CRW"), dated_crw(1_083_408_238))?;
+        let path = directory.path().join("library.rawmakase");
+        Catalog::create(&path)?.add_folder(&folder)?;
+        // Catalogued without a date, as releases that could not read these
+        // files left them: the next start reads them.
+        let Opened { mut session, .. } = CatalogSession::open(&CatalogLocation::from(&path))?;
+        assert!(session.photos.iter().all(|p| p.captured.is_empty()));
+        session.start_capture_times(|_| true);
+        let started = std::time::Instant::now();
+        while session.reading_capture_times() {
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            assert!(session.poll_capture_times().error.is_none());
+            std::thread::yield_now();
+        }
+        session.reload()?;
+        let mut dated: Vec<_> = session
+            .photos
+            .iter()
+            .map(|p| (p.filename.as_str(), p.captured.as_str()))
+            .collect();
+        dated.sort();
+        assert_eq!(
+            dated,
+            [
+                ("a.CR3", "2024-03-02T10:00:01.120"),
+                ("b.CRW", "2004-05-01T10:43:58.000"),
+            ]
+        );
+        // Dated photos are not read again, even once retried.
+        session.retry_capture_times();
+        session.start_capture_times(|_| true);
+        assert!(!session.reading_capture_times());
+        Ok(())
+    }
+
+    /// Export names of a photo opened without a catalog read its capture
+    /// time by the same rule.
+    #[test]
+    fn a_file_alone_is_dated_as_the_catalog_dates_it() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (cr3, crw) = (
+            directory.path().join("a.CR3"),
+            directory.path().join("b.CRW"),
+        );
+        std::fs::write(&cr3, dated_cr3("2024:03:02 10:00:01", "12"))?;
+        std::fs::write(&crw, dated_crw(1_083_408_238))?;
+        assert_eq!(
+            file_capture_time(&cr3).as_deref(),
+            Some("2024-03-02T10:00:01.120")
+        );
+        assert_eq!(
+            file_capture_time(&crw).as_deref(),
+            Some("2004-05-01T10:43:58.000")
+        );
         Ok(())
     }
 

@@ -194,9 +194,9 @@ enum CaptureRead {
 }
 
 /// Whether a capture time can be read from this kind of file at all, so
-/// files that never yield one are not opened on every launch: the EXIF
-/// reader handles JPEG, TIFF, PNG, WebP, AVIF and JPEG XL, TIFF-based RAWs and
-/// RAF but not Canon's CR3 and CRW, Sigma's X3F or Minolta's MRW.
+/// files that never yield one are not opened on every launch: JPEG, TIFF,
+/// PNG, WebP, AVIF and JPEG XL, and every RAW (the EXIF reader's, and the
+/// CR3, CRW, MRW and X3F files RAWmakase's own decoders date).
 fn has_capture_time(path: &Path) -> bool {
     use crate::storage::RasterFormat;
     match RasterFormat::of(path) {
@@ -208,14 +208,7 @@ fn has_capture_time(path: &Path) -> bool {
             | RasterFormat::Avif
             | RasterFormat::Jxl,
         ) => true,
-        None => {
-            let extension = path
-                .extension()
-                .map(|x| x.to_string_lossy().to_ascii_lowercase())
-                .unwrap_or_default();
-            !matches!(extension.as_str(), "cr3" | "crw" | "x3f" | "mrw")
-                && crate::storage::is_raw(path)
-        }
+        None => crate::storage::is_raw(path),
     }
 }
 
@@ -223,10 +216,17 @@ fn read_capture(path: &Path) -> CaptureRead {
     if !can_read(path) {
         return CaptureRead::Unreadable;
     }
-    match crate::exif::capture_time(path) {
+    match capture_time(path) {
         Some(time) => CaptureRead::Dated(time),
         None => CaptureRead::Undated,
     }
+}
+
+/// When the photo in the file at `path` was taken, in Lightroom's form: from
+/// its EXIF, else from the containers whose dates the EXIF reader can't read
+/// (the RAW decoders tell CR3, CRW, MRW and X3F files by their first bytes).
+pub(crate) fn capture_time(path: &Path) -> Option<String> {
+    crate::exif::capture_time(path).or_else(|| crate::raw::capture_time(path))
 }
 
 /// The file's info: `None` when it cannot be read now, `Some(None)` when it
@@ -255,16 +255,15 @@ pub(crate) fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
 mod tests {
     use super::*;
     #[test]
-    fn capture_times_are_read_from_rendered_files_and_raws_the_exif_reader_handles() {
+    fn capture_times_are_read_from_rendered_files_and_raws() {
         for name in [
             "A.jpg", "A.JPG", "A.jpeg", "A.JPEG", "A.tif", "A.TIF", "A.tiff", "A.png", "A.PNG",
-            "A.NEF", "A.dng", "A.ARW", "A.raf", "A.webp", "A.avif", "A.jxl",
+            "A.NEF", "A.dng", "A.ARW", "A.raf", "A.webp", "A.avif", "A.jxl", "A.CR3", "A.crw",
+            "A.X3F", "A.mrw",
         ] {
             assert!(has_capture_time(Path::new(name)), "{name}");
         }
-        for name in [
-            "A.CR3", "A.crw", "A.X3F", "A.mrw", "A.heic", "A.xmp", "A", "._A.NEF",
-        ] {
+        for name in ["A.heic", "A.xmp", "A", "._A.NEF"] {
             assert!(!has_capture_time(Path::new(name)), "{name}");
         }
     }

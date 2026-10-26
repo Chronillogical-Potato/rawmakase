@@ -66,28 +66,6 @@ fn pointer(header: &Bytes, i: u64) -> Result<u32> {
     header.u32(84 + 4 * i)
 }
 
-/// Where the TIFF of the JPEG's EXIF (APP1 "Exif") starts.
-fn exif_at(bytes: &[u8], jpeg: u64, len: u64) -> Option<u64> {
-    let b = Bytes::new(bytes, Order::Big);
-    let end = jpeg.checked_add(len)?;
-    if b.u16(jpeg).ok()? != 0xffd8 {
-        return None;
-    }
-    let mut at = jpeg + 2;
-    while at + 4 <= end {
-        let marker = b.u16(at).ok()?;
-        let size = u64::from(b.u16(at + 2).ok()?);
-        if marker == 0xffe1 && b.slice(at + 4, 6).ok()? == b"Exif\0\0" {
-            return Some(at + 10);
-        }
-        if marker & 0xff00 != 0xff00 || marker == 0xffda || size < 2 {
-            return None;
-        }
-        at += 2 + size;
-    }
-    None
-}
-
 /// Reads a RAF's header facts.
 pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
     let header = Bytes::new(bytes, Order::Big);
@@ -108,7 +86,7 @@ pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
         pixels: 0,
     });
     let mut orientation = 1;
-    if let Some(at) = exif_at(bytes, u64::from(jpeg), u64::from(jpeg_len))
+    if let Some(at) = super::tiff_exif::in_jpeg(bytes, u64::from(jpeg), u64::from(jpeg_len))
         && let Some(t) = TiffFile::parse(bytes, at)
     {
         super::tiff_exif::read(&t, &mut info);

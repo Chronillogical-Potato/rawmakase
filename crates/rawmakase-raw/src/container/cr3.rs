@@ -13,10 +13,11 @@
 //! Sources: ISO/IEC 14496-12, Laurent Clévy's public description of the CR3
 //! format, TIFF 6, Exif 2.32, and our own measurements.
 use super::tiff::{NAME_MAX, TiffFile};
+use crate::captured::CaptureDates;
 use crate::codec::crx;
 use crate::error::{Error, Result, corrupt};
 use crate::info::{Cfa, RawInfo};
-use crate::io::Bytes;
+use crate::io::{Bytes, Pieces};
 use crate::sensor::Sensor;
 use crate::variant::{Plan, Variant};
 use crate::vendor::canon_cr3 as notes;
@@ -246,6 +247,48 @@ fn parse(bytes: &[u8]) -> Cr3<'_> {
         }
     }
     out
+}
+
+/// The most top-level boxes passed over on the way to `moov`.
+const MAX_TOP_BOXES: usize = 64;
+
+/// The capture dates in `CMT2` (the EXIF directory's) and `CMT1`
+/// (DateTime), the file's `moov` box read alone.
+pub(crate) fn capture_dates(f: &mut Pieces) -> CaptureDates {
+    let mut dates = CaptureDates::default();
+    let mut at = 0u64;
+    for _ in 0..MAX_TOP_BOXES {
+        let Some(head) = f.read_upto(at, 16).filter(|h| h.len() >= 8) else {
+            break;
+        };
+        let len = match be32(&head, 0) {
+            Some(0) => f.len - at,
+            Some(1) => match head.get(8..16) {
+                Some(b) => u64::from_be_bytes(b.try_into().unwrap_or([0; 8])),
+                None => break,
+            },
+            Some(n) => u64::from(n),
+            None => break,
+        };
+        if len < 8 {
+            break;
+        }
+        if &head[4..8] == b"moov" {
+            if let Some(moov) = f.read(at, len) {
+                for cmt in parse(&moov).cmt[..2].iter().rev().flatten() {
+                    if let Some(t) = TiffFile::parse(cmt, 0) {
+                        super::tiff_exif::dates(&t, &mut dates);
+                    }
+                }
+            }
+            break;
+        }
+        let Some(next) = at.checked_add(len) else {
+            break;
+        };
+        at = next;
+    }
+    dates
 }
 
 /// The records and items read from the timed metadata, and the maker notes
@@ -738,6 +781,75 @@ mod tests {
         assert_eq!(crate::maker_name("Acme Optics"), "Acme Optics");
     }
 
+    /// A reader that counts the bytes read.
+    struct Counted<'a> {
+        file: std::io::Cursor<&'a [u8]>,
+        read: usize,
+    }
+    impl std::io::Read for Counted<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.file.read(buf)?;
+            self.read += n;
+            Ok(n)
+        }
+    }
+    impl std::io::Seek for Counted<'_> {
+        fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+            self.file.seek(to)
+        }
+    }
+
+    /// The dates are in `CMT2`, the EXIF directory, and `CMT1`'s DateTime;
+    /// only the boxes' headers and `moov` are read.
+    #[test]
+    fn the_metadata_boxes_date_a_cr3_and_nothing_else_is_read() {
+        let cmt1 = tiff(&[text(271, "Canon"), text(306, "2024:03:02 10:00:03")]);
+        let cmt2 = tiff(&[
+            text(36867, "2024:03:02 10:00:01"),
+            text(36868, "2024:03:02 10:00:02"),
+            text(37520, "30"),
+            text(37521, "12"),
+            text(37522, "  "),
+        ]);
+        let canon = bx(
+            b"uuid",
+            &[CANON_UUID.to_vec(), bx(b"CMT1", &cmt1), bx(b"CMT2", &cmt2)].concat(),
+        );
+        let mut file = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
+        file.extend(bx(b"free", &[0; 100]));
+        file.extend(bx(b"moov", &canon));
+        // A large-size `mdat` of a megabyte, unread.
+        let mdat = 1usize << 20;
+        file.extend(1u32.to_be_bytes());
+        file.extend(b"mdat");
+        file.extend(((mdat + 16) as u64).to_be_bytes());
+        file.resize(file.len() + mdat, 0);
+        let mut counted = Counted {
+            file: std::io::Cursor::new(&file),
+            read: 0,
+        };
+        let dates = crate::capture_dates(&mut counted);
+        let stamp = |date: &str, subseconds: Option<&str>| crate::Stamp {
+            date: Some(date.into()),
+            subseconds: subseconds.map(Into::into),
+        };
+        assert_eq!(
+            dates,
+            crate::CaptureDates {
+                original: stamp("2024:03:02 10:00:01", Some("12")),
+                digitized: stamp("2024:03:02 10:00:02", None),
+                modified: stamp("2024:03:02 10:00:03", Some("30")),
+            }
+        );
+        assert!(counted.read < 2048, "{}", counted.read);
+        // The decoder's own test file has no dates.
+        let file = cr3(true);
+        assert_eq!(
+            crate::capture_dates(&mut std::io::Cursor::new(&file)),
+            crate::CaptureDates::default()
+        );
+    }
+
     #[test]
     fn reads_the_header_facts_and_the_sensor_data() {
         let file = cr3(true);
@@ -834,6 +946,7 @@ mod tests {
         let file = cr3(true);
         let cancel = AtomicBool::new(false);
         for n in (0..file.len()).step_by(7) {
+            let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..n]));
             if let Ok(info) = crate::open(&file[..n]) {
                 let _ = crate::preview(&info, &file[..n]);
                 let decoded = crate::decode(&info, &file[..n], &cancel);
@@ -844,6 +957,7 @@ mod tests {
             for v in [0, 1, 0x7f, 0xff] {
                 let mut d = file.clone();
                 d[i] = v;
+                let _ = crate::capture_dates(&mut std::io::Cursor::new(&d));
                 if let Ok(info) = crate::open(&d) {
                     let _ = crate::preview(&info, &d);
                     let _ = crate::decode(&info, &d, &cancel);

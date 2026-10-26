@@ -244,7 +244,7 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
     }
     let (captured, info) = if photo.standalone {
         let info = crate::catalog_session::file_photo_info(path).ok_or_else(unreadable)?;
-        (crate::exif::capture_time(path), info)
+        (crate::catalog_session::file_capture_time(path), info)
     } else {
         (None, None)
     };
