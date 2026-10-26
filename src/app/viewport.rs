@@ -34,6 +34,11 @@ impl Editor {
             let cy = (c[1] + c[3]) / 2.;
             let mut w = c[2] - c[0];
             let mut h = c[3] - c[1];
+            // A crop already at the aspect stays exactly as it is: rounding would
+            // otherwise nudge an uncropped photo's crop off the whole frame.
+            if (w / h / ratio - 1.).abs() < 1e-5 {
+                return;
+            }
             if w / h > ratio {
                 w = h * ratio;
             } else {

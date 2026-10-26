@@ -3194,6 +3194,36 @@ fn crop_tool_reads_each_photos_own_aspect() {
     assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
 }
 #[test]
+fn choosing_the_photos_own_aspect_leaves_an_uncropped_photo_alone() {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    // 100 × 99: the photo's ratio over itself is not exactly 1 in f32.
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 100,
+        height: 99,
+        pixels: vec![[0.1; 3]; 9900],
+        metadata: Metadata {
+            width: 100,
+            height: 99,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    editor.view.toggle(state::Tool::Crop);
+    let frame = editor.begin_edit_frame();
+    editor.finish_edit_frame(frame, &ctx);
+    let steps = editor.document.edit.history().steps().0.len();
+    let frame = editor.begin_edit_frame();
+    editor.choose_aspect(-1.);
+    editor.finish_edit_frame(frame, &ctx);
+    assert_eq!(editor.document.edit.recipe().crop, [0., 0., 1., 1.]);
+    assert_eq!(editor.document.edit.history().steps().0.len(), steps);
+}
+#[test]
 fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let session = dir.path().join("session.json");
