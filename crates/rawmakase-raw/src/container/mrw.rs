@@ -375,8 +375,12 @@ mod tests {
                 modified: stamp("2005:03:24 14:56:53"),
             }
         );
-        // The decoder reads the same block.
+        // The decoder reads the same block, which is the camera's EXIF.
         assert_eq!(crate::open(&file).unwrap().make, "Minolta");
+        assert_eq!(
+            crate::exif_tiffs(&mut std::io::Cursor::new(&file)).main,
+            Some(ttw.clone())
+        );
         // Without TTW, no dates.
         assert_eq!(
             crate::capture_dates(&mut std::io::Cursor::new(&mrw(0x59, 1, &[0; 12]))),
@@ -384,6 +388,7 @@ mod tests {
         );
         for end in 0..file.len() {
             let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..end]));
+            let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&file[..end]));
         }
     }
 

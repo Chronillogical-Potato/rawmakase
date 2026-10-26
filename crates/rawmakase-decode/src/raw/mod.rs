@@ -85,6 +85,47 @@ pub fn capture_time(path: &Path) -> Option<String> {
         [dates.original, dates.digitized, dates.modified].map(|s| (s.date, s.subseconds)),
     )
 }
+/// The camera's EXIF of the CR3, MRW or X3F at `path`, which
+/// `exif::read` can't find: the TIFFs the container keeps it in, read by
+/// `exif::read_tiffs`; nothing else is read. `None` for other files.
+pub(crate) fn camera_exif(path: &Path) -> Option<rawmakase_interop::exif::CameraExif> {
+    let tiffs = rawmakase_raw::exif_tiffs(&mut std::fs::File::open(path).ok()?);
+    rawmakase_interop::exif::read_tiffs(
+        tiffs.main.as_deref(),
+        tiffs.exif.as_deref(),
+        tiffs.gps.as_deref(),
+    )
+}
+/// The EXIF directory's date tags of the CR3, CRW, MRW or X3F at `path`
+/// (DateTimeOriginal and DateTimeDigitized with their subseconds), from the
+/// records [`capture_time`] reads: for the stand-in an export writes for a
+/// RAW without EXIF of its own, a CRW. None for other files.
+pub fn capture_date_tags(path: &Path) -> Vec<rawmakase_interop::exif::Field> {
+    use rawmakase_interop::exif::{Field, tag};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let dates = rawmakase_raw::capture_dates(&mut file);
+    let mut tags = Vec::new();
+    for (stamp, date, subseconds) in [
+        (
+            dates.original,
+            tag::DATE_TIME_ORIGINAL,
+            tag::SUBSEC_TIME_ORIGINAL,
+        ),
+        (
+            dates.digitized,
+            tag::DATE_TIME_DIGITIZED,
+            tag::SUBSEC_TIME_DIGITIZED,
+        ),
+    ] {
+        if let Some(text) = stamp.date {
+            tags.push(Field::ascii(date, &text));
+            tags.extend(stamp.subseconds.map(|s| Field::ascii(subseconds, &s)));
+        }
+    }
+    tags
+}
 pub struct Raw {
     // Boxed: the decoder's state is large, and a `Raw` travels in enums.
     own: Box<own::Own>,

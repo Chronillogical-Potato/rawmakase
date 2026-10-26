@@ -245,6 +245,11 @@ mod tests {
         ]);
         let dates = crate::capture_dates(&mut Cursor::new(&file));
         assert_eq!(dates.original, stamp("2021:09:04 17:20:45", Some("5")));
+        // The preview's EXIF is the camera's.
+        assert_eq!(
+            crate::exif_tiffs(&mut Cursor::new(&file)).main,
+            Some(exif.clone())
+        );
         assert_eq!(dates.digitized, stamp("2021:09:04 17:20:44", None));
         assert_eq!(dates.modified, stamp("2021:09:04 17:20:46", Some("7")));
         // An SD9's: no preview, TIME alone.
@@ -258,6 +263,10 @@ mod tests {
         let dates = crate::capture_dates(&mut Cursor::new(&file));
         assert_eq!(dates.original, stamp("2003:04:12 12:40:05", None));
         assert_eq!(dates.digitized, Stamp::default());
+        assert_eq!(
+            crate::exif_tiffs(&mut Cursor::new(&file)),
+            crate::ExifTiffs::default()
+        );
         // A preview whose EXIF is no TIFF gives way to the next one's.
         let file = x3f(&[
             (b"IMA2", image(&jpeg(b"not a TIFF"))),
@@ -302,12 +311,14 @@ mod tests {
         assert!(good.original.date.is_some() && good.modified.date.is_some());
         for end in 0..file.len() {
             let _ = crate::capture_dates(&mut Cursor::new(&file[..end]));
+            let _ = crate::exif_tiffs(&mut Cursor::new(&file[..end]));
         }
         for i in 0..file.len() {
             for v in [0, 0x7f, 0xff] {
                 let mut d = file.clone();
                 d[i] = v;
                 let _ = crate::capture_dates(&mut Cursor::new(&d));
+                let _ = crate::exif_tiffs(&mut Cursor::new(&d));
             }
         }
         // A TIME that is not a number is none.
