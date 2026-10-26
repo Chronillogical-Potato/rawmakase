@@ -299,14 +299,16 @@ pub(super) fn write(
             .into());
         }
     };
-    let made = disk.entry(temp).map_err(problem)?;
-    if made.kind != EntryKind::File || made.links != 1 {
+    // The file object made, from its handle; its name must still be it.
+    let made = disk.handle_id(temp, &into).map_err(problem)?;
+    let named = disk.entry(temp).map_err(problem)?;
+    if named.kind != EntryKind::File || named.links != 1 || named.id != made {
         return Err(Problem::Disk(format!("{} isn't the file made", temp.display())).into());
     }
     // As the disk spells it (HFS+ keeps names decomposed), which every
     // later step and recovery find it by. Its file object only where it
     // stays.
-    let file = (proofs.copies == Proof::Ids).then_some(made.id);
+    let file = (proofs.copies == Proof::Ids).then_some(made);
     let temp = match file {
         Some(file) => spelled(disk, temp, file),
         None => proof::spelled(disk, temp),
@@ -347,7 +349,7 @@ pub(super) fn write(
     if !unchanged(disk, source, id_proves, identity) {
         return Err(Problem::Changed(source.to_path_buf()).into());
     }
-    Ok((temp, made.id))
+    Ok((temp, made))
 }
 
 /// Whether `path` is a file with `identity` (and file object `id`, where

@@ -2163,6 +2163,55 @@ fn a_name_taken_just_before_a_copy_is_made_at_it_is_left_as_it_is() -> Result<()
     Ok(())
 }
 
+/// A file another program or computer puts at a copy's name just after it
+/// is made, before its file object is journalled, is never taken for it:
+/// nothing is copied into it, and it is left as it is, through recovery
+/// and Put Back: the move is listed for the user, as a name holding bytes
+/// that can't be proven the copy's is (review of #573: the file object
+/// was read from the name).
+#[test]
+fn a_file_put_at_a_copys_name_just_after_it_is_made_is_left_as_it_is() -> Result<()> {
+    let mut kinds = Far::by_names();
+    kinds.push(Far::Ids);
+    for kind in kinds {
+        let mut fx = files();
+        let disk = Faulty {
+            swap_after_create: Some(b"theirs".to_vec()),
+            ..far_as(&fx, kind)
+        };
+        let trash = trash_as(&fx, kind);
+        let op = to_far(&fx, &["A.NEF"]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert!(
+            matches!(results(&outcome)[..], [ItemResult::NeedsRecovery(_)]),
+            "{kind:?}: {outcome:?}"
+        );
+        let theirs = disk.swapped.borrow().clone().expect("a file was made");
+        assert_eq!(std::fs::read(&theirs)?, b"theirs", "{kind:?}");
+        for name in ["A.NEF", "A.xmp"] {
+            assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name), "{kind:?}");
+        }
+        fx.reopen();
+        let fresh = far_as(&fx, kind);
+        let recovery = fx.recover_with(&fresh, &trash);
+        assert_eq!(recovery.unfinished.len(), 1, "{kind:?}");
+        for u in &recovery.unfinished {
+            let _ = recover::resolve_with(
+                &mut fx.cat,
+                u.operation,
+                Resolution::PutBack,
+                &fresh,
+                &trash,
+            );
+        }
+        assert_eq!(std::fs::read(&theirs)?, b"theirs", "{kind:?}");
+        for name in ["A.NEF", "A.xmp"] {
+            assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name), "{kind:?}");
+        }
+    }
+    Ok(())
+}
+
 /// `Café.NEF` with its sidecar, and `far/`.
 fn accented() -> Fx {
     fixture(&[CAFE, "Caf\u{e9}.xmp", "far/"])

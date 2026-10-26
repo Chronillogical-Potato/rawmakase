@@ -32,6 +32,15 @@ pub(super) fn entry(path: &Path) -> Result<Entry, FsError> {
     })
 }
 
+/// The file object an open file is.
+pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    let m = file.metadata()?;
+    Ok(FileId {
+        volume: VolumeId(m.dev()),
+        index: m.ino(),
+    })
+}
+
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     use rustix::fs::{CWD, RenameFlags, renameat_with};

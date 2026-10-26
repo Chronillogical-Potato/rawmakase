@@ -3,7 +3,7 @@
 //! and crashes at any step and record which folders were synced. The real
 //! one is [`Real`]; nothing else implements it outside tests.
 use crate::storage::Identity;
-use crate::storage::fsops::{self, ContentHash, CopyError, Entry, FsError};
+use crate::storage::fsops::{self, ContentHash, CopyError, Entry, FileId, FsError};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -28,6 +28,9 @@ pub(super) trait Disk {
         into: &mut std::fs::File,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError>;
+    /// The file object `file`, the handle the file at `at` was made
+    /// through, is ([`fsops::handle_id`]).
+    fn handle_id(&self, at: &Path, file: &std::fs::File) -> Result<FileId, FsError>;
     fn sync_file(&self, path: &Path) -> Result<(), FsError>;
     /// Gives file or folder `to` the extras of `from` (extended attributes,
     /// alternate data streams), [`FsError::Unsupported`] where its volume
@@ -87,6 +90,9 @@ impl Disk for Real {
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError> {
         fsops::copy_into(from, into, go_on)
+    }
+    fn handle_id(&self, _at: &Path, file: &std::fs::File) -> Result<FileId, FsError> {
+        fsops::handle_id(file)
     }
     fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError> {
         fsops::hash_prefix(path, len)

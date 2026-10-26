@@ -185,6 +185,11 @@ pub fn entry(path: &Path) -> Result<Entry, FsError> {
     os::entry(path)
 }
 
+/// The file object open file `file` is, whatever has its name now.
+pub fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    os::handle_id(file)
+}
+
 /// Renames `from` to `to`, a file or a directory, only if nothing has the
 /// name `to`: never replacing a file, nor an empty directory as a plain
 /// rename would. Both must be on one volume ([`FsError::CrossDevice`]).

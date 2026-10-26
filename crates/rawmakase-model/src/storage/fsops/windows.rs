@@ -90,6 +90,11 @@ pub(super) fn kind_of(name: &str) -> VolumeKind {
     }
 }
 
+/// The file object an open file is.
+pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    Ok(information(file)?.0)
+}
+
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     let (from, to) = (wide(from), wide(to));
     // SAFETY: both are NUL-terminated wide strings that outlive the call.

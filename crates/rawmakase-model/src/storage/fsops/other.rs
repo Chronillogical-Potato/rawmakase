@@ -1,5 +1,5 @@
 //! A system RAWmakase has no file system calls for: nothing is moved.
-use super::{Entry, FsError, VolumeFacts};
+use super::{Entry, FileId, FsError, VolumeFacts};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
@@ -13,6 +13,9 @@ pub(super) fn sync_dir(_dir: &Path) -> Result<(), FsError> {
     Err(FsError::Unsupported)
 }
 pub(super) fn volume_facts(_path: &Path) -> Result<VolumeFacts, FsError> {
+    Err(FsError::Unsupported)
+}
+pub(super) fn handle_id(_file: &std::fs::File) -> Result<FileId, FsError> {
     Err(FsError::Unsupported)
 }
 pub(super) fn open_folder(_path: &Path) -> Result<std::fs::File, FsError> {

@@ -448,6 +448,13 @@ macro_rules! passes_on {
         ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
             self.$inner.copy_into(from, to, into, go_on)
         }
+        fn handle_id(
+            &self,
+            at: &std::path::Path,
+            file: &std::fs::File,
+        ) -> Result<crate::storage::fsops::FileId, crate::storage::fsops::FsError> {
+            self.$inner.handle_id(at, file)
+        }
         fn hash_prefix(
             &self,
             path: &std::path::Path,
@@ -609,6 +616,11 @@ pub(super) struct Faulty {
     /// A file with these bytes takes this name just before a file is made
     /// there; a folder, just before a folder is.
     pub occupy_on_create: Option<(PathBuf, Vec<u8>)>,
+    /// Right after the first file is made, another file with these bytes
+    /// takes its name (another computer, on a share); where, is kept in
+    /// `swapped`.
+    pub swap_after_create: Option<Vec<u8>>,
+    pub swapped: RefCell<Option<PathBuf>>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Folders whose volume says its file ids can't be proven, as network
@@ -969,7 +981,16 @@ impl Disk for Faulty {
         {
             std::fs::write(at, bytes).unwrap();
         }
-        self.step(Op::CreateFile, || Real.create_file(&self.stored(path)))
+        let made = self.step(Op::CreateFile, || Real.create_file(&self.stored(path)))?;
+        if let Some(theirs) = &self.swap_after_create
+            && self.swapped.borrow().is_none()
+        {
+            let at = self.stored(path);
+            std::fs::remove_file(&at).unwrap();
+            std::fs::write(&at, theirs).unwrap();
+            *self.swapped.borrow_mut() = Some(at);
+        }
+        Ok(made)
     }
     fn copy_into(
         &self,
@@ -1025,6 +1046,17 @@ impl Disk for Faulty {
             panic!("injected crash after copy {n}");
         }
         copied
+    }
+    fn handle_id(
+        &self,
+        at: &Path,
+        file: &std::fs::File,
+    ) -> Result<crate::storage::fsops::FileId, FsError> {
+        let id = Real.handle_id(at, file)?;
+        Ok(match self.far(at) {
+            true => self.number(id),
+            false => id,
+        })
     }
     fn sync_file(&self, path: &Path) -> Result<(), FsError> {
         self.calls.borrow_mut().push(Call::SyncFile(path.into()));
