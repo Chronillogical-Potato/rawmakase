@@ -50,13 +50,19 @@ pub(super) fn settle(e: &mut Editor) {
     while Instant::now() < until {
         let ctx = e.context.clone();
         e.events(&ctx);
-        let waiting = e.file_ops.ordering_cancel().is_some();
-        if !e.activity.is_busy()
-            || e.file_ops.confirming()
-            || (e.file_ops.dialog_open() && !waiting)
-        {
+        let settled = |e: &Editor| {
+            let waiting = e.file_ops.ordering_cancel().is_some() || e.file_ops.rename_planning();
+            !e.activity.is_busy()
+                || e.file_ops.confirming()
+                || (e.file_ops.dialog_open() && !waiting)
+        };
+        // Settled once a frame leaves it so: a frame may start what is
+        // waited for next (a Rename asked before its plan was in).
+        if settled(e) {
             frame(e, Vec::new());
-            return;
+            if settled(e) {
+                return;
+            }
         }
         std::thread::sleep(Duration::from_millis(5));
     }

@@ -99,7 +99,7 @@ fn ownership_follows_the_rule_lookup_reads_sidecars_by() {
                 })
                 .unwrap();
             assert!(
-                readers(name, &listing).contains(&file),
+                readers(name, &listing).contains(file),
                 "{file:?} reads {name:?}"
             );
         }
@@ -169,4 +169,199 @@ fn a_name_is_taken_on_disk_or_in_the_catalog() {
     } else {
         assert_eq!(lower, None);
     }
+}
+
+/// The companion rules as they were asked of every name, one name at a
+/// time, before a folder's names were indexed: what the index must answer
+/// exactly.
+mod scanned {
+    use crate::catalog::folder_sync::folded;
+    use crate::catalog::legacy_sidecar::companion_paths;
+    use crate::catalog::sidecar::{caseless, sidecar_names, sidecar_names_caseless};
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
+
+    fn names_of(photo: &OsStr) -> Vec<String> {
+        let mut names = sidecar_names_caseless(Path::new(photo));
+        names.extend(
+            companion_paths(Path::new(photo))
+                .iter()
+                .map(|p| caseless(p.as_os_str())),
+        );
+        names
+    }
+
+    fn reads(photo: &OsStr, name: &OsStr) -> bool {
+        photo != name && name.to_str().is_some() && names_of(photo).contains(&caseless(name))
+    }
+
+    pub fn readers<'a>(companion: &OsStr, names: &'a [OsString]) -> Vec<&'a OsString> {
+        let Some(wanted) = companion.to_str().map(|s| caseless(OsStr::new(s))) else {
+            return Vec::new();
+        };
+        let mut found: Vec<&OsString> = names
+            .iter()
+            .filter(|n| n.as_os_str() != companion && n.to_str().is_some())
+            .filter(|n| sidecar_names_caseless(Path::new(n)).contains(&wanted))
+            .collect();
+        for name in names {
+            let legacy = companion_paths(Path::new(name))
+                .iter()
+                .any(|p| caseless(p.as_os_str()) == caseless(companion));
+            if legacy && companion.to_str().is_some() && !found.contains(&name) {
+                found.push(name);
+            }
+        }
+        found
+    }
+
+    fn is_companion(
+        photo: &OsStr,
+        name: &OsStr,
+        same_file: &dyn Fn(&OsStr, &OsStr) -> bool,
+    ) -> bool {
+        if photo == name || name.to_str().is_none() {
+            return false;
+        }
+        let mut candidates = sidecar_names(Path::new(photo));
+        candidates.extend(
+            companion_paths(Path::new(photo))
+                .into_iter()
+                .map(|p| p.into_os_string()),
+        );
+        candidates.iter().any(|c| {
+            folded(name) == folded(c) || (caseless(name) == caseless(c) && same_file(name, c))
+        })
+    }
+
+    pub fn of(
+        photo: &OsStr,
+        names: &[OsString],
+        same_file: &dyn Fn(&OsStr, &OsStr) -> bool,
+    ) -> (Vec<OsString>, Vec<OsString>) {
+        let (mut carried, mut shared) = (Vec::new(), Vec::new());
+        for name in names.iter().filter(|n| is_companion(photo, n, same_file)) {
+            if readers(name, names).iter().all(|r| r.as_os_str() == photo) {
+                carried.push(name.clone());
+            } else {
+                shared.push(name.clone());
+            }
+        }
+        carried.sort();
+        shared.sort();
+        (carried, shared)
+    }
+
+    pub fn arrival_conflict(
+        photo: &OsStr,
+        carried: &[OsString],
+        projected: &[OsString],
+    ) -> Option<OsString> {
+        let theirs = projected
+            .iter()
+            .filter(|n| !carried.contains(n) && n.as_os_str() != photo);
+        for name in theirs {
+            if reads(photo, name) {
+                return Some(name.clone());
+            }
+        }
+        for companion in carried {
+            let others = readers(companion, projected)
+                .into_iter()
+                .find(|r| r.as_os_str() != photo);
+            if let Some(other) = others {
+                return Some(other.clone());
+            }
+        }
+        None
+    }
+}
+
+#[test]
+fn an_indexed_folder_answers_as_asking_every_name_did() {
+    use crate::catalog::sidecar::caseless;
+    use std::ffi::OsStr;
+    let mut listing = names(&[
+        "A.NEF",
+        "a.nef",
+        "A.NEF.xmp",
+        "a.NEF.XMP",
+        "A.xmp",
+        "a.XMP",
+        "A.NEF.rawmakase.json",
+        "a.nef.RAWMAKASE.JSON",
+        "A.NEF.rawmakase-local.json",
+        "A.JPG",
+        "A.JPG.xmp",
+        "Straße.NEF",
+        "STRASSE.xmp",
+        "strasse.nef.xmp",
+        "Straẞe.NEF.xmp",
+        "Caf\u{e9}.ARW",
+        "Cafe\u{301}.xmp",
+        "CAFE\u{301}.ARW.XMP",
+        "\u{fb01}le.DNG",
+        "file.xmp",
+        "FILE.DNG.xmp",
+        "B.CR3",
+        "B.xmp",
+        "B.xmp.xmp",
+        "C.tif",
+        "C.tif.xmp",
+        "C.xmp",
+        "D",
+        "D.xmp",
+        ".xmp",
+        "E.NEF.DNG",
+        "E.NEF.DNG.xmp",
+        "E.NEF.xmp",
+    ]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        listing.push(OsString::from_vec(b"A\xff.NEF".to_vec()));
+        listing.push(OsString::from_vec(b"A\xff.NEF.xmp".to_vec()));
+    }
+    // A volume that takes some names alike for one file and others not.
+    let same_file =
+        |a: &OsStr, b: &OsStr| caseless(a) == caseless(b) && !(a.len() + b.len()).is_multiple_of(3);
+    let index = companions::Listing::new(listing.clone());
+    let (mut shared, mut clashes) = (0, 0);
+    for photo in &listing {
+        let expected = scanned::of(photo, &listing, &same_file);
+        shared += expected.1.len();
+        let found = index.companions(photo, &same_file);
+        assert_eq!((found.carried, found.shared), expected, "{photo:?}");
+        assert_eq!(
+            readers(photo, &listing),
+            scanned::readers(photo, &listing)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            "readers of {photo:?}"
+        );
+        // Carrying each name in turn, with each other name gone.
+        for (i, carried) in listing.iter().enumerate() {
+            let carried = vec![carried.clone()];
+            for gone in [None, Some(i), Some((i + 1) % listing.len())] {
+                let projected: Vec<OsString> = listing
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| Some(*j) != gone)
+                    .map(|(_, n)| n.clone())
+                    .collect();
+                let expected = scanned::arrival_conflict(photo, &carried, &projected);
+                clashes += usize::from(expected.is_some());
+                assert_eq!(
+                    index.arrival_conflict(photo, &carried, &|j| Some(j) == gone),
+                    expected,
+                    "{photo:?} carrying {carried:?} without {gone:?}"
+                );
+            }
+        }
+    }
+    // The listing asks the hard questions: companions read by two files,
+    // and clashes found as well as not.
+    assert!(shared > 5, "{shared}");
+    assert!(clashes > 100, "{clashes}");
 }

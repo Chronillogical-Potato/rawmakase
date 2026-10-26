@@ -841,7 +841,8 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
         "tie2.NEF",
         "file.tif",
     ]);
-    // The catalog's times where it has one; the file's otherwise, written nowhere.
+    // The catalog's times; a file's own is not read (#681): the catalog's
+    // background reads fill it in.
     let set = |name: &str, at: &str| {
         fx.cat
             .db_for_tests()
@@ -879,8 +880,7 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
     let copy = cat.create_virtual_copy(given[0])?;
     let mut with_copy = given.clone();
     with_copy.push(copy);
-    let order = rename_order(&cat, &with_copy, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(&cat, &with_copy).map_err(|e| anyhow::anyhow!("{e}"))?;
     let names: Vec<(&str, Option<&str>)> = order
         .photos()
         .iter()
@@ -890,25 +890,14 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
         names,
         [
             ("early.NEF", Some("2021-06-06T08:00:00.000")),
-            ("file.tif", Some("2021-06-06T10:00:00.000")),
             ("tie2.NEF", Some("2021-06-06T11:00:00.000")),
             ("tie1.NEF", Some("2021-06-06T11:00:00.000")),
             ("late.NEF", Some("2021-06-06T12:00:00.000")),
+            ("file.tif", None),
             ("m.NEF", None),
             ("z.NEF", None),
         ]
     );
-    let captured: String = cat.db_for_tests().query_row(
-        "SELECT captured FROM photos WHERE filename='file.tif'",
-        [],
-        |r| r.get(0),
-    )?;
-    assert_eq!(captured, "", "the file's time is kept nowhere");
-    // Stopped with the dialog.
-    assert!(matches!(
-        rename_order(&cat, &given, &AtomicBool::new(true)),
-        Err(FileOpError::Cancelled)
-    ));
     Ok(())
 }
 
@@ -916,8 +905,7 @@ fn a_batch_is_numbered_by_capture_time_then_undated_by_filename() -> Result<()> 
 fn a_batch_keeps_the_order_read_when_its_dialog_opened() -> Result<()> {
     let fx = fixture(&["a.NEF", "b.NEF"]);
     let (a, b) = (fx.photo("a.NEF"), fx.photo("b.NEF"));
-    let order = rename_order(&fx.cat, &[a, b], &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(&fx.cat, &[a, b]).map_err(|e| anyhow::anyhow!("{e}"))?;
     // A capture time read meanwhile (the backfill, another window) would
     // put b first; the preview keeps the order it was given.
     fx.cat.db_for_tests().execute(
@@ -945,8 +933,7 @@ fn a_batch_keeps_the_order_read_when_its_dialog_opened() -> Result<()> {
 fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
     let mut fx = fixture(&["b.NEF", "b.xmp", "a.NEF", "c.JPG"]);
     let given = [fx.photo("b.NEF"), fx.photo("a.NEF"), fx.photo("c.JPG")];
-    let order = rename_order(&fx.cat, &given, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(&fx.cat, &given).map_err(|e| anyhow::anyhow!("{e}"))?;
     let template = NameTemplate {
         naming: Naming::CustomNameSequence,
         text: "Trip".into(),
@@ -988,8 +975,7 @@ fn a_preview_names_the_batch_in_order_and_plans_exactly_that() -> Result<()> {
     );
     // A name taken marks its photo, and blocks the others.
     std::fs::write(fx.root.join("Next-2.NEF"), b"in the way")?;
-    let order = rename_order(&fx.cat, &given, &AtomicBool::new(false))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let order = rename_order(&fx.cat, &given).map_err(|e| anyhow::anyhow!("{e}"))?;
     let template = NameTemplate {
         naming: Naming::CustomNameSequence,
         text: "Next".into(),
@@ -1037,5 +1023,39 @@ fn a_case_only_rename_leaves_a_companion_already_so_named_where_it_is() -> Resul
     assert_eq!(listing(&fx), ["a.NEF", "a.xmp"]);
     assert_eq!(fsops::entry(&fx.root.join("a.xmp"))?.id, xmp);
     assert_eq!(fx.rows()[&a], "a.NEF");
+    Ok(())
+}
+
+/// Renaming 1500 photos with their sidecars in one folder: their names are
+/// planned as they are typed, so planning reads each folder once and asks
+/// its index, never every name again for every photo (#681, where a plan
+/// of this took minutes).
+#[test]
+fn a_large_batch_is_planned_in_time_linear_in_its_photos() -> Result<()> {
+    let names: Vec<String> = (0..1500)
+        .flat_map(|i| [format!("DSC{i:05}.NEF"), format!("DSC{i:05}.NEF.xmp")])
+        .collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let fx = fixture(&names);
+    let photos: Vec<PhotoId> = fx.cat.photos()?.into_iter().map(|p| p.id).collect();
+    let order = rename_order(&fx.cat, &photos).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let template = NameTemplate {
+        naming: Naming::CustomNameSequence,
+        text: "Trip".into(),
+        start: 1,
+        padding: 4,
+        tokens: None,
+    };
+    let started = std::time::Instant::now();
+    let preview = rename_preview(&fx.cat, &order, &template).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let took = started.elapsed();
+    eprintln!("planned 1500 renames in {took:?}");
+    assert_eq!(preview.plan.summary().files, 1500);
+    assert_eq!(preview.plan.summary().companions, 1500);
+    assert!(preview.rows.iter().all(|r| r.problem.is_none()));
+    assert_eq!(preview.rows[1499].new, "Trip-1500.NEF");
+    // Minutes when every photo asked every name; well under a second now,
+    // with room for a slow machine's debug build.
+    assert!(took < std::time::Duration::from_secs(30), "{took:?}");
     Ok(())
 }

@@ -98,6 +98,8 @@ pub(crate) enum Event {
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         Box<Result<crate::catalog::file_ops::RenameOrder, String>>,
     ),
+    /// A plan of the rename dialog's names (see `app::file_ops::rename`).
+    RenamePlanned(Box<crate::app::file_ops::RenamePlanned>),
     /// The plan, and Delete's Move to Trash beside it.
     FileOpPlanned(
         Box<

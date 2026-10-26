@@ -11,13 +11,14 @@
 //! its folder.
 //!
 //! The order a batch numbers photos in is read once, when its dialog opens
-//! ([`rename_order`]): by capture time, the catalog's where it has one,
-//! else read from the file and kept nowhere; photos without one follow by
-//! filename. [`rename_preview`] names them in that order and plans it.
+//! ([`rename_order`]): by the capture time the catalog has (filled in for
+//! photos added from folders by the app's background reads, never read
+//! from the files here); photos without one follow by filename.
+//! [`rename_preview`] names them in that order and plans it.
 use super::super::db::{Reads, sql};
 use super::super::value::row;
 use super::super::{Catalog, FolderId, PhotoId};
-use super::companions;
+use super::companions::{self, Listing};
 use super::conflicts::Names;
 use super::disk::parent;
 use super::names::{FileName, Stem};
@@ -28,7 +29,7 @@ use crate::storage::fsops::{self, FileId, FsError};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::rc::Rc;
 
 /// The rename items of `families`, each master to its stem in `stems`
 /// (`None` when it was given two): resolved, renamed, and checked together.
@@ -110,7 +111,7 @@ fn renamed(files: &mut Files<'_>, mut item: Item, stem: &Stem) -> Result<Item, S
     let listing = files
         .listing(&dir)
         .map_err(|e| Skip::Refused(Refusal::Unreadable(e)))?;
-    let rules = Names(fsops::probe(&dir, &listing));
+    let rules = files.rules(&dir, &listing);
     let spelling = files.renames_spelling(id.volume(), &dir);
     // A companion already named so (`a.xmp` for `A.NEF` → `a.NEF`) stays
     // as it is, and out of the rename: only what changes is renamed.
@@ -159,17 +160,32 @@ fn key(name: &OsStr) -> String {
     super::super::sidecar::caseless(name)
 }
 
-/// What one folder of a rename holds, read once.
+/// What one folder of a rename holds, read once, with what the rename
+/// brings there.
 struct Folder {
-    listing: Vec<OsString>,
-    /// The catalog's photos there, through any folder over it: id and
+    listing: Rc<Listing>,
+    /// How the folder compares names (its items' `rules`), and its names
+    /// by that.
+    rules: Names,
+    keys: HashMap<String, Vec<usize>>,
+    /// The catalog's photos there, through any folder over it, by
     /// filename by `sidecar::caseless`.
-    catalog: Vec<(PhotoId, String)>,
+    catalog: HashMap<String, Vec<PhotoId>>,
+    /// Its names, then every new name the rename gives there; the first
+    /// `listed` are its names.
+    projected: Listing,
+    listed: usize,
 }
 
 impl Folder {
-    /// Directory `dir`, which catalog folder `own` is over.
-    fn read(files: &mut Files<'_>, dir: &Path, own: FolderId) -> Result<Self, FileOpError> {
+    /// Directory `dir`, which catalog folder `own` is over, where the
+    /// rename gives the new names `arriving`.
+    fn read(
+        files: &mut Files<'_>,
+        dir: &Path,
+        own: FolderId,
+        arriving: &[OsString],
+    ) -> Result<Self, FileOpError> {
         row! {
             struct Named {
                 id: PhotoId,
@@ -177,21 +193,36 @@ impl Folder {
             }
         }
         let listing = files.listing(dir).map_err(FileOpError::Destination)?;
+        let rules = files.rules(dir, &listing);
+        let mut keys: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, n) in listing.names().iter().enumerate() {
+            keys.entry(rules.key(n)).or_default().push(i);
+        }
         let mut over = files.folders.over(dir);
         over.push(own);
-        let mut catalog = Vec::new();
+        let mut catalog: HashMap<String, Vec<PhotoId>> = HashMap::new();
         for folder in over {
             let named: Vec<Named> = files.catalog.db.read(
                 sql!("SELECT id, filename FROM photos WHERE folder=?"),
                 &[&folder],
             )?;
-            catalog.extend(
-                named
-                    .into_iter()
-                    .map(|p| (p.id, key(OsStr::new(&p.filename)))),
-            );
+            for p in named {
+                catalog
+                    .entry(key(OsStr::new(&p.filename)))
+                    .or_default()
+                    .push(p.id);
+            }
         }
-        Ok(Self { listing, catalog })
+        let names = listing.names();
+        let projected = Listing::new(names.iter().chain(arriving).cloned().collect());
+        Ok(Self {
+            listed: names.len(),
+            listing,
+            rules,
+            keys,
+            catalog,
+            projected,
+        })
     }
 }
 
@@ -208,6 +239,19 @@ fn conflicts(
     let mut taken: HashMap<(PathBuf, String), usize> = HashMap::new();
     let mut ids: HashSet<FileId> = HashSet::new();
     let mut rows: HashSet<PhotoId> = HashSet::new();
+    // Every new name, by the folder it is given in.
+    let mut arriving: HashMap<PathBuf, Vec<OsString>> = HashMap::new();
+    for item in items.iter() {
+        let Some(dir) = dir_of(item) else {
+            continue;
+        };
+        let names = item.members.iter();
+        let names = names.filter_map(|m| m.destination.as_deref()?.file_name());
+        arriving
+            .entry(dir.to_path_buf())
+            .or_default()
+            .extend(names.map(OsString::from));
+    }
     let mut folders: HashMap<PathBuf, Folder> = HashMap::new();
     for item in items.iter() {
         rows.extend(item.preconditions.rows.iter().copied());
@@ -224,7 +268,8 @@ fn conflicts(
             continue;
         };
         if let std::collections::hash_map::Entry::Vacant(e) = folders.entry(dir) {
-            let read = Folder::read(files, e.key(), item.preconditions.folder)?;
+            let new = arriving.get(e.key()).map_or(&[][..], Vec::as_slice);
+            let read = Folder::read(files, e.key(), item.preconditions.folder, new)?;
             e.insert(read);
         }
     }
@@ -236,13 +281,7 @@ fn conflicts(
         let Some(folder) = folders.get(dir) else {
             continue;
         };
-        let arriving: Vec<OsString> = items
-            .iter()
-            .filter(|other| dir_of(other) == Some(dir))
-            .flat_map(|other| &other.members)
-            .filter_map(|m| m.destination.as_deref()?.file_name().map(OsString::from))
-            .collect();
-        if let Some(r) = refusal(item, folder, &sources, &taken, &ids, &rows, &arriving) {
+        if let Some(r) = refusal(item, folder, &sources, &taken, &ids, &rows) {
             refused.push((i, r));
         }
     }
@@ -256,9 +295,9 @@ fn conflicts(
     Ok(())
 }
 
-/// Why `item` of a rename can't take its new names in `folder`, which
-/// `arriving` (every new name there, its own too) arrive in; `None` when
-/// they are free. A name another member of the rename has now is a chain.
+/// Why `item` of a rename can't take its new names in `folder`; `None`
+/// when they are free. A name another member of the rename has now is a
+/// chain.
 fn refusal(
     item: &Item,
     folder: &Folder,
@@ -266,7 +305,6 @@ fn refusal(
     taken: &HashMap<(PathBuf, String), usize>,
     ids: &HashSet<FileId>,
     rows: &HashSet<PhotoId>,
-    arriving: &[OsString],
 ) -> Option<Refusal> {
     let text = |n: &OsStr| n.to_string_lossy().into_owned();
     let family = &item.preconditions.rows;
@@ -283,10 +321,14 @@ fn refusal(
             return Some(Refusal::NameTwice(text(name)));
         }
         // On disk: as the folder compares names, then as a lookup finds them.
-        let alike = folder.listing.iter().find(|n| {
-            n.as_os_str() != own
-                && (n.as_os_str() == name || item.rules.key(n) == item.rules.key(name))
-        });
+        let listed = folder.listing.names();
+        let alike = match folder.keys.get(&folder.rules.key(name)) {
+            Some(alike) => alike
+                .iter()
+                .map(|&i| &listed[i])
+                .find(|n| n.as_os_str() != own),
+            None => None,
+        };
         if let Some(n) = alike {
             return Some(match sources.contains(&(dir.to_path_buf(), key(n))) {
                 true => Refusal::Chain(text(name)),
@@ -300,12 +342,9 @@ fn refusal(
             _ => return Some(Refusal::NameTaken(text(name))),
         }
         // In the catalog, offline photos too.
-        let named = folder
-            .catalog
-            .iter()
-            .filter(|(id, n)| *n == key(name) && !family.contains(id));
+        let named = folder.catalog.get(&key(name)).into_iter().flatten();
         let mut chain = false;
-        for (id, _) in named {
+        for id in named.filter(|id| !family.contains(id)) {
             if !rows.contains(id) {
                 return Some(Refusal::NameTaken(text(name)));
             }
@@ -331,6 +370,7 @@ fn refusal(
                 .filter_map(|k| k.file_name().map(OsString::from)),
         )
         .collect();
+    // Its own names there are gone once it is renamed.
     let own: Vec<&OsStr> = item
         .members
         .iter()
@@ -338,14 +378,11 @@ fn refusal(
         .chain(item.kept.iter().map(PathBuf::as_path))
         .filter_map(Path::file_name)
         .collect();
-    let projected: Vec<OsString> = folder
-        .listing
-        .iter()
-        .filter(|n| !own.contains(&n.as_os_str()))
-        .chain(arriving)
-        .cloned()
-        .collect();
-    companions::arrival_conflict(photo, &carried, &projected)
+    let names = folder.projected.names();
+    let gone = |i: usize| i < folder.listed && own.contains(&names[i].as_os_str());
+    folder
+        .projected
+        .arrival_conflict(photo, &carried, &gone)
         .map(|n| Refusal::CompanionClash(text(&n)))
 }
 
@@ -379,31 +416,24 @@ impl RenameOrder {
 }
 
 /// `photos`, given in the Library's order, in the order a batch rename
-/// numbers them: by capture time (the catalog's, else read from the file,
-/// and kept nowhere), photos taken at one time in the order given; then
-/// those whose time isn't known, by filename. A virtual copy goes with its
-/// master when that is given too. Stops between files once `cancel` is set.
-pub fn rename_order(
-    catalog: &Catalog,
-    photos: &[PhotoId],
-    cancel: &AtomicBool,
-) -> Result<RenameOrder, FileOpError> {
+/// numbers them: by the capture time the catalog has, photos taken at one
+/// time in the order given; then those it has none for, by filename. A
+/// virtual copy goes with its master when that is given too. Reads no file:
+/// a photo whose time the background reads haven't filled in yet is
+/// undated.
+pub fn rename_order(catalog: &Catalog, photos: &[PhotoId]) -> Result<RenameOrder, FileOpError> {
     row! {
         struct Dated {
             id: PhotoId,
-            folder: super::super::FolderId,
             filename: String,
             master: Option<PhotoId>,
             captured: String,
         }
     }
-    let (rows, folders) = catalog.db.snapshot(|s| {
-        let rows: Vec<Dated> = s.read(
-            sql!("SELECT id, folder, filename, master_id, captured FROM photos"),
-            &[],
-        )?;
-        Ok((rows, catalog.locate_folders(s)?))
-    })?;
+    let rows: Vec<Dated> = catalog.db.read(
+        sql!("SELECT id, filename, master_id, captured FROM photos"),
+        &[],
+    )?;
     let by_id: HashMap<PhotoId, &Dated> = rows.iter().map(|r| (r.id, r)).collect();
     let given: HashSet<PhotoId> = photos.iter().copied().collect();
     let mut seen = HashSet::new();
@@ -423,22 +453,10 @@ pub fn rename_order(
         if row.master.is_some_and(|m| given.contains(&m)) {
             continue;
         }
-        let captured = match row.captured.as_str() {
-            "" => {
-                if cancel.load(Ordering::Relaxed) {
-                    return Err(FileOpError::Cancelled);
-                }
-                folders
-                    .get(&row.folder)
-                    .and_then(|f| f.path.as_ref())
-                    .and_then(|dir| crate::exif::capture_time(&dir.join(&row.filename)))
-            }
-            text => Some(text.to_string()),
-        };
         ordered.push(Ordered {
             photo: *id,
             filename: row.filename.clone(),
-            captured,
+            captured: Some(row.captured.clone()).filter(|c| !c.is_empty()),
         });
     }
     // Stable: ties keep the order given.
