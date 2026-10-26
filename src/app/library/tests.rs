@@ -571,8 +571,8 @@ fn a_folder_s_menu_turns_subfolders_off_and_its_count_follows() {
         path: PathBuf::from("/missing").join(relative),
         count,
     };
-    root.insert(&folder(1, "", 2));
-    root.insert(&folder(2, "day1", 3));
+    root.insert(&folder(1, "", 2), &HashMap::new());
+    root.insert(&folder(2, "day1", 3), &HashMap::new());
     root.finish();
     let (labels, action) = tree_menu(&root, "Show Photos in Subfolders", true);
     assert!(
@@ -686,13 +686,16 @@ fn batched_availability_distinguishes_files_directories_and_missing_paths() -> R
 fn hierarchy_includes_unregistered_parents_and_descendant_counts() {
     let mut root = FolderNode::root(RootId(1), "Photos".into(), "/old".into());
     for (id, relative, count) in [(10, "2026/09/Trip/", 2), (11, "2026/10/", 3)] {
-        root.insert(&Folder {
-            id: FolderId(id),
-            root: RootId(1),
-            relative: relative.into(),
-            path: PathBuf::from("/old").join(relative),
-            count,
-        });
+        root.insert(
+            &Folder {
+                id: FolderId(id),
+                root: RootId(1),
+                relative: relative.into(),
+                path: PathBuf::from("/old").join(relative),
+                count,
+            },
+            &HashMap::new(),
+        );
     }
     root.finish();
     assert_eq!(root.count, 5);
@@ -2786,7 +2789,7 @@ fn the_folders_panel_groups_roots_by_the_drive_found_for_them() -> Result<()> {
     };
     frame(&mut library);
     library.volumes.wait();
-    let root = library.root_paths().remove(0);
+    let root = library.anchors().remove(0).2;
     let image = crate::platform::volume::Volume {
         name: "RMK590".into(),
         mount: Some(root.parent().unwrap().into()),
@@ -2795,6 +2798,88 @@ fn the_folders_panel_groups_roots_by_the_drive_found_for_them() -> Result<()> {
         .volumes
         .set_seen(volumes::Seen::from([(root, image.clone())]));
     assert_eq!(frame(&mut library), vec![image]);
+    Ok(())
+}
+
+#[test]
+fn a_folder_located_on_another_drive_shows_under_that_drive() -> Result<()> {
+    // #678: a folder holding only folders, located on another drive, showed
+    // under its root's drive, at the path below its root.
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("disk/2026");
+    let card = |folder: &std::path::Path| -> Result<()> {
+        let card = folder.join("RAW/Card 1");
+        std::fs::create_dir_all(&card)?;
+        std::fs::write(card.join("a.RAF"), b"synthetic raw")?;
+        Ok(())
+    };
+    card(&root.join("Wedding"))?;
+    card(&root.join("Party"))?;
+    let moved = directory.path().join("other/Wedding");
+    card(&moved)?;
+    let party = directory.path().join("disk/Elsewhere/Party");
+    card(&party)?;
+    let path = directory.path().join("library.rawmakase");
+    let mut catalog = Catalog::create(&path)?;
+    catalog.add_folder(&root)?;
+    let id = catalog.roots()?[0].0;
+    catalog.relink_folder_at(id, "Wedding", &moved, crate::catalog::Overrides::Keep)?;
+    catalog.relink_folder_at(id, "Party", &party, crate::catalog::Overrides::Keep)?;
+    drop(catalog);
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let ctx = library.ctx.clone();
+    let frame = |library: &mut Library| {
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            egui::Panel::left("sidebar").show(ui, |ui| library.sidebar(ui));
+        });
+        output.textures_delta.clear();
+        library.sidebar_trees.clone().expect("the sidebar's trees")
+    };
+    frame(&mut library);
+    library.volumes.wait();
+    let drive = |name: &str, mount: &std::path::Path| crate::platform::volume::Volume {
+        name: name.into(),
+        mount: Some(mount.into()),
+    };
+    let disk = drive("Disk", &directory.path().join("disk"));
+    let other = drive("Other", &directory.path().join("other"));
+    // By the paths the catalog keeps (canonical: /private/var on macOS,
+    // \\?\ on Windows), as the drives are found for them.
+    let at: HashMap<String, PathBuf> = library
+        .anchors()
+        .into_iter()
+        .map(|(_, logical, path)| (logical, path))
+        .collect();
+    let (moved, party) = (at["Wedding"].clone(), at["Party"].clone());
+    library.volumes.set_seen(volumes::Seen::from([
+        (at[""].clone(), disk.clone()),
+        (moved.clone(), other.clone()),
+        (party.clone(), disk.clone()),
+    ]));
+    let trees = frame(&mut library);
+    let shown: Vec<(crate::platform::volume::Volume, Vec<String>)> = trees
+        .drive_trees()
+        .into_iter()
+        .map(|(volume, trees)| (volume, trees.iter().map(|t| t.key.clone()).collect()))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            (disk, vec![format!("root:{id}")]),
+            (other, vec![format!("root:{id}/Wedding")]),
+        ]
+    );
+    let drives = trees.drive_trees();
+    let (root_tree, wedding) = (drives[0].1[0], drives[1].1[0]);
+    assert_eq!(root_tree.children.keys().collect::<Vec<_>>(), vec!["Party"]);
+    // Where it is, down to the folder of folders below it.
+    assert_eq!(wedding.path, moved);
+    assert_eq!(wedding.children["RAW"].path, moved.join("RAW"));
+    assert_eq!(wedding.count, 1);
+    // One elsewhere on its root's drive stays in its root.
+    assert_eq!(root_tree.children["Party"].path, party);
+    // Each drive counts the photos on it.
+    assert_eq!(trees.drive_photos(), vec![1, 1]);
     Ok(())
 }
 
@@ -3398,13 +3483,16 @@ fn a_folder_s_menu_offers_move_to_trash_and_a_root_s_doesnt() {
 fn a_folder_holding_only_folders_can_be_located() {
     use crate::catalog::FolderId;
     let mut root = FolderNode::root(RootId(42), "2026".into(), "/missing".into());
-    root.insert(&Folder {
-        id: FolderId(1),
-        root: RootId(42),
-        relative: "Wedding/RAW/Card 1".into(),
-        path: PathBuf::from("/missing/Wedding/RAW/Card 1"),
-        count: 3,
-    });
+    root.insert(
+        &Folder {
+            id: FolderId(1),
+            root: RootId(42),
+            relative: "Wedding/RAW/Card 1".into(),
+            path: PathBuf::from("/missing/Wedding/RAW/Card 1"),
+            count: 3,
+        },
+        &HashMap::new(),
+    );
     root.finish();
     let wedding = &root.children["Wedding"];
     assert!(wedding.folder.is_none(), "no catalog folder of its own");

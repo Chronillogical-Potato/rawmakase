@@ -3,7 +3,8 @@ use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::catalog::{Folder, FolderId, PhotoId, RootId};
 use eframe::egui::{self, Vec2};
-use std::{collections::HashSet, path::PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 #[derive(Default)]
 pub(super) struct FolderNode {
     pub(super) key: String,
@@ -30,16 +31,21 @@ impl FolderNode {
             ..Default::default()
         }
     }
-    pub(super) fn insert(&mut self, f: &Folder) {
+    /// Adds folder `f` to this root's tree, with the folders above it.
+    /// `located` is where folders of the root are apart from it, by logical
+    /// path: a folder above `f` with no catalog folder of its own is there.
+    pub(super) fn insert(&mut self, f: &Folder, located: &HashMap<&str, &Path>) {
         let mut node = self;
         for component in f.relative.split('/').filter(|c| !c.is_empty()) {
             let key = format!("{}/{}", node.key, component);
-            let path = node.path.join(component);
             let in_root = node.in_root;
             let logical = match node.logical.as_str() {
                 "" => component.to_string(),
                 parent => format!("{parent}/{component}"),
             };
+            let path = located
+                .get(logical.as_str())
+                .map_or_else(|| node.path.join(component), |p| p.to_path_buf());
             node = node
                 .children
                 .entry(component.into())
@@ -55,6 +61,25 @@ impl FolderNode {
         node.folder = Some(f.id);
         node.own_count += f.count;
         node.path = f.path.clone();
+    }
+    /// Takes the folder at logical path `logical` below this root out of
+    /// its tree, with the folders in it.
+    pub(super) fn detach(&mut self, logical: &str) -> Option<FolderNode> {
+        let (parent, name) = logical.rsplit_once('/').unwrap_or(("", logical));
+        let mut node = self;
+        for component in parent.split('/').filter(|c| !c.is_empty()) {
+            node = node.children.get_mut(component)?;
+        }
+        node.children.remove(name)
+    }
+    /// The photos of this folder and the folders still in its tree.
+    pub(super) fn photos_in_tree(&self) -> usize {
+        self.own_count
+            + self
+                .children
+                .values()
+                .map(Self::photos_in_tree)
+                .sum::<usize>()
     }
     pub(super) fn finish(&mut self) {
         self.count = self.own_count;

@@ -60,10 +60,13 @@ fn load(file: &Path) -> Seen {
         .roots
         .into_iter()
         .map(|(root, d)| {
+            // Kept by 0.4.6 or earlier, perhaps as \\?\D:, which a root
+            // offline now would keep beside D: for a folder found there.
             let volume = Volume {
                 name: d.name,
                 mount: d.mount,
-            };
+            }
+            .plain();
             (PathBuf::from(root), volume)
         })
         .collect()
@@ -511,6 +514,36 @@ mod tests {
         assert_eq!(load(&file), seen);
         std::fs::write(&file, b"{\"roots\": 7}")?;
         assert!(load(&file).is_empty());
+        Ok(())
+    }
+    /// A Windows drive an earlier release kept as `\\?\D:` is `D:`, as
+    /// it is found now: a root offline keeps it, and another folder found
+    /// on that drive is on the same drive (#678).
+    #[test]
+    #[cfg(windows)]
+    fn a_windows_drive_kept_with_its_prefix_is_found_as_one() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let file = dir.path().join("drives.json");
+        let (offline, found) = (
+            PathBuf::from(r"\\?\D:\Card"),
+            PathBuf::from(r"D:\Elsewhere\Party"),
+        );
+        let old = Volume {
+            name: r"\\?\D:".into(),
+            mount: Some(r"\\?\D:\".into()),
+        };
+        save(&file, &Seen::from([(offline.clone(), old)]))?;
+        let d = crate::platform::volume::volume_of(&found);
+        let checked = survey(
+            &[offline.clone(), found.clone()],
+            &load(&file),
+            |p| (p == found.as_path()).then(|| d.clone()),
+            |_| true,
+            |_| None,
+        );
+        assert_eq!(drive_of(&checked.seen, &offline), d);
+        assert_eq!(drive_of(&checked.seen, &found), d);
+        assert_eq!(checked.online.len(), 1);
         Ok(())
     }
 }

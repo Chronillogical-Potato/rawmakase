@@ -13,10 +13,45 @@ pub(crate) struct Volume {
     pub mount: Option<PathBuf>,
 }
 
+impl Volume {
+    /// The drive as this release names it: one an earlier release kept
+    /// with Windows' `\\?\` prefix in its mount without it, as
+    /// [`volume_of`] and [`locate`] now name it. Its name changes only where
+    /// its path gave it (`\\?\D:` for the drive at `\\?\D:\`); a label
+    /// stays as it is, and so does every drive kept elsewhere than Windows.
+    pub(crate) fn plain(self) -> Volume {
+        let Some(kept) = self.mount.as_deref() else {
+            return self;
+        };
+        let mount = plain(kept);
+        if mount == kept {
+            return self;
+        }
+        // As 0.4.6's `volume_of` named a drive's root from its path.
+        let parts: Vec<Component> = kept.components().collect();
+        let by_path = match parts[..] {
+            [Component::Prefix(prefix), Component::RootDir]
+                if matches!(prefix.kind(), Prefix::VerbatimDisk(_)) =>
+            {
+                prefix.as_os_str().to_string_lossy().trim_end_matches('\\') == self.name
+            }
+            _ => false,
+        };
+        Volume {
+            name: if by_path {
+                volume_of(&mount).name
+            } else {
+                self.name
+            },
+            mount: Some(mount),
+        }
+    }
+}
 /// The volume `path` would be on, from its path alone: /Volumes/NAME on macOS, /media/USER/NAME,
 /// /run/media/USER/NAME or /mnt/NAME on Linux, a drive letter or UNC share
 /// on Windows, and otherwise the startup disk.
 pub(crate) fn volume_of(path: &Path) -> Volume {
+    let path = plain(path);
     let parts: Vec<Component> = path.components().collect();
     if let Some(Component::Prefix(prefix)) = parts.first() {
         let mount: PathBuf = parts.iter().take(2).collect();
@@ -64,6 +99,28 @@ pub(crate) fn volume_of(path: &Path) -> Volume {
         name: startup_name(),
         mount: None,
     })
+}
+/// `path` without Windows' `\\?\` prefix (`\\?\D:\x` is `D:\x`, and
+/// `\\?\UNC\nas\share\x` is `\\nas\share\x`), so a drive or share is
+/// one drive however its path is written: a root folder is kept canonical,
+/// a folder located in it as it was chosen. Any other path is as it is.
+fn plain(path: &Path) -> PathBuf {
+    let mut parts = path.components();
+    let start = match parts.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(letter) => format!("{}:\\", letter as char),
+            Prefix::VerbatimUNC(server, share) => format!(
+                "\\\\{}\\{}\\",
+                server.to_string_lossy(),
+                share.to_string_lossy()
+            ),
+            _ => return path.to_path_buf(),
+        },
+        _ => return path.to_path_buf(),
+    };
+    let mut plain = PathBuf::from(start);
+    plain.extend(parts.filter(|c| !matches!(c, Component::RootDir)));
+    plain
 }
 /// Whether the volume holding `path` is mounted, for headless commands with
 /// no volume checks of their own. The startup disk always is; another only
@@ -119,6 +176,7 @@ pub(crate) fn name_of_mount(mount: &Path) -> String {
 /// /run/media/USER/NAME, a drive letter) as it always has; any other by its
 /// label, or the mount point's name without one.
 fn drive_at(point: &Path, label: Option<&str>, startup: &[PathBuf]) -> Volume {
+    let point = &plain(point);
     let system = cfg!(target_os = "macos") && point.starts_with("/System/Volumes");
     if system || startup.iter().any(|s| s == point) {
         return Volume {
@@ -370,6 +428,48 @@ mod tests {
         assert_eq!(local.mount, None);
         assert_eq!(linux.name, "CARD");
         assert_eq!(linux.mount, Some(PathBuf::from("/run/media/me/CARD")));
+    }
+    /// Elsewhere than on Windows a drive kept is read as it was, even one
+    /// whose folder's name begins as Windows' `\\?\` prefix does.
+    #[test]
+    #[cfg(unix)]
+    fn a_unix_drive_kept_is_read_as_it_was() {
+        let drive = volume_of(Path::new(r"/mnt/\\?\Photos/2026"));
+        assert_eq!(drive.name, r"\\?\Photos");
+        assert_eq!(drive.clone().plain(), drive);
+    }
+    /// A drive or share is one drive whether its path is written with
+    /// Windows' `\\?\` prefix (a root folder, kept canonical) or without
+    /// it (a folder located as it was chosen, #678).
+    #[test]
+    #[cfg(windows)]
+    fn a_windows_drive_is_one_however_its_path_is_written() {
+        let drive = volume_of(Path::new(r"D:\Elsewhere\Party"));
+        assert_eq!(drive.name, "D:");
+        assert_eq!(drive.mount, Some(PathBuf::from(r"D:\")));
+        assert_eq!(volume_of(Path::new(r"\\?\D:\Photos\2026")), drive);
+        assert_eq!(drive_at(Path::new(r"\\?\D:\"), Some("Data"), &[]), drive);
+        assert_eq!(drive_at(Path::new(r"D:\"), Some("Data"), &[]), drive);
+        let share = volume_of(Path::new(r"\\nas\photos\Party"));
+        assert_eq!(share.name, r"nas\photos");
+        assert_eq!(share.mount, Some(PathBuf::from(r"\\nas\photos\")));
+        assert_eq!(volume_of(Path::new(r"\\?\UNC\nas\photos\2026")), share);
+        assert_eq!(
+            drive_at(Path::new(r"\\?\UNC\nas\photos\"), None, &[]),
+            share
+        );
+        // Kept by 0.4.6 as its path named it, it is named as now; the label
+        // of a drive mounted in a folder (any text, even this) stays.
+        let kept = |name: &str, mount: &str| Volume {
+            name: name.into(),
+            mount: Some(mount.into()),
+        };
+        assert_eq!(kept(r"\\?\D:", r"\\?\D:\").plain(), drive);
+        assert_eq!(kept(r"nas\photos", r"\\?\UNC\nas\photos\").plain(), share);
+        assert_eq!(
+            kept(r"\\?\Photos", r"\\?\C:\Mounted\Card\").plain(),
+            drive_at(Path::new(r"C:\Mounted\Card\"), Some(r"\\?\Photos"), &[])
+        );
     }
 }
 
