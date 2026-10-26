@@ -689,7 +689,7 @@ mod tests {
         assert!(shown.contains("Catalog: 1 photo, 1 folder\n"), "{shown}");
         let home_dir = std::env::var("HOME").unwrap_or_default();
         let login = std::env::var("USER").unwrap_or_default();
-        for secret in [
+        for private in [
             home.path().to_string_lossy().as_ref(),
             user,
             catalog_name,
@@ -706,7 +706,7 @@ mod tests {
         .chain((!home_dir.is_empty()).then_some(home_dir.as_str()))
         .chain((login.len() > 3).then_some(login.as_str()))
         {
-            assert!(!shown.contains(secret), "{secret:?} in {shown}");
+            assert!(!shown.contains(private), "{private:?} in {shown}");
         }
         Ok(())
     }
