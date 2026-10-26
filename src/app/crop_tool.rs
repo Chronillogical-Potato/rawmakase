@@ -396,10 +396,12 @@ impl super::Editor {
             }
         }
     }
-    /// Picks `aspect` from the Crop tool's menu: the crop takes it as the frame ends,
-    /// and uncropped photos open with it, here and after a relaunch.
+    /// Picks `aspect` from the Crop tool's menu: the crop takes it now, even when an
+    /// uncropped photo already opened with it, and uncropped photos open with it, here
+    /// and after a relaunch.
     pub(super) fn choose_aspect(&mut self, aspect: f32) {
         self.view.aspect = aspect;
+        self.fit_aspect();
         if aspect != self.view.chosen_aspect {
             self.view.chosen_aspect = aspect;
             let _ = self.save_session();

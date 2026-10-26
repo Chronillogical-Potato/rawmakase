@@ -3243,6 +3243,12 @@ fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()
     assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.25).abs() < 1e-3);
     // ...and is what the next uncropped photo starts from, without cropping it.
     assert_eq!(open(&mut editor, full), 1.25);
+    // Choosing it again from the menu crops that photo too.
+    let frame = editor.begin_edit_frame();
+    editor.choose_aspect(1.25);
+    editor.finish_edit_frame(frame, &ctx);
+    let c = editor.document.edit.recipe().crop;
+    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.25).abs() < 1e-3);
     // A cropped photo still shows its own aspect, and does not replace the choice.
     let xpan = [0., 0.223, 1., 0.777];
     assert_eq!(open(&mut editor, xpan), 65. / 24.);
