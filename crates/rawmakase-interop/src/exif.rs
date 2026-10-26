@@ -272,45 +272,58 @@ pub fn capture_time_of(dates: [(Option<String>, Option<String>); 3]) -> Option<S
 /// Camera, lens and exposure settings of a JPEG, TIFF, PNG, WebP, AVIF, JPEG XL or TIFF-based RAW
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
 pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
-    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
-    let text = |tag| {
-        exif.get(tag)
-            .and_then(Field::text)
-            .filter(|t| !t.is_empty())
-    };
-    let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
-    // Lightroom shows the model, which usually names the make too.
-    let camera = match (text(MAKE), text(MODEL)) {
-        (Some(make), Some(model)) if !model.starts_with(make.split(' ').next().unwrap_or("")) => {
-            Some(format!("{make} {model}"))
-        }
-        (make, model) => model.or(make),
-    };
-    let info = crate::metadata::PhotoInfo {
-        camera,
-        lens: text(LENS_MODEL),
-        focal: number(FOCAL_LENGTH),
-        // FNumber and ExposureTime, else their APEX values.
-        aperture: number(F_NUMBER).or_else(|| {
-            let av = exif.get(APERTURE_VALUE).and_then(Field::number)?;
-            Some(2f64.powf(av / 2.))
-        }),
-        exposure: number(EXPOSURE_TIME).or_else(|| {
-            let tv = exif.get(SHUTTER_SPEED_VALUE).and_then(Field::number)?;
-            Some(2f64.powf(-tv))
-        }),
-        iso: iso(&exif),
-        dimensions: None,
-    };
-    (info != Default::default()).then_some(info)
+    directories(path, |tag| tag == MAKE || tag == MODEL)?.photo_info()
 }
 
 /// The EXIF Make and Model of a JPEG, TIFF, PNG or TIFF-based RAW, trimmed, each
 /// empty when missing; `None` when the file has no EXIF at all.
 pub fn camera_names(path: &Path) -> Option<(String, String)> {
-    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
-    let text = |tag| exif.get(tag).and_then(Field::text).unwrap_or_default();
-    Some((text(MAKE), text(MODEL)))
+    Some(directories(path, |tag| tag == MAKE || tag == MODEL)?.camera_names())
+}
+
+impl CameraExif {
+    /// The camera, lens and exposure settings [`photo_info`] reads, of
+    /// these directories; `None` when they have none.
+    pub fn photo_info(&self) -> Option<crate::metadata::PhotoInfo> {
+        let exif = self;
+        let text = |tag| {
+            exif.get(tag)
+                .and_then(Field::text)
+                .filter(|t| !t.is_empty())
+        };
+        let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
+        // Lightroom shows the model, which usually names the make too.
+        let camera = match (text(MAKE), text(MODEL)) {
+            (Some(make), Some(model))
+                if !model.starts_with(make.split(' ').next().unwrap_or("")) =>
+            {
+                Some(format!("{make} {model}"))
+            }
+            (make, model) => model.or(make),
+        };
+        let info = crate::metadata::PhotoInfo {
+            camera,
+            lens: text(LENS_MODEL),
+            focal: number(FOCAL_LENGTH),
+            // FNumber and ExposureTime, else their APEX values.
+            aperture: number(F_NUMBER).or_else(|| {
+                let av = exif.get(APERTURE_VALUE).and_then(Field::number)?;
+                Some(2f64.powf(av / 2.))
+            }),
+            exposure: number(EXPOSURE_TIME).or_else(|| {
+                let tv = exif.get(SHUTTER_SPEED_VALUE).and_then(Field::number)?;
+                Some(2f64.powf(-tv))
+            }),
+            iso: iso(exif),
+            dimensions: None,
+        };
+        (info != Default::default()).then_some(info)
+    }
+    /// Make and Model, as [`camera_names`] reads them.
+    pub fn camera_names(&self) -> (String, String) {
+        let text = |tag| self.get(tag).and_then(Field::text).unwrap_or_default();
+        (text(MAKE), text(MODEL))
+    }
 }
 
 /// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
