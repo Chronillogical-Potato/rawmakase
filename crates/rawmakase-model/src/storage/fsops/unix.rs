@@ -322,11 +322,23 @@ pub(super) fn read_extra(path: &Path, name: &OsStr) -> Result<Vec<u8>, FsError> 
     }
 }
 
-/// Gives `path` the extended attribute `name`, replacing one it has.
+/// Gives `path` the extended attribute `name`, replacing one it has:
+/// through `file`, a handle to it, where given (a resource fork and
+/// FinderInfo too on macOS, whose `fsetxattr(2)` takes them as
+/// `setxattr(2)` does).
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
-pub(super) fn write_extra(path: &Path, name: &OsStr, value: &[u8]) -> Result<(), FsError> {
-    use rustix::fs::{XattrFlags, lsetxattr};
-    lsetxattr(path, name, value, XattrFlags::empty()).map_err(io)
+pub(super) fn write_extra(
+    path: &Path,
+    file: Option<&std::fs::File>,
+    name: &OsStr,
+    value: &[u8],
+) -> Result<(), FsError> {
+    use rustix::fs::{XattrFlags, fsetxattr, lsetxattr};
+    match file {
+        Some(file) => fsetxattr(file, name, value, XattrFlags::empty()),
+        None => lsetxattr(path, name, value, XattrFlags::empty()),
+    }
+    .map_err(io)
 }
 
 /// Other Unix systems: no extended attributes rustix reaches, so what a
@@ -342,7 +354,12 @@ pub(super) fn read_extra(_path: &Path, _name: &OsStr) -> Result<Vec<u8>, FsError
 }
 
 #[cfg(not(any(target_vendor = "apple", target_os = "linux", target_os = "android")))]
-pub(super) fn write_extra(_path: &Path, _name: &OsStr, _value: &[u8]) -> Result<(), FsError> {
+pub(super) fn write_extra(
+    _path: &Path,
+    _file: Option<&std::fs::File>,
+    _name: &OsStr,
+    _value: &[u8],
+) -> Result<(), FsError> {
     Err(FsError::Unsupported)
 }
 

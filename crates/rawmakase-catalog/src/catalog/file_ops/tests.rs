@@ -468,22 +468,28 @@ macro_rules! passes_on {
         ) -> Result<std::time::SystemTime, crate::storage::fsops::FsError> {
             self.$inner.created(path)
         }
-        fn sync_file(&self, path: &std::path::Path) -> Result<(), crate::storage::fsops::FsError> {
-            self.$inner.sync_file(path)
+        fn sync_file(
+            &self,
+            at: &std::path::Path,
+            file: &std::fs::File,
+        ) -> Result<(), crate::storage::fsops::FsError> {
+            self.$inner.sync_file(at, file)
         }
         fn copy_extras(
             &self,
             from: &std::path::Path,
             to: &std::path::Path,
+            into: Option<&std::fs::File>,
         ) -> Result<(), crate::storage::fsops::FsError> {
-            self.$inner.copy_extras(from, to)
+            self.$inner.copy_extras(from, to, into)
         }
         fn copy_times(
             &self,
             from: &std::path::Path,
             to: &std::path::Path,
+            into: Option<&std::fs::File>,
         ) -> Result<(), crate::storage::fsops::FsError> {
-            self.$inner.copy_times(from, to)
+            self.$inner.copy_times(from, to, into)
         }
         fn extras(
             &self,
@@ -621,6 +627,11 @@ pub(super) struct Faulty {
     /// `swapped`.
     pub swap_after_create: Option<Vec<u8>>,
     pub swapped: RefCell<Option<PathBuf>>,
+    /// Just before the first call of this kind on a file `elsewhere`,
+    /// another file with these bytes, dated 2001, takes that file's name
+    /// (another computer, on a share), the file there moved aside; where,
+    /// is kept in `swapped`.
+    pub swap_before: Option<(Op, Vec<u8>)>,
     /// Set once a copy wrote its first chunk, as Stop pressed then.
     pub stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Folders whose volume says its file ids can't be proven, as network
@@ -747,6 +758,28 @@ impl Faulty {
         {
             std::fs::remove_file(double).unwrap();
         }
+    }
+    /// Swaps the file at `path` for another, if `swap_before` asks it
+    /// at this call of kind `op`.
+    fn swap(&self, op: Op, path: &Path) {
+        let Some((at_op, theirs)) = &self.swap_before else {
+            return;
+        };
+        let at = self.found(path);
+        if *at_op != op || self.swapped.borrow().is_some() || !self.far(path) || !at.is_file() {
+            return;
+        }
+        // Moved aside rather than removed, as `swap_after_create`.
+        std::fs::rename(&at, at.with_extension("aside")).unwrap();
+        std::fs::write(&at, theirs).unwrap();
+        let dated = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&at)
+            .unwrap()
+            .set_modified(dated)
+            .unwrap();
+        *self.swapped.borrow_mut() = Some(at);
     }
     /// Whether `path` is on the `names_only` volume.
     fn fat(&self, path: &Path) -> bool {
@@ -937,7 +970,7 @@ impl Disk for Faulty {
         // matrix proves. `sync_file` is FlushFileBuffers on NTFS; `sync_dir`
         // is an fsync on Unix and only an existence check on Windows.
         // Opening still fails when the folder is missing, as `sync_dir` does.
-        self.step(Op::Sync, || opened_without_flush(&self.found(dir), false))
+        self.step(Op::Sync, || opened_without_flush(&self.found(dir)))
     }
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
         Real.canonical(&self.found(path))
@@ -1056,19 +1089,26 @@ impl Disk for Faulty {
             false => id,
         })
     }
-    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
-        self.record(Call::SyncFile(path.into()));
-        self.step(Op::SyncFile, || {
-            opened_without_flush(&self.found(path), true)
-        })
+    fn sync_file(&self, at: &Path, _file: &std::fs::File) -> Result<(), FsError> {
+        self.record(Call::SyncFile(at.into()));
+        self.swap(Op::SyncFile, at);
+        // Not flushed: these crashes are panics in this process, not power
+        // loss (see `sync_dir`).
+        self.step(Op::SyncFile, || Ok(()))
     }
-    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+    fn copy_extras(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
         self.record(Call::CopyExtras(to.into()));
+        self.swap(Op::CopyExtras, to);
         let (from, to) = (&self.found(from), &self.found(to));
         self.step(Op::CopyExtras, || {
             match self.keeps_no_extras && self.far(to) {
                 true => Err(FsError::Unsupported),
-                false => Real.copy_extras(from, to),
+                false => Real.copy_extras(from, to, into),
             }
         })
     }
@@ -1091,16 +1131,22 @@ impl Disk for Faulty {
             _ => Ok(found),
         }
     }
-    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+    fn copy_times(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
         self.record(Call::CopyTimes(to.into()));
+        self.swap(Op::CopyTimes, to);
         let (from, to) = (&self.found(from), &self.found(to));
         if let Some(double) = self.apple_double_of(to) {
             std::fs::write(double, APPLE_DOUBLE).unwrap();
         }
         self.step(Op::CopyTimes, || {
-            Real.copy_times(from, to)?;
-            if let (Some(step), false) = (self.coarse, to.is_dir()) {
-                let at = std::fs::metadata(to)?.modified()?;
+            Real.copy_times(from, to, into)?;
+            if let (Some(step), Some(into)) = (self.coarse, into) {
+                let at = into.metadata()?.modified()?;
                 let ns = at.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
                 let cut = ns - ns % u128::from(step);
                 let cut = std::time::UNIX_EPOCH
@@ -1108,10 +1154,7 @@ impl Disk for Faulty {
                         (cut / 1_000_000_000) as u64,
                         (cut % 1_000_000_000) as u32,
                     );
-                std::fs::File::options()
-                    .write(true)
-                    .open(to)?
-                    .set_modified(cut)?;
+                into.set_modified(cut)?;
             }
             Ok(())
         })
@@ -1122,6 +1165,7 @@ impl Disk for Faulty {
     }
     fn remove_file(&self, path: &Path) -> Result<(), FsError> {
         self.record(Call::RemoveFile(path.into()));
+        self.swap(Op::RemoveFile, path);
         if self.refuses_decomposed(path) {
             return self.step(Op::RemoveFile, || Err(FsError::NotFound));
         }
@@ -1184,20 +1228,10 @@ pub(super) fn keeps_extras(dir: &Path) -> bool {
         || volume_facts(dir).is_ok_and(|f| !matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat))
 }
 
-/// Opens `path` the way the real sync does, and does not flush.
-///
-/// `file` follows `sync_file` (a read handle on Unix, a write handle on
-/// Windows, so a read-only copy still syncs where the real call would).
-/// A folder follows `sync_dir`: open it on Unix, and on Windows only check
-/// that it is a folder, because a folder cannot be opened there.
-fn opened_without_flush(path: &Path, file: bool) -> Result<(), FsError> {
-    if file {
-        #[cfg(unix)]
-        std::fs::File::open(path)?;
-        #[cfg(not(unix))]
-        std::fs::OpenOptions::new().write(true).open(path)?;
-        return Ok(());
-    }
+/// Opens folder `path` the way the real `sync_dir` does, and does not
+/// flush: opens it on Unix, and on Windows only checks that it is a
+/// folder, because a folder cannot be opened there.
+fn opened_without_flush(path: &Path) -> Result<(), FsError> {
     #[cfg(unix)]
     {
         std::fs::File::open(path)?;

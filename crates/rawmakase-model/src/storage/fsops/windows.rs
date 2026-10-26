@@ -254,8 +254,16 @@ pub(super) fn read_extra(path: &Path, name: &OsStr) -> Result<Vec<u8>, FsError> 
 
 /// Gives `path` the alternate data stream `name` holding `value`, durably,
 /// replacing one it has. [`FsError::Unsupported`] where its volume keeps
-/// none, which takes the stream's name for an invalid one.
-pub(super) fn write_extra(path: &Path, name: &OsStr, value: &[u8]) -> Result<(), FsError> {
+/// none, which takes the stream's name for an invalid one. By its path,
+/// whatever handle to it there is: Win32 opens a stream only so (`NtCreateFile`
+/// would open one relative to a handle), and a copy to a share, where
+/// another computer could put a file at its name, is refused on Windows.
+pub(super) fn write_extra(
+    path: &Path,
+    _file: Option<&std::fs::File>,
+    name: &OsStr,
+    value: &[u8],
+) -> Result<(), FsError> {
     use std::io::Write as _;
     let written = std::fs::OpenOptions::new()
         .write(true)

@@ -583,7 +583,7 @@ fn build(
             .ok_or_else(|| Problem::Disk("a folder wasn't made".into()))?;
         let source = tree.source.join(&e.rel);
         let extras = disk.extras(&source).map_err(problem)?;
-        copy::carry_extras(disk, &source, dir, extras)?;
+        copy::carry_extras(disk, &source, (dir, None), extras)?;
         disk.sync_dir(dir).map_err(problem)?;
     }
     let (Some(hidden), Some(top)) = (made.get(Path::new("")), top) else {
@@ -1114,7 +1114,7 @@ fn finish(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, recovering: bool) -> 
         }
         let timed = match emptied(&m.source) {
             true => Ok(()),
-            false => disk.copy_times(&m.source, &at),
+            false => disk.copy_times(&m.source, &at, None),
         };
         if let Err(e) = timed {
             let why = format!("its dates and permissions couldn't be given to its copy: {e}");

@@ -2411,3 +2411,61 @@ fn another_spelling_of_a_name_is_taken_only_for_the_same_file() -> Result<()> {
     }
     Ok(())
 }
+
+/// A file another computer puts at a copy's name while it is given its
+/// original's extras, time and permissions takes none of them: they go
+/// through the handle the copy was made through, never by its name (#675).
+/// The copy then reads back otherwise, and the move changes nothing.
+#[test]
+fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Result<()> {
+    let mut kinds = Far::by_names();
+    kinds.push(Far::Ids);
+    for kind in kinds {
+        for step in [Op::SyncFile, Op::CopyExtras, Op::CopyTimes] {
+            let what = format!("{kind:?} {step:?}");
+            let mut fx = files();
+            let rows = fx.rows();
+            if !tagged(&fx.root.join("A.NEF"), "com.rawmakase.test", b"synthetic") {
+                return Ok(());
+            }
+            let plain = fx.dir.path().join("plain");
+            std::fs::write(&plain, b"")?;
+            let disk = Faulty {
+                swap_before: Some((step, b"theirs".to_vec())),
+                ..far_as(&fx, kind)
+            };
+            let trash = trash_as(&fx, kind);
+            let op = to_far(&fx, &["A.NEF"]);
+            let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+            let theirs = disk
+                .swapped
+                .borrow()
+                .clone()
+                .expect("a file was swapped in");
+            assert_eq!(std::fs::read(&theirs)?, b"theirs", "{what}");
+            assert_eq!(
+                fsops::extras(&theirs)?,
+                fsops::extras(&plain)?,
+                "{what}: its extras"
+            );
+            let dated = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+            assert_eq!(
+                std::fs::metadata(&theirs)?.modified()?,
+                dated,
+                "{what}: its time"
+            );
+            assert!(
+                matches!(
+                    results(&outcome)[..],
+                    [ItemResult::NeedsRecovery(_) | ItemResult::Unchanged(_)]
+                ),
+                "{what}: {outcome:?}"
+            );
+            assert_eq!(fx.rows(), rows, "{what}");
+            for name in ["A.NEF", "A.xmp"] {
+                assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name), "{what}");
+            }
+        }
+    }
+    Ok(())
+}

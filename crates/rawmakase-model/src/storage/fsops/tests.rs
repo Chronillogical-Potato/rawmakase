@@ -440,10 +440,11 @@ fn a_copy_takes_the_sources_time_and_permissions() {
     }
     let mut into = create_file(&b).unwrap();
     copy_into(&a, &mut into, &mut |_| true).unwrap();
-    sync_file(&b).unwrap();
-    copy_times(&a, &b).unwrap();
-    // Read-only now, and still synced.
-    sync_file(&b).unwrap();
+    sync_file(&into).unwrap();
+    copy_times(&a, &b, Some(&into)).unwrap();
+    // Read-only now, and still synced through the handle it was made by.
+    sync_file(&into).unwrap();
+    drop(into);
     let (source, copy) = (fs::metadata(&a).unwrap(), fs::metadata(&b).unwrap());
     assert_eq!(copy.modified().unwrap(), source.modified().unwrap());
     assert_eq!(copy.modified().unwrap(), when);
@@ -520,7 +521,7 @@ fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
         }
         // A file made has a birth time, near now.
         let c = d.path().join("c.NEF");
-        create_file(&c).unwrap();
+        let into = create_file(&c).unwrap();
         let born = created(&c).unwrap();
         let off = born
             .duration_since(std::time::SystemTime::now())
@@ -532,7 +533,7 @@ fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
         let tagged = home.path().join("tagged");
         fs::write(&tagged, b"t").unwrap();
         set_extra(&tagged, "tag", b"Red").unwrap();
-        let kept = copy_extras(&tagged, &c);
+        let kept = copy_extras(&tagged, &c, Some(&into));
         if cfg!(target_vendor = "apple") {
             assert!(kept.is_ok(), "{shown}: {kept:?}");
             assert_eq!(extras(&c).unwrap(), extras(&tagged).unwrap(), "{shown}");
@@ -544,7 +545,7 @@ fn fat_and_exfat_volumes_are_told_and_have_no_stable_ids() {
         }
         let folder = d.path().join("folder");
         create_dir(&folder).unwrap();
-        copy_times(home.path(), &folder).unwrap();
+        copy_times(home.path(), &folder, None).unwrap();
     }
 }
 
@@ -603,12 +604,12 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     let mut into = create_file(&copy).unwrap();
     set_extra(&source, "com.rawmakase.test", b"synthetic").unwrap();
     let content = copy_into(&source, &mut into, &mut |_| true).unwrap();
-    drop(into);
-    sync_file(&copy).unwrap();
+    sync_file(&into).unwrap();
     // Its extras, as a move gives them, between the two.
-    copy_extras(&source, &copy).unwrap();
+    copy_extras(&source, &copy, Some(&into)).unwrap();
     assert_eq!(extras(&copy).unwrap(), extras(&source).unwrap());
-    copy_times(&source, &copy).unwrap();
+    copy_times(&source, &copy, Some(&into)).unwrap();
+    drop(into);
     assert_eq!(hash_file(&copy).unwrap(), content);
     // Its folders sync, though they take no full sync (ENOTSUP).
     sync_dir(d.path()).unwrap();
@@ -622,6 +623,59 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     };
     let (kept, was) = (ns(&copy), ns(&source));
     assert!(kept.abs_diff(was) < 100, "{shown}: {kept} {was}");
+    // Not tested here: what another computer puts at a copy's name while it
+    // is finished. Linux's CIFS sends an extended attribute by its name
+    // whatever handle it is given, and times too once it has looked the
+    // name up again: through a second mount, another file put there took
+    // both (Linux 7.2 against Samba 4.22, #675).
+}
+
+/// What a copy is given after its bytes goes to the file made, through
+/// the handle it was made through, never to another file put at its name
+/// meanwhile (#675); but for an alternate data stream on Windows, written
+/// by path. (Linux's CIFS doesn't keep to the handle: see
+/// `an_smb_share_is_told_and_makes_files_only_where_none_is`.)
+#[test]
+fn a_copy_is_finished_through_its_handle_whatever_is_at_its_name() {
+    let d = dir();
+    let (source, at) = (d.path().join("a.NEF"), d.path().join("b.NEF"));
+    fs::write(&source, b"synthetic raw").unwrap();
+    let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_600_000_000, 0);
+    let opened = fs::File::options().write(true).open(&source).unwrap();
+    opened.set_modified(when).unwrap();
+    drop(opened);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).unwrap();
+    }
+    let _ = tagged(&source, "tag", b"Red");
+    let mut into = create_file(&at).unwrap();
+    copy_into(&source, &mut into, &mut |_| true).unwrap();
+    // Another file takes its name.
+    let aside = d.path().join("b.aside");
+    fs::rename(&at, &aside).unwrap();
+    fs::write(&at, b"theirs").unwrap();
+    let theirs = extras(&at).unwrap();
+    sync_file(&into).unwrap();
+    copy_extras(&source, &at, Some(&into)).unwrap();
+    copy_times(&source, &at, Some(&into)).unwrap();
+    drop(into);
+    let modified = |p: &Path| fs::metadata(p).unwrap().modified().unwrap();
+    assert_eq!(fs::read(&at).unwrap(), b"theirs");
+    assert_ne!(modified(&at), when);
+    assert_eq!(modified(&aside), when);
+    if !cfg!(windows) {
+        assert_eq!(extras(&at).unwrap(), theirs);
+        assert_eq!(extras(&aside).unwrap(), extras(&source).unwrap());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&aside), 0o640);
+        assert_ne!(mode(&at), 0o640);
+    }
 }
 
 #[test]
@@ -752,15 +806,15 @@ fn a_copy_carries_its_originals_extras_and_tells_them_apart() {
     );
     fs::write(&a, b"synthetic raw").unwrap();
     fs::write(&c, b"synthetic raw").unwrap();
-    create_file(&b).unwrap();
+    let into = create_file(&b).unwrap();
     // None to carry: the same as a file with none.
-    copy_extras(&a, &b).unwrap();
+    copy_extras(&a, &b, Some(&into)).unwrap();
     assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
     if !tagged(&a, "tag", b"Red") || !tagged(&a, "where", &[0, 1, 2, 255]) {
         return;
     }
     assert_ne!(extras(&a).unwrap(), extras(&b).unwrap());
-    copy_extras(&a, &b).unwrap();
+    copy_extras(&a, &b, Some(&into)).unwrap();
     assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
     // Another value, or another name, is another set.
     assert!(tagged(&c, "tag", b"Blue") && tagged(&c, "where", &[0, 1, 2, 255]));
@@ -791,12 +845,12 @@ fn a_folder_takes_its_originals_extras_dates_and_permissions() {
         .unwrap();
     let when = fs::metadata(&a).unwrap().modified().unwrap();
     if carried {
-        copy_extras(&a, &b).unwrap();
+        copy_extras(&a, &b, None).unwrap();
         assert_eq!(extras(&a).unwrap(), extras(&b).unwrap());
         // Named with a separator after it, the same folder.
         assert_eq!(extras(&a.join("")).unwrap(), extras(&a).unwrap());
     }
-    copy_times(&a, &b).unwrap();
+    copy_times(&a, &b, None).unwrap();
     let copy = fs::metadata(&b).unwrap();
     assert_eq!(copy.modified().unwrap(), when);
     #[cfg(unix)]
@@ -820,8 +874,9 @@ fn a_resource_fork_and_finder_info_are_carried_and_compared() {
     let mut info = [0u8; 32];
     info[8] = 0x04; // kHasCustomIcon
     set_extra(&icon, "com.apple.FinderInfo", &info).unwrap();
-    create_file(&copy).unwrap();
-    copy_extras(&icon, &copy).unwrap();
+    // Through the handle it was made by, as a move gives them.
+    let into = create_file(&copy).unwrap();
+    copy_extras(&icon, &copy, Some(&into)).unwrap();
     assert_eq!(fs::read(copy.join("..namedfork/rsrc")).unwrap(), fork);
     assert_eq!(extras(&icon).unwrap(), extras(&copy).unwrap());
     assert_eq!(fs::read(&copy).unwrap(), b"");

@@ -10,7 +10,8 @@
 //!    (stopping between chunks when the run is stopped), the hash
 //!    journalled, synced, given the original's extras (extended
 //!    attributes: Finder tags, FinderInfo, a resource fork; alternate data
-//!    streams on Windows), time and permission bits, and synced again;
+//!    streams on Windows), time and permission bits, and synced again,
+//!    each through the handle it was made through (#675);
 //! 3. read back and compared with the hash, its extras with the
 //!    original's, and the original checked to be the file object and
 //!    `Identity` journalled, with the extras it had before they were copied;
@@ -127,15 +128,16 @@ pub(super) fn extras_differ(disk: &dyn Disk, original: &Path, copy: &Path) -> Op
 /// Gives file or folder `to` the extras of `from`, read as `extras`, and
 /// checks them there: [`Problem::Changed`] when `from`'s are no longer
 /// those, [`Problem::ExtrasNotKept`] when `to`'s volume can't keep them or
-/// reads back others.
+/// reads back others. A file's through `into`, the handle it was made
+/// through, where given.
 pub(super) fn carry_extras(
     disk: &dyn Disk,
     from: &Path,
-    to: &Path,
+    (to, into): (&Path, Option<&std::fs::File>),
     extras: ContentHash,
 ) -> Result<(), Problem> {
     let not_kept = || Problem::ExtrasNotKept(name(from));
-    disk.copy_extras(from, to).map_err(|e| match e {
+    disk.copy_extras(from, to, into).map_err(|e| match e {
         FsError::Unsupported => not_kept(),
         e => problem(e),
     })?;
@@ -331,16 +333,21 @@ pub(super) fn write(
             CopyError::NotTheFile => Problem::Disk(e.to_string()),
             CopyError::Fs(e) => problem(e),
         })?;
-    drop(into);
     // Written whole: from here it is never removed while its original
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
-    disk.sync_file(&temp).map_err(problem)?;
+    // Durable, with its extras, time and permissions, through the handle
+    // too, not given to a file another computer puts at its name
+    // meanwhile (#675), where the system keeps to the handle (Linux's
+    // CIFS doesn't: see `fsops::copy`). Such a file fails the read-back.
+    disk.sync_file(&temp, &into).map_err(problem)?;
     // Its extras before its time and permissions: writing a resource fork
     // changes a file's time, and a read-only file takes no more.
     let extras = disk.extras(source).map_err(problem)?;
-    carry_extras(disk, source, &temp, extras)?;
-    disk.copy_times(source, &temp).map_err(problem)?;
+    carry_extras(disk, source, (&temp, Some(&into)), extras)?;
+    disk.copy_times(source, &temp, Some(&into))
+        .map_err(problem)?;
+    drop(into);
     // 3. Read back, and the original still what was copied.
     if disk.hash(&temp).map_err(problem)? != content {
         return Err(Problem::Mismatch(source.to_path_buf()).into());
