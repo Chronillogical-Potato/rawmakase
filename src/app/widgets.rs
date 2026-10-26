@@ -461,6 +461,9 @@ fn section_header(
     }
     if let Some(group) = group.filter(|_| !solo_exempt) {
         context_menu(&toggle, |ui| {
+            // Menu rows fill the width they are given, and an unsized popup gives
+            // them all it can.
+            ui.set_width(160.);
             if menu_item(ui, "Solo Mode", "", true, solo(ui, group)) {
                 toggle_solo(ui, group, key);
                 ui.close();

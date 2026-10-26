@@ -5618,6 +5618,38 @@ fn solo_mode_opens_one_panel_per_side_and_is_set_from_the_header_menu() {
     );
 }
 #[test]
+fn the_panel_header_menu_fits_its_item_not_the_header() {
+    use super::widgets::{SectionGroup, SectionSide};
+    let ctx = egui::Context::default();
+    let header = std::cell::Cell::new(0.);
+    let draw = |events, time| {
+        widget_frame(&ctx, time, events, |ui| {
+            let _side = SectionSide::enter(ui, SectionGroup::DevelopRight);
+            header.set(ui.cursor().top() + 14. + 14.);
+            super::widgets::section(ui, "Basic", false, |ui| {
+                ui.label("Basic");
+            });
+        })
+    };
+    draw(vec![], 0.);
+    draw(
+        click_at(Pos2::new(60., header.get()), egui::PointerButton::Secondary),
+        1.,
+    );
+    draw(vec![], 1.1);
+    let menus: Vec<Rect> = ctx.memory(|m| {
+        m.areas()
+            .visible_layer_ids()
+            .into_iter()
+            .filter(|layer| layer.order == egui::Order::Foreground)
+            .filter_map(|layer| m.area_rect(layer.id))
+            .collect()
+    });
+    assert_eq!(menus.len(), 1, "{menus:?}");
+    // The header spans the 360 pt panel; Solo Mode needs far less.
+    assert!(menus[0].width() < 200., "{menus:?}");
+}
+#[test]
 fn a_pinned_panel_opens_and_closes_on_its_own_in_solo_mode() {
     use super::widgets::{HeaderButton, SectionGroup, SectionSide};
     let ctx = egui::Context::default();
