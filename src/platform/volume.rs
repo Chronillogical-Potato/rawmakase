@@ -15,22 +15,33 @@ pub(crate) struct Volume {
 
 impl Volume {
     /// The drive as this release names it: one an earlier release kept
-    /// with Windows' `\\?\` prefix in its mount, and in its name where its
-    /// path named it (`\\?\D:`), without it, as [`volume_of`] and
-    /// [`locate`] now name it.
+    /// with Windows' `\\?\` prefix in its mount without it, as
+    /// [`volume_of`] and [`locate`] now name it. Its name changes only where
+    /// its path gave it (`\\?\D:` for the drive at `\\?\D:\`); a label
+    /// stays as it is, and so does every drive kept elsewhere than Windows.
     pub(crate) fn plain(self) -> Volume {
-        let Some(mount) = self.mount.as_deref().map(plain) else {
+        let Some(kept) = self.mount.as_deref() else {
             return self;
         };
-        // Only a mount written with the prefix (Windows' alone) changes; a
-        // Unix folder's name may hold `\\?\` too.
-        if self.mount.as_deref() == Some(mount.as_path()) {
+        let mount = plain(kept);
+        if mount == kept {
             return self;
         }
+        // As 0.4.6's `volume_of` named a drive's root from its path.
+        let parts: Vec<Component> = kept.components().collect();
+        let by_path = match parts[..] {
+            [Component::Prefix(prefix), Component::RootDir]
+                if matches!(prefix.kind(), Prefix::VerbatimDisk(_)) =>
+            {
+                prefix.as_os_str().to_string_lossy().trim_end_matches('\\') == self.name
+            }
+            _ => false,
+        };
         Volume {
-            name: match self.name.strip_prefix(r"\\?\") {
-                Some(name) => name.to_owned(),
-                None => self.name,
+            name: if by_path {
+                volume_of(&mount).name
+            } else {
+                self.name
             },
             mount: Some(mount),
         }
@@ -446,6 +457,18 @@ mod tests {
         assert_eq!(
             drive_at(Path::new(r"\\?\UNC\nas\photos\"), None, &[]),
             share
+        );
+        // Kept by 0.4.6 as its path named it, it is named as now; the label
+        // of a drive mounted in a folder (any text, even this) stays.
+        let kept = |name: &str, mount: &str| Volume {
+            name: name.into(),
+            mount: Some(mount.into()),
+        };
+        assert_eq!(kept(r"\\?\D:", r"\\?\D:\").plain(), drive);
+        assert_eq!(kept(r"nas\photos", r"\\?\UNC\nas\photos\").plain(), share);
+        assert_eq!(
+            kept(r"\\?\Photos", r"\\?\C:\Mounted\Card\").plain(),
+            drive_at(Path::new(r"C:\Mounted\Card\"), Some(r"\\?\Photos"), &[])
         );
     }
 }
