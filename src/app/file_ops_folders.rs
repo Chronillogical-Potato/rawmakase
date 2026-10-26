@@ -39,6 +39,20 @@ fn root_name(roots: &[(RootId, String, Option<String>)], root: RootId) -> String
         )
 }
 
+/// Root `root`'s folder's name where it is on this computer (its location,
+/// else where it was added): the name a root moved into another takes
+/// there, as the plan gives it.
+fn located_name(roots: &[(RootId, String, Option<String>)], root: RootId) -> String {
+    roots
+        .iter()
+        .find(|r| r.0 == root)
+        .and_then(|r| std::path::Path::new(r.2.as_deref().unwrap_or(&r.1)).file_name())
+        .map_or_else(
+            || "Folder".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+}
+
 /// Where Move Folder… may put `c`'s folder, as roots and logical paths
 /// ("" for a root itself) with labels and where each is on this computer
 /// (which tells apart two roots of one name): every root, and every folder
@@ -148,19 +162,16 @@ impl Editor {
         to_root: RootId,
         to: String,
     ) {
+        let roots = self
+            .library
+            .as_ref()
+            .map(|l| l.session.roots.as_slice())
+            .unwrap_or_default();
         let into = match last(&to) {
-            "" => self
-                .library
-                .as_ref()
-                .map_or_else(String::new, |l| root_name(&l.session.roots, to_root)),
+            "" => root_name(roots, to_root),
             name => name.to_string(),
         };
-        let names = |root| {
-            self.library
-                .as_ref()
-                .map_or_else(String::new, |l| root_name(&l.session.roots, root))
-        };
-        // A root, named as its folder, joins the other root (#586).
+        // A root, named as its folder is here, joins the other root (#586).
         let (op, name, joins) = match from.as_str() {
             "" => (
                 FileOp::MoveRoot {
@@ -168,8 +179,8 @@ impl Editor {
                     to_root,
                     parent: to.clone(),
                 },
-                names(root),
-                Some(names(to_root)),
+                located_name(roots, root),
+                Some(root_name(roots, to_root)),
             ),
             from => (
                 FileOp::MoveFolder {
@@ -203,7 +214,7 @@ impl Editor {
         }
         let Some((catalog, name)) = self.library.as_ref().map(|l| {
             let name = match last(&from) {
-                "" => root_name(&l.session.roots, root),
+                "" => located_name(&l.session.roots, root),
                 name => name.to_string(),
             };
             (l.session.catalog.location().clone(), name)

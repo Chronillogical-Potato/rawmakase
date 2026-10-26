@@ -336,3 +336,37 @@ fn move_folder_offers_a_root_only_other_roots_and_their_folders() -> anyhow::Res
     assert!(offered.iter().all(|(r, _)| *r == other), "{offered:?}");
     Ok(())
 }
+
+#[test]
+fn a_root_located_again_under_a_new_name_is_followed_by_that_name() -> anyhow::Result<()> {
+    let (d, mut e, mine, other) = editor_with_two_roots(&["2024/day1/a.RAF"], &["trips/c.RAF"])?;
+    // Renamed in Finder, then located again: added as `photos`, `renamed`
+    // here.
+    std::fs::rename(d.path().join("photos"), d.path().join("renamed"))?;
+    let path = d.path().join("test.rawmakase");
+    crate::catalog::Catalog::open(&path)?.relink_root(mine, &d.path().join("renamed"))?;
+    let ctx = eframe::egui::Context::default();
+    e.library = Some(Box::new(crate::app::library::Library::load(&path, ctx)?));
+    e.library
+        .as_mut()
+        .unwrap()
+        .click_folder_for_tests(&format!("root:{mine}/2024/day1"));
+    e.request_folder_move(mine, String::new(), other, "trips".into());
+    settle(&mut e);
+    let (title, ..) = e.file_ops.question().expect("it asks");
+    assert_eq!(title, "Move folder “renamed” into “trips”?");
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(
+        d.path()
+            .join("elsewhere/trips/renamed/2024/day1/a.RAF")
+            .is_file()
+    );
+    assert_eq!(
+        e.library.as_ref().unwrap().source_key(),
+        format!("root:{other}/trips/renamed/2024/day1")
+    );
+    assert_eq!(e.status, "Moved folder renamed into trips");
+    Ok(())
+}
