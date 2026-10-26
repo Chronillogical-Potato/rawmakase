@@ -209,9 +209,41 @@ pub const MAX_VALUE: usize = 4096;
 
 /// Reads the camera EXIF of a TIFF-based RAW (ARW, NEF, CR2, DNG, ORF, RW2, PEF…),
 /// a JPEG, TIFF, PNG, WebP, AVIF or JPEG XL, or a Fujifilm RAF, whose EXIF lives in its preview JPEG.
-/// `None` when the file has none that can be read, e.g. a CR3.
+/// `None` when the file has none that can be read, e.g. a CR3, whose EXIF
+/// RAWmakase's RAW decoders find for [`read_tiffs`].
 pub fn read(path: &Path) -> Option<CameraExif> {
     directories(path, |tag| MAIN.contains(&tag))
+}
+
+/// [`read`] of the TIFFs a RAW container keeps its camera's EXIF in, each
+/// on its own, as RAWmakase's RAW decoders find them: `main`'s first
+/// directory is IFD0 (a CR3's `CMT1`, an MRW's or X3F's whole TIFF), whose
+/// pointers lead to the EXIF and GPS directories unless `exif` or `gps` is
+/// a TIFF whose first directory is that directory (a CR3's `CMT2` and
+/// `CMT4`). `None` when they hold neither IFD0's tags nor EXIF's.
+pub fn read_tiffs(
+    main: Option<&[u8]>,
+    exif: Option<&[u8]>,
+    gps: Option<&[u8]>,
+) -> Option<CameraExif> {
+    fn open(b: &[u8]) -> Option<Tiff<std::io::Cursor<&[u8]>>> {
+        Tiff::open_within(std::io::Cursor::new(b), 0, b.len() as u64)
+    }
+    let mut out = main
+        .and_then(open)
+        .and_then(|t| camera_exif(t, |tag| MAIN.contains(&tag)))
+        .unwrap_or_default();
+    for (tiff, kept, keep) in [
+        (exif, &mut out.exif, exif_tag as fn(u16) -> bool),
+        (gps, &mut out.gps, gps_tag),
+    ] {
+        if let Some(mut t) = tiff.and_then(open)
+            && let Some(ifd) = t.ifd(t.first)
+        {
+            *kept = fields(&mut t, &ifd, keep);
+        }
+    }
+    (!out.exif.is_empty() || !out.main.is_empty()).then_some(out)
 }
 
 /// When the photo was taken, in the form Lightroom stores it: the camera's
@@ -240,45 +272,58 @@ pub fn capture_time_of(dates: [(Option<String>, Option<String>); 3]) -> Option<S
 /// Camera, lens and exposure settings of a JPEG, TIFF, PNG, WebP, AVIF, JPEG XL or TIFF-based RAW
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
 pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
-    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
-    let text = |tag| {
-        exif.get(tag)
-            .and_then(Field::text)
-            .filter(|t| !t.is_empty())
-    };
-    let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
-    // Lightroom shows the model, which usually names the make too.
-    let camera = match (text(MAKE), text(MODEL)) {
-        (Some(make), Some(model)) if !model.starts_with(make.split(' ').next().unwrap_or("")) => {
-            Some(format!("{make} {model}"))
-        }
-        (make, model) => model.or(make),
-    };
-    let info = crate::metadata::PhotoInfo {
-        camera,
-        lens: text(LENS_MODEL),
-        focal: number(FOCAL_LENGTH),
-        // FNumber and ExposureTime, else their APEX values.
-        aperture: number(F_NUMBER).or_else(|| {
-            let av = exif.get(APERTURE_VALUE).and_then(Field::number)?;
-            Some(2f64.powf(av / 2.))
-        }),
-        exposure: number(EXPOSURE_TIME).or_else(|| {
-            let tv = exif.get(SHUTTER_SPEED_VALUE).and_then(Field::number)?;
-            Some(2f64.powf(-tv))
-        }),
-        iso: iso(&exif),
-        dimensions: None,
-    };
-    (info != Default::default()).then_some(info)
+    directories(path, |tag| tag == MAKE || tag == MODEL)?.photo_info()
 }
 
 /// The EXIF Make and Model of a JPEG, TIFF, PNG or TIFF-based RAW, trimmed, each
 /// empty when missing; `None` when the file has no EXIF at all.
 pub fn camera_names(path: &Path) -> Option<(String, String)> {
-    let exif = directories(path, |tag| tag == MAKE || tag == MODEL)?;
-    let text = |tag| exif.get(tag).and_then(Field::text).unwrap_or_default();
-    Some((text(MAKE), text(MODEL)))
+    Some(directories(path, |tag| tag == MAKE || tag == MODEL)?.camera_names())
+}
+
+impl CameraExif {
+    /// The camera, lens and exposure settings [`photo_info`] reads, of
+    /// these directories; `None` when they have none.
+    pub fn photo_info(&self) -> Option<crate::metadata::PhotoInfo> {
+        let exif = self;
+        let text = |tag| {
+            exif.get(tag)
+                .and_then(Field::text)
+                .filter(|t| !t.is_empty())
+        };
+        let number = |tag| exif.get(tag).and_then(Field::number).filter(|n| *n > 0.);
+        // Lightroom shows the model, which usually names the make too.
+        let camera = match (text(MAKE), text(MODEL)) {
+            (Some(make), Some(model))
+                if !model.starts_with(make.split(' ').next().unwrap_or("")) =>
+            {
+                Some(format!("{make} {model}"))
+            }
+            (make, model) => model.or(make),
+        };
+        let info = crate::metadata::PhotoInfo {
+            camera,
+            lens: text(LENS_MODEL),
+            focal: number(FOCAL_LENGTH),
+            // FNumber and ExposureTime, else their APEX values.
+            aperture: number(F_NUMBER).or_else(|| {
+                let av = exif.get(APERTURE_VALUE).and_then(Field::number)?;
+                Some(2f64.powf(av / 2.))
+            }),
+            exposure: number(EXPOSURE_TIME).or_else(|| {
+                let tv = exif.get(SHUTTER_SPEED_VALUE).and_then(Field::number)?;
+                Some(2f64.powf(-tv))
+            }),
+            iso: iso(exif),
+            dimensions: None,
+        };
+        (info != Default::default()).then_some(info)
+    }
+    /// Make and Model, as [`camera_names`] reads them.
+    pub fn camera_names(&self) -> (String, String) {
+        let text = |tag| self.get(tag).and_then(Field::text).unwrap_or_default();
+        (text(MAKE), text(MODEL))
+    }
 }
 
 /// The ISO speed. Above 65535 the EXIF 2.3 tag that SensitivityType
@@ -409,16 +454,27 @@ fn camera_exif<R: Read + Seek>(
         .and_then(|e| t.offset(e))
         .and_then(|at| t.ifd(at))
     {
-        out.exif = fields(&mut t, &ifd, |tag| !SKIP.contains(&tag) && tag < 0xc000);
+        out.exif = fields(&mut t, &ifd, exif_tag);
     }
     if let Some(ifd) = main
         .get(&GPS_IFD)
         .and_then(|e| t.offset(e))
         .and_then(|at| t.ifd(at))
     {
-        out.gps = fields(&mut t, &ifd, |tag| tag <= 0x1f);
+        out.gps = fields(&mut t, &ifd, gps_tag);
     }
     (!out.exif.is_empty() || !out.main.is_empty()).then_some(out)
+}
+
+/// The EXIF directory's tags an export copies: not [`SKIP`]'s, nor the
+/// private ones.
+fn exif_tag(tag: u16) -> bool {
+    !SKIP.contains(&tag) && tag < 0xc000
+}
+
+/// The GPS directory's tags, those of Exif 2.32.
+fn gps_tag(tag: u16) -> bool {
+    tag <= 0x1f
 }
 
 /// Whether an `ftyp` box lists the AVIF/HEIF-image brands (`avif`, `avis`,
@@ -899,6 +955,119 @@ mod container_tests {
                 model.as_deref().is_none_or(str::is_empty),
                 "{name} value: {model:?}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tiffs_tests {
+    use super::*;
+
+    /// A TIFF in `order` ("II" or "MM") whose one directory holds `fields`
+    /// (tag, type, count, value as the file writes it), values longer than
+    /// four bytes after it.
+    fn tiff(order: &[u8; 2], fields: &[(u16, u16, u32, Vec<u8>)]) -> Vec<u8> {
+        let big = order == b"MM";
+        let u16b = |v: u16| {
+            if big {
+                v.to_be_bytes()
+            } else {
+                v.to_le_bytes()
+            }
+        };
+        let u32b = |v: u32| {
+            if big {
+                v.to_be_bytes()
+            } else {
+                v.to_le_bytes()
+            }
+        };
+        let mut out = order.to_vec();
+        out.extend(u16b(42));
+        out.extend(u32b(8));
+        out.extend(u16b(fields.len() as u16));
+        let mut data: Vec<u8> = Vec::new();
+        let start = 8 + 2 + 12 * fields.len() + 4;
+        for (tag, kind, count, value) in fields {
+            out.extend(u16b(*tag));
+            out.extend(u16b(*kind));
+            out.extend(u32b(*count));
+            if value.len() <= 4 {
+                let mut v = value.clone();
+                v.resize(4, 0);
+                out.extend(v);
+            } else {
+                out.extend(u32b((start + data.len()) as u32));
+                data.extend(value);
+            }
+        }
+        out.extend([0; 4]);
+        out.extend(data);
+        out
+    }
+
+    fn ascii(tag: u16, text: &str) -> (u16, u16, u32, Vec<u8>) {
+        let mut v = text.as_bytes().to_vec();
+        v.push(0);
+        (tag, ASCII, v.len() as u32, v)
+    }
+
+    /// A CR3's three TIFFs, each holding one directory, give the
+    /// directories `read` gives, by the same rules: IFD0's tags an export
+    /// keeps, EXIF's but the maker note, private tags and long values, and
+    /// GPS's own tags, numbers in little-endian order.
+    #[test]
+    fn a_containers_tiffs_are_read_by_the_rules_of_a_files_exif() {
+        let main = tiff(
+            b"MM",
+            &[
+                ascii(MAKE, "Canon"),
+                (ORIENTATION, SHORT, 1, 6u16.to_be_bytes().to_vec()),
+                ascii(ARTIST, "Ann Example"),
+                // A pointer CMT1 may have: CMT2 is the EXIF directory.
+                (EXIF_IFD, LONG, 1, 4096u32.to_be_bytes().to_vec()),
+            ],
+        );
+        let exif = tiff(
+            b"MM",
+            &[
+                (0x8822, SHORT, 1, 3u16.to_be_bytes().to_vec()),
+                ascii(DATE_TIME_ORIGINAL, "2024:08:20 15:24:34"),
+                ascii(MAKER_NOTE, "notes"),
+                (0x9286, 7, 5000, vec![b'x'; 5000]),
+                ascii(0xc5f0, "private"),
+            ],
+        );
+        let gps = tiff(
+            b"II",
+            &[
+                ascii(GPS_LATITUDE_REF, "N"),
+                (0x0020, ASCII, 2, b"x\0".to_vec()),
+            ],
+        );
+        let read = read_tiffs(Some(&main), Some(&exif), Some(&gps)).unwrap();
+        let tags = |fields: &[Field]| fields.iter().map(|f| f.tag).collect::<Vec<_>>();
+        assert_eq!(tags(&read.main), [MAKE, ARTIST]);
+        assert_eq!(tags(&read.exif), [0x8822, DATE_TIME_ORIGINAL]);
+        assert_eq!(tags(&read.gps), [GPS_LATITUDE_REF]);
+        assert_eq!(read.get(0x8822).and_then(Field::number), Some(3.));
+        assert_eq!(read.captured().as_deref(), Some("2024:08:20 15:24:34"));
+        // An MRW's or X3F's one TIFF, its EXIF directory found by IFD0's
+        // pointer, as in a file.
+        let whole = read_tiffs(Some(&tiff(b"II", &[ascii(MAKE, "SIGMA")])), None, None).unwrap();
+        assert_eq!(tags(&whole.main), [MAKE]);
+        assert!(whole.exif.is_empty() && whole.gps.is_empty());
+        // The EXIF directory alone is enough; GPS alone, or nothing, is none.
+        assert_eq!(
+            tags(&read_tiffs(None, Some(&exif), None).unwrap().exif),
+            [0x8822, DATE_TIME_ORIGINAL]
+        );
+        assert_eq!(read_tiffs(None, None, Some(&gps)), None);
+        assert_eq!(read_tiffs(None, None, None), None);
+        assert_eq!(read_tiffs(Some(b"not a TIFF"), Some(&[]), None), None);
+        // Cut short anywhere, a TIFF is read as far as it goes.
+        for end in 0..exif.len() {
+            let _ = read_tiffs(Some(&main[..end.min(main.len())]), Some(&exif[..end]), None);
         }
     }
 }

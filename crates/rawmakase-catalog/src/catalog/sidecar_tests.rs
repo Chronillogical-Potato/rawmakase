@@ -223,10 +223,13 @@ fn defaults_fill_only_what_neither_file_nor_sidecar_has() -> Result<()> {
         ),
     )?;
     let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
-    let defaults = crate::catalog::MetadataDefaults {
-        creator: "Default Creator".into(),
-        copyright: "© Default".into(),
-    };
+    let defaults = crate::catalog::NewPhotoDefaults::new(
+        crate::catalog::MetadataDefaults {
+            creator: "Default Creator".into(),
+            copyright: "© Default".into(),
+        },
+        crate::exif::read,
+    );
     cat.add_folder_with(&folder, &defaults)?;
     let (a, b) = (id_of(&cat, "A.NEF")?, id_of(&cat, "B.NEF")?);
     assert_eq!(
@@ -397,6 +400,59 @@ fn webp_avif_and_jxl_files_without_xmp_read_nothing_and_are_not_unreadable() -> 
         let (read, report) = read_file(&file);
         assert!(report.unreadable.is_empty(), "{name}: {report:?}");
         assert_eq!(read.and_then(|r| r.title), None, "{name}");
+    }
+    Ok(())
+}
+
+/// The camera's own Artist and Copyright, as the app's reader finds them
+/// (a CR3's, which the catalog can't read itself), keep the defaults out;
+/// a camera without them gets the defaults (#671).
+#[test]
+fn defaults_give_way_to_the_camera_exif_the_apps_reader_finds() -> Result<()> {
+    use crate::exif::{CameraExif, Field, tag};
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("A.CR3"), b"synthetic raw a")?;
+    std::fs::write(folder.join("B.CR3"), b"synthetic raw b")?;
+    std::fs::write(folder.join("C.CR3"), b"synthetic raw c")?;
+    fn reader(path: &Path) -> Option<CameraExif> {
+        let main = match path.file_name()?.to_str()? {
+            "A.CR3" => vec![
+                Field::ascii(tag::ARTIST, "Ann Example"),
+                Field::ascii(tag::COPYRIGHT, "Ann Example 2024"),
+            ],
+            // Canon writes them blank when the camera has none.
+            "B.CR3" => vec![
+                Field::ascii(tag::ARTIST, ""),
+                Field::ascii(tag::COPYRIGHT, ""),
+            ],
+            _ => return None,
+        };
+        Some(CameraExif {
+            main,
+            ..Default::default()
+        })
+    }
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    let defaults = crate::catalog::NewPhotoDefaults::new(
+        crate::catalog::MetadataDefaults {
+            creator: "Default Creator".into(),
+            copyright: "© Default".into(),
+        },
+        reader,
+    );
+    cat.add_folder_with(&folder, &defaults)?;
+    let a = cat.descriptive(id_of(&cat, "A.CR3")?)?;
+    assert_eq!((a.creator, a.copyright), (None, None));
+    for name in ["B.CR3", "C.CR3"] {
+        let d = cat.descriptive(id_of(&cat, name)?)?;
+        assert_eq!(
+            d.creator,
+            Some(Value::Set(vec!["Default Creator".into()])),
+            "{name}"
+        );
+        assert_eq!(d.copyright, set("© Default"), "{name}");
     }
     Ok(())
 }

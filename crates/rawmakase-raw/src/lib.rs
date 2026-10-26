@@ -7,14 +7,16 @@
 //! the sensor data ([`Sensor`]), checking `cancel` as it goes. One selector
 //! ([`Variant`]) decides which reader and codec handle a file; a file of a
 //! known container in a variant not decoded here is [`Error::Unsupported`].
-//! [`capture_dates`] reads, from the file itself, the few parts that date a
-//! photo in the containers whose EXIF is not a TIFF at the file's start.
+//! [`capture_dates`] and [`exif_tiffs`] read, from the file itself, the few
+//! parts that date a photo and hold its camera's EXIF in the containers
+//! whose EXIF is not a TIFF at the file's start.
 #![forbid(unsafe_code)]
 mod captured;
 mod codec;
 mod color;
 mod container;
 mod error;
+mod exif_tiffs;
 mod facts;
 mod geometry;
 mod info;
@@ -28,6 +30,7 @@ mod vendor;
 
 pub use captured::{CaptureDates, Stamp};
 pub use error::{Error, Result};
+pub use exif_tiffs::ExifTiffs;
 pub use info::{Cfa, Presets, RawInfo, SuperCcd, UNSET};
 pub use preview::{NoPreview, is_jpeg_xl};
 pub use sensor::Sensor;
@@ -78,6 +81,57 @@ pub fn maker_name(file_make: &str) -> String {
 /// be read. Holds for files whose sensor data is not decoded here (X3F).
 pub fn capture_dates(file: &mut (impl std::io::Read + std::io::Seek)) -> CaptureDates {
     captured::read(file)
+}
+
+/// Where the CR3, MRW or X3F `file` keeps its camera's EXIF, as TIFFs of
+/// their own, nothing else read; none for another file (a CRW has no
+/// TIFF) or one that can't be read. Holds for files whose sensor data is
+/// not decoded here (X3F).
+pub fn exif_tiffs(file: &mut (impl std::io::Read + std::io::Seek)) -> ExifTiffs {
+    let Some(mut f) = io::Pieces::new(file) else {
+        return ExifTiffs::default();
+    };
+    let head = f.read_upto(0, 16).unwrap_or_default();
+    exif_tiffs::read(&mut f, &head)
+}
+
+/// What RAWmakase reads of an X3F, whose sensor data it doesn't decode: all
+/// the photo info it has of one.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct X3fMetadata {
+    /// The preview's EXIF, a TIFF of its own, as [`exif_tiffs`] finds it;
+    /// none on the SD9 and SD10.
+    pub exif: Option<Vec<u8>>,
+    pub properties: X3fProperties,
+}
+
+/// What an X3F's property list says of its camera and exposure, which the
+/// SD9 and SD10 write instead of a preview's EXIF. Values not given are
+/// empty or `None`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct X3fProperties {
+    /// CAMMANUF and CAMMODEL, as the file writes them.
+    pub make: String,
+    pub model: String,
+    /// In seconds.
+    pub exposure: Option<f64>,
+    pub aperture: Option<f64>,
+    pub iso: Option<f64>,
+    /// In millimetres.
+    pub focal: Option<f64>,
+}
+
+/// The preview's EXIF and the property list of the X3F `file`, its
+/// directory and these sections read alone; `None` for a file that is no
+/// X3F, or when a section holding them can't be read (a file still being
+/// copied), so that what can't be read is not taken for absent.
+pub fn x3f_metadata(file: &mut (impl std::io::Read + std::io::Seek)) -> Option<X3fMetadata> {
+    let mut f = io::Pieces::new(file)?;
+    let head = f.read_upto(0, 16)?;
+    if !container::x3f::is_x3f(&head) {
+        return None;
+    }
+    container::x3f::metadata(&mut f)
 }
 
 /// The embedded preview of the file `info` was read from, JPEG or JPEG XL

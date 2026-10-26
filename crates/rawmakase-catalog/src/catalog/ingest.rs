@@ -160,7 +160,7 @@ impl Catalog {
     pub fn add_folder_with(
         &mut self,
         folder: &Path,
-        defaults: &super::MetadataDefaults,
+        defaults: &super::NewPhotoDefaults,
     ) -> Result<(usize, super::SidecarReport)> {
         let added = self.import_folder(folder, defaults, &[])?;
         ensure!(
@@ -185,7 +185,7 @@ impl Catalog {
     pub fn import_folder(
         &mut self,
         folder: &Path,
-        defaults: &super::MetadataDefaults,
+        defaults: &super::NewPhotoDefaults,
         choices: &[Choice],
     ) -> Result<Added> {
         let folder = folder.canonicalize()?;
@@ -246,7 +246,7 @@ impl Catalog {
         chosen: &Path,
         files: Vec<PathBuf>,
         places: &HashMap<PathBuf, Place>,
-        defaults: &super::MetadataDefaults,
+        defaults: &super::NewPhotoDefaults,
         kind: ImportKind,
     ) -> Result<(usize, super::SidecarReport)> {
         // Photos already in the catalog are left before their files are read.
@@ -387,7 +387,7 @@ impl Catalog {
         &self,
         file: PathBuf,
         place: &'a Place,
-        defaults: &super::MetadataDefaults,
+        defaults: &super::NewPhotoDefaults,
     ) -> NewPhoto<'a> {
         let edit = crate::storage::is_raw(&file)
             .then(|| self.read_legacy_edit(&file))

@@ -148,8 +148,8 @@ pub fn copyright(values: &Values, file: Option<&CameraExif>) -> Option<String> {
 }
 
 /// Decides every tag of an export. `file` is the source's EXIF when it could
-/// be read; `libraw`, the decoder's capture settings, stands in for the camera
-/// info when it could not.
+/// be read; `libraw`, the decoder's capture settings (and a RAW container's
+/// own dates), stands in for the camera info and dates when it could not.
 pub fn assemble(
     policy: Policy,
     file: Option<&CameraExif>,
@@ -158,25 +158,33 @@ pub fn assemble(
 ) -> Assembled {
     let d = &values.descriptive;
     let text = |tag| file.and_then(|f| f.get(tag)).and_then(Field::text);
+    let camera = file.cloned().or(libraw);
     let mut exif = CameraExif::default();
     if policy.camera
-        && let Some(camera) = file.cloned().or(libraw)
+        && let Some(camera) = &camera
     {
         exif.main = camera
             .main
-            .into_iter()
+            .iter()
             .filter(|f| ![CAPTION, ARTIST, COPYRIGHT].contains(&f.tag))
+            .cloned()
             .collect();
         exif.exif = camera
             .exif
-            .into_iter()
+            .iter()
             .filter(|f| !DATES.contains(&f.tag))
+            .cloned()
             .collect();
     }
     if policy.capture_time {
-        if let Some(file) = file {
-            exif.exif
-                .extend(file.exif.iter().filter(|f| DATES.contains(&f.tag)).cloned());
+        if let Some(camera) = &camera {
+            exif.exif.extend(
+                camera
+                    .exif
+                    .iter()
+                    .filter(|f| DATES.contains(&f.tag))
+                    .cloned(),
+            );
         }
         if let Some(c) = &d.capture {
             capture_tags(&mut exif.exif, c);
@@ -239,7 +247,7 @@ pub fn assemble(
         XmpFields {
             captured: policy
                 .capture_time
-                .then(|| file.and_then(CameraExif::captured))
+                .then(|| camera.as_ref().and_then(CameraExif::captured))
                 .flatten(),
             created: policy
                 .capture_time

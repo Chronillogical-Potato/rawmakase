@@ -236,6 +236,12 @@ pub(crate) fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
         return None;
     }
     Some(if crate::storage::is_raw(path) {
+        // An X3F's, which RAWmakase doesn't decode, from its header alone.
+        // One with none may not have been read whole (its preview); its
+        // header is read again later, which costs little.
+        if let Some(undecoded) = crate::raw::undecoded(path) {
+            return (undecoded.info != PhotoInfo::default()).then_some(Some(undecoded.info));
+        }
         // A RAW that cannot be opened now (still copying, a network error) is
         // tried again later.
         Some(PhotoInfo::from_metadata(
@@ -254,6 +260,66 @@ pub(crate) fn read_info(path: &Path) -> Option<Option<PhotoInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An X3F, whose sensor data RAWmakase doesn't decode, has the info of
+    /// its preview's EXIF, else of its property list (SD9, SD10), read
+    /// without decoding; one that can't be read is tried again (#671).
+    #[test]
+    fn an_x3f_has_the_info_of_its_preview_exif_or_property_list() -> anyhow::Result<()> {
+        use crate::exif::{CameraExif, Field, tag};
+        use crate::export::exif::{Container, camera_raw, x3f_with_properties};
+        let dir = tempfile::tempdir()?;
+        let quattro = dir.path().join("SDIM4388.X3F");
+        let camera = CameraExif {
+            main: vec![
+                Field::ascii(tag::MAKE, "SIGMA"),
+                Field::ascii(tag::MODEL, "SIGMA dp2 Quattro"),
+            ],
+            exif: vec![
+                Field::rational(tag::EXPOSURE_TIME, 1, 250),
+                Field::rational(tag::F_NUMBER, 28, 10),
+                Field::short(tag::ISO, 200),
+                Field::rational(tag::FOCAL_LENGTH, 30, 1),
+                Field::ascii(tag::LENS_MODEL, "30mm F2.8"),
+            ],
+            gps: Vec::new(),
+        };
+        std::fs::write(&quattro, camera_raw(Container::X3f, camera))?;
+        let info = read_info(&quattro).flatten().expect("the preview's info");
+        assert_eq!(info.camera.as_deref(), Some("SIGMA dp2 Quattro"));
+        assert_eq!(info.lens.as_deref(), Some("30mm F2.8"));
+        assert_eq!(info.exposure_text().as_deref(), Some("1/250 sec at f/2.8"));
+        assert_eq!(info.iso_text().as_deref(), Some("ISO 200"));
+        assert_eq!(info.focal_text().as_deref(), Some("30 mm"));
+        let sd9 = dir.path().join("RAW_SIGMA_SD9.X3F");
+        std::fs::write(
+            &sd9,
+            x3f_with_properties(&[
+                ("ISO", "100"),
+                ("CAMMANUF", "SIGMA"),
+                ("CAMMODEL", "SIGMA SD9"),
+                ("EXPTIME", "41408"),
+                ("LENSMODEL", "16"),
+                ("APERTURE", "5.18736"),
+                ("FLENGTH", "53"),
+            ]),
+        )?;
+        let info = read_info(&sd9).flatten().expect("the property list's info");
+        assert_eq!(info.camera.as_deref(), Some("SIGMA SD9"));
+        assert_eq!(info.lens, None);
+        assert_eq!(info.exposure_text().as_deref(), Some("1/24 sec at f/5.2"));
+        assert_eq!(info.iso_text().as_deref(), Some("ISO 100"));
+        assert_eq!(info.focal_text().as_deref(), Some("53 mm"));
+        // An X3F that says nothing (or whose preview couldn't be read) is
+        // tried again later, not kept as a photo without info.
+        let blank = dir.path().join("blank.X3F");
+        std::fs::write(&blank, x3f_with_properties(&[]))?;
+        assert_eq!(read_info(&blank), None);
+        // Gone, it is tried again later.
+        std::fs::remove_file(&sd9)?;
+        assert_eq!(read_info(&sd9), None);
+        Ok(())
+    }
     #[test]
     fn capture_times_are_read_from_rendered_files_and_raws() {
         for name in [

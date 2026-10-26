@@ -72,6 +72,10 @@ enum Command {
     Inspect {
         input: PathBuf,
     },
+    /// Print the system report the Report an Issue dialog shows, for a bug
+    /// report. Opens no window, catalog, photo or GPU, so the window's lines
+    /// say so.
+    SystemInfo,
     /// Render one RAW with several XMP sidecars, developing it once: for comparisons
     /// with Camera Raw. `jobs` is a JSON list of {"xmp", "output", "max_edge"}; existing
     /// outputs are skipped.
@@ -308,6 +312,17 @@ fn main() -> Result<()> {
                 origin.map(|p| [p[0], p[1]]),
             )?;
         }
+        Some(Command::SystemInfo) => {
+            use rawmakase::diagnostics;
+            print!(
+                "{}",
+                diagnostics::report(
+                    &diagnostics::Build::current(),
+                    &diagnostics::System::probe(),
+                    None
+                )
+            );
+        }
         Some(Command::Inspect { input }) => {
             let r = rawmakase::photo::open(&input)?;
             let (profiles, errors) = rawmakase::camera_profiles::installed(&r.metadata);
@@ -339,7 +354,10 @@ fn main() -> Result<()> {
             )?;
             let (profiles, _) = rawmakase::camera_profiles::installed(&im.metadata);
             let base = Recipe::with_profiles(&im.metadata, &profiles);
-            let camera = rawmakase::exif::read(&input);
+            let camera = Some(
+                rawmakase::photo::camera_exif(&input)
+                    .unwrap_or_else(|| rawmakase::export::job::stand_in(&input, &im.metadata)),
+            );
             for job in jobs.iter().filter(|j| !j.output.exists()) {
                 let rendered = (|| -> Result<()> {
                     let preset =
@@ -494,7 +512,11 @@ fn main() -> Result<()> {
                     ..Default::default()
                 },
                 &rawmakase::export::Embed {
-                    camera: rawmakase::exif::read(&input),
+                    camera: Some(
+                        rawmakase::photo::camera_exif(&input).unwrap_or_else(|| {
+                            rawmakase::export::job::stand_in(&input, &im.metadata)
+                        }),
+                    ),
                     ..Default::default()
                 },
                 if overwrite {
@@ -646,7 +668,10 @@ fn sync_folder(
         &plan.default_accepted(),
         &online,
         None,
-        &rawmakase::catalog::MetadataDefaults::load(),
+        &rawmakase::catalog::NewPhotoDefaults::new(
+            rawmakase::catalog::MetadataDefaults::load(),
+            rawmakase::photo::camera_exif,
+        ),
     )?;
     for s in &applied.skipped {
         println!("skipped: {} ({})", shown(&s.path), s.reason);

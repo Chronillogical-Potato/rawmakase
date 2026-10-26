@@ -67,6 +67,9 @@ pub use rawmakase_raw::FileNames;
 /// header, nothing decoded. For files whose EXIF `crate::exif` can't read,
 /// such as a CR3.
 pub fn file_camera_names(path: &Path) -> Result<FileNames> {
+    if let Some(undecoded) = undecoded(path) {
+        return Ok(undecoded.names);
+    }
     let bytes = std::fs::read(path)?;
     Ok(rawmakase_raw::file_camera_names(&bytes)?)
 }
@@ -84,6 +87,99 @@ pub fn capture_time(path: &Path) -> Option<String> {
     rawmakase_interop::exif::capture_time_of(
         [dates.original, dates.digitized, dates.modified].map(|s| (s.date, s.subseconds)),
     )
+}
+/// The camera's EXIF of the CR3, MRW or X3F at `path`, which
+/// `exif::read` can't find: the TIFFs the container keeps it in, read by
+/// `exif::read_tiffs`; nothing else is read. `None` for other files.
+pub(crate) fn camera_exif(path: &Path) -> Option<rawmakase_interop::exif::CameraExif> {
+    let tiffs = rawmakase_raw::exif_tiffs(&mut std::fs::File::open(path).ok()?);
+    rawmakase_interop::exif::read_tiffs(
+        tiffs.main.as_deref(),
+        tiffs.exif.as_deref(),
+        tiffs.gps.as_deref(),
+    )
+}
+/// What RAWmakase reads of a RAW whose sensor data it doesn't decode, an
+/// X3F: its photo info and its make and model as the file writes them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Undecoded {
+    /// No dimensions: the preview's are not the photo's.
+    pub info: rawmakase_model::metadata::PhotoInfo,
+    pub names: FileNames,
+}
+/// The info and names of the X3F at `path`, from its preview's EXIF, else
+/// (the SD9 and SD10, whose preview has none) its property list, read by
+/// the rules of `exif::photo_info` and `camera_names`; nothing decoded.
+/// `None` for other files and an X3F that can't be read (not even in
+/// part: what can't be read now is read again later).
+pub fn undecoded(path: &Path) -> Option<Undecoded> {
+    use rawmakase_interop::exif::{CameraExif, Field, tag};
+    let x3f = rawmakase_raw::x3f_metadata(&mut std::fs::File::open(path).ok()?)?;
+    let properties = x3f.properties;
+    let preview = x3f.exif.as_deref();
+    let exif = rawmakase_interop::exif::read_tiffs(preview, None, None).unwrap_or_else(|| {
+        // The property list as the EXIF tags it stands in for.
+        let rational =
+            |tag, v: f64| Field::rational(tag, (v * 1_000_000.).round() as u32, 1_000_000);
+        let mut main = Vec::new();
+        for (tag, text) in [
+            (tag::MAKE, &properties.make),
+            (tag::MODEL, &properties.model),
+        ] {
+            if !text.is_empty() {
+                main.push(Field::ascii(tag, text));
+            }
+        }
+        let mut exif = Vec::new();
+        exif.extend(properties.exposure.map(|v| rational(tag::EXPOSURE_TIME, v)));
+        exif.extend(properties.aperture.map(|v| rational(tag::F_NUMBER, v)));
+        exif.extend(
+            properties
+                .iso
+                .map(|v| Field::short(tag::ISO, v.min(65535.) as u16)),
+        );
+        exif.extend(properties.focal.map(|v| rational(tag::FOCAL_LENGTH, v)));
+        CameraExif {
+            main,
+            exif,
+            gps: Vec::new(),
+        }
+    });
+    let (make, model) = exif.camera_names();
+    Some(Undecoded {
+        info: exif.photo_info().unwrap_or_default(),
+        names: FileNames { make, model },
+    })
+}
+/// The EXIF directory's date tags of the CR3, CRW, MRW or X3F at `path`
+/// (DateTimeOriginal and DateTimeDigitized with their subseconds), from the
+/// records [`capture_time`] reads: for the stand-in an export writes for a
+/// RAW without EXIF of its own, a CRW. None for other files.
+pub fn capture_date_tags(path: &Path) -> Vec<rawmakase_interop::exif::Field> {
+    use rawmakase_interop::exif::{Field, tag};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let dates = rawmakase_raw::capture_dates(&mut file);
+    let mut tags = Vec::new();
+    for (stamp, date, subseconds) in [
+        (
+            dates.original,
+            tag::DATE_TIME_ORIGINAL,
+            tag::SUBSEC_TIME_ORIGINAL,
+        ),
+        (
+            dates.digitized,
+            tag::DATE_TIME_DIGITIZED,
+            tag::SUBSEC_TIME_DIGITIZED,
+        ),
+    ] {
+        if let Some(text) = stamp.date {
+            tags.push(Field::ascii(date, &text));
+            tags.extend(stamp.subseconds.map(|s| Field::ascii(subseconds, &s)));
+        }
+    }
+    tags
 }
 pub struct Raw {
     // Boxed: the decoder's state is large, and a `Raw` travels in enums.

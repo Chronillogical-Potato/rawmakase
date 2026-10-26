@@ -59,6 +59,11 @@ pub(crate) enum AutoKind {
 }
 pub(crate) enum Event {
     DialogClosed,
+    /// The system report's probe answered, or stopped (see `app::report_issue`).
+    SystemProbed {
+        generation: u64,
+        system: Box<crate::diagnostics::System>,
+    },
     /// A Subject or Background selection finished (or failed).
     Selection(Box<crate::app::subject_mask::Done>),
     /// The selection model finished installing, or why not.

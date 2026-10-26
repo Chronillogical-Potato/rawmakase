@@ -42,6 +42,14 @@ pub fn open_source(path: &Path, cancel: &AtomicBool) -> Result<Opened> {
     }
 }
 
+/// The camera's EXIF of the photo at `path`, which exports carry and the
+/// catalog's defaults give way to: `exif::read`'s, else, for a CR3, MRW or
+/// X3F, what RAWmakase's RAW decoders find in the container
+/// (`raw::camera_exif`). `None` when the file has none, e.g. a CRW.
+pub fn camera_exif(path: &Path) -> Option<rawmakase_interop::exif::CameraExif> {
+    rawmakase_interop::exif::read(path).or_else(|| crate::raw::camera_exif(path))
+}
+
 /// The photo at `path`, opened for developing.
 pub fn open(path: &Path) -> Result<Raw> {
     let mut raw = Raw::open_file(path)?;

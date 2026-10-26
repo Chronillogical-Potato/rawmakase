@@ -71,7 +71,7 @@ that drops it.
 | Selection model install | `app/subject_mask/models.rs` | HTTP for five files, as requests resuming where the file stopped (connect 20 s, 30 s per response, 60 s for each body in total, 2 min each request) and file writes, in 256 KB chunks | Its cancel flag, between chunks and requests, and while waiting for another window's install | Yes, under the deadline; a partial download is kept for the next install to resume, under the folder's install lock |
 | Availability check | `app/library/availability.rs` | File metadata for every photo | None | No, for the same reason |
 | Update checker | `app/updates.rs` | Up to an hour between checks; a check or download of up to 15 min | Its request sender dropped, between requests | No: a download has no cancel |
-| Usage stats | `stats.rs` | A 30 s sleep, then a report of up to 20 s | `enabled`, after the sleep | No |
+| Installation probe | `diagnostics.rs` | `updates::installation()`, which can run the package manager | None; the system probe stops waiting for it after 10 s and reports it unavailable | No |
 | GVFS bridge reaper (Linux) | `platform/network.rs` | The bridge process, which outlives the app | None | Never |
 
 One-shot jobs stay detached: Auto, Upright, Auto straighten, the Point Color and
@@ -82,8 +82,7 @@ Folder Inside, and deciding what a crash left when a catalog opens; the close gu
 waits for a run, with Close anyway, and the journal leaves anything cut short to
 recovery), the
 folder availability probe (which can hang on a stalled mount like the volume
-probe), the update receipt acknowledgement, usage stats collection (which can run
-the package manager) and the watermark fonts. They report through the event channel or a generation check,
+probe), the update receipt acknowledgement, the Report an Issue system probe and the watermark fonts. They report through the event channel or a generation check,
 so a result that arrives after its document is gone is dropped. File dialogs on
 macOS run their panel on the main thread, so they are never joined from it.
 

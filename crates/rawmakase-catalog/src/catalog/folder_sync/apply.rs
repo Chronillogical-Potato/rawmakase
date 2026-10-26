@@ -11,7 +11,7 @@ use crate::catalog::db::{Reads, sql};
 use crate::catalog::edit_rows::{Refresh, refresh_identity};
 use crate::catalog::ingest::{Matched, Place, folder_id, known};
 use crate::catalog::locations::folder_path;
-use crate::catalog::{Catalog, FolderId, MetadataDefaults, PhotoId, SidecarReport};
+use crate::catalog::{Catalog, FolderId, NewPhotoDefaults, PhotoId, SidecarReport};
 use crate::storage::Identity;
 use anyhow::{Result, ensure};
 use std::collections::{HashMap, HashSet};
@@ -84,7 +84,7 @@ impl Catalog {
         accepted: &Accepted,
         online: &dyn Fn(&Path) -> bool,
         open: Option<PhotoId>,
-        defaults: &MetadataDefaults,
+        defaults: &NewPhotoDefaults,
     ) -> Result<Applied> {
         let moves = chosen_moves(plan, accepted)?;
         let mut applied = Applied::default();
@@ -302,7 +302,7 @@ impl Catalog {
     fn add_files(
         &mut self,
         files: &[PathBuf],
-        defaults: &MetadataDefaults,
+        defaults: &NewPhotoDefaults,
     ) -> Result<(usize, SidecarReport, Vec<NotChecked>)> {
         let mut placed = self.place(files, Path::new(""), &[])?;
         let mut not_placed: Vec<NotChecked> = placed

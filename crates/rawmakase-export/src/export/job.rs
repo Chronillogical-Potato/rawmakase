@@ -99,7 +99,7 @@ pub fn prepare(
     // Read once: for the export's metadata and the Simple Copyright
     // Watermark.
     let file = (policy.reads_file() || simple_copyright)
-        .then(|| exif::read(&photo.source))
+        .then(|| crate::photo::camera_exif(&photo.source))
         .flatten();
     // Loaded first: a missing image or font fails the export before it
     // renders.
@@ -134,10 +134,9 @@ pub fn prepare(
     cancelled()?;
     progress(0.85);
     let file = file.filter(|_| policy.reads_file());
-    // The decoder's capture settings stand in for EXIF that could not be read.
     let libraw = file
         .is_none()
-        .then(|| exif::CameraExif::from_libraw(&image.metadata));
+        .then(|| stand_in(&photo.source, &image.metadata));
     let assembled = assemble(policy, file.as_ref(), libraw, &photo.values);
     let xmp = assembled
         .xmp
@@ -155,6 +154,15 @@ pub fn prepare(
         },
         notice,
     })
+}
+
+/// What stands in for the camera's EXIF of `source`, which has none that
+/// can be read: the decoder's capture settings in `metadata`, with the
+/// dates a RAW container's own records give (a CRW's TimeStamp).
+pub fn stand_in(source: &Path, metadata: &crate::camera_data::Metadata) -> exif::CameraExif {
+    let mut stand_in = exif::CameraExif::from_libraw(metadata);
+    stand_in.exif.extend(crate::raw::capture_date_tags(source));
+    stand_in
 }
 
 /// `raw` at full resolution, as Develop decodes the photo it opens: the decode
@@ -232,6 +240,142 @@ fn xmp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exif::{CameraExif, Field, tag};
+
+    /// The photo at `source`, its image decoded already, as Develop has it.
+    fn photo(source: &Path, cache: &Path) -> Photo {
+        let metadata = crate::camera_data::Metadata {
+            make: "Canon".into(),
+            model: "EOS 300D".into(),
+            shutter: 0.01,
+            aperture: 4.,
+            iso: 200.,
+            focal: 35.,
+            ..Default::default()
+        };
+        Photo {
+            image: Arc::new(CameraImage {
+                width: 4,
+                height: 2,
+                recovered: Default::default(),
+                pixels: vec![[0.2; 3]; 8],
+                metadata,
+                fast: false,
+                scale_factor: 1.,
+                scale_clipped: 0,
+            }),
+            source: source.to_path_buf(),
+            recipe: Recipe::default(),
+            values: Default::default(),
+            watermark: None,
+            demosaic: Demosaic::default(),
+            cache: DecodeCache::new(cache.to_path_buf(), u64::MAX),
+        }
+    }
+
+    /// The EXIF of `photo`'s JPEG export.
+    fn exported(photo: Photo, dir: &Path) -> Result<CameraExif> {
+        let settings = ExportSettings {
+            include: crate::export_settings::Include::AllExceptCameraRaw,
+            ..Default::default()
+        };
+        let target = dir.join("out.jpg");
+        let _ = std::fs::remove_file(&target);
+        let cancel = AtomicBool::new(false);
+        run(
+            photo,
+            &settings,
+            &target,
+            super::super::Replace::NoClobber,
+            &cancel,
+            |_| {},
+        )?;
+        crate::exif::read(&target).ok_or_else(|| anyhow::anyhow!("no EXIF in the export"))
+    }
+
+    fn text(exif: &CameraExif, tag: u16) -> Option<String> {
+        exif.main
+            .iter()
+            .chain(&exif.exif)
+            .chain(&exif.gps)
+            .find(|f| f.tag == tag)
+            .and_then(Field::text)
+    }
+
+    /// A CR3's and an MRW's camera EXIF go with their exports as a CR2's
+    /// does: the creator, copyright and description, the dates, the
+    /// serial numbers, the exposure program and GPS (#671).
+    #[test]
+    fn a_cr3s_and_an_mrws_camera_exif_go_with_their_exports() -> Result<()> {
+        use super::super::exif::{Container, camera_raw};
+        let camera = CameraExif {
+            main: vec![
+                Field::ascii(tag::IMAGE_DESCRIPTION, "Harbour at dusk"),
+                Field::ascii(tag::MAKE, "Canon"),
+                Field::ascii(tag::MODEL, "Canon EOS R5m2"),
+                Field::ascii(tag::ARTIST, "Ann Example"),
+                Field::ascii(tag::COPYRIGHT, "Ann Example 2024"),
+            ],
+            exif: vec![
+                Field::short(0x8822, 1),
+                Field::ascii(tag::DATE_TIME_ORIGINAL, "2024:08:20 15:24:34"),
+                Field::ascii(tag::DATE_TIME_DIGITIZED, "2024:08:20 15:24:35"),
+                Field::ascii(tag::OFFSET_TIME_ORIGINAL, "+02:00"),
+                Field::ascii(0xa431, "143302103530"),
+                Field::ascii(tag::LENS_MODEL, "RF135mm F1.8 L IS USM"),
+                Field::ascii(tag::MAKER_NOTE, "maker note"),
+            ],
+            gps: vec![
+                Field::ascii(tag::GPS_LATITUDE_REF, "N"),
+                Field::rational(tag::GPS_LATITUDE, 52, 1),
+            ],
+        };
+        let dir = tempfile::tempdir()?;
+        for (container, name) in [(Container::Cr3, "a.CR3"), (Container::Mrw, "a.MRW")] {
+            let source = dir.path().join(name);
+            std::fs::write(&source, camera_raw(container, camera.clone()))?;
+            let out = exported(photo(&source, dir.path()), dir.path())?;
+            for (tag, value) in [
+                (tag::IMAGE_DESCRIPTION, "Harbour at dusk"),
+                (tag::MODEL, "Canon EOS R5m2"),
+                (tag::ARTIST, "Ann Example"),
+                (tag::COPYRIGHT, "Ann Example 2024"),
+                (tag::DATE_TIME_ORIGINAL, "2024:08:20 15:24:34"),
+                (tag::DATE_TIME_DIGITIZED, "2024:08:20 15:24:35"),
+                (tag::OFFSET_TIME_ORIGINAL, "+02:00"),
+                (0xa431, "143302103530"),
+                (tag::LENS_MODEL, "RF135mm F1.8 L IS USM"),
+                (tag::GPS_LATITUDE_REF, "N"),
+            ] {
+                assert_eq!(text(&out, tag).as_deref(), Some(value), "{name} {tag:#x}");
+            }
+            let program = out.exif.iter().find(|f| f.tag == 0x8822);
+            assert_eq!(program.and_then(Field::number), Some(1.), "{name}");
+            assert_eq!(out.gps.len(), 2, "{name}");
+            // The maker note's offsets point into the RAW.
+            assert!(out.get(tag::MAKER_NOTE).is_none(), "{name}");
+        }
+        Ok(())
+    }
+
+    /// A CRW has no EXIF: its export carries the decoder's capture settings
+    /// and the date of its TimeStamp record (#671).
+    #[test]
+    fn a_crws_export_is_dated_by_its_time_stamp() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let source = dir.path().join("a.CRW");
+        // 2016-12-23 17:05:30 on the camera's clock.
+        std::fs::write(&source, super::super::exif::dated_crw(1_482_512_730))?;
+        let out = exported(photo(&source, dir.path()), dir.path())?;
+        assert_eq!(
+            text(&out, tag::DATE_TIME_ORIGINAL).as_deref(),
+            Some("2016:12:23 17:05:30")
+        );
+        assert_eq!(text(&out, tag::MODEL).as_deref(), Some("EOS 300D"));
+        let f_number = out.exif.iter().find(|f| f.tag == tag::F_NUMBER);
+        assert_eq!(f_number.and_then(Field::number), Some(4.));
+        Ok(())
+    }
 
     /// Export reads the full-size image from the cache it is given, which
     /// follows the folder chosen in Preferences, not the default directory.

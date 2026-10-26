@@ -27,6 +27,7 @@ fastframe_icons::icons! {
         Collection => "images",
         CollectionSet => "box",
         Keyboard => "keyboard",
+        Bug => "bug",
         GridView => "layout-grid",
         LoupeView => "square",
         SurveyView => "layout-dashboard",

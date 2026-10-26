@@ -453,6 +453,7 @@ impl Editor {
             || self.modal.is_some()
             || self.not_editable.is_some()
             || self.view.shortcuts
+            || self.report_issue.is_open()
             || self.onboarding.visible
             || self.curve_save_open()
             || self.lut_import_open()
