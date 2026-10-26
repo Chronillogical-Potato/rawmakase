@@ -3224,6 +3224,35 @@ fn choosing_the_photos_own_aspect_leaves_an_uncropped_photo_alone() {
     assert_eq!(editor.document.edit.history().steps().0.len(), steps);
 }
 #[test]
+fn fitting_a_crop_dragged_to_its_smallest_keeps_it_valid() {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    editor.view.tool = state::Tool::Crop;
+    editor.view.aspect = -1.;
+    // A handle dragged to the smallest crop: 0.11 - 0.1 is just under 0.01 in f32,
+    // though the crop is already at the photo's aspect.
+    let frame = editor.begin_edit_frame();
+    editor.document.edit.recipe_mut().crop = [0.1, 0.1, 0.1 + 0.01, 0.1 + 0.01];
+    editor.fit_aspect();
+    editor.finish_edit_frame(frame, &ctx);
+    editor.document.edit.recipe().validate().unwrap();
+}
+#[test]
 fn crop_tool_keeps_the_chosen_aspect_for_uncropped_photos() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let session = dir.path().join("session.json");
