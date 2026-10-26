@@ -78,6 +78,25 @@ pub(crate) fn describe(choice: &MonitorProfile, system: &SystemDisplay) -> Strin
     }
 }
 
+/// The mode for the system report, without the profile's name.
+pub(crate) fn report_mode(
+    choice: &MonitorProfile,
+    system: &SystemDisplay,
+) -> crate::diagnostics::Monitor {
+    use crate::diagnostics::{Monitor, SystemProfile};
+    match (choice, system) {
+        (MonitorProfile::Custom(_), _) => Monitor::Custom,
+        (MonitorProfile::Srgb, _) => Monitor::Srgb,
+        (MonitorProfile::System, SystemDisplay::Profile(_)) => {
+            Monitor::System(SystemProfile::Found)
+        }
+        (MonitorProfile::System, SystemDisplay::Managed) => Monitor::System(SystemProfile::Managed),
+        (MonitorProfile::System, SystemDisplay::Unknown) => {
+            Monitor::System(SystemProfile::NotFound)
+        }
+    }
+}
+
 /// Asks the system for the window's display profile, again when the window
 /// reaches another display and every few seconds for a newly assigned profile.
 #[derive(Default)]

@@ -69,6 +69,8 @@ pub(crate) struct Editor {
     updates: updates::Updates,
     #[cfg(feature = "telemetry")]
     stats: stats::UsageStats,
+    /// Report an Issue…: its dialog and the system probe.
+    report_issue: report_issue::ReportIssue,
     themes: theme::Themes,
     exports: export::Exports,
     /// Build Standard-Sized Previews, in the background.
@@ -240,11 +242,11 @@ impl Editor {
         let place = CatalogPlace::of(&session);
         // Only a real session checks GitHub, not an isolated test.
         let updates = updates::Updates::new(&session, session_file.is_some().then_some(ctx));
-        #[cfg(feature = "telemetry")]
         let adapter = match &backend {
             worker::RenderBackend::Gpu(Some(render_state)) => Some(render_state.adapter.get_info()),
             _ => None,
         };
+        let report_issue = report_issue::ReportIssue::new(adapter.as_ref());
         #[cfg(feature = "telemetry")]
         let stats = stats::UsageStats::new(
             adapter.as_ref(),
@@ -324,6 +326,7 @@ impl Editor {
             updates,
             #[cfg(feature = "telemetry")]
             stats,
+            report_issue,
             themes: theme::Themes::new(
                 ctx,
                 // Sessions from before `theme_chosen` saved only a palette.
@@ -888,6 +891,7 @@ mod raw_defaults;
 mod readout;
 mod red_eye_tool;
 mod reference;
+mod report_issue;
 mod retouch_tool;
 mod side_tabs;
 mod stand_in;

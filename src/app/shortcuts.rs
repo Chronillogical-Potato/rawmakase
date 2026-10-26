@@ -332,6 +332,9 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> egui::R
     }
     let color = palette.gray(if response.hovered() { 235 } else { 160 });
     icons::paint_at(ui.painter(), icon, rect.center(), 15., color);
+    // Named for screen readers by what it does, as its hover text says.
+    let enabled = ui.is_enabled();
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, hover));
     response
         .on_hover_text(hover)
         .on_hover_cursor(egui::CursorIcon::PointingHand)

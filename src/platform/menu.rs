@@ -21,6 +21,7 @@ pub(crate) enum Action {
     Filmstrip,
     Fullscreen,
     Shortcuts,
+    ReportIssue,
 }
 
 #[cfg(target_os = "macos")]
