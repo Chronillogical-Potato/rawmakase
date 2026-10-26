@@ -346,8 +346,8 @@ pub(super) fn write(
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
     // Durable, with its extras, time and permissions, through the handle
     // too, not given to a file another computer puts at its name
-    // meanwhile (#675), where the system keeps to the handle (Linux's
-    // CIFS doesn't: see `fsops::copy`). Such a file fails the read-back.
+    // meanwhile (#675), where the system keeps to the handle (a share's
+    // drivers don't: see `fsops::copy`). Such a file fails the read-back.
     disk.sync_file(&temp, &into).map_err(problem)?;
     // Its extras before its time and permissions: writing a resource fork
     // changes a file's time, and a read-only file takes no more.

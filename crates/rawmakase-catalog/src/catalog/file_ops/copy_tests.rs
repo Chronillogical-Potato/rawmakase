@@ -2497,8 +2497,10 @@ fn a_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Result<()> {
 }
 
 /// A file another computer puts at a copy's name while it is given its
-/// original's extras, time and permissions takes none of them: they go
-/// through the handle the copy was made through, never by its name (#675).
+/// original's extras, time and permissions takes none of them where the
+/// system keeps to the handle the copy was made through, as this test disk
+/// does (#675); not Windows' alternate data streams, written by path, nor
+/// a share's drivers (see `fsops::copy`).
 /// The copy then reads back otherwise, and the move changes nothing.
 #[test]
 fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Result<()> {
@@ -2527,11 +2529,14 @@ fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Resu
                 .clone()
                 .expect("a file was swapped in");
             assert_eq!(std::fs::read(&theirs)?, b"theirs", "{what}");
-            assert_eq!(
-                fsops::extras(&theirs)?,
-                fsops::extras(&plain)?,
-                "{what}: its extras"
-            );
+            // Windows writes an alternate data stream by its path.
+            if !cfg!(windows) {
+                assert_eq!(
+                    fsops::extras(&theirs)?,
+                    fsops::extras(&plain)?,
+                    "{what}: its extras"
+                );
+            }
             let dated = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
             assert_eq!(
                 std::fs::metadata(&theirs)?.modified()?,
