@@ -198,11 +198,12 @@ Not compared yet: the Hasselblad, OM System, Olympus ORI and Fujifilm GFX100 II,
 GFX100RF, GFX100S, GFX100S II and GFX50S II samples, for which RAWmakase does not find the installed Adobe Standard profile by name, and the Pentax KP
 and 645Z and Fujifilm X-T200 and X-T50, whose default crop differs from Camera Raw's.
 
-Seven rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
+Eight rows are not from raw.pixls.us: the X100F (read from two Lightroom DNGs, see
 `macos-lightroom-validation.md`), the A7 II and A7CR, fitted to Camera Raw 18.6
 renders of private photos (8 and 4), the A7R VI, EOS 700D and A7R, read from
-Adobe DNG Converter 18.7's DNG of one private photo each, and the EOS 1500D (2000D),
-read from its DNG of one Signature Edits photo. LibRaw does not identify
+Adobe DNG Converter 18.7's DNG of one private photo each, the EOS 1500D (2000D),
+read from its DNG of one Signature Edits photo, and the EOS R8 Mark II, read from
+its DNGs of six private photos. LibRaw does not identify
 the A7R VI by name yet, but its white level, black level and crop match Adobe's.
 
 The 45 rows added with per-unit calibration on 2026-10-14 (older Canon, Sony and

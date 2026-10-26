@@ -6439,6 +6439,13 @@ source = "adobe-dng"
 
 [[camera]]
 make = "Canon"
+model = "EOS R8 Mark II"
+dng = false
+white = 16384
+source = "adobe-dng"
+
+[[camera]]
+make = "Canon"
 model = "EOS R10"
 dng = false
 white = 16384

@@ -732,10 +732,14 @@ is the first of the largest raw tracks (a Dual Pixel file's second image is as
 large). The visible area is the image areas' (`IAD1`) active area, the default
 crop their crop, and the aspect crop the maker notes' AspectInfo inside it.
 White balance and the daylight and shade presets are the timed metadata's
-ColorData. White is ColorData's SpecularWhiteLevel, which Adobe DNG
-Converter's WhiteLevel follows, but for the cameras whose data Adobe reads
-unclipped at that level (EOS R5, R5 Mark II, R6, R7, R8, R10, R50, R50 V and
-1D X Mark III): their `adobe-dng` rows give Adobe's level. LibRaw read every
+ColorData. Its version 67 (EOS R8 Mark II), which ExifTool does not
+decode, keeps version 64's white balance layout and versions 65 and 66's
+levels: our measurement, which reproduces Adobe DNG Converter's
+AsShotNeutral, BlackLevel and CameraCalibration on its files. White is
+ColorData's SpecularWhiteLevel, which Adobe DNG Converter's WhiteLevel
+follows, but for the cameras whose data Adobe reads unclipped at that level
+(EOS R5, R5 Mark II, R6, R7, R8, R8 Mark II, R10, R50, R50 V and 1D X Mark
+III): their `adobe-dng` rows give Adobe's level. LibRaw read every
 CR3 with the bit depth's range (16383), so CR3 files develop on a different
 normalized scale than before (departures from LibRaw, Adobe's values as
 evidence). Black is ColorData's per-channel

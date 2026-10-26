@@ -48,21 +48,24 @@ matrix-derived `pre_mul` (LibRaw's); `cameras::neutral_calibration` applies the 
 missing or invalid preset, or a camera without a row, keeps identity rather than
 borrowing another unit's correction, and there is no make-wide fallback.
 
-Evidence (Adobe DNG Converter 18.7, 2026-10-14): 683 samples, 465 public
-raw.pixls.us files and 218 anonymous local ones, including bodies of the same
+Evidence (Adobe DNG Converter 18.7, 2026-10-14 to 2026-10-24): 689 samples, 465 public
+raw.pixls.us files and 224 anonymous local ones, including bodies of the same
 model identified by serial number. For 61 models, bodies with different
 calibrations reproduce Adobe's four-decimal values exactly from one integer
 reference: 24 Sony and 31 Canon models with the Daylight preset, 3 Canon models
 with Shade, 2 Fujifilm models with D65 and the Olympus E-M5 Mark III with its
 5300 K preset. Different ISO settings and recording
 modes of one unit (RAW and C-RAW, compressed and uncompressed, sRAW and mRAW)
-record one calibration. Separately measured models that share a sensor or
+record one calibration. The EOS R8 Mark II stores a Daylight preset that
+depends on the lens, and Adobe's calibration follows it: six local files of one
+unit (2026-10-24), with two lenses, record two calibrations that its one
+reference reproduces. Separately measured models that share a sensor or
 processor generation share their reference (Fujifilm X-T3, X-T30, X-T4, X-S10,
-X-E4, X-Pro3 and X100V; Canon 250D and 850D, R6 Mark II and R8, R10 and R50,
-100D, 650D and 700D, 600D and 1200D, 1300D and 3000D, 6D and 70D; Sony ILCE-5000
-and SLT-A37), which further supports single-sample rows. A body sold under several
-names (the 1100D as the Rebel T3, the 3000D as the 4000D and Rebel T100) has one
-reference under each name. The A7CR, A7 II and X100F rows have
+X-E4, X-Pro3 and X100V; Canon 250D and 850D, R6 Mark II, R8 and R8 Mark II,
+R10 and R50, 100D, 650D and 700D, 600D and 1200D, 1300D and 3000D, 6D and 70D;
+Sony ILCE-5000 and SLT-A37), which further supports single-sample rows. A body
+sold under several names (the 1100D as the Rebel T3, the 3000D as the 4000D and
+Rebel T100) has one reference under each name. The A7CR, A7 II and X100F rows have
 been checked against Lightroom or Camera Raw on the owner's bodies. This agrees
 with the [RawSpeed calibration investigation](https://github.com/darktable-org/rawspeed/compare/develop...tdonovan4:rawspeed:camera-calibration-matrix)
 for Sony.
