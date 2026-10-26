@@ -1748,3 +1748,31 @@ fn a_folder_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable()
     assert!(rewritten > 0);
     Ok(())
 }
+
+/// A folder left on a share holding a file the move didn't make (another
+/// computer's) is never said to be the user's to delete (review of #675).
+#[test]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+fn a_folder_left_on_a_share_with_another_file_in_it_isnt_said_to_be_deletable() -> Result<()> {
+    let mut fx = small();
+    let disk = Faulty {
+        faults: vec![(Op::Copy, 2, Fault::Fail)],
+        ..far_as(&fx, Far::Share)
+    };
+    let trash = trash_as(&fx, Far::Share);
+    let op = to_far(&fx);
+    let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+    let operation = outcome.items[0].operation;
+    // Another computer puts a file in it; the user deletes the copies.
+    let theirs = fx.root.join("far/day/sub/peer-only.txt");
+    std::fs::write(&theirs, b"theirs")?;
+    super::copy_tests::deleted_by_the_user(&fx, operation);
+    fx.reopen();
+    let recovery = fx.recover_with(&far_as(&fx, Far::Share), &trash);
+    let [u] = &recovery.unfinished[..] else {
+        panic!("{recovery:?}")
+    };
+    assert_ne!(u.reason, super::copy::LEFT_ON_SHARE);
+    assert_eq!(std::fs::read(&theirs)?, b"theirs");
+    Ok(())
+}

@@ -1502,6 +1502,8 @@ fn discard_each(
     // it stays (Put Back puts it in the Trash), with the folders
     // holding it; what can't be told stays too.
     let mut left = None;
+    // What is left on a share for the user to delete, safely.
+    let mut deletable = std::collections::HashSet::new();
     for m in item.members.iter().rev() {
         if m.state == MemberState::Discarded {
             continue;
@@ -1526,20 +1528,31 @@ fn discard_each(
             },
         };
         let mut receipt = None;
+        let here = match &found {
+            Made::Here(at) => Some(at.clone()),
+            _ => None,
+        };
         // Why it stays, if it does.
         let mut why = NOT_BACK;
         let done = match found {
             Made::Gone => true,
             Made::Unknown => false,
             // Only while empty: one holding a copy left stays, on a share
-            // for as long as the copies left there.
+            // the user's to delete only while it holds nothing but copies
+            // left so (never another computer's file).
             Made::Here(at) if dir => {
-                if proof::removes_nothing(disk, &at) {
+                let removed = disk
+                    .remove_dir(&at)
+                    .and_then(|()| disk.sync_dir(parent(&at)))
+                    .is_ok();
+                let only_ours = || {
+                    disk.list(&at)
+                        .is_ok_and(|names| names.iter().all(|n| deletable.contains(&at.join(n))))
+                };
+                if !removed && proof::removes_nothing(disk, &at) && only_ours() {
                     why = copy::LEFT_ON_SHARE;
                 }
-                disk.remove_dir(&at)
-                    .and_then(|()| disk.sync_dir(parent(&at)))
-                    .is_ok()
+                removed
             }
             Made::Here(at) if copy.content.is_some() && !original_proven(disk, proofs, m) => {
                 match rule {
@@ -1601,6 +1614,9 @@ fn discard_each(
                 Some(NOT_BACK) => left,
                 _ => Some(why),
             };
+            if let (copy::LEFT_ON_SHARE, Some(at)) = (why, here) {
+                deletable.insert(at);
+            }
             continue;
         }
         catalog
