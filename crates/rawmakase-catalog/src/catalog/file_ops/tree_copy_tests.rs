@@ -540,32 +540,27 @@ fn every_fault_at_every_step_of_a_folder_built_at_its_name_ends_proven() {
 }
 
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn every_fault_at_every_step_of_a_folder_copy_to_an_smb_share_ends_proven() {
     assert!(every_fault(Far::Share) >= 50);
 }
 
 #[test]
-fn a_folder_to_an_smb_share_is_refused_but_on_macos() {
+fn a_folder_to_an_smb_share_is_refused_on_windows() {
     let fx = files();
     let disk = far_as(&fx, Far::Share);
     let planned = fx.plan_on(to_far(&fx), &disk);
-    assert_eq!(planned.is_ok(), cfg!(target_vendor = "apple"));
+    assert_eq!(planned.is_ok(), !cfg!(windows));
     if let Err(e) = planned {
         assert!(e.to_string().contains("this kind of drive"), "{e}");
     }
 }
 
 /// A folder moved off a share stays there once copied: macOS has no Trash
-/// on an SMB share. The question says so before, and nothing is deleted.
+/// on an SMB share, and Linux's isn't used. The question says so before,
+/// and nothing is deleted.
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_moved_from_an_smb_share_stays_there_as_its_trash_can_t_take_it() -> Result<()> {
     let mut fx = files();
     // The fixture's volume and `far/`'s both shares.
@@ -733,10 +728,7 @@ fn every_failed_journal_write_of_a_folder_copy_ends_proven() -> Result<()> {
 /// copy that can't be removed just then), is put back in the end: what
 /// is left of it goes a copy at a time, as the rest went.
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_on_a_share_undone_part_way_is_put_back_later() -> Result<()> {
     let mut fx = files();
     let was = before(&fx);
@@ -1011,8 +1003,10 @@ fn a_folder_moves_between_two_real_volumes() -> Result<()> {
             info[8] = 0x04;
             fsops::set_extra(&day, "com.apple.FinderInfo", &info)?;
         }
+        // Never empty: SMB takes an empty extended attribute for none
+        // (Linux's CIFS against Samba drops it), and the move is refused.
         for t in tags {
-            fsops::set_extra(&day.join(t), "tag", t.as_bytes())?;
+            fsops::set_extra(&day.join(t), "tag", format!("tag {t}").as_bytes())?;
         }
         for t in tags
             .iter()

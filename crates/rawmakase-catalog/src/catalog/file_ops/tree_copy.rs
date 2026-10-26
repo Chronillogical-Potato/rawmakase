@@ -356,7 +356,7 @@ fn alike(
 
 /// Why a folder isn't copied to or from a drive whose file ids can't prove
 /// which file a name is.
-const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network drives other than SMB shares on a Mac, and others) isn't available yet. Copy it in Finder, then add the folder.";
+const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others) isn't available yet. Copy it in Finder, then add the folder.";
 
 /// The members `tree` journals, copied as `copy`: each name's original,
 /// where it goes, and where it is made inside the hidden folder.
@@ -1458,8 +1458,8 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             if !ready || !as_made(disk, item, &at) {
                 return Ok(false);
             }
-            // Built at its name on a volume with no Trash (an SMB share on
-            // macOS), each copy goes on its own, as one still being built.
+            // Built at its name on a volume with no Trash (an SMB share),
+            // each copy goes on its own, as one still being built.
             let receipt = match cx.trash.trash(&at) {
                 Ok(receipt) => receipt,
                 Err(TrashError::Unsupported) if proofs.direct => {

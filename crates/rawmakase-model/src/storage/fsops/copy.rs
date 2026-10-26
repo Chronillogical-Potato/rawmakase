@@ -13,7 +13,7 @@
 //! FinderInfo, its resource fork, and the rest, but for what the system
 //! sets itself), its `user.` ones on Linux, and its alternate data streams
 //! on Windows.
-use super::{FileId, FsError};
+use super::FsError;
 use sha2::{Digest as _, Sha256};
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -97,30 +97,26 @@ impl std::error::Error for CopyError {}
 
 /// Makes an empty file `path`, only if nothing has that name: a file,
 /// folder or link already there is never opened, truncated or replaced.
-pub fn create_file(path: &Path) -> Result<(), FsError> {
-    OpenOptions::new().write(true).create_new(true).open(path)?;
-    Ok(())
+/// Returns the handle it was made through, open to write, for
+/// [`copy_into`]: what is copied goes into the file made, whatever another
+/// program or computer puts at its name meanwhile (on an SMB share, where
+/// names prove files, one could, #573).
+pub fn create_file(path: &Path) -> Result<File, FsError> {
+    Ok(OpenOptions::new().write(true).create_new(true).open(path)?)
 }
 
-/// Copies every byte of `from` into `to`, which must be empty and, where
-/// its volume keeps file ids, the file object `to_id` (made by
-/// [`create_file`]): `COPY_CHUNK` bytes at a time,
-/// asking `go_on`, with how many bytes are written so far, after each
-/// chunk. Returns the SHA-256 of the bytes read from `from`. Neither syncs
-/// nor sets times; `to` is never made, truncated or replaced here.
+/// Copies every byte of `from` into `to`, the handle [`create_file`] made
+/// a file through, which must still be empty: `COPY_CHUNK` bytes at a
+/// time, asking `go_on`, with how many bytes are written so far, after
+/// each chunk. Returns the SHA-256 of the bytes read from `from`. Neither
+/// syncs nor sets times; nothing is made, truncated or replaced here.
 pub fn copy_into(
     from: &Path,
-    to: &Path,
-    to_id: Option<FileId>,
+    to: &mut File,
     go_on: &mut dyn FnMut(u64) -> bool,
 ) -> Result<ContentHash, CopyError> {
     let mut source = File::open(from)?;
-    let mut target = OpenOptions::new().write(true).open(to)?;
-    let same = match to_id {
-        Some(id) => super::os::handle_id(&target)? == id,
-        None => true,
-    };
-    if !same || target.metadata()?.len() != 0 {
+    if to.metadata()?.len() != 0 {
         return Err(CopyError::NotTheFile);
     }
     let mut sha = Sha256::new();
@@ -134,13 +130,13 @@ pub fn copy_into(
             Err(e) => return Err(e.into()),
         };
         sha.update(&buffer[..read]);
-        target.write_all(&buffer[..read])?;
+        to.write_all(&buffer[..read])?;
         written += read as u64;
         if !go_on(written) {
             return Err(CopyError::Stopped);
         }
     }
-    target.flush()?;
+    to.flush()?;
     Ok(ContentHash::of(sha))
 }
 
@@ -180,10 +176,15 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
         file.set_permissions(std::fs::Permissions::from_mode(mode))?;
         // An SMB server given a flush after the times sets the write time
         // to when its handle closes (macOS 15 against a Synology share,
-        // every time). There `fsync(2)`, which kept them every time; the
-        // server applies the times as it is given them.
+        // and Linux 7.2's CIFS against Samba 4.22, every time). There
+        // macOS's `fsync(2)` kept them every time, and Linux's, which is
+        // that flush, is left out; the server applies the times as it is
+        // given them, before the call returns.
         if !source.is_dir() && super::os::kind(to)? == super::VolumeKind::Smb {
+            #[cfg(target_vendor = "apple")]
             return rustix::fs::fsync(&file).map_err(|e| std::io::Error::from(e).into());
+            #[cfg(not(target_vendor = "apple"))]
+            return Ok(());
         }
     }
     // A folder's are left to the system, as before (a Windows folder's

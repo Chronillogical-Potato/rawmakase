@@ -185,11 +185,17 @@ pub fn entry(path: &Path) -> Result<Entry, FsError> {
     os::entry(path)
 }
 
+/// The file object open file `file` is, whatever has its name now.
+pub fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
+    os::handle_id(file)
+}
+
 /// Renames `from` to `to`, a file or a directory, only if nothing has the
 /// name `to`: never replacing a file, nor an empty directory as a plain
 /// rename would. Both must be on one volume ([`FsError::CrossDevice`]).
 /// A volume or system without such a rename answers
-/// [`FsError::Unsupported`] and nothing is changed.
+/// [`FsError::Unsupported`] and nothing is changed: an SMB share among them
+/// ([`VolumeKind::exclusive_rename`]).
 pub fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     os::rename_exclusive(from, to)
 }
@@ -379,7 +385,8 @@ impl VolumeKind {
     /// a file another computer puts at the name isn't promised to be kept:
     /// macOS's smbfs answers `ENOTSUP` (measured on macOS 15), and Linux's
     /// CIFS checks the name only on this computer. Elsewhere it is taken
-    /// to, and a volume that doesn't answers [`FsError::Unsupported`].
+    /// to, and a volume that doesn't answers [`FsError::Unsupported`], as
+    /// [`rename_exclusive`] does on an SMB share.
     pub fn exclusive_rename(self) -> bool {
         !((cfg!(target_vendor = "apple") && self == Self::Exfat) || self == Self::Smb)
     }

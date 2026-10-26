@@ -286,22 +286,29 @@ pub(super) fn write(
     // is found by its name, empty. Not made, nothing of it is there: what
     // is (a file another program made at its name, which may be the
     // photo's own name where copies are made at it) is never taken for it.
-    if let Err(e) = disk.create_file(temp) {
-        journal(catalog, &|w| journal::set_discarded(w, id, ordinal, None))?;
-        return Err(match e {
-            FsError::AlreadyExists => Problem::NameTaken(name(temp)),
-            e => problem(e),
+    // Copied through the handle it was made through: into this file,
+    // whatever another computer puts at its name meanwhile (on a share).
+    let mut into = match disk.create_file(temp) {
+        Ok(into) => into,
+        Err(e) => {
+            journal(catalog, &|w| journal::set_discarded(w, id, ordinal, None))?;
+            return Err(match e {
+                FsError::AlreadyExists => Problem::NameTaken(name(temp)),
+                e => problem(e),
+            }
+            .into());
         }
-        .into());
-    }
-    let made = disk.entry(temp).map_err(problem)?;
-    if made.kind != EntryKind::File || made.links != 1 {
+    };
+    // The file object made, from its handle; its name must still be it.
+    let made = disk.handle_id(temp, &into).map_err(problem)?;
+    let named = disk.entry(temp).map_err(problem)?;
+    if named.kind != EntryKind::File || named.links != 1 || named.id != made {
         return Err(Problem::Disk(format!("{} isn't the file made", temp.display())).into());
     }
     // As the disk spells it (HFS+ keeps names decomposed), which every
     // later step and recovery find it by. Its file object only where it
     // stays.
-    let file = (proofs.copies == Proof::Ids).then_some(made.id);
+    let file = (proofs.copies == Proof::Ids).then_some(made);
     let temp = match file {
         Some(file) => spelled(disk, temp, file),
         None => proof::spelled(disk, temp),
@@ -316,7 +323,7 @@ pub(super) fn write(
     })?;
     // 2. Copied, durable, with the original's time.
     let content = disk
-        .copy_into(source, &temp, file, &mut |_| {
+        .copy_into(source, &temp, &mut into, &mut |_| {
             !cancel.load(Ordering::Relaxed)
         })
         .map_err(|e| match e {
@@ -324,6 +331,7 @@ pub(super) fn write(
             CopyError::NotTheFile => Problem::Disk(e.to_string()),
             CopyError::Fs(e) => problem(e),
         })?;
+    drop(into);
     // Written whole: from here it is never removed while its original
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
@@ -341,7 +349,7 @@ pub(super) fn write(
     if !unchanged(disk, source, id_proves, identity) {
         return Err(Problem::Changed(source.to_path_buf()).into());
     }
-    Ok((temp, made.id))
+    Ok((temp, made))
 }
 
 /// Whether `path` is a file with `identity` (and file object `id`, where
@@ -907,7 +915,7 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
 }
 
 /// Puts copy `at` of original `source` in the Trash, as an undone copy
-/// goes. Where its volume has none (an SMB share on macOS) it is removed
+/// goes. Where its volume has none (an SMB share) it is removed
 /// instead, only while `source` holds every byte it does, as many as it
 /// has ([`proof::begins`]): then nothing is lost. `Some` once it is gone,
 /// with the Trash's receipt if the Trash took it; `None` while it stays.

@@ -18,15 +18,19 @@ pub(super) trait Disk {
     fn canonical(&self, path: &Path) -> Result<PathBuf, FsError>;
     fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError>;
     /// The steps of a copy to another volume ([`fsops::create_file`] and
-    /// the rest), each on its own.
-    fn create_file(&self, path: &Path) -> Result<(), FsError>;
+    /// the rest), each on its own. A copy is written through the handle
+    /// its file was made through (`into`); `to` names it.
+    fn create_file(&self, path: &Path) -> Result<std::fs::File, FsError>;
     fn copy_into(
         &self,
         from: &Path,
         to: &Path,
-        to_id: Option<FileId>,
+        into: &mut std::fs::File,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError>;
+    /// The file object `file`, the handle the file at `at` was made
+    /// through, is ([`fsops::handle_id`]).
+    fn handle_id(&self, at: &Path, file: &std::fs::File) -> Result<FileId, FsError>;
     fn sync_file(&self, path: &Path) -> Result<(), FsError>;
     /// Gives file or folder `to` the extras of `from` (extended attributes,
     /// alternate data streams), [`FsError::Unsupported`] where its volume
@@ -75,17 +79,20 @@ impl Disk for Real {
     fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError> {
         fsops::volume_facts(path)
     }
-    fn create_file(&self, path: &Path) -> Result<(), FsError> {
+    fn create_file(&self, path: &Path) -> Result<std::fs::File, FsError> {
         fsops::create_file(path)
     }
     fn copy_into(
         &self,
         from: &Path,
-        to: &Path,
-        to_id: Option<FileId>,
+        _to: &Path,
+        into: &mut std::fs::File,
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<ContentHash, CopyError> {
-        fsops::copy_into(from, to, to_id, go_on)
+        fsops::copy_into(from, into, go_on)
+    }
+    fn handle_id(&self, _at: &Path, file: &std::fs::File) -> Result<FileId, FsError> {
+        fsops::handle_id(file)
     }
     fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError> {
         fsops::hash_prefix(path, len)

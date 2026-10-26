@@ -44,6 +44,18 @@ pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
 #[cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))]
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     use rustix::fs::{CWD, RenameFlags, renameat_with};
+    // Linux's CIFS checks `RENAME_NOREPLACE` only against what this
+    // computer has seen, and the server replaces: raced against an
+    // exclusive create through another mount, the rename replaced that
+    // file every time (Linux 7.2 against Samba 4.22). macOS's smbfs
+    // answers ENOTSUP itself.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let dir = from.parent().filter(|d| !d.as_os_str().is_empty());
+        if kind(dir.unwrap_or(Path::new(".")))? == VolumeKind::Smb {
+            return Err(FsError::Unsupported);
+        }
+    }
     renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(errno)
 }
 

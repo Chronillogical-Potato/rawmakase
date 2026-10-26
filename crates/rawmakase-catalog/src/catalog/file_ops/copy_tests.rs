@@ -43,7 +43,7 @@ pub(super) enum Far {
     /// made at their names.
     Direct,
     /// An SMB share, as `Direct` but on the network and with no Trash of
-    /// its own: proven by names on macOS, refused elsewhere.
+    /// its own: proven by names on macOS and Linux, refused on Windows.
     Share,
 }
 
@@ -51,7 +51,7 @@ impl Far {
     /// The kinds proven by names here.
     pub(super) fn by_names() -> Vec<Far> {
         let mut kinds = vec![Far::Names, Far::Direct];
-        if cfg!(target_vendor = "apple") {
+        if !cfg!(windows) {
             kinds.push(Far::Share);
         }
         kinds
@@ -77,7 +77,7 @@ pub(super) fn far_as(fx: &Fx, kind: Far) -> Faulty {
 }
 
 /// The Trash as it is beside a drive of `kind`: none on an SMB share
-/// (macOS's answers `Unsupported` there).
+/// (macOS's answers `Unsupported` there, and Linux's isn't used).
 pub(super) fn trash_as(fx: &Fx, kind: Far) -> FakeTrash {
     let mut trash = FakeTrash::new(fx);
     if kind == Far::Share {
@@ -268,7 +268,7 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
     let fx = files();
     let (here, there) = (fx.root.clone(), fx.root.join("far"));
-    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac, and others)";
+    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others)";
     for unstable in [
         vec![there.clone()],
         vec![here.clone()],
@@ -1198,10 +1198,7 @@ fn every_fault_at_every_step_of_a_copy_made_at_its_name_ends_proven() {
 }
 
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn every_fault_at_every_step_of_a_copy_to_an_smb_share_ends_proven() {
     assert!(every_fault(Far::Share) >= 60);
 }
@@ -1897,7 +1894,8 @@ fn a_copy_its_folder_doesn_t_list_yet_is_never_taken_for_gone() -> Result<()> {
 }
 
 #[test]
-fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_refused_elsewhere() -> Result<()> {
+fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_linux_and_refused_on_windows()
+-> Result<()> {
     let mut fx = files();
     let a = fx.photo("A.NEF");
     let disk = far_as(&fx, Far::Share);
@@ -1907,7 +1905,7 @@ fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_refused_elsewhere() ->
         // Its originals, on this drive, go to its Trash.
         assert_eq!((across.files, across.originals_stay), (1, 0));
     }
-    if !cfg!(target_vendor = "apple") {
+    if cfg!(windows) {
         assert!(plan.is_empty());
         let reasons: Vec<_> = plan.skipped().iter().map(|s| s.reason.clone()).collect();
         assert_eq!(reasons, [Skip::Refused(Refusal::FileIdsUnproven)]);
@@ -1939,10 +1937,7 @@ fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_refused_elsewhere() ->
 /// the share has no Trash: each copy, made at its name, is removed while
 /// its original holds every byte it does, and nothing is left there.
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_move_onto_an_smb_share_that_fails_is_undone_without_a_trash_there() -> Result<()> {
     let mut fx = files();
     let a = fx.photo("A.NEF");
@@ -1976,14 +1971,11 @@ fn a_move_onto_an_smb_share_that_fails_is_undone_without_a_trash_there() -> Resu
 }
 
 /// A share has no Trash (macOS's answers NSFeatureUnsupportedError on an
-/// SMB share, measured): its originals stay where they were, beside their
-/// copies, which the catalog follows, and the outcome says why. Nothing is
-/// deleted instead.
+/// SMB share, measured; Linux's isn't used): its originals stay where they
+/// were, beside their copies, which the catalog follows, and the outcome
+/// says why. Nothing is deleted instead.
 #[test]
-#[cfg_attr(
-    not(target_vendor = "apple"),
-    ignore = "SMB shares are proven by names only on macOS"
-)]
+#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_move_from_an_smb_share_keeps_the_originals_its_trash_can_t_take() -> Result<()> {
     let mut fx = files();
     let a = fx.photo("A.NEF");
@@ -2167,6 +2159,55 @@ fn a_name_taken_just_before_a_copy_is_made_at_it_is_left_as_it_is() -> Result<()
                 .unfinished
                 .is_empty()
         );
+    }
+    Ok(())
+}
+
+/// A file another program or computer puts at a copy's name just after it
+/// is made, before its file object is journalled, is never taken for it:
+/// nothing is copied into it, and it is left as it is, through recovery
+/// and Put Back: the move is listed for the user, as a name holding bytes
+/// that can't be proven the copy's is (review of #573: the file object
+/// was read from the name).
+#[test]
+fn a_file_put_at_a_copys_name_just_after_it_is_made_is_left_as_it_is() -> Result<()> {
+    let mut kinds = Far::by_names();
+    kinds.push(Far::Ids);
+    for kind in kinds {
+        let mut fx = files();
+        let disk = Faulty {
+            swap_after_create: Some(b"theirs".to_vec()),
+            ..far_as(&fx, kind)
+        };
+        let trash = trash_as(&fx, kind);
+        let op = to_far(&fx, &["A.NEF"]);
+        let outcome = run(&mut fx, op, &trash, &disk, &AtomicBool::new(false));
+        assert!(
+            matches!(results(&outcome)[..], [ItemResult::NeedsRecovery(_)]),
+            "{kind:?}: {outcome:?}"
+        );
+        let theirs = disk.swapped.borrow().clone().expect("a file was made");
+        assert_eq!(std::fs::read(&theirs)?, b"theirs", "{kind:?}");
+        for name in ["A.NEF", "A.xmp"] {
+            assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name), "{kind:?}");
+        }
+        fx.reopen();
+        let fresh = far_as(&fx, kind);
+        let recovery = fx.recover_with(&fresh, &trash);
+        assert_eq!(recovery.unfinished.len(), 1, "{kind:?}");
+        for u in &recovery.unfinished {
+            let _ = recover::resolve_with(
+                &mut fx.cat,
+                u.operation,
+                Resolution::PutBack,
+                &fresh,
+                &trash,
+            );
+        }
+        assert_eq!(std::fs::read(&theirs)?, b"theirs", "{kind:?}");
+        for name in ["A.NEF", "A.xmp"] {
+            assert_eq!(std::fs::read(fx.root.join(name))?, bytes(name), "{kind:?}");
+        }
     }
     Ok(())
 }

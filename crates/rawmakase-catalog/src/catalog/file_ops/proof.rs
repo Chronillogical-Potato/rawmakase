@@ -1,7 +1,8 @@
 //! Which file a name is, on a volume whose file ids change (#573): FAT and
 //! exFAT number files anew when they are written, renamed or mounted again,
 //! and give a number to another file later, so there a file object proves
-//! nothing; nor does it on an SMB share, whose mounts number it anew. A copy there is proven by its exact name, its size and its
+//! nothing; nor does it on an SMB share, whose mounts number it anew. A
+//! copy there is proven by its exact name, its size and its
 //! SHA-256 (the bytes copied, journalled), an original by its exact name,
 //! its `Identity` and, before it goes to the Trash, its SHA-256 again. An
 //! item journals which proof each side takes ([`Proofs`]), so recovery
@@ -67,32 +68,45 @@ impl Proofs {
 }
 
 /// The proof a volume of `facts` takes, if any: by ids where they stay, by
-/// names on a local FAT or exFAT volume and on an SMB share on macOS; none
-/// elsewhere (other network shares, FUSE, ReFS…), which is refused.
+/// names on a local FAT or exFAT volume and on an SMB share (macOS's smbfs,
+/// Linux's CIFS); none elsewhere (other network shares, FUSE, GVFS's shares
+/// among them, ReFS…), which is refused. Windows' shares aren't told apart
+/// ([`VolumeKind::Smb`]), and aren't measured: refused.
 ///
-/// On macOS an SMB share's ids prove nothing across mounts (each mount is
-/// another `st_dev`), nor at all from a server without file ids, where
-/// smbfs makes them from names. It makes a file only where no name is
-/// (`O_EXCL`, atomic on the server), lists names decomposed and finds them
-/// by either form, but renames nothing exclusively: its copies are made at
-/// their names (measured on macOS 15 against a Synology share). SMB on
-/// Linux and Windows isn't measured yet.
+/// An SMB share's ids prove nothing across mounts (macOS gives each mount
+/// another `st_dev`; Linux may give a mount's to the next one, another
+/// share's or not), nor at all from a server without file ids (smbfs then
+/// makes them from names; CIFS mounted `noserverino` numbers files anew
+/// each mount). It makes a file
+/// only where no name is (`O_EXCL`, atomic on the server, through two
+/// mounts at once), keeps birth times (the server's clock) and finds a name
+/// by either case where the server folds them, but renames nothing
+/// exclusively: its copies are made at their names. Measured on macOS 15
+/// against a Synology share, which lists names decomposed and finds them by
+/// either form; and with Linux 7.2's CIFS (SMB 3.1.1) against Samba 4.22,
+/// where a name is its bytes, as on Linux's FAT. GVFS's FUSE mounts keep no
+/// birth time, no permissions and no extended attributes, and number files
+/// per mount.
 pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
     match facts.kind {
         _ if facts.stable_ids => Some(Proof::Ids),
         VolumeKind::Fat | VolumeKind::Exfat if facts.local => Some(Proof::Names),
-        VolumeKind::Smb if cfg!(target_vendor = "apple") => Some(Proof::Names),
+        VolumeKind::Smb if cfg!(any(target_vendor = "apple", target_os = "linux")) => {
+            Some(Proof::Names)
+        }
         _ => None,
     }
 }
 
 /// Whether what is copied off a volume of `facts` keeps its originals where
-/// they are: macOS has no Trash on an SMB share (it answers
-/// NSFeatureUnsupportedError and leaves the file, measured on macOS 15),
-/// and nothing is deleted instead. What a move's question says; the Trash
-/// decides when it runs.
+/// they are: an SMB share has no Trash RAWmakase uses. macOS has none there
+/// (it answers NSFeatureUnsupportedError and leaves the file, measured on
+/// macOS 15); Linux's would be the share's `.Trash-$uid`, filled by a
+/// rename that can replace a file another computer put at its name
+/// (measured on CIFS), so it isn't used. Nothing is deleted instead. What
+/// a move's question says; the Trash decides when it runs.
 pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
-    facts.kind == VolumeKind::Smb && cfg!(target_vendor = "apple")
+    facts.kind == VolumeKind::Smb
 }
 
 /// Whether a volume of `kind` is one names prove files on ([`of`]).
@@ -180,8 +194,10 @@ pub(super) fn decomposed_path(path: &Path) -> PathBuf {
 /// its folder's listing has that name, composed (case and all), and no
 /// other `sidecar::caseless` takes for it; [`Presence::Absent`] when it has
 /// none of them and looking the name up finds nothing (an SMB share's
-/// listing lags a file another computer made, by 2 to 3 s as measured,
-/// while a lookup finds it); and [`Presence::Unknown`] otherwise.
+/// listing lags a file another computer made, by 2 to 3 s as measured on
+/// macOS, while a lookup finds it; Linux's CIFS lists at once, but finds
+/// a file another computer removed for up to its attribute cache's second);
+/// and [`Presence::Unknown`] otherwise.
 pub(super) fn presence(disk: &dyn Disk, path: &Path) -> Presence {
     let Some(alike) = alike(disk, path) else {
         return Presence::Unknown;
