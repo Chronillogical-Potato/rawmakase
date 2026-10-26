@@ -57,6 +57,18 @@ impl FolderSelection {
             }
         }
     }
+    /// Gives each key `name` has another name for that name.
+    pub(super) fn rename(&mut self, name: impl Fn(&str) -> Option<String>) {
+        for key in self
+            .keys
+            .iter_mut()
+            .chain(std::iter::once(&mut self.anchor))
+        {
+            if let Some(named) = name(key) {
+                *key = named;
+            }
+        }
+    }
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }
@@ -116,6 +128,14 @@ impl FolderSelection {
                 }
             }
         }
+    }
+}
+
+/// The tree key of logical folder `relative` of `root` ("" for the root).
+pub(super) fn tree_key(root: crate::catalog::RootId, relative: &str) -> String {
+    match relative {
+        "" => format!("root:{root}"),
+        relative => format!("root:{root}/{relative}"),
     }
 }
 

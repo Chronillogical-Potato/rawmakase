@@ -3496,6 +3496,60 @@ fn a_root_moved_into_another_keeps_its_selection_and_unfolded_folders() -> Resul
     assert!(library.selected_folders.contains("root:4/trip"));
     Ok(())
 }
+/// A folder moved onto a drive that spells it otherwise (composed, on FAT,
+/// exFAT and SMB shares) keeps what was selected and unfolded in it, by the
+/// names the catalog gives its folders once read again.
+#[test]
+fn a_moved_folder_s_selection_follows_the_names_the_catalog_gives_it() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let photos = directory.path().join("photos");
+    for f in ["Cafe\u{301}/day/a.RAF", "Cafe\u{301}/b.RAF", "trips/c.RAF"] {
+        let path = photos.join(f);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(&path, b"synthetic raw")?;
+    }
+    let db = directory.path().join("photos.rawmakase");
+    Catalog::create(&db)?.add_folder(&photos)?;
+    let mut library = Library::load(&db, egui::Context::default())?;
+    let root = library.session.roots[0].0;
+    let key = |l: &str| format!("root:{root}/{l}");
+    let day = library
+        .session
+        .folders
+        .iter()
+        .find(|f| f.relative == "Cafe\u{301}/day")
+        .unwrap()
+        .id;
+    library.selected_folders = folder_selection::FolderSelection::one(&key("Cafe\u{301}/day"));
+    library.expanded = [key("Cafe\u{301}"), key("Cafe\u{301}/day"), key("trips")].into();
+    library.folder_renamed(root, "Cafe\u{301}", root, "trips/Cafe\u{301}");
+    // What the move committed: its folders named as the copies are, composed.
+    library.session.catalog.db_for_tests().execute(
+        "UPDATE folder_paths SET path = 'trips/Caf\u{e9}' || substr(path, 6)
+         WHERE path LIKE 'Cafe_%'",
+        [],
+    )?;
+    library.reread_after(&[])?;
+    assert!(
+        library
+            .selected_folders
+            .contains(&key("trips/Caf\u{e9}/day")),
+        "{:?}",
+        library.selected_folders
+    );
+    let mut expanded: Vec<_> = library.expanded.iter().cloned().collect();
+    expanded.sort();
+    assert_eq!(
+        expanded,
+        [
+            key("trips"),
+            key("trips/Caf\u{e9}"),
+            key("trips/Caf\u{e9}/day")
+        ]
+    );
+    assert_eq!(library.filters.folder_scope, Some([day].into()));
+    Ok(())
+}
 /// A root's menu offers Move Folder… (#586), never Rename Folder… or Move
 /// to Trash….
 #[test]
