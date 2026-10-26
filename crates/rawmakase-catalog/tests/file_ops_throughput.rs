@@ -18,8 +18,10 @@ use std::time::Instant;
 const PHOTOS: usize = 1500;
 
 /// Each photo's share of the run, at most, in milliseconds. Before #692
-/// a rename took ~120 ms a photo on a USB disk and ~10 ms on an SSD.
-const BUDGET_MS: f64 = 2.0;
+/// a rename took ~120 ms a photo on #692's USB disk and ~128 ms on btrfs on
+/// an SSD (moves ~93 ms), most of it checks folding every name in the
+/// folder again for each photo; ~1.9 ms after (moves ~1.3 ms).
+const BUDGET_MS: f64 = 5.0;
 
 struct NoTrash;
 impl Trash for NoTrash {

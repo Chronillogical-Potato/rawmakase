@@ -274,8 +274,11 @@ inject a temporary file, without changing the process-wide environment.
   its locations on every computer, in the transaction that re-keys its
   folders; it is journalled as its own kind (`move_root`), which earlier
   releases fail closed on. Every disk step is journalled, after its folders
-  are synced, before the next, and recovery decides whatever a crash left from
-  the journal and the disk, putting back only what it proves. One process at a
+  are synced, before the item's next, and recovery decides whatever a crash left from
+  the journal and the disk, putting back only what it proves. Items moved or
+  renamed within a drive go up to 100 at a time (#692), each step in one
+  commit and each folder synced once for all of them, so every item still
+  steps, syncs and journals its files one after another. One process at a
   time changes a catalog's files, under an OS lock on a file beside the
   catalog named after its canonical path; catalogs on network volumes or with
   several hard links are refused. Each item's preconditions (its family's

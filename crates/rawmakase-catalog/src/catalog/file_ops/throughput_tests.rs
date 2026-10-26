@@ -118,3 +118,55 @@ fn moving_a_large_batch_commits_syncs_and_lists_per_batch_not_per_photo() {
     assert_eq!(fx.rows()[&fx.photo("sub/IMG_0249.NEF")], "sub/IMG_0249.NEF");
     assert!(cheap(&cost), "{cost:?}");
 }
+
+#[test]
+fn a_folders_photos_read_once_follow_the_transactions_own_moves() -> anyhow::Result<()> {
+    use super::plan::{Folders, occupied, shared};
+    use crate::catalog::db::sql;
+    use crate::catalog::folder_sync::locate_folders;
+    use crate::storage::fsops;
+    use std::ffi::OsStr;
+    let mut fx = fixture(&["a.NEF", "b.NEF", "sub/"]);
+    let a = fx.photo("a.NEF");
+    let copy = fx.cat.create_virtual_copy(a)?;
+    let b = fx.photo("b.NEF");
+    let sub = fx.folder("sub");
+    let computer = fx.cat.computer.id.clone();
+    let folders = Folders::index(&fx.cat.db.snapshot(|s| locate_folders(s, &computer))?);
+    let (root, below) = (fx.root.clone(), fx.root.join("sub"));
+    let b_file = fsops::entry(&root.join("b.NEF"))?.id;
+    // Every question `shared` and `occupied` are asked of both folders.
+    let ask = |w: &crate::catalog::db::Write<'_>| -> anyhow::Result<Vec<bool>> {
+        let mut answers = Vec::new();
+        for name in ["a.NEF", "A.nef", "b.NEF", "c.NEF", "C.nef", "keep.dng"] {
+            let name = OsStr::new(name);
+            for family in [&[][..], &[a, copy][..], &[b][..]] {
+                for (dir, to) in [(&root, None), (&below, None), (&root, Some(sub))] {
+                    answers.push(occupied(w, &folders, to, dir, name, family)?);
+                }
+                for dir in [&root, &below] {
+                    answers.push(shared(w, &folders, dir, name, None, family)?);
+                    answers.push(shared(w, &folders, dir, name, Some(b_file), family)?);
+                }
+            }
+        }
+        Ok(answers)
+    };
+    let (read, kept) = fx.cat.db.write_immediate(|w| {
+        folders.caching(|| {
+            let read = ask(w)?;
+            // As `moved` moves a family: to `sub`, renamed `c.NEF`.
+            w.execute(
+                sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
+                &[&sub, &"c.NEF", &a, &a],
+            )?;
+            folders.refresh(w, a)?;
+            Ok((read, ask(w)?))
+        })
+    })?;
+    // Asked afresh, outside the transaction's reads.
+    let fresh = fx.cat.db.write_immediate(|w| ask(w))?;
+    assert_eq!(kept, fresh);
+    assert_ne!(read, fresh, "the move changes some answers");
+    Ok(())
+}

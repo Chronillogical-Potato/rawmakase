@@ -4,6 +4,8 @@
 //! one is [`Real`]; nothing else implements it outside tests.
 use crate::storage::Identity;
 use crate::storage::fsops::{self, ContentHash, CopyError, Entry, FileId, FsError};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -229,4 +231,103 @@ pub(super) fn sync_parents(disk: &dyn Disk, from: &Path, to: &Path) -> Result<()
         disk.sync_dir(b)?;
     }
     Ok(())
+}
+
+/// `disk` with each folder listed once (#692): for checks that change
+/// nothing on disk themselves, made one after another in a moment, such
+/// as finishing a batch's items in one transaction. Anything that changes
+/// the disk through it forgets every listing.
+pub(super) struct Listed<'a> {
+    disk: &'a dyn Disk,
+    listings: RefCell<HashMap<PathBuf, Vec<OsString>>>,
+}
+
+impl<'a> Listed<'a> {
+    pub fn new(disk: &'a dyn Disk) -> Self {
+        Self {
+            disk,
+            listings: RefCell::default(),
+        }
+    }
+
+    fn changes<T>(&self, result: T) -> T {
+        self.listings.borrow_mut().clear();
+        result
+    }
+}
+
+impl Disk for Listed<'_> {
+    fn entry(&self, path: &Path) -> Result<Entry, FsError> {
+        self.disk.entry(path)
+    }
+    fn list(&self, dir: &Path) -> Result<Vec<OsString>, FsError> {
+        if let Some(names) = self.listings.borrow().get(dir) {
+            return Ok(names.clone());
+        }
+        let names = self.disk.list(dir)?;
+        self.listings
+            .borrow_mut()
+            .insert(dir.to_path_buf(), names.clone());
+        Ok(names)
+    }
+    fn identity(&self, path: &Path) -> anyhow::Result<Identity> {
+        self.disk.identity(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.rename(from, to))
+    }
+    fn create_dir(&self, path: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.create_dir(path))
+    }
+    fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
+        self.disk.sync_dir(dir)
+    }
+    fn canonical(&self, path: &Path) -> Result<PathBuf, FsError> {
+        self.disk.canonical(path)
+    }
+    fn volume_facts(&self, path: &Path) -> Result<fsops::VolumeFacts, FsError> {
+        self.disk.volume_facts(path)
+    }
+    fn create_file(&self, path: &Path) -> Result<std::fs::File, FsError> {
+        self.changes(self.disk.create_file(path))
+    }
+    fn copy_into(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: &mut std::fs::File,
+        go_on: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<ContentHash, CopyError> {
+        self.changes(self.disk.copy_into(from, to, into, go_on))
+    }
+    fn handle_id(&self, at: &Path, file: &std::fs::File) -> Result<FileId, FsError> {
+        self.disk.handle_id(at, file)
+    }
+    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
+        self.disk.sync_file(path)
+    }
+    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.copy_extras(from, to))
+    }
+    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.copy_times(from, to))
+    }
+    fn extras(&self, path: &Path) -> Result<ContentHash, FsError> {
+        self.disk.extras(path)
+    }
+    fn hash(&self, path: &Path) -> Result<ContentHash, FsError> {
+        self.disk.hash(path)
+    }
+    fn hash_prefix(&self, path: &Path, len: u64) -> Result<ContentHash, FsError> {
+        self.disk.hash_prefix(path, len)
+    }
+    fn created(&self, path: &Path) -> Result<std::time::SystemTime, FsError> {
+        self.disk.created(path)
+    }
+    fn remove_file(&self, path: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.remove_file(path))
+    }
+    fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
+        self.changes(self.disk.remove_dir(path))
+    }
 }

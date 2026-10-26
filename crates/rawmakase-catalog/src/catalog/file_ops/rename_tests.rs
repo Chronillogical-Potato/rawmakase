@@ -654,6 +654,9 @@ fn every_fault_at_every_disk_step_of_a_rename_ends_proven() {
         (Op::Sync, counting.count(Op::Sync)),
     ];
     assert_eq!(steps[0].1, 3);
+    // Their folder synced once for each round of renames: the photos, then
+    // the sidecar (#692).
+    assert_eq!(steps[1].1, 2);
     let mut runs = 0;
     for (at, count) in steps {
         for nth in 0..count {
@@ -682,7 +685,7 @@ fn every_fault_at_every_disk_step_of_a_rename_ends_proven() {
             }
         }
     }
-    assert!(runs >= 18);
+    assert!(runs >= 15);
 }
 
 #[test]
