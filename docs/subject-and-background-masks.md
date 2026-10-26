@@ -745,7 +745,7 @@ scripts/crate-closures.sh
 ```
 
 Also run the applicable checks in `.github/workflows/ci.yml`: MSRV, model
-all-features, no-default-features clippy, isolated crate builds, portable SQL
+all-features, isolated crate builds, portable SQL
 preparation, dependency/license audit, platform tests and Arch install validation.
 Keep ordinary tests download-free; run pinned actual-model tests separately in CI
 and in packaged-app smoke tests. Extend release packaging/verification for runtime

@@ -60,8 +60,6 @@ pub(super) struct Updates {
     manual: Option<Option<Result<(), String>>>,
     /// Acknowledged after the first frame, so the helper keeps the update.
     receipt: Option<fastframe_update::Receipt>,
-    /// The first automatic check has answered, found or not.
-    checked: bool,
 }
 impl Updates {
     pub(super) fn new(session: &crate::app::session::Session, ctx: Option<&egui::Context>) -> Self {
@@ -93,17 +91,6 @@ impl Updates {
         if let Some(error) = launch.error {
             *status = error;
         }
-    }
-    /// The update notice is on screen, or would be outside modal windows.
-    #[cfg(feature = "telemetry")]
-    /// Until the first automatic check answers, a notice may still come.
-    pub(super) fn notice_pending(&self) -> bool {
-        if self.automatic && self.requests.is_some() && !self.checked {
-            return true;
-        }
-        self.available.as_ref().is_some_and(|release| {
-            !self.dismissed && self.skipped.as_deref() != Some(release.version.as_str())
-        })
     }
     /// Drops the update checker's channels at exit. It ends after the request it is
     /// working on; a download cannot be cancelled, so it is not waited for.
@@ -201,7 +188,6 @@ impl Editor {
                     installable,
                     manual,
                 } => {
-                    updates.checked = true;
                     match &found {
                         Ok(Some(release)) => {
                             if updates.available.as_ref() != Some(release) {

@@ -55,14 +55,8 @@ pub(crate) fn taskbar_icon(window: &impl winit::raw_window_handle::HasWindowHand
 }
 
 /// Whether winit opens windows through Wayland rather than X11 on Linux, for
-/// the usage report and the system report: it does whenever the session
-/// offers Wayland, by either variable.
-#[cfg(feature = "telemetry")]
-pub(crate) fn wayland() -> bool {
-    wayland_in(|name| std::env::var_os(name))
-}
-
-/// `wayland`, reading the environment through `var`.
+/// the system report, reading the environment through `var`: it does whenever
+/// the session offers Wayland, by either variable.
 pub(crate) fn wayland_in(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     let set = |name| var(name).is_some_and(|value| !value.is_empty());
     set("WAYLAND_DISPLAY") || set("WAYLAND_SOCKET")

@@ -1,8 +1,7 @@
 //! What a bug report needs to know about this copy of RAWmakase and the
 //! system it runs on: the plain-text system report the Report an Issue
-//! dialog shows and `rawmakase system-info` prints. Unlike the usage report
-//! (`stats`), this is not behind the `telemetry` feature: nothing here is
-//! sent anywhere; the user copies the text into an issue themselves.
+//! dialog shows and `rawmakase system-info` prints. Nothing here is sent
+//! anywhere; the user copies the text into an issue themselves.
 //!
 //! The report is built from plain snapshots: the build ([`Build`]), the
 //! system, probed once per process ([`System`]), and what the window knew
@@ -499,7 +498,7 @@ fn is_inside(executable: &Path, directory: &Path) -> bool {
 
 /// SystemVersion.plist's ProductVersion, e.g. `26.0.1`.
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
-pub(crate) fn macos_product_version(plist: &str) -> Option<String> {
+fn macos_product_version(plist: &str) -> Option<String> {
     let after = &plist[plist.find("<key>ProductVersion</key>")?..];
     let start = after.find("<string>")? + "<string>".len();
     let end = start + after[start..].find('<')?;
@@ -515,13 +514,13 @@ pub(crate) fn macos_version() -> Option<String> {
 
 /// Windows 11 still reports major version 10; its builds start at 22000.
 #[cfg_attr(not(any(windows, test)), allow(dead_code))]
-pub(crate) fn windows_release(build: u32) -> u32 {
+fn windows_release(build: u32) -> u32 {
     if build >= 22_000 { 11 } else { 10 }
 }
 
 /// The registry's `CurrentBuildNumber`, e.g. 26100.
 #[cfg(windows)]
-pub(crate) fn windows_build() -> Option<u32> {
+fn windows_build() -> Option<u32> {
     use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
     let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
     let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
