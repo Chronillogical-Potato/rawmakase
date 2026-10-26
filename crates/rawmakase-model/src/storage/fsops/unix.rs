@@ -50,9 +50,11 @@ pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
     // file every time (Linux 7.2 against Samba 4.22). macOS's smbfs
     // answers ENOTSUP itself.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let dir = from.parent().filter(|d| !d.as_os_str().is_empty());
-    if kind(dir.unwrap_or(Path::new(".")))? == VolumeKind::Smb {
-        return Err(FsError::Unsupported);
+    {
+        let dir = from.parent().filter(|d| !d.as_os_str().is_empty());
+        if kind(dir.unwrap_or(Path::new(".")))? == VolumeKind::Smb {
+            return Err(FsError::Unsupported);
+        }
     }
     renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE).map_err(errno)
 }
