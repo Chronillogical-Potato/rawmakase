@@ -15,7 +15,6 @@ check:
 	scripts/crate-closures.sh
 	cargo fmt --check
 	cargo clippy --locked --workspace --all-targets -- -D warnings
-	cargo clippy --locked --all-targets --no-default-features -- -D warnings
 	cargo test --locked -p rawmakase -p rawmakase-decode -p rawmakase-export
 	cargo clippy --locked --all-targets -p rawmakase-tiff -p rawmakase-raw -p rawmakase-model -p rawmakase-interop -p rawmakase-catalog -p rawmakase-engine -p rawmakase-protocol -p rawmakase-ctl -- -D warnings
 	cargo test --locked -p rawmakase-model --all-features

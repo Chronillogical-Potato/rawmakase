@@ -240,8 +240,6 @@ impl Editor {
         self.export_windows(&ctx);
         let dialog = modal || self.view.shortcuts || self.report_issue.is_open();
         self.update_notice(&ctx, dialog);
-        #[cfg(feature = "telemetry")]
-        self.usage_stats_notice(&ctx, dialog);
         // Last, after whatever else this frame opened or asked: see its docs.
         self.develop_key_steps(&ctx, typing);
         self.pending_work(&ctx);

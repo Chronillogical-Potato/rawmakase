@@ -70,8 +70,6 @@ pub(crate) struct Editor {
     onboarding_done: bool,
     preferences: preferences::Preferences,
     updates: updates::Updates,
-    #[cfg(feature = "telemetry")]
-    stats: stats::UsageStats,
     /// Report an Issue…: its dialog and the system probe.
     report_issue: report_issue::ReportIssue,
     themes: theme::Themes,
@@ -250,14 +248,6 @@ impl Editor {
             _ => None,
         };
         let report_issue = report_issue::ReportIssue::new(adapter.as_ref());
-        #[cfg(feature = "telemetry")]
-        let stats = stats::UsageStats::new(
-            adapter.as_ref(),
-            session_file
-                .as_deref()
-                .and_then(std::path::Path::parent)
-                .map(|dir| (dir.to_path_buf(), ctx)),
-        );
         let last = session.last_path.clone().filter(|p| p.exists());
         // A first launch opens the default catalog. A catalog used before that
         // is missing now (an unplugged drive) is not replaced by it.
@@ -328,8 +318,6 @@ impl Editor {
             onboarding_done,
             preferences: Default::default(),
             updates,
-            #[cfg(feature = "telemetry")]
-            stats,
             report_issue,
             themes: theme::Themes::new(
                 ctx,
@@ -900,8 +888,6 @@ mod report_issue;
 mod retouch_tool;
 mod side_tabs;
 mod stand_in;
-#[cfg(feature = "telemetry")]
-mod stats;
 mod stroke_outline;
 mod subject_mask;
 mod targeted_tool;
