@@ -854,12 +854,13 @@ impl super::NameFields {
             },
             Field::Lens => known(info.lens.as_ref()),
             Field::Iso => info.iso_text(),
-            // Lightroom's "^1 at ^2", its aperture with one decimal.
+            // Lightroom's "^1 at ^2", its aperture with one decimal, the
+            // region's separator.
             Field::Exposure => {
                 let aperture = info
                     .aperture
                     .filter(|f| *f > 0.)
-                    .map(|f| format!("f / {f:.1}"));
+                    .map(|f| format!("f / {f:.1}").replace('.', &self.decimal.0.to_string()));
                 match (info.shutter_text(), aperture) {
                     (Some(s), Some(a)) => Some(format!("{s} at {a}")),
                     (s, a) => s.or(a),

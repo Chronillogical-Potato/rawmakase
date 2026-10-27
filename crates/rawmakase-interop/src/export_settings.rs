@@ -234,6 +234,19 @@ pub struct NameFields {
     pub rating: i32,
     pub label: String,
     pub camera: CameraNames,
+    /// The system's decimal separator, where Lightroom writes it.
+    pub decimal: Decimal,
+}
+
+/// The decimal separator of the user's region, which Lightroom writes in an
+/// Exposure's aperture ("f - 5,0" in Poland); other numbers in names keep
+/// `.`, as Lightroom's do. Taken once with a scope's fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Decimal(pub char);
+impl Default for Decimal {
+    fn default() -> Self {
+        Decimal('.')
+    }
 }
 impl NameFields {
     /// Nothing known.
@@ -256,6 +269,7 @@ impl NameFields {
         rating: 0,
         label: String::new(),
         camera: CameraNames::NotRead,
+        decimal: Decimal('.'),
     };
     /// Whether a title, caption, copyright or creator is the file's own,
     /// which the catalog doesn't have.

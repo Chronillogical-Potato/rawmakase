@@ -55,6 +55,8 @@ pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
         rating: photo.rating,
         label: photo.label,
         camera: Default::default(),
+        // The app's to say, from the system.
+        decimal: Default::default(),
     })
 }
 

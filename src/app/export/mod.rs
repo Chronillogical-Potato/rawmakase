@@ -316,6 +316,11 @@ impl Editor {
                 }
             }
         }
+        // The region's number format, read once with the fields.
+        let decimal = crate::export_settings::Decimal(crate::platform::locale::decimal_separator());
+        for photo in &mut scope.photos {
+            photo.fields.decimal = decimal;
+        }
         Some(scope)
     }
 
