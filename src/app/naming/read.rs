@@ -1,22 +1,22 @@
-//! Reading what export file names need from the photos' files, in the
+//! Reading what file names need from the photos' files, in the
 //! background: every photo's camera make and model (the catalog keeps a
 //! combined camera label, which is not Lightroom's Make or Model), and for a
 //! photo opened without a catalog also its capture time and photo info.
 //!
-//! A read belongs to the Export scope it was started for. It is started only
+//! A read belongs to the scope it was started for (Export's). It is started only
 //! when the template needs what it reads, and cancelled when the scope is
 //! replaced or the dialog closes; a completion of any other read is dropped.
 //! Failure, a panic or a lost worker end it as Failed, never busy. The worker
 //! only reads files, so at exit it is left to end with the process: nothing
 //! waits for it.
-use super::super::worker::Event;
+use crate::app::worker::Event;
 use crate::export_settings::{CameraNames, NameFields, Needs};
 use crate::metadata::PhotoInfo;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{
     Arc,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc::Sender,
 };
 
@@ -32,14 +32,14 @@ pub(crate) struct FileFields {
 /// One photo to read: its file, and whether it has no catalog (so its
 /// capture time and photo info come from the file too).
 #[derive(Clone, Debug)]
-pub(super) struct ToRead {
+pub(in crate::app) struct ToRead {
     pub path: PathBuf,
     pub standalone: bool,
 }
 
 /// Reads one photo's file: what it gave, or why it can't be read (a file
 /// with no names gives none; one that can't be opened is an error).
-pub(super) type Reader = Arc<dyn Fn(&ToRead) -> Result<FileFields, String> + Send + Sync>;
+pub(in crate::app) type Reader = Arc<dyn Fn(&ToRead) -> Result<FileFields, String> + Send + Sync>;
 
 /// Each photo's read, in order: what its file gave, or why it couldn't be
 /// read.
@@ -47,7 +47,7 @@ pub(crate) type Reads = Vec<Result<FileFields, String>>;
 
 /// Where a read stands.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(super) enum Status {
+pub(in crate::app) enum Status {
     /// None started for the scope.
     #[default]
     Idle,
@@ -71,18 +71,20 @@ enum State {
     Failed(String),
 }
 
+/// Tells each read from every other, of any host's reader: a completion
+/// is taken only by the reader whose read it is, never by a reader made
+/// later for another dialog.
+static READS: AtomicU64 = AtomicU64::new(1);
+
 /// The scope's read.
-pub(super) struct NameRead {
+pub(in crate::app) struct NameRead {
     state: State,
-    /// The last request's id; each read has its own.
-    request: u64,
     reader: Reader,
 }
 impl Default for NameRead {
     fn default() -> Self {
         Self {
             state: State::Idle,
-            request: 0,
             reader: Arc::new(read_file),
         }
     }
@@ -109,8 +111,7 @@ impl NameRead {
     /// read's request id; any read under way is cancelled.
     pub fn start(&mut self, photos: Vec<ToRead>, events: Sender<Event>, ctx: egui::Context) {
         self.cancel();
-        self.request += 1;
-        let request = self.request;
+        let request = READS.fetch_add(1, Ordering::Relaxed);
         let cancel = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicUsize::new(0));
         self.state = State::Reading {
@@ -121,7 +122,7 @@ impl NameRead {
         };
         let reader = self.reader.clone();
         let repaint = ctx.clone();
-        super::super::task::spawn(
+        crate::app::task::spawn(
             events,
             ctx,
             move |events| {
@@ -207,7 +208,7 @@ impl NameRead {
 
 /// What the files of a scope give, `standalone` when its photo has no
 /// catalog: the catalog has the rest.
-pub(super) fn file_sourced(standalone: bool) -> Needs {
+pub(in crate::app) fn file_sourced(standalone: bool) -> Needs {
     Needs {
         captured: standalone,
         info: standalone,
@@ -216,7 +217,7 @@ pub(super) fn file_sourced(standalone: bool) -> Needs {
 }
 
 /// Puts what `photo`'s file gave in its fields.
-pub(super) fn fill(fields: &mut NameFields, read: FileFields, standalone: bool) {
+pub(in crate::app) fn fill(fields: &mut NameFields, read: FileFields, standalone: bool) {
     fields.camera = read.camera;
     if standalone {
         fields.captured = read.captured;
@@ -267,9 +268,54 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
 
 /// For tests: the real reader.
 #[cfg(test)]
-pub(super) fn read_path(path: &std::path::Path, standalone: bool) -> Result<FileFields, String> {
+pub(in crate::app) fn read_path(
+    path: &std::path::Path,
+    standalone: bool,
+) -> Result<FileFields, String> {
     read_file(&ToRead {
         path: path.to_path_buf(),
         standalone,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    /// The completion a read sends, waited for.
+    fn completion(events: &mpsc::Receiver<Event>) -> (u64, Result<Reads, String>) {
+        loop {
+            match events.recv_timeout(std::time::Duration::from_secs(10)) {
+                Ok(Event::NamesRead { request, read }) => return (request, read),
+                Ok(_) => {}
+                Err(e) => panic!("no completion: {e}"),
+            }
+        }
+    }
+
+    /// A reader made for another dialog never takes an earlier reader's
+    /// completion, though both started their first read.
+    #[test]
+    fn a_completion_is_only_its_own_readers() {
+        let (tx, events) = mpsc::channel();
+        let ctx = egui::Context::default();
+        let photo = || ToRead {
+            path: PathBuf::from("a.ARW"),
+            standalone: false,
+        };
+        let mut first = NameRead::default();
+        first.set_reader(Arc::new(|_: &ToRead| Ok(FileFields::default())));
+        first.start(vec![photo()], tx.clone(), ctx.clone());
+        let (request, read) = completion(&events);
+        first.cancel();
+        let mut second = NameRead::default();
+        second.set_reader(Arc::new(|_: &ToRead| Ok(FileFields::default())));
+        second.start(vec![photo()], tx, ctx);
+        assert_eq!(second.finished(request, read), None);
+        assert!(matches!(second.status(), Status::Reading { .. }));
+        let (request, read) = completion(&events);
+        assert!(second.finished(request, read).is_some());
+        assert_eq!(second.status(), Status::Ready);
+    }
 }

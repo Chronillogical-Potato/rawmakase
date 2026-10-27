@@ -1,15 +1,11 @@
-//! Lightroom's Filename Template Editor, opened from the Export dialog's
-//! Rename To > Edit…: the template as text with its tokens shown as chips,
-//! a menu of tokens for each of Lightroom's groups, inserted at the cursor,
-//! and an Example for the first photo. Done, or Return, keeps the template
-//! in the dialog's settings (`ExportSettings::choose_tokens`); Cancel drops
-//! it. A file name has no line breaks, so the template has none either.
-use super::super::widgets::{modal_frame, primary_button};
-use super::{Editor, Status};
+//! Lightroom's Filename Template Editor: the template as text with its
+//! tokens shown as chips, a menu of tokens for each of Lightroom's groups,
+//! inserted at the cursor, and an Example the host makes for its first
+//! photo. Done, or Return, gives the host the template; Cancel drops it. A
+//! file name has no line breaks, so the template has none either.
 use crate::app::theme;
-use crate::export_settings::{
-    BUILTIN, Menu, NameContext, Naming, Span, TokenTemplate, menu as tokens_in,
-};
+use crate::app::widgets::{modal_frame, primary_button};
+use crate::export_settings::{BUILTIN, Menu, Naming, Span, TokenTemplate, menu as tokens_in};
 use eframe::egui::{self, Color32, Stroke, Vec2};
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 
@@ -31,7 +27,7 @@ const MENUS: [Menu; 6] = [
 ];
 
 /// The editor, open.
-pub(super) struct NameEditor {
+pub(in crate::app) struct NameEditor {
     /// The template in the editor's form.
     pub text: String,
     /// The token each menu shows, by its index in the menu.
@@ -48,7 +44,18 @@ impl NameEditor {
     }
 }
 
-pub(super) fn text_id() -> egui::Id {
+/// What the editor's frame ended with.
+#[derive(Debug, PartialEq)]
+pub(in crate::app) enum Outcome {
+    /// Still open.
+    Open,
+    /// Done: the template made.
+    Done(TokenTemplate),
+    /// Cancel, Escape or a click outside.
+    Cancel,
+}
+
+pub(in crate::app) fn text_id() -> egui::Id {
     egui::Id::new("filename-template-text")
 }
 
@@ -77,45 +84,18 @@ fn insert(ctx: &egui::Context, text: &mut String, label: &str) {
     ctx.memory_mut(|m| m.request_focus(text_id()));
 }
 
-impl Editor {
-    pub(super) fn name_editor_window(&mut self, ctx: &egui::Context) {
-        let Some(text) = self.exports.name_editor.as_ref().map(|e| e.text.clone()) else {
-            return;
-        };
+impl NameEditor {
+    /// The template as typed: what it is, or what is wrong with it.
+    pub fn parsed(&self) -> Result<TokenTemplate, Vec<crate::export_settings::DisplayError>> {
+        TokenTemplate::from_display(&self.text)
+    }
+
+    /// Draws the editor over its host, with `example`, the first photo's
+    /// name by the template typed and what it has to say; how the frame
+    /// ended.
+    pub fn show(&mut self, ctx: &egui::Context, example: &(String, Vec<String>)) -> Outcome {
         let palette = theme::palette(ctx);
-        let parsed = TokenTemplate::from_display(&text);
-        // The Example: the first photo named by the template being edited,
-        // as the export would name it; its files read first if it needs them.
-        let mut settings = self.exports.draft.clone();
-        let example = match &parsed {
-            Ok(template) => {
-                settings.choose_tokens(&template.to_lightroom());
-                let named = settings.name_template();
-                self.names_wait(&named);
-                let status = self.names_read_status(&named);
-                let first = self.exports.scope.photos.first();
-                let (source, fields, place) = first
-                    .map(|p| (p.source.clone(), p.fields.clone(), p.place))
-                    .unwrap_or_default();
-                let at = NameContext {
-                    index: place,
-                    total: self.exports.scope.chosen.max(1),
-                    fields: &fields,
-                };
-                let (name, notes) = settings.file_name_for(&source, &at);
-                match status {
-                    Some(Status::Reading { .. }) => ("Reading photo info…".to_string(), Vec::new()),
-                    Some(Status::Failed(why)) => {
-                        (name, vec![format!("photo info could not be read: {why}")])
-                    }
-                    _ => (name, notes),
-                }
-            }
-            Err(_) => (String::new(), Vec::new()),
-        };
-        let Some(editor) = self.exports.name_editor.as_mut() else {
-            return;
-        };
+        let editor = self;
         // Return is Done, as in Lightroom, also from the text; it is taken
         // before the editor draws so the text does not get a line break. An
         // open menu keeps it.
@@ -279,15 +259,12 @@ impl Editor {
                     });
                 });
             });
-        let finished = done
-            .then_some(self.exports.name_editor.as_ref())
-            .flatten()
-            .and_then(|editor| TokenTemplate::from_display(&editor.text).ok());
-        if let Some(template) = finished {
-            self.exports.draft.choose_tokens(&template.to_lightroom());
-            self.exports.name_editor = None;
+        if done && let Ok(template) = TokenTemplate::from_display(&editor.text) {
+            Outcome::Done(template)
         } else if cancel || response.should_close() {
-            self.exports.name_editor = None;
+            Outcome::Cancel
+        } else {
+            Outcome::Open
         }
     }
 }

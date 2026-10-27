@@ -92,10 +92,10 @@ pub(crate) enum Event {
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
     /// A file operation was planned (see `app::file_ops`).
     /// What export file names need from the photos' files, for the read
-    /// `request` (see `app::export::name_read`).
+    /// `request` (see `app::naming::read`).
     NamesRead {
         request: u64,
-        read: Result<crate::app::export::Reads, String>,
+        read: Result<crate::app::naming::read::Reads, String>,
     },
     /// Rename Photo(s)' photos in the order they are numbered in, for the
     /// catalog they were read from.

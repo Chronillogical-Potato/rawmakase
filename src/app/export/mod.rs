@@ -4,12 +4,10 @@
 //! editing; the top bar shows its progress, and what could not be exported stays
 //! there until it is read.
 mod dialog;
-mod name_editor;
-mod name_read;
 mod watermark_editor;
 
-pub(super) use name_read::Reads;
-use name_read::{NameRead, Status, ToRead};
+use super::naming::editor::{self, NameEditor};
+use super::naming::read::{self as name_read, NameRead, Reads, Status, ToRead};
 
 use crate::app::Module;
 use crate::catalog::PhotoId;
@@ -41,7 +39,7 @@ struct Chosen {
     /// The photo open in Develop: exported with its edit as shown.
     open: bool,
     /// What its exported name is made from: the catalog's, read when Export
-    /// was chosen, and the file's once read (`name_read`).
+    /// was chosen, and the file's once read (`naming::read`).
     fields: NameFields,
     /// Its place among the photos chosen, those left out counted.
     place: usize,
@@ -140,7 +138,7 @@ pub(super) struct Exports {
     /// Export with Previous's settings, waiting for `read`.
     waiting: Option<ExportSettings>,
     /// The Filename Template Editor, over the dialog.
-    name_editor: Option<name_editor::NameEditor>,
+    name_editor: Option<NameEditor>,
     /// Tests: an export doesn't save its settings as the last export's.
     unsaved_settings: bool,
 }
@@ -384,6 +382,54 @@ impl Editor {
                 self.exports.watermarks = crate::watermark::presets();
                 self.exports.dialog = true;
             }
+        }
+    }
+
+    /// The Filename Template Editor over the dialog: its Example is the
+    /// first photo named by the template being edited, as the export would
+    /// name it, its files read first if it needs them; Done makes the
+    /// template the dialog's.
+    fn name_editor_window(&mut self, ctx: &egui::Context) {
+        let Some(parsed) = self.exports.name_editor.as_ref().map(NameEditor::parsed) else {
+            return;
+        };
+        let mut settings = self.exports.draft.clone();
+        let example = match &parsed {
+            Ok(template) => {
+                settings.choose_tokens(&template.to_lightroom());
+                let named = settings.name_template();
+                self.names_wait(&named);
+                let status = self.names_read_status(&named);
+                let first = self.exports.scope.photos.first();
+                let (source, fields, place) = first
+                    .map(|p| (p.source.clone(), p.fields.clone(), p.place))
+                    .unwrap_or_default();
+                let at = crate::export_settings::NameContext {
+                    index: place,
+                    total: self.exports.scope.chosen.max(1),
+                    fields: &fields,
+                };
+                let (name, notes) = settings.file_name_for(&source, &at);
+                match status {
+                    Some(Status::Reading { .. }) => ("Reading photo info…".to_string(), Vec::new()),
+                    Some(Status::Failed(why)) => {
+                        (name, vec![format!("photo info could not be read: {why}")])
+                    }
+                    _ => (name, notes),
+                }
+            }
+            Err(_) => (String::new(), Vec::new()),
+        };
+        let Some(name_editor) = self.exports.name_editor.as_mut() else {
+            return;
+        };
+        match name_editor.show(ctx, &example) {
+            editor::Outcome::Open => {}
+            editor::Outcome::Done(template) => {
+                self.exports.draft.choose_tokens(&template.to_lightroom());
+                self.exports.name_editor = None;
+            }
+            editor::Outcome::Cancel => self.exports.name_editor = None,
         }
     }
 

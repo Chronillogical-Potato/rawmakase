@@ -876,6 +876,7 @@ pub(crate) mod library;
 mod lut_import;
 mod mask_tool;
 mod monitor;
+mod naming;
 mod navigator;
 mod onboarding;
 mod overlay;
