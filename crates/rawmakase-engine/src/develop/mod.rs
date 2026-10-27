@@ -20,6 +20,8 @@ pub mod guided;
 mod image_space;
 mod local_tone;
 mod local_tone_data;
+mod local_tone_rule;
+mod local_tone_rule_data;
 mod luminance_noise;
 pub mod masks;
 mod orientation;
