@@ -2530,7 +2530,8 @@ fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Resu
                 .clone()
                 .expect("a file was swapped in");
             assert_eq!(std::fs::read(&theirs)?, b"theirs", "{what}");
-            // Windows writes an alternate data stream by its path.
+            // Windows writes an alternate data stream by its path, which
+            // also changes the time of a file swapped in before it.
             if !cfg!(windows) {
                 assert_eq!(
                     fsops::extras(&theirs)?,
@@ -2538,12 +2539,14 @@ fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Resu
                     "{what}: its extras"
                 );
             }
-            let dated = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
-            assert_eq!(
-                std::fs::metadata(&theirs)?.modified()?,
-                dated,
-                "{what}: its time"
-            );
+            if !cfg!(windows) || step == Op::CopyTimes {
+                let dated = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+                assert_eq!(
+                    std::fs::metadata(&theirs)?.modified()?,
+                    dated,
+                    "{what}: its time"
+                );
+            }
             assert!(
                 matches!(
                     results(&outcome)[..],
