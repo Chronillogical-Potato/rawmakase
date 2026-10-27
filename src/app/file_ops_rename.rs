@@ -29,6 +29,7 @@ use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::app::naming::editor::{NameEditor, Outcome};
 use crate::app::naming::menu::{self, Choice};
+use crate::app::naming::presets::{Library, Preset};
 use crate::app::naming::read::{self as name_read, NameRead, Reads, Status, ToRead};
 use crate::catalog::file_ops::{self, FileOp, Plan, RenameOrder, Skip};
 use crate::catalog::{CatalogLocation, PhotoId, RootId};
@@ -51,6 +52,8 @@ pub(super) struct Renaming {
     settings: RenameSettings,
     /// The Filename Template Editor, over the dialog.
     editor: Option<NameEditor>,
+    /// The saved file-name templates, read when the dialog opens.
+    saved: Library,
     /// What the names need from the photos' files, read once a template
     /// needs it; then in `order`'s fields.
     read: NameRead,
@@ -486,6 +489,7 @@ impl Editor {
             extension,
             settings,
             editor: None,
+            saved: Library::load(),
             read,
             fields: 0,
             planned: None,
@@ -651,7 +655,7 @@ impl Editor {
         let Some(editor) = r.editor.as_mut() else {
             return;
         };
-        match editor.show(ctx, &example) {
+        match editor.show(ctx, &example, &mut r.saved) {
             Outcome::Open => {}
             Outcome::Done(template) => {
                 r.settings.choose_tokens(&template.to_lightroom());
@@ -797,9 +801,17 @@ impl Editor {
                     ui.horizontal(|ui| {
                         label(ui, "File Naming");
                         let s = &mut r.settings;
-                        match menu::combo(ui, "rename-naming", 260., s.naming, s.tokens.as_deref()) {
+                        let choice = menu::combo(
+                            ui,
+                            "rename-naming",
+                            260.,
+                            s.naming,
+                            s.tokens.as_deref(),
+                            &r.saved,
+                        );
+                        match choice {
                             Some(Choice::Preset(naming)) => s.choose_naming(naming),
-                            Some(Choice::Tokens(tokens)) => s.choose_tokens(tokens),
+                            Some(Choice::Tokens(tokens)) => s.choose_tokens(&tokens),
                             Some(Choice::Edit) => edit = true,
                             None => {}
                         }
@@ -941,7 +953,8 @@ impl Editor {
                 .tokens
                 .clone()
                 .unwrap_or_else(|| template.naming.tokens().to_string());
-            r.editor = Some(NameEditor::new(&tokens));
+            let preset = Preset::of(template.naming, r.settings.tokens.as_deref(), &r.saved);
+            r.editor = Some(NameEditor::new(&tokens, preset));
         }
         self.rename_editor_window(ctx);
         let State::Renaming(r) = &mut self.file_ops.state else {
@@ -1139,7 +1152,8 @@ impl super::FileOps {
     #[cfg(test)]
     pub(super) fn rename_edit(&mut self, tokens: &str) {
         if let State::Renaming(r) = &mut self.state {
-            r.editor = Some(NameEditor::new(tokens));
+            let preset = Preset::of(r.settings.naming, Some(tokens), &r.saved);
+            r.editor = Some(NameEditor::new(tokens, preset));
         }
     }
     /// Picks `tokens` (Lightroom's form) in the rename dialog's File Naming.

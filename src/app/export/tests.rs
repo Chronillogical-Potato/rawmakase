@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::Module;
 use crate::app::naming::editor as name_editor;
+use crate::app::naming::presets::Preset;
 use crate::catalog::PhotoId;
 use crate::export_settings::NameContext;
 use crate::export_settings::{Destination, Format};
@@ -828,7 +829,7 @@ fn return_in_the_template_editor_is_done_and_does_not_export() -> anyhow::Result
     let (dir, mut e, ids, ctx) = editor()?;
     e.library.as_mut().unwrap().select(Some(ids[0]));
     open_dialog(&mut e, settings(&dir.path().join("out")));
-    let mut wrong = name_editor::NameEditor::new(MODEL);
+    let mut wrong = name_editor::NameEditor::new(MODEL, Preset::Custom);
     wrong.text.push('{');
     let typed = wrong.text.clone();
     e.exports.name_editor = Some(wrong);
@@ -843,7 +844,7 @@ fn return_in_the_template_editor_is_done_and_does_not_export() -> anyhow::Result
         Some(&typed)
     );
     assert_eq!(e.exports.draft.custom_tokens(), None);
-    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL, Preset::Custom));
     press_return(&mut e, &ctx);
     assert!(e.exports.name_editor.is_none());
     assert_eq!(e.exports.draft.custom_tokens(), Some(MODEL));
@@ -859,7 +860,7 @@ fn line_breaks_never_get_into_the_template() -> anyhow::Result<()> {
     let (dir, mut e, ids, ctx) = editor()?;
     e.library.as_mut().unwrap().select(Some(ids[0]));
     open_dialog(&mut e, settings(&dir.path().join("out")));
-    let mut typing = name_editor::NameEditor::new("abcd");
+    let mut typing = name_editor::NameEditor::new("abcd", Preset::Custom);
     typing.text = "abcd".into();
     e.exports.name_editor = Some(typing);
     frame(&mut e, &ctx, vec![]);
@@ -916,7 +917,7 @@ fn escape_closes_the_template_editor_then_the_dialog() -> anyhow::Result<()> {
     e.library.as_mut().unwrap().select(Some(ids[0]));
     open_dialog(&mut e, settings(&dir.path().join("out")));
     frame(&mut e, &ctx, vec![]);
-    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL, Preset::Custom));
     frame(&mut e, &ctx, vec![]);
     ctx.memory_mut(|m| m.request_focus(name_editor::text_id()));
     frame(&mut e, &ctx, vec![]);
@@ -931,7 +932,7 @@ fn escape_closes_the_template_editor_then_the_dialog() -> anyhow::Result<()> {
     // under it.
     open_dialog(&mut e, settings(&dir.path().join("out")));
     frame(&mut e, &ctx, vec![]);
-    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL));
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL, Preset::Custom));
     press(&mut e, &ctx, egui::Key::Escape);
     assert!(e.exports.dialog);
     press(&mut e, &ctx, egui::Key::Escape);
@@ -993,5 +994,110 @@ fn a_file_that_cant_be_read_fails_the_read_and_keeps_the_others() -> anyhow::Res
     press_return(&mut e, &ctx);
     wait(&mut e, &ctx);
     assert_eq!(listing(&dir.path().join("out")), ["-b.tif", "X100-a.tif"]);
+    Ok(())
+}
+
+/// The editor's Preset menu: Save Current Settings as New Preset… asks a
+/// name and saves the template under it, which Rename To then lists and
+/// shows; Update Preset gives it the template as edited; Delete preset…
+/// asks, deletes it, and leaves the template as it was, a preset of none.
+/// What the dialog chose keeps its tokens whatever happens to the preset.
+#[test]
+fn templates_are_saved_updated_and_deleted_from_the_editor() -> anyhow::Result<()> {
+    use crate::app::naming::presets::{Action, Library};
+    use crate::export_settings::SavedTemplates;
+    let (dir, mut e, ids, ctx) = editor()?;
+    let file = dir.path().join("filename_templates.json");
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    e.exports.saved = Library(SavedTemplates::load_from(&file));
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL, Preset::Custom));
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    let act = |e: &mut Editor, action| {
+        let editor = e.exports.name_editor.as_mut().unwrap();
+        let tokens = editor.parsed().ok().map(|t| t.to_lightroom());
+        editor
+            .presets
+            .act(action, tokens.as_deref(), &mut e.exports.saved);
+    };
+    act(&mut e, Action::New);
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    // The name is typed over "Untitled Preset"; Return creates it, and
+    // leaves the editor open.
+    frame(&mut e, &ctx, vec![egui::Event::Text("Cameras".into())]);
+    press_return(&mut e, &ctx);
+    let saved = SavedTemplates::load_from(&file).map_err(anyhow::Error::msg)?;
+    assert_eq!(
+        saved.get("Cameras").map(|t| t.tokens).as_deref(),
+        Some(MODEL)
+    );
+    let editor = e.exports.name_editor.as_ref().expect("still open");
+    assert_eq!(editor.presets.preset(), &Preset::Saved("Cameras".into()));
+    // Edited, then updated.
+    e.exports
+        .name_editor
+        .as_mut()
+        .unwrap()
+        .text
+        .push_str("-{Hour}");
+    act(&mut e, Action::Update);
+    let edited = format!("{MODEL}-{{{{date_Hour}}}}");
+    let saved = SavedTemplates::load_from(&file).map_err(anyhow::Error::msg)?;
+    assert_eq!(saved.get("Cameras").map(|t| t.tokens), Some(edited.clone()));
+    // Done: Rename To shows it by its name.
+    press_return(&mut e, &ctx);
+    assert!(e.exports.name_editor.is_none());
+    assert_eq!(e.exports.draft.custom_tokens(), Some(edited.as_str()));
+    let shown = Preset::of(
+        e.exports.draft.naming(),
+        e.exports.draft.custom_tokens(),
+        &e.exports.saved,
+    );
+    assert_eq!(shown, Preset::Saved("Cameras".into()));
+    // Deleted from the editor opened on it: the dialog keeps the tokens.
+    e.exports.name_editor = Some(name_editor::NameEditor::new(&edited, shown));
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    act(&mut e, Action::Delete);
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    press_return(&mut e, &ctx);
+    let editor = e.exports.name_editor.as_ref().expect("still open");
+    assert_eq!(editor.presets.preset(), &Preset::Custom);
+    let saved = SavedTemplates::load_from(&file).map_err(anyhow::Error::msg)?;
+    assert!(saved.list().is_empty());
+    assert_eq!(e.exports.draft.custom_tokens(), Some(edited.as_str()));
+    Ok(())
+}
+
+/// Escape drops the Preset menu's question first, saving nothing, then the
+/// editor, then the dialog.
+#[test]
+fn escape_closes_the_presets_question_then_the_editor() -> anyhow::Result<()> {
+    use crate::app::naming::presets::{Action, Library};
+    use crate::export_settings::SavedTemplates;
+    let (dir, mut e, ids, ctx) = editor()?;
+    let file = dir.path().join("filename_templates.json");
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    open_dialog(&mut e, settings(&dir.path().join("out")));
+    e.exports.saved = Library(SavedTemplates::load_from(&file));
+    e.exports.name_editor = Some(name_editor::NameEditor::new(MODEL, Preset::Custom));
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    let editor = e.exports.name_editor.as_mut().unwrap();
+    editor
+        .presets
+        .act(Action::New, Some(MODEL), &mut e.exports.saved);
+    frame(&mut e, &ctx, vec![]);
+    frame(&mut e, &ctx, vec![]);
+    press(&mut e, &ctx, egui::Key::Escape);
+    let editor = e.exports.name_editor.as_ref().expect("the editor stays");
+    assert!(!editor.presets.asking());
+    assert!(!file.exists());
+    press(&mut e, &ctx, egui::Key::Escape);
+    assert!(e.exports.name_editor.is_none());
+    assert!(e.exports.dialog);
     Ok(())
 }

@@ -2,6 +2,7 @@
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::{Editor, Status};
 use crate::app::naming::menu::Choice;
+use crate::app::naming::presets::Preset;
 use crate::app::theme;
 use crate::export_settings::{AfterExport, Destination, Existing, Format, Include, NameContext};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
@@ -280,9 +281,10 @@ impl Editor {
             220.,
             naming,
             custom.as_deref(),
+            &self.exports.saved,
         ) {
             Some(Choice::Preset(n)) => s.choose_naming(n),
-            Some(Choice::Tokens(tokens)) => s.choose_tokens(tokens),
+            Some(Choice::Tokens(tokens)) => s.choose_tokens(&tokens),
             Some(Choice::Edit) => edit_names = true,
             None => {}
         });
@@ -326,7 +328,8 @@ impl Editor {
         });
         if edit_names {
             let tokens = custom.as_deref().unwrap_or(naming.tokens()).to_string();
-            self.exports.name_editor = Some(super::NameEditor::new(&tokens));
+            let preset = Preset::of(naming, custom.as_deref(), &self.exports.saved);
+            self.exports.name_editor = Some(super::NameEditor::new(&tokens, preset));
             return;
         }
         let s = &mut self.exports.draft;
