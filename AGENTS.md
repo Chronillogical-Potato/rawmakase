@@ -1,5 +1,11 @@
 # Working on RAWmakase
 
+## GitHub preference
+
+Prefer the GitHub CLI (`gh`, including `gh api`) for GitHub work such as issues,
+pull requests, reviews, comments, and media uploads. Check the installed CLI
+capabilities before falling back to GitHub connectors or browser automation.
+
 ## Architecture and implementation
 
 - Before changing a module boundary, read `docs/architecture.md`,
