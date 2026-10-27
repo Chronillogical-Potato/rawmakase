@@ -140,7 +140,7 @@ impl Default for MaskTool {
         Self {
             selected: None,
             component: None,
-            overlay: false,
+            overlay: true,
             brushes: [Brush::default(); 3],
             brush: 0,
             pending: None,
@@ -599,11 +599,10 @@ impl Editor {
     }
     /// Starts a stroke of the current brush (or the Erase brush) at `at` in the
     /// selected brush component; returns where it is, as `Drag::Stroke` keeps it.
-    /// Painting shows the mask's overlay, as in Lightroom; O hides it again.
+    /// Painting preserves the overlay choice made with O or Show Overlay.
     fn begin_stroke(&mut self, at: [f32; 2], erase: bool) -> Option<(usize, usize, usize)> {
         let (m, c) = self.selected_component()?;
         let strokes = self.add_stroke(vec![at], erase)?;
-        self.view.masking.overlay = true;
         Some((m, c, strokes - 1))
     }
     /// Whether the stroke being painted, or the mask being moved, is still selected
@@ -1505,6 +1504,7 @@ mod tests {
             None,
         );
         e.view.tool = Tool::Mask;
+        e.view.masking.overlay = false;
         e.document.edit.change(None, |r| r.masks.push(mask("Sky")));
         frame(&mut e, vec![]);
         assert_eq!(e.overlay(), crate::app::worker::Overlay::None);

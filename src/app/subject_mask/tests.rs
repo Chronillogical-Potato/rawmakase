@@ -104,6 +104,7 @@ fn a_selection_becomes_one_named_mask_and_one_history_step() {
     let mut f = fixture();
     let e = &mut f.editor;
     e.view.tool = crate::app::state::Tool::Mask;
+    e.view.masking.overlay = false;
     let g = begin(e, SUBJECT);
     let renders = e.preview.task.id();
     finish(e, g, Ok(generated(10)));
