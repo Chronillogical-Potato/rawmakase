@@ -3,7 +3,7 @@
 //! Namespaces are matched by URI, in attribute and element forms. Lightroom's
 //! and digiKam's properties are read as digiKam documents and writes them.
 use crate::metadata::{Capture, LangAlt, Location, Value};
-use crate::xml::ns::{DC, DIGIKAM, EXIF, LR, PHOTOSHOP, RDF, XML, XMP};
+use crate::xml::ns::{DC, DIGIKAM, EXIF, IPTC_CORE, LR, PHOTOSHOP, RDF, XML, XMP};
 use anyhow::{Result, ensure};
 use roxmltree::Node;
 
@@ -24,6 +24,32 @@ pub struct Read {
     pub flag: Option<i32>,
     pub capture: Option<Capture>,
     pub location: Option<Location>,
+    /// Its headline and where it was taken, as IPTC names them; RAWmakase
+    /// keeps none of them, but names files by them.
+    pub place: Place,
+}
+
+/// A photo's IPTC headline and place names; each `None` when the packet
+/// doesn't have it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Place {
+    pub headline: Option<String>,
+    pub city: Option<String>,
+    pub state: Option<String>,
+    pub country: Option<String>,
+    pub sublocation: Option<String>,
+}
+impl Place {
+    /// Each from `self`, else from `fallback`.
+    fn or(self, fallback: Place) -> Place {
+        Place {
+            headline: self.headline.or(fallback.headline),
+            city: self.city.or(fallback.city),
+            state: self.state.or(fallback.state),
+            country: self.country.or(fallback.country),
+            sublocation: self.sublocation.or(fallback.sublocation),
+        }
+    }
 }
 impl Read {
     /// Each field from `self`, else from `fallback`: a sidecar over a file's
@@ -40,6 +66,7 @@ impl Read {
             flag: self.flag.or(fallback.flag),
             capture: self.capture.or(fallback.capture),
             location: self.location.or(fallback.location),
+            place: self.place.or(fallback.place),
         }
     }
 }
@@ -200,6 +227,13 @@ pub fn read(text: &str) -> Result<Read> {
         .into_iter()
         .find_map(|(ns, name)| capture(&p.text(ns, name)?)),
         location: location(&p),
+        place: Place {
+            headline: p.text(PHOTOSHOP, "Headline"),
+            city: p.text(PHOTOSHOP, "City"),
+            state: p.text(PHOTOSHOP, "State"),
+            country: p.text(PHOTOSHOP, "Country"),
+            sublocation: p.text(IPTC_CORE, "Location"),
+        },
     })
 }
 

@@ -334,7 +334,7 @@ mod tests {
             "",
             "{Filename}-{Date (YYYY)}",
             "a{Nope}b}c{",
-            "{?x\\}y} \\{日本\\} {Keywords}",
+            "{?x\\}y} \\{日本\\} {Flash}",
             "{Filename",
         ] {
             let job = layout(text, 400., &palette);

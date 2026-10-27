@@ -12,7 +12,7 @@
 //! only reads files, so at exit it is left to end with the process: nothing
 //! waits for it.
 use crate::app::worker::Event;
-use crate::export_settings::{CameraNames, NameFields, Needs};
+use crate::export_settings::{CameraNames, FileFacts, NameFields, Needs};
 use crate::metadata::PhotoInfo;
 use eframe::egui;
 use std::path::PathBuf;
@@ -31,6 +31,8 @@ pub(crate) struct FileFields {
     pub info: Option<PhotoInfo>,
     /// Its own title, caption, copyright and creator, when asked for.
     pub descriptive: FileText,
+    /// What names take from the file alone.
+    pub facts: FileFacts,
 }
 
 /// What a file says of a photo's title, caption, copyright and creator:
@@ -43,6 +45,8 @@ pub(crate) struct FileText {
     pub copyright: Option<String>,
     /// ", " between them, as Lightroom names them.
     pub creator: Option<String>,
+    /// The first of them.
+    pub artist: Option<String>,
 }
 
 /// One photo to read: its file, and whether it has no catalog (so its
@@ -241,6 +245,7 @@ pub(in crate::app) fn file_sourced(standalone: bool, descriptive: bool) -> Needs
         info: standalone,
         camera: true,
         descriptive,
+        facts: true,
     }
 }
 
@@ -248,6 +253,7 @@ pub(in crate::app) fn file_sourced(standalone: bool, descriptive: bool) -> Needs
 /// or creator only where the catalog has none of its own.
 pub(in crate::app) fn fill(fields: &mut NameFields, read: FileFields, standalone: bool) {
     fields.camera = read.camera;
+    fields.facts = read.facts;
     if standalone {
         fields.captured = read.captured;
         fields.info = read.info.unwrap_or_default();
@@ -258,6 +264,7 @@ pub(in crate::app) fn fill(fields: &mut NameFields, read: FileFields, standalone
         (&mut fields.caption, text.caption),
         (&mut fields.copyright, text.copyright),
         (&mut fields.creator, text.creator),
+        (&mut fields.artist, text.artist),
     ] {
         if field.is_none() {
             *field = file;
@@ -265,8 +272,11 @@ pub(in crate::app) fn fill(fields: &mut NameFields, read: FileFields, standalone
     }
 }
 
-/// `path`'s own title, caption, copyright and creator (see [`FileText`]).
-fn file_text(path: &std::path::Path) -> FileText {
+/// What `path`'s sidecar (else its own XMP) and EXIF say that names use:
+/// its own title, caption, copyright and creator (see [`FileText`]), and
+/// the facts only the file has. A CR3's, MRW's or X3F's EXIF is what
+/// RAWmakase's RAW decoders find, which has no Software.
+fn file_names(path: &std::path::Path) -> (FileText, FileFacts) {
     use crate::metadata::Value;
     let xmp = crate::catalog_session::read_file_metadata(path)
         .0
@@ -275,7 +285,7 @@ fn file_text(path: &std::path::Path) -> FileText {
         Value::Set(langs) => Some(langs.default_text().unwrap_or_default().to_string()),
         Value::Cleared => Some(String::new()),
     };
-    let exif = crate::photo::camera_exif(path);
+    let exif = crate::exif::read_for_names(path).or_else(|| crate::photo::camera_exif(path));
     let tag = |tag: u16| {
         exif.as_ref()
             .and_then(|e| e.get(tag))
@@ -284,25 +294,43 @@ fn file_text(path: &std::path::Path) -> FileText {
             .map(|t| t.split('\0').next().unwrap_or_default().trim().to_string())
             .filter(|t| !t.is_empty())
     };
-    use crate::exif::tag::{ARTIST, COPYRIGHT, IMAGE_DESCRIPTION};
-    FileText {
+    use crate::exif::tag::{ARTIST, COPYRIGHT, FOCAL_LENGTH_IN_35MM, IMAGE_DESCRIPTION, SOFTWARE};
+    let creators: Option<Vec<String>> = match xmp.creator {
+        Some(Value::Set(names)) => Some(names),
+        Some(Value::Cleared) => Some(Vec::new()),
+        // EXIF's Artist names several people with "; " between them.
+        None => tag(ARTIST).map(|artist| {
+            artist
+                .split(';')
+                .map(str::trim)
+                .filter(|a| !a.is_empty())
+                .map(String::from)
+                .collect()
+        }),
+    };
+    let text = FileText {
         title: lang(xmp.title),
         caption: lang(xmp.caption).or_else(|| tag(IMAGE_DESCRIPTION)),
         copyright: lang(xmp.copyright).or_else(|| tag(COPYRIGHT)),
-        creator: match xmp.creator {
-            Some(Value::Set(names)) => Some(names.join(", ")),
-            Some(Value::Cleared) => Some(String::new()),
-            // EXIF's Artist names several people with "; " between them.
-            None => tag(ARTIST).map(|artist| {
-                artist
-                    .split(';')
-                    .map(str::trim)
-                    .filter(|a| !a.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }),
-        },
-    }
+        creator: creators.as_ref().map(|c| c.join(", ")),
+        artist: creators.map(|c| c.into_iter().next().unwrap_or_default()),
+    };
+    let place = xmp.place;
+    let facts = FileFacts {
+        software: tag(SOFTWARE),
+        focal_35mm: exif
+            .as_ref()
+            .and_then(|e| e.get(FOCAL_LENGTH_IN_35MM))
+            .and_then(crate::exif::Field::number)
+            .filter(|mm| mm.is_finite() && *mm > 0. && *mm < 100_000.)
+            .map(|mm| mm.round() as u32),
+        headline: place.headline,
+        city: place.city,
+        state: place.state,
+        country: place.country,
+        sublocation: place.sublocation,
+    };
+    (text, facts)
 }
 
 /// The real reader: the camera's make and model from the file's EXIF, else
@@ -338,6 +366,7 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
             .unwrap_or_default(),
     };
     let known = |text: String| Some(text.trim().to_string()).filter(|t| !t.is_empty());
+    let (text, facts) = file_names(path);
     Ok(FileFields {
         camera: CameraNames::Read {
             make: known(make).map(|make| crate::raw::maker_name(&make)),
@@ -346,10 +375,11 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
         captured,
         info,
         descriptive: if photo.descriptive {
-            file_text(path)
+            text
         } else {
             FileText::default()
         },
+        facts,
     })
 }
 

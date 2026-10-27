@@ -88,6 +88,19 @@ pub enum Field {
     FocalLength,
     /// "6000 x 4000"
     Dimensions,
+    /// The software that wrote the file ("DSLR-A230 v1.10").
+    Software,
+    /// "39 mm"
+    FocalLength35,
+    /// Its first creator.
+    Artist,
+    /// Its keywords, by name.
+    Keywords,
+    Headline,
+    City,
+    State,
+    Country,
+    Sublocation,
 }
 
 /// Where the editor offers a token.
@@ -151,10 +164,7 @@ pub const TOKENS: &[Def] = &[
         Menu::ImageName,
     ),
     unsupported("image_originalName", "Original filename"),
-    unsupported(
-        "image_originalName_number_suffix",
-        "Original filename number suffix",
-    ),
+    unsupported("image_originalName_number_suffix", "Original number suffix"),
     unsupported("image_preservedName", "Preserved filename"),
     unsupported("image_name_extension", "Filename extension"),
     def(
@@ -319,12 +329,17 @@ pub const TOKENS: &[Def] = &[
         Menu::Metadata,
     ),
     def(
+        "com.adobe.keywords",
+        "Keywords",
+        Token::Field(Field::Keywords),
+        Menu::Metadata,
+    ),
+    def(
         "com.adobe.creator",
         "Creator",
         Token::Field(Field::Creator),
         Menu::Metadata,
     ),
-    unsupported("com.adobe.keywords", "Keywords"),
     unsupported("com.adobe.creatorJobTitle", "Creator Job Title"),
     unsupported("com.adobe.creatorAddress", "Creator Address"),
     unsupported("com.adobe.creatorCity", "Creator City"),
@@ -338,31 +353,53 @@ pub const TOKENS: &[Def] = &[
     unsupported("com.adobe.iptcSubjectCode", "IPTC Subject Code"),
     unsupported("com.adobe.intellectualGenre", "Intellectual Genre"),
     unsupported("com.adobe.scene", "IPTC Scene Code"),
-    unsupported("com.adobe.location", "Sublocation"),
+    def(
+        "com.adobe.location",
+        "Sublocation",
+        Token::Field(Field::Sublocation),
+        Menu::Metadata,
+    ),
     unsupported("com.adobe.isoCountryCode", "ISO Country Code"),
-    unsupported("com.adobe.headline", "Headline"),
+    def(
+        "com.adobe.headline",
+        "Headline",
+        Token::Field(Field::Headline),
+        Menu::Metadata,
+    ),
     unsupported("com.adobe.dateCreated", "Date Created"),
-    unsupported("com.adobe.city", "City"),
-    unsupported("com.adobe.state", "State / Province"),
-    unsupported("com.adobe.country", "Country"),
+    def(
+        "com.adobe.city",
+        "City",
+        Token::Field(Field::City),
+        Menu::Metadata,
+    ),
+    def(
+        "com.adobe.state",
+        "State / Province",
+        Token::Field(Field::State),
+        Menu::Metadata,
+    ),
+    def(
+        "com.adobe.country",
+        "Country / Region",
+        Token::Field(Field::Country),
+        Menu::Metadata,
+    ),
     unsupported("com.adobe.jobIdentifier", "Job Identifier"),
     unsupported("com.adobe.instructions", "Instructions"),
-    unsupported("com.adobe.provider", "Provider"),
+    unsupported("com.adobe.provider", "Credit Line"),
     unsupported("com.adobe.source", "Source"),
     unsupported("com.adobe.rightsUsageTerms", "Rights Usage Terms"),
     unsupported("com.adobe.copyrightInfoURL", "Copyright Info URL"),
-    unsupported("com.adobe.altTextAccessibility", "Alt Text (Accessibility)"),
-    unsupported(
-        "com.adobe.extDescrAccessibility",
-        "Extended Description (Accessibility)",
-    ),
+    unsupported("com.adobe.altTextAccessibility", "Alt Text"),
+    unsupported("com.adobe.extDescrAccessibility", "Extended Description"),
     def(
         "com.adobe.imageFileDimensions",
         "File Dimensions",
         Token::Field(Field::Dimensions),
         Menu::Exif,
     ),
-    unsupported("com.adobe.imageCroppedDimensions", "Cropped Dimensions"),
+    unsupported("com.adobe.imageCroppedDimensions", "Current Dimensions"),
     def(
         "com.adobe.exposure",
         "Exposure",
@@ -375,7 +412,12 @@ pub const TOKENS: &[Def] = &[
         Token::Field(Field::FocalLength),
         Menu::Exif,
     ),
-    unsupported("com.adobe.focalLength35mm", "Focal Length 35mm"),
+    def(
+        "com.adobe.focalLength35mm",
+        "Focal Length 35mm",
+        Token::Field(Field::FocalLength35),
+        Menu::Exif,
+    ),
     unsupported("com.adobe.brightnessValue", "Brightness Value"),
     unsupported("com.adobe.exposureBiasValue", "Exposure Bias"),
     def(
@@ -401,8 +443,18 @@ pub const TOKENS: &[Def] = &[
         Menu::Exif,
     ),
     unsupported("com.adobe.serialNumber", "Serial Number"),
-    unsupported("com.adobe.artist", "Artist"),
-    unsupported("com.adobe.software", "Software"),
+    def(
+        "com.adobe.artist",
+        "Artist",
+        Token::Field(Field::Artist),
+        Menu::Exif,
+    ),
+    def(
+        "com.adobe.software",
+        "Software",
+        Token::Field(Field::Software),
+        Menu::Exif,
+    ),
     def(
         "com.adobe.lens",
         "Lens",
@@ -509,10 +561,13 @@ pub struct Needs {
     /// A title, caption, copyright or creator, which a photo the catalog
     /// has none of its own for takes from its file.
     pub descriptive: bool,
+    /// What only the file says (its software, 35 mm focal length, IPTC
+    /// headline and place names).
+    pub facts: bool,
 }
 impl Needs {
     pub fn any(self) -> bool {
-        self.captured || self.info || self.camera || self.descriptive
+        self.captured || self.info || self.camera || self.descriptive || self.facts
     }
     /// What both need.
     pub fn and(self, other: Needs) -> Needs {
@@ -521,6 +576,7 @@ impl Needs {
             info: self.info && other.info,
             camera: self.camera && other.camera,
             descriptive: self.descriptive && other.descriptive,
+            facts: self.facts && other.facts,
         }
     }
 }
@@ -665,9 +721,22 @@ impl TokenTemplate {
             match token {
                 Token::Date(_) => needs.captured = true,
                 Token::Field(Field::Make | Field::Model) => needs.camera = true,
-                Token::Field(Field::Title | Field::Caption | Field::Copyright | Field::Creator) => {
-                    needs.descriptive = true
-                }
+                Token::Field(
+                    Field::Title
+                    | Field::Caption
+                    | Field::Copyright
+                    | Field::Creator
+                    | Field::Artist,
+                ) => needs.descriptive = true,
+                Token::Field(
+                    Field::Software
+                    | Field::FocalLength35
+                    | Field::Headline
+                    | Field::City
+                    | Field::State
+                    | Field::Country
+                    | Field::Sublocation,
+                ) => needs.facts = true,
                 Token::Field(
                     Field::Lens
                     | Field::Iso
@@ -871,6 +940,19 @@ impl super::NameFields {
                 .dimensions
                 .filter(|(w, h)| *w > 0 && *h > 0)
                 .map(|(w, h)| format!("{w} x {h}")),
+            Field::Software => known(self.facts.software.as_ref()),
+            Field::FocalLength35 => self
+                .facts
+                .focal_35mm
+                .filter(|mm| *mm > 0)
+                .map(|mm| format!("{mm} mm")),
+            Field::Artist => own(&self.artist),
+            Field::Keywords => some(&self.keywords),
+            Field::Headline => own(&self.facts.headline),
+            Field::City => own(&self.facts.city),
+            Field::State => own(&self.facts.state),
+            Field::Country => own(&self.facts.country),
+            Field::Sublocation => own(&self.facts.sublocation),
         }
     }
 }

@@ -750,6 +750,7 @@ fn a_files_own_descriptive_text_names_what_the_catalog_lacks() -> anyhow::Result
                 bytes: std::mem::take(&mut copyright),
             },
         ],
+        exif: vec![Field::short(tag::FOCAL_LENGTH_IN_35MM, 39)],
         ..Default::default()
     };
     std::fs::write(&x3f, camera_raw(Container::X3f, camera))?;
@@ -767,8 +768,11 @@ fn a_files_own_descriptive_text_names_what_the_catalog_lacks() -> anyhow::Result
             caption: Some("From EXIF".into()),
             copyright: Some("Ann Example".into()),
             creator: Some("A One, B Two".into()),
+            artist: Some("A One".into()),
         }
     );
+    // A RAW container's EXIF, read for what only the file says.
+    assert_eq!(read.facts.focal_35mm, Some(39));
     let mut fields = NameFields {
         caption: Some(String::new()),
         creator: Some("Catalog Person".into()),
@@ -779,6 +783,55 @@ fn a_files_own_descriptive_text_names_what_the_catalog_lacks() -> anyhow::Result
     assert_eq!(fields.caption.as_deref(), Some(""), "cleared stays cleared");
     assert_eq!(fields.copyright.as_deref(), Some("Ann Example"));
     assert_eq!(fields.creator.as_deref(), Some("Catalog Person"));
+    Ok(())
+}
+
+/// What only a file says names its photo: its software (EXIF), and its
+/// IPTC headline and place names (its sidecar's XMP), as Lightroom writes
+/// them; a file that says none of them names nothing by them.
+#[test]
+fn a_files_software_and_place_names_name_its_photo() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let tif = dir.path().join("a.tif");
+    // A little-endian TIFF whose one directory holds Software.
+    let software = b"ProbeSoft 1.2\0";
+    let mut t = b"II*\0\x08\0\0\0\x01\0".to_vec();
+    t.extend(0x0131u16.to_le_bytes());
+    t.extend(2u16.to_le_bytes());
+    t.extend((software.len() as u32).to_le_bytes());
+    t.extend(26u32.to_le_bytes());
+    t.extend([0; 4]);
+    t.extend(software);
+    std::fs::write(&tif, t)?;
+    std::fs::write(
+        dir.path().join("a.tif.xmp"),
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+          xmlns:Iptc4xmpCore="http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/"
+          photoshop:Headline="Probe Headline" photoshop:City="Probe City"
+          photoshop:State="Probe State" photoshop:Country="Probe Country"
+          Iptc4xmpCore:Location="Probe Place"/>
+        </rdf:RDF></x:xmpmeta>"#,
+    )?;
+    let read = name_read::read_path(&tif, false).unwrap();
+    let mut fields = NameFields::default();
+    name_read::fill(&mut fields, read, false);
+    let template = crate::export_settings::TokenTemplate::parse(
+        "{{com.adobe.software}}|{{com.adobe.headline}}|{{com.adobe.city}}|{{com.adobe.state}}|{{com.adobe.country}}|{{com.adobe.location}}",
+    );
+    let at = NameContext {
+        index: 0,
+        total: 1,
+        fields: &fields,
+    };
+    assert_eq!(
+        template.stem(&tif, &at, "", 1).0,
+        "ProbeSoft 1.2-Probe Headline-Probe City-Probe State-Probe Country-Probe Place"
+    );
+    let bare = dir.path().join("b.txt");
+    std::fs::write(&bare, "not a photo")?;
+    let read = name_read::read_path(&bare, false).unwrap();
+    assert_eq!(read.facts, Default::default());
     Ok(())
 }
 

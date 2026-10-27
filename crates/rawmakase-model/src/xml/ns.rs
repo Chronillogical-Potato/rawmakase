@@ -10,6 +10,8 @@ pub const XMP_MM: &str = "http://ns.adobe.com/xap/1.0/mm/";
 pub const XMP_NOTE: &str = "http://ns.adobe.com/xmp/note/";
 pub const DC: &str = "http://purl.org/dc/elements/1.1/";
 pub const PHOTOSHOP: &str = "http://ns.adobe.com/photoshop/1.0/";
+/// IPTC Core (`Iptc4xmpCore:`), of a photo's sublocation.
+pub const IPTC_CORE: &str = "http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/";
 pub const EXIF: &str = "http://ns.adobe.com/exif/1.0/";
 pub const AUX: &str = "http://ns.adobe.com/exif/1.0/aux/";
 pub const LR: &str = "http://ns.adobe.com/lightroom/1.0/";
