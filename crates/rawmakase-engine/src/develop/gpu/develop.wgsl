@@ -856,11 +856,26 @@ fn point_colors(rgb: vec3<f32>) -> vec3<f32> {
     return PRO_TO_RGB * q;
 }
 // camera_profiles::rgb_table: a look's RGB table, in its own primaries and encoding.
+const REC2020_ALPHA: f32 = 1.0992968;
+const REC2020_BETA: f32 = 0.01805397;
+fn rec2020_encode(v: f32) -> f32 {
+    if v < REC2020_BETA {
+        return 4.5 * v;
+    }
+    return REC2020_ALPHA * powf(v, 0.45) - (REC2020_ALPHA - 1.0);
+}
+fn rec2020_decode(v: f32) -> f32 {
+    if v < 4.5 * REC2020_BETA {
+        return v / 4.5;
+    }
+    return powf((v + REC2020_ALPHA - 1.0) / REC2020_ALPHA, 1.0 / 0.45);
+}
 fn rgb_encode(v: f32, gamma: u32) -> f32 {
     switch gamma {
         case 1u: { return srgb_encode(v); }
         case 2u: { return powf(v, 1.0 / 1.8); }
         case 3u: { return powf(v, 1.0 / 2.2); }
+        case 4u: { return rec2020_encode(v); }
         default: { return v; }
     }
 }
@@ -869,6 +884,7 @@ fn rgb_decode(v: f32, gamma: u32) -> f32 {
         case 1u: { return srgb_decode(v); }
         case 2u: { return powf(v, 1.8); }
         case 3u: { return powf(v, 2.2); }
+        case 4u: { return rec2020_decode(v); }
         default: { return v; }
     }
 }

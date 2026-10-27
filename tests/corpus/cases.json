@@ -1390,6 +1390,41 @@
    }
   },
   {
+   "name": "rgb-p3-100",
+   "look": {
+    "file": "synthetic-rgb-p3.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-rec2020-100",
+   "look": {
+    "file": "synthetic-rgb-rec2020.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-rec2020-half-100",
+   "look": {
+    "file": "synthetic-rgb-rec2020-half.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "rgb-code4-half-50",
+   "look": {
+    "file": "synthetic-rgb-code4-half.xmp",
+    "amount": 0.5
+   }
+  },
+  {
+   "name": "rgb-code4-half-100",
+   "look": {
+    "file": "synthetic-rgb-code4-half.xmp",
+    "amount": 1
+   }
+  },
+  {
    "name": "rgb-1d-100",
    "look": {
     "file": "synthetic-rgb-1d.xmp",
@@ -1633,6 +1668,41 @@
    "look": {
     "file": "cube-hue-rotation-33-adobe-rgb.xmp",
     "amount": 1
+   }
+  },
+  {
+   "name": "cube-identity-33-display-p3-100",
+   "look": {
+    "file": "cube-identity-33-display-p3.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-display-p3-100",
+   "look": {
+    "file": "cube-creative-33-display-p3.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-identity-33-rec2020-100",
+   "look": {
+    "file": "cube-identity-33-rec2020.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-rec2020-100",
+   "look": {
+    "file": "cube-creative-33-rec2020.xmp",
+    "amount": 1
+   }
+  },
+  {
+   "name": "cube-creative-33-rec2020-200",
+   "look": {
+    "file": "cube-creative-33-rec2020.xmp",
+    "amount": 2
    }
   },
   {

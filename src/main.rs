@@ -172,15 +172,19 @@ fn parse_reference(json: &str) -> Result<rawmakase::half_check::Reference, Strin
 enum LutSpace {
     Srgb,
     AdobeRgb,
+    DisplayP3,
     #[value(name = "prophoto-rgb")]
     ProPhotoRgb,
+    Rec2020,
 }
 impl From<LutSpace> for rawmakase::camera_profiles::LutSpace {
     fn from(space: LutSpace) -> Self {
         match space {
             LutSpace::Srgb => Self::Srgb,
             LutSpace::AdobeRgb => Self::AdobeRgb,
+            LutSpace::DisplayP3 => Self::DisplayP3,
             LutSpace::ProPhotoRgb => Self::ProPhotoRgb,
+            LutSpace::Rec2020 => Self::Rec2020,
         }
     }
 }

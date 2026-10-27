@@ -15,8 +15,8 @@ about 8 MB of text); this script writes the same bytes every time.
       scripts/corpus/camera-raw-charts.py renders) to tests/corpus/looks/cube-<name>.xmp.
       Cubes RAWmakase refuses (a DOMAIN other than 0–1) are listed and get no look.
   python3 scripts/corpus/synthetic-cubes.py looks --lut-space adobe-rgb
-      the same, imported with `--lut-space` (adobe-rgb or prophoto-rgb), into
-      tests/corpus/looks/cube-<name>-<space>.xmp.
+      the same, imported with `--lut-space` (adobe-rgb, display-p3, prophoto-rgb or
+      rec2020), into tests/corpus/looks/cube-<name>-<space>.xmp.
 
 Run from the repository root.
 """
@@ -188,7 +188,7 @@ if __name__ == '__main__':
     s.add_argument('out', type=Path)
     s = sub.add_parser('looks')
     s.add_argument('--rawmakase', type=Path, default=ROOT / 'target/release/rawmakase')
-    s.add_argument('--lut-space', choices=['srgb', 'adobe-rgb', 'prophoto-rgb'], default='srgb')
+    s.add_argument('--lut-space', choices=['srgb', 'adobe-rgb', 'display-p3', 'prophoto-rgb', 'rec2020'], default='srgb')
     args = p.parse_args()
     if args.command == 'cubes':
         write_cubes(args.out)

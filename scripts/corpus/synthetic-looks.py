@@ -49,8 +49,8 @@ def table(dims, f, srgb=True, bounds=(0., 2.)):
 
 
 # The colour spaces, encodings and gamut modes of a DNG SDK RGB table.
-SRGB, ADOBE_RGB, PROPHOTO = 0, 1, 2
-LINEAR, SRGB_GAMMA, GAMMA_1_8, GAMMA_2_2 = 0, 1, 2, 3
+SRGB, ADOBE_RGB, PROPHOTO, DISPLAY_P3, REC2020 = 0, 1, 2, 3, 4
+LINEAR, SRGB_GAMMA, GAMMA_1_8, GAMMA_2_2, REC2020_GAMMA = 0, 1, 2, 3, 4
 CLIP, EXTEND = 0, 1
 
 
@@ -145,6 +145,11 @@ def fade(r, g, b):
             0.08 + 0.8 * b + 0.06 * r * (1 - b) - 0.03 * math.sin(math.pi * g))
 
 
+def half(v):
+    """Each channel halved in the table's encoding: on a gray, the encoding's curve."""
+    return (0.5 * v,) * 3
+
+
 IDENTITY = ['0, 0', '255, 255']
 S_CURVE = ['0, 0', '64, 44', '128, 132', '192, 214', '255, 255']
 LOOKS = {
@@ -187,6 +192,14 @@ LOOKS = {
     'synthetic-rgb-extend.xmp': look('Synthetic RGB Extend', None,
                                      rgb=rgb_table(17, fade, primaries=SRGB, gamma=SRGB_GAMMA, gamut=EXTEND)),
     'synthetic-rgb-1d.xmp': look('Synthetic RGB 1D', None, rgb=rgb_table_1d(64, cross)),
+    'synthetic-rgb-p3.xmp': look('Synthetic RGB Display P3', None,
+                                 rgb=rgb_table(17, fade, primaries=DISPLAY_P3, gamma=SRGB_GAMMA)),
+    'synthetic-rgb-rec2020.xmp': look('Synthetic RGB Rec. 2020', None,
+                                      rgb=rgb_table(17, fade, primaries=REC2020, gamma=REC2020_GAMMA)),
+    'synthetic-rgb-rec2020-half.xmp': look('Synthetic RGB Rec. 2020 Half', None,
+                                           rgb=rgb_table_1d(256, half, primaries=REC2020, gamma=REC2020_GAMMA)),
+    'synthetic-rgb-code4-half.xmp': look('Synthetic RGB Code 4 Half', None,
+                                         rgb=rgb_table_1d(256, half, primaries=SRGB, gamma=REC2020_GAMMA)),
     'synthetic-rgb-flag.xmp': look('Synthetic RGB Flag', None, rgb=rgb_table(17, fade, flags=1)),
     'synthetic-rgb-look.xmp': look('Synthetic RGB Look', table((12, 5, 6), twist), curve=S_CURVE,
                                    rgb=rgb_table(17, fade)),
