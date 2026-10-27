@@ -246,3 +246,127 @@ fn move_folder_says_where_each_row_is_even_one_located_on_its_own() -> anyhow::R
     assert!(same(e.parent_path(other, ""), d.path().join("elsewhere")));
     Ok(())
 }
+
+#[test]
+fn a_root_moves_into_another_roots_folder_once_confirmed() -> anyhow::Result<()> {
+    let (d, mut e, mine, other) = editor_with_two_roots(
+        &["a.RAF", "2024/day1/b.RAF", "2024/day1/b.xmp"],
+        &["trips/c.RAF"],
+    )?;
+    let day1 = folder(&e, "2024/day1").unwrap();
+    let b = photo(&e, &d, "2024/day1/b.RAF");
+    e.request_folder_move(mine, String::new(), other, "trips".into());
+    settle(&mut e);
+    let (title, lines, actions) = e.file_ops.question().expect("it asks");
+    assert_eq!(title, "Move folder “photos” into “trips”?");
+    assert_eq!(actions, ["Move"]);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "The folder moves on disk with the 2 photos and the folders in it."),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(
+            |l| l == "“photos” is no longer a root folder: it becomes a folder of “elsewhere”."
+        ),
+        "{lines:?}"
+    );
+    // Return alone cancels.
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(d.path().join("photos/2024/day1/b.RAF").is_file());
+    e.request_folder_move(mine, String::new(), other, "trips".into());
+    settle(&mut e);
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert!(
+        d.path()
+            .join("elsewhere/trips/photos/2024/day1/b.xmp")
+            .is_file()
+    );
+    assert!(!d.path().join("photos").exists());
+    let now = &e.library.as_ref().unwrap().photo(b).unwrap().path;
+    assert_eq!(
+        now.canonicalize()?,
+        d.path()
+            .join("elsewhere/trips/photos/2024/day1/b.RAF")
+            .canonicalize()?
+    );
+    assert_eq!(
+        folder(&e, "trips/photos/2024/day1"),
+        Some(day1),
+        "the same folder"
+    );
+    let roots: Vec<RootId> = e
+        .library
+        .as_ref()
+        .unwrap()
+        .session
+        .roots
+        .iter()
+        .map(|r| r.0)
+        .collect();
+    assert_eq!(roots, [other], "the root left");
+    assert_eq!(e.status, "Moved folder photos into trips");
+    Ok(())
+}
+
+#[test]
+fn a_root_into_itself_is_refused_and_says_why() -> anyhow::Result<()> {
+    let (d, mut e, mine, _) = editor_with_two_roots(&["2024/day1/a.RAF"], &["trips/c.RAF"])?;
+    e.request_folder_move(mine, String::new(), mine, "2024".into());
+    settle(&mut e);
+    assert!(!e.file_ops.confirming());
+    assert!(!e.activity.is_busy());
+    assert!(e.status.contains("into itself"), "{}", e.status);
+    assert!(d.path().join("photos/2024/day1/a.RAF").is_file());
+    Ok(())
+}
+
+#[test]
+fn move_folder_offers_a_root_only_other_roots_and_their_folders() -> anyhow::Result<()> {
+    let (_d, mut e, mine, other) = editor_with_two_roots(&["2024/day1/a.RAF"], &["trips/c.RAF"])?;
+    e.choose_parent_for(mine, String::new());
+    let offered = e.parent_choices();
+    assert!(offered.contains(&(other, "trips".into())), "{offered:?}");
+    assert!(offered.contains(&(other, String::new())), "{offered:?}");
+    assert!(offered.iter().all(|(r, _)| *r == other), "{offered:?}");
+    Ok(())
+}
+
+#[test]
+fn a_root_located_again_under_a_new_name_is_followed_by_that_name() -> anyhow::Result<()> {
+    let (d, mut e, mine, other) = editor_with_two_roots(&["2024/day1/a.RAF"], &["trips/c.RAF"])?;
+    // Renamed in Finder, then located again: added as `photos`, `renamed`
+    // here.
+    std::fs::rename(d.path().join("photos"), d.path().join("renamed"))?;
+    let path = d.path().join("test.rawmakase");
+    crate::catalog::Catalog::open(&path)?.relink_root(mine, &d.path().join("renamed"))?;
+    let ctx = eframe::egui::Context::default();
+    e.library = Some(Box::new(crate::app::library::Library::load(&path, ctx)?));
+    e.library
+        .as_mut()
+        .unwrap()
+        .click_folder_for_tests(&format!("root:{mine}/2024/day1"));
+    e.request_folder_move(mine, String::new(), other, "trips".into());
+    settle(&mut e);
+    let (title, ..) = e.file_ops.question().expect("it asks");
+    assert_eq!(title, "Move folder “renamed” into “trips”?");
+    tap(&mut e, Key::Tab, Modifiers::NONE);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(
+        d.path()
+            .join("elsewhere/trips/renamed/2024/day1/a.RAF")
+            .is_file()
+    );
+    assert_eq!(
+        e.library.as_ref().unwrap().source_key(),
+        format!("root:{other}/trips/renamed/2024/day1")
+    );
+    assert_eq!(e.status, "Moved folder renamed into trips");
+    Ok(())
+}

@@ -846,12 +846,7 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item, copy: &TreeCopy) -> Resul
         });
         let new = match base {
             Some(rel) => join(&to, &logical_from_os(&rel)),
-            None => {
-                let rest = logical
-                    .strip_prefix(state.from.as_str())
-                    .context("a folder outside the subtree")?;
-                format!("{to}{rest}")
-            }
+            None => state.moved(logical, &to)?,
         };
         paths.push((*folder, new));
     }
@@ -872,7 +867,7 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item, copy: &TreeCopy) -> Resul
             &[filename, photo, photo],
         )?;
     }
-    super::tree::set_paths(w, state.to_root(), &paths)?;
+    super::tree::follow(w, state, &paths)?;
     for (ordinal, now) in &copies {
         journal::set_copy_identity(w, item.id, *ordinal as i64, now)?;
     }

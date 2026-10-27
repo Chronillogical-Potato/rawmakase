@@ -125,11 +125,12 @@ pub(crate) enum FileRequest {
     },
 }
 /// A folder being dragged in the Folders panel: the folder of `root` at
-/// logical path `from`.
+/// logical path `from` ("" for the root itself), named `name`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DraggedFolder {
     pub root: crate::catalog::RootId,
     pub from: String,
+    pub name: String,
 }
 /// Photos being dragged from the grid: the selection, or the photo dragged
 /// when it isn't in it.
@@ -169,6 +170,10 @@ pub(crate) struct Library {
     /// photos too; see `show_subfolders`.
     subfolders_shown: bool,
     expanded: HashSet<String>,
+    /// A folder renamed or moved: its tree key there as planned, and its
+    /// catalog folders by the keys that gave them, until the catalog is
+    /// read again and names them as the disk does there.
+    following: Option<(String, Vec<(FolderId, String)>)>,
     /// The tree key of the folder New Folder Inside was last asked in,
     /// unfolded once the folder is made.
     new_folder_in: Option<String>,
@@ -297,6 +302,7 @@ impl Library {
             selected_folders: Default::default(),
             subfolders_shown: true,
             expanded: HashSet::new(),
+            following: None,
             new_folder_in: None,
             thumb_size: 190.,
             cell_style: Default::default(),
@@ -433,6 +439,9 @@ impl Library {
                 self.filters.collection = None;
                 self.filters.members.clear();
             }
+        }
+        if let Some((to, folders)) = self.following.take() {
+            self.follow_catalog_names(&to, &folders);
         }
         // The folders shown as the catalog has them now: one may have
         // gained a catalog folder (photos moved into it) or subfolders.
@@ -852,10 +861,25 @@ impl Library {
         to_root: crate::catalog::RootId,
         to: &str,
     ) {
-        let (from, to) = (
-            format!("root:{root}/{from}"),
-            format!("root:{to_root}/{to}"),
-        );
+        let from = match from {
+            "" => format!("root:{root}"),
+            from => format!("root:{root}/{from}"),
+        };
+        let to = format!("root:{to_root}/{to}");
+        // Named as planned now; as the disk spelled it there (composed, on
+        // FAT, exFAT and SMB shares) once the catalog is read again.
+        let folders = self
+            .session
+            .folders
+            .iter()
+            .filter(|f| f.root == root)
+            .filter_map(|f| {
+                let key = folder_selection::tree_key(root, &f.relative);
+                let rest = folder_selection::rekeyed(&key, &from)?;
+                Some((f.id, format!("{to}{rest}")))
+            })
+            .collect();
+        self.following = Some((to.clone(), folders));
         self.selected_folders.rekey(&from, &to);
         self.expanded = std::mem::take(&mut self.expanded)
             .into_iter()
@@ -863,6 +887,32 @@ impl Library {
                 Some(rest) => format!("{to}{rest}"),
                 None => key,
             })
+            .collect();
+    }
+    /// Names each selected or unfolded row in a folder renamed or moved to
+    /// tree key `to` as the catalog names it now: a row is the folders below
+    /// it, `folders` by the keys they were planned at, and takes the names
+    /// one of them has now, as deep.
+    fn follow_catalog_names(&mut self, to: &str, folders: &[(FolderId, String)]) {
+        let now: HashMap<FolderId, String> = self
+            .session
+            .folders
+            .iter()
+            .map(|f| (f.id, folder_selection::tree_key(f.root, &f.relative)))
+            .collect();
+        let named = |key: &str| {
+            folder_selection::rekeyed(key, to)?;
+            let at = folders.iter().find_map(|(id, planned)| {
+                folder_selection::rekeyed(planned, key)?;
+                now.get(id)
+            })?;
+            let depth = key.split('/').count();
+            Some(at.split('/').take(depth).collect::<Vec<_>>().join("/"))
+        };
+        self.selected_folders.rename(named);
+        self.expanded = std::mem::take(&mut self.expanded)
+            .into_iter()
+            .map(|key| named(&key).unwrap_or(key))
             .collect();
     }
     /// After the folder of `root` at logical path `logical` went to the

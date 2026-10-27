@@ -1,8 +1,8 @@
-//! Moving a folder (planned in #556, into another root in #572): dragged
-//! onto another folder in the Folders panel, or Move Folder… in its menu,
-//! which lists where it can go. Either is confirmed as moving photos is,
-//! Cancel focused; the catalog's folder stays the same folder, its photos
-//! follow.
+//! Moving a folder (planned in #556, into another root in #572, a root
+//! into another in #586): dragged onto another folder in the Folders
+//! panel, or Move Folder… in its menu, which lists where it can go. Either
+//! is confirmed as moving photos is, Cancel focused; the catalog's folder
+//! stays the same folder, its photos follow.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
 use crate::catalog::file_ops::FileOp;
@@ -13,8 +13,10 @@ use eframe::egui::{self, Vec2};
 pub(super) struct ChoosingParent {
     catalog: CatalogLocation,
     root: RootId,
-    /// Its logical path.
+    /// Its logical path ("" for the root itself).
     from: String,
+    /// Its name.
+    name: String,
     filter: String,
     /// The root and logical path chosen ("" for the root itself).
     chosen: Option<(RootId, String)>,
@@ -37,12 +39,27 @@ fn root_name(roots: &[(RootId, String, Option<String>)], root: RootId) -> String
         )
 }
 
+/// Root `root`'s folder's name where it is on this computer (its location,
+/// else where it was added): the name a root moved into another takes
+/// there, as the plan gives it.
+fn located_name(roots: &[(RootId, String, Option<String>)], root: RootId) -> String {
+    roots
+        .iter()
+        .find(|r| r.0 == root)
+        .and_then(|r| std::path::Path::new(r.2.as_deref().unwrap_or(&r.1)).file_name())
+        .map_or_else(
+            || "Folder".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+}
+
 /// Where Move Folder… may put `c`'s folder, as roots and logical paths
 /// ("" for a root itself) with labels and where each is on this computer
 /// (which tells apart two roots of one name): every root, and every folder
 /// of each the Folders panel shows (those with no catalog folder of their
 /// own too, such as `2025` above `2025/day2`), but where it is, itself and
-/// the folders in it. Whether another root is on its drive the plan checks.
+/// the folders in it; for a root, every other root and its folders alone.
+/// Whether another root is on its drive the plan checks.
 fn parent_rows(
     library: &super::super::library::Library,
     c: &ChoosingParent,
@@ -82,6 +99,9 @@ fn parent_rows(
             }
         }
         let own = *root == c.root;
+        if own && c.from.is_empty() {
+            continue;
+        }
         rows.extend(
             logical
                 .into_iter()
@@ -142,19 +162,36 @@ impl Editor {
         to_root: RootId,
         to: String,
     ) {
+        let roots = self
+            .library
+            .as_ref()
+            .map(|l| l.session.roots.as_slice())
+            .unwrap_or_default();
         let into = match last(&to) {
-            "" => self
-                .library
-                .as_ref()
-                .map_or_else(String::new, |l| root_name(&l.session.roots, to_root)),
+            "" => root_name(roots, to_root),
             name => name.to_string(),
         };
-        let name = last(&from).to_string();
-        let op = FileOp::MoveFolder {
-            root,
-            folder: from.clone(),
-            to_root,
-            parent: to.clone(),
+        // A root, named as its folder is here, joins the other root (#586).
+        let (op, name, joins) = match from.as_str() {
+            "" => (
+                FileOp::MoveRoot {
+                    root,
+                    to_root,
+                    parent: to.clone(),
+                },
+                located_name(roots, root),
+                Some(root_name(roots, to_root)),
+            ),
+            from => (
+                FileOp::MoveFolder {
+                    root,
+                    folder: from.to_string(),
+                    to_root,
+                    parent: to.clone(),
+                },
+                last(from).to_string(),
+                None,
+            ),
         };
         let verb = Verb::MoveFolder {
             root,
@@ -163,6 +200,7 @@ impl Editor {
             from,
             name,
             into,
+            joins,
         };
         self.request_file_op(op, None, verb);
     }
@@ -174,16 +212,19 @@ impl Editor {
             self.status = "Finish what is running first".into();
             return;
         }
-        let Some(catalog) = self
-            .library
-            .as_ref()
-            .map(|l| l.session.catalog.location().clone())
-        else {
+        let Some((catalog, name)) = self.library.as_ref().map(|l| {
+            let name = match last(&from) {
+                "" => located_name(&l.session.roots, root),
+                name => name.to_string(),
+            };
+            (l.session.catalog.location().clone(), name)
+        }) else {
             return;
         };
         self.file_ops.state = State::ChoosingParent(Box::new(ChoosingParent {
             catalog,
             root,
+            name,
             from,
             filter: String::new(),
             chosen: None,
@@ -213,7 +254,7 @@ impl Editor {
             .show(ctx, |ui| {
                 ui.set_width(460.);
                 ui.label(
-                    egui::RichText::new(format!("Move Folder “{}”", last(&c.from)))
+                    egui::RichText::new(format!("Move Folder “{}”", c.name))
                         .size(15.)
                         .color(palette.gray(236)),
                 );

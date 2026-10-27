@@ -60,7 +60,12 @@ impl Far {
 
 /// The test disk, with `far/` on another volume of `kind`.
 pub(super) fn far_as(fx: &Fx, kind: Far) -> Faulty {
-    let dir = fx.root.join("far");
+    far_at(&fx.root.join("far"), kind)
+}
+
+/// The test disk, with folder `dir` on another volume of `kind`.
+pub(super) fn far_at(dir: &Path, kind: Far) -> Faulty {
+    let dir = dir.to_path_buf();
     let mut disk = Faulty::default().elsewhere(&dir);
     if kind != Far::Ids {
         disk.names_only = vec![dir];
