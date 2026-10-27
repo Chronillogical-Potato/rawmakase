@@ -82,7 +82,8 @@ models.
 - **Gradients:** drag a linear gradient's ends to size and turn it, its middle to
   move it; drag a radial gradient's centre to move it and its edge handles to size
   and turn it. Its Feather slider sets the soft edge.
-- **O** shows the selected mask as a red overlay.
+- **O** toggles the selected mask's red overlay, which is on by default. Painting
+  and erasing keep the choice made with **O** or **Show Overlay**.
 - Sliders follow Lightroom's order: Amount; Temp, Tint; Exposure, Contrast,
   Highlights, Shadows, Whites, Blacks; Texture, Clarity, Dehaze; Hue, Saturation;
   Sharpness, Noise; Color (hue and saturation). History names them like
