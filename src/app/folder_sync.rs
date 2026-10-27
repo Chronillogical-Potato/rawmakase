@@ -334,9 +334,8 @@ impl Editor {
             return;
         };
         if self.open_master() == Some(picked.photo) && !picked.verified {
-            let stuck = self.document.edit.save_state().needs_save()
-                && self.document.path.as_ref().is_some_and(|p| !p.exists());
-            if stuck {
+            // Asked only over no other dialog, whose state it would replace.
+            if self.unsaved_on_missing_file() && self.modal.is_none() {
                 let badges = self.badges(&plan);
                 self.modal = Some(super::Modal::DiscardForFind(Box::new(Review::new(
                     scan, plan, badges,
@@ -378,7 +377,7 @@ impl Editor {
             &format!("Discard the unsaved change to {name}?"),
             &format!(
                 "{name} is open in Develop with a change that can't be saved: \
-                 its file is gone. The file picked can't be verified as {name}, \
+                 its file can't be found. The file picked can't be verified as {name}, \
                  so the open photo can't follow it. Discarding closes the photo \
                  and reviews the file picked. To keep the change, Cancel and \
                  save it as a preset, or put the file back where it was."
@@ -405,13 +404,33 @@ impl Editor {
             );
             return;
         }
-        // Closed only if still the photo asked about; the review then
-        // checks the catalog is unchanged before applying.
+        let current = self
+            .library
+            .as_ref()
+            .is_some_and(|l| *l.session.catalog.location() == review.catalog);
+        if !current {
+            self.status = "The catalog changed during the search; Find on Disk again".into();
+            return;
+        }
+        // Asked about once more as things are now: a change that can be
+        // saved again (its file back) is never discarded.
         if self.open_master() == Some(picked) {
+            if !self.unsaved_on_missing_file() {
+                self.status = format!(
+                    "{name} is open in Develop. Open another photo in Develop, then Find on Disk again"
+                );
+                return;
+            }
             self.close_removed_document();
         }
+        // The review checks the catalog is unchanged before applying.
         self.folder_sync.review = Some(*review);
         self.folder_sync.showing = false;
+    }
+    /// The open edit needs saving but can't be saved: its file is not found.
+    fn unsaved_on_missing_file(&self) -> bool {
+        self.document.edit.save_state().needs_save()
+            && self.document.path.as_ref().is_some_and(|p| !p.exists())
     }
     /// The master of the photo loaded in Develop, shown or not.
     fn open_master(&self) -> Option<PhotoId> {
@@ -2734,6 +2753,27 @@ mod tests {
         let to = move_out(&trip, "a.dng")?;
         // Leaving the photo saves first, which fails: it can't be left.
         assert!(!e.flush());
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        assert!(matches!(e.modal, Some(Modal::DiscardForFind(_))));
+        // The file put back meanwhile: the change can be saved again, and
+        // is never discarded.
+        std::fs::copy(&to, trip.join("a.dng"))?;
+        e.answer_discard_for_find(true);
+        assert!(e.modal.is_none());
+        assert_eq!(e.document.catalog_photo, Some(a));
+        assert_eq!(e.document.edit.recipe().exposure, 0.4);
+        assert!(e.document.edit.save_state().needs_save());
+        assert!(e.folder_sync.review.is_none());
+        assert!(e.status.contains("is open in Develop"), "{}", e.status);
+        std::fs::remove_file(trip.join("a.dng"))?;
+        // Asked over no other dialog: the status says why instead.
+        e.modal = Some(Modal::RemoveCopy(a));
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        assert!(matches!(e.modal, Some(Modal::RemoveCopy(_))));
+        assert!(e.status.contains("is open in Develop"), "{}", e.status);
+        e.modal = None;
         e.start_find_on_disk(a, to.clone());
         scanned(&mut e);
         assert!(matches!(e.modal, Some(Modal::DiscardForFind(_))));
