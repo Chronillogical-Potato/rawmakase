@@ -1,10 +1,9 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::{Editor, Status};
+use crate::app::naming::menu::Choice;
 use crate::app::theme;
-use crate::export_settings::{
-    AfterExport, BUILTIN, Destination, Existing, Format, Include, NameContext, Naming, builtin,
-};
+use crate::export_settings::{AfterExport, Destination, Existing, Format, Include, NameContext};
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
 use std::{path::Path, sync::atomic::Ordering};
 
@@ -275,40 +274,17 @@ impl Editor {
         let naming = s.naming();
         let custom = s.custom_tokens().map(str::to_string);
         let mut edit_names = false;
-        form_row(ui, "Rename To", |ui| {
-            // Lightroom's presets, RAWmakase's own templates, the template
-            // made in the editor, and the editor.
-            let shown = match &custom {
-                Some(tokens) => builtin(tokens).map_or("Custom Settings", |b| b.name),
-                None => naming.label(),
-            };
-            egui::ComboBox::from_id_salt("export-naming")
-                .width(220.)
-                .selected_text(shown)
-                .show_ui(ui, |ui| {
-                    for n in Naming::ALL {
-                        if ui
-                            .selectable_label(custom.is_none() && naming == n, n.label())
-                            .clicked()
-                        {
-                            s.choose_naming(n);
-                        }
-                    }
-                    ui.separator();
-                    for b in &BUILTIN {
-                        if ui
-                            .selectable_label(custom.as_deref() == Some(b.tokens), b.name)
-                            .clicked()
-                        {
-                            s.choose_tokens(b.tokens);
-                        }
-                    }
-                    if custom.as_deref().is_some_and(|t| builtin(t).is_none()) {
-                        let _ = ui.selectable_label(true, "Custom Settings");
-                    }
-                    ui.separator();
-                    edit_names = ui.selectable_label(false, "Edit…").clicked();
-                });
+        form_row(ui, "Rename To", |ui| match crate::app::naming::menu::combo(
+            ui,
+            "export-naming",
+            220.,
+            naming,
+            custom.as_deref(),
+        ) {
+            Some(Choice::Preset(n)) => s.choose_naming(n),
+            Some(Choice::Tokens(tokens)) => s.choose_tokens(tokens),
+            Some(Choice::Edit) => edit_names = true,
+            None => {}
         });
         let template = s.name_template();
         form_row(ui, "Custom Text", |ui| {

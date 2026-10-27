@@ -32,6 +32,8 @@ pub(in crate::app) struct NameEditor {
     pub text: String,
     /// The token each menu shows, by its index in the menu.
     chosen: [usize; MENUS.len()],
+    /// The text has been given the keyboard, as the editor opened.
+    focused: bool,
 }
 
 impl NameEditor {
@@ -40,6 +42,7 @@ impl NameEditor {
         Self {
             text: TokenTemplate::parse(tokens).to_display(),
             chosen: [0; MENUS.len()],
+            focused: false,
         }
     }
 }
@@ -96,6 +99,12 @@ impl NameEditor {
     pub fn show(&mut self, ctx: &egui::Context, example: &(String, Vec<String>)) -> Outcome {
         let palette = theme::palette(ctx);
         let editor = self;
+        // Typing goes to the template as it opens, not to a field of the
+        // window under it (which would also keep Escape and Return).
+        if !editor.focused {
+            ctx.memory_mut(|m| m.request_focus(text_id()));
+            editor.focused = true;
+        }
         // Return is Done, as in Lightroom, also from the text; it is taken
         // before the editor draws so the text does not get a line break. An
         // open menu keeps it.

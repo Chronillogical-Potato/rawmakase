@@ -1094,3 +1094,38 @@ fn a_photo_on_an_smb_share_is_not_renamed() -> Result<()> {
     assert!(fx.recover(&disk).unfinished.is_empty());
     Ok(())
 }
+
+/// A batch is named from each photo's own catalog fields and its folder,
+/// read with its order: a template naming the title, rating and folder
+/// gives each photo its own, whatever order they were chosen in.
+#[test]
+fn a_batch_is_named_from_each_photos_catalog_fields_and_folder() -> Result<()> {
+    let mut fx = fixture(&["day 1/a.NEF", "day 1/b.NEF"]);
+    let (a, b) = (fx.photo("day 1/a.NEF"), fx.photo("day 1/b.NEF"));
+    fx.cat
+        .set_text(&[b], crate::metadata::TextField::Title, "Harbour")?;
+    fx.cat.db_for_tests().execute(
+        "UPDATE photos SET rating = 4, captured = '2021-01-01T00:00:00.000' WHERE id=?1",
+        [b.0],
+    )?;
+    let copy = fx.cat.create_virtual_copy(a)?;
+    // b is dated, so first; a's copy stands for a's file.
+    let order = rename_order(&fx.cat, &[copy, b]).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let template = NameTemplate {
+        tokens: Some(crate::export_settings::TokenTemplate::parse(
+            "{{image_folder}}-{{com.adobe.title}}-{{com.adobe.rating.string}}-{{copy_name}}",
+        )),
+        ..NameTemplate::default()
+    };
+    let preview = rename_preview(&fx.cat, &order, &template).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let rows: Vec<(PhotoId, &str)> = preview
+        .rows
+        .iter()
+        .map(|r| (r.photo, r.new.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [(b, "day 1-Harbour-4-.NEF"), (copy, "day 1---Copy 1.NEF")]
+    );
+    Ok(())
+}

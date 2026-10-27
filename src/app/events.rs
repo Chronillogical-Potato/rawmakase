@@ -45,7 +45,17 @@ impl Editor {
                 }
                 // The dialog's own DialogClosed follows.
                 Event::FileOpPlanned(planned) => self.file_op_planned(*planned),
-                Event::NamesRead { request, read } => self.names_read(request, read),
+                // Each read's id is its own: only its reader takes it.
+                Event::NamesRead { request, read } => match read {
+                    Ok(reads) => {
+                        self.names_read(request, Ok(reads.clone()));
+                        self.rename_names_read(request, Ok(reads));
+                    }
+                    Err(why) => {
+                        self.names_read(request, Err(why.clone()));
+                        self.rename_names_read(request, Err(why));
+                    }
+                },
                 Event::RenameOrdered(catalog, cancel, ordered) => {
                     self.rename_ordered(catalog, cancel, *ordered)
                 }

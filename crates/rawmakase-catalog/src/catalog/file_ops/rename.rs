@@ -394,24 +394,42 @@ pub(super) fn names(item: &Item) -> Option<(String, String)> {
 }
 
 /// A photo in a batch rename's order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ordered {
     pub photo: PhotoId,
     /// Its file's name, as the catalog has it.
     pub filename: String,
+    /// Its file where its folder is on this computer, else its folder's
+    /// path as the catalog keeps it (for the folder's name) joined with
+    /// `filename`.
+    pub path: PathBuf,
     /// When it was taken, as Lightroom keeps it; `None` when that isn't
     /// known.
     pub captured: Option<String>,
+    /// What its new name is made from, as the catalog has it: the file's
+    /// part (its camera's make and model) is the app's to add, by
+    /// [`RenameOrder::with_fields`].
+    pub fields: NameFields,
 }
 
 /// The photos of a batch rename in the order it numbers them, read once
 /// when its dialog opens: nothing reorders it after.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenameOrder(Vec<Ordered>);
 
 impl RenameOrder {
     pub fn photos(&self) -> &[Ordered] {
         &self.0
+    }
+    /// The same photos in the same order, each photo's name fields changed
+    /// by `fill` (given its place in the order): nothing else of the order
+    /// changes after it is read.
+    pub fn with_fields(&self, mut fill: impl FnMut(usize, &mut NameFields)) -> Self {
+        let mut order = self.clone();
+        for (index, o) in order.0.iter_mut().enumerate() {
+            fill(index, &mut o.fields);
+        }
+        order
     }
 }
 
@@ -420,45 +438,68 @@ impl RenameOrder {
 /// time in the order given; then those it has none for, by filename. A
 /// virtual copy goes with its master when that is given too. Reads no file:
 /// a photo whose time the background reads haven't filled in yet is
-/// undated.
+/// undated. The photos and their name fields are read in one snapshot.
 pub fn rename_order(catalog: &Catalog, photos: &[PhotoId]) -> Result<RenameOrder, FileOpError> {
     row! {
         struct Dated {
             id: PhotoId,
+            folder: FolderId,
             filename: String,
             master: Option<PhotoId>,
             captured: String,
         }
     }
-    let rows: Vec<Dated> = catalog.db.read(
-        sql!("SELECT id, filename, master_id, captured FROM photos"),
-        &[],
-    )?;
-    let by_id: HashMap<PhotoId, &Dated> = rows.iter().map(|r| (r.id, r)).collect();
-    let given: HashSet<PhotoId> = photos.iter().copied().collect();
-    let mut seen = HashSet::new();
-    let mut ordered = Vec::new();
-    for id in photos {
-        if !seen.insert(*id) {
-            continue;
-        }
-        let Some(row) = by_id.get(id) else {
+    // Where each folder is, for the photos' paths (their Folder Name, and
+    // the files the app reads names from).
+    let folders: HashMap<FolderId, PathBuf> = catalog
+        .folders()?
+        .into_iter()
+        .map(|f| {
+            let path = if f.path.as_os_str().is_empty() {
+                PathBuf::from(&f.relative)
+            } else {
+                f.path
+            };
+            (f.id, path)
+        })
+        .collect();
+    let mut ordered = catalog.db.snapshot(|db| {
+        let rows: Vec<Dated> = db.read(
+            sql!("SELECT id, folder, filename, master_id, captured FROM photos"),
+            &[],
+        )?;
+        let by_id: HashMap<PhotoId, &Dated> = rows.iter().map(|r| (r.id, r)).collect();
+        let given: HashSet<PhotoId> = photos.iter().copied().collect();
+        let mut seen = HashSet::new();
+        let mut ordered = Vec::new();
+        for id in photos {
+            if !seen.insert(*id) {
+                continue;
+            }
+            let Some(row) = by_id.get(id) else {
+                ordered.push(Ordered {
+                    photo: *id,
+                    filename: String::new(),
+                    path: PathBuf::new(),
+                    captured: None,
+                    fields: NameFields::default(),
+                });
+                continue;
+            };
+            if row.master.is_some_and(|m| given.contains(&m)) {
+                continue;
+            }
+            let folder = folders.get(&row.folder).cloned().unwrap_or_default();
             ordered.push(Ordered {
                 photo: *id,
-                filename: String::new(),
-                captured: None,
+                filename: row.filename.clone(),
+                path: folder.join(&row.filename),
+                captured: Some(row.captured.clone()).filter(|c| !c.is_empty()),
+                fields: super::super::naming::read(db, *id)?,
             });
-            continue;
-        };
-        if row.master.is_some_and(|m| given.contains(&m)) {
-            continue;
         }
-        ordered.push(Ordered {
-            photo: *id,
-            filename: row.filename.clone(),
-            captured: Some(row.captured.clone()).filter(|c| !c.is_empty()),
-        });
-    }
+        Ok(ordered)
+    })?;
     // Stable: ties keep the order given.
     ordered.sort_by(|a, b| match (&a.captured, &b.captured) {
         (Some(x), Some(y)) => x.cmp(y),
@@ -505,13 +546,17 @@ pub fn rename_preview(
     let mut rows = Vec::new();
     let mut renames = Vec::new();
     for (index, o) in order.0.iter().enumerate() {
-        let fields = NameFields::captured(o.captured.clone());
         let at = NameContext {
             index,
             total,
-            fields: &fields,
+            fields: &o.fields,
         };
-        let (stem, notes) = template.stem(Path::new(&o.filename), &at);
+        let source = if o.path.as_os_str().is_empty() {
+            Path::new(&o.filename)
+        } else {
+            &o.path
+        };
+        let (stem, notes) = template.stem(source, &at);
         let note = (!notes.is_empty()).then(|| notes.join("; "));
         let new = match Path::new(&o.filename).extension() {
             Some(extension) => format!("{stem}.{}", extension.to_string_lossy()),

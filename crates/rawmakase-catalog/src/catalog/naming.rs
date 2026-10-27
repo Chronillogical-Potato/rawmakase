@@ -18,7 +18,8 @@ impl Catalog {
     }
 }
 
-fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
+/// `id`'s name fields, in the snapshot or transaction `db`.
+pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
     row! {
         struct Photo {
             captured: String,
