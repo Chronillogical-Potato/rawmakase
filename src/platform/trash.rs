@@ -233,10 +233,12 @@ mod tests {
     }
 
     /// An SMB share has no Trash on macOS (measured on macOS 15 against a
-    /// Synology share) nor on Windows, and Linux's isn't used, as no rename
-    /// there can promise not to replace a file: the file stays, and nothing
-    /// is deleted or made there. Run when `RAWMAKASE_TEST_NETWORK_SHARE`
-    /// names a writable folder on one.
+    /// Synology share), and Linux's and Windows' (a folder redirected to a
+    /// share has a Recycle Bin there) aren't used, as no rename there can
+    /// promise not to replace a file: the file stays, and nothing is
+    /// deleted or made there. Run when `RAWMAKASE_TEST_NETWORK_SHARE` names
+    /// a writable folder on one; on Windows, also with it redirected to as
+    /// a known folder (Pictures, say).
     #[test]
     #[ignore = "needs RAWMAKASE_TEST_NETWORK_SHARE: a writable folder on an SMB share"]
     fn a_file_on_an_smb_share_is_kept_as_its_volume_has_no_trash() {

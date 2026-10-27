@@ -358,7 +358,7 @@ fn alike(
 
 /// Why a folder isn't copied to or from a drive whose file ids can't prove
 /// which file a name is.
-const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others) isn't available yet. Copy it in Finder, then add the folder.";
+const FOLDER_IDS_UNPROVEN: &str = "Moving folders to or from this kind of drive (network drives other than SMB shares, and others) isn't available yet. Copy it in Finder, then add the folder.";
 
 /// The members `tree` journals, copied as `copy`: each name's original,
 /// where it goes, and where it is made inside the hidden folder.

@@ -271,7 +271,7 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
     let fx = files();
     let (here, there) = (fx.root.clone(), fx.root.join("far"));
-    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others)";
+    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares, and others)";
     for unstable in [
         vec![there.clone()],
         vec![here.clone()],
