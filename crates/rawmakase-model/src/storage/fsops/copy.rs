@@ -4,9 +4,20 @@
 //! are read ([`copy_into`]), made durable ([`sync_file`]), given the
 //! source's extras ([`copy_extras`]) and time, a file's durably
 //! ([`copy_times`]), and hashed again ([`hash_file`]), its extras too
-//! ([`extras`]). The file is never truncated or replaced, and the source
-//! never changed. [`remove_file`] is the one unlink here, for a partial
-//! copy.
+//! ([`extras`]). Each step that writes goes through the handle the file
+//! was made through rather than its name, which another computer may give
+//! another file meanwhile on a share (#675); but for an alternate data
+//! stream on Windows, opened by its path (copies never go to a share
+//! there). That holds where the system keeps to the handle, as local file
+//! systems do; a share's drivers don't. Linux's CIFS keeps only the bytes
+//! and the flush to the handle: it sends an extended attribute by the
+//! file's name whatever handle it is given, and times and permissions too
+//! once it has looked the name up again (measured through a second mount,
+//! Linux 7.2 against Samba 4.22). macOS's smbfs, by its source (SMBClient),
+//! opens a name too for an extended attribute (a named stream) and for
+//! times (a compound create, set-info and close); not measured.
+//! The file is never truncated or replaced, and the source never changed.
+//! [`remove_file`] is the one unlink here, for a partial copy.
 //!
 //! A file's or folder's extras are what it keeps beside its contents, times
 //! and permissions: its extended attributes on macOS (Finder tags,
@@ -140,30 +151,32 @@ pub fn copy_into(
     Ok(ContentHash::of(sha))
 }
 
-/// Makes file `path`'s contents durable.
-pub fn sync_file(path: &Path) -> Result<(), FsError> {
-    // Through a handle opened to write: an SMB server flushes no other
-    // (MS-SMB2 3.3.5.11; macOS's smbfs answers EACCES). A file given a
-    // read-only source's permissions can't be opened so any more; Unix
-    // syncs it through one opened to read, and Windows, which needs one
-    // opened to write, copies no permissions.
-    let file = match OpenOptions::new().write(true).open(path) {
-        #[cfg(unix)]
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => File::open(path)?,
-        opened => opened?,
-    };
+/// Makes the contents of the file [`create_file`] made through `file`
+/// durable: through that handle, opened to write, as an SMB server flushes
+/// no other (MS-SMB2 3.3.5.11; macOS's smbfs answers EACCES), and which
+/// still writes once it is given a read-only source's permissions.
+pub fn sync_file(file: &File) -> Result<(), FsError> {
     Ok(file.sync_all()?)
 }
 
 /// Gives file or folder `to` the modification and access times of `from`
 /// (to the nanosecond where `to`'s volume keeps them; to what it keeps
 /// otherwise), and on Unix its permission bits; a file's durably, its
-/// contents made durable first ([`sync_file`]).
-pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
+/// contents made durable first ([`sync_file`]). A file's through `into`,
+/// the handle [`create_file`] made it through, where given.
+pub fn copy_times(from: &Path, to: &Path, into: Option<&File>) -> Result<(), FsError> {
     let source = std::fs::metadata(from)?;
-    let file = match source.is_dir() {
-        true => super::os::open_folder(to)?,
-        false => OpenOptions::new().write(true).open(to)?,
+    let opened;
+    let file = match (into, source.is_dir()) {
+        (Some(into), _) => into,
+        (None, true) => {
+            opened = super::os::open_folder(to)?;
+            &opened
+        }
+        (None, false) => {
+            opened = OpenOptions::new().write(true).open(to)?;
+            &opened
+        }
     };
     let times = std::fs::FileTimes::new()
         .set_accessed(source.accessed()?)
@@ -182,7 +195,7 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
         // given them, before the call returns.
         if !source.is_dir() && super::os::kind(to)? == super::VolumeKind::Smb {
             #[cfg(target_vendor = "apple")]
-            return rustix::fs::fsync(&file).map_err(|e| std::io::Error::from(e).into());
+            return rustix::fs::fsync(file).map_err(|e| std::io::Error::from(e).into());
             #[cfg(not(target_vendor = "apple"))]
             return Ok(());
         }
@@ -196,14 +209,16 @@ pub fn copy_times(from: &Path, to: &Path) -> Result<(), FsError> {
 }
 
 /// Gives file or folder `to` each extra of `from`, as it is there; what
-/// `to` has already stays. [`FsError::Unsupported`] where `to`'s volume
-/// can't keep one (FAT and exFAT on Linux and Windows; macOS keeps them
-/// there in AppleDouble files, `._name`). Neither syncs nor compares: see
-/// [`extras`].
-pub fn copy_extras(from: &Path, to: &Path) -> Result<(), FsError> {
+/// `to` has already stays. A file's through `into`, the handle
+/// [`create_file`] made it through, where given; Windows opens an
+/// alternate data stream by its path. [`FsError::Unsupported`] where
+/// `to`'s volume can't keep one (FAT and exFAT on Linux and Windows; macOS
+/// keeps them there in AppleDouble files, `._name`). Neither syncs nor
+/// compares: see [`extras`].
+pub fn copy_extras(from: &Path, to: &Path, into: Option<&File>) -> Result<(), FsError> {
     for name in super::os::extra_names(from)? {
         let value = super::os::read_extra(from, &name)?;
-        super::os::write_extra(to, &name, &value)?;
+        super::os::write_extra(to, into, &name, &value)?;
     }
     Ok(())
 }
@@ -232,7 +247,7 @@ pub fn set_extra(path: &Path, name: &str, value: &[u8]) -> Result<(), FsError> {
         true => format!("user.{name}"),
         false => name.to_string(),
     };
-    super::os::write_extra(path, std::ffi::OsStr::new(&name), value)
+    super::os::write_extra(path, None, std::ffi::OsStr::new(&name), value)
 }
 
 /// The SHA-256 of `path`'s contents, read whole.

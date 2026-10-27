@@ -27,6 +27,11 @@ pub(super) fn extra_names(_path: &Path) -> Result<Vec<OsString>, FsError> {
 pub(super) fn read_extra(_path: &Path, _name: &OsStr) -> Result<Vec<u8>, FsError> {
     Err(FsError::Unsupported)
 }
-pub(super) fn write_extra(_path: &Path, _name: &OsStr, _value: &[u8]) -> Result<(), FsError> {
+pub(super) fn write_extra(
+    _path: &Path,
+    _file: Option<&std::fs::File>,
+    _name: &OsStr,
+    _value: &[u8],
+) -> Result<(), FsError> {
     Err(FsError::Unsupported)
 }

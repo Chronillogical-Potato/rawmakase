@@ -10,7 +10,8 @@
 //!    (stopping between chunks when the run is stopped), the hash
 //!    journalled, synced, given the original's extras (extended
 //!    attributes: Finder tags, FinderInfo, a resource fork; alternate data
-//!    streams on Windows), time and permission bits, and synced again;
+//!    streams on Windows), time and permission bits, and synced again,
+//!    each through the handle it was made through (#675);
 //! 3. read back and compared with the hash, its extras with the
 //!    original's, and the original checked to be the file object and
 //!    `Identity` journalled, with the extras it had before they were copied;
@@ -26,7 +27,9 @@
 //! `done`. A drive that can't keep an original's extras undoes the item.
 //!
 //! Anything that fails before the commit undoes the item: partial copies
-//! are removed, complete ones put in the Trash, and nothing else changes.
+//! are removed, complete ones put in the Trash, and nothing else changes;
+//! on an SMB share, which has no Trash, copies stay, for the user to
+//! delete ([`LEFT_ON_SHARE`]).
 //! The partial copy is journalled as the disk spells its name (HFS+ keeps
 //! names decomposed) and found by any spelling of it with its file object.
 //! Recovery does the same for an item a crash left before its commit
@@ -110,6 +113,12 @@ impl fmt::Display for Problem {
     }
 }
 
+/// Why an undone item is unfinished: copies of it are left on an SMB share
+/// (#675). Nothing removes a name there only while it is still the file
+/// proven ours, and another computer could put its own file at it between
+/// the proof and the removal.
+pub(super) const LEFT_ON_SHARE: &str = "its copies on the network share were left there for you to delete: removing one could remove a file another computer had just put at its name";
+
 /// Why an original whose extras aren't its copy's stays.
 pub(super) const EXTRAS_DIFFER: &str =
     "its Finder tags or other extended attributes aren't its copy's any more";
@@ -127,15 +136,16 @@ pub(super) fn extras_differ(disk: &dyn Disk, original: &Path, copy: &Path) -> Op
 /// Gives file or folder `to` the extras of `from`, read as `extras`, and
 /// checks them there: [`Problem::Changed`] when `from`'s are no longer
 /// those, [`Problem::ExtrasNotKept`] when `to`'s volume can't keep them or
-/// reads back others.
+/// reads back others. A file's through `into`, the handle it was made
+/// through, where given.
 pub(super) fn carry_extras(
     disk: &dyn Disk,
     from: &Path,
-    to: &Path,
+    (to, into): (&Path, Option<&std::fs::File>),
     extras: ContentHash,
 ) -> Result<(), Problem> {
     let not_kept = || Problem::ExtrasNotKept(name(from));
-    disk.copy_extras(from, to).map_err(|e| match e {
+    disk.copy_extras(from, to, into).map_err(|e| match e {
         FsError::Unsupported => not_kept(),
         e => problem(e),
     })?;
@@ -331,16 +341,21 @@ pub(super) fn write(
             CopyError::NotTheFile => Problem::Disk(e.to_string()),
             CopyError::Fs(e) => problem(e),
         })?;
-    drop(into);
     // Written whole: from here it is never removed while its original
     // can't be proven, whatever fails next.
     journal(catalog, &|w| journal::set_content(w, id, ordinal, content))?;
-    disk.sync_file(&temp).map_err(problem)?;
+    // Durable, with its extras, time and permissions, through the handle
+    // too, not given to a file another computer puts at its name
+    // meanwhile (#675), where the system keeps to the handle (a share's
+    // drivers don't: see `fsops::copy`). Such a file fails the read-back.
+    disk.sync_file(&temp, &into).map_err(problem)?;
     // Its extras before its time and permissions: writing a resource fork
     // changes a file's time, and a read-only file takes no more.
     let extras = disk.extras(source).map_err(problem)?;
-    carry_extras(disk, source, &temp, extras)?;
-    disk.copy_times(source, &temp).map_err(problem)?;
+    carry_extras(disk, source, (&temp, Some(&into)), extras)?;
+    disk.copy_times(source, &temp, Some(&into))
+        .map_err(problem)?;
+    drop(into);
     // 3. Read back, and the original still what was copied.
     if disk.hash(&temp).map_err(problem)? != content {
         return Err(Problem::Mismatch(source.to_path_buf()).into());
@@ -671,8 +686,8 @@ fn undo_as(
         .write(|w| journal::set_state(w, id, ItemState::Restoring, Some(why)))?;
     let item = journal::item(&catalog.db, id)?.context("the journalled item is gone")?;
     let state = match discard(cx, catalog, &item, rule)? {
-        true => (ItemState::NoChange, None),
-        false => (ItemState::Restoring, Some(NOT_BACK)),
+        None => (ItemState::NoChange, None),
+        Some(left) => (ItemState::Restoring, Some(left)),
     };
     catalog
         .db
@@ -817,8 +832,14 @@ pub(super) fn copy_at(disk: &dyn Disk, at: &Path, id: FileId) -> Option<Option<P
 /// Trash instead on the user's Put Back); a complete one goes to the
 /// Trash, only while it is proven the copy (its file object, its bytes the
 /// original's), no photo of the catalog is named so there, and every
-/// original is proven at its source. Returns whether every one is gone.
-fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> Result<bool> {
+/// original is proven at its source; on an SMB share none is removed
+/// ([`LEFT_ON_SHARE`]). Returns why not, unless every one is gone.
+fn discard(
+    cx: &Cx<'_>,
+    catalog: &mut Catalog,
+    item: &Item,
+    rule: Originals,
+) -> Result<Option<&'static str>> {
     let disk = cx.disk;
     let proofs = proofs_of(item);
     let originals = originals(disk, item, rule);
@@ -827,21 +848,24 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
         Subject::Photos(pre) => pre.to.as_ref().map(|(to, _)| *to),
         _ => None,
     };
+    // Copies left on a share, the user's to delete: said only once no
+    // other copy stays, which may hold the only bytes left.
+    let mut on_share = false;
     for m in item.members.iter().rev() {
         let Some(copy) = &m.copy else {
-            return Ok(false);
+            return Ok(Some(NOT_BACK));
         };
         match m.state {
             MemberState::Discarded => continue,
             MemberState::Planned | MemberState::Copying | MemberState::Copied => {}
-            _ => return Ok(false),
+            _ => return Ok(Some(NOT_BACK)),
         }
         let mut receipt = None;
         match partial(disk, m, &copy.temp, proofs) {
             // Never renamed, so nothing of it is at its destination. One
             // written whole stays while its original can't be proven: it
             // may be the one copy of those bytes left.
-            Partial::Ours(_) if copy.content.is_some() && !originals => return Ok(false),
+            Partial::Ours(_) if copy.content.is_some() && !originals => return Ok(Some(NOT_BACK)),
             // Put Back with an original changed since: written whole, it has
             // the bytes the original had, perhaps the only ones left, so it
             // goes to the Trash, never unlinked; as does one made at its name
@@ -861,31 +885,44 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                         rows,
                     )? =>
             {
-                return Ok(false);
+                return Ok(Some(NOT_BACK));
             }
             Partial::Ours(at)
                 if (copy.content.is_some() && rule == Originals::Present)
                     || (proofs.direct && !disk.identity(&at).is_ok_and(|i| i.size == 0)) =>
             {
-                let Some(r) = trash_copy(cx, &at, &m.source) else {
-                    return Ok(false);
+                receipt = match trash_copy(cx, &at, &m.source) {
+                    Ok(r) => r,
+                    Err(LEFT_ON_SHARE) => {
+                        on_share = true;
+                        continue;
+                    }
+                    Err(left) => return Ok(Some(left)),
                 };
-                receipt = r;
+            }
+            // Never removed there; the user's to delete only while its
+            // original begins with its bytes (as many as it has).
+            Partial::Ours(at) if proof::removes_nothing(disk, &at) => {
+                match proof::begins(disk, &at, &m.source) {
+                    true => on_share = true,
+                    false => return Ok(Some(NOT_BACK)),
+                }
+                continue;
             }
             Partial::Ours(at) => {
                 let removed = disk
                     .remove_file(&at)
                     .and_then(|()| disk.sync_dir(parent(&at)));
                 if removed.is_err() {
-                    return Ok(false);
+                    return Ok(Some(NOT_BACK));
                 }
             }
-            Partial::Unknown => return Ok(false),
+            Partial::Unknown => return Ok(Some(NOT_BACK)),
             Partial::Gone => {
                 if let Some(asked) = m.destination.as_deref() {
                     match complete_at(disk, asked, copy, proofs) {
                         Some(None) => {}
-                        None => return Ok(false),
+                        None => return Ok(Some(NOT_BACK)),
                         Some(Some(at)) => {
                             let at = at.as_path();
                             let proven = originals
@@ -896,12 +933,16 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
                             let named =
                                 occupied(&catalog.db, cx.folders, to, parent(at), filename, rows)?;
                             if !proven || named {
-                                return Ok(false);
+                                return Ok(Some(NOT_BACK));
                             }
-                            let Some(r) = trash_copy(cx, at, &m.source) else {
-                                return Ok(false);
+                            receipt = match trash_copy(cx, at, &m.source) {
+                                Ok(r) => r,
+                                Err(LEFT_ON_SHARE) => {
+                                    on_share = true;
+                                    continue;
+                                }
+                                Err(left) => return Ok(Some(left)),
                             };
-                            receipt = r;
                         }
                     }
                 }
@@ -911,25 +952,39 @@ fn discard(cx: &Cx<'_>, catalog: &mut Catalog, item: &Item, rule: Originals) -> 
             .db
             .write(|w| journal::set_discarded(w, item.id, m.ordinal, receipt.as_deref()))?;
     }
-    Ok(true)
+    Ok(on_share.then_some(LEFT_ON_SHARE))
 }
 
 /// Puts copy `at` of original `source` in the Trash, as an undone copy
-/// goes. Where its volume has none (an SMB share) it is removed
-/// instead, only while `source` holds every byte it does, as many as it
-/// has ([`proof::begins`]): then nothing is lost. `Some` once it is gone,
-/// with the Trash's receipt if the Trash took it; `None` while it stays.
-pub(super) fn trash_copy(cx: &Cx<'_>, at: &Path, source: &Path) -> Option<Option<PathBuf>> {
+/// goes. Where its volume has none it is removed instead, only while
+/// `source` holds every byte it does, as many as it has
+/// ([`proof::begins`]): then nothing is lost; but never on an SMB share
+/// ([`proof::removes_nothing`]), where it stays, the user's to delete
+/// ([`LEFT_ON_SHARE`]) only when that holds.
+/// `Ok` once it is gone, with the Trash's receipt if the Trash took it;
+/// why not while it stays.
+pub(super) fn trash_copy(
+    cx: &Cx<'_>,
+    at: &Path,
+    source: &Path,
+) -> Result<Option<PathBuf>, &'static str> {
     let receipt = match cx.trash.trash(at) {
         Ok(r) => Some(r.location),
+        // The user's to delete only while nothing would be lost.
+        Err(TrashError::Unsupported) if proof::removes_nothing(cx.disk, at) => {
+            return Err(match proof::begins(cx.disk, at, source) {
+                true => LEFT_ON_SHARE,
+                false => NOT_BACK,
+            });
+        }
         Err(TrashError::Unsupported) if proof::begins(cx.disk, at, source) => {
-            cx.disk.remove_file(at).ok()?;
+            cx.disk.remove_file(at).map_err(|_| NOT_BACK)?;
             None
         }
-        Err(_) => return None,
+        Err(_) => return Err(NOT_BACK),
     };
-    cx.disk.sync_dir(parent(at)).ok()?;
-    Some(receipt)
+    cx.disk.sync_dir(parent(at)).map_err(|_| NOT_BACK)?;
+    Ok(receipt)
 }
 
 /// Recovery of copy item `item`: one the catalog follows is finished;

@@ -109,6 +109,19 @@ pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
     facts.kind == VolumeKind::Smb
 }
 
+/// Whether nothing RAWmakase made at `path` is ever removed: on an SMB
+/// share, or where `path`'s volume can't be told (#675). Neither POSIX nor
+/// SMB from a POSIX client removes a name only while it is still a given
+/// file, and another computer could put its own file at a copy's name
+/// between proving the copy (by its bytes, or as empty) and removing it;
+/// nor does looking its file object up prove it there, as Linux's CIFS
+/// can report a removed file's for over a second.
+pub(super) fn removes_nothing(disk: &dyn Disk, path: &Path) -> bool {
+    !disk
+        .volume_facts(parent(path))
+        .is_ok_and(|f| f.kind != VolumeKind::Smb)
+}
+
 /// Whether a volume of `kind` is one names prove files on ([`of`]).
 pub(super) fn by_names(kind: VolumeKind) -> bool {
     matches!(kind, VolumeKind::Fat | VolumeKind::Exfat | VolumeKind::Smb)

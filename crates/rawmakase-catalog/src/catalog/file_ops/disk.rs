@@ -33,13 +33,27 @@ pub(super) trait Disk {
     /// The file object `file`, the handle the file at `at` was made
     /// through, is ([`fsops::handle_id`]).
     fn handle_id(&self, at: &Path, file: &std::fs::File) -> Result<FileId, FsError>;
-    fn sync_file(&self, path: &Path) -> Result<(), FsError>;
+    /// Makes the contents of the file at `at` durable, through `file`, the
+    /// handle it was made through.
+    fn sync_file(&self, at: &Path, file: &std::fs::File) -> Result<(), FsError>;
     /// Gives file or folder `to` the extras of `from` (extended attributes,
     /// alternate data streams), [`FsError::Unsupported`] where its volume
-    /// can't keep them.
-    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError>;
-    /// Gives file or folder `to` the times and permission bits of `from`.
-    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError>;
+    /// can't keep them; a file's through `into`, the handle it was made
+    /// through, where given.
+    fn copy_extras(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError>;
+    /// Gives file or folder `to` the times and permission bits of `from`,
+    /// as [`Disk::copy_extras`] its extras.
+    fn copy_times(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError>;
     /// The SHA-256 of file or folder `path`'s extras.
     fn extras(&self, path: &Path) -> Result<ContentHash, FsError>;
     fn hash(&self, path: &Path) -> Result<ContentHash, FsError>;
@@ -102,14 +116,24 @@ impl Disk for Real {
     fn created(&self, path: &Path) -> Result<std::time::SystemTime, FsError> {
         fsops::created(path)
     }
-    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
-        fsops::sync_file(path)
+    fn sync_file(&self, _at: &Path, file: &std::fs::File) -> Result<(), FsError> {
+        fsops::sync_file(file)
     }
-    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        fsops::copy_extras(from, to)
+    fn copy_extras(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
+        fsops::copy_extras(from, to, into)
     }
-    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        fsops::copy_times(from, to)
+    fn copy_times(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
+        fsops::copy_times(from, to, into)
     }
     fn extras(&self, path: &Path) -> Result<ContentHash, FsError> {
         fsops::extras(path)
@@ -303,14 +327,24 @@ impl Disk for Listed<'_> {
     fn handle_id(&self, at: &Path, file: &std::fs::File) -> Result<FileId, FsError> {
         self.disk.handle_id(at, file)
     }
-    fn sync_file(&self, path: &Path) -> Result<(), FsError> {
-        self.disk.sync_file(path)
+    fn sync_file(&self, at: &Path, file: &std::fs::File) -> Result<(), FsError> {
+        self.disk.sync_file(at, file)
     }
-    fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        self.changes(self.disk.copy_extras(from, to))
+    fn copy_extras(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
+        self.changes(self.disk.copy_extras(from, to, into))
     }
-    fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        self.changes(self.disk.copy_times(from, to))
+    fn copy_times(
+        &self,
+        from: &Path,
+        to: &Path,
+        into: Option<&std::fs::File>,
+    ) -> Result<(), FsError> {
+        self.changes(self.disk.copy_times(from, to, into))
     }
     fn extras(&self, path: &Path) -> Result<ContentHash, FsError> {
         self.disk.extras(path)
