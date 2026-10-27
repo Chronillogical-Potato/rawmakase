@@ -15,12 +15,27 @@ pub(crate) use backfill::{capture_time as file_capture_time, read_info as file_p
 
 /// What photos added from folders get where their files have none: the
 /// Preferences' Creator and Copyright, giving way to the camera's own,
-/// which the RAW decoders also find in a CR3, MRW or X3F.
+/// which the RAW decoders also find in a CR3, MRW or X3F, and to a CR3's
+/// own XMP, which they find too.
 pub(crate) fn new_photo_defaults() -> crate::catalog::NewPhotoDefaults {
     photo_defaults(crate::catalog::MetadataDefaults::load())
 }
 fn photo_defaults(metadata: crate::catalog::MetadataDefaults) -> crate::catalog::NewPhotoDefaults {
-    crate::catalog::NewPhotoDefaults::new(metadata, crate::photo::camera_exif)
+    crate::catalog::NewPhotoDefaults::new(
+        metadata,
+        crate::photo::camera_exif,
+        crate::photo::raw_xmp,
+    )
+}
+/// Read Metadata from Files' read of one photo: its sidecar and its own
+/// XMP, a CR3's found by the RAW decoders, as adding it reads them.
+pub(crate) fn read_file_metadata(
+    path: &Path,
+) -> (
+    Option<crate::catalog::FileMetadata>,
+    crate::catalog::SidecarReport,
+) {
+    crate::catalog::read_file_metadata(path, crate::photo::raw_xmp)
 }
 pub(crate) use background::Wake;
 pub(crate) use descriptive::{Committed, DescriptiveChange, DescriptiveEdit};
@@ -518,6 +533,40 @@ mod tests {
             creator("none.CR3")?,
             Some(crate::metadata::Value::Set(vec!["Default Creator".into()]))
         );
+        Ok(())
+    }
+
+    /// The XMP a camera embeds in a CR3 (its box after `moov`) gives a new
+    /// photo its in-camera rating and title, and Read Metadata from Files
+    /// reads it the same way (#680).
+    #[test]
+    fn a_cr3s_own_xmp_gives_its_rating_and_title() -> Result<()> {
+        use crate::export::exif::{Container, camera_raw};
+        let directory = tempfile::tempdir()?;
+        let folder = directory.path().join("photos");
+        std::fs::create_dir(&folder)?;
+        let packet = r#"<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmp:Rating="3"><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Rated in camera</rdf:li></rdf:Alt></dc:title></rdf:Description></rdf:RDF></x:xmpmeta>
+    <?xpacket end='w'?>"#;
+        let mut cr3 = camera_raw(Container::Cr3, Default::default());
+        let mut body = vec![
+            0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3,
+            0xaf, 0xac,
+        ];
+        body.extend(packet.as_bytes());
+        cr3.extend(((body.len() + 8) as u32).to_be_bytes());
+        cr3.extend(b"uuid");
+        cr3.extend(body);
+        let file = folder.join("rated.CR3");
+        std::fs::write(&file, cr3)?;
+        let mut catalog = Catalog::create(&directory.path().join("Photos.rawmakase"))?;
+        catalog.add_folder_with(&folder, &photo_defaults(Default::default()))?;
+        let photo = catalog.photos()?.into_iter().next().expect("added");
+        assert_eq!(photo.rating, 3);
+        let title = crate::metadata::Value::Set(crate::metadata::LangAlt::new("Rated in camera"));
+        assert_eq!(catalog.descriptive(photo.id)?.title, Some(title));
+        let (read, report) = read_file_metadata(&file);
+        assert_eq!(report, Default::default());
+        assert_eq!(read.and_then(|r| r.rating), Some(3));
         Ok(())
     }
 

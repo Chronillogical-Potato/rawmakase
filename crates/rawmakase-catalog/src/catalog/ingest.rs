@@ -393,7 +393,7 @@ impl Catalog {
             .then(|| self.read_legacy_edit(&file))
             // A sidecar that no longer matches its photo stays unused on disk.
             .and_then(|edit| edit.ok().flatten());
-        let (metadata, report) = super::sidecar::read_file(&file);
+        let (metadata, report) = super::sidecar::read_file(&file, defaults.raw_xmp());
         let defaults = defaults.for_file(&file, metadata.as_ref());
         NewPhoto {
             file,

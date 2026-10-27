@@ -249,43 +249,66 @@ fn parse(bytes: &[u8]) -> Cr3<'_> {
     out
 }
 
-/// The most top-level boxes passed over on the way to `moov`.
+/// The most top-level boxes passed over on the way to `moov` or the XMP.
 const MAX_TOP_BOXES: usize = 64;
+
+/// The first of the file's top-level boxes, read header by header, that
+/// `found` takes: it is given the box's start, length and first bytes (its
+/// header, and a `uuid` box's id).
+fn top_level<T>(
+    f: &mut Pieces,
+    mut found: impl FnMut(&mut Pieces, u64, u64, &[u8]) -> Option<T>,
+) -> Option<T> {
+    let mut at = 0u64;
+    for _ in 0..MAX_TOP_BOXES {
+        let head = f.read_upto(at, 32).filter(|h| h.len() >= 8)?;
+        let len = match be32(&head, 0)? {
+            0 => f.len - at,
+            1 => u64::from_be_bytes(head.get(8..16)?.try_into().ok()?),
+            n => u64::from(n),
+        };
+        if len < 8 {
+            return None;
+        }
+        if let Some(t) = found(f, at, len, &head) {
+            return Some(t);
+        }
+        at = at.checked_add(len)?;
+    }
+    None
+}
 
 /// The camera's EXIF: `CMT1` (IFD0), `CMT2` (the EXIF directory) and
 /// `CMT4` (GPS), the file's `moov` box read alone.
 pub(crate) fn exif_tiffs(f: &mut Pieces) -> ExifTiffs {
-    let mut tiffs = ExifTiffs::default();
-    let mut at = 0u64;
-    for _ in 0..MAX_TOP_BOXES {
-        let Some(head) = f.read_upto(at, 16).filter(|h| h.len() >= 8) else {
-            break;
-        };
-        let len = match be32(&head, 0) {
-            Some(0) => f.len - at,
-            Some(1) => match head.get(8..16) {
-                Some(b) => u64::from_be_bytes(b.try_into().unwrap_or([0; 8])),
-                None => break,
-            },
-            Some(n) => u64::from(n),
-            None => break,
-        };
-        if len < 8 {
-            break;
-        }
-        if &head[4..8] == b"moov" {
-            if let Some(moov) = f.read(at, len) {
+    top_level(f, |f, at, len, head| {
+        (&head[4..8] == b"moov").then(|| {
+            f.read(at, len).map_or_else(ExifTiffs::default, |moov| {
                 let [main, exif, _, gps] = parse(&moov).cmt.map(|cmt| cmt.map(<[u8]>::to_vec));
-                tiffs = ExifTiffs { main, exif, gps };
-            }
-            break;
-        }
-        let Some(next) = at.checked_add(len) else {
-            break;
-        };
-        at = next;
-    }
-    tiffs
+                ExifTiffs { main, exif, gps }
+            })
+        })
+    })
+    .unwrap_or_default()
+}
+
+/// The `uuid` box the XMP specification (part 3) gives an ISO base media
+/// file's XMP packet, which a CR3 has after `moov`.
+const XMP_UUID: [u8; 16] = [
+    0xbe, 0x7a, 0xcf, 0xcb, 0x97, 0xa9, 0x42, 0xe8, 0x9c, 0x71, 0x99, 0x94, 0x91, 0xe3, 0xaf, 0xac,
+];
+
+/// The XMP packet the camera wrote (its rating among them), that box read
+/// alone; none when the file has none or it can't be read.
+pub(crate) fn xmp(f: &mut Pieces) -> Option<Vec<u8>> {
+    top_level(f, |f, at, len, head| {
+        // A large size takes 8 more bytes of the header.
+        let header = if be32(head, 0) == Some(1) { 16 } else { 8 };
+        let body = header + 16;
+        (&head[4..8] == b"uuid" && head.get(header..body) == Some(XMP_UUID.as_slice()))
+            .then(|| f.read(at + body as u64, len.checked_sub(body as u64)?))
+    })
+    .flatten()
 }
 
 /// The records and items read from the timed metadata, and the maker notes
@@ -578,7 +601,7 @@ fn mean(data: &[u16], width: u32, info: &RawInfo, area: [u32; 4]) -> Result<[u32
 
 #[cfg(test)]
 mod tests {
-    use super::CANON_UUID;
+    use super::{CANON_UUID, XMP_UUID};
     use crate::info::UNSET;
     use std::sync::atomic::AtomicBool;
 
@@ -797,7 +820,8 @@ mod tests {
     }
 
     /// The dates are in `CMT2`, the EXIF directory, and `CMT1`'s DateTime;
-    /// only the boxes' headers and `moov` are read.
+    /// only the boxes' headers and `moov` are read, and the XMP box for the
+    /// XMP.
     #[test]
     fn the_metadata_boxes_date_a_cr3_and_hold_its_exif_and_nothing_else_is_read() {
         let cmt1 = tiff(&[text(271, "Canon"), text(306, "2024:03:02 10:00:03")]);
@@ -823,6 +847,9 @@ mod tests {
         let mut file = bx(b"ftyp", b"crx \0\0\0\x01crx isom");
         file.extend(bx(b"free", &[0; 100]));
         file.extend(bx(b"moov", &canon));
+        // Canon's XMP box, padded as the cameras pad it.
+        let packet = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'>...</x:xmpmeta>   \n".to_vec();
+        file.extend(bx(b"uuid", &[XMP_UUID.as_slice(), &packet].concat()));
         // A large-size `mdat` of a megabyte, unread.
         let mdat = 1usize << 20;
         file.extend(1u32.to_be_bytes());
@@ -859,18 +886,25 @@ mod tests {
             }
         );
         assert!(counted.read < 2048, "{}", counted.read);
+        // The camera's XMP, whole.
+        counted.read = 0;
+        assert_eq!(crate::embedded_xmp(&mut counted), Some(packet));
+        assert!(counted.read < 2048, "{}", counted.read);
         // The decoder's own test file has no dates.
         let file = cr3(true);
         assert_eq!(
             crate::capture_dates(&mut std::io::Cursor::new(&file)),
             crate::CaptureDates::default()
         );
+        // Nor XMP.
+        assert_eq!(crate::embedded_xmp(&mut std::io::Cursor::new(&file)), None);
         // Other files hold none of a CR3's, MRW's or X3F's.
         for other in [&b""[..], b"II*\0\x08\0\0\0", &[0xff, 0xd8, 0xff, 0xd9]] {
             assert_eq!(
                 crate::exif_tiffs(&mut std::io::Cursor::new(other)),
                 crate::ExifTiffs::default()
             );
+            assert_eq!(crate::embedded_xmp(&mut std::io::Cursor::new(other)), None);
         }
     }
 
@@ -972,6 +1006,7 @@ mod tests {
         for n in (0..file.len()).step_by(7) {
             let _ = crate::capture_dates(&mut std::io::Cursor::new(&file[..n]));
             let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&file[..n]));
+            let _ = crate::embedded_xmp(&mut std::io::Cursor::new(&file[..n]));
             if let Ok(info) = crate::open(&file[..n]) {
                 let _ = crate::preview(&info, &file[..n]);
                 let decoded = crate::decode(&info, &file[..n], &cancel);
@@ -984,6 +1019,7 @@ mod tests {
                 d[i] = v;
                 let _ = crate::capture_dates(&mut std::io::Cursor::new(&d));
                 let _ = crate::exif_tiffs(&mut std::io::Cursor::new(&d));
+                let _ = crate::embedded_xmp(&mut std::io::Cursor::new(&d));
                 if let Ok(info) = crate::open(&d) {
                     let _ = crate::preview(&info, &d);
                     let _ = crate::decode(&info, &d, &cancel);

@@ -37,6 +37,7 @@ fn defaults() -> NewPhotoDefaults {
             copyright: "© Default".into(),
         },
         crate::exif::read,
+        |_| None,
     )
 }
 

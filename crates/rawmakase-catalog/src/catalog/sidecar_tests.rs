@@ -152,7 +152,7 @@ fn utf16_sidecars_are_read() -> Result<()> {
     let mut bytes = vec![0xff, 0xfe];
     bytes.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
     std::fs::write(dir.path().join("A.NEF.xmp"), bytes)?;
-    let (read, report) = read_file(&file);
+    let (read, report) = read_file(&file, |_| None);
     assert_eq!(report, SidecarReport::default());
     assert_eq!(read.unwrap().title, set("Zażółć"));
     Ok(())
@@ -203,7 +203,7 @@ fn jpeg_fill_bytes_before_a_marker_are_skipped() -> Result<()> {
     jpeg.splice(2..2, [0xff, 0xff, 0xff]);
     let file = dir.path().join("A.JPG");
     std::fs::write(&file, jpeg)?;
-    let (read, _) = read_file(&file);
+    let (read, _) = read_file(&file, |_| None);
     assert_eq!(read.unwrap().title, set("Filled"));
     Ok(())
 }
@@ -229,6 +229,7 @@ fn defaults_fill_only_what_neither_file_nor_sidecar_has() -> Result<()> {
             copyright: "© Default".into(),
         },
         crate::exif::read,
+        |_| None,
     );
     cat.add_folder_with(&folder, &defaults)?;
     let (a, b) = (id_of(&cat, "A.NEF")?, id_of(&cat, "B.NEF")?);
@@ -300,7 +301,7 @@ fn a_files_own_xmp_is_read_by_its_extension() -> Result<()> {
     let title_of = |name: &str, bytes: &[u8]| -> Result<_> {
         let file = dir.path().join(name);
         std::fs::write(&file, bytes)?;
-        let (read, report) = read_file(&file);
+        let (read, report) = read_file(&file, |_| None);
         assert!(report.unreadable.is_empty(), "{name}: {report:?}");
         Ok(read.and_then(|r| r.title))
     };
@@ -349,7 +350,7 @@ fn webp_avif_and_jxl_files_own_xmp_is_read() -> Result<()> {
         "metadata-brob.jxl",
     ] {
         let file = formats_fixture(name, dir.path())?;
-        let (read, report) = read_file(&file);
+        let (read, report) = read_file(&file, |_| None);
         assert!(report.unreadable.is_empty(), "{name}: {report:?}");
         assert_eq!(read.and_then(|r| r.title), set("Fixture title"), "{name}");
     }
@@ -386,7 +387,7 @@ fn an_avifs_xmp_item_over_16_mib_is_not_read() -> Result<()> {
     bytes.extend(packet);
     std::fs::write(&file, bytes)?;
     // Skipped unread, as a WebP chunk or JPEG XL box that size is.
-    let (read, report) = read_file(&file);
+    let (read, report) = read_file(&file, |_| None);
     assert!(report.unreadable.is_empty(), "{report:?}");
     assert_eq!(read.and_then(|r| r.title), None);
     Ok(())
@@ -397,7 +398,7 @@ fn webp_avif_and_jxl_files_without_xmp_read_nothing_and_are_not_unreadable() -> 
     let dir = tempfile::tempdir()?;
     for name in ["animated.webp", "ten-bit.avif", "sixteen-bit.jxl"] {
         let file = formats_fixture(name, dir.path())?;
-        let (read, report) = read_file(&file);
+        let (read, report) = read_file(&file, |_| None);
         assert!(report.unreadable.is_empty(), "{name}: {report:?}");
         assert_eq!(read.and_then(|r| r.title), None, "{name}");
     }
@@ -441,6 +442,7 @@ fn defaults_give_way_to_the_camera_exif_the_apps_reader_finds() -> Result<()> {
             copyright: "© Default".into(),
         },
         reader,
+        |_| None,
     );
     cat.add_folder_with(&folder, &defaults)?;
     let a = cat.descriptive(id_of(&cat, "A.CR3")?)?;
@@ -454,5 +456,72 @@ fn defaults_give_way_to_the_camera_exif_the_apps_reader_finds() -> Result<()> {
         );
         assert_eq!(d.copyright, set("© Default"), "{name}");
     }
+    Ok(())
+}
+
+/// The XMP a camera embeds in a CR3, as the app's reader finds it, is read
+/// like a JPEG's: its rating and title fill a new photo, below a sidecar's
+/// fields, and its creator keeps the default out. Read Metadata from Files
+/// reads it too; XMP that isn't text is reported (#680).
+#[test]
+fn a_cr3s_own_xmp_the_apps_reader_finds_is_read_below_its_sidecar() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let folder = dir.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in ["A.CR3", "B.CR3", "C.CR3", "D.NEF"] {
+        std::fs::write(folder.join(name), b"synthetic raw")?;
+    }
+    std::fs::write(folder.join("B.CR3.xmp"), xmp(r#"xmp:Rating="2""#, ""))?;
+    fn reader(path: &Path) -> Option<Vec<u8>> {
+        match path.file_name()?.to_str()? {
+            "A.CR3" | "B.CR3" => Some(
+                xmp(
+                    r#"xmp:Rating="4" dc:title="In camera""#,
+                    "<dc:creator><rdf:Seq><rdf:li>Camera Owner</rdf:li></rdf:Seq></dc:creator>",
+                )
+                .into_bytes(),
+            ),
+            "C.CR3" => Some(vec![0xff, 0xfe, 0xfd]),
+            _ => None,
+        }
+    }
+    let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
+    let defaults = crate::catalog::NewPhotoDefaults::new(
+        crate::catalog::MetadataDefaults {
+            creator: "Default Creator".into(),
+            copyright: String::new(),
+        },
+        |_| None,
+        reader,
+    );
+    let (_, report) = cat.add_folder_with(&folder, &defaults)?;
+    assert_eq!(
+        report.unreadable.iter().map(|(p, _)| p).collect::<Vec<_>>(),
+        [&folder.join("C.CR3").canonicalize()?]
+    );
+    let rating = |name: &str| -> Result<i32> {
+        let id = id_of(&cat, name)?;
+        Ok(cat
+            .photos()?
+            .into_iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .rating)
+    };
+    let (a, b) = (id_of(&cat, "A.CR3")?, id_of(&cat, "B.CR3")?);
+    assert_eq!((rating("A.CR3")?, title(&cat, a)?), (4, set("In camera")));
+    assert_eq!(
+        cat.descriptive(a)?.creator,
+        Some(Value::Set(vec!["Camera Owner".into()]))
+    );
+    // The sidecar's rating wins; the title it lacks is the camera's.
+    assert_eq!((rating("B.CR3")?, title(&cat, b)?), (2, set("In camera")));
+    assert_eq!(rating("D.NEF")?, 0);
+    // Read Metadata from Files, as the app reads a file.
+    let (read, report) = read_file(&folder.join("A.CR3"), reader);
+    assert_eq!(report, SidecarReport::default());
+    assert_eq!(read.map(|r| r.rating), Some(Some(4)));
+    // Without the app's reader, the catalog finds no XMP in a CR3.
+    assert_eq!(read_file(&folder.join("A.CR3"), |_| None).0, None);
     Ok(())
 }

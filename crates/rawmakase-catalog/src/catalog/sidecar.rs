@@ -1,5 +1,6 @@
 //! Descriptive metadata read from XMP sidecars and from the XMP inside JPEG,
-//! TIFF, PNG, WebP, AVIF and JPEG XL files: when a folder is added, for its
+//! TIFF, PNG, WebP, AVIF, JPEG XL, DNG and CR3 files (a CR3's found by the
+//! reader the app passes in): when a folder is added, for its
 //! new photos, and on Read Metadata from Files, for photos already in the
 //! catalog. Never at render time; the catalog stays the source of truth.
 use super::db::{LightroomWrite, Write, sql, sqlite_sql};
@@ -138,10 +139,16 @@ pub fn sidecars(file: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// Reads the XMP a camera embeds in a RAW the catalog can't read it from
+/// itself (a CR3's, found by RAWmakase's RAW decoders), so the app passes
+/// its reader in: `photo::raw_xmp`. `None` for other files.
+pub type RawXmpReader = fn(&Path) -> Option<Vec<u8>>;
+
 /// The XMP inside a JPEG (its standard APP1 packet), TIFF (tag 700), PNG (its
 /// XMP text chunk), WebP ("XMP " chunk), AVIF (its XMP item) or JPEG XL ("xml "
-/// box, or "brob" box compressing one).
-fn embedded(file: &Path) -> Result<Option<String>> {
+/// box, or "brob" box compressing one); in another file, what `raw_xmp`
+/// finds.
+fn embedded(file: &Path, raw_xmp: RawXmpReader) -> Result<Option<String>> {
     match RasterFormat::of(file) {
         Some(RasterFormat::Jpeg) => {
             use std::io::Read as _;
@@ -175,7 +182,7 @@ fn embedded(file: &Path) -> Result<Option<String>> {
         {
             in_tiff(file)
         }
-        None => Ok(None),
+        None => text(raw_xmp(file)),
     }
 }
 
@@ -304,11 +311,11 @@ fn decode(bytes: &[u8]) -> Result<String> {
     }
 }
 
-/// The metadata of `file`'s sidecar and, for a JPEG, TIFF, PNG, WebP, AVIF or
-/// JPEG XL, its own XMP:
-/// field by field the sidecar's where it has one, an explicitly empty value
-/// included, else the file's. `None` when neither has any.
-pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {
+/// The metadata of `file`'s sidecar and its own XMP (see [`embedded`]; a
+/// RAW's as `raw_xmp` reads it): field by field the sidecar's where it has
+/// one, an explicitly empty value included, else the file's. `None` when
+/// neither has any.
+pub fn read_file(file: &Path, raw_xmp: RawXmpReader) -> (Option<Read>, SidecarReport) {
     let mut report = SidecarReport::default();
     let mut found = sidecars(file).into_iter();
     let first = found.next();
@@ -330,15 +337,16 @@ pub fn read_file(file: &Path) -> (Option<Read>, SidecarReport) {
             }
         }
     });
-    let inside = match embedded(file).and_then(|x| x.map(|t| descriptive::read(&t)).transpose()) {
-        Ok(read) => read,
-        Err(e) => {
-            report
-                .unreadable
-                .push((file.to_path_buf(), format!("{e:#}")));
-            None
-        }
-    };
+    let inside =
+        match embedded(file, raw_xmp).and_then(|x| x.map(|t| descriptive::read(&t)).transpose()) {
+            Ok(read) => read,
+            Err(e) => {
+                report
+                    .unreadable
+                    .push((file.to_path_buf(), format!("{e:#}")));
+                None
+            }
+        };
     let read = match (sidecar, inside) {
         (Some(s), Some(i)) => Some(s.or(i)),
         (s, i) => s.or(i),
@@ -409,7 +417,7 @@ impl Catalog {
             .into_iter()
             .filter(|p| ids.contains(&p.id) && p.master.is_none())
             .filter_map(|p| {
-                let (read, found) = read_file(&p.path);
+                let (read, found) = read_file(&p.path, |_| None);
                 report.add(found);
                 read.map(|r| (p.id, p.path, r))
             })
