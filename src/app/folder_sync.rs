@@ -3,11 +3,17 @@
 //! a stop button; the review dialog; and applying what the user accepted as
 //! a folder change. The photo open in Develop keeps its pending edit: a
 //! verified move of its file relinks it in place (see `catalog_ready`).
+//!
+//! Find on Disk… (issue #693) runs through the same scan slot, review and
+//! apply: the user picks an offline photo's file, and the other offline
+//! photos of its folder found beside it are offered with it.
 use super::Editor;
 use super::icons::Icon;
 use super::theme;
 use super::worker::Event;
-use crate::catalog::folder_sync::{Accepted, Applied, SyncPlan, SyncScope, scan};
+use crate::catalog::folder_sync::{
+    Accepted, Applied, PlanKind, SyncPlan, SyncScope, find_on_disk, scan,
+};
 use crate::catalog::{CatalogLocation, PhotoId};
 use eframe::egui;
 use std::collections::{BTreeSet, HashMap};
@@ -24,6 +30,8 @@ pub(super) struct FolderSync {
     showing: bool,
     /// Counts scans, so a result of one stopped or superseded is ignored.
     started: u64,
+    /// What is being applied is Find on Disk's, for its messages.
+    applying_find: bool,
 }
 
 impl FolderSync {
@@ -43,6 +51,8 @@ struct Scan {
     name: String,
     /// The folder synchronized, on this computer; none for all of them.
     root: Option<PathBuf>,
+    /// Find on Disk's search, not a synchronization.
+    finding: bool,
     catalog: CatalogLocation,
     /// The session's structural generation it started under.
     generation: u64,
@@ -111,43 +121,6 @@ impl Editor {
                 return;
             }
         };
-        self.folder_sync.review = None;
-        self.folder_sync.showing = false;
-        self.folder_sync.started += 1;
-        let id = self.folder_sync.started;
-        let files = Arc::new(AtomicUsize::new(0));
-        let cancel = Arc::new(AtomicBool::new(false));
-        let sent = Arc::new(AtomicBool::new(false));
-        let (tx, ctx) = (self.tx.clone(), self.context.clone());
-        let (counted, stopped, sending) = (files.clone(), cancel.clone(), sent.clone());
-        let thread = std::thread::Builder::new()
-            .name("folder-sync-scan".into())
-            .spawn(move || {
-                let progress = |n: usize| {
-                    counted.store(n, Ordering::Relaxed);
-                    ctx.request_repaint();
-                };
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    scan(&inputs, &crate::volume_mounted, &stopped, &progress)
-                }));
-                let result = match result {
-                    Ok(Ok(plan)) => Ok(plan),
-                    Ok(Err(e)) => Err(format!("{e:#}")),
-                    Err(_) => Err("Stopped unexpectedly".into()),
-                };
-                if tx
-                    .send(Event::FolderSyncScanned(Box::new(Scanned { id, result })))
-                    .is_ok()
-                {
-                    sending.store(true, Ordering::Release);
-                }
-                ctx.request_repaint();
-            })
-            .ok();
-        if thread.is_none() {
-            self.status = "Synchronize Folder could not start".into();
-            return;
-        }
         let root = match scope {
             SyncScope::Folder(folder) => library
                 .session
@@ -165,10 +138,134 @@ impl Editor {
                 }),
             SyncScope::All => None,
         };
+        self.spawn_scan(name, root, false, move |stopped, progress| {
+            scan(&inputs, &crate::volume_mounted, stopped, progress)
+        });
+    }
+    /// Find on Disk…: asks for the file of `photo`, offline, starting where
+    /// it was last.
+    pub(super) fn choose_file_on_disk(&mut self, photo: PhotoId, ctx: &egui::Context) {
+        let Some(path) = self
+            .library
+            .as_ref()
+            .and_then(|l| l.photo(photo))
+            .map(|p| p.path.clone())
+        else {
+            return;
+        };
+        if self.folder_sync.scan.is_some() {
+            self.status = "A synchronization is already running.".into();
+            return;
+        }
+        if !self.activity.begin_dialog() {
+            return;
+        }
+        let start = picker_start(&path);
+        let title = format!("Find {}", file_name(&path));
+        super::task::spawn(
+            self.tx.clone(),
+            ctx.clone(),
+            move |tx| {
+                let mut dialog = rfd::FileDialog::new().set_title(title);
+                if let Some(start) = start {
+                    dialog = dialog.set_directory(start);
+                }
+                let event = dialog
+                    .pick_file()
+                    .map(|file| Event::FileOnDiskPicked(photo, file))
+                    .unwrap_or(Event::DialogClosed);
+                let _ = tx.send(event);
+            },
+            |tx, _| {
+                let _ = tx.send(Event::DialogClosed);
+            },
+        );
+    }
+    /// Starts Find on Disk for `photo` (a virtual copy stands for its
+    /// master), whose file the user picked at `file`, in the background as a
+    /// synchronization's scan: one runs at a time.
+    pub(super) fn start_find_on_disk(&mut self, photo: PhotoId, file: PathBuf) {
+        if self.folder_sync.scan.is_some() {
+            self.status = "A synchronization is already running.".into();
+            return;
+        }
+        let Some(library) = &self.library else {
+            return;
+        };
+        let inputs = match library.session.catalog.find_inputs(photo, &file) {
+            Ok(inputs) => inputs,
+            Err(e) => {
+                self.status = format!("Find on Disk: {e:#}");
+                return;
+            }
+        };
+        let name = library
+            .photo(photo)
+            .map(|p| p.filename.clone())
+            .unwrap_or_default();
+        let root = file.parent().map(PathBuf::from);
+        self.spawn_scan(name, root, true, move |stopped, progress| {
+            find_on_disk(&inputs, &crate::volume_mounted, stopped, progress)
+        });
+    }
+    /// Runs `work`, a synchronization's scan or Find on Disk's (`finding`),
+    /// on a thread of its own, shown in the top bar until its plan is back.
+    fn spawn_scan(
+        &mut self,
+        name: String,
+        root: Option<PathBuf>,
+        finding: bool,
+        work: impl FnOnce(&AtomicBool, &dyn Fn(usize)) -> anyhow::Result<SyncPlan> + Send + 'static,
+    ) {
+        let Some(library) = &self.library else {
+            return;
+        };
+        self.folder_sync.review = None;
+        self.folder_sync.showing = false;
+        self.folder_sync.started += 1;
+        let id = self.folder_sync.started;
+        let files = Arc::new(AtomicUsize::new(0));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let sent = Arc::new(AtomicBool::new(false));
+        let (tx, ctx) = (self.tx.clone(), self.context.clone());
+        let (counted, stopped, sending) = (files.clone(), cancel.clone(), sent.clone());
+        let thread = std::thread::Builder::new()
+            .name("folder-sync-scan".into())
+            .spawn(move || {
+                let progress = |n: usize| {
+                    counted.store(n, Ordering::Relaxed);
+                    ctx.request_repaint();
+                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    work(&stopped, &progress)
+                }));
+                let result = match result {
+                    Ok(Ok(plan)) => Ok(plan),
+                    Ok(Err(e)) => Err(format!("{e:#}")),
+                    Err(_) => Err("Stopped unexpectedly".into()),
+                };
+                if tx
+                    .send(Event::FolderSyncScanned(Box::new(Scanned { id, result })))
+                    .is_ok()
+                {
+                    sending.store(true, Ordering::Release);
+                }
+                ctx.request_repaint();
+            })
+            .ok();
+        if thread.is_none() {
+            self.status = if finding {
+                "Find on Disk could not start".into()
+            } else {
+                "Synchronize Folder could not start".into()
+            };
+            return;
+        }
         self.folder_sync.scan = Some(Scan {
             id,
             name,
             root,
+            finding,
             catalog: library.session.catalog.location().clone(),
             generation: library.session.generation(),
             files,
@@ -186,6 +283,20 @@ impl Editor {
             *l.session.catalog.location() == scan.catalog
                 && l.session.generation() == scan.generation
         });
+        if scan.finding {
+            match scanned.result {
+                Err(_) if scan.cancel.load(Ordering::Relaxed) => {
+                    self.status = "Find on Disk stopped".into();
+                }
+                Err(e) => self.status = format!("Find on Disk: {e}"),
+                Ok(_) if !current => {
+                    self.status =
+                        "The catalog changed during the search; Find on Disk again".into();
+                }
+                Ok(plan) => self.found_on_disk(scan, plan),
+            }
+            return;
+        }
         match scanned.result {
             Err(e) if scan.cancel.load(Ordering::Relaxed) => {
                 let _ = e;
@@ -210,14 +321,54 @@ impl Editor {
             }
         }
     }
+    /// Find on Disk's plan is back. The photo open in Develop moves only on
+    /// a verified match: an unverified file picked for it is refused, its
+    /// edit left pending, whichever module shows. The file picked, verified,
+    /// with nothing else found and its old file observed missing, is
+    /// relinked at once; anything else is reviewed.
+    fn found_on_disk(&mut self, scan: Scan, plan: SyncPlan) {
+        let Some(picked) = plan.picked().cloned() else {
+            self.status = "Find on Disk: the file picked was not found".into();
+            return;
+        };
+        if self.open_master() == Some(picked.photo) && !picked.verified {
+            self.status = format!(
+                "{} is open in Develop. Open another photo in Develop, then Find on Disk again",
+                file_name(&picked.from)
+            );
+            return;
+        }
+        let alone = plan.moves.len() == 1 && plan.choices.is_empty();
+        let badges = self.badges(&plan);
+        self.folder_sync.review = Some(Review::new(scan, plan, badges));
+        self.folder_sync.showing = false;
+        if alone && picked.verified && !picked.offline {
+            let ctx = self.context.clone();
+            self.apply_folder_sync(&ctx);
+        }
+    }
+    /// The master of the photo loaded in Develop, shown or not.
+    fn open_master(&self) -> Option<PhotoId> {
+        let id = self.document.catalog_photo?;
+        let master = self
+            .library
+            .as_ref()?
+            .photo(id)
+            .map(|p| p.master.unwrap_or(id));
+        Some(master.unwrap_or(id))
+    }
     /// Notices a scan thread that ended without sending its result.
     pub(super) fn poll_folder_sync(&mut self) {
         let lost = self.folder_sync.scan.as_ref().is_some_and(|s| {
             s.thread.as_ref().is_some_and(|t| t.is_finished()) && !s.sent.load(Ordering::Acquire)
         });
         if lost {
-            self.folder_sync.scan = None;
-            self.status = "Synchronize Folder stopped unexpectedly".into();
+            let finding = self.folder_sync.scan.take().is_some_and(|s| s.finding);
+            self.status = if finding {
+                "Find on Disk stopped unexpectedly".into()
+            } else {
+                "Synchronize Folder stopped unexpectedly".into()
+            };
         }
         // The review opens on its own in either mode once nothing else
         // is asked.
@@ -255,7 +406,11 @@ impl Editor {
             painter.text(
                 rect.left_center() + egui::vec2(0., -6.),
                 egui::Align2::LEFT_CENTER,
-                format!("Synchronizing \u{201c}{}\u{201d}", scan.name),
+                if scan.finding {
+                    format!("Finding photos beside \u{201c}{}\u{201d}", scan.name)
+                } else {
+                    format!("Synchronizing \u{201c}{}\u{201d}", scan.name)
+                },
                 egui::FontId::proportional(12.),
                 palette.gray(210),
             );
@@ -276,7 +431,11 @@ impl Editor {
                     ui.id().with("stop-folder-sync"),
                     egui::Sense::click(),
                 )
-                .on_hover_text("Stop synchronizing");
+                .on_hover_text(if scan.finding {
+                    "Stop Find on Disk"
+                } else {
+                    "Stop synchronizing"
+                });
             let tint = palette.gray(if stop.hovered() { 235 } else { 150 });
             super::icons::paint_at(ui.painter(), Icon::Close, close.center(), 13., tint);
             if stop.clicked() {
@@ -289,7 +448,11 @@ impl Editor {
         if let Some(review) = &self.folder_sync.review
             && !self.folder_sync.showing
         {
-            let label = format!("Review synchronization of \u{201c}{}\u{201d}", review.name);
+            let label = if review.finding() {
+                format!("Review photos found beside \u{201c}{}\u{201d}", review.name)
+            } else {
+                format!("Review synchronization of \u{201c}{}\u{201d}", review.name)
+            };
             let button =
                 egui::Button::new(egui::RichText::new(label).size(12.).color(palette.accent()))
                     .frame(false);
@@ -403,12 +566,9 @@ impl Editor {
                     })
                     .show(ui, |ui| {
                         ui.label(
-                            egui::RichText::new(format!(
-                                "Synchronize \u{201c}{}\u{201d}",
-                                review.name
-                            ))
-                            .size(16.)
-                            .color(palette.gray(236)),
+                            egui::RichText::new(review.title())
+                                .size(16.)
+                                .color(palette.gray(236)),
                         );
                         ui.add_space(2.);
                         ui.label(
@@ -453,7 +613,16 @@ impl Editor {
                                     ui.spacing_mut().button_padding = egui::vec2(18., 6.);
                                     let removing = review.removals.iter().filter(|r| **r).count();
                                     let nothing = review.accepted_nothing();
-                                    let label = if removing > 0 {
+                                    let label = if review.finding() {
+                                        format!(
+                                            "Relink {}",
+                                            super::widgets::plural(
+                                                review.ticked(),
+                                                "Photo",
+                                                "Photos"
+                                            )
+                                        )
+                                    } else if removing > 0 {
                                         format!("Synchronize and Remove {removing}")
                                     } else {
                                         "Synchronize".into()
@@ -596,6 +765,7 @@ impl Editor {
             library.session.stop_background_reads();
         }
         let location = review.catalog.clone();
+        self.folder_sync.applying_find = review.finding();
         let plan = review.plan;
         // The open photo's master, as the review saw it: what moves is the
         // master's family.
@@ -669,7 +839,11 @@ impl Editor {
             Ok(synced) => synced,
             Err(e) => {
                 self.activity.finish_dialog();
-                self.status = format!("Synchronize Folder failed: {e}");
+                self.status = if self.folder_sync.applying_find {
+                    format!("Find on Disk failed: {e}")
+                } else {
+                    format!("Synchronize Folder failed: {e}")
+                };
                 return;
             }
         };
@@ -730,6 +904,15 @@ fn moved_files(photos: &[crate::catalog::Photo], applied: &Applied) -> Vec<(Phot
         .collect()
 }
 
+/// Where Find on Disk's picker starts for a photo last at `path`: the
+/// nearest folder above it that is still there.
+fn picker_start(path: &std::path::Path) -> Option<PathBuf> {
+    path.ancestors()
+        .skip(1)
+        .find(|dir| !dir.as_os_str().is_empty() && dir.is_dir())
+        .map(PathBuf::from)
+}
+
 /// Whether `plan` offers nothing to do.
 fn nothing_to_do(plan: &SyncPlan) -> bool {
     plan.gone_folders.is_empty()
@@ -742,8 +925,32 @@ fn nothing_to_do(plan: &SyncPlan) -> bool {
 }
 
 /// The status line after applying: "Synchronized · 14 updated · 32 added ·
-/// 5 still missing", with every detail on hover.
+/// 5 still missing", or Find on Disk's "Relinked 9 photos", with every
+/// detail on hover.
 fn synced_message(library: &mut super::library::Library, plan: &SyncPlan, applied: &Applied) {
+    if matches!(plan.kind(), PlanKind::FindOnDisk { .. }) {
+        let mut summary = format!(
+            "Relinked {}",
+            super::widgets::plural(applied.moved.len(), "photo", "photos")
+        );
+        if !applied.skipped.is_empty() {
+            summary.push_str(&format!(" \u{b7} {} skipped", applied.skipped.len()));
+        }
+        let mut detail: Vec<String> = applied
+            .skipped
+            .iter()
+            .map(|s| format!("Skipped {}: {}", s.path.display(), s.reason))
+            .collect();
+        if !applied.protected.is_empty() {
+            detail.push(format!(
+                "{} kept their edit protected: it was saved for another version of the file",
+                super::widgets::plural(applied.protected.len(), "photo", "photos")
+            ));
+        }
+        library.set_message_with_detail(summary, detail.join("\n"));
+        library.offer_previous_import = false;
+        return;
+    }
     let still_missing = plan
         .missing
         .iter()
@@ -796,8 +1003,15 @@ fn synced_message(library: &mut super::library::Library, plan: &SyncPlan, applie
 
 impl Review {
     fn new(scan: Scan, plan: SyncPlan, badges: HashMap<PhotoId, Vec<String>>) -> Self {
+        // Ticked as the plan says: verified moves, and Find on Disk's file
+        // picked.
+        let ticked = plan.default_accepted().moves;
         Self {
-            moves: plan.moves.iter().map(|m| m.verified).collect(),
+            moves: plan
+                .moves
+                .iter()
+                .map(|m| ticked.contains(&(m.photo, m.to.clone())))
+                .collect(),
             picks: vec![None; plan.choices.len()],
             additions: plan
                 .additions
@@ -813,6 +1027,32 @@ impl Review {
             catalog: scan.catalog,
             generation: scan.generation,
             plan,
+        }
+    }
+    /// Whether this is Find on Disk's review, not a synchronization's.
+    fn finding(&self) -> bool {
+        matches!(self.plan.kind(), PlanKind::FindOnDisk { .. })
+    }
+    /// The photos ticked or picked.
+    fn ticked(&self) -> usize {
+        self.moves.iter().filter(|m| **m).count() + self.picks.iter().flatten().count()
+    }
+    /// The dialog's title: Find on Disk's says how many other photos were
+    /// found beside the one picked.
+    fn title(&self) -> String {
+        if !self.finding() {
+            return format!("Synchronize \u{201c}{}\u{201d}", self.name);
+        }
+        let picked = self.plan.picked().map(|m| m.photo);
+        let mut others: Vec<PhotoId> = self.photos().filter(|id| Some(*id) != picked).collect();
+        others.sort();
+        others.dedup();
+        match others.len() {
+            0 => format!("Relink \u{201c}{}\u{201d}", self.name),
+            n => format!(
+                "Found {} in this folder",
+                super::widgets::plural(n, "other missing photo", "other missing photos")
+            ),
         }
     }
     /// Whether the review was opened once already.
@@ -891,9 +1131,30 @@ impl Review {
                     .flat_map(|c| c.options.iter().map(|m| m.photo)),
             )
     }
-    /// "4 changes found in 1,240 files" and the like, under the title.
+    /// "4 changes found in 1,240 files" and the like, under the title; for
+    /// Find on Disk, where the file picked is and what it adds.
     fn summary(&self) -> String {
         let p = &self.plan;
+        if let Some(picked) = p.picked() {
+            let mut parts = vec![format!(
+                "{} found in {}",
+                file_name(&picked.from),
+                picked
+                    .to
+                    .parent()
+                    .map(super::widgets::pretty_path)
+                    .unwrap_or_default()
+            )];
+            if let Some(root) = picked.new_root() {
+                parts.push(format!(
+                    "{} is added as a root folder",
+                    root.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| root.display().to_string())
+                ));
+            }
+            return parts.join(" \u{b7} ");
+        }
         let mut parts = Vec::new();
         let moved = p.moves.len();
         if moved > 0 {
@@ -969,6 +1230,23 @@ impl Review {
         thumbnails: &HashMap<PhotoId, egui::TextureHandle>,
     ) {
         let palette = theme::palette(ui.ctx());
+        // Find on Disk from a drive that isn't connected: the old files
+        // can't be checked, so the catalog switches on the checksum alone.
+        let offline = self.plan.moves.iter().filter(|m| m.offline).count();
+        if offline > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(4.);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "\u{26a0}  The old drive of {} isn't connected. The files found here match by checksum; \
+                         the catalog uses them from now on, even if the old ones are still there.",
+                        super::widgets::plural(offline, "photo", "photos")
+                    ))
+                    .size(12.)
+                    .color(palette.gray(200)),
+                );
+            });
+        }
         let verified: Vec<usize> = (0..self.plan.moves.len())
             .filter(|i| self.plan.moves[*i].verified)
             .collect();
@@ -1002,7 +1280,17 @@ impl Review {
                         let open = open_master == Some(m.photo);
                         let enabled = !(open && !m.verified);
                         let mut on = self.moves[i];
-                        let note = (open && !m.verified).then_some("Open in Develop, not verified");
+                        let note = if open && !m.verified {
+                            Some("Open in Develop, not verified")
+                        } else if m.offline {
+                            Some("Its old drive isn't connected")
+                        } else if m.by_name {
+                            Some("Same name, not verified")
+                        } else if !m.verified && self.plan.picked() == Some(&m) {
+                            Some("Picked, not verified")
+                        } else {
+                            None
+                        };
                         row(
                             ui,
                             &palette,
@@ -1879,6 +2167,7 @@ mod tests {
             id: 99,
             name: "trip".into(),
             root: None,
+            finding: false,
             catalog: e
                 .library
                 .as_ref()
@@ -2083,6 +2372,274 @@ mod tests {
 
     /// Renders the review of a scenario with every kind of change to
     /// `target/folder-sync-review.png`, for looking at the design.
+    /// Moves `name` out of the trip folder to a directory outside every
+    /// root, as another volume would: new time. Returns its new path.
+    fn move_out(trip: &std::path::Path, name: &str) -> anyhow::Result<PathBuf> {
+        let out = trip.with_file_name("moved");
+        std::fs::create_dir_all(&out)?;
+        let to = out.join(name);
+        std::fs::copy(trip.join(name), &to)?;
+        let later = std::time::SystemTime::now() + Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&to)?
+            .set_modified(later)?;
+        std::fs::remove_file(trip.join(name))?;
+        Ok(to)
+    }
+    /// Opens `id` at `path` in Develop as `catalog_ready` leaves it.
+    fn open_in_develop(e: &mut Editor, id: PhotoId, path: PathBuf) {
+        e.module = Module::Develop;
+        e.document.catalog_photo = Some(id);
+        e.document.path = Some(path);
+    }
+    fn forget_checksum(e: &Editor, id: PhotoId) -> anyhow::Result<()> {
+        let library = e.library.as_ref().unwrap();
+        library
+            .session
+            .catalog
+            .db_for_tests()
+            .execute("DELETE FROM photo_checksums WHERE photo=?", [id.0])?;
+        Ok(())
+    }
+
+    #[test]
+    fn the_picker_starts_in_the_nearest_folder_still_there() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let shoot = dir.path().join("shoot");
+        std::fs::create_dir_all(&shoot)?;
+        assert_eq!(picker_start(&shoot.join("a.dng")), Some(shoot.clone()));
+        assert_eq!(
+            picker_start(&shoot.join("gone/deeper/a.dng")),
+            Some(shoot.clone())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_verified_file_with_nothing_else_found_is_relinked_at_once() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        let to = move_out(&trip, "a.dng")?;
+        let previous = e.library.as_ref().unwrap().session.previous_import.clone();
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        applied(&mut e);
+        assert!(e.folder_sync.review.is_none());
+        let library = e.library.as_ref().unwrap();
+        assert_eq!(library.photo(a).unwrap().path, to);
+        assert!(e.status.starts_with("Relinked 1 photo"), "{}", e.status);
+        assert_eq!(library.session.previous_import, previous);
+        assert!(!library.offer_previous_import);
+        Ok(())
+    }
+
+    #[test]
+    fn other_photos_found_beside_it_are_reviewed() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let (a, b) = (id(&e, "a.dng"), id(&e, "b.dng"));
+        let to = move_out(&trip, "a.dng")?;
+        let other = move_out(&trip, "b.dng")?;
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        e.poll_folder_sync();
+        assert!(e.folder_sync.showing);
+        let review = e.folder_sync.review.as_ref().unwrap();
+        assert_eq!(review.title(), "Found 1 other missing photo in this folder");
+        assert_eq!(review.ticked(), 2);
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        let library = e.library.as_ref().unwrap();
+        assert_eq!(library.photo(a).unwrap().path, to);
+        assert_eq!(library.photo(b).unwrap().path, other);
+        assert!(e.status.starts_with("Relinked 2 photos"), "{}", e.status);
+        Ok(())
+    }
+
+    #[test]
+    fn a_photo_whose_drive_is_gone_is_always_reviewed() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        // The whole folder went elsewhere: its old place can't be listed,
+        // so the photo is unavailable, not observed missing.
+        let elsewhere = trip.with_file_name("elsewhere");
+        std::fs::rename(&trip, &elsewhere)?;
+        e.start_find_on_disk(a, elsewhere.join("a.dng"));
+        scanned(&mut e);
+        e.poll_folder_sync();
+        assert!(!e.activity.is_busy());
+        assert!(e.folder_sync.showing, "{}", e.status);
+        let review = e.folder_sync.review.as_ref().unwrap();
+        assert!(review.plan.moves.iter().all(|m| m.offline && m.verified));
+        Ok(())
+    }
+
+    #[test]
+    fn a_different_file_is_refused_and_nothing_stays_busy() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        std::fs::remove_file(trip.join("a.dng"))?;
+        let out = trip.with_file_name("moved");
+        std::fs::create_dir_all(&out)?;
+        std::fs::write(out.join("a.dng"), bytes(9))?;
+        e.start_find_on_disk(a, out.join("a.dng"));
+        scanned(&mut e);
+        assert!(e.folder_sync.review.is_none() && !e.folder_sync.is_scanning());
+        assert!(!e.activity.is_busy());
+        assert!(
+            e.status.contains("a different photo than a.dng"),
+            "{}",
+            e.status
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_stopped_panicked_or_lost_search_clears_the_top_bar() -> anyhow::Result<()> {
+        let (_dir, mut e, _) = editor()?;
+        // Panicked.
+        e.spawn_scan("a.dng".into(), None, true, |_, _| panic!("synthetic"));
+        scanned(&mut e);
+        assert!(e.status.contains("Stopped unexpectedly"), "{}", e.status);
+        // Stopped.
+        e.spawn_scan("a.dng".into(), None, true, |stopped, _| {
+            while !stopped.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            anyhow::bail!("Find on Disk stopped")
+        });
+        e.folder_sync
+            .scan
+            .as_ref()
+            .unwrap()
+            .cancel
+            .store(true, Ordering::Relaxed);
+        scanned(&mut e);
+        assert_eq!(e.status, "Find on Disk stopped");
+        // Lost without a result.
+        let thread = std::thread::spawn(|| {});
+        while !thread.is_finished() {
+            std::thread::yield_now();
+        }
+        e.folder_sync.scan = Some(Scan {
+            id: 99,
+            name: "a.dng".into(),
+            root: None,
+            finding: true,
+            catalog: e
+                .library
+                .as_ref()
+                .unwrap()
+                .session
+                .catalog
+                .location()
+                .clone(),
+            generation: 0,
+            files: Default::default(),
+            cancel: Default::default(),
+            sent: Default::default(),
+            thread: Some(thread),
+        });
+        e.poll_folder_sync();
+        assert!(!e.folder_sync.is_scanning());
+        assert!(e.status.contains("Find on Disk stopped unexpectedly"));
+        assert!(!e.activity.is_busy());
+        Ok(())
+    }
+
+    #[test]
+    fn the_open_photo_follows_a_verified_relink_and_saves_its_edit_there() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        open_in_develop(&mut e, a, trip.join("a.dng"));
+        e.document.edit.change(None, |r| r.exposure = 0.7);
+        let to = move_out(&trip, "a.dng")?;
+        assert!(!e.flush());
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        applied(&mut e);
+        assert_eq!(e.document.path.as_deref(), Some(to.as_path()));
+        assert_eq!(e.document.catalog_photo, Some(a));
+        assert!(e.module == Module::Develop);
+        assert!(e.flush());
+        let library = e.library.as_ref().unwrap();
+        let saved = library.session.catalog.load_edit(a, &to)?.expect("saved");
+        assert_eq!(saved.recipe.exposure, 0.7);
+        // A save that fails at the new path keeps the edit pending.
+        e.document.edit.change(None, |r| r.exposure = 0.9);
+        std::fs::remove_file(&to)?;
+        assert!(!e.flush());
+        assert!(e.document.edit.save_state().needs_save());
+        assert_eq!(e.document.edit.recipe().exposure, 0.9);
+        Ok(())
+    }
+
+    #[test]
+    fn an_unverified_file_for_the_open_photo_is_refused_until_another_is_opened()
+    -> anyhow::Result<()> {
+        for open_copy in [false, true] {
+            let (_dir, mut e, trip) = editor()?;
+            let (a, b) = (id(&e, "a.dng"), id(&e, "b.dng"));
+            let open = if open_copy {
+                let copy = e
+                    .library
+                    .as_mut()
+                    .unwrap()
+                    .session
+                    .catalog
+                    .create_virtual_copy(a)?;
+                e.library.as_mut().unwrap().session.reload()?;
+                copy
+            } else {
+                a
+            };
+            forget_checksum(&e, a)?;
+            open_in_develop(&mut e, open, trip.join("a.dng"));
+            e.document.edit.change(None, |r| r.exposure = 0.4);
+            let to = move_out(&trip, "a.dng")?;
+            let refused = |e: &mut Editor| {
+                e.start_find_on_disk(a, to.clone());
+                scanned(e);
+                assert!(e.folder_sync.review.is_none());
+                assert!(!e.activity.is_busy());
+                assert!(e.status.contains("is open in Develop"), "{}", e.status);
+                let library = e.library.as_ref().unwrap();
+                assert_eq!(library.photo(a).unwrap().path, trip.join("a.dng"));
+            };
+            refused(&mut e);
+            assert_eq!(e.document.edit.recipe().exposure, 0.4);
+            assert!(e.document.edit.save_state().needs_save());
+            assert_eq!(
+                e.document.path.as_deref(),
+                Some(trip.join("a.dng").as_path())
+            );
+            // The Library shown, the document still loaded, its edit clean.
+            e.document.edit.save_state_mut().saved();
+            e.module = Module::Library;
+            refused(&mut e);
+            // Another family open in Develop: the same file relinks.
+            open_in_develop(&mut e, b, trip.join("b.dng"));
+            e.start_find_on_disk(a, to.clone());
+            scanned(&mut e);
+            // Not verified: reviewed, never applied at once.
+            assert!(!e.activity.is_busy());
+            e.poll_folder_sync();
+            assert!(e.folder_sync.showing, "{}", e.status);
+            let ctx = e.context.clone();
+            e.apply_folder_sync(&ctx);
+            applied(&mut e);
+            let library = e.library.as_ref().unwrap();
+            assert_eq!(
+                library.photo(a).unwrap().path,
+                to,
+                "{:?}",
+                library.message_detail()
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "writes an image to look at"]
     fn render_the_review() -> anyhow::Result<()> {

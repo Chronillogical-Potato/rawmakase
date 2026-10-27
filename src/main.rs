@@ -60,6 +60,17 @@ enum Command {
         #[arg(long)]
         apply: bool,
     },
+    /// Find on Disk for an offline photo: checks that FILE is photo
+    /// PHOTO_ID (a virtual copy stands for its master) and looks beside it
+    /// for the other offline photos of its folder. Prints the plan; --apply
+    /// relinks what the review ticks by default. Nothing on disk is changed.
+    FindPhoto {
+        catalog: PathBuf,
+        photo_id: i64,
+        file: PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
     Compare {
         input: PathBuf,
         reference: PathBuf,
@@ -297,6 +308,17 @@ fn main() -> Result<()> {
             folder,
             apply,
         }) => sync_folder(&catalog, folder.as_deref(), apply)?,
+        Some(Command::FindPhoto {
+            catalog,
+            photo_id,
+            file,
+            apply,
+        }) => find_photo(
+            &catalog,
+            rawmakase::catalog::PhotoId(photo_id),
+            &file,
+            apply,
+        )?,
         Some(Command::Compare {
             input,
             reference,
@@ -685,6 +707,65 @@ fn sync_folder(
     if let Some(e) = applied.add_error {
         anyhow::bail!("Adding the new files failed: {e:#}");
     }
+    Ok(())
+}
+
+/// `rawmakase find-photo`: finds `photo` at `file` and the other offline
+/// photos of its folder beside it, prints the plan, and relinks with `apply`.
+fn find_photo(
+    catalog: &std::path::Path,
+    photo: rawmakase::catalog::PhotoId,
+    file: &std::path::Path,
+    apply: bool,
+) -> Result<()> {
+    use rawmakase::catalog::folder_sync::find_on_disk;
+    let mut c = rawmakase::catalog::Catalog::open(catalog)?;
+    let inputs = c.find_inputs(photo, file)?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let online = |path: &std::path::Path| rawmakase::volume_mounted(path);
+    let plan = find_on_disk(&inputs, &online, &cancel, &|_| {})?;
+    let shown = |p: &std::path::Path| p.display().to_string();
+    let ticked = plan.default_accepted();
+    for m in &plan.moves {
+        let how = match (m.verified, m.by_name) {
+            (true, _) => "verified",
+            (false, true) => "same name, not verified",
+            (false, false) => "probably, not verified",
+        };
+        let tick = if ticked.moves.contains(&(m.photo, m.to.clone())) {
+            "[x]"
+        } else {
+            "[ ]"
+        };
+        let offline = if m.offline {
+            " (its old drive isn't connected)"
+        } else {
+            ""
+        };
+        println!(
+            "{tick} {how}: {} → {}{offline}",
+            shown(&m.from),
+            shown(&m.to)
+        );
+    }
+    for choice in &plan.choices {
+        println!("needs a choice:");
+        for m in &choice.options {
+            println!("  {} → {}", shown(&m.from), shown(&m.to));
+        }
+    }
+    if let Some(root) = plan.picked().and_then(|m| m.new_root()) {
+        println!("{} becomes a new root folder", shown(root));
+    }
+    if !apply {
+        println!("Dry run: nothing changed. Run again with --apply to relink.");
+        return Ok(());
+    }
+    let applied = c.apply_folder_sync(&plan, &ticked, &online, None, &Default::default())?;
+    for s in &applied.skipped {
+        println!("skipped: {} ({})", shown(&s.path), s.reason);
+    }
+    println!("Relinked {} photos", applied.moved.len());
     Ok(())
 }
 

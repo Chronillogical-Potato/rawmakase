@@ -5,13 +5,13 @@
 //! disk and in the catalog, and one that no longer holds is skipped and
 //! reported, never forced.
 use super::digest;
-use super::{FileState, Move, NotChecked, SyncPlan, current_master, state_of};
+use super::{FileState, Move, NotChecked, PlanKind, SyncPlan, Target, current_master, state_of};
 use crate::catalog::copies::delete_photo;
 use crate::catalog::db::{Reads, sql};
 use crate::catalog::edit_rows::{Refresh, refresh_identity};
-use crate::catalog::ingest::{Matched, Place, folder_id, known};
+use crate::catalog::ingest::{Matched, Matcher, Place, folder_id, known};
 use crate::catalog::locations::folder_path;
-use crate::catalog::{Catalog, FolderId, NewPhotoDefaults, PhotoId, SidecarReport};
+use crate::catalog::{Catalog, FolderId, NewPhotoDefaults, PhotoId, RootId, SidecarReport};
 use crate::storage::Identity;
 use anyhow::{Result, ensure};
 use std::collections::{HashMap, HashSet};
@@ -32,13 +32,15 @@ pub struct Accepted {
 impl SyncPlan {
     /// What the review starts with ticked, as Lightroom's: verified moves
     /// and new files; neither probable moves, copies of photos already in
-    /// the catalog nor removals.
+    /// the catalog nor removals. Find on Disk's file picked is ticked too,
+    /// verified or not: the user chose it.
     pub fn default_accepted(&self) -> Accepted {
+        let picked = self.picked();
         Accepted {
             moves: self
                 .moves
                 .iter()
-                .filter(|m| m.verified)
+                .filter(|m| m.verified || picked == Some(*m))
                 .map(|m| (m.photo, m.to.clone()))
                 .collect(),
             additions: self
@@ -74,10 +76,9 @@ pub struct Applied {
 }
 
 impl Catalog {
-    /// Applies `accepted` from `plan`, sealed by
-    /// [`Catalog::seal_folder_sync`]. `online` observes volumes as the scan
-    /// did; `open` is the photo open in Develop, which can be moved but not
-    /// removed. Nothing on disk is changed.
+    /// Applies `accepted` from `plan`. `online` observes volumes as the scan
+    /// did; `open` is the photo open in Develop, which can be moved, only by
+    /// a verified match, but not removed. Nothing on disk is changed.
     pub fn apply_folder_sync(
         &mut self,
         plan: &SyncPlan,
@@ -87,6 +88,11 @@ impl Catalog {
         defaults: &NewPhotoDefaults,
     ) -> Result<Applied> {
         let moves = chosen_moves(plan, accepted)?;
+        let finding = matches!(plan.kind, PlanKind::FindOnDisk { .. });
+        ensure!(
+            !finding || (accepted.additions.is_empty() && accepted.removals.is_empty()),
+            "Find on Disk only relinks photos"
+        );
         let mut applied = Applied::default();
         let skip = |applied: &mut Applied, path: &Path, reason: &str| {
             applied.skipped.push(NotChecked {
@@ -106,18 +112,25 @@ impl Catalog {
         let still_missing = |id: PhotoId, path: &Path| {
             state_of(Some(path), anchor_of(id).as_deref(), online) == FileState::Missing
         };
+        // A move from an offline location, verified: its old file must still
+        // not be there, offline or missing.
+        let still_absent = |m: &Move| {
+            if !m.offline {
+                return still_missing(m.photo, &m.from);
+            }
+            matches!(
+                state_of(Some(&m.from), anchor_of(m.photo).as_deref(), online),
+                FileState::Missing | FileState::Unavailable
+            )
+        };
         let matcher = crate::catalog::ingest::Matcher::new(self)?;
         let mut ready: Vec<&Move> = Vec::new();
         for m in moves {
             if Identity::read(&m.to).ok().as_ref() != Some(&m.identity) {
                 skip(&mut applied, &m.to, "changed since the scan");
-            } else if !still_missing(m.photo, &m.from) {
+            } else if !still_absent(m) {
                 skip(&mut applied, &m.from, "no longer missing");
-            } else if !matches!(
-                m.to.parent().map(|d| matcher.place(d, d, &[])),
-                Some(Matched::Place(Place::Folder(root, ref logical)))
-                    if (root, logical.clone()) == m.place
-            ) {
+            } else if !placed_as(&matcher, m) {
                 skip(
                     &mut applied,
                     &m.to,
@@ -191,24 +204,60 @@ impl Catalog {
                     reason: reason.into(),
                 })
             };
+            // The photo open in Develop, as its master: it follows only a
+            // verified match.
+            let open_master: Option<PhotoId> = match open {
+                Some(id) => w.read_optional(
+                    sql!("SELECT COALESCE(master_id, id) FROM photos WHERE id=?"),
+                    &[&id],
+                )?,
+                None => None,
+            };
+            // New roots made by this transaction, by directory.
+            let mut new_roots: HashMap<PathBuf, RootId> = HashMap::new();
             for m in ready {
                 if let Some(reason) = unchanged(w, plan, &computer, m.photo, &m.from)? {
                     skip(&m.from, reason);
                     continue;
                 }
-                let (root, logical) = &m.place;
-                let placed = m.to.parent().map(|d| placing.place(d, d, &[]));
-                if !matches!(placed, Some(Matched::Place(Place::Folder(r, ref l)))
-                    if r == *root && l == logical)
-                {
-                    skip(&m.to, "its folder was located elsewhere since the scan");
+                if open_master == Some(m.photo) && !m.verified {
+                    skip(&m.to, "open in Develop, and not verified");
                     continue;
                 }
-                if known(w, *root, logical, &m.to)? {
-                    skip(&m.to, "a photo of the catalog is there now");
-                    continue;
-                }
-                let folder = folder_id(w, *root, logical)?;
+                let folder = match &m.target {
+                    Target::Folder(root, logical) => {
+                        if !placed_as(&placing, m) {
+                            skip(&m.to, "its folder was located elsewhere since the scan");
+                            continue;
+                        }
+                        if known(w, *root, logical, &m.to)? {
+                            skip(&m.to, "a photo of the catalog is there now");
+                            continue;
+                        }
+                        folder_id(w, *root, logical)?
+                    }
+                    Target::NewRoot(directory) => {
+                        let root = match new_roots.get(directory) {
+                            Some(root) => *root,
+                            None => {
+                                if !placed_as(&placing, m) {
+                                    skip(
+                                        &m.to,
+                                        "its folder was added to the catalog since the scan",
+                                    );
+                                    continue;
+                                }
+                                // As Add Folder adds a root: where it was added.
+                                let root: RootId = w.insert_returning_id(
+                                    sql!("INSERT INTO roots(original_path) VALUES(?) RETURNING id"),
+                                    &[&directory.to_string_lossy()],
+                                )?;
+                                *new_roots.entry(directory.clone()).or_insert(root)
+                            }
+                        };
+                        folder_id(w, root, "")?
+                    }
+                };
                 let filename = m.to.file_name().unwrap_or_default().to_string_lossy();
                 let family: Vec<PhotoId> = w.read(
                     sql!("SELECT id FROM photos WHERE id=? OR master_id=?"),
@@ -266,8 +315,9 @@ impl Catalog {
                     removed.push(*photo);
                 }
             }
-            // A synchronization adding nothing leaves Previous Import empty.
-            if files.is_empty() {
+            // A synchronization adding nothing leaves Previous Import empty;
+            // Find on Disk adds nothing by design, and leaves it as it is.
+            if files.is_empty() && !finding {
                 crate::catalog::ingest::new_batch(w, crate::catalog::ingest::ImportKind::Sync)?;
             }
             let mut folders_removed = Vec::new();
@@ -339,6 +389,24 @@ impl Catalog {
             crate::catalog::ingest::ImportKind::Sync,
         )?;
         Ok((added, report, not_placed))
+    }
+}
+
+/// Whether `m`'s destination is still placed as scanned by `matcher`: in
+/// the same catalog folder, or for a new root still in none, with no root
+/// or folder location at or below it.
+fn placed_as(matcher: &Matcher, m: &Move) -> bool {
+    let Some(directory) = m.to.parent() else {
+        return false;
+    };
+    match (&m.target, matcher.place(directory, directory, &[])) {
+        (Target::Folder(root, logical), Matched::Place(Place::Folder(r, l))) => {
+            r == *root && l == *logical
+        }
+        (Target::NewRoot(at), Matched::Place(Place::New(_))) => {
+            at == directory && !matcher.holds_below(directory)
+        }
+        _ => false,
     }
 }
 

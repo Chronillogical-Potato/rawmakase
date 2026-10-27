@@ -207,6 +207,8 @@ pub(crate) struct Library {
     removal_request: Option<FolderRemoval>,
     /// Synchronize Folder chosen in the Folders panel, for the editor.
     sync_request: Option<(crate::catalog::folder_sync::SyncScope, String)>,
+    /// Find on Disk… chosen in a photo's menu, for the editor.
+    find_request: Option<PhotoId>,
     /// After a synchronization added photos, the status bar offers to show
     /// them.
     pub(in crate::app) offer_previous_import: bool,
@@ -319,6 +321,7 @@ impl Library {
             copy_request: None,
             removal_request: None,
             sync_request: None,
+            find_request: None,
             offer_previous_import: false,
             copy_names: Default::default(),
             fields: Default::default(),
@@ -987,6 +990,9 @@ impl Library {
     pub(super) fn take_copy_request(&mut self) -> Option<CopyAction> {
         self.copy_request.take()
     }
+    pub(in crate::app) fn take_find_request(&mut self) -> Option<PhotoId> {
+        self.find_request.take()
+    }
     pub(in crate::app) fn take_sync_request(
         &mut self,
     ) -> Option<(crate::catalog::folder_sync::SyncScope, String)> {
@@ -1361,7 +1367,7 @@ impl Refusal {
     pub(in crate::app) fn detail(&self) -> String {
         match self {
             Self::Offline => {
-                "The photo is offline. Use Locate root folder or right-click its folder to relink it."
+                "The photo is offline. Right-click it and choose Find on Disk… to pick its file, or relink its folder with Locate root folder or Locate this folder."
                     .into()
             }
             Self::Unsupported { reason, .. } => format!("RAWmakase can't edit {reason} images"),

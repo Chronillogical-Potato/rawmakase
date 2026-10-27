@@ -172,6 +172,10 @@ impl Editor {
         if let Some((scope, name)) = self.library.as_mut().and_then(|l| l.take_sync_request()) {
             self.start_folder_sync(scope, name);
         }
+        if let Some(photo) = self.library.as_mut().and_then(|l| l.take_find_request()) {
+            let ctx = self.context.clone();
+            self.choose_file_on_disk(photo, &ctx);
+        }
         self.poll_folder_sync();
         if let Some(removal) = self.library.as_mut().and_then(|l| l.take_removal_request()) {
             self.modal = Some(super::Modal::RemoveFolder(removal));

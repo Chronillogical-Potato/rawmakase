@@ -37,6 +37,41 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
 }
 
 #[test]
+fn find_on_disk_is_offered_for_one_offline_photo() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    std::fs::write(folder.join("a.dng"), b"synthetic a")?;
+    std::fs::write(folder.join("b.dng"), b"synthetic b")?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let mut library = Library::load(&path, egui::Context::default())?;
+    let (a, b) = (library.session.photos[0].id, library.session.photos[1].id);
+    // Offline and alone: offered; online: not.
+    assert!(library.menu_single(a, true));
+    assert!(cell::find_on_disk_enabled(
+        false,
+        library.menu_single(a, true)
+    ));
+    assert!(!cell::find_on_disk_enabled(
+        true,
+        library.menu_single(a, true)
+    ));
+    // One of several selected: the menu acts on them all, so not offered.
+    library.selection.selected.extend([a, b]);
+    assert!(!library.menu_single(a, true));
+    assert!(!cell::find_on_disk_enabled(
+        false,
+        library.menu_single(a, true)
+    ));
+    // A strip cell whose menu acts on its photo alone.
+    assert!(library.menu_single(a, false));
+    // The offline reason says what to do.
+    assert!(Refusal::Offline.detail().contains("Find on Disk"));
+    Ok(())
+}
+
+#[test]
 fn develop_says_why_it_cannot_open_a_photo() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let folder = directory.path().join("photos");
@@ -271,6 +306,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
                     quick: false,
                     style: cell::Style::Compact,
                     details: String::new(),
+                    single: true,
                 };
                 photo_cell(ui, &photo, Some(&texture), shown, width);
             });

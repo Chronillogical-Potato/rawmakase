@@ -84,6 +84,8 @@ pub(crate) enum Event {
     },
     /// A Synchronize Folder scan finished, or failed.
     FolderSyncScanned(Box<crate::app::folder_sync::Scanned>),
+    /// Find on Disk's file picked for a photo.
+    FileOnDiskPicked(crate::catalog::PhotoId, PathBuf),
     /// Applying a synchronization finished: the catalog opened again.
     FolderSyncApplied(Result<Box<crate::app::folder_sync::Synced>, String>),
     /// A folder change waiting for the user's answer.

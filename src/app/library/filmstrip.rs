@@ -372,7 +372,8 @@ impl Library {
             self.drag_source(ui, &response, photo);
         }
         let available = self.is_available(&photo.path);
-        if let Some(menu) = cell::photo_menu(&response, photo, available, module) {
+        let single = self.menu_single(photo.id, whole_selection);
+        if let Some(menu) = cell::photo_menu(&response, photo, available, single, module) {
             if matches!(menu, cell::PhotoAction::SetReference) {
                 return (Some(Pick::Reference(photo.id)), false);
             }
