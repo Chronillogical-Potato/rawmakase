@@ -1,11 +1,13 @@
 //! Lightroom's Filename Template Editor: the template as text with its
 //! tokens shown as chips, a menu of tokens for each of Lightroom's groups,
-//! inserted at the cursor, and an Example the host makes for its first
-//! photo. Done, or Return, gives the host the template; Cancel drops it. A
-//! file name has no line breaks, so the template has none either.
+//! inserted at the cursor, the Preset menu (`presets`), and an Example the
+//! host makes for its first photo. Done, or Return, gives the host the
+//! template; Cancel drops it. A file name has no line breaks, so the
+//! template has none either.
+use super::presets::{Library, Preset, Presets};
 use crate::app::theme;
 use crate::app::widgets::{modal_frame, primary_button};
-use crate::export_settings::{BUILTIN, Menu, Naming, Span, TokenTemplate, menu as tokens_in};
+use crate::export_settings::{Menu, Span, TokenTemplate, menu as tokens_in};
 use eframe::egui::{self, Color32, Stroke, Vec2};
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 
@@ -34,15 +36,17 @@ pub(in crate::app) struct NameEditor {
     chosen: [usize; MENUS.len()],
     /// The text has been given the keyboard, as the editor opened.
     focused: bool,
+    pub presets: Presets,
 }
 
 impl NameEditor {
-    /// Editing `tokens`, Lightroom's form.
-    pub fn new(tokens: &str) -> Self {
+    /// Editing `tokens`, Lightroom's form, which are `preset`'s.
+    pub fn new(tokens: &str, preset: Preset) -> Self {
         Self {
             text: TokenTemplate::parse(tokens).to_display(),
             chosen: [0; MENUS.len()],
             focused: false,
+            presets: Presets::new(preset, tokens),
         }
     }
 }
@@ -94,9 +98,15 @@ impl NameEditor {
     }
 
     /// Draws the editor over its host, with `example`, the first photo's
-    /// name by the template typed and what it has to say; how the frame
+    /// name by the template typed and what it has to say, and `library`,
+    /// the saved templates its Preset menu lists and changes; how the frame
     /// ended.
-    pub fn show(&mut self, ctx: &egui::Context, example: &(String, Vec<String>)) -> Outcome {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        example: &(String, Vec<String>),
+        library: &mut Library,
+    ) -> Outcome {
         let palette = theme::palette(ctx);
         let editor = self;
         // Typing goes to the template as it opens, not to a field of the
@@ -107,8 +117,10 @@ impl NameEditor {
         }
         // Return is Done, as in Lightroom, also from the text; it is taken
         // before the editor draws so the text does not get a line break. An
-        // open menu keeps it.
-        let returned = !egui::Popup::is_any_open(ctx)
+        // open menu, or a question of the Preset menu, keeps it.
+        let asking = editor.presets.asking();
+        let returned = !asking
+            && !egui::Popup::is_any_open(ctx)
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         // A file name has no line breaks: pasted, typed or composed, they are
         // dropped before the text takes them, so its cursor stays where it was.
@@ -148,29 +160,12 @@ impl NameEditor {
                         .size(15.)
                         .color(palette.gray(236)),
                 );
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Preset:").color(palette.gray(150)));
-                    egui::ComboBox::from_id_salt("filename-template-preset")
-                        .width(260.)
-                        .selected_text("Start from…")
-                        .show_ui(ui, |ui| {
-                            let mut seed = None;
-                            for n in Naming::ALL {
-                                if ui.selectable_label(false, n.label()).clicked() {
-                                    seed = Some(n.tokens());
-                                }
-                            }
-                            ui.separator();
-                            for b in &BUILTIN {
-                                if ui.selectable_label(false, b.name).clicked() {
-                                    seed = Some(b.tokens);
-                                }
-                            }
-                            if let Some(tokens) = seed {
-                                editor.text = TokenTemplate::parse(tokens).to_display();
-                            }
-                        });
-                });
+                let tokens = TokenTemplate::from_display(&editor.text)
+                    .ok()
+                    .map(|t| t.to_lightroom());
+                if let Some(tokens) = editor.presets.row(ui, &palette, tokens.as_deref(), library) {
+                    editor.text = TokenTemplate::parse(&tokens).to_display();
+                }
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Example:").color(palette.gray(150)));
                     ui.add(
@@ -268,9 +263,17 @@ impl NameEditor {
                     });
                 });
             });
+        let tokens = TokenTemplate::from_display(&editor.text)
+            .ok()
+            .map(|t| t.to_lightroom());
+        // Escape closes one window at a time: the question first.
+        let close = !asking && !editor.presets.asking() && response.should_close();
+        editor
+            .presets
+            .prompt_window(ctx, tokens.as_deref(), library);
         if done && let Ok(template) = TokenTemplate::from_display(&editor.text) {
             Outcome::Done(template)
-        } else if cancel || response.should_close() {
+        } else if cancel || close {
             Outcome::Cancel
         } else {
             Outcome::Open

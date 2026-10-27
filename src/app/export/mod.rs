@@ -143,6 +143,8 @@ pub(super) struct Exports {
     waiting: Option<ExportSettings>,
     /// The Filename Template Editor, over the dialog.
     name_editor: Option<NameEditor>,
+    /// The saved file-name templates, read when the dialog opens.
+    saved: super::naming::presets::Library,
     /// Tests: an export doesn't save its settings as the last export's.
     unsaved_settings: bool,
 }
@@ -166,6 +168,7 @@ impl Editor {
         self.exports.scope = scope;
         self.exports.draft = ExportSettings::load().unwrap_or_default();
         self.exports.watermarks = crate::watermark::presets();
+        self.exports.saved = super::naming::presets::Library::load();
         self.exports.dialog = true;
     }
     /// Export with Previous: the last export's choices, without the dialog.
@@ -431,7 +434,7 @@ impl Editor {
         let Some(name_editor) = self.exports.name_editor.as_mut() else {
             return;
         };
-        match name_editor.show(ctx, &example) {
+        match name_editor.show(ctx, &example, &mut self.exports.saved) {
             editor::Outcome::Open => {}
             editor::Outcome::Done(template) => {
                 self.exports.draft.choose_tokens(&template.to_lightroom());

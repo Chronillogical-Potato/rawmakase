@@ -1071,7 +1071,7 @@ fn scan(text: &str) -> Scanned {
 }
 
 /// A file-name template RAWmakase offers beside Lightroom's own.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Builtin {
     pub name: &'static str,
     /// Lightroom's form.
