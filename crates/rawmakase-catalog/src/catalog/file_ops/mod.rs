@@ -628,6 +628,8 @@ pub fn outcome(catalog: &super::Catalog, batch: &BatchId) -> anyhow::Result<Outc
 #[cfg(test)]
 mod arrive_tests;
 #[cfg(test)]
+mod batch_tests;
+#[cfg(test)]
 mod copy_tests;
 #[cfg(test)]
 mod folder_tests;

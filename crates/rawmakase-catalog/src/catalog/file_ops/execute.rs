@@ -17,7 +17,9 @@
 //! [`BATCH`] (#692): a. for all of them in one transaction; b. round by
 //! round, every item's first member, then every second, each round's
 //! folders synced once and its steps journalled in one transaction; c. in
-//! one transaction. Each item's own steps still come one after another,
+//! one transaction, once each item's sidecars are read again from the disk
+//! (an item another program's sidecar now goes with is put back). Each
+//! item's own steps still come one after another,
 //! each durable and journalled before its next, so recovery finds each item
 //! as it would after a crash at that point of a run of it alone.
 //!
@@ -191,7 +193,7 @@ pub(super) const UNFINISHED: &str = "an unfinished file operation involves it";
 /// How many items within their drives are moved or renamed together
 /// (#692): few enough that Stop and the count in the top bar follow
 /// promptly.
-const BATCH: usize = 100;
+pub(super) const BATCH: usize = 100;
 
 /// Points `items`, planned into a folder not yet made, at folder `made`:
 /// its id, and the name the disk gave it.
@@ -654,6 +656,11 @@ impl Run<'_> {
     ///    interrupts; only other items' steps come in between, whose files
     ///    are others. An item whose step, sync or journal fails is put back
     ///    on its own.
+    ///
+    /// Then each item's sidecars are read again from the disk
+    /// ([`Self::settled`]), as another program may have written one since
+    /// a.: an item that would now read another file's, or that left one of
+    /// its own behind, is put back.
     /// c. In one transaction, every item finished on the evidence; when
     ///    that fails, each in a transaction of its own, as [`Self::files`].
     fn renames(
@@ -777,6 +784,24 @@ impl Run<'_> {
             going.extend(journalling);
             going.sort_by_key(|g| g.id);
         }
+        // Each item's sidecars as they are now that every round is done,
+        // read again from the disk: the items were checked before any of the
+        // batch's renames, so another program's sidecar written meanwhile
+        // would go unseen. One that another file's sidecar now goes with, or
+        // that left one of its own behind, is put back before the catalog
+        // follows.
+        let mut listings = Listings::new(self.disk);
+        let mut settled = Vec::new();
+        for g in going {
+            match self.settled(&mut listings, g.item, &g.changed)? {
+                None => settled.push(g),
+                Some(why) => {
+                    self.put_back(catalog, g.id, &g.changed, &why)?;
+                    listings = Listings::new(self.disk);
+                }
+            }
+        }
+        let going = settled;
         // c. The catalog follows, on the evidence: all together, or each on
         // its own when that fails.
         let ids: Vec<OperationId> = going.iter().map(|g| g.id).collect();
@@ -797,6 +822,74 @@ impl Run<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Why `item`, its members renamed as `changed`, can't stay so, read
+    /// from `listings`, listed after its batch's renames: at its
+    /// destination, another file there reads a sidecar it brought, or its
+    /// photo reads one it didn't bring; at its source, a sidecar its photo
+    /// alone read is left behind.
+    fn settled(
+        &self,
+        listings: &mut Listings<'_>,
+        item: &Item,
+        changed: &[Member],
+    ) -> Result<Option<String>> {
+        let (Some(photo), Some(planned)) = (changed.first(), item.members.first()) else {
+            return Ok(None);
+        };
+        let Some(to) = photo.destination.as_deref() else {
+            return Ok(None);
+        };
+        let disk = listings.disk;
+        let pre = &item.preconditions;
+        // Names as the listings hold them: as the plan took them where the
+        // drive lists them decomposed (#573).
+        let usable = |dir: &Path, name: &OsStr, by: Proof| match by {
+            Proof::Names => super::proof::usable(disk, dir, name),
+            Proof::Ids => name.to_os_string(),
+        };
+        let (dir, here) = (parent(to), parent(to) == parent(&photo.source));
+        let new = usable(dir, to.file_name().unwrap_or_default(), pre.proofs.copies);
+        let kept: Vec<&OsStr> = item.kept.iter().filter_map(|k| k.file_name()).collect();
+        let carried: Vec<OsString> = changed[1..]
+            .iter()
+            .filter_map(|m| m.destination.as_deref()?.file_name())
+            .chain(kept.iter().copied().filter(|_| here))
+            .map(|n| usable(dir, n, pre.proofs.copies))
+            .collect();
+        let there = listings.get(dir, pre.proofs.copies)?;
+        if let Some(other) = there.arrival_conflict(&new, &carried, &|_| false) {
+            return Ok(Some(format!(
+                "{} there would share an XMP sidecar with it now",
+                other.to_string_lossy()
+            )));
+        }
+        let from = parent(&planned.source);
+        let old = planned.source.file_name().unwrap_or_default();
+        let same_file =
+            |a: &OsStr, b: &OsStr| match (disk.entry(&from.join(a)), disk.entry(&from.join(b))) {
+                (Ok(a), Ok(b)) => a.id == b.id,
+                _ => false,
+            };
+        // What stays at the source by the plan: the companions a rename keeps
+        // as they are, and, renamed in place, those it brought.
+        let stays: Vec<OsString> = kept
+            .iter()
+            .map(|&k| OsString::from(k))
+            .chain(carried.iter().filter(|_| here).cloned())
+            .collect();
+        let left = listings
+            .get(from, pre.proofs.originals)?
+            .companions(old, &same_file)
+            .carried
+            .into_iter()
+            .filter(|n| {
+                disk.entry(&from.join(n))
+                    .is_ok_and(|e| e.kind == EntryKind::File && e.links == 1)
+            })
+            .find(|n| !stays.contains(n));
+        Ok(left.map(|_| "its XMP sidecars changed since it was planned".into()))
     }
 
     /// Step a. of [`Self::renames`], in `w`'s transaction: `items` checked

@@ -221,6 +221,9 @@ fn every_fault_at_every_disk_step_of_a_move_ends_proven() {
         (Op::Sync, counting.count(Op::Sync)),
     ];
     assert_eq!(steps[0].1, 3);
+    // Both folders synced once for each round of renames: the photos, then
+    // the sidecar (#692).
+    assert_eq!(steps[1].1, 4);
     let mut runs = 0;
     for (at, count) in steps {
         for nth in 0..count {
@@ -246,7 +249,7 @@ fn every_fault_at_every_disk_step_of_a_move_ends_proven() {
             }
         }
     }
-    assert!(runs >= 18);
+    assert_eq!(runs, 3 * (3 + 4));
 }
 
 /// Photos of two folders, some with sidecars, moved together in one batch
@@ -292,6 +295,9 @@ fn every_fault_at_every_disk_step_of_a_batch_ends_proven() {
         (Op::Sync, counting.count(Op::Sync)),
     ];
     assert_eq!(steps[0].1, 7);
+    // Its three folders synced once for each round: the photos, then the
+    // sidecars.
+    assert_eq!(steps[1].1, 6);
     let mut runs = 0;
     for (at, count) in steps {
         for nth in 0..count {
@@ -334,7 +340,7 @@ fn every_fault_at_every_disk_step_of_a_batch_ends_proven() {
             }
         }
     }
-    assert!(runs >= 3 * (7 + 4), "{runs}");
+    assert_eq!(runs, 3 * (7 + 6));
 }
 
 #[test]
