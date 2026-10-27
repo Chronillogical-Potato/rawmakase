@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::Module;
+use crate::app::naming::editor as name_editor;
 use crate::catalog::PhotoId;
 use crate::export_settings::{Destination, Format};
 use name_read::{FileFields, Status};

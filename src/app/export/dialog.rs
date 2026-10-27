@@ -350,7 +350,7 @@ impl Editor {
         });
         if edit_names {
             let tokens = custom.as_deref().unwrap_or(naming.tokens()).to_string();
-            self.exports.name_editor = Some(super::name_editor::NameEditor::new(&tokens));
+            self.exports.name_editor = Some(super::NameEditor::new(&tokens));
             return;
         }
         let s = &mut self.exports.draft;
