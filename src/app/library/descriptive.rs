@@ -215,7 +215,7 @@ impl Library {
             reader: crate::catalog_session::background::Reader::start(
                 photos,
                 self.wake(),
-                crate::catalog::read_file_metadata,
+                crate::catalog_session::read_file_metadata,
             ),
             read: Vec::new(),
             report: Default::default(),

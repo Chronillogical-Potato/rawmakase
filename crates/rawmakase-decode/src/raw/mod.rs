@@ -99,6 +99,11 @@ pub(crate) fn camera_exif(path: &Path) -> Option<rawmakase_interop::exif::Camera
         tiffs.gps.as_deref(),
     )
 }
+/// The XMP packet the camera embeds in the CR3 at `path`, found by
+/// `rawmakase_raw::embedded_xmp`; nothing decoded. `None` for other files.
+pub(crate) fn embedded_xmp(path: &Path) -> Option<Vec<u8>> {
+    rawmakase_raw::embedded_xmp(&mut std::fs::File::open(path).ok()?)
+}
 /// What RAWmakase reads of a RAW whose sensor data it doesn't decode, an
 /// X3F: its photo info and its make and model as the file writes them.
 #[derive(Clone, Debug, Default, PartialEq)]

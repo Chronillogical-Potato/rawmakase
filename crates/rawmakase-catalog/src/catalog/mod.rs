@@ -58,7 +58,7 @@ pub use lightroom::HistoryStep;
 pub use location::CatalogLocation;
 pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
-pub use sidecar::{SidecarReport, read_file as read_file_metadata, sidecars};
+pub use sidecar::{RawXmpReader, SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {

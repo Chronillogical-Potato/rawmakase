@@ -37,20 +37,32 @@ pub type CameraExifReader = fn(&Path) -> Option<crate::exif::CameraExif>;
 
 /// What photos added from folders get where their files have none: the
 /// Preferences' Creator and Copyright, which give way to the camera's own,
-/// read by the reader given. The default is none, which reads nothing.
+/// read by the reader given; and the reader of the XMP a RAW's camera
+/// embeds, which the defaults give way to as well. The default is none,
+/// which reads nothing.
 #[derive(Clone, Debug, Default)]
 pub struct NewPhotoDefaults {
     metadata: MetadataDefaults,
     camera_exif: Option<CameraExifReader>,
+    raw_xmp: Option<super::RawXmpReader>,
 }
 impl NewPhotoDefaults {
     /// `metadata` where `camera_exif` finds no Artist or Copyright of the
-    /// camera's.
-    pub fn new(metadata: MetadataDefaults, camera_exif: CameraExifReader) -> Self {
+    /// camera's; new photos' RAWs' own XMP read by `raw_xmp`.
+    pub fn new(
+        metadata: MetadataDefaults,
+        camera_exif: CameraExifReader,
+        raw_xmp: super::RawXmpReader,
+    ) -> Self {
         Self {
             metadata,
             camera_exif: Some(camera_exif),
+            raw_xmp: Some(raw_xmp),
         }
+    }
+    /// What reads the XMP a new photo's RAW embeds; nothing by default.
+    pub(super) fn raw_xmp(&self) -> super::RawXmpReader {
+        self.raw_xmp.unwrap_or(|_| None)
     }
     /// What of the defaults a photo added from `file` gets: each one the
     /// metadata read from its files (`read`) and its camera's EXIF both lack.

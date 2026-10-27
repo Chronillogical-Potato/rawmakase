@@ -50,6 +50,13 @@ pub fn camera_exif(path: &Path) -> Option<rawmakase_interop::exif::CameraExif> {
     rawmakase_interop::exif::read(path).or_else(|| crate::raw::camera_exif(path))
 }
 
+/// The XMP a camera embeds in a RAW the catalog can't read it from itself,
+/// a CR3's (an in-camera rating, title or description), found by
+/// RAWmakase's RAW decoders; nothing decoded. `None` for other files.
+pub fn raw_xmp(path: &Path) -> Option<Vec<u8>> {
+    crate::raw::embedded_xmp(path)
+}
+
 /// The photo at `path`, opened for developing.
 pub fn open(path: &Path) -> Result<Raw> {
     let mut raw = Raw::open_file(path)?;

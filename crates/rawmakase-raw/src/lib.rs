@@ -9,7 +9,8 @@
 //! known container in a variant not decoded here is [`Error::Unsupported`].
 //! [`capture_dates`] and [`exif_tiffs`] read, from the file itself, the few
 //! parts that date a photo and hold its camera's EXIF in the containers
-//! whose EXIF is not a TIFF at the file's start.
+//! whose EXIF is not a TIFF at the file's start; [`embedded_xmp`] the XMP a
+//! CR3 keeps in a box of its own.
 #![forbid(unsafe_code)]
 mod captured;
 mod codec;
@@ -93,6 +94,17 @@ pub fn exif_tiffs(file: &mut (impl std::io::Read + std::io::Seek)) -> ExifTiffs 
     };
     let head = f.read_upto(0, 16).unwrap_or_default();
     exif_tiffs::read(&mut f, &head)
+}
+
+/// The XMP packet a camera embeds in the CR3 `file` (an in-camera rating,
+/// title or description), the box holding it read alone; none for another
+/// file, one without, or one that can't be read.
+pub fn embedded_xmp(file: &mut (impl std::io::Read + std::io::Seek)) -> Option<Vec<u8>> {
+    let mut f = io::Pieces::new(file)?;
+    let head = f.read_upto(0, 16)?;
+    container::cr3::is_cr3(&head)
+        .then(|| container::cr3::xmp(&mut f))
+        .flatten()
 }
 
 /// What RAWmakase reads of an X3F, whose sensor data it doesn't decode: all

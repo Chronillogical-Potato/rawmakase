@@ -693,6 +693,7 @@ fn sync_folder(
         &rawmakase::catalog::NewPhotoDefaults::new(
             rawmakase::catalog::MetadataDefaults::load(),
             rawmakase::photo::camera_exif,
+            rawmakase::photo::raw_xmp,
         ),
     )?;
     for s in &applied.skipped {
