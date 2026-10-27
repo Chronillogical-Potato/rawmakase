@@ -59,6 +59,10 @@ impl Scope {
     fn standalone(&self) -> bool {
         self.photos.iter().any(|p| p.id.is_none())
     }
+    /// Some photo's title, caption, copyright or creator is its file's.
+    fn lacks_descriptive(&self) -> bool {
+        self.photos.iter().any(|p| p.fields.lacks_descriptive())
+    }
 }
 
 /// A batch whose files already exist, waiting for the answer to Ask.
@@ -318,7 +322,10 @@ impl Editor {
         !scope.photos.is_empty()
             && template
                 .needs()
-                .and(name_read::file_sourced(scope.standalone()))
+                .and(name_read::file_sourced(
+                    scope.standalone(),
+                    scope.lacks_descriptive(),
+                ))
                 .any()
     }
     /// Whether names by `template` wait for the scope's files: it needs
@@ -337,6 +344,7 @@ impl Editor {
                     .map(|p| ToRead {
                         path: p.source.clone(),
                         standalone: p.id.is_none(),
+                        descriptive: p.fields.lacks_descriptive(),
                     })
                     .collect();
                 self.exports

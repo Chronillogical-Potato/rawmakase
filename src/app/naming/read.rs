@@ -1,7 +1,9 @@
 //! Reading what file names need from the photos' files, in the
 //! background: every photo's camera make and model (the catalog keeps a
-//! combined camera label, which is not Lightroom's Make or Model), and for a
-//! photo opened without a catalog also its capture time and photo info.
+//! combined camera label, which is not Lightroom's Make or Model), the
+//! title, caption, copyright and creator of a photo the catalog has none of
+//! its own for, and for a photo opened without a catalog also its capture
+//! time and photo info.
 //!
 //! A read belongs to the scope it was started for (Export's). It is started only
 //! when the template needs what it reads, and cancelled when the scope is
@@ -27,6 +29,20 @@ pub(crate) struct FileFields {
     /// For a photo without a catalog: its capture time and photo info.
     pub captured: Option<String>,
     pub info: Option<PhotoInfo>,
+    /// Its own title, caption, copyright and creator, when asked for.
+    pub descriptive: FileText,
+}
+
+/// What a file says of a photo's title, caption, copyright and creator:
+/// its sidecar's, else its own XMP's, else its EXIF's (Image Description,
+/// Copyright, Artist); `None` where none says anything.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct FileText {
+    pub title: Option<String>,
+    pub caption: Option<String>,
+    pub copyright: Option<String>,
+    /// ", " between them, as Lightroom names them.
+    pub creator: Option<String>,
 }
 
 /// One photo to read: its file, and whether it has no catalog (so its
@@ -35,6 +51,9 @@ pub(crate) struct FileFields {
 pub(in crate::app) struct ToRead {
     pub path: PathBuf,
     pub standalone: bool,
+    /// The catalog lacks some of its title, caption, copyright and creator,
+    /// which the file then gives.
+    pub descriptive: bool,
 }
 
 /// Reads one photo's file: what it gave, or why it can't be read (a file
@@ -214,21 +233,75 @@ impl Drop for NameRead {
 }
 
 /// What the files of a scope give, `standalone` when its photo has no
-/// catalog: the catalog has the rest.
-pub(in crate::app) fn file_sourced(standalone: bool) -> Needs {
+/// catalog, `descriptive` when the catalog lacks some photo's title,
+/// caption, copyright or creator: the catalog has the rest.
+pub(in crate::app) fn file_sourced(standalone: bool, descriptive: bool) -> Needs {
     Needs {
         captured: standalone,
         info: standalone,
         camera: true,
+        descriptive,
     }
 }
 
-/// Puts what `photo`'s file gave in its fields.
+/// Puts what `photo`'s file gave in its fields: a title, caption, copyright
+/// or creator only where the catalog has none of its own.
 pub(in crate::app) fn fill(fields: &mut NameFields, read: FileFields, standalone: bool) {
     fields.camera = read.camera;
     if standalone {
         fields.captured = read.captured;
         fields.info = read.info.unwrap_or_default();
+    }
+    let text = read.descriptive;
+    for (field, file) in [
+        (&mut fields.title, text.title),
+        (&mut fields.caption, text.caption),
+        (&mut fields.copyright, text.copyright),
+        (&mut fields.creator, text.creator),
+    ] {
+        if field.is_none() {
+            *field = file;
+        }
+    }
+}
+
+/// `path`'s own title, caption, copyright and creator (see [`FileText`]).
+fn file_text(path: &std::path::Path) -> FileText {
+    use crate::metadata::Value;
+    let xmp = crate::catalog_session::read_file_metadata(path)
+        .0
+        .unwrap_or_default();
+    let lang = |value: Option<Value<crate::metadata::LangAlt>>| match value? {
+        Value::Set(langs) => Some(langs.default_text().unwrap_or_default().to_string()),
+        Value::Cleared => Some(String::new()),
+    };
+    let exif = crate::photo::camera_exif(path);
+    let tag = |tag: u16| {
+        exif.as_ref()
+            .and_then(|e| e.get(tag))
+            .and_then(crate::exif::Field::text)
+            // A copyright's editor part follows a NUL: the photographer's.
+            .map(|t| t.split('\0').next().unwrap_or_default().trim().to_string())
+            .filter(|t| !t.is_empty())
+    };
+    use crate::exif::tag::{ARTIST, COPYRIGHT, IMAGE_DESCRIPTION};
+    FileText {
+        title: lang(xmp.title),
+        caption: lang(xmp.caption).or_else(|| tag(IMAGE_DESCRIPTION)),
+        copyright: lang(xmp.copyright).or_else(|| tag(COPYRIGHT)),
+        creator: match xmp.creator {
+            Some(Value::Set(names)) => Some(names.join(", ")),
+            Some(Value::Cleared) => Some(String::new()),
+            // EXIF's Artist names several people with "; " between them.
+            None => tag(ARTIST).map(|artist| {
+                artist
+                    .split(';')
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        },
     }
 }
 
@@ -272,6 +345,11 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
         },
         captured,
         info,
+        descriptive: if photo.descriptive {
+            file_text(path)
+        } else {
+            FileText::default()
+        },
     })
 }
 
@@ -284,6 +362,7 @@ pub(in crate::app) fn read_path(
     read_file(&ToRead {
         path: path.to_path_buf(),
         standalone,
+        descriptive: true,
     })
 }
 
@@ -312,6 +391,7 @@ mod tests {
         let photo = || ToRead {
             path: PathBuf::from("a.ARW"),
             standalone: false,
+            descriptive: false,
         };
         let mut first = NameRead::default();
         first.set_reader(Arc::new(|_: &ToRead| Ok(FileFields::default())));

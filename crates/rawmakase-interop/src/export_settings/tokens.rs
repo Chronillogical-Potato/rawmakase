@@ -506,10 +506,13 @@ pub struct Needs {
     pub info: bool,
     /// The camera's make or model.
     pub camera: bool,
+    /// A title, caption, copyright or creator, which a photo the catalog
+    /// has none of its own for takes from its file.
+    pub descriptive: bool,
 }
 impl Needs {
     pub fn any(self) -> bool {
-        self.captured || self.info || self.camera
+        self.captured || self.info || self.camera || self.descriptive
     }
     /// What both need.
     pub fn and(self, other: Needs) -> Needs {
@@ -517,6 +520,7 @@ impl Needs {
             captured: self.captured && other.captured,
             info: self.info && other.info,
             camera: self.camera && other.camera,
+            descriptive: self.descriptive && other.descriptive,
         }
     }
 }
@@ -661,6 +665,9 @@ impl TokenTemplate {
             match token {
                 Token::Date(_) => needs.captured = true,
                 Token::Field(Field::Make | Field::Model) => needs.camera = true,
+                Token::Field(Field::Title | Field::Caption | Field::Copyright | Field::Creator) => {
+                    needs.descriptive = true
+                }
                 Token::Field(
                     Field::Lens
                     | Field::Iso
@@ -824,14 +831,15 @@ impl super::NameFields {
     /// Lightroom).
     fn value(&self, field: Field) -> Option<String> {
         let some = |text: &str| Some(text.trim().to_string());
+        let own = |text: &Option<String>| some(text.as_deref().unwrap_or_default());
         let known =
             |text: Option<&String>| text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let info = &self.info;
         match field {
-            Field::Title => some(&self.title),
-            Field::Caption => some(&self.caption),
-            Field::Copyright => some(&self.copyright),
-            Field::Creator => some(&self.creator),
+            Field::Title => own(&self.title),
+            Field::Caption => own(&self.caption),
+            Field::Copyright => own(&self.copyright),
+            Field::Creator => own(&self.creator),
             Field::Rating => Some(if self.rating > 0 {
                 self.rating.to_string()
             } else {

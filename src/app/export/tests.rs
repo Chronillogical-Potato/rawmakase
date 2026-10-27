@@ -2,6 +2,7 @@ use super::*;
 use crate::app::Module;
 use crate::app::naming::editor as name_editor;
 use crate::catalog::PhotoId;
+use crate::export_settings::NameContext;
 use crate::export_settings::{Destination, Format};
 use name_read::{FileFields, Status};
 
@@ -402,8 +403,8 @@ fn names_come_from_the_catalog_as_it_was_when_export_was_chosen() -> anyhow::Res
     let scope = e.export_scope().expect("the copy");
     let fields = &scope.photos[0].fields;
     assert_eq!(
-        (fields.title.as_str(), fields.copy_name.as_str()),
-        ("Harbour", "Night")
+        (fields.title.as_deref(), fields.copy_name.as_str()),
+        (Some("Harbour"), "Night")
     );
     assert_eq!(fields.captured, None);
     // The catalog changes after the dialog opened.
@@ -721,6 +722,101 @@ fn an_x3f_names_its_export_from_its_exif_or_property_list() -> anyhow::Result<()
         );
         assert_eq!(read.info.and_then(|i| i.camera).as_deref(), Some(camera));
     }
+    Ok(())
+}
+
+/// A file's own title, caption, copyright and creator: its sidecar's XMP
+/// first, then its EXIF's Image Description, Copyright (the photographer's
+/// part) and Artist (several people as Lightroom names them); they fill
+/// only what the catalog has none of, a cleared caption staying empty.
+#[test]
+fn a_files_own_descriptive_text_names_what_the_catalog_lacks() -> anyhow::Result<()> {
+    use crate::exif::{CameraExif, Field, tag};
+    use crate::export::exif::{Container, camera_raw};
+    let dir = tempfile::tempdir()?;
+    let x3f = dir.path().join("SDIM0001.X3F");
+    let mut copyright = b"Ann Example\0Ed Itor\0".to_vec();
+    let camera = CameraExif {
+        main: vec![
+            Field::ascii(tag::MAKE, "SIGMA"),
+            Field::ascii(tag::MODEL, "sd Quattro"),
+            Field::ascii(tag::IMAGE_DESCRIPTION, "From EXIF"),
+            Field::ascii(tag::ARTIST, "A One; B Two"),
+            Field {
+                tag: tag::COPYRIGHT,
+                kind: 2,
+                count: copyright.len() as u32,
+                bytes: std::mem::take(&mut copyright),
+            },
+        ],
+        ..Default::default()
+    };
+    std::fs::write(&x3f, camera_raw(Container::X3f, camera))?;
+    std::fs::write(
+        dir.path().join("SDIM0001.xmp"),
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" dc:title="Harbour"/>
+        </rdf:RDF></x:xmpmeta>"#,
+    )?;
+    let read = name_read::read_path(&x3f, false).unwrap();
+    assert_eq!(
+        read.descriptive,
+        name_read::FileText {
+            title: Some("Harbour".into()),
+            caption: Some("From EXIF".into()),
+            copyright: Some("Ann Example".into()),
+            creator: Some("A One, B Two".into()),
+        }
+    );
+    let mut fields = NameFields {
+        caption: Some(String::new()),
+        creator: Some("Catalog Person".into()),
+        ..Default::default()
+    };
+    name_read::fill(&mut fields, read, false);
+    assert_eq!(fields.title.as_deref(), Some("Harbour"));
+    assert_eq!(fields.caption.as_deref(), Some(""), "cleared stays cleared");
+    assert_eq!(fields.copyright.as_deref(), Some("Ann Example"));
+    assert_eq!(fields.creator.as_deref(), Some("Catalog Person"));
+    Ok(())
+}
+
+/// A title only the photo's sidecar has names its export: the Example waits
+/// for the file, then has it.
+#[test]
+fn a_title_only_the_file_has_names_the_export() -> anyhow::Result<()> {
+    let (dir, mut e, ids, ctx) = editor()?;
+    let source = e
+        .library
+        .as_ref()
+        .unwrap()
+        .photo(ids[0])
+        .unwrap()
+        .path
+        .clone();
+    std::fs::write(
+        source.with_extension("xmp"),
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+        <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" dc:title="Harbour"/>
+        </rdf:RDF></x:xmpmeta>"#,
+    )?;
+    e.library.as_mut().unwrap().select(Some(ids[0]));
+    let mut s = settings(&dir.path().join("out"));
+    s.choose_tokens("{{com.adobe.title}}");
+    open_dialog(&mut e, s);
+    frame(&mut e, &ctx, vec![]);
+    assert!(matches!(e.exports.read.status(), Status::Reading { .. }));
+    until(&mut e, &ctx, |e| e.exports.read.status() == Status::Ready);
+    let photo = &e.exports.scope.photos[0];
+    let at = NameContext {
+        index: 0,
+        total: 1,
+        fields: &photo.fields,
+    };
+    assert_eq!(
+        e.exports.draft.file_name_for(&photo.source, &at).0,
+        "Harbour.tif"
+    );
     Ok(())
 }
 
