@@ -231,11 +231,34 @@ pub struct NameFields {
     pub copyright: Option<String>,
     /// Its creators, ", " between them, as Lightroom names them.
     pub creator: Option<String>,
+    /// Its first creator (Lightroom's Artist), kept as `creator` is.
+    pub artist: Option<String>,
+    /// Its keywords' names, by name, ", " between them, as Lightroom names
+    /// them.
+    pub keywords: String,
     pub rating: i32,
     pub label: String,
     pub camera: CameraNames,
     /// The system's decimal separator, where Lightroom writes it.
     pub decimal: Decimal,
+    /// What only its file says, once read.
+    pub facts: FileFacts,
+}
+
+/// What file names take from a photo's file alone, the catalog keeping none
+/// of it; each `None` when the file doesn't say (or wasn't read).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FileFacts {
+    /// The software that wrote it (EXIF Software).
+    pub software: Option<String>,
+    /// Its focal length in 35 mm film (EXIF FocalLengthIn35mmFilm).
+    pub focal_35mm: Option<u32>,
+    /// Its IPTC headline and place names (XMP).
+    pub headline: Option<String>,
+    pub city: Option<String>,
+    pub state: Option<String>,
+    pub country: Option<String>,
+    pub sublocation: Option<String>,
 }
 
 /// The decimal separator of the user's region, which Lightroom writes in an
@@ -266,10 +289,21 @@ impl NameFields {
         caption: None,
         copyright: None,
         creator: None,
+        artist: None,
+        keywords: String::new(),
         rating: 0,
         label: String::new(),
         camera: CameraNames::NotRead,
         decimal: Decimal('.'),
+        facts: FileFacts {
+            software: None,
+            focal_35mm: None,
+            headline: None,
+            city: None,
+            state: None,
+            country: None,
+            sublocation: None,
+        },
     };
     /// Whether a title, caption, copyright or creator is the file's own,
     /// which the catalog doesn't have.

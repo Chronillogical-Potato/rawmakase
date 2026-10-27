@@ -236,3 +236,41 @@ fn impossible_days_and_times_are_not_read_and_empty_gps_clears() -> Result<()> {
     assert_eq!(cleared.location, Some(Location::Cleared));
     Ok(())
 }
+
+/// IPTC's headline and place names, in attribute and element form; a
+/// sidecar's empty one suppresses the file's, a missing one doesn't.
+#[test]
+fn headline_and_place_names_are_read_and_a_sidecar_wins() -> Result<()> {
+    let packet = |attributes: &str, elements: &str| {
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description rdf:about="" xmlns:photoshop="http://ns.adobe.com/photoshop/1.0/"
+              xmlns:Iptc4xmpCore="http://iptc.org/std/Iptc4xmpCore/1.0/xmlns/" {attributes}>{elements}</rdf:Description>
+            </rdf:RDF></x:xmpmeta>"#
+        )
+    };
+    let file = read(&packet(
+        r#"photoshop:Headline="Harbour at dawn" photoshop:City="Gdańsk""#,
+        "<Iptc4xmpCore:Location>Long Market</Iptc4xmpCore:Location>\
+         <photoshop:Country>Poland</photoshop:Country>",
+    ))?;
+    assert_eq!(
+        file.place,
+        Place {
+            headline: Some("Harbour at dawn".into()),
+            city: Some("Gdańsk".into()),
+            state: None,
+            country: Some("Poland".into()),
+            sublocation: Some("Long Market".into()),
+        }
+    );
+    let sidecar = read(&packet(
+        r#"photoshop:City="" photoshop:State="Pomerania""#,
+        "",
+    ))?;
+    let place = sidecar.or(file).place;
+    assert_eq!(place.city.as_deref(), Some(""));
+    assert_eq!(place.state.as_deref(), Some("Pomerania"));
+    assert_eq!(place.headline.as_deref(), Some("Harbour at dawn"));
+    Ok(())
+}

@@ -163,7 +163,7 @@ fn the_editors_mistakes_are_said_where_they_are() {
         "{a}"
     );
     // Every stretch of the text is shown as what it is.
-    let text = "a{Filename}{?x}{Keywords}{Nope}";
+    let text = "a{Filename}{?x}{Flash}{Nope}";
     let spans: Vec<Span> = TokenTemplate::spans(text)
         .into_iter()
         .map(|s| s.1)
@@ -233,6 +233,45 @@ fn generated_templates_round_trip() {
             Ok(&read)
         );
     }
+}
+
+/// The tokens filled from the file alone, the creators and the keywords,
+/// as Lightroom filled them for a synthetic JPEG.
+#[test]
+fn file_facts_artist_and_keywords_fill_as_lightroom_filled_them() {
+    let f = NameFields {
+        facts: crate::export_settings::FileFacts {
+            software: Some("ProbeSoft 1.2".into()),
+            focal_35mm: Some(35),
+            headline: Some("Probe Headline".into()),
+            ..Default::default()
+        },
+        creator: Some("A One, B Two".into()),
+        artist: Some("A One".into()),
+        keywords: "Apple, Zebra".into(),
+        ..NameFields::default()
+    };
+    let one = |tokens: &str| name(tokens, &f, "").0;
+    assert_eq!(one("{{com.adobe.software}}"), "ProbeSoft 1.2");
+    assert_eq!(one("{{com.adobe.focalLength35mm}}"), "35 mm");
+    assert_eq!(one("{{com.adobe.artist}}"), "A One");
+    assert_eq!(one("{{com.adobe.creator}}"), "A One, B Two");
+    assert_eq!(one("{{com.adobe.keywords}}"), "Apple, Zebra");
+    assert_eq!(one("{{com.adobe.headline}}"), "Probe Headline");
+    // The file's facts are read for them; keywords are the catalog's.
+    let needs = |tokens: &str| TokenTemplate::parse(tokens).needs();
+    assert!(needs("{{com.adobe.city}}").facts);
+    assert!(needs("{{com.adobe.artist}}").descriptive);
+    assert!(!needs("{{com.adobe.keywords}}").any());
+    // Without them: a note for what the file must say, nothing for an
+    // unset field.
+    let (stem, notes) = name(
+        "x{{com.adobe.software}}{{com.adobe.city}}",
+        &NameFields::default(),
+        "",
+    );
+    assert_eq!(stem, "x");
+    assert_eq!(notes, ["no Software"]);
 }
 
 /// Lightroom writes an Exposure's aperture with the region's decimal
@@ -375,7 +414,7 @@ fn what_a_photo_lacks_is_empty_and_said() {
     assert_eq!(notes.len(), 1);
     // Unknown and unsupported tokens are said once.
     let (_, notes) = name(
-        "{{future}}{{future}}{{com.adobe.keywords}}{{naming_importNumber_3Digits}}",
+        "{{future}}{{future}}{{com.adobe.flash}}{{naming_importNumber_3Digits}}",
         &none,
         "",
     );
@@ -383,7 +422,7 @@ fn what_a_photo_lacks_is_empty_and_said() {
         notes,
         [
             "unknown file name token {{future}}",
-            "not supported yet: Keywords",
+            "not supported yet: Flash",
             "not supported yet: Import # (001)",
             "the template gave no name: named after the file",
         ]

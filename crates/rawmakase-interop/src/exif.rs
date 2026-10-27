@@ -55,6 +55,7 @@ pub mod tag {
     pub const SHUTTER_SPEED_VALUE: u16 = 0x9201;
     pub const APERTURE_VALUE: u16 = 0x9202;
     pub const FOCAL_LENGTH: u16 = 0x920a;
+    pub const FOCAL_LENGTH_IN_35MM: u16 = 0xa405;
     pub const MAKER_NOTE: u16 = 0x927c;
     pub const SUBSEC_TIME: u16 = 0x9290;
     pub const SUBSEC_TIME_ORIGINAL: u16 = 0x9291;
@@ -273,6 +274,12 @@ pub fn capture_time_of(dates: [(Option<String>, Option<String>); 3]) -> Option<S
 /// from its EXIF; `None` when it has none. Dimensions are not read here.
 pub fn photo_info(path: &Path) -> Option<crate::metadata::PhotoInfo> {
     directories(path, |tag| tag == MAKE || tag == MODEL)?.photo_info()
+}
+
+/// [`read`] of what file names take from the EXIF: also the software that
+/// wrote the file, which an export writes its own of and so leaves out.
+pub fn read_for_names(path: &Path) -> Option<CameraExif> {
+    directories(path, |tag| MAIN.contains(&tag) || tag == SOFTWARE)
 }
 
 /// The EXIF Make and Model of a JPEG, TIFF, PNG or TIFF-based RAW, trimmed, each
@@ -1010,6 +1017,23 @@ mod tiffs_tests {
         let mut v = text.as_bytes().to_vec();
         v.push(0);
         (tag, ASCII, v.len() as u32, v)
+    }
+
+    /// The software that wrote a file is left out of what exports keep,
+    /// and read for file names.
+    #[test]
+    fn names_read_the_software_exports_leave_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.tif");
+        let fields = [ascii(MAKE, "SONY"), ascii(SOFTWARE, "DSLR-A230 v1.10")];
+        std::fs::write(&path, tiff(b"II", &fields)).unwrap();
+        assert!(read(&path).unwrap().get(SOFTWARE).is_none());
+        let named = read_for_names(&path).unwrap();
+        assert_eq!(
+            named.get(SOFTWARE).and_then(Field::text).as_deref(),
+            Some("DSLR-A230 v1.10")
+        );
+        assert!(named.get(MAKE).is_some());
     }
 
     /// A CR3's three TIFFs, each holding one directory, give the

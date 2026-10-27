@@ -32,6 +32,25 @@ pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
         sql!("SELECT captured, copy_name, rating, label FROM photos WHERE id = ?"),
         &[&id],
     )?;
+    row! {
+        struct Keyword {
+            name: String,
+        }
+    }
+    let mut keywords: Vec<String> = db
+        .read::<Keyword>(
+            sql!(
+                "SELECT k.name FROM photo_keywords pk JOIN keywords k ON k.id = pk.keyword
+                 WHERE pk.photo = ?"
+            ),
+            &[&id],
+        )?
+        .into_iter()
+        .map(|k| k.name)
+        .collect();
+    // By name, as Lightroom lists them.
+    keywords.sort_by_cached_key(|k| (k.to_lowercase(), k.clone()));
+    keywords.dedup();
     let d = super::descriptive::read(db, id)?;
     // No row is the file's own (`None`); a cleared one is empty.
     let text = |value: &Option<Value<LangAlt>>| match value {
@@ -52,11 +71,18 @@ pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
             Some(Value::Cleared) => Some(String::new()),
             None => None,
         },
+        artist: match &d.creator {
+            Some(Value::Set(names)) => Some(names.first().cloned().unwrap_or_default()),
+            Some(Value::Cleared) => Some(String::new()),
+            None => None,
+        },
+        keywords: keywords.join(", "),
         rating: photo.rating,
         label: photo.label,
         camera: Default::default(),
-        // The app's to say, from the system.
+        // The app's to say, from the system and the file.
         decimal: Default::default(),
+        facts: Default::default(),
     })
 }
 
@@ -101,6 +127,21 @@ mod tests {
             (fields[0].title.as_deref(), fields[0].creator.as_deref()),
             (Some("Harbour"), Some("Ann, Bo"))
         );
+        assert_eq!(fields[0].artist.as_deref(), Some("Ann"));
+        // Keywords by name, case aside, leaf names only, each once.
+        cat.add_keywords(
+            &ids[..1],
+            &[
+                vec!["Zebra".into()],
+                vec!["Places".into(), "apple".into()],
+                vec!["Fruit".into(), "apple".into()],
+            ],
+        )?;
+        assert_eq!(cat.name_fields(&ids[..1])?[0].keywords, "apple, Zebra");
+        // No creator row: the file's own Artist; cleared: none.
+        assert_eq!(fields[1].artist, None);
+        cat.set_creators(&ids[1..2], &[])?;
+        assert_eq!(cat.name_fields(&ids[1..2])?[0].artist.as_deref(), Some(""));
         // No row: the file's own; cleared: empty, whatever the file says.
         assert_eq!(fields[0].caption, None);
         cat.set_text(&ids[1..2], TextField::Caption, "")?;
