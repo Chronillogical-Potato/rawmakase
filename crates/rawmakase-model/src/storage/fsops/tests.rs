@@ -640,6 +640,8 @@ fn a_copy_is_finished_through_its_handle_whatever_is_at_its_name() {
     let d = dir();
     let (source, at) = (d.path().join("a.NEF"), d.path().join("b.NEF"));
     fs::write(&source, b"synthetic raw").unwrap();
+    // Tagged first: a stream written on Windows changes the file's time.
+    let _ = tagged(&source, "tag", b"Red");
     let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_600_000_000, 0);
     let opened = fs::File::options().write(true).open(&source).unwrap();
     opened.set_modified(when).unwrap();
@@ -649,7 +651,6 @@ fn a_copy_is_finished_through_its_handle_whatever_is_at_its_name() {
         use std::os::unix::fs::PermissionsExt as _;
         fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).unwrap();
     }
-    let _ = tagged(&source, "tag", b"Red");
     let mut into = create_file(&at).unwrap();
     copy_into(&source, &mut into, &mut |_| true).unwrap();
     // Another file takes its name.
