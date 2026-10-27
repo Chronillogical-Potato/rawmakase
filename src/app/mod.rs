@@ -524,6 +524,8 @@ impl eframe::App for Editor {
         self.themes.applied().gray(12).to_normalized_gamma_f32()
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        crate::platform::titlebar::configure(frame, ui.ctx());
         // AppKit moves the traffic lights back during layout passes.
         fastframe_titlebar::align_traffic_lights(frame, ui.ctx(), workspace::BAR_HEIGHT);
         #[cfg(windows)]

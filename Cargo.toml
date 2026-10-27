@@ -88,13 +88,13 @@ midir = "0.11"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 dispatch2 = "0.3"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSCell", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSCell", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow", "objc2-quartz-core"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer", "objc2-core-graphics"] }
 # The Trash (src/platform/trash/macos.rs): NSFileManager's trashItemAtURL,
 # and URLForDirectory for whether a volume has one; a drive's name for the
 # Folders panel (src/platform/volume.rs): NSURLVolumeNameKey.
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "FoundationErrors", "NSError", "NSFileManager", "NSPathUtilities", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "FoundationErrors", "NSError", "NSFileManager", "NSPathUtilities", "NSString", "NSURL", "NSUserDefaults"] }
 
 # The freedesktop Trash (src/platform/trash/freedesktop.rs, also built for
 # macOS's tests): the user's id, and whether a folder could be made where

@@ -5,6 +5,7 @@ pub(crate) mod menu;
 pub(crate) mod network;
 pub(crate) mod quit;
 pub(crate) mod reveal;
+pub(crate) mod titlebar;
 pub(crate) mod trash;
 pub(crate) mod volume;
 pub(crate) mod web;
