@@ -2,6 +2,16 @@ use super::*;
 use crate::develop::masks::local::LocalDeltas;
 
 #[test]
+fn windows_leaves_vulkan_out_by_default() {
+    // Intel's Vulkan driver crashed the app at launch where DirectX 12 worked (#623).
+    let windows = default_backends(true);
+    assert!(windows.contains(wgpu::Backends::DX12 | wgpu::Backends::GL));
+    assert!(!windows.contains(wgpu::Backends::VULKAN));
+    let elsewhere = default_backends(false);
+    assert!(elsewhere.contains(wgpu::Backends::VULKAN | wgpu::Backends::METAL));
+}
+
+#[test]
 #[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
 fn gpu_clarity_reconstructs_fine_edges_like_the_cpu() -> Result<()> {
     use crate::{

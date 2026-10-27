@@ -758,6 +758,7 @@ impl winit::application::ApplicationHandler<eframe::UserEvent> for SurfaceGate<'
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        setup.instance_descriptor.backends = crate::develop::gpu::backends();
         #[cfg(target_os = "linux")]
         {
             setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| {
