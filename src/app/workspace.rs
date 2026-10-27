@@ -228,6 +228,7 @@ impl Editor {
         self.remove_copy_window(&ctx);
         self.remove_folder_window(&ctx);
         self.folder_sync_window(&ctx);
+        self.discard_for_find_window(&ctx);
         self.read_metadata_window(&ctx);
         self.file_op_window(&ctx);
         self.not_editable_window(&ctx);

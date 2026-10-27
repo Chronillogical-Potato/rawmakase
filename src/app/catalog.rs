@@ -751,8 +751,9 @@ impl Editor {
             Err(e) => self.status = format!("Folder not removed: {e:#}"),
         }
     }
-    /// Closes the open photo, removed from the catalog: nothing may save
-    /// into it, nor a load still under way bring it back.
+    /// Closes the open photo, removed from the catalog or its unsaved change
+    /// discarded: nothing may save into it, nor a load still under way bring
+    /// it back.
     pub(super) fn close_removed_document(&mut self) {
         self.load.invalidate();
         self.selection.clear_document();

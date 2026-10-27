@@ -323,7 +323,9 @@ impl Editor {
     }
     /// Find on Disk's plan is back. The photo open in Develop moves only on
     /// a verified match: an unverified file picked for it is refused, its
-    /// edit left pending, whichever module shows. The file picked, verified,
+    /// edit left pending, whichever module shows. When that edit can't be
+    /// saved, its file gone, opening another photo can't free it: discarding
+    /// the change is asked instead (issue #702). The file picked, verified,
     /// with nothing else found and its old file observed missing, is
     /// relinked at once; anything else is reviewed.
     fn found_on_disk(&mut self, scan: Scan, plan: SyncPlan) {
@@ -332,6 +334,15 @@ impl Editor {
             return;
         };
         if self.open_master() == Some(picked.photo) && !picked.verified {
+            let stuck = self.document.edit.save_state().needs_save()
+                && self.document.path.as_ref().is_some_and(|p| !p.exists());
+            if stuck {
+                let badges = self.badges(&plan);
+                self.modal = Some(super::Modal::DiscardForFind(Box::new(Review::new(
+                    scan, plan, badges,
+                ))));
+                return;
+            }
             self.status = format!(
                 "{} is open in Develop. Open another photo in Develop, then Find on Disk again",
                 file_name(&picked.from)
@@ -346,6 +357,61 @@ impl Editor {
             let ctx = self.context.clone();
             self.apply_folder_sync(&ctx);
         }
+    }
+    /// Asks before discarding the unsaved change of the photo open in
+    /// Develop, so that Find on Disk's unverified file can be reviewed for
+    /// it (see [`found_on_disk`](Self::found_on_disk)).
+    pub(super) fn discard_for_find_window(&mut self, ctx: &egui::Context) {
+        let Some(super::Modal::DiscardForFind(review)) = &self.modal else {
+            return;
+        };
+        let name = review
+            .plan
+            .picked()
+            .map(|m| file_name(&m.from))
+            .unwrap_or_default();
+        // Only a click or the focused button confirms: a stray Return must
+        // never discard an edit.
+        let Some(discard) = super::widgets::confirm_modal(
+            ctx,
+            "discard-for-find",
+            &format!("Discard the unsaved change to {name}?"),
+            &format!(
+                "{name} is open in Develop with a change that can't be saved: \
+                 its file is gone. The file picked can't be verified as {name}, \
+                 so the open photo can't follow it. Discarding closes the photo \
+                 and reviews the file picked. To keep the change, Cancel and \
+                 save it as a preset, or put the file back where it was."
+            ),
+            false,
+            &[("Cancel", false), ("Discard Change", true)],
+            false,
+        ) else {
+            return;
+        };
+        self.answer_discard_for_find(discard);
+    }
+    fn answer_discard_for_find(&mut self, discard: bool) {
+        let Some(super::Modal::DiscardForFind(review)) = self.modal.take() else {
+            return;
+        };
+        let Some((picked, name)) = review.plan.picked().map(|m| (m.photo, file_name(&m.from)))
+        else {
+            return;
+        };
+        if !discard {
+            self.status = format!(
+                "{name} keeps its unsaved change. Save it as a preset or put the file back, then Find on Disk again"
+            );
+            return;
+        }
+        // Closed only if still the photo asked about; the review then
+        // checks the catalog is unchanged before applying.
+        if self.open_master() == Some(picked) {
+            self.close_removed_document();
+        }
+        self.folder_sync.review = Some(*review);
+        self.folder_sync.showing = false;
     }
     /// The master of the photo loaded in Develop, shown or not.
     fn open_master(&self) -> Option<PhotoId> {
@@ -2028,6 +2094,7 @@ fn thousands(n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::Modal;
     use crate::app::library::Module;
     use crate::catalog::ReadChecksum;
     use crate::storage::{ChecksumRead, FileChecksum};
@@ -2607,12 +2674,28 @@ mod tests {
                 let library = e.library.as_ref().unwrap();
                 assert_eq!(library.photo(a).unwrap().path, trip.join("a.dng"));
             };
-            refused(&mut e);
+            // Its edit can't be saved, its file gone: discarding it is
+            // asked, and Cancel keeps it.
+            e.start_find_on_disk(a, to.clone());
+            scanned(&mut e);
+            assert!(matches!(e.modal, Some(Modal::DiscardForFind(_))));
+            e.answer_discard_for_find(false);
+            assert!(e.modal.is_none());
+            assert!(e.folder_sync.review.is_none());
+            assert!(
+                e.status.contains("keeps its unsaved change"),
+                "{}",
+                e.status
+            );
             assert_eq!(e.document.edit.recipe().exposure, 0.4);
             assert!(e.document.edit.save_state().needs_save());
             assert_eq!(
                 e.document.path.as_deref(),
                 Some(trip.join("a.dng").as_path())
+            );
+            assert_eq!(
+                e.library.as_ref().unwrap().photo(a).unwrap().path,
+                trip.join("a.dng")
             );
             // The Library shown, the document still loaded, its edit clean.
             e.document.edit.save_state_mut().saved();
@@ -2637,6 +2720,41 @@ mod tests {
                 library.message_detail()
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn an_unsaved_change_on_a_gone_file_can_be_discarded_for_an_unverified_file()
+    -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        let a = id(&e, "a.dng");
+        forget_checksum(&e, a)?;
+        open_in_develop(&mut e, a, trip.join("a.dng"));
+        e.document.edit.change(None, |r| r.exposure = 0.4);
+        let to = move_out(&trip, "a.dng")?;
+        // Leaving the photo saves first, which fails: it can't be left.
+        assert!(!e.flush());
+        e.start_find_on_disk(a, to.clone());
+        scanned(&mut e);
+        assert!(matches!(e.modal, Some(Modal::DiscardForFind(_))));
+        // Nothing is reviewed while the question is open.
+        e.poll_folder_sync();
+        assert!(!e.folder_sync.showing);
+        e.answer_discard_for_find(true);
+        // The photo is closed, its change gone, and the file reviewed.
+        assert!(e.modal.is_none());
+        assert_eq!(e.document.catalog_photo, None);
+        assert!(!e.document.edit.save_state().needs_save());
+        assert!(e.module == Module::Library);
+        e.poll_folder_sync();
+        assert!(e.folder_sync.showing, "{}", e.status);
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        let library = e.library.as_ref().unwrap();
+        assert_eq!(library.photo(a).unwrap().path, to);
+        // The discarded change was never saved.
+        assert!(library.session.catalog.load_edit(a, &to)?.is_none());
         Ok(())
     }
 

@@ -515,6 +515,9 @@ enum Modal {
     ReadMetadata(Vec<PhotoId>),
     /// A folder change waiting for the user's answer.
     FolderQuestion(folder_locations::FolderQuestion),
+    /// Find on Disk's review, held while the user decides whether to discard
+    /// the open photo's unsaved change for it.
+    DiscardForFind(Box<folder_sync::Review>),
 }
 impl eframe::App for Editor {
     /// What shows where no panel paints, e.g. behind the Library grid: the
