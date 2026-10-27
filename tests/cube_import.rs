@@ -136,10 +136,11 @@ fn lut_space_chooses_the_space_cubes_expect() -> Result<()> {
     let data = temp.path().join("data");
     let library = data.join("camera-profiles");
 
-    let (ok, out) = import_with(&data, &["--lut-space", "display-p3"], &[&warm])?;
+    let (ok, out) = import_with(&data, &["--lut-space", "dci-p3"], &[&warm])?;
     assert!(!ok, "{out}");
     assert!(
-        out.contains("display-p3") && out.contains("srgb, adobe-rgb, prophoto-rgb"),
+        out.contains("dci-p3")
+            && out.contains("srgb, adobe-rgb, display-p3, prophoto-rgb, rec2020"),
         "{out}"
     );
     assert!(!library.exists() || fs::read_dir(&library)?.next().is_none());
@@ -169,6 +170,20 @@ fn lut_space_chooses_the_space_cubes_expect() -> Result<()> {
         ),
         "{out}"
     );
+    for (space, name, said) in [
+        ("display-p3", "Warm (Pack 3)", "Display P3"),
+        ("rec2020", "Warm (Pack 4)", "Rec. 2020"),
+    ] {
+        let (ok, out) = import_with(&data, &["--lut-space", space], &[&warm])?;
+        assert!(ok, "{out}");
+        assert!(
+            out.contains(&format!(
+                "Warm.cube: imported as look \"{name}\" in {said}, as another profile \
+                 is named \"Warm\": exact"
+            )),
+            "{out}"
+        );
+    }
     let photo = rawmakase::camera_data::Metadata {
         make: "Test".into(),
         model: "Camera".into(),
@@ -181,6 +196,8 @@ fn lut_space_chooses_the_space_cubes_expect() -> Result<()> {
         ("Warm", (Primaries::AdobeRgb, Gamma::Power22)),
         ("Warm (Pack)", (Primaries::ProPhoto, Gamma::Power18)),
         ("Warm (Pack 2)", (Primaries::Srgb, Gamma::Srgb)),
+        ("Warm (Pack 3)", (Primaries::DisplayP3, Gamma::Srgb)),
+        ("Warm (Pack 4)", (Primaries::Rec2020, Gamma::Rec2020)),
     ] {
         let look = listed.profiles.iter().find(|p| p.name == name).expect(name);
         let table = look

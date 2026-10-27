@@ -31,17 +31,30 @@ pub enum LutSpace {
     Srgb,
     /// Adobe RGB (1998) primaries, gamma 2.2.
     AdobeRgb,
+    /// Display P3 primaries, sRGB encoding.
+    DisplayP3,
     /// ProPhoto RGB primaries, gamma 1.8.
     ProPhotoRgb,
+    /// Rec. 2020 primaries and encoding.
+    Rec2020,
 }
 impl LutSpace {
-    pub const ALL: [Self; 3] = [Self::Srgb, Self::AdobeRgb, Self::ProPhotoRgb];
+    /// In Create Profile's order.
+    pub const ALL: [Self; 5] = [
+        Self::Srgb,
+        Self::AdobeRgb,
+        Self::DisplayP3,
+        Self::ProPhotoRgb,
+        Self::Rec2020,
+    ];
     /// The space's name, as Camera Raw and Photoshop call it.
     pub fn name(self) -> &'static str {
         match self {
             Self::Srgb => "sRGB",
             Self::AdobeRgb => "Adobe RGB (1998)",
+            Self::DisplayP3 => "Display P3",
             Self::ProPhotoRgb => "ProPhoto RGB",
+            Self::Rec2020 => "Rec. 2020",
         }
     }
     /// The table's primaries, encoding and gamut codes and its amount bounds, as Create
@@ -51,7 +64,9 @@ impl LutSpace {
         let (primaries, encoding) = match self {
             Self::Srgb => (0, 1),
             Self::AdobeRgb => (1, 3),
+            Self::DisplayP3 => (3, 1),
             Self::ProPhotoRgb => (2, 2),
+            Self::Rec2020 => (4, 4),
         };
         (primaries, encoding, 0, [0., 2.])
     }

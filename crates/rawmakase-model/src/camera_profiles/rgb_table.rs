@@ -19,6 +19,29 @@ const ADOBE_TO_PRO: Matrix = [
     [0.137551, 0.8330699, 0.0293791],
     [0.0235977, 0.0737835, 0.9026188],
 ];
+/// ProPhoto (D50) to Display P3 (P3 primaries, D65 white), Bradford-adapted to D50,
+/// and back.
+const PRO_TO_P3: Matrix = [
+    [1.6325645, -0.3797686, -0.2527959],
+    [-0.1537019, 1.1667131, -0.0130112],
+    [0.0103933, -0.0628079, 1.0524146],
+];
+const P3_TO_PRO: Matrix = [
+    [0.6316912, 0.2139282, 0.1543806],
+    [0.0832043, 0.8858575, 0.0309382],
+    [-0.0012727, 0.0507551, 0.9505176],
+];
+/// ProPhoto (D50) to Rec. 2020 (ITU-R BT.2020), Bradford-adapted to D50, and back.
+const PRO_TO_REC2020: Matrix = [
+    [1.2006506, -0.0575637, -0.1430869],
+    [-0.0699434, 1.080628, -0.0106845],
+    [0.0055415, -0.0407826, 1.035241],
+];
+const REC2020_TO_PRO: Matrix = [
+    [0.8351932, 0.0488653, 0.1159414],
+    [0.0540346, 0.9289099, 0.0170555],
+    [-0.002342, 0.0363322, 0.9660099],
+];
 const IDENTITY: Matrix = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
 
 /// The primaries a table's colours are in (`dng_rgb_table::primaries`).
@@ -27,6 +50,8 @@ pub enum Primaries {
     Srgb,
     AdobeRgb,
     ProPhoto,
+    DisplayP3,
+    Rec2020,
 }
 impl Primaries {
     fn from_code(code: u32) -> Result<Self> {
@@ -34,6 +59,8 @@ impl Primaries {
             0 => Self::Srgb,
             1 => Self::AdobeRgb,
             2 => Self::ProPhoto,
+            3 => Self::DisplayP3,
+            4 => Self::Rec2020,
             _ => bail!("Unsupported RGB table primaries {code}"),
         })
     }
@@ -45,6 +72,8 @@ impl Primaries {
             Self::Srgb => return [IDENTITY, IDENTITY],
             Self::AdobeRgb => [PRO_TO_ADOBE, ADOBE_TO_PRO],
             Self::ProPhoto => [IDENTITY, IDENTITY],
+            Self::DisplayP3 => [PRO_TO_P3, P3_TO_PRO],
+            Self::Rec2020 => [PRO_TO_REC2020, REC2020_TO_PRO],
         };
         [matmul(from_pro, RGB_TO_PRO), matmul(PRO_TO_RGB, to_pro)]
     }
@@ -56,6 +85,8 @@ pub enum Gamma {
     Srgb,
     Power18,
     Power22,
+    /// Rec. 2020's (ITU-R BT.2020, as BT.709): linear near black, then a 0.45 power.
+    Rec2020,
 }
 impl Gamma {
     fn from_code(code: u32) -> Result<Self> {
@@ -64,6 +95,7 @@ impl Gamma {
             1 => Self::Srgb,
             2 => Self::Power18,
             3 => Self::Power22,
+            4 => Self::Rec2020,
             _ => bail!("Unsupported RGB table gamma {code}"),
         })
     }
@@ -73,6 +105,7 @@ impl Gamma {
             Self::Srgb => 1,
             Self::Power18 => 2,
             Self::Power22 => 3,
+            Self::Rec2020 => 4,
         }
     }
     fn encode(self, v: f32) -> f32 {
@@ -81,6 +114,7 @@ impl Gamma {
             Self::Srgb => srgb_encode(v),
             Self::Power18 => v.powf(1. / 1.8),
             Self::Power22 => v.powf(1. / 2.2),
+            Self::Rec2020 => rec2020_encode(v),
         }
     }
     fn decode(self, v: f32) -> f32 {
@@ -89,7 +123,26 @@ impl Gamma {
             Self::Srgb => srgb_decode(v),
             Self::Power18 => v.powf(1.8),
             Self::Power22 => v.powf(2.2),
+            Self::Rec2020 => rec2020_decode(v),
         }
+    }
+}
+/// Rec. 2020's curve (BT.2020's exact constants), measured to be the encoding of code 4
+/// with Camera Raw 18.7 (`rgb-code4-half-*`). Mirrored in `develop.wgsl`.
+const REC2020_ALPHA: f32 = 1.099_296_8;
+const REC2020_BETA: f32 = 0.018_053_97;
+fn rec2020_encode(v: f32) -> f32 {
+    if v < REC2020_BETA {
+        4.5 * v
+    } else {
+        REC2020_ALPHA * v.powf(0.45) - (REC2020_ALPHA - 1.)
+    }
+}
+fn rec2020_decode(v: f32) -> f32 {
+    if v < 4.5 * REC2020_BETA {
+        v / 4.5
+    } else {
+        ((v + REC2020_ALPHA - 1.) / REC2020_ALPHA).powf(1. / 0.45)
     }
 }
 /// What happens to colours outside the table's space (`dng_rgb_table::gamut`).
@@ -478,8 +531,9 @@ pub mod tests {
     pub(crate) const ADOBE: Tail = (1, 3, 0, [0., 2.]);
     /// Tables of every kind for GPU tests: a 3D Adobe RGB table, a 3D linear ProPhoto
     /// one that extends the gamut, a 1D sRGB one, a 3D sRGB one whose blend leaves
-    /// 0–1 at amounts over 1 (`clips_over_one`), and a 3D ProPhoto one in gamma 1.8, as
-    /// a `.cube` imported for ProPhoto RGB is.
+    /// 0–1 at amounts over 1 (`clips_over_one`), a 3D ProPhoto one in gamma 1.8, as
+    /// a `.cube` imported for ProPhoto RGB is, and 3D Display P3 and Rec. 2020 ones in
+    /// those spaces' encodings.
     pub(crate) fn variety() -> Vec<RgbTable> {
         let curves = |v: f32| {
             [
@@ -494,6 +548,8 @@ pub mod tests {
             table_bytes_1d(64, curves, (0, 1, 0, [0., 2.])),
             table_bytes(9, clips_over_one, (0, 1, 0, [0., 2.])),
             table_bytes(9, fade, (2, 2, 0, [0., 2.])),
+            table_bytes(9, fade, (3, 1, 0, [0., 2.])),
+            table_bytes(9, fade, (4, 4, 0, [0., 2.])),
         ]
         .iter()
         .map(|b| RgbTable::decode(&encode(b)).unwrap())
@@ -598,7 +654,9 @@ pub mod tests {
         for (space, primaries, gamma) in [
             (LutSpace::Srgb, Primaries::Srgb, Gamma::Srgb),
             (LutSpace::AdobeRgb, Primaries::AdobeRgb, Gamma::Power22),
+            (LutSpace::DisplayP3, Primaries::DisplayP3, Gamma::Srgb),
             (LutSpace::ProPhotoRgb, Primaries::ProPhoto, Gamma::Power18),
+            (LutSpace::Rec2020, Primaries::Rec2020, Gamma::Rec2020),
         ] {
             let (table, bytes) = RgbTable::from_cube(&cube, space)?;
             assert_eq!(
@@ -613,8 +671,9 @@ pub mod tests {
     }
     /// A table blends in its own encoding: a cube that maps each channel linearly
     /// gives `decode(f(encode(x)))` on a gray, a different colour in each space's
-    /// encoding. A colour inside Adobe RGB but outside sRGB passes an identity cube
-    /// unchanged in Adobe RGB and ProPhoto, and is clipped into sRGB in sRGB.
+    /// encoding. A colour inside Adobe RGB but outside sRGB and Display P3 passes an
+    /// identity cube unchanged in Adobe RGB, ProPhoto and Rec. 2020, and is clipped into
+    /// sRGB or Display P3 in those.
     #[test]
     fn a_cubes_space_is_the_one_it_applies_in() -> Result<()> {
         let cube = |f: fn([f32; 3]) -> [f32; 3], space| -> Result<RgbTable> {
@@ -644,6 +703,25 @@ pub mod tests {
                 |v: f32| v.powf(1. / 1.8),
                 |v: f32| v.powf(1.8),
             ),
+            (LutSpace::DisplayP3, srgb_encode, srgb_decode),
+            // BT.2020's curve, written out here rather than taken from `Gamma`.
+            (
+                LutSpace::Rec2020,
+                |v: f32| {
+                    if v < 0.018_054 {
+                        4.5 * v
+                    } else {
+                        1.099_297 * v.powf(0.45) - 0.099_297
+                    }
+                },
+                |v: f32| {
+                    if v < 0.081_243 {
+                        v / 4.5
+                    } else {
+                        ((v + 0.099_297) / 1.099_297).powf(1. / 0.45)
+                    }
+                },
+            ),
         ] {
             let table = cube(f, space)?;
             let [into, back] = table.matrices;
@@ -656,14 +734,24 @@ pub mod tests {
             outputs.push(want);
         }
         assert!(outputs[0][0] != outputs[1][0] && outputs[1][0] != outputs[2][0]);
-        // Adobe RGB's green, which sRGB holds only with a negative red.
+        assert!(outputs[0][0] != outputs[4][0] && outputs[1][0] != outputs[4][0]);
+        // Adobe RGB's green, which sRGB and Display P3 hold only with a negative red,
+        // and Rec. 2020 holds.
         let [_, from_adobe] = Primaries::AdobeRgb.matrices();
         let green = mul(from_adobe, [0.05, 0.6, 0.1]);
         assert!(green[0] < -0.01, "{green:?}");
+        let [into_p3, _] = Primaries::DisplayP3.matrices();
+        assert!(mul(into_p3, green)[0] < -0.01);
+        let [into_2020, _] = Primaries::Rec2020.matrices();
+        assert!(mul(into_2020, green).iter().all(|&v| v > 0.01));
         for space in LutSpace::ALL {
-            let got = cube(|p| p, space)?.apply(green, 1.);
+            let table = cube(|p| p, space)?;
+            let got = table.apply(green, 1.);
             let want = match space {
-                LutSpace::Srgb => green.map(|v| v.clamp(0., 1.)),
+                LutSpace::Srgb | LutSpace::DisplayP3 => {
+                    let [into, back] = table.matrices;
+                    mul(back, mul(into, green).map(|v| v.clamp(0., 1.)))
+                }
                 _ => green,
             };
             assert!(
@@ -672,6 +760,55 @@ pub mod tests {
             );
         }
         Ok(())
+    }
+    /// Display P3 and Rec. 2020 tables, as Camera Raw writes them (primaries 3 with the
+    /// sRGB encoding, primaries 4 with code 4), are read with their spaces' matrices.
+    #[test]
+    fn display_p3_and_rec2020_tables_decode() -> Result<()> {
+        let p3 = RgbTable::decode(&encode(&table_bytes(5, fade, (3, 1, 0, [0., 2.]))))?;
+        assert_eq!(
+            (p3.primaries, p3.gamma),
+            (Primaries::DisplayP3, Gamma::Srgb)
+        );
+        let rec = RgbTable::decode(&encode(&table_bytes(5, fade, (4, 4, 0, [0., 2.]))))?;
+        assert_eq!(
+            (rec.primaries, rec.gamma),
+            (Primaries::Rec2020, Gamma::Rec2020)
+        );
+        let near = |a: [f32; 3], b: [f32; 3], tolerance: f32| {
+            a.iter().zip(b).all(|(x, y)| (x - y).abs() < tolerance)
+        };
+        // sRGB's red in each, as the spaces' published primaries give it (Rec. 2020's
+        // as the engine's own `TO_2020`), and white kept white.
+        for (primaries, red) in [
+            (Primaries::DisplayP3, [0.822_49, 0.033_20, 0.017_09]),
+            (Primaries::Rec2020, [0.627_404, 0.069_097, 0.016_391]),
+        ] {
+            let [into, back] = primaries.matrices();
+            assert!(near(mul(into, [1., 0., 0.]), red, 2e-4), "{primaries:?}");
+            assert!(near(mul(into, [1.; 3]), [1.; 3], 1e-4), "{primaries:?}");
+            let p = [0.3, 0.7, 0.1];
+            assert!(near(mul(back, mul(into, p)), p, 1e-5), "{primaries:?}");
+        }
+        Ok(())
+    }
+    /// Code 4 is BT.2020's curve: linear below 0.018, a 0.45 power above, continuous
+    /// at the knee, and decoded by its exact inverse.
+    #[test]
+    fn rec2020_encoding_is_bt2020s_curve() {
+        let curve = Gamma::Rec2020;
+        assert_eq!(Gamma::from_code(4).unwrap(), curve);
+        assert_eq!(curve.code(), 4);
+        for (linear, encoded) in [(0., 0.), (0.01, 0.045), (0.18, 0.408_88), (1., 1.)] {
+            assert!((curve.encode(linear) - encoded).abs() < 1e-4, "{linear}");
+        }
+        let below = curve.encode(REC2020_BETA - 1e-6);
+        let above = curve.encode(REC2020_BETA);
+        assert!((above - below).abs() < 1e-5, "{below} {above}");
+        for i in 0..=1000 {
+            let v = i as f32 / 1000.;
+            assert!((curve.decode(curve.encode(v)) - v).abs() < 1e-5, "{v}");
+        }
     }
     #[test]
     fn malformed_rgb_tables_are_refused() {

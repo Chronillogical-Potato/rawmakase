@@ -8251,8 +8251,9 @@ fn centre(node: &egui::accesskit::Node) -> Pos2 {
     Pos2::new(((b.x0 + b.x1) / 2.) as f32, ((b.y0 + b.y1) / 2.) as f32)
 }
 /// A raw photo's Profile menu offers Import .cube LUTs…, which opens the window at
-/// sRGB. Choosing ProPhoto RGB and Choose Files… asks for the file chooser for
-/// ProPhoto LUTs; Cancel asks for nothing; the window opens at sRGB again.
+/// sRGB. Choosing Rec. 2020, the last of Create Profile's five spaces, and Choose
+/// Files… asks for the file chooser for Rec. 2020 LUTs; Cancel asks for nothing; the
+/// window opens at sRGB again.
 #[test]
 fn import_cube_luts_asks_the_space_before_the_files() {
     use egui::accesskit::Role;
@@ -8346,15 +8347,15 @@ fn import_cube_luts_asks_the_space_before_the_files() {
     };
     frame(&mut editor, vec![]);
     assert_eq!(click(&mut editor, "sRGB"), None);
-    assert_eq!(click(&mut editor, "ProPhoto RGB"), None);
+    assert_eq!(click(&mut editor, "Rec. 2020"), None);
     assert_eq!(
         editor.lut_import,
-        Some(crate::camera_profiles::LutSpace::ProPhotoRgb)
+        Some(crate::camera_profiles::LutSpace::Rec2020)
     );
     assert_eq!(
         click(&mut editor, "Choose Files…"),
         Some(dialogs::FileDialog::Luts(
-            crate::camera_profiles::LutSpace::ProPhotoRgb
+            crate::camera_profiles::LutSpace::Rec2020
         ))
     );
     assert_eq!(editor.lut_import, None);

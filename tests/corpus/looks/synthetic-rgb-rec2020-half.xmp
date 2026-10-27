@@ -1,0 +1,59 @@
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   crs:PresetType="Look"
+   crs:Cluster=""
+   crs:UUID="CE4177CACB6A3BFD58B0EFAB138DD618"
+   crs:SupportsAmount="True"
+   crs:SupportsColor="True"
+   crs:SupportsMonochrome="False"
+   crs:SupportsHighDynamicRange="True"
+   crs:SupportsNormalDynamicRange="True"
+   crs:SupportsSceneReferred="True"
+   crs:SupportsOutputReferred="False"
+   crs:CameraModelRestriction=""
+   crs:Copyright="Synthetic test look, public domain"
+   crs:ContactInfo=""
+   crs:Version="18.7"
+   crs:ProcessVersion="15.4"
+   crs:ConvertToGrayscale="False"
+   crs:RGBTable="37948A4E1284EB1FC3422428AAECA881"
+   crs:Table_37948A4E1284EB1FC3422428AAECA881="Oi000:]rn!V*Z10z|%tMzs[/+2egvN(ENgtq$e(d?u%-No*C[w*IfvNnev0/u2?2(:1+JHkkH3mfuTt5sBuC'I'2I5yo+aw/+A}@ah:$ukHqLUB9DeU|a()UXY):f{G[+fjI9zb0E+?mdk)L4-RR19@Wj-5^[#?aiAyUa8W*F5!aPZHJGT0m?zLJ4SzlL4%-5%l$QB(lTGGz.x)'r`VrMfvxe)gvZRp|p)Xd7SIRm)l:qW}ag.XiM0*+iM'b/]cA5J`paBFfnnlpOb#(EYk3]ZzFk()GPqeZ-k.2uf0*6De0JOs*Er1hLZK2$mPDtDlkK6]X}'+})(0o!v`caNc`vXFX/Xq)J/-vF4`pR@w`cI3D/fXfZ/w){M`94Pj.s|]l.OE/K.3|.Zv6C97vNMg(vL3*kv0'UJFk$:043Y6`2][KB1P`FyFsb!B5lC)ZjJ}FS0x/ny9*ETo76[3aaYhte2KT7%4lf1N8lgYK7?1|!4X|9`6$:}#5RsL*8*@n:17nyYe/6!Y'%LU-wa1zdRN|d(hTo!eog)GZhP{cM6W]Jz79i`[t(`ZBu|6sEYZ?vdCv:x(]%%}h+^dM`'gYP$kfb7pk/=!YMj[*b=3-nAwUtOjxIoy1uauq3+%DZsu^A{V+v:2?Qid.6!?!9CSxog!3Qx)l|?]V/=RG7ZO]{d!j3A$qLJc0zinj$kEUi!t(W#5M'reWo6@Hc.JHQ23Lkn1Ink247IjBj}2OGuG[`[oZJgFW.`Kxm8JdNX?KS88:(#]J+Xj2">
+   <crs:Name>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Synthetic RGB Rec. 2020 Half</rdf:li>
+    </rdf:Alt>
+   </crs:Name>
+   <crs:Group>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">Synthetic</rdf:li>
+    </rdf:Alt>
+   </crs:Group>
+   <crs:ToneCurvePV2012>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012>
+   <crs:ToneCurvePV2012Red>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Red>
+   <crs:ToneCurvePV2012Green>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Green>
+   <crs:ToneCurvePV2012Blue>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012Blue>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>

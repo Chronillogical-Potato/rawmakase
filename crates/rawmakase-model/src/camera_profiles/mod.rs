@@ -613,9 +613,12 @@ impl CameraProfile {
     /// its look, at amounts below, at and above the table's own.
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_test_rgb_tables(self) -> Vec<Self> {
-        rgb_table::tests::variety()
+        let tables = rgb_table::tests::variety();
+        let amounts = [0.7, 1., 1.5, 2., 1.25, 1.1, 1.6];
+        assert_eq!(tables.len(), amounts.len(), "an amount for each table");
+        tables
             .into_iter()
-            .zip([0.7, 1., 1.5, 2., 1.25])
+            .zip(amounts)
             .map(|(table, amount)| {
                 let mut p = self.clone();
                 let look = p.enhanced.as_mut().expect("a profile with a look");
