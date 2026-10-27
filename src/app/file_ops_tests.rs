@@ -829,3 +829,24 @@ fn a_move_from_two_drives_says_what_is_copied_and_what_is_moved() {
         ["3 files (and 1 sidecar file) will be moved on disk."]
     );
 }
+
+#[test]
+fn stop_says_a_batch_of_photos_finishes_when_photos_go_in_batches() {
+    // Moves and renames within a drive go in batches that Stop lets finish
+    // (#681, #692); the Trash goes photo by photo.
+    let batched = [
+        Verb::Rename { one: None },
+        Verb::Move { to: "Day".into() },
+        Verb::Create {
+            name: "Day".into(),
+            parent: "Trip".into(),
+            moving: true,
+        },
+    ];
+    for verb in batched {
+        assert_eq!(verb.stopping(), "Stopping after the photos under way…");
+    }
+    for verb in [Verb::Trash, Verb::Delete { rejected: false }] {
+        assert_eq!(verb.stopping(), "Stopping after the photo under way…");
+    }
+}

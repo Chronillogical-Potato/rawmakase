@@ -114,6 +114,23 @@ pub(super) enum Verb {
 }
 
 impl Verb {
+    /// What the top bar says once Stop is pressed. Photos moved or renamed
+    /// within their drive go in batches, which Stop lets finish (#681,
+    /// #692); anything else stops after the photo or folder under way.
+    fn stopping(&self) -> &'static str {
+        match self {
+            Self::Rename { .. } | Self::Move { .. } | Self::Create { .. } => {
+                "Stopping after the photos under way…"
+            }
+            Self::Remove
+            | Self::Delete { .. }
+            | Self::Trash
+            | Self::MoveFolder { .. }
+            | Self::TrashFolder { .. }
+            | Self::RenameFolder { .. } => "Stopping after the photo under way…",
+        }
+    }
+
     /// "nothing was removed", for a status line.
     fn nothing(&self) -> &'static str {
         match self {
@@ -1554,7 +1571,7 @@ impl Editor {
                 ..
             } => {
                 if cancel.load(Ordering::Relaxed) {
-                    "Stopping after the photo under way…".to_string()
+                    verb.stopping().to_string()
                 } else {
                     // How far it is, read from the journal now and then.
                     let due = progress
