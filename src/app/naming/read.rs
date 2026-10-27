@@ -206,6 +206,13 @@ impl NameRead {
     }
 }
 
+impl Drop for NameRead {
+    /// A read nobody can take any more stops (its dialog is gone).
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 /// What the files of a scope give, `standalone` when its photo has no
 /// catalog: the catalog has the rest.
 pub(in crate::app) fn file_sourced(standalone: bool) -> Needs {
@@ -240,7 +247,9 @@ fn read_file(photo: &ToRead) -> Result<FileFields, String> {
             path.file_name().unwrap_or_default().to_string_lossy()
         )
     };
-    if !crate::catalog_session::background::can_read(path) {
+    // A photo whose folder isn't on this computer has only the catalog's
+    // path for it, which names no file here.
+    if !path.is_absolute() || !crate::catalog_session::background::can_read(path) {
         return Err(unreadable());
     }
     let (captured, info) = if photo.standalone {

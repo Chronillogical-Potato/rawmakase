@@ -6,7 +6,9 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+mod rename;
 mod tokens;
+pub use rename::RenameSettings;
 pub use tokens::{
     BUILTIN, Builtin, DatePart, Def, DisplayError, Field, Menu, Needs, Part, Span, TOKENS, Token,
     TokenTemplate, builtin, by_label, menu,

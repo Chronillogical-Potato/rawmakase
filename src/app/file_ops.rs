@@ -185,6 +185,12 @@ pub(super) struct FileOps {
     /// frame an answer lands in.
     #[cfg(test)]
     hold_plans: bool,
+    /// Tests: Rename Photos' remembered choices, in place of `rename.json`.
+    #[cfg(test)]
+    rename_settings: crate::export_settings::RenameSettings,
+    /// Tests: what reads a rename's files for their names.
+    #[cfg(test)]
+    name_reader: Option<crate::app::naming::read::Reader>,
 }
 
 #[derive(Default)]
@@ -270,6 +276,10 @@ impl Default for FileOps {
             stop_first: false,
             #[cfg(test)]
             hold_plans: false,
+            #[cfg(test)]
+            rename_settings: Default::default(),
+            #[cfg(test)]
+            name_reader: None,
         }
     }
 }

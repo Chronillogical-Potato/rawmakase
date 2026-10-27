@@ -14,11 +14,24 @@
 //! undone by another rename): asked before that plan is in, it runs once it
 //! is, if nothing was typed meanwhile. Rename Folder… holds nothing until
 //! Rename, which plans and runs.
+//!
+//! Several photos are named by a template, as Export names files: a preset,
+//! one of RAWmakase's own, or one made in the Filename Template Editor
+//! (File Naming > Edit…). Their names come from the catalog's fields, read
+//! with their order, and from their files (the camera's make and model),
+//! read in the background once a template needs them (`naming::read`), and
+//! cancelled with the dialog. A plan names photos from the fields it was
+//! given: one made before the files were read is replaced once they are,
+//! and Rename waits for that read. The choice is remembered for the next
+//! Rename Photos (`RenameSettings`) when Rename is asked for.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
+use crate::app::naming::editor::{NameEditor, Outcome};
+use crate::app::naming::menu::{self, Choice};
+use crate::app::naming::read::{self as name_read, NameRead, Reads, Status, ToRead};
 use crate::catalog::file_ops::{self, FileOp, Plan, RenameOrder, Skip};
 use crate::catalog::{CatalogLocation, PhotoId, RootId};
-use crate::export_settings::{NameTemplate, Naming};
+use crate::export_settings::{NameContext, NameTemplate, RenameSettings};
 use eframe::egui::{self, Vec2};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,7 +47,15 @@ pub(super) struct Renaming {
     stem: String,
     extension: String,
     /// Several: how they are named.
-    template: NameTemplate,
+    settings: RenameSettings,
+    /// The Filename Template Editor, over the dialog.
+    editor: Option<NameEditor>,
+    /// What the names need from the photos' files, read once a template
+    /// needs it; then in `order`'s fields.
+    read: NameRead,
+    /// Counts the times `order`'s fields changed, so a plan made from
+    /// earlier fields is not taken for one of these.
+    fields: u64,
     /// The names last planned, which may be for input changed since.
     planned: Option<Planned>,
     /// The plan under way on a worker, and the input it plans.
@@ -52,6 +73,9 @@ pub(super) struct Renaming {
 struct Inputs {
     stem: String,
     template: NameTemplate,
+    /// Which of `order`'s fields (see `Renaming::fields`) the names take,
+    /// when they take any from the files; 0 when they don't.
+    fields: u64,
 }
 
 /// What the dialog's names would do, planned for the input they came from.
@@ -127,10 +151,93 @@ impl Renaming {
     }
 
     fn inputs(&self) -> Inputs {
+        let template = self.settings.name_template();
         Inputs {
             stem: self.stem.clone(),
-            template: self.template.clone(),
+            // Names that take nothing from the files are the same whatever
+            // they gave, so their plan stays.
+            fields: if self.needs_files(&template) {
+                self.fields
+            } else {
+                0
+            },
+            template,
         }
+    }
+
+    /// Whether names by `template` need what the photos' files give.
+    fn needs_files(&self, template: &NameTemplate) -> bool {
+        !self.one() && template.needs().and(name_read::file_sourced(false)).any()
+    }
+
+    /// Whether names by `template` wait for the photos' files: they need
+    /// them, and they are being read; started here the first time.
+    fn names_wait(
+        &mut self,
+        template: &NameTemplate,
+        events: &std::sync::mpsc::Sender<super::super::worker::Event>,
+        ctx: &egui::Context,
+    ) -> bool {
+        if !self.needs_files(template) {
+            return false;
+        }
+        match self.read.status() {
+            Status::Idle => {
+                let photos = self
+                    .order
+                    .photos()
+                    .iter()
+                    .map(|o| ToRead {
+                        path: o.path.clone(),
+                        standalone: false,
+                    })
+                    .collect();
+                self.read.start(photos, events.clone(), ctx.clone());
+                true
+            }
+            Status::Reading { .. } => true,
+            Status::Ready | Status::Failed(_) => false,
+        }
+    }
+
+    /// What `template`'s names wait for or lack from the files: `None` when
+    /// they need nothing from them, or have it.
+    fn read_status(&self, template: &NameTemplate) -> Option<Status> {
+        match self.read.status() {
+            Status::Ready => None,
+            status if self.needs_files(template) => Some(status),
+            _ => None,
+        }
+    }
+
+    /// The first photo's name by `template`, as the dialog would name it,
+    /// and what it has to say.
+    fn example(&self, template: &NameTemplate) -> (String, Vec<String>) {
+        match self.read_status(template) {
+            Some(Status::Reading { .. }) => return ("Reading photo info…".into(), Vec::new()),
+            Some(Status::Failed(why)) => {
+                let (name, _) = self.example_name(template);
+                return (name, vec![format!("photo info could not be read: {why}")]);
+            }
+            _ => {}
+        }
+        self.example_name(template)
+    }
+    fn example_name(&self, template: &NameTemplate) -> (String, Vec<String>) {
+        let Some(first) = self.order.photos().first() else {
+            return Default::default();
+        };
+        let at = NameContext {
+            index: 0,
+            total: self.order.photos().len(),
+            fields: &first.fields,
+        };
+        let (stem, notes) = template.stem(&first.path, &at);
+        let name = match first.path.extension() {
+            Some(extension) => format!("{stem}.{}", extension.to_string_lossy()),
+            None => stem,
+        };
+        (name, notes)
     }
 
     /// The plan of what is typed now, once it is in.
@@ -247,14 +354,6 @@ fn plan_several(
     }
 }
 
-/// How many digits numbering `count` photos from `start` takes.
-fn digits(start: u32, count: usize) -> usize {
-    (start as usize + count.saturating_sub(1))
-        .max(1)
-        .to_string()
-        .len()
-}
-
 impl Editor {
     /// F2 and Rename Photo…: renames `photos`, one by its name, several by a
     /// template in the order they were taken. Saves what is open and holds
@@ -361,20 +460,23 @@ impl Editor {
             .extension()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let count = order.photos().len();
+        let settings = self.remembered_rename();
+        #[allow(unused_mut)]
+        let mut read = NameRead::default();
+        #[cfg(test)]
+        if let Some(reader) = &self.file_ops.name_reader {
+            read.set_reader(reader.clone());
+        }
         self.file_ops.state = State::Renaming(Box::new(Renaming {
             catalog,
             generation,
             order: Arc::new(order),
             stem,
             extension,
-            template: NameTemplate {
-                naming: Naming::CustomNameSequence,
-                text: String::new(),
-                start: 1,
-                padding: digits(1, count),
-                tokens: None,
-            },
+            settings,
+            editor: None,
+            read,
+            fields: 0,
             planned: None,
             planning: None,
             reader: None,
@@ -473,12 +575,88 @@ impl Editor {
         })
     }
 
+    /// Rename Photos' choices from the last rename.
+    fn remembered_rename(&self) -> RenameSettings {
+        #[cfg(test)]
+        return self.file_ops.rename_settings.clone();
+        #[cfg(not(test))]
+        RenameSettings::load()
+    }
+    /// Keeps Rename Photos' choices for the next one: what is named now
+    /// does not depend on it, so a failure is only said.
+    fn remember_rename(&mut self, settings: &RenameSettings) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            self.file_ops.rename_settings = settings.clone();
+            Ok(())
+        }
+        #[cfg(not(test))]
+        settings.save().map_err(|e| format!("{e:#}"))
+    }
+
+    /// The rename dialog's files were read for their names: what they gave
+    /// goes in its photos' fields, which replaces the plan of the earlier
+    /// ones. A read of another dialog, or one cancelled, is dropped.
+    pub(in crate::app) fn rename_names_read(&mut self, request: u64, read: Result<Reads, String>) {
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
+        let Some((read, _failed)) = r.read.finished(request, read) else {
+            return;
+        };
+        // What could be read goes in, whether or not all could; the dialog
+        // says what could not.
+        r.order = Arc::new(r.order.with_fields(|index, fields| {
+            if let Some(Some(read)) = read.get(index) {
+                name_read::fill(fields, read.clone(), false);
+            }
+        }));
+        // Plans of names by the files' fields are of earlier ones now.
+        r.fields += 1;
+        self.plan_rename();
+    }
+
+    /// The Filename Template Editor over Rename Photos: its Example is the
+    /// first photo named by the template being edited, its files read first
+    /// if it needs them; Done makes it the dialog's template.
+    fn rename_editor_window(&mut self, ctx: &egui::Context) {
+        let (tx, context) = (self.tx.clone(), self.context.clone());
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
+        let Some(parsed) = r.editor.as_ref().map(NameEditor::parsed) else {
+            return;
+        };
+        let example = match &parsed {
+            Ok(template) => {
+                let mut settings = r.settings.clone();
+                settings.choose_tokens(&template.to_lightroom());
+                let named = settings.name_template();
+                r.names_wait(&named, &tx, &context);
+                r.example(&named)
+            }
+            Err(_) => Default::default(),
+        };
+        let Some(editor) = r.editor.as_mut() else {
+            return;
+        };
+        match editor.show(ctx, &example) {
+            Outcome::Open => {}
+            Outcome::Done(template) => {
+                r.settings.choose_tokens(&template.to_lightroom());
+                r.editor = None;
+            }
+            Outcome::Cancel => r.editor = None,
+        }
+    }
+
     /// Rename: runs the plan of what is typed, which is in and can be had.
     fn run_rename(&mut self) {
         let State::Renaming(r) = std::mem::take(&mut self.file_ops.state) else {
             return;
         };
         let inputs = r.inputs();
+        let several = !r.one();
         let Some(Planned {
             plan: Some(plan),
             rows,
@@ -489,6 +667,9 @@ impl Editor {
             self.release_files();
             return;
         };
+        if several && let Err(e) = self.remember_rename(&r.settings) {
+            self.status = format!("Rename Photos' choices not kept for next time: {e}");
+        }
         let verb = Verb::Rename {
             one: match rows.as_slice() {
                 [one] => Some((one.old.clone(), one.new.clone())),
@@ -552,9 +733,29 @@ impl Editor {
         let palette = super::super::theme::palette(ctx);
         let mut rename = false;
         let mut cancel = false;
-        let can_rename = r.current().is_some_and(|p| p.plan.is_some());
+        let mut edit = false;
+        // What the names need from the files is read once they need it
+        // (here, or once the Filename Template Editor adds it); Rename waits
+        // for it, and the dialog says when it could not be read.
+        let template = r.settings.name_template();
+        r.names_wait(&template, &self.tx, &self.context);
+        let read = r.read_status(&template);
+        let reading = matches!(read, Some(Status::Reading { .. }));
+        let example = r.example(&template);
+        let can_rename = !reading && r.current().is_some_and(|p| p.plan.is_some());
         let checking = r.current().is_none();
         let title = r.title();
+        // Several photos: Return is Rename, as in Lightroom, whichever
+        // control has focus (Custom Text may be off); taken before the
+        // dialog draws so a focused control does not also act on it. An open
+        // menu, or the editor on top, keeps it.
+        if !r.one()
+            && r.editor.is_none()
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+        {
+            rename = true;
+        }
         let response = egui::Modal::new(egui::Id::new("rename-photos"))
             .frame(widgets::modal_frame(&palette).inner_margin(24))
             .show(ctx, |ui| {
@@ -576,32 +777,56 @@ impl Editor {
                     });
                     field.inner
                 } else {
+                    let label = |ui: &mut egui::Ui, text: &str| {
+                        ui.add_sized(
+                            Vec2::new(96., 20.),
+                            egui::Label::new(egui::RichText::new(text).color(palette.gray(170))),
+                        );
+                    };
+                    ui.horizontal(|ui| {
+                        label(ui, "File Naming");
+                        let s = &mut r.settings;
+                        match menu::combo(ui, "rename-naming", 260., s.naming, s.tokens.as_deref()) {
+                            Some(Choice::Preset(naming)) => s.choose_naming(naming),
+                            Some(Choice::Tokens(tokens)) => s.choose_tokens(tokens),
+                            Some(Choice::Edit) => edit = true,
+                            None => {}
+                        }
+                    });
                     let output = ui
                         .horizontal(|ui| {
-                            ui.label("Name");
-                            egui::ComboBox::from_id_salt("rename-naming")
-                                .selected_text(r.template.naming.label())
-                                .show_ui(ui, |ui| {
-                                    for naming in Naming::ALL {
-                                        ui.selectable_value(
-                                            &mut r.template.naming,
-                                            naming,
-                                            naming.label(),
-                                        );
-                                    }
-                                });
-                            egui::TextEdit::singleline(&mut r.template.text)
-                                .hint_text("Custom text")
-                                .desired_width(200.)
-                                .show(ui)
+                            label(ui, "Custom Text");
+                            ui.add_enabled_ui(template.uses_text(), |ui| {
+                                egui::TextEdit::singleline(&mut r.settings.custom_text)
+                                    .desired_width(260.)
+                                    .show(ui)
+                            })
+                            .inner
                         })
                         .inner;
                     ui.horizontal(|ui| {
-                        ui.label("Start number");
-                        ui.add(egui::DragValue::new(&mut r.template.start).range(0..=999_999));
-                        ui.label("Digits");
-                        ui.add(egui::DragValue::new(&mut r.template.padding).range(0..=9));
+                        label(ui, "Start Number");
+                        ui.add_enabled(
+                            template.uses_sequence(),
+                            egui::DragValue::new(&mut r.settings.start_number).range(0..=999_999),
+                        );
                     });
+                    ui.horizontal(|ui| {
+                        label(ui, "Example");
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&example.0).color(palette.gray(225)),
+                            )
+                            .truncate(),
+                        );
+                    });
+                    if let Some(Status::Failed(why)) = &read {
+                        ui.label(
+                            egui::RichText::new(format!("Photo info could not be read: {why}"))
+                                .size(12.)
+                                .color(palette.warning()),
+                        );
+                    }
                     output
                 };
                 if !r.focused {
@@ -687,7 +912,10 @@ impl Editor {
                     }
                 });
             });
-        if cancel || response.should_close() {
+        // Escape closes one window at a time: the editor keeps it, also on
+        // the frame it opens, while the dialog is still the top one.
+        let close = r.editor.is_none() && !edit && response.should_close();
+        if cancel || close {
             self.file_ops.state = State::Idle;
             self.release_files();
             return;
@@ -695,11 +923,30 @@ impl Editor {
         let State::Renaming(r) = &mut self.file_ops.state else {
             return;
         };
+        if edit {
+            let template = r.settings.name_template();
+            let tokens = r
+                .settings
+                .tokens
+                .clone()
+                .unwrap_or_else(|| template.naming.tokens().to_string());
+            r.editor = Some(NameEditor::new(&tokens));
+        }
+        self.rename_editor_window(ctx);
+        let State::Renaming(r) = &mut self.file_ops.state else {
+            return;
+        };
         // Typed since Rename was asked: it waits for another.
         if r.submitted.as_ref().is_some_and(|s| *s != r.inputs()) {
             r.submitted = None;
         }
-        if rename {
+        // Rename is off while the files are read for the names, as in
+        // Export: Return then does nothing.
+        let reading = matches!(
+            r.read_status(&r.settings.name_template()),
+            Some(Status::Reading { .. })
+        );
+        if rename && !reading {
             // Return may come with the last of the text: what this frame
             // typed is what is renamed, once planned.
             r.submitted = Some(r.inputs());
@@ -870,6 +1117,37 @@ impl super::FileOps {
             State::Renaming(r) => r.planning.as_ref().map(|(request, _)| *request),
             _ => None,
         }
+    }
+    /// Whether the open rename dialog is reading its photos' files.
+    #[cfg(test)]
+    pub(super) fn rename_reading(&self) -> bool {
+        matches!(&self.state, State::Renaming(r) if matches!(r.read.status(), Status::Reading { .. }))
+    }
+    /// Opens the Filename Template Editor over the rename dialog with
+    /// `tokens` (Lightroom's form), as File Naming > Edit… would.
+    #[cfg(test)]
+    pub(super) fn rename_edit(&mut self, tokens: &str) {
+        if let State::Renaming(r) = &mut self.state {
+            r.editor = Some(NameEditor::new(tokens));
+        }
+    }
+    /// Picks `tokens` (Lightroom's form) in the rename dialog's File Naming.
+    #[cfg(test)]
+    pub(super) fn rename_choose(&mut self, tokens: &str) {
+        if let State::Renaming(r) = &mut self.state {
+            r.settings.choose_tokens(tokens);
+        }
+    }
+    /// Types `text` in the rename dialog's Custom Text.
+    #[cfg(test)]
+    pub(super) fn rename_custom_text(&mut self, text: &str) {
+        if let State::Renaming(r) = &mut self.state {
+            r.settings.custom_text = text.into();
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn rename_editor_open(&self) -> bool {
+        matches!(&self.state, State::Renaming(r) if r.editor.is_some())
     }
     /// The open rename dialog, as it shows once what is typed is planned.
     #[cfg(test)]

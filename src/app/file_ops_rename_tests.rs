@@ -420,3 +420,250 @@ fn typing_in_the_frame_a_rename_asked_for_is_planned_waits_for_another_return() 
     assert!(d.path().join("photos/Keeper2.RAF").is_file());
     Ok(())
 }
+
+/// A reader naming every camera "Sony ILCE-7RM6", one photo each time
+/// `gate` lets it through.
+fn gated_reader() -> (
+    crate::app::naming::read::Reader,
+    std::sync::mpsc::Sender<()>,
+) {
+    use crate::app::naming::read::{FileFields, ToRead};
+    let (open, gate) = std::sync::mpsc::channel::<()>();
+    let gate = std::sync::Mutex::new(gate);
+    let reader: crate::app::naming::read::Reader = std::sync::Arc::new(move |_: &ToRead| {
+        let _ = gate.lock().unwrap().recv();
+        Ok(FileFields {
+            camera: crate::export_settings::CameraNames::Read {
+                make: Some("Sony".into()),
+                model: Some("ILCE-7RM6".into()),
+            },
+            ..Default::default()
+        })
+    });
+    (reader, open)
+}
+
+/// Takes the editor's events until `done`.
+fn until(e: &mut crate::app::Editor, done: impl Fn(&crate::app::Editor) -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while !done(e) {
+        assert!(std::time::Instant::now() < deadline, "never happened");
+        let ctx = e.context.clone();
+        e.events(&ctx);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+const MODEL: &str = "{{com.adobe.model}}-{{naming_sequenceNumber_2Digits}}";
+
+/// File Naming > Edit… with `tokens`, the editor then on top.
+fn edit(e: &mut crate::app::Editor, tokens: &str) {
+    e.file_ops.rename_edit(tokens);
+    frame(e, Vec::new());
+    frame(e, Vec::new());
+}
+
+/// Rename Photos opened on x.RAF and y.RAF (y taken first), with its files
+/// read by `reader`.
+fn rename_two(
+    reader: crate::app::naming::read::Reader,
+) -> anyhow::Result<(
+    tempfile::TempDir,
+    crate::app::Editor,
+    Vec<crate::catalog::PhotoId>,
+)> {
+    let (d, mut e, _) = editor_with_folders(&["x.RAF", "y.RAF"])?;
+    captured(&d, "x.RAF", "2026-05-04T12:00:03")?;
+    captured(&d, "y.RAF", "2026-05-04T12:00:01")?;
+    let ids: Vec<_> = ["x.RAF", "y.RAF"]
+        .iter()
+        .map(|n| photo(&e, &d, n))
+        .collect();
+    e.file_ops.name_reader = Some(reader);
+    select(&mut e, &ids);
+    tap(&mut e, Key::F2, Modifiers::NONE);
+    settle(&mut e);
+    settle(&mut e);
+    Ok((d, e, ids))
+}
+
+/// File Naming > Edit…: a template naming the camera is made in the
+/// editor; Rename waits for the files to be read, the names then have the
+/// camera, Rename renames by them, and the next Rename Photos starts from
+/// that template.
+#[test]
+fn several_photos_are_named_by_a_template_made_in_the_editor() -> anyhow::Result<()> {
+    let (reader, open) = gated_reader();
+    let (d, mut e, ids) = rename_two(reader)?;
+    edit(&mut e, MODEL);
+    assert!(
+        e.file_ops.rename_reading(),
+        "the editor's Example reads them"
+    );
+    // Return is the editor's Done.
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    assert!(!e.file_ops.rename_editor_open());
+    // While the files are read, Return renames nothing.
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(d.path().join("photos/x.RAF").is_file());
+    open.send(())?;
+    open.send(())?;
+    until(&mut e, |e| !e.file_ops.rename_reading());
+    settle(&mut e);
+    let shown = e.file_ops.rename_shown().expect("planned with the cameras");
+    let names: Vec<&str> = shown.rows.iter().map(|(_, new, _)| new.as_str()).collect();
+    assert_eq!(names, ["ILCE-7RM6-01.RAF", "ILCE-7RM6-02.RAF"]);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert_eq!(at(&e, &d, ids[1]), "ILCE-7RM6-01.RAF");
+    assert_eq!(at(&e, &d, ids[0]), "ILCE-7RM6-02.RAF");
+    assert_eq!(e.file_ops.rename_settings.tokens.as_deref(), Some(MODEL));
+    // The next Rename Photos starts from it, and reads the files again.
+    let (reader, open) = gated_reader();
+    e.file_ops.name_reader = Some(reader);
+    select(&mut e, &ids);
+    tap(&mut e, Key::F2, Modifiers::NONE);
+    settle(&mut e);
+    settle(&mut e);
+    assert!(e.file_ops.rename_reading());
+    open.send(())?;
+    open.send(())?;
+    until(&mut e, |e| !e.file_ops.rename_reading());
+    settle(&mut e);
+    let shown = e.file_ops.rename_shown().unwrap();
+    assert_eq!(shown.rows[0].1, "ILCE-7RM6-01.RAF", "same name again");
+    Ok(())
+}
+
+/// Escape closes the editor first, then the dialog, which stops its read
+/// and lets the catalog go; the read's late completion changes nothing.
+#[test]
+fn escape_closes_the_editor_then_the_dialog_and_its_read() -> anyhow::Result<()> {
+    let (reader, open) = gated_reader();
+    let (d, mut e, _) = rename_two(reader)?;
+    edit(&mut e, MODEL);
+    assert!(e.file_ops.rename_reading());
+    tap(&mut e, Key::Escape, Modifiers::NONE);
+    assert!(!e.file_ops.rename_editor_open());
+    assert!(e.file_ops.dialog_open(), "the dialog stays");
+    frame(&mut e, Vec::new());
+    tap(&mut e, Key::Escape, Modifiers::NONE);
+    settle(&mut e);
+    assert!(!e.file_ops.dialog_open());
+    assert!(!e.activity.is_busy());
+    open.send(())?;
+    open.send(())?;
+    for _ in 0..20 {
+        let ctx = e.context.clone();
+        e.events(&ctx);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!e.file_ops.dialog_open());
+    assert!(!e.activity.is_busy());
+    assert!(d.path().join("photos/x.RAF").is_file());
+    assert_eq!(
+        e.file_ops.rename_settings,
+        Default::default(),
+        "nothing kept"
+    );
+    Ok(())
+}
+
+/// A file that can't be read: the names say what they lack, and Rename
+/// still renames by what could be read.
+#[test]
+fn a_failed_read_is_said_and_rename_goes_on_without_it() -> anyhow::Result<()> {
+    let reader: crate::app::naming::read::Reader =
+        std::sync::Arc::new(|_: &crate::app::naming::read::ToRead| Err("disk gone".to_string()));
+    let (d, mut e, ids) = rename_two(reader)?;
+    edit(&mut e, MODEL);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    until(&mut e, |e| !e.file_ops.rename_reading());
+    settle(&mut e);
+    let shown = e.file_ops.rename_shown().unwrap();
+    assert_eq!(shown.rows[0].1, "-01.RAF");
+    assert!(
+        shown.rows[0]
+            .2
+            .as_deref()
+            .is_some_and(|p| p.contains("make and model were not read")),
+        "{:?}",
+        shown.rows[0]
+    );
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert_eq!(at(&e, &d, ids[1]), "-01.RAF");
+    Ok(())
+}
+
+/// A read the dialog's template no longer needs (the editor that wanted it
+/// was cancelled) doesn't drop a Rename asked for before it ends.
+#[test]
+fn a_read_no_longer_needed_lets_a_rename_asked_for_run() -> anyhow::Result<()> {
+    let (reader, open) = gated_reader();
+    let (d, mut e, ids) = rename_two(reader)?;
+    edit(&mut e, MODEL);
+    assert!(e.file_ops.rename_reading());
+    tap(&mut e, Key::Escape, Modifiers::NONE);
+    assert!(!e.file_ops.rename_editor_open());
+    settle(&mut e);
+    e.file_ops.hold_plans = true;
+    e.file_ops.rename_custom_text("Trip");
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    assert!(e.file_ops.rename_planning(), "asked before its plan is in");
+    // The read ends before the plan of what was asked is in.
+    open.send(())?;
+    open.send(())?;
+    until(&mut e, |e| !e.file_ops.rename_reading());
+    let answer = e.rename_answer_now().expect("planning");
+    e.rename_planned(answer);
+    e.file_ops.hold_plans = false;
+    settle(&mut e);
+    assert!(!e.activity.is_busy());
+    assert_eq!(at(&e, &d, ids[1]), "Trip-1.RAF");
+    Ok(())
+}
+
+/// A plan made before the files were read, of a template that needs them,
+/// never comes back as current: picked again after the read ended under
+/// another template, it is planned again with what the files gave.
+#[test]
+fn a_plan_from_before_the_read_is_not_taken_again() -> anyhow::Result<()> {
+    let (reader, open) = gated_reader();
+    let (d, mut e, ids) = rename_two(reader)?;
+    edit(&mut e, MODEL);
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert!(e.file_ops.rename_reading());
+    // Planned without the cameras while they are read.
+    assert!(e.file_ops.rename_shown().is_some());
+    e.file_ops.hold_plans = true;
+    e.file_ops
+        .rename_choose("{{image_name}}-{{naming_sequenceNumber_2Digits}}");
+    frame(&mut e, Vec::new());
+    open.send(())?;
+    open.send(())?;
+    until(&mut e, |e| !e.file_ops.rename_reading());
+    e.file_ops.rename_choose(MODEL);
+    frame(&mut e, Vec::new());
+    assert!(
+        e.file_ops.rename_shown().is_none(),
+        "the plan without the cameras is not shown as current"
+    );
+    // The plan of the other template lands, then the template's again.
+    let answer = e.rename_answer_now().expect("planning");
+    e.rename_planned(answer);
+    let answer = e.rename_answer_now().expect("planned again");
+    e.rename_planned(answer);
+    e.file_ops.hold_plans = false;
+    settle(&mut e);
+    let shown = e.file_ops.rename_shown().expect("planned with the cameras");
+    assert_eq!(shown.rows[0].1, "ILCE-7RM6-01.RAF");
+    tap(&mut e, Key::Enter, Modifiers::NONE);
+    settle(&mut e);
+    assert_eq!(at(&e, &d, ids[1]), "ILCE-7RM6-01.RAF");
+    Ok(())
+}
