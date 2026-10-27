@@ -1229,11 +1229,21 @@ pub(super) fn tagged(path: &Path, name: &str, value: &[u8]) -> bool {
 }
 
 /// Whether a real drive, at folder `dir`, keeps extras: any on macOS (FAT
-/// and exFAT in AppleDouble files), not FAT and exFAT elsewhere.
+/// and exFAT in AppleDouble files), not FAT and exFAT elsewhere, and on
+/// Windows an SMB share only where its server keeps alternate data streams
+/// (Samba needs `streams_xattr`), as a file made there to try tells.
 pub(super) fn keeps_extras(dir: &Path) -> bool {
     use crate::storage::fsops::{VolumeKind, volume_facts};
+    let tried = || {
+        tempfile::NamedTempFile::new_in(dir)
+            .is_ok_and(|f| crate::storage::fsops::set_extra(f.path(), "tried", b"1").is_ok())
+    };
     cfg!(target_vendor = "apple")
-        || volume_facts(dir).is_ok_and(|f| !matches!(f.kind, VolumeKind::Fat | VolumeKind::Exfat))
+        || volume_facts(dir).is_ok_and(|f| match f.kind {
+            VolumeKind::Fat | VolumeKind::Exfat => false,
+            VolumeKind::Smb if cfg!(windows) => tried(),
+            _ => true,
+        })
 }
 
 /// Opens folder `path` the way the real `sync_dir` does, and does not

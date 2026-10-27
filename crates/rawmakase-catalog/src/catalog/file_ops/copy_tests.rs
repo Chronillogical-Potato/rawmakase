@@ -43,18 +43,14 @@ pub(super) enum Far {
     /// made at their names.
     Direct,
     /// An SMB share, as `Direct` but on the network and with no Trash of
-    /// its own: proven by names on macOS and Linux, refused on Windows.
+    /// its own: proven by names.
     Share,
 }
 
 impl Far {
     /// The kinds proven by names here.
     pub(super) fn by_names() -> Vec<Far> {
-        let mut kinds = vec![Far::Names, Far::Direct];
-        if !cfg!(windows) {
-            kinds.push(Far::Share);
-        }
-        kinds
+        vec![Far::Names, Far::Direct, Far::Share]
     }
 }
 
@@ -275,7 +271,7 @@ fn a_move_from_two_drives_counts_only_what_it_copies() -> Result<()> {
 fn a_move_to_or_from_a_drive_whose_file_ids_can_t_be_proven_is_refused() -> Result<()> {
     let fx = files();
     let (here, there) = (fx.root.clone(), fx.root.join("far"));
-    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares on a Mac or mounted as CIFS on Linux, and others)";
+    let why = "Moving photos to or from this kind of drive (network drives other than SMB shares, and others)";
     for unstable in [
         vec![there.clone()],
         vec![here.clone()],
@@ -1259,7 +1255,10 @@ fn every_fault_at_every_step_of_a_copy_made_at_its_name_ends_proven() {
 }
 
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
 fn every_fault_at_every_step_of_a_copy_to_an_smb_share_ends_proven() {
     assert!(every_fault(Far::Share) >= 60);
 }
@@ -1958,8 +1957,7 @@ fn a_copy_its_folder_doesn_t_list_yet_is_never_taken_for_gone() -> Result<()> {
 }
 
 #[test]
-fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_linux_and_refused_on_windows()
--> Result<()> {
+fn a_move_to_an_smb_share_is_proven_by_names() -> Result<()> {
     let mut fx = files();
     let a = fx.photo("A.NEF");
     let disk = far_as(&fx, Far::Share);
@@ -1968,12 +1966,6 @@ fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_linux_and_refused_on_w
     if let Some(across) = &plan.summary().across {
         // Its originals, on this drive, go to its Trash.
         assert_eq!((across.files, across.originals_stay), (1, 0));
-    }
-    if cfg!(windows) {
-        assert!(plan.is_empty());
-        let reasons: Vec<_> = plan.skipped().iter().map(|s| s.reason.clone()).collect();
-        assert_eq!(reasons, [Skip::Refused(Refusal::FileIdsUnproven)]);
-        return Ok(());
     }
     let outcome = execute::execute_with(
         &mut fx.cat,
@@ -2002,7 +1994,6 @@ fn a_move_to_an_smb_share_is_proven_by_names_on_macos_and_linux_and_refused_on_w
 /// were, beside their copies, which the catalog follows, and the outcome
 /// says why. Nothing is deleted instead.
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_move_from_an_smb_share_keeps_the_originals_its_trash_can_t_take() -> Result<()> {
     let mut fx = files();
     let a = fx.photo("A.NEF");
@@ -2440,7 +2431,6 @@ fn another_spelling_of_a_name_is_taken_only_for_the_same_file() -> Result<()> {
 /// (#675). The move is listed for the user, Put Back changes nothing, and
 /// once the user deletes the copies it clears.
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Result<()> {
     let mut fx = files();
     let rows = fx.rows();
@@ -2568,7 +2558,6 @@ fn a_file_put_at_a_copys_name_while_it_is_finished_takes_nothing_of_it() -> Resu
 /// original changed meanwhile may hold the only bytes left, and that is
 /// said over any other copy left there (review of #675).
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable() -> Result<()> {
     let mut fx = files();
     let original = fx.root.join("A.NEF");

@@ -8,8 +8,14 @@
 //!
 //! Whether a file's volume has a Recycle Bin is told from its drive type:
 //! removable, network, CD and RAM drives have none; on a fixed drive the
-//! bin may be turned off or too small, which only the delete tells.
+//! bin may be turned off or too small, which only the delete tells. A file
+//! on an SMB share is refused before the shell is asked, even where it
+//! would recycle it (a folder redirected there has a bin, the share's
+//! `$RECYCLE.BIN`, measured on Windows 11, #691): that bin is filled by a
+//! rename on the server, which can take a file another computer put at the
+//! name since it was checked, so it isn't used, as on Linux.
 use crate::catalog::file_ops::{TrashError, TrashReceipt, TrashSupport};
+use crate::storage::fsops;
 use std::cell::RefCell;
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
@@ -27,6 +33,15 @@ use windows::Win32::UI::Shell::{
 use windows::core::{ComObject, HRESULT, HSTRING, PCWSTR, Ref, implement};
 
 pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
+    // Refused too where the volume can't be read but is a network drive
+    // (one dropped since it was checked, say), failing closed.
+    let share = match fsops::volume_facts(path) {
+        Ok(f) => f.kind == fsops::VolumeKind::Smb,
+        Err(_) => supports(path) == TrashSupport::No,
+    };
+    if share {
+        return Err(TrashError::Unsupported);
+    }
     let _com = Com::init()?;
     let seen = recycle(path).map_err(|e| TrashError::Failed(said(&e)))?;
     match seen {
@@ -63,7 +78,8 @@ pub(super) fn supports(path: &Path) -> TrashSupport {
 /// removable (USB sticks and cards, FAT and exFAT among them), network, CD
 /// or RAM drives; a fixed one's may be turned off, or too small for what
 /// goes, so it can't be told. A network folder that has a bin (a
-/// redirected one) is refused too.
+/// redirected one) is refused too, and [`trash`] refuses one on an SMB
+/// share.
 fn of_drive(kind: u32) -> TrashSupport {
     use windows_sys::Win32::System::WindowsProgramming::{
         DRIVE_CDROM, DRIVE_RAMDISK, DRIVE_REMOTE, DRIVE_REMOVABLE,

@@ -1,7 +1,8 @@
 //! Windows: `GetFileInformationByHandle` for entries, `MoveFileExW` without
 //! `MOVEFILE_REPLACE_EXISTING` or `MOVEFILE_COPY_ALLOWED` for the exclusive
 //! rename, the volume's drive type, flags and free space
-//! (`GetDiskFreeSpaceExW`), and alternate data streams for extras
+//! (`GetDiskFreeSpaceExW`), a network drive's protocol
+//! (`FileRemoteProtocolInfo`), and alternate data streams for extras
 //! (`FindFirstStreamW`).
 use super::{Entry, EntryKind, FileId, FsError, VolumeFacts, VolumeId, VolumeKind};
 use std::ffi::{OsStr, OsString};
@@ -16,10 +17,12 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_WRITE_ATTRIBUTES, FindClose, FindFirstStreamW, FindNextStreamW, FindStreamInfoStandard,
-    GetDiskFreeSpaceExW, GetDriveTypeW, GetFileInformationByHandle, GetVolumeInformationW,
+    FILE_REMOTE_PROTOCOL_INFO, FILE_WRITE_ATTRIBUTES, FileRemoteProtocolInfo, FindClose,
+    FindFirstStreamW, FindNextStreamW, FindStreamInfoStandard, GetDiskFreeSpaceExW, GetDriveTypeW,
+    GetFileInformationByHandle, GetFileInformationByHandleEx, GetVolumeInformationW,
     GetVolumePathNameW, MOVEFILE_WRITE_THROUGH, MoveFileExW, WIN32_FIND_STREAM_DATA,
 };
+use windows_sys::Win32::Storage::InstallableFileSystems::WNNC_NET_SMB;
 use windows_sys::Win32::System::SystemServices::FILE_READ_ONLY_VOLUME;
 use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOTE;
 
@@ -81,6 +84,7 @@ fn information(file: &std::fs::File) -> Result<(FileId, u64), FsError> {
 
 /// The kind of file system `name`, as `GetVolumeInformationW` names it.
 /// ReFS's 64-bit file index isn't promised unique, so it is another kind.
+/// Not for a network drive, which names the server's ([`remote_kind`]).
 pub(super) fn kind_of(name: &str) -> VolumeKind {
     match name.to_ascii_uppercase().as_str() {
         "NTFS" => VolumeKind::Ntfs,
@@ -90,12 +94,54 @@ pub(super) fn kind_of(name: &str) -> VolumeKind {
     }
 }
 
+/// The kind of a network drive reached over `protocol` (a `WNNC_NET_`
+/// network type, as `FileRemoteProtocolInfo` names it; `None` where it
+/// can't be read): an SMB share, or another kind. Its file system's name
+/// is the server's, `NTFS` from a Synology and from Samba alike (measured
+/// for #691), so it tells nothing.
+pub(super) fn remote_kind(protocol: Option<u32>) -> VolumeKind {
+    match protocol {
+        Some(WNNC_NET_SMB) => VolumeKind::Smb,
+        _ => VolumeKind::Other,
+    }
+}
+
+/// The network protocol `path` is reached over, from a handle opened for
+/// no access; `None` for a local file, which has none.
+fn protocol(path: &Path) -> Result<Option<u32>, FsError> {
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    // SAFETY: an all-zero FILE_REMOTE_PROTOCOL_INFO is a valid value of the
+    // plain C struct, which the call fills.
+    let mut info: FILE_REMOTE_PROTOCOL_INFO = unsafe { std::mem::zeroed() };
+    // SAFETY: the handle is open for the duration of the call, and `info`
+    // is a writable struct of the size given, of the type the class needs.
+    let read = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileRemoteProtocolInfo,
+            (&raw mut info).cast(),
+            size_of::<FILE_REMOTE_PROTOCOL_INFO>() as u32,
+        )
+    };
+    Ok((read != 0).then_some(info.Protocol))
+}
+
 /// The file object an open file is.
 pub(super) fn handle_id(file: &std::fs::File) -> Result<FileId, FsError> {
     Ok(information(file)?.0)
 }
 
 pub(super) fn rename_exclusive(from: &Path, to: &Path) -> Result<(), FsError> {
+    // An SMB server is asked not to replace, but needn't keep to it: raced
+    // against an exclusive create through Linux's CIFS, such a rename
+    // replaced the file made, against Samba 4.22 and a Synology alike
+    // (Windows 11, #691).
+    if protocol(from)? == Some(WNNC_NET_SMB) {
+        return Err(FsError::Unsupported);
+    }
     let (from, to) = (wide(from), wide(to));
     // SAFETY: both are NUL-terminated wide strings that outlive the call.
     if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
@@ -112,8 +158,8 @@ pub(super) fn sync_dir(dir: &Path) -> Result<(), FsError> {
     Ok(())
 }
 
-pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
-    let path = wide(path);
+pub(super) fn volume_facts(at: &Path) -> Result<VolumeFacts, FsError> {
+    let path = wide(at);
     let mut root = vec![0u16; 1024];
     // SAFETY: `path` is NUL-terminated and `root` holds the length given.
     if unsafe { GetVolumePathNameW(path.as_ptr(), root.as_mut_ptr(), root.len() as u32) } == 0 {
@@ -156,9 +202,12 @@ pub(super) fn volume_facts(path: &Path) -> Result<VolumeFacts, FsError> {
     if read == 0 {
         return Err(last_error());
     }
-    let kind =
-        String::from_utf16_lossy(&kind[..kind.iter().position(|c| *c == 0).unwrap_or(kind.len())]);
-    let kind = kind_of(&kind);
+    let kind = match remote {
+        true => remote_kind(protocol(at)?),
+        false => kind_of(&String::from_utf16_lossy(
+            &kind[..kind.iter().position(|c| *c == 0).unwrap_or(kind.len())],
+        )),
+    };
     Ok(VolumeFacts {
         kind,
         local: !remote,
@@ -257,8 +306,10 @@ pub(super) fn read_extra(path: &Path, name: &OsStr) -> Result<Vec<u8>, FsError> 
 /// none, which takes the stream's name for an invalid one. By its path,
 /// whatever handle to it there is, as `CreateFileW` opens a stream
 /// (`NtCreateFile` relative to a handle, or `BackupWrite`, might not need
-/// it; neither is measured): a copy to a share, where another computer
-/// could put a file at its name, is refused on Windows.
+/// it locally; neither is measured, and SMB names the file in each open
+/// anyway): on a share, a file another computer put at its name takes it,
+/// as Linux's CIFS gives one an extended attribute. The copy then reads
+/// back otherwise, and stays for the user.
 pub(super) fn write_extra(
     path: &Path,
     _file: Option<&std::fs::File>,

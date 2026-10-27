@@ -562,8 +562,8 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     assert!(!facts.local && !facts.stable_ids, "{shown}");
     assert!(!facts.exclusive_rename, "{shown}");
     // It says it can't rename exclusively, and changes nothing: macOS's
-    // smbfs answers so, and Linux's CIFS would replace a file another
-    // computer just put at the name.
+    // smbfs answers so, and Linux's CIFS, or the server Windows asks, would
+    // replace a file another computer just put at the name.
     let (a, b) = (d.path().join("a.NEF"), d.path().join("b.NEF"));
     fs::write(&a, b"a").unwrap();
     assert!(matches!(
@@ -581,8 +581,9 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     assert_eq!(fs::read(&a).unwrap(), b"a");
     let c = d.path().join("caf\u{e9}.NEF");
     create_file(&c).unwrap();
-    // macOS's smbfs finds a name by either form; Linux's CIFS sends its
-    // bytes, which a server may tell apart (Samba 4.22 does).
+    // macOS's smbfs finds a name by either form; Linux's CIFS and Windows
+    // send its bytes, which a server may tell apart (Samba 4.22 and a
+    // Synology do).
     if cfg!(target_vendor = "apple") {
         assert!(matches!(
             create_file(&d.path().join("cafe\u{301}.NEF")),
@@ -605,9 +606,14 @@ fn an_smb_share_is_told_and_makes_files_only_where_none_is() {
     set_extra(&source, "com.rawmakase.test", b"synthetic").unwrap();
     let content = copy_into(&source, &mut into, &mut |_| true).unwrap();
     sync_file(&into).unwrap();
-    // Its extras, as a move gives them, between the two.
-    copy_extras(&source, &copy, Some(&into)).unwrap();
-    assert_eq!(extras(&copy).unwrap(), extras(&source).unwrap());
+    // Its extras, as a move gives them, between the two; on Windows none
+    // where the server keeps no alternate data streams (Samba without
+    // `streams_xattr`), which a move says it can't keep.
+    match copy_extras(&source, &copy, Some(&into)) {
+        Ok(()) => assert_eq!(extras(&copy).unwrap(), extras(&source).unwrap()),
+        Err(FsError::Unsupported) if cfg!(windows) => {}
+        Err(e) => panic!("{shown}: {e}"),
+    }
     copy_times(&source, &copy, Some(&into)).unwrap();
     drop(into);
     assert_eq!(hash_file(&copy).unwrap(), content);
@@ -724,6 +730,14 @@ fn a_volume_kind_is_told_from_its_file_system_name() {
         for other in ["ReFS", ""] {
             assert_eq!(kind_of(other), VolumeKind::Other, "{other}");
         }
+        // A network drive by its protocol, whatever file system its server
+        // names (`NTFS`, from Samba and a Synology): SMB, or another (a
+        // WebDAV or NFS drive, `WNNC_NET_DAV` and `WNNC_NET_MS_NFS`).
+        use super::windows::remote_kind;
+        assert_eq!(remote_kind(Some(0x0002_0000)), VolumeKind::Smb);
+        for other in [Some(0x002e_0000), Some(0x0042_0000), None] {
+            assert_eq!(remote_kind(other), VolumeKind::Other, "{other:?}");
+        }
     }
     // Only these keep a file's id while it is on them.
     for kind in [
@@ -746,7 +760,8 @@ fn a_volume_kind_is_told_from_its_file_system_name() {
     }
     // An SMB share can't promise a rename won't replace a file another
     // computer put at the name: macOS's smbfs answers ENOTSUP (measured on
-    // macOS 15), and Linux's CIFS checks the name only on this computer.
+    // macOS 15), Linux's CIFS checks the name only on this computer, and
+    // the servers Windows asked not to replace did (#691).
     assert!(!VolumeKind::Smb.exclusive_rename());
 }
 
