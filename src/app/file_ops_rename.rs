@@ -474,6 +474,9 @@ impl Editor {
             .extension()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // The region's number format, read once with the fields.
+        let decimal = crate::export_settings::Decimal(crate::platform::locale::decimal_separator());
+        let order = order.with_fields(|_, fields| fields.decimal = decimal);
         let settings = self.remembered_rename();
         #[allow(unused_mut)]
         let mut read = NameRead::default();

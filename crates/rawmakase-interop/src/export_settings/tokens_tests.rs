@@ -235,6 +235,27 @@ fn generated_templates_round_trip() {
     }
 }
 
+/// Lightroom writes an Exposure's aperture with the region's decimal
+/// separator, its shutter speed and focal length always with a dot ("0.8 sec
+/// at f - 5,0", "23.5 mm" in Poland), and literal text as typed.
+#[test]
+fn only_the_aperture_has_the_regions_decimal_separator() {
+    let f = NameFields {
+        info: crate::metadata::PhotoInfo {
+            exposure: Some(0.8),
+            aperture: Some(5.),
+            focal: Some(23.5),
+            ..Default::default()
+        },
+        decimal: crate::export_settings::Decimal(','),
+        ..NameFields::default()
+    };
+    let one = |tokens: &str| name(tokens, &f, "").0;
+    assert_eq!(one("{{com.adobe.exposure}}"), "0.8 sec at f - 5,0");
+    assert_eq!(one("{{com.adobe.focalLength}}"), "23.5 mm");
+    assert_eq!(one("v1.2 {{naming_sequenceNumber_2Digits}}"), "v1.2 01");
+}
+
 #[test]
 fn tokens_fill_as_lightroom_filled_them_for_the_a7r_vi() {
     let f = a7r_vi();
