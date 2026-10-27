@@ -618,9 +618,12 @@ fn run_window(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::
             .with_icon(window_icon())
             .with_inner_size([1440., 960.])
             .with_min_inner_size([900., 650.])
-            // Restoring leaves it at the size above. X11 window managers ignore
-            // this while the window is hidden; the first frame asks again.
-            .with_maximized(workspace::KEEPS_MAXIMIZED && session.maximized)
+            // On Windows egui-winit applies the inner size after creating the
+            // window. Resizing an already maximized window can leave it at that
+            // size with its maximized flag still set (#553). Let the first
+            // frame maximize it after sizing instead. X11 also needs that
+            // request because its window manager waits for the window to show.
+            .with_maximized(!cfg!(windows) && workspace::KEEPS_MAXIMIZED && session.maximized)
             // On macOS the workspace bar is the title bar, under the traffic
             // lights; elsewhere the window keeps its decorations.
             .with_fullsize_content_view(true)
