@@ -210,6 +210,10 @@ pub enum CameraNames {
 /// What a photo's name can be made from, taken once for each export: the
 /// Example and the files named all come from one reading. Text left empty
 /// is unknown or unset.
+///
+/// Title, caption, copyright and creator are `None` while the catalog has
+/// none of its own for the photo: the file's own then names it, once read
+/// (`Some("")` is one cleared, or set empty, which the file never fills).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NameFields {
     /// Its capture time as the catalog keeps it ("2026-05-04 10:21:33.000")
@@ -220,11 +224,11 @@ pub struct NameFields {
     /// Lens, exposure, focal length, ISO and dimensions; its camera is not
     /// used, see `camera`.
     pub info: crate::metadata::PhotoInfo,
-    pub title: String,
-    pub caption: String,
-    pub copyright: String,
-    /// Its creators, "; " between them.
-    pub creator: String,
+    pub title: Option<String>,
+    pub caption: Option<String>,
+    pub copyright: Option<String>,
+    /// Its creators, ", " between them, as Lightroom names them.
+    pub creator: Option<String>,
     pub rating: i32,
     pub label: String,
     pub camera: CameraNames,
@@ -243,14 +247,21 @@ impl NameFields {
             iso: None,
             dimensions: None,
         },
-        title: String::new(),
-        caption: String::new(),
-        copyright: String::new(),
-        creator: String::new(),
+        title: None,
+        caption: None,
+        copyright: None,
+        creator: None,
         rating: 0,
         label: String::new(),
         camera: CameraNames::NotRead,
     };
+    /// Whether a title, caption, copyright or creator is the file's own,
+    /// which the catalog doesn't have.
+    pub fn lacks_descriptive(&self) -> bool {
+        [&self.title, &self.caption, &self.copyright, &self.creator]
+            .iter()
+            .any(|t| t.is_none())
+    }
     /// Only its capture time known.
     pub fn captured(captured: Option<String>) -> Self {
         Self {

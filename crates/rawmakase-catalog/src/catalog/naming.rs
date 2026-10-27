@@ -33,9 +33,11 @@ pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
         &[&id],
     )?;
     let d = super::descriptive::read(db, id)?;
+    // No row is the file's own (`None`); a cleared one is empty.
     let text = |value: &Option<Value<LangAlt>>| match value {
-        Some(Value::Set(langs)) => langs.default_text().unwrap_or_default().to_string(),
-        _ => String::new(),
+        Some(Value::Set(langs)) => Some(langs.default_text().unwrap_or_default().to_string()),
+        Some(Value::Cleared) => Some(String::new()),
+        None => None,
     };
     Ok(NameFields {
         captured: Some(photo.captured).filter(|c| !c.is_empty()),
@@ -44,9 +46,11 @@ pub(super) fn read(db: &impl Reads, id: PhotoId) -> Result<NameFields> {
         title: text(&d.title),
         caption: text(&d.caption),
         copyright: text(&d.copyright),
+        // As Lightroom names them.
         creator: match &d.creator {
-            Some(Value::Set(names)) => names.join("; "),
-            _ => String::new(),
+            Some(Value::Set(names)) => Some(names.join(", ")),
+            Some(Value::Cleared) => Some(String::new()),
+            None => None,
         },
         rating: photo.rating,
         label: photo.label,
@@ -92,9 +96,14 @@ mod tests {
         );
         assert_eq!(fields[0].info, info);
         assert_eq!(
-            (fields[0].title.as_str(), fields[0].creator.as_str()),
-            ("Harbour", "Ann; Bo")
+            (fields[0].title.as_deref(), fields[0].creator.as_deref()),
+            (Some("Harbour"), Some("Ann, Bo"))
         );
+        // No row: the file's own; cleared: empty, whatever the file says.
+        assert_eq!(fields[0].caption, None);
+        cat.set_text(&ids[1..2], TextField::Caption, "")?;
+        let cleared = cat.name_fields(&ids[1..2])?;
+        assert_eq!(cleared[0].caption.as_deref(), Some(""));
         assert_eq!((fields[0].rating, fields[0].label.as_str()), (3, "Red"));
         assert_eq!(fields[0].camera, Default::default());
         // Nothing known is nothing.

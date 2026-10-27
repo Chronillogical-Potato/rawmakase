@@ -453,7 +453,9 @@ fn what_a_template_needs_and_uses() {
     assert!(needs("{{date_Hour}}").captured);
     assert!(needs("{{com.adobe.make}}").camera);
     assert!(needs("{{com.adobe.lens}}").info && !needs("{{com.adobe.lens}}").camera);
-    assert!(!needs("{{com.adobe.title}}").any());
+    // A title the catalog lacks is the file's.
+    assert!(needs("{{com.adobe.title}}").descriptive && !needs("{{com.adobe.title}}").camera);
+    assert!(!needs("{{com.adobe.rating.string}}").any());
     let t = TokenTemplate::parse("{{custom_token}} {{naming_sequenceTotal_1Digit}}");
     assert!(t.uses_text() && !t.uses_sequence() && !t.names_each_photo());
     assert!(TokenTemplate::parse("{{naming_sequenceNumber_2Digits}}").names_each_photo());

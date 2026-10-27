@@ -18,7 +18,8 @@
 //! Several photos are named by a template, as Export names files: a preset,
 //! one of RAWmakase's own, or one made in the Filename Template Editor
 //! (File Naming > Edit…). Their names come from the catalog's fields, read
-//! with their order, and from their files (the camera's make and model),
+//! with their order, and from their files (the camera's make and model,
+//! and a title, caption, copyright or creator the catalog has none of),
 //! read in the background once a template needs them (`naming::read`), and
 //! cancelled with the dialog. A plan names photos from the fields it was
 //! given: one made before the files were read is replaced once they are,
@@ -167,7 +168,16 @@ impl Renaming {
 
     /// Whether names by `template` need what the photos' files give.
     fn needs_files(&self, template: &NameTemplate) -> bool {
-        !self.one() && template.needs().and(name_read::file_sourced(false)).any()
+        let lacks = self
+            .order
+            .photos()
+            .iter()
+            .any(|o| o.fields.lacks_descriptive());
+        !self.one()
+            && template
+                .needs()
+                .and(name_read::file_sourced(false, lacks))
+                .any()
     }
 
     /// Whether names by `template` wait for the photos' files: they need
@@ -190,6 +200,7 @@ impl Renaming {
                     .map(|o| ToRead {
                         path: o.path.clone(),
                         standalone: false,
+                        descriptive: o.fields.lacks_descriptive(),
                     })
                     .collect();
                 self.read.start(photos, events.clone(), ctx.clone());
