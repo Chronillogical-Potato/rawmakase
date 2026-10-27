@@ -277,10 +277,8 @@ mod scanned {
     }
 }
 
-#[test]
-fn an_indexed_folder_answers_as_asking_every_name_did() {
-    use crate::catalog::sidecar::caseless;
-    use std::ffi::OsStr;
+/// A folder's names asking the hard questions of an index.
+fn hard_names() -> Vec<OsString> {
     let listing = names(&[
         "A.NEF",
         "a.nef",
@@ -325,6 +323,14 @@ fn an_indexed_folder_answers_as_asking_every_name_did() {
         listing.push(OsString::from_vec(b"A\xff.NEF.xmp".to_vec()));
         listing
     };
+    listing
+}
+
+#[test]
+fn an_indexed_folder_answers_as_asking_every_name_did() {
+    use crate::catalog::sidecar::caseless;
+    use std::ffi::OsStr;
+    let listing = hard_names();
     // A volume that takes some names alike for one file and others not.
     let same_file =
         |a: &OsStr, b: &OsStr| caseless(a) == caseless(b) && !(a.len() + b.len()).is_multiple_of(3);
@@ -367,4 +373,56 @@ fn an_indexed_folder_answers_as_asking_every_name_did() {
     // and clashes found as well as not.
     assert!(shared > 5, "{shared}");
     assert!(clashes > 100, "{clashes}");
+}
+
+#[test]
+fn an_index_changed_name_by_name_answers_as_one_read_whole() {
+    use crate::catalog::sidecar::caseless;
+    use std::ffi::OsStr;
+    let same_file = |a: &OsStr, b: &OsStr| caseless(a) == caseless(b);
+    let answers = |index: &companions::Listing, names: &[OsString]| {
+        let mut listed = index.names().to_vec();
+        listed.sort();
+        let mut asked = Vec::new();
+        for photo in names {
+            let found = index.companions(photo, &same_file);
+            let mut alike: Vec<OsString> = index.alike(photo).cloned().collect();
+            alike.sort();
+            let clash = index.arrival_conflict(photo, std::slice::from_ref(photo), &|_| false);
+            asked.push((found.carried, found.shared, alike, clash.is_some()));
+        }
+        (listed, asked)
+    };
+    let all = hard_names();
+    let mut index = companions::Listing::new(all.clone());
+    let mut now = all.clone();
+    // Each name renamed away and back in turn, some of them twice over,
+    // as a batch's renames change a folder's listing.
+    for (i, name) in all.iter().enumerate() {
+        index.remove(name);
+        now.retain(|n| n != name);
+        let mut renamed = name.clone();
+        renamed.push(".moved");
+        index.push(renamed.clone());
+        now.push(renamed.clone());
+        if i % 3 == 0 {
+            // Another arriving and leaving again, as a check projects.
+            let len = index.names().len();
+            index.push(name.clone());
+            index.push(all[(i + 1) % all.len()].clone());
+            index.truncate(len);
+        }
+        if i % 2 == 0 {
+            index.remove(&renamed);
+            now.retain(|n| *n != renamed);
+            index.push(name.clone());
+            now.push(name.clone());
+        }
+        let whole = companions::Listing::new(now.clone());
+        assert_eq!(
+            answers(&index, &all),
+            answers(&whole, &all),
+            "after {name:?}"
+        );
+    }
 }

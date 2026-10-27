@@ -428,6 +428,32 @@ pub(super) struct Folders {
     /// (so before anything of it moves): a volume may take two different
     /// names (`ß.NEF`, `SS.NEF`) for one file, which no folding tells.
     files: std::cell::RefCell<HashMap<PathBuf, Option<FileId>>>,
+    /// Each catalog filename by `sidecar::caseless`, folded once per plan
+    /// or run, not once per photo checked against its folder (#692).
+    folded: std::cell::RefCell<HashMap<String, String>>,
+    /// While [`Self::caching`], the photos of each catalog folder [`shared`]
+    /// and [`occupied`] asked about, by the folder and the directory they
+    /// were asked about it over.
+    photos: std::cell::RefCell<Option<HashMap<(FolderId, PathBuf), Photos>>>,
+}
+
+/// A catalog folder's photos, as read in a transaction, kept as its own
+/// writes change them.
+struct Photos {
+    rows: Vec<Photo>,
+    /// Whether each master's file object is read.
+    files: bool,
+}
+
+/// A photo of a folder, as [`shared`] and [`occupied`] ask about it.
+struct Photo {
+    id: PhotoId,
+    master: bool,
+    /// Its filename, by `sidecar::caseless`.
+    name: String,
+    filename: String,
+    /// A master's file object there, once [`Photos::files`].
+    file: Option<FileId>,
 }
 
 impl Folders {
@@ -446,7 +472,143 @@ impl Folders {
         Self {
             by_dir,
             files: Default::default(),
+            folded: Default::default(),
+            photos: Default::default(),
         }
+    }
+
+    /// Runs `checks`, all in one transaction, with each catalog folder's
+    /// photos read once for [`shared`] and [`occupied`] (#692), not for
+    /// each photo checked. The only photo rows `checks` may change are
+    /// those [`moved`] changes, which [`Self::refresh`] reads again.
+    pub fn caching<R>(&self, checks: impl FnOnce() -> R) -> R {
+        struct Stop<'a>(&'a Folders);
+        impl Drop for Stop<'_> {
+            fn drop(&mut self) {
+                self.0.photos.replace(None);
+            }
+        }
+        self.photos.replace(Some(HashMap::new()));
+        let _stop = Stop(self);
+        checks()
+    }
+
+    /// Whether any photo of folder `folder`, over `dir`, outside `family`
+    /// passes `test`, read in `db`; each master's file object there read
+    /// first when `files`.
+    fn any_photo(
+        &self,
+        db: &impl Reads,
+        folder: FolderId,
+        dir: &Path,
+        files: bool,
+        family: &[PhotoId],
+        test: impl Fn(&Photo) -> bool,
+    ) -> anyhow::Result<Option<bool>> {
+        let mut cached = self.photos.borrow_mut();
+        let Some(cached) = cached.as_mut() else {
+            return Ok(None);
+        };
+        let photos = match cached.entry((folder, dir.to_path_buf())) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let rows = self.read_photos(
+                    db,
+                    sql!("SELECT id, master_id, folder, filename FROM photos WHERE folder=?"),
+                    &[&folder],
+                )?;
+                let rows = rows.into_iter().map(|(_, p)| p).collect();
+                e.insert(Photos { rows, files: false })
+            }
+        };
+        if files && !photos.files {
+            for p in photos.rows.iter_mut().filter(|p| p.master) {
+                p.file = self.file_at(&dir.join(&p.filename));
+            }
+            photos.files = true;
+        }
+        Ok(Some(
+            photos
+                .rows
+                .iter()
+                .any(|p| !family.contains(&p.id) && test(p)),
+        ))
+    }
+
+    /// The photos `query` reads with `params`, each with its folder.
+    fn read_photos(
+        &self,
+        db: &impl Reads,
+        query: super::super::db::Sql,
+        params: &[&dyn super::super::value::ToValue],
+    ) -> anyhow::Result<Vec<(FolderId, Photo)>> {
+        row! {
+            struct Row {
+                id: PhotoId,
+                master_id: Option<PhotoId>,
+                folder: FolderId,
+                filename: String,
+            }
+        }
+        let rows: Vec<Row> = db.read(query, params)?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let photo = Photo {
+                    id: r.id,
+                    master: r.master_id.is_none(),
+                    name: self.caseless(&r.filename),
+                    filename: r.filename,
+                    file: None,
+                };
+                (r.folder, photo)
+            })
+            .collect())
+    }
+
+    /// Reads master `master`'s family again into what [`Self::caching`]
+    /// keeps, once [`moved`] gave it another folder or name in the
+    /// transaction.
+    pub fn refresh(&self, db: &impl Reads, master: PhotoId) -> anyhow::Result<()> {
+        if self.photos.borrow().is_none() {
+            return Ok(());
+        }
+        let family = self.read_photos(
+            db,
+            sql!("SELECT id, master_id, folder, filename FROM photos WHERE id=? OR master_id=?"),
+            &[&master, &master],
+        )?;
+        let mut cached = self.photos.borrow_mut();
+        let Some(cached) = cached.as_mut() else {
+            return Ok(());
+        };
+        for ((folder, dir), photos) in cached.iter_mut() {
+            photos
+                .rows
+                .retain(|p| !family.iter().any(|(_, f)| f.id == p.id));
+            for (_, p) in family.iter().filter(|(f, _)| f == folder) {
+                photos.rows.push(Photo {
+                    id: p.id,
+                    master: p.master,
+                    name: p.name.clone(),
+                    filename: p.filename.clone(),
+                    file: match (photos.files, p.master) {
+                        (true, true) => self.file_at(&dir.join(&p.filename)),
+                        _ => None,
+                    },
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Catalog filename `name` by `sidecar::caseless`.
+    fn caseless(&self, name: &str) -> String {
+        self.folded
+            .borrow_mut()
+            .entry(name.to_string())
+            .or_insert_with(|| caseless(OsStr::new(name)))
+            .clone()
     }
 
     /// The file object at `path`, as first read in this plan or run.
@@ -480,8 +642,15 @@ pub(super) fn shared(
 ) -> anyhow::Result<bool> {
     let name = caseless(filename);
     for folder in folders.over(dir) {
-        let masters = Masters::read(db, folders, folder, dir, file.is_some())?;
-        if masters.share(&name, file, family) {
+        let same =
+            |p: &Photo| p.master && (p.name == name || file.is_some_and(|f| p.file == Some(f)));
+        let found = match folders.any_photo(db, folder, dir, file.is_some(), family, same)? {
+            Some(found) => found,
+            None => {
+                Masters::read(db, folders, folder, dir, file.is_some())?.share(&name, file, family)
+            }
+        };
+        if found {
             return Ok(true);
         }
     }
@@ -520,7 +689,7 @@ impl Masters {
         };
         for p in masters {
             out.by_name
-                .entry(caseless(OsStr::new(&p.filename)))
+                .entry(folders.caseless(&p.filename))
                 .or_default()
                 .push(p.id);
             if files && let Some(f) = folders.file_at(&dir.join(&p.filename)) {
@@ -566,13 +735,19 @@ pub(super) fn occupied(
         over.push(to);
     }
     for folder in over {
+        let named = |p: &Photo| p.name == name;
+        match folders.any_photo(db, folder, dir, false, family, named)? {
+            Some(true) => return Ok(true),
+            Some(false) => continue,
+            None => {}
+        }
         let photos: Vec<Named> = db.read(
             sql!("SELECT id, filename FROM photos WHERE folder=?"),
             &[&folder],
         )?;
         if photos
             .iter()
-            .any(|p| !family.contains(&p.id) && caseless(OsStr::new(&p.filename)) == name)
+            .any(|p| !family.contains(&p.id) && folders.caseless(&p.filename) == name)
         {
             return Ok(true);
         }

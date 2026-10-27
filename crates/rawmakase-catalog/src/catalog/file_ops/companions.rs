@@ -55,26 +55,95 @@ impl Listing {
             legacy_readers: HashMap::new(),
             names: Vec::new(),
         };
-        let add = |map: &mut HashMap<String, Vec<usize>>, key: String, i: usize| {
-            let at = map.entry(key).or_default();
-            if at.last() != Some(&i) {
-                at.push(i);
-            }
+        for name in names {
+            listing.push(name);
+        }
+        listing
+    }
+
+    /// The keys name `name` is indexed by in each of [`Self::keyed`]'s
+    /// maps.
+    fn keys(name: &OsStr) -> [Vec<String>; 4] {
+        let sidecars = match name.to_str() {
+            Some(_) => sidecar_names_caseless(Path::new(name)),
+            None => Vec::new(),
         };
-        for (i, name) in names.iter().enumerate() {
-            add(&mut listing.folded, folded(name), i);
-            add(&mut listing.caseless, caseless(name), i);
-            if name.to_str().is_some() {
-                for sidecar in sidecar_names_caseless(Path::new(name)) {
-                    add(&mut listing.sidecar_readers, sidecar, i);
+        let legacy = companion_paths(Path::new(name))
+            .iter()
+            .map(|p| caseless(p.as_os_str()))
+            .collect();
+        [vec![folded(name)], vec![caseless(name)], sidecars, legacy]
+    }
+
+    fn keyed(&mut self) -> [&mut HashMap<String, Vec<usize>>; 4] {
+        [
+            &mut self.folded,
+            &mut self.caseless,
+            &mut self.sidecar_readers,
+            &mut self.legacy_readers,
+        ]
+    }
+
+    /// Indexes name `name` at `i`, keeping each key's places in order.
+    fn index(&mut self, i: usize, name: &OsStr) {
+        for (map, keys) in self.keyed().into_iter().zip(Self::keys(name)) {
+            for key in keys {
+                let at = map.entry(key).or_default();
+                if let Err(place) = at.binary_search(&i) {
+                    at.insert(place, i);
                 }
             }
-            for legacy in companion_paths(Path::new(name)) {
-                add(&mut listing.legacy_readers, caseless(legacy.as_os_str()), i);
+        }
+    }
+
+    /// Takes name `name` at `i` out of the indexes.
+    fn unindex(&mut self, i: usize, name: &OsStr) {
+        for (map, keys) in self.keyed().into_iter().zip(Self::keys(name)) {
+            for key in keys {
+                if let Some(at) = map.get_mut(&key) {
+                    at.retain(|&j| j != i);
+                    if at.is_empty() {
+                        map.remove(&key);
+                    }
+                }
             }
         }
-        listing.names = names;
-        listing
+    }
+
+    /// Adds `name`, last, as a file named so arriving there adds it.
+    pub fn push(&mut self, name: OsString) {
+        self.index(self.names.len(), &name);
+        self.names.push(name);
+    }
+
+    /// Takes out every name exactly `name`, as a file named so leaving
+    /// there takes it out. The last name takes the place of each.
+    pub fn remove(&mut self, name: &OsStr) {
+        let exact = |l: &Self| {
+            Self::at(&l.folded, &folded(name))
+                .iter()
+                .copied()
+                .find(|&i| l.names[i] == name)
+        };
+        while let Some(i) = exact(self) {
+            let last = self.names.len() - 1;
+            let gone = self.names.swap_remove(i);
+            self.unindex(i, &gone);
+            if i < last {
+                let moved = self.names[i].clone();
+                self.unindex(last, &moved);
+                self.index(i, &moved);
+            }
+        }
+    }
+
+    /// Takes out the names after the first `len`, as [`Self::push`] added
+    /// them.
+    pub fn truncate(&mut self, len: usize) {
+        while self.names.len() > len {
+            let Some(name) = self.names.pop() else { break };
+            self.unindex(self.names.len(), &name);
+        }
     }
 
     pub fn names(&self) -> &[OsString] {
@@ -223,6 +292,7 @@ pub(super) struct Companions {
 /// `names`: the files named as its companions are, in another case or
 /// normalisation form at most, or by a name `same_file` (whether two names
 /// there are one file object) says the volume takes for one of them.
+#[cfg(test)]
 pub(super) fn of(
     photo: &OsStr,
     names: &[OsString],
@@ -271,6 +341,7 @@ pub(super) fn renamed(photo: &OsStr, renamed: &OsStr, companion: &OsStr) -> Opti
 /// folder whose names, once everything arriving there is in, will be
 /// `projected`: the name of a file there the photo would read as its
 /// companion, or of one that would read a companion arriving with it.
+#[cfg(test)]
 pub(super) fn arrival_conflict(
     photo: &OsStr,
     carried: &[OsString],

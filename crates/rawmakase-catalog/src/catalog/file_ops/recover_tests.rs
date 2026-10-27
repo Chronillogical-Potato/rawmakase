@@ -249,6 +249,94 @@ fn every_fault_at_every_disk_step_of_a_move_ends_proven() {
     assert!(runs >= 18);
 }
 
+/// Photos of two folders, some with sidecars, moved together in one batch
+/// (#692): its renames and syncs go round by round.
+fn batch_files() -> Fx {
+    fixture(&[
+        "a.NEF",
+        "a.xmp",
+        "b.NEF",
+        "c.NEF",
+        "c.xmp",
+        "day/e.NEF",
+        "day/e.xmp",
+        "sub/",
+    ])
+}
+
+fn batch_op(fx: &Fx) -> FileOp {
+    FileOp::MovePhotos {
+        photos: ["a.NEF", "b.NEF", "c.NEF", "day/e.NEF"]
+            .map(|p| fx.photo(p))
+            .to_vec(),
+        root: fx.root_id(),
+        to: "sub".into(),
+    }
+}
+
+#[test]
+fn every_fault_at_every_disk_step_of_a_batch_ends_proven() {
+    let mut clean = batch_files();
+    let counting = Faulty::default();
+    let op = batch_op(&clean);
+    let outcome = clean.run(op, &NoTrash, &counting);
+    let sub = clean.folder("sub");
+    assert!(
+        results(&outcome)
+            .iter()
+            .all(|r| *r == ItemResult::Moved { to: sub }),
+        "{outcome:?}"
+    );
+    let steps = [
+        (Op::Rename, counting.count(Op::Rename)),
+        (Op::Sync, counting.count(Op::Sync)),
+    ];
+    assert_eq!(steps[0].1, 7);
+    let mut runs = 0;
+    for (at, count) in steps {
+        for nth in 0..count {
+            for fault in [Fault::Fail, Fault::CrashBefore, Fault::CrashAfter] {
+                let mut fx = batch_files();
+                let was = before(&fx);
+                let disk = Faulty::at(at, nth, fault);
+                let op = batch_op(&fx);
+                let (batch, recovery) = scenario(&mut fx, op, &NoTrash, &disk);
+                check(&fx, &was, &recovery, &batch);
+                // A step that fails is put back, the run going on: a
+                // rename's item alone, a folder's sync every item renamed
+                // into or out of it in that round; the others are moved.
+                if fault == Fault::Fail {
+                    let outcome = super::outcome(&fx.cat, &batch).unwrap();
+                    let results = results(&outcome);
+                    let moved = results
+                        .iter()
+                        .filter(|r| **r == ItemResult::Moved { to: sub })
+                        .count();
+                    let back = results
+                        .iter()
+                        .filter(|r| matches!(r, ItemResult::Unchanged(Some(_))))
+                        .count();
+                    assert_eq!(moved + back, 4, "{at:?} {nth}: {outcome:?}");
+                    if at == Op::Rename {
+                        assert_eq!(moved, 3, "{at:?} {nth}: {outcome:?}");
+                    }
+                }
+                for u in &recovery.unfinished {
+                    let back =
+                        resolve(&mut fx.cat, u.operation, Resolution::PutBack, &NoTrash).unwrap();
+                    assert!(
+                        matches!(back.result, ItemResult::Unchanged(_)),
+                        "{at:?} {nth} {fault:?}: {back:?}"
+                    );
+                }
+                check(&fx, &was, &Recovery::default(), &batch);
+                runs += 1;
+            }
+        }
+    }
+    assert!(runs >= 3 * (7 + 4), "{runs}");
+}
+
 #[test]
 fn every_fault_at_every_step_of_a_trash_ends_proven() {
     let files = || fixture(&["a.NEF", "a.xmp", "b.NEF"]);
@@ -366,25 +454,58 @@ fn the_journal_moves_past_a_step_only_once_its_folders_are_synced() -> Result<()
         first.destination.as_ref().is_some_and(|d| d.is_file()),
         "the rename itself happened"
     );
-    // Every rename's folders are synced before the journal records it.
-    let disk = Faulty::default();
+    // Every rename's folders are synced before the journal records it,
+    // whichever disk step the run ends at: a member journalled moved was
+    // renamed, then both its folders synced. Folders of several renames are
+    // synced once for all of them (#692), so it isn't the next step.
+    let counting = Faulty::default();
     let mut fx = move_files();
     let op = move_op(&fx);
-    let _ = fx.run(op, &NoTrash, &disk);
-    let calls = disk.calls.borrow();
-    for (i, c) in calls.iter().enumerate() {
-        if let tests::Call::Rename(from, to) = c {
-            let syncs: Vec<_> = calls[i + 1..]
-                .iter()
-                .take(2)
-                .filter_map(|c| match c {
-                    tests::Call::Sync(d) => Some(d.clone()),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(syncs, [from.parent().unwrap(), to.parent().unwrap()]);
+    let _ = fx.run(op, &NoTrash, &counting);
+    let mut checked = 0;
+    for op in [Op::Rename, Op::Sync] {
+        // Each step of the kind, then none: the run ends whole.
+        for nth in 0..=counting.count(op) {
+            let mut fx = move_files();
+            let disk = Faulty::at(op, nth, Fault::CrashBefore);
+            let plan = fx.plan(move_op(&fx));
+            let batch = plan.batch().clone();
+            let crashed = crashes(|| {
+                let _ = execute::execute_with(
+                    &mut fx.cat,
+                    plan.confirm(),
+                    &NoTrash,
+                    &Default::default(),
+                    &disk,
+                );
+            });
+            fx.reopen();
+            let calls = disk.calls.borrow();
+            // The step it crashed before didn't happen.
+            let done = &calls[..calls.len() - usize::from(crashed)];
+            for item in journal::of_batch(&fx.cat.db, &batch.0)? {
+                for m in item
+                    .members
+                    .iter()
+                    .filter(|m| m.state == MemberState::Moved)
+                {
+                    let to = m.destination.clone().expect("a destination");
+                    let rename = tests::Call::Rename(m.source.clone(), to.clone());
+                    let renamed = done.iter().position(|c| *c == rename);
+                    let renamed = renamed.unwrap_or_else(|| panic!("{op:?} {nth}: {m:?}"));
+                    for dir in [m.source.parent().unwrap(), to.parent().unwrap()] {
+                        let sync = tests::Call::Sync(dir.to_path_buf());
+                        assert!(
+                            done[renamed + 1..].contains(&sync),
+                            "{op:?} {nth}: {m:?} journalled before {dir:?} was synced"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
         }
     }
+    assert!(checked > 0);
     Ok(())
 }
 
