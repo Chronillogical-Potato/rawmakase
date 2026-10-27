@@ -170,6 +170,18 @@ impl Editor {
                                 ui.close();
                             }
                             menu_separator(ui);
+                            // The photo open here, its file gone from where
+                            // the catalog has it.
+                            let offline = self.document.catalog_photo.filter(|_| {
+                                self.document.path.as_ref().is_some_and(|p| !p.exists())
+                            });
+                            if menu_item(ui, "Find on Disk…", "", offline.is_some(), false)
+                                && let Some(photo) = offline
+                            {
+                                self.choose_file_on_disk(photo, &ctx);
+                                ui.close();
+                            }
+                            menu_separator(ui);
                             let (export, previous) = if cfg!(target_os = "macos") {
                                 ("⇧⌘E", "⌥⇧⌘E")
                             } else {

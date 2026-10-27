@@ -3,7 +3,7 @@
 //! names, and matches them with the checksums on record. It reads files and
 //! the inputs captured from the catalog, and writes nothing.
 use super::{
-    Addition, Choice, FileState, Missing, Move, NotChecked, SyncInputs, SyncPlan, state_of,
+    Addition, Choice, FileState, Missing, Move, NotChecked, SyncInputs, SyncPlan, Target, state_of,
 };
 use crate::catalog::ingest::{Matched, Place};
 use crate::catalog::{FolderId, PhotoId, RootId};
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// What listing one directory gave.
-enum Listing {
+pub(super) enum Listing {
     /// The names of the photo files in it, and its subdirectories.
     Listed {
         files: HashSet<OsString>,
@@ -26,7 +26,7 @@ enum Listing {
     Failed(String),
 }
 
-fn list(directory: &Path) -> Listing {
+pub(super) fn list(directory: &Path) -> Listing {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Listing::Absent,
@@ -362,7 +362,9 @@ pub fn scan(
                             to: file.clone(),
                             identity: identity.clone(),
                             verified: *verified,
-                            place: place.clone(),
+                            by_name: false,
+                            offline: false,
+                            target: Target::Folder(place.0, place.1.clone()),
                         })
                     })
                     .collect();
@@ -375,22 +377,7 @@ pub fn scan(
             }
         }
     }
-    // Choices sharing a photo are one choice.
-    let mut merged: Vec<Vec<Move>> = Vec::new();
-    for options in choices {
-        let photos: BTreeSet<PhotoId> = options.iter().map(|m| m.photo).collect();
-        let (mut joined, rest): (Vec<_>, Vec<_>) = merged
-            .into_iter()
-            .partition(|c: &Vec<Move>| c.iter().any(|m| photos.contains(&m.photo)));
-        let mut group: Vec<Move> = joined.drain(..).flatten().collect();
-        group.extend(options);
-        merged = rest;
-        merged.push(group);
-    }
-    plan.choices = merged
-        .into_iter()
-        .map(|options| Choice { options })
-        .collect();
+    plan.choices = merge_choices(choices);
     plan.moves.sort_by_key(|m| (!m.verified, m.to.clone()));
     // A mount gone during the scan is no evidence of anything missing.
     for (id, state) in matcher.states.iter_mut() {
@@ -464,6 +451,25 @@ pub fn scan(
         }
     }
     Ok(plan)
+}
+
+/// `choices`, those sharing a photo made one.
+pub(super) fn merge_choices(choices: Vec<Vec<Move>>) -> Vec<Choice> {
+    let mut merged: Vec<Vec<Move>> = Vec::new();
+    for options in choices {
+        let photos: BTreeSet<PhotoId> = options.iter().map(|m| m.photo).collect();
+        let (mut joined, rest): (Vec<_>, Vec<_>) = merged
+            .into_iter()
+            .partition(|c: &Vec<Move>| c.iter().any(|m| photos.contains(&m.photo)));
+        let mut group: Vec<Move> = joined.drain(..).flatten().collect();
+        group.extend(options);
+        merged = rest;
+        merged.push(group);
+    }
+    merged
+        .into_iter()
+        .map(|options| Choice { options })
+        .collect()
 }
 
 /// Matching unknown files, keeping each photo's state once worked out.

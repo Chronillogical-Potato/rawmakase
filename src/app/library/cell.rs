@@ -52,6 +52,8 @@ pub(super) struct Shown {
     pub style: Style,
     /// File details for an expanded cell, e.g. "6000 × 4000 · 29/06/2016".
     pub details: String,
+    /// Its menu acts on this photo alone, not a selection of several.
+    pub single: bool,
 }
 pub(super) fn photo_cell(
     ui: &mut egui::Ui,
@@ -68,6 +70,7 @@ pub(super) fn photo_cell(
         quick,
         style,
         details,
+        single,
     } = shown;
     use crate::app::photo_metadata::label_color;
     use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, StrokeKind};
@@ -210,7 +213,7 @@ pub(super) fn photo_cell(
         };
         footer_badges(painter, &palette, cell, footer, photo, badges);
     }
-    let action = photo_menu(&response, photo, available, super::Module::Library);
+    let action = photo_menu(&response, photo, available, single, super::Module::Library);
     (response, action)
 }
 /// What a cell's footer shows besides the photo's own flag and rating.
@@ -325,6 +328,8 @@ pub(in crate::app) enum PhotoAction {
     Develop,
     Reveal,
     CopyPath,
+    /// Find on Disk…: pick the file of an offline photo.
+    FindOnDisk,
     Edit(crate::app::photo_metadata::Edit),
     Copy(super::CopyAction),
     /// Read Metadata from Files.
@@ -362,14 +367,21 @@ pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "maco
 } else {
     "Ctrl+'"
 };
+/// Whether Find on Disk… is offered: for one photo, offline.
+pub(in crate::app) fn find_on_disk_enabled(available: bool, single: bool) -> bool {
+    !available && single
+}
 /// The right-click menu shared by grid cells and the Develop filmstrip.
 /// Open in Develop is greyed out for a photo Develop cannot open, e.g. one
 /// not `available`, with the reason in place of its shortcut. In Develop's
-/// filmstrip it starts with Set as Reference Photo, as in Lightroom.
+/// filmstrip it starts with Set as Reference Photo, as in Lightroom. Find on
+/// Disk… is offered for a photo not `available` when the menu acts on it
+/// alone (`single`).
 pub(in crate::app) fn photo_menu(
     response: &egui::Response,
     photo: &Photo,
     available: bool,
+    single: bool,
     module: super::Module,
 ) -> Option<PhotoAction> {
     use crate::app::photo_metadata::{Edit, LABELS};
@@ -407,6 +419,16 @@ pub(in crate::app) fn photo_menu(
         }
         if menu_item(ui, "Copy File Path", "", true, false) {
             action = Some(PhotoAction::CopyPath);
+            ui.close();
+        }
+        if menu_item(
+            ui,
+            "Find on Disk…",
+            "",
+            find_on_disk_enabled(available, single),
+            false,
+        ) {
+            action = Some(PhotoAction::FindOnDisk);
             ui.close();
         }
         menu_separator(ui);

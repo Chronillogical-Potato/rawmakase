@@ -7,8 +7,13 @@
 //! unknown files with the checksums on record, touching no catalog; and
 //! [`Catalog::apply_folder_sync`] applies what the user accepted, checking
 //! each action again first. Nothing on disk is ever changed.
+//!
+//! Find on Disk (issue #693) builds the same kind of plan for one offline
+//! photo whose file the user picked ([`find_on_disk`]), and the other
+//! offline photos of its folder found beside that file.
 mod apply;
 pub(super) mod digest;
+mod find;
 mod scan;
 
 use super::db::{Reads, sql};
@@ -23,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 pub use apply::{Accepted, Applied};
 pub use digest::FamilyDigest;
+pub use find::{FindInputs, find_on_disk};
 pub use scan::scan;
 
 /// What a synchronization covers.
@@ -116,9 +122,46 @@ pub struct Move {
     /// Its full checksum equals the one on record; otherwise only its quick
     /// hash, or the identity its edit was saved for, matched.
     pub verified: bool,
-    /// The catalog folder `to` is in, by root and logical path, as placed
-    /// when scanned.
-    pub(super) place: (RootId, String),
+    /// Matched by its name alone: the photo has no checksum on record.
+    pub by_name: bool,
+    /// The photo's old location was offline, not observed missing: only a
+    /// verified match is offered, and the catalog uses this file from now on
+    /// even if the old one is still there.
+    pub offline: bool,
+    /// Where `to` goes in the catalog, as placed when scanned.
+    pub(super) target: Target,
+}
+
+impl Move {
+    /// The directory that becomes a new root folder for this move, if `to`
+    /// is in no catalog folder.
+    pub fn new_root(&self) -> Option<&Path> {
+        match &self.target {
+            Target::NewRoot(dir) => Some(dir),
+            Target::Folder(..) => None,
+        }
+    }
+}
+
+/// Where a moved photo's file goes in the catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Target {
+    /// An existing catalog folder, by root and logical path.
+    Folder(RootId, String),
+    /// A new root folder at this directory, which no location covers: made
+    /// with the first move into it that applies.
+    NewRoot(PathBuf),
+}
+
+/// What a plan was made for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum PlanKind {
+    /// Synchronize Folder.
+    #[default]
+    Sync,
+    /// Find on Disk for `photo`, a master, whose file the user picked: only
+    /// moves and choices, and no import batch, so Previous Import stays.
+    FindOnDisk { photo: PhotoId, file: PathBuf },
 }
 
 /// Files that match more than one photo, or photos matched by more than one
@@ -173,6 +216,22 @@ pub struct SyncPlan {
     /// Each master the plan acts on, as the scan's snapshot had it, and its
     /// family's digest then.
     pub(super) scanned: HashMap<PhotoId, (Master, FamilyDigest)>,
+    pub(super) kind: PlanKind,
+}
+
+impl SyncPlan {
+    pub fn kind(&self) -> &PlanKind {
+        &self.kind
+    }
+    /// For Find on Disk, the move to the file the user picked.
+    pub fn picked(&self) -> Option<&Move> {
+        let PlanKind::FindOnDisk { photo, file } = &self.kind else {
+            return None;
+        };
+        self.moves
+            .iter()
+            .find(|m| m.photo == *photo && m.to == *file)
+    }
 }
 
 impl Catalog {

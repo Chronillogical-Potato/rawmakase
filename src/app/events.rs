@@ -35,6 +35,10 @@ impl Editor {
                     self.catalog_ready(result);
                 }
                 Event::FolderSyncScanned(scanned) => self.folder_sync_scanned(*scanned),
+                Event::FileOnDiskPicked(photo, file) => {
+                    self.activity.finish_dialog();
+                    self.start_find_on_disk(photo, file);
+                }
                 Event::FolderSyncApplied(result) => {
                     self.catalog_work = None;
                     self.folder_synced(result);

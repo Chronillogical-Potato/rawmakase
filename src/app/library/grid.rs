@@ -171,6 +171,7 @@ impl Library {
                                         } else {
                                             String::new()
                                         },
+                                        single: self.menu_single(p.id, true),
                                     };
                                     let (response, edit) =
                                         photo_cell(ui, &p, self.texture(&p), shown, width);
@@ -231,6 +232,7 @@ impl Library {
                     self.message = format!("Could not show {}: {e}", photo.filename);
                 }
             }
+            PhotoAction::FindOnDisk => self.find_request = Some(photo.id),
             PhotoAction::CopyPath => {
                 ctx.copy_text(photo.path.display().to_string());
                 self.message = format!("Copied {}", photo.path.display());
@@ -337,6 +339,13 @@ impl Library {
 }
 impl Library {
     /// The selection when `id` is part of it, else `id` alone.
+    /// Whether a photo's menu acts on it alone: it isn't one of several
+    /// selected, or the menu never takes the selection (`whole_selection`).
+    pub(super) fn menu_single(&self, id: PhotoId, whole_selection: bool) -> bool {
+        !(whole_selection
+            && self.selection.selected.contains(&id)
+            && self.selection.selected.len() > 1)
+    }
     fn menu_scope(&self, id: PhotoId) -> Vec<PhotoId> {
         if self.selection.selected.contains(&id) {
             self.selected_ids()

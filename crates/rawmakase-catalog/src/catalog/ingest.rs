@@ -626,6 +626,13 @@ impl Matcher {
         }
         Ok(Self { locations, roots })
     }
+    /// Whether a root or folder location is at `directory` or below it, as
+    /// the disk has them: then it can't become a root of its own.
+    pub(in crate::catalog) fn holds_below(&self, directory: &Path) -> bool {
+        self.locations
+            .iter()
+            .any(|(_, on_disk)| on_disk.starts_with(directory))
+    }
     /// Where `directory`, found below the `chosen` folder, goes.
     pub(in crate::catalog) fn place(
         &self,
