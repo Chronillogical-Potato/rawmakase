@@ -1491,7 +1491,7 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     editor.document.edit.recipe().validate().unwrap();
 }
 #[test]
-fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
+fn a_mask_brush_paints_live_and_preserves_the_overlay_choice() {
     use super::worker::Overlay;
     use crate::model::masks::MaskShape;
     let ctx = egui::Context::default();
@@ -1547,8 +1547,11 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
         editor.create_mask(mask_tool::Kind::Brush, None)
     });
     let steps = editor.document.edit.history().steps().0.len();
-    assert!(!editor.view.masking.overlay);
-    assert_eq!(editor.overlay(), Overlay::None);
+    assert!(
+        editor.view.masking.overlay,
+        "new editors show masks by default"
+    );
+    assert!(matches!(editor.overlay(), Overlay::Mask { index: 0, .. }));
     let points = |editor: &Editor| match &editor.document.edit.recipe().masks[0].components[0].shape
     {
         MaskShape::Brush { strokes } => strokes.iter().map(|s| s.points.len()).collect::<Vec<_>>(),
@@ -1565,8 +1568,8 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
             &mut editor,
             vec![egui::Event::PointerMoved(a + (b - a) * k as f32 / 8.)],
         );
-        // Mid-stroke, the photo already has the stroke so far, and the red overlay
-        // shows it, as in Lightroom.
+        // Mid-stroke, the photo already has the stroke so far, with the
+        // default overlay still enabled.
         let now = points(&editor);
         assert_eq!(now.len(), 1, "one stroke while painting");
         assert!(now[0] >= painted);
@@ -1605,6 +1608,8 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
         vec![egui::Event::PointerMoved(a + (b - a) * 0.5)],
     );
     assert_eq!(points(&editor).len(), 2);
+    assert!(!editor.view.masking.overlay, "painting must preserve O off");
+    assert_eq!(editor.overlay(), Overlay::None);
     in_edit_frame(&ctx, &mut editor, |editor| editor.undo());
     frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
     frame(&mut editor, vec![button(b, false)]);
@@ -1670,6 +1675,29 @@ fn a_mask_brush_paints_as_it_drags_with_the_overlay_shown() {
     frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
     frame(&mut editor, vec![button(b, false)]);
     assert_eq!(points(&editor), started);
+    // Repeated painting and erasing keep the explicit overlay choice (#697).
+    for (brush, overlay) in [(0, false), (2, false), (2, true)] {
+        editor.view.masking.brush = brush;
+        editor.view.masking.overlay = overlay;
+        let count = points(&editor).len();
+        let (a, b) = (Pos2::new(40., 60.), Pos2::new(160., 60.));
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(a), button(a, true)],
+        );
+        frame(&mut editor, vec![egui::Event::PointerMoved(b)]);
+        assert_eq!(points(&editor).len(), count + 1);
+        assert_eq!(editor.view.masking.overlay, overlay);
+        assert_eq!(matches!(editor.overlay(), Overlay::Mask { .. }), overlay);
+        frame(&mut editor, vec![button(b, false)]);
+        assert_eq!(editor.view.masking.overlay, overlay);
+        let MaskShape::Brush { strokes } =
+            &editor.document.edit.recipe().masks[0].components[0].shape
+        else {
+            unreachable!()
+        };
+        assert_eq!(strokes.last().unwrap().erase, brush == 2);
+    }
     editor.document.edit.recipe().validate().unwrap();
 }
 #[test]
@@ -1757,6 +1785,7 @@ fn dragging_a_mask_pin_moves_the_mask() {
     let steps = editor.document.edit.history().steps().0.len();
     // Over the pin, the mask's overlay shows though Show Overlay is off; it goes when
     // the pointer leaves.
+    editor.view.masking.overlay = false;
     assert!(!editor.view.masking.overlay);
     frame(
         &mut editor,
