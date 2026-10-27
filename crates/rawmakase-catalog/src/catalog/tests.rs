@@ -25,7 +25,7 @@ fn fixture(path: &Path) -> Result<()> {
         INSERT INTO Adobe_imageDevelopSettings VALUES(40,'s = { Exposure2012 = 1.5 }'),(41,'s = { ConvertToGrayscale = true }');
         INSERT INTO AgLibraryCollection VALUES(50,'Travel',NULL,'com.adobe.ag.library.collection');
         INSERT INTO AgLibraryCollectionImage VALUES(50,40,'a'),(50,41,'b');
-        INSERT INTO AgLibraryKeyword VALUES(60,'City',NULL);
+        INSERT INTO AgLibraryKeyword VALUES(59,NULL,NULL),(60,'City',59);
         INSERT INTO AgLibraryKeywordImage VALUES(40,60);")?;
     Ok(())
 }
@@ -1129,6 +1129,65 @@ fn lightroom_keyword_export_options_are_imported_and_backfilled() -> Result<()> 
     assert_eq!(cat.backfill_keyword_export()?, 2);
     assert_eq!(cat.backfill_keyword_export()?, 0);
     assert_eq!(exported(&cat)?, expected);
+    Ok(())
+}
+#[test]
+fn lightroom_root_keyword_is_left_out_and_holds_the_top_level() -> Result<()> {
+    // Lightroom's hidden root (59, no name, no parent) is imported as a
+    // nameless keyword; "City" is under it, as in every real catalog.
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("root.lrcat");
+    fixture(&source)?;
+    let destination = d.path().join("root.rawmakase");
+    import_lightroom(&source, &destination)?;
+    let mut cat = Catalog::open(&destination)?;
+    let paths = |cat: &Catalog, id| -> Result<Vec<(Vec<String>, Vec<bool>)>> {
+        Ok(cat
+            .keywords(id)?
+            .into_iter()
+            .map(|k| (k.path, k.exported))
+            .collect())
+    };
+    assert_eq!(
+        paths(&cat, PhotoId(40))?,
+        [(vec!["City".to_string()], vec![true])]
+    );
+    // A typed name finds the imported keyword, at the top and below it.
+    assert_eq!(cat.keyword_at(&["City".into()])?, 60);
+    cat.add_keywords(&[PhotoId(41)], &[vec!["City".into(), "Old Town".into()]])?;
+    assert_eq!(
+        paths(&cat, PhotoId(41))?,
+        [(
+            vec!["City".to_string(), "Old Town".into()],
+            vec![true, true]
+        )]
+    );
+    // A new top-level keyword goes under the root, as Lightroom's do.
+    let zebra = cat.keyword_at(&["Zebra".into()])?;
+    let parent: Option<i64> =
+        cat.db_for_tests()
+            .query_row("SELECT parent FROM keywords WHERE id=?", [zebra], |r| {
+                r.get(0)
+            })?;
+    assert_eq!(parent, Some(59));
+    // A duplicate an earlier release made beside the root loses to
+    // Lightroom's own, the older one.
+    cat.db_for_tests()
+        .execute_batch("INSERT INTO keywords(id, name, parent) VALUES (900, 'City', NULL);")?;
+    assert_eq!(cat.keyword_at(&["City".into()])?, 60);
+    cat.add_keyword(&[PhotoId(40)], 900)?;
+    assert_eq!(
+        paths(&cat, PhotoId(40))?,
+        [
+            (vec!["City".to_string()], vec![true]),
+            (vec!["City".to_string()], vec![true])
+        ]
+    );
+    // The root is never a photo's keyword, nor a name in the Library's list.
+    cat.add_keyword(&[PhotoId(40)], 59)?;
+    assert_eq!(paths(&cat, PhotoId(40))?.len(), 2);
+    let photo = cat.photos()?.into_iter().find(|p| p.id == PhotoId(40));
+    assert_eq!(photo.map(|p| p.keywords), Some("City, City".into()));
     Ok(())
 }
 #[test]
