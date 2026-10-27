@@ -99,6 +99,21 @@ struct Buffers {
     output: wgpu::Buffer,
     staging: wgpu::Buffer,
 }
+/// The wgpu backends the UI and previews may use, unless `WGPU_BACKEND` names
+/// others. Windows uses DirectX 12, with OpenGL as the fallback, and leaves Vulkan
+/// out. wgpu prefers Vulkan when both are available, and Intel's Vulkan driver for
+/// HD Graphics 530 (igvk64.dll 31.0.101.2125) crashes the process at most launches,
+/// while DirectX 12 and OpenGL start reliably on the same machine (#623).
+pub fn backends() -> wgpu::Backends {
+    wgpu::Backends::from_env().unwrap_or(default_backends(cfg!(windows)))
+}
+fn default_backends(windows: bool) -> wgpu::Backends {
+    if windows {
+        wgpu::Backends::DX12 | wgpu::Backends::GL
+    } else {
+        wgpu::Backends::PRIMARY | wgpu::Backends::GL
+    }
+}
 /// Device limits previews need: storage buffers for a whole photo kept on the device
 /// (735 MB for 61 megapixels), up to 2 GB where the adapter allows.
 pub fn required_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
@@ -113,7 +128,10 @@ pub fn required_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
 impl Processor {
     /// A device of its own. Fails cleanly if no hardware compute adapter is available.
     pub fn new() -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: backends(),
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,

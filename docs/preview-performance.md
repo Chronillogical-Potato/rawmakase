@@ -15,9 +15,9 @@ region, comes first (see [slider responsiveness](#slider-responsiveness) and
 presented frames and `GPU finish` when only finishing used compute.
 
 The shaders are portable WGSL through wgpu, with no CUDA or Metal-specific code.
-Metal is used on macOS; Linux NVIDIA/AMD devices can use Vulkan with a working
-compatible driver and sufficient compute/storage limits. Unsupported adapters,
-oversized images and GPU failures fall back to CPU. That is intended platform
+Metal is used on macOS and DirectX 12 on Windows; Linux NVIDIA/AMD devices can
+use Vulkan with a working compatible driver and sufficient compute/storage
+limits. Unsupported adapters, oversized images and GPU failures fall back to CPU. That is intended platform
 support, not evidence of testing on every driver. **Hardware tested here: Apple
 M1 Pro only. Linux/NVIDIA/AMD runtime validation remains outstanding.**
 

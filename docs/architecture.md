@@ -307,8 +307,11 @@ The desktop renderer creates it on its worker thread. Headless UI tests and the
 legacy `worker::renderer` entry point remain CPU-only. Domain color processing,
 RAW development and exports use the existing CPU implementation.
 
-`develop::gpu` uses portable WGSL compute through wgpu: Metal on macOS and Vulkan
-on supported Linux drivers, including NVIDIA and AMD. On the desktop it shares the
+`develop::gpu` uses portable WGSL compute through wgpu: Metal on macOS, Vulkan
+on supported Linux drivers, including NVIDIA and AMD, and DirectX 12 on Windows.
+Windows leaves Vulkan out unless `WGPU_BACKEND` asks for it, because an Intel
+Vulkan driver crashed the app at launch where DirectX 12 worked (#623); the UI
+and a standalone processor share that choice (`gpu::backends`). On the desktop it shares the
 UI's wgpu device (eframe's), which the app creates with the storage limits previews
 need (`gpu::required_limits`) and a high-performance adapter. On Linux the window's
 adapter is the first GPU the system lists instead: the display's GPU, or the discrete
