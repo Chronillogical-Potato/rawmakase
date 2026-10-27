@@ -745,7 +745,7 @@ impl Editor {
             .show(ui, |ui| {
                 // The bar is the title bar on macOS: its empty space moves the
                 // window, and a double click does what System Settings says.
-                fastframe_titlebar::drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
+                crate::platform::titlebar::drag(ui, ui.max_rect().expand2(Vec2::new(18., 0.)));
                 // Beside the sidebar, which holds the traffic lights, its
                 // toggle, the catalog menu, Preferences and the shortcuts.
                 ui.horizontal_centered(|ui| {
@@ -1072,7 +1072,7 @@ impl Editor {
                     Vec2::new(ui.available_width(), BAR_HEIGHT),
                     egui::Sense::hover(),
                 );
-                fastframe_titlebar::drag(ui, row.expand2(Vec2::new(8., 0.)));
+                crate::platform::titlebar::drag(ui, row.expand2(Vec2::new(8., 0.)));
                 ui.scope_builder(
                     egui::UiBuilder::new()
                         .max_rect(row)
@@ -2129,7 +2129,7 @@ pub(super) const BAR_HEIGHT: f32 = 44.;
 fn title_bar_pad(ui: &mut egui::Ui) {
     let corner = ui.max_rect().min;
     let width = fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left + 24.;
-    fastframe_titlebar::drag(
+    crate::platform::titlebar::drag(
         ui,
         egui::Rect::from_min_size(corner, egui::Vec2::new(width, BAR_HEIGHT)),
     );
