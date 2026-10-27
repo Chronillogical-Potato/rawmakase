@@ -103,10 +103,10 @@ pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
 /// Whether what is copied off a volume of `facts` keeps its originals where
 /// they are: an SMB share has no Trash RAWmakase uses. macOS has none there
 /// (it answers NSFeatureUnsupportedError and leaves the file, measured on
-/// macOS 15), nor has Windows (no Recycle Bin on a network drive); Linux's
-/// would be the share's `.Trash-$uid`, filled by a rename that can replace
-/// a file another computer put at its name (measured on CIFS), so it isn't
-/// used. Nothing is deleted instead. What
+/// macOS 15); Linux's would be the share's `.Trash-$uid`, and Windows' the
+/// share's `$RECYCLE.BIN` where a folder is redirected there, each filled
+/// by a rename that can replace a file another computer put at its name
+/// (measured on CIFS), so neither is used. Nothing is deleted instead. What
 /// a move's question says; the Trash decides when it runs.
 pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
     facts.kind == VolumeKind::Smb

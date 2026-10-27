@@ -33,7 +33,13 @@ use windows::Win32::UI::Shell::{
 use windows::core::{ComObject, HRESULT, HSTRING, PCWSTR, Ref, implement};
 
 pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
-    if fsops::volume_facts(path).is_ok_and(|f| f.kind == fsops::VolumeKind::Smb) {
+    // Refused too where the volume can't be read but is a network drive
+    // (one dropped since it was checked, say), failing closed.
+    let share = match fsops::volume_facts(path) {
+        Ok(f) => f.kind == fsops::VolumeKind::Smb,
+        Err(_) => supports(path) == TrashSupport::No,
+    };
+    if share {
         return Err(TrashError::Unsupported);
     }
     let _com = Com::init()?;
