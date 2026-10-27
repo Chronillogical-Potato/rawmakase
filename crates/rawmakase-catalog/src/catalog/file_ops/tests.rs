@@ -891,9 +891,7 @@ impl Disk for Faulty {
         Real.identity(&self.found(path))
     }
     fn rename(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        self.calls
-            .borrow_mut()
-            .push(Call::Rename(from.into(), to.into()));
+        self.record(Call::Rename(from.into(), to.into()));
         if self.occupy.as_deref() == Some(to) {
             std::fs::write(to, b"raced").unwrap();
         }
@@ -917,7 +915,7 @@ impl Disk for Faulty {
         renamed
     }
     fn create_dir(&self, path: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::CreateDir(path.into()));
+        self.record(Call::CreateDir(path.into()));
         if let Some((at, _)) = &self.occupy_on_create
             && at == path
         {
@@ -933,7 +931,7 @@ impl Disk for Faulty {
         made
     }
     fn sync_dir(&self, dir: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::Sync(dir.into()));
+        self.record(Call::Sync(dir.into()));
         // The fault is still injected here. These crashes are panics in this
         // process, not power loss, so the durability flush is not what the
         // matrix proves. `sync_file` is FlushFileBuffers on NTFS; `sync_dir`
@@ -975,7 +973,7 @@ impl Disk for Faulty {
         Ok(facts)
     }
     fn create_file(&self, path: &Path) -> Result<std::fs::File, FsError> {
-        self.calls.borrow_mut().push(Call::CreateFile(path.into()));
+        self.record(Call::CreateFile(path.into()));
         if let Some((at, bytes)) = &self.occupy_on_create
             && at == path
         {
@@ -1002,9 +1000,7 @@ impl Disk for Faulty {
         go_on: &mut dyn FnMut(u64) -> bool,
     ) -> Result<crate::storage::fsops::ContentHash, crate::storage::fsops::CopyError> {
         use crate::storage::fsops::CopyError;
-        self.calls
-            .borrow_mut()
-            .push(Call::Copy(from.into(), to.into()));
+        self.record(Call::Copy(from.into(), to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
         let (n, fault) = self.fault(Op::Copy);
         match fault {
@@ -1021,7 +1017,7 @@ impl Disk for Faulty {
             Some(Fault::CrashAfter) | None => {}
         }
         let copied = Real.copy_into(from, to, into, &mut |written| {
-            self.calls.borrow_mut().push(Call::Chunk(written));
+            self.record(Call::Chunk(written));
             if let Some(stop) = &self.stop {
                 stop.store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -1061,13 +1057,13 @@ impl Disk for Faulty {
         })
     }
     fn sync_file(&self, path: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::SyncFile(path.into()));
+        self.record(Call::SyncFile(path.into()));
         self.step(Op::SyncFile, || {
             opened_without_flush(&self.found(path), true)
         })
     }
     fn copy_extras(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::CopyExtras(to.into()));
+        self.record(Call::CopyExtras(to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
         self.step(Op::CopyExtras, || {
             match self.keeps_no_extras && self.far(to) {
@@ -1096,7 +1092,7 @@ impl Disk for Faulty {
         }
     }
     fn copy_times(&self, from: &Path, to: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::CopyTimes(to.into()));
+        self.record(Call::CopyTimes(to.into()));
         let (from, to) = (&self.found(from), &self.found(to));
         if let Some(double) = self.apple_double_of(to) {
             std::fs::write(double, APPLE_DOUBLE).unwrap();
@@ -1121,11 +1117,11 @@ impl Disk for Faulty {
         })
     }
     fn hash(&self, path: &Path) -> Result<crate::storage::fsops::ContentHash, FsError> {
-        self.calls.borrow_mut().push(Call::Hash(path.into()));
+        self.record(Call::Hash(path.into()));
         self.step(Op::Hash, || Real.hash(&self.found(path)))
     }
     fn remove_file(&self, path: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::RemoveFile(path.into()));
+        self.record(Call::RemoveFile(path.into()));
         if self.refuses_decomposed(path) {
             return self.step(Op::RemoveFile, || Err(FsError::NotFound));
         }
@@ -1135,7 +1131,7 @@ impl Disk for Faulty {
         removed
     }
     fn remove_dir(&self, path: &Path) -> Result<(), FsError> {
-        self.calls.borrow_mut().push(Call::RemoveDir(path.into()));
+        self.record(Call::RemoveDir(path.into()));
         let at = &self.found(path);
         let removed = self.step(Op::RemoveDir, || Real.remove_dir(at));
         self.forget_apple_double(at, removed.is_ok());

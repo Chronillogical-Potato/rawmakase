@@ -685,7 +685,7 @@ fn every_fault_at_every_disk_step_of_a_rename_ends_proven() {
             }
         }
     }
-    assert!(runs >= 15);
+    assert_eq!(runs, 3 * (3 + 2));
 }
 
 #[test]

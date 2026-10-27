@@ -191,7 +191,7 @@ pub(super) const UNFINISHED: &str = "an unfinished file operation involves it";
 /// How many items within their drives are moved or renamed together
 /// (#692): few enough that Stop and the count in the top bar follow
 /// promptly.
-const BATCH: usize = 100;
+pub(super) const BATCH: usize = 100;
 
 /// Points `items`, planned into a folder not yet made, at folder `made`:
 /// its id, and the name the disk gave it.
