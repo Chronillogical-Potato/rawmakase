@@ -130,7 +130,7 @@ impl Catalog {
         let rows: Vec<PhotoRow> = self.db.read(
             sql!(
                 "SELECT p.id,p.folder,p.filename,p.captured,p.rating,p.flag,p.label,p.format,p.copy_name,p.master_id, COALESCE((SELECT string_agg(k.name, ', ')
-                 FROM photo_keywords pk JOIN keywords k ON k.id=pk.keyword WHERE pk.photo=p.id),''),length(COALESCE(p.lightroom_develop,''))>0
+                 FROM photo_keywords pk JOIN keywords k ON k.id=pk.keyword WHERE pk.photo=p.id AND k.name<>''),''),length(COALESCE(p.lightroom_develop,''))>0
                  FROM photos p
                  ORDER BY p.captured,p.filename,p.id"
             ),

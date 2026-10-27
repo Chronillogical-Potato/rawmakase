@@ -222,6 +222,8 @@ pub(super) fn keywords(db: &impl Reads, id: PhotoId) -> Result<Vec<Keyword>> {
         .into_iter()
         .map(|k| keyword(db, k))
         .collect::<Result<Vec<_>>>()?;
+    // Lightroom's root, were a photo given it.
+    keywords.retain(|k| !k.path.is_empty());
     keywords.sort_by(|a, b| a.path.cmp(&b.path).then(a.id.cmp(&b.id)));
     Ok(keywords)
 }
@@ -235,7 +237,10 @@ pub(super) fn tag_photo(w: &mut Write<'_>, photo: PhotoId, keyword: i64) -> Resu
     Ok(())
 }
 
-/// The keyword at `path`, made where missing.
+/// The keyword at `path`, made where missing. A top-level name is looked
+/// up both beside and under Lightroom's root (see `keyword`), and a new
+/// top-level keyword goes under the root where there is one, as Lightroom's
+/// do.
 pub(super) fn keyword_at(w: &mut Write<'_>, path: &[String]) -> Result<i64> {
     row! {
         struct Named {
@@ -243,15 +248,29 @@ pub(super) fn keyword_at(w: &mut Write<'_>, path: &[String]) -> Result<i64> {
             name: String,
         }
     }
+    let root: Option<i64> = w.read_optional(
+        sql!("SELECT id FROM keywords WHERE name='' AND parent IS NULL ORDER BY id LIMIT 1"),
+        &[],
+    )?;
     let mut parent: Option<i64> = None;
     for name in path {
         let name = keyword_name(name);
         ensure!(!name.is_empty(), "A keyword needs a name");
         // Not unique: the first of any duplicates Lightroom left.
-        let candidates: Vec<Named> = w.read(
-            sql!("SELECT id, name FROM keywords WHERE parent IS NOT DISTINCT FROM ? ORDER BY id"),
-            &[&parent],
-        )?;
+        let candidates: Vec<Named> = match parent {
+            Some(parent) => w.read(
+                sql!("SELECT id, name FROM keywords WHERE parent=? ORDER BY id"),
+                &[&parent],
+            )?,
+            None => w.read(
+                sql!(
+                    "SELECT id, name FROM keywords WHERE parent IS NULL
+                     OR parent IN (SELECT id FROM keywords WHERE name='' AND parent IS NULL)
+                     ORDER BY id"
+                ),
+                &[],
+            )?,
+        };
         let found = candidates
             .into_iter()
             .find(|k| keyword_name(&k.name) == name)
@@ -260,13 +279,16 @@ pub(super) fn keyword_at(w: &mut Write<'_>, path: &[String]) -> Result<i64> {
             Some(id) => id,
             None => w.insert_returning_id(
                 sql!("INSERT INTO keywords(name, parent) VALUES (?, ?) RETURNING id"),
-                &[&name, &parent],
+                &[&name, &parent.or(root)],
             )?,
         });
     }
     Ok(parent.unwrap())
 }
 
+/// A keyword with its path from the top. Lightroom's hidden root, a
+/// nameless keyword with no parent that its top-level keywords are under,
+/// is no part of a path; the root itself has an empty one.
 fn keyword(db: &impl Reads, id: i64) -> Result<Keyword> {
     row! {
         struct Step {
@@ -293,6 +315,9 @@ fn keyword(db: &impl Reads, id: i64) -> Result<Keyword> {
                 &[&k],
             )?
             .context("Unknown keyword")?;
+        if step.name.is_empty() && step.parent.is_none() {
+            break;
+        }
         if path.is_empty() {
             parents = step.with_parents;
         }
@@ -300,7 +325,7 @@ fn keyword(db: &impl Reads, id: i64) -> Result<Keyword> {
         include.push(step.included);
         next = step.parent;
     }
-    let own = include[0];
+    let own = include.first().copied().unwrap_or(true);
     let mut exported: Vec<bool> = include
         .iter()
         .enumerate()
