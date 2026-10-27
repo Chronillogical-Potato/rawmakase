@@ -37,4 +37,4 @@ rustix = { version = "1.1", features = ["fs"] }
 
 [target.'cfg(windows)'.dependencies]
 # `storage::fsops`: MoveFileExW without replacing, file ids and volume facts.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_SystemServices", "Win32_System_WindowsProgramming"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Storage_InstallableFileSystems", "Win32_System_SystemServices", "Win32_System_WindowsProgramming"] }

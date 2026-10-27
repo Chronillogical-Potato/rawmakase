@@ -233,11 +233,10 @@ mod tests {
     }
 
     /// An SMB share has no Trash on macOS (measured on macOS 15 against a
-    /// Synology share), and Linux's isn't used, as no rename there can
-    /// promise not to replace a file: the file stays, and nothing is
-    /// deleted or made there. Run when `RAWMAKASE_TEST_NETWORK_SHARE` names
-    /// a writable folder on one.
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    /// Synology share) nor on Windows, and Linux's isn't used, as no rename
+    /// there can promise not to replace a file: the file stays, and nothing
+    /// is deleted or made there. Run when `RAWMAKASE_TEST_NETWORK_SHARE`
+    /// names a writable folder on one.
     #[test]
     #[ignore = "needs RAWMAKASE_TEST_NETWORK_SHARE: a writable folder on an SMB share"]
     fn a_file_on_an_smb_share_is_kept_as_its_volume_has_no_trash() {
@@ -247,8 +246,8 @@ mod tests {
         let dir = tempfile::tempdir_in(share).unwrap();
         let path = dir.path().join("rawmakase-trash-test.jpg");
         std::fs::write(&path, b"RAWmakase trash test, synthetic").unwrap();
-        // macOS 15 can't tell before trying: Unknown, never Yes. Linux says
-        // no.
+        // macOS 15 can't tell before trying: Unknown, never Yes. Linux and
+        // Windows say no.
         let asked = SystemTrash.supports(&path);
         assert_ne!(asked, TrashSupport::Yes);
         assert!(cfg!(target_os = "macos") || asked == TrashSupport::No);

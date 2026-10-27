@@ -69,9 +69,8 @@ impl Proofs {
 
 /// The proof a volume of `facts` takes, if any: by ids where they stay, by
 /// names on a local FAT or exFAT volume and on an SMB share (macOS's smbfs,
-/// Linux's CIFS); none elsewhere (other network shares, FUSE, GVFS's shares
-/// among them, ReFS…), which is refused. Windows' shares aren't told apart
-/// ([`VolumeKind::Smb`]), and aren't measured: refused.
+/// Linux's CIFS, Windows' redirector); none elsewhere (other network
+/// shares, FUSE, GVFS's shares among them, ReFS…), which is refused.
 ///
 /// An SMB share's ids prove nothing across mounts (macOS gives each mount
 /// another `st_dev`; Linux may give a mount's to the next one, another
@@ -83,17 +82,20 @@ impl Proofs {
 /// by either case where the server folds them, but renames nothing
 /// exclusively: its copies are made at their names. Measured on macOS 15
 /// against a Synology share, which lists names decomposed and finds them by
-/// either form; and with Linux 7.2's CIFS (SMB 3.1.1) against Samba 4.22,
-/// where a name is its bytes, as on Linux's FAT. GVFS's FUSE mounts keep no
+/// either form; with Linux 7.2's CIFS (SMB 3.1.1) against Samba 4.22,
+/// where a name is its bytes, as on Linux's FAT; and with Windows 11 (SMB
+/// 3.1.1) against both, where a name is its bytes but for case, which the
+/// servers fold. Windows' ids stayed through writes, renames and
+/// reconnects there, but a rename without `MOVEFILE_REPLACE_EXISTING`
+/// replaced a file Linux had just made at the name, on each server (#691),
+/// so they prove nothing either. GVFS's FUSE mounts keep no
 /// birth time, no permissions and no extended attributes, and number files
 /// per mount.
 pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
     match facts.kind {
         _ if facts.stable_ids => Some(Proof::Ids),
         VolumeKind::Fat | VolumeKind::Exfat if facts.local => Some(Proof::Names),
-        VolumeKind::Smb if cfg!(any(target_vendor = "apple", target_os = "linux")) => {
-            Some(Proof::Names)
-        }
+        VolumeKind::Smb => Some(Proof::Names),
         _ => None,
     }
 }
@@ -101,9 +103,10 @@ pub(super) fn of(facts: &crate::storage::fsops::VolumeFacts) -> Option<Proof> {
 /// Whether what is copied off a volume of `facts` keeps its originals where
 /// they are: an SMB share has no Trash RAWmakase uses. macOS has none there
 /// (it answers NSFeatureUnsupportedError and leaves the file, measured on
-/// macOS 15); Linux's would be the share's `.Trash-$uid`, filled by a
-/// rename that can replace a file another computer put at its name
-/// (measured on CIFS), so it isn't used. Nothing is deleted instead. What
+/// macOS 15), nor has Windows (no Recycle Bin on a network drive); Linux's
+/// would be the share's `.Trash-$uid`, filled by a rename that can replace
+/// a file another computer put at its name (measured on CIFS), so it isn't
+/// used. Nothing is deleted instead. What
 /// a move's question says; the Trash decides when it runs.
 pub(super) fn no_trash(facts: &crate::storage::fsops::VolumeFacts) -> bool {
     facts.kind == VolumeKind::Smb

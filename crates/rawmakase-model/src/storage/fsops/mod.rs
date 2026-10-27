@@ -359,8 +359,8 @@ pub enum VolumeKind {
     /// FAT12, FAT16 or FAT32.
     Fat,
     Exfat,
-    /// An SMB share (macOS's smbfs; Linux's CIFS, SMB2 and SMB). Windows'
-    /// shares aren't told apart: their kind is the server's file system.
+    /// An SMB share (macOS's smbfs; Linux's CIFS, SMB2 and SMB; on Windows
+    /// a network drive reached over SMB, by drive letter or UNC path).
     Smb,
     /// Any other, NFS, WebDAV and FUSE among them.
     Other,
@@ -383,8 +383,10 @@ impl VolumeKind {
     /// Whether [`rename_exclusive`] works on it: not on macOS's exFAT, which
     /// answers `ENOTSUP` (measured on macOS 15), nor on an SMB share, where
     /// a file another computer puts at the name isn't promised to be kept:
-    /// macOS's smbfs answers `ENOTSUP` (measured on macOS 15), and Linux's
-    /// CIFS checks the name only on this computer. Elsewhere it is taken
+    /// macOS's smbfs answers `ENOTSUP` (measured on macOS 15), Linux's
+    /// CIFS checks the name only on this computer, and a server asked by
+    /// Windows not to replace a file may all the same (Samba 4.22 and a
+    /// Synology did, #691). Elsewhere it is taken
     /// to, and a volume that doesn't answers [`FsError::Unsupported`], as
     /// [`rename_exclusive`] does on an SMB share.
     pub fn exclusive_rename(self) -> bool {

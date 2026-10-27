@@ -7,15 +7,17 @@
 //! ([`extras`]). Each step that writes goes through the handle the file
 //! was made through rather than its name, which another computer may give
 //! another file meanwhile on a share (#675); but for an alternate data
-//! stream on Windows, opened by its path (copies never go to a share
-//! there). That holds where the system keeps to the handle, as local file
-//! systems do; a share's drivers don't. Linux's CIFS keeps only the bytes
+//! stream on Windows, opened by its path. That holds where the system
+//! keeps to the handle, as local file systems do; a share's drivers don't
+//! all. Linux's CIFS keeps only the bytes
 //! and the flush to the handle: it sends an extended attribute by the
 //! file's name whatever handle it is given, and times and permissions too
 //! once it has looked the name up again (measured through a second mount,
 //! Linux 7.2 against Samba 4.22). macOS's smbfs, by its source (SMBClient),
 //! opens a name too for an extended attribute (a named stream) and for
-//! times (a compound create, set-info and close); not measured.
+//! times (a compound create, set-info and close); not measured. Windows
+//! sets times through the handle, on a share too, and opens an alternate
+//! data stream by its name.
 //! The file is never truncated or replaced, and the source never changed.
 //! [`remove_file`] is the one unlink here, for a partial copy.
 //!

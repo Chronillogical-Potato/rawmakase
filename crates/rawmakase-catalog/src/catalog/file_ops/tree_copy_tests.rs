@@ -529,27 +529,18 @@ fn every_fault_at_every_step_of_a_folder_built_at_its_name_ends_proven() {
 }
 
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
+#[cfg_attr(
+    windows,
+    ignore = "the fault matrix by names is the same code everywhere; Linux and macOS run it, keeping Windows CI within its hour"
+)]
 fn every_fault_at_every_step_of_a_folder_copy_to_an_smb_share_ends_proven() {
     assert!(every_fault(Far::Share) >= 50);
-}
-
-#[test]
-fn a_folder_to_an_smb_share_is_refused_on_windows() {
-    let fx = files();
-    let disk = far_as(&fx, Far::Share);
-    let planned = fx.plan_on(to_far(&fx), &disk);
-    assert_eq!(planned.is_ok(), !cfg!(windows));
-    if let Err(e) = planned {
-        assert!(e.to_string().contains("this kind of drive"), "{e}");
-    }
 }
 
 /// A folder moved off a share stays there once copied: macOS has no Trash
 /// on an SMB share, and Linux's isn't used. The question says so before,
 /// and nothing is deleted.
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_moved_from_an_smb_share_stays_there_as_its_trash_can_t_take_it() -> Result<()> {
     let mut fx = files();
     // The fixture's volume and `far/`'s both shares.
@@ -1659,7 +1650,6 @@ fn a_folder_holding_the_catalog_is_refused_by_either_spelling() -> Result<()> {
 /// never removed (#675): removing a copy by its name could remove a file
 /// another computer put at that name just then, as the test disk does.
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Result<()> {
     let mut fx = small();
     let tree = tree_of(&fx.root.join("day"));
@@ -1703,7 +1693,6 @@ fn a_folder_move_onto_an_smb_share_that_fails_leaves_its_copies_there() -> Resul
 /// the only bytes left, is never said to be the user's to delete, whatever
 /// else is left there (review of #675).
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable() -> Result<()> {
     let mut fx = small();
     let (day, far) = (fx.root.join("day"), fx.root.join("far/day"));
@@ -1752,7 +1741,6 @@ fn a_folder_copy_left_on_a_share_with_the_only_bytes_isnt_said_to_be_deletable()
 /// A folder left on a share holding a file the move didn't make (another
 /// computer's) is never said to be the user's to delete (review of #675).
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_left_on_a_share_with_another_file_in_it_isnt_said_to_be_deletable() -> Result<()> {
     let mut fx = small();
     let disk = Faulty {
@@ -1782,7 +1770,6 @@ fn a_folder_left_on_a_share_with_another_file_in_it_isnt_said_to_be_deletable() 
 /// smbfs does); not while it holds an AppleDouble file (`._name`), which
 /// can't be told from another computer's file (review of #675).
 #[test]
-#[cfg_attr(windows, ignore = "SMB shares are told only on macOS and Linux")]
 fn a_folder_left_on_a_share_is_deletable_however_its_names_are_listed() -> Result<()> {
     for apple_double in [false, true] {
         let mut fx = fixture(&["day/a.NEF", "day/.h\u{ed}dden", "day/sub/b.NEF", "far/"]);
