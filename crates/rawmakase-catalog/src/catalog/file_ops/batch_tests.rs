@@ -84,6 +84,45 @@ fn a_sidecar_an_earlier_item_leaves_to_a_later_one_keeps_it_from_going() {
     assert!(fx.root.join("a.xmp").is_file());
 }
 
+#[test]
+fn a_sidecar_made_while_the_batch_renames_puts_its_item_back() {
+    // Another program writes later.NEF.xmp during the first rename: the
+    // second item, renamed to later.NEF, would read it over its own
+    // later.xmp, so it is put back before the catalog follows.
+    let mut fx = fixture(&["a.NEF", "a.xmp", "b.NEF", "b.xmp"]);
+    let mut ids = [fx.photo("a.NEF"), fx.photo("b.NEF")];
+    ids.sort();
+    let raced = fx.root.join("later.NEF.xmp");
+    let written = std::cell::Cell::new(false);
+    let at = raced.clone();
+    let disk = Faulty {
+        watch: Some(Box::new(move |call: &Call| {
+            if matches!(call, Call::Rename(..)) && !written.replace(true) {
+                std::fs::write(&at, b"another program's").unwrap();
+            }
+        })),
+        ..Faulty::default()
+    };
+    let outcome = fx.run(
+        FileOp::RenamePhotos {
+            renames: vec![(ids[0], "first".into()), (ids[1], "later".into())],
+        },
+        &NoTrash,
+        &disk,
+    );
+    assert!(
+        matches!(
+            &results(&outcome)[..],
+            [ItemResult::Renamed { .. }, ItemResult::Unchanged(Some(why))] if why.contains("share an XMP sidecar")
+        ),
+        "{:?}",
+        results(&outcome)
+    );
+    let later = fx.rows()[&ids[1]].clone();
+    assert!(fx.root.join(&later).is_file(), "{later}");
+    assert_eq!(std::fs::read(&raced).unwrap(), b"another program's");
+}
+
 /// A volume that stores names decomposed (as HFS+ does): asked for
 /// "café.NEF", it names the file "cafe\u{301}.NEF".
 struct Decomposing(Faulty);
