@@ -7,9 +7,10 @@ pub(super) enum Activity {
     /// A folder change (relink, clear or add) is writing the catalog. It ends as a
     /// dialog does, once the catalog has opened again.
     ChangingFolder,
-    /// Sync Settings is writing other photos' edits: moving to another photo or
-    /// catalog waits for it.
-    Syncing,
+    /// A batch edit (Sync Settings, Auto Settings or a preset on the selection) is
+    /// preparing or writing photos' edits: moving to another photo or catalog waits
+    /// for it. It ends when its worker reports back, cancelled or not.
+    Syncing(std::sync::Arc<super::sync::BatchProgress>),
     /// A file operation (Remove from Catalog, and later moving and trashing
     /// photos) is planned, confirmed or running: from just after the open
     /// edit was saved until its outcome is applied, nothing else writes the
@@ -41,20 +42,30 @@ impl Activity {
         *self = Self::ChoosingFile;
         true
     }
-    pub(crate) fn begin_sync(&mut self) -> bool {
+    pub(crate) fn begin_sync(
+        &mut self,
+        progress: std::sync::Arc<super::sync::BatchProgress>,
+    ) -> bool {
         if self.is_busy() {
             return false;
         }
-        *self = Self::Syncing;
+        *self = Self::Syncing(progress);
         true
     }
     pub(crate) fn is_syncing(&self) -> bool {
-        matches!(self, Self::Syncing)
+        matches!(self, Self::Syncing(_))
+    }
+    /// The running batch's progress and Cancel.
+    pub(crate) fn batch(&self) -> Option<&super::sync::BatchProgress> {
+        match self {
+            Self::Syncing(progress) => Some(progress),
+            _ => None,
+        }
     }
     /// Something else is writing the open photo's or other photos' rows:
     /// autosave, saving before navigation and undo wait for it.
     pub(crate) fn holds_catalog_writes(&self) -> bool {
-        matches!(self, Self::Syncing | Self::ChangingFiles)
+        matches!(self, Self::Syncing(_) | Self::ChangingFiles)
     }
     pub(crate) fn begin_file_change(&mut self) -> bool {
         if self.is_busy() {
@@ -86,6 +97,9 @@ impl Activity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn batch() -> std::sync::Arc<super::super::sync::BatchProgress> {
+        std::sync::Arc::new(super::super::sync::BatchProgress::new("Sync", 2))
+    }
     #[test]
     fn a_file_dialog_blocks_another_until_it_closes() {
         let mut activity = Activity::default();
@@ -111,7 +125,9 @@ mod tests {
         assert!(activity.holds_catalog_writes() && activity.is_busy());
         assert!(!activity.is_dialog() && !activity.is_syncing());
         assert!(
-            !activity.begin_file_change() && !activity.begin_sync() && !activity.begin_dialog()
+            !activity.begin_file_change()
+                && !activity.begin_sync(batch())
+                && !activity.begin_dialog()
         );
         // Only its own end ends it.
         activity.finish_dialog();
@@ -119,15 +135,15 @@ mod tests {
         assert!(activity.is_changing_files());
         activity.finish_file_change();
         assert!(!activity.is_busy());
-        assert!(activity.begin_sync());
+        assert!(activity.begin_sync(batch()));
         assert!(activity.holds_catalog_writes());
     }
     #[test]
     fn a_sync_keeps_dialogs_and_other_syncs_waiting() {
         let mut activity = Activity::default();
-        assert!(activity.begin_sync());
+        assert!(activity.begin_sync(batch()));
         assert!(activity.is_busy() && !activity.is_dialog());
-        assert!(!activity.begin_dialog() && !activity.begin_sync());
+        assert!(!activity.begin_dialog() && !activity.begin_sync(batch()));
         activity.finish_dialog();
         assert!(activity.is_syncing());
         activity.finish_sync();

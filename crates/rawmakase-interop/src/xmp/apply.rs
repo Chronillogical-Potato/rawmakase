@@ -1,7 +1,7 @@
 use super::PhotoMeasures;
 use super::Preset;
 use crate::model::recipe::Recipe;
-use crate::{camera_data::Metadata, camera_profiles::CameraProfile, color::mul};
+use crate::{camera_data::Metadata, camera_profiles::CameraProfile};
 use anyhow::{Context, Result, ensure};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -32,11 +32,44 @@ fn boolean(values: &BTreeMap<String, String>, key: &str) -> Result<Option<bool>>
         })
         .transpose()
 }
+/// The settings Lightroom's Auto Settings sets.
+pub(crate) const AUTO_TONE_KEYS: [&str; 8] = [
+    "Exposure2012",
+    "Contrast2012",
+    "Highlights2012",
+    "Shadows2012",
+    "Whites2012",
+    "Blacks2012",
+    "Vibrance",
+    "Saturation",
+];
+/// The value Lightroom's catalog holds in each of [`AUTO_TONE_KEYS`] while an Auto
+/// Settings is still to be measured.
+const UNMEASURED: f32 = -999999.;
+/// Whether `key` holds Lightroom's placeholder for an Auto Settings not measured
+/// yet: [`UNMEASURED`], with `AutoTone` on. Any other value is read as it is.
+fn unmeasured(values: &BTreeMap<String, String>, key: &str) -> Result<bool> {
+    Ok(AUTO_TONE_KEYS.contains(&key)
+        && boolean(values, "AutoTone")? == Some(true)
+        && values
+            .get(key)
+            .is_some_and(|v| v.trim().parse::<f32>().ok() == Some(UNMEASURED)))
+}
 struct Settings<'a> {
     values: &'a BTreeMap<String, String>,
     seen: BTreeSet<String>,
 }
 impl Settings<'_> {
+    /// [`Self::assign`], leaving `out` as it is for an Auto Settings still to be
+    /// measured (see [`unmeasured`]).
+    fn assign_tone(&mut self, key: &str, out: &mut f32, scale: f32) -> Result<()> {
+        if unmeasured(self.values, key)? {
+            self.seen.insert(key.to_string());
+            return Ok(());
+        }
+        let limit = if key == "Exposure2012" { 8. } else { 1. };
+        self.assign(key, out, scale, -limit, limit)
+    }
     fn assign(&mut self, key: &str, out: &mut f32, scale: f32, lo: f32, hi: f32) -> Result<()> {
         self.seen.insert(key.to_string());
         if let Some(value) = number(self.values, key)? {
@@ -118,7 +151,7 @@ impl Preset {
         self.apply_grading(&mut settings, &mut recipe)?;
         self.apply_effects(&mut settings, &mut recipe)?;
         self.apply_auto_gray_mix(&mut settings, &mut recipe, m, image)?;
-        self.apply_auto_tone(&mut settings, &mut recipe, m, image)?;
+        self.apply_auto_tone(&mut settings, &mut recipe, image)?;
         self.apply_panels(&mut settings, &mut recipe)?;
         let skipped = self.apply_local(&mut recipe, m);
         ensure!(skipped.is_empty(), "{}", skipped.join("; "));
@@ -189,7 +222,7 @@ impl Preset {
             self.apply_auto_gray_mix(&mut settings.borrow_mut(), r, m, image)
         });
         stage(&mut recipe, &|r| {
-            self.apply_auto_tone(&mut settings.borrow_mut(), r, m, image)
+            self.apply_auto_tone(&mut settings.borrow_mut(), r, image)
         });
         stage(&mut recipe, &|r| {
             self.apply_panels(&mut settings.borrow_mut(), r)
@@ -377,14 +410,14 @@ impl Preset {
     }
 
     fn apply_basic(&self, settings: &mut Settings<'_>, r: &mut Recipe) -> Result<()> {
-        settings.assign("Exposure2012", &mut r.exposure, 1., -8., 8.)?;
-        settings.assign("Contrast2012", &mut r.contrast, 0.01, -1., 1.)?;
-        settings.assign("Highlights2012", &mut r.highlights, 0.01, -1., 1.)?;
-        settings.assign("Shadows2012", &mut r.shadows, 0.01, -1., 1.)?;
-        settings.assign("Whites2012", &mut r.whites, 0.01, -1., 1.)?;
-        settings.assign("Blacks2012", &mut r.blacks, 0.01, -1., 1.)?;
-        settings.assign("Saturation", &mut r.saturation, 0.01, -1., 1.)?;
-        settings.assign("Vibrance", &mut r.vibrance, 0.01, -1., 1.)?;
+        settings.assign_tone("Exposure2012", &mut r.exposure, 1.)?;
+        settings.assign_tone("Contrast2012", &mut r.contrast, 0.01)?;
+        settings.assign_tone("Highlights2012", &mut r.highlights, 0.01)?;
+        settings.assign_tone("Shadows2012", &mut r.shadows, 0.01)?;
+        settings.assign_tone("Whites2012", &mut r.whites, 0.01)?;
+        settings.assign_tone("Blacks2012", &mut r.blacks, 0.01)?;
+        settings.assign_tone("Saturation", &mut r.saturation, 0.01)?;
+        settings.assign_tone("Vibrance", &mut r.vibrance, 0.01)?;
         settings.assign("Sharpness", &mut r.sharpening, 1. / 150., 0., 1.)?;
         settings.assign("SharpenRadius", &mut r.sharpening_radius, 1., 0.5, 3.)?;
         settings.assign("SharpenDetail", &mut r.sharpening_detail, 0.01, 0., 1.)?;
@@ -858,37 +891,42 @@ impl Preset {
         Ok(())
     }
 
+    /// Lightroom's Auto Settings saved in settings (`AutoTone`). A preset saves the
+    /// flag alone, and Lightroom's catalog [`UNMEASURED`] placeholders until it is
+    /// measured: the engine's Auto then sets all eight sliders on this photo, over
+    /// any tone value saved with it, as Lightroom's Auto does. Settings Lightroom
+    /// resolved carry the values Auto chose (with an Exposure), which are kept, so
+    /// every route (open, reset, history, hover) renders the same edit. Without the
+    /// photo (raw defaults, a catalog record read before the photo opens) the
+    /// sliders stay as they were.
     fn apply_auto_tone(
         &self,
         settings: &mut Settings<'_>,
         r: &mut Recipe,
-        m: &Metadata,
         image: Option<&dyn PhotoMeasures>,
     ) -> Result<()> {
-        let v = settings.values;
         settings.seen.insert("AutoTone".into());
-        // Lightroom stores the exposure Auto Tone chose; recompute only when it is absent,
-        // so every route (open, reset, history, hover) renders the same edit.
-        if boolean(v, "AutoTone")? == Some(true)
-            && !v.contains_key("Exposure2012")
+        if self.auto_tone_pending()?
             && let Some(photo) = image
         {
-            let mut l: Vec<f32> = photo
-                .camera_image()
-                .pixels
-                .iter()
-                .step_by(64)
-                .map(|p| {
-                    let q = mul(m.matrix, std::array::from_fn(|c| p[c] * r.wb[c]));
-                    crate::color::luminance(q).max(1e-6)
-                })
-                .collect();
-            l.sort_by(f32::total_cmp);
-            if !l.is_empty() {
-                r.exposure = (0.18 / l[l.len() / 2]).log2().clamp(-8., 8.);
-            }
+            *r = photo.auto_tone(r)?;
         }
         Ok(())
+    }
+    /// Whether these settings ask for an Auto Settings Lightroom has not measured.
+    fn auto_tone_pending(&self) -> Result<bool> {
+        let v = &self.settings;
+        Ok(boolean(v, "AutoTone")? == Some(true)
+            && (!v.contains_key("Exposure2012") || unmeasured(v, "Exposure2012")?))
+    }
+    /// Whether applying these settings may measure the photo (Auto Settings, Auto
+    /// white balance or Auto black & white), so a caller without it decoded yet
+    /// knows to decode it first. Settings that can't be read count as measuring.
+    pub fn measures_photo(&self) -> bool {
+        let v = &self.settings;
+        self.auto_tone_pending().unwrap_or(true)
+            || boolean(v, "AutoGrayscaleMix").unwrap_or(Some(true)) == Some(true)
+            || v.get("WhiteBalance").is_some_and(|wb| wb == "Auto")
     }
 
     /// Lightroom's panel switches. A panel is off when any of its keys says so, and

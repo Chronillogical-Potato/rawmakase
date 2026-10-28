@@ -2870,6 +2870,7 @@ fn a_synced_photo_open_in_develop_opens_again() -> anyhow::Result<()> {
         synced: vec![synced(id)],
         failed: Vec::new(),
         notes: Vec::new(),
+        cancelled: false,
     };
     let settled = || {
         save_state::SaveState::Pending(
@@ -2878,7 +2879,10 @@ fn a_synced_photo_open_in_develop_opens_again() -> anyhow::Result<()> {
     };
     let ctx = e.context.clone();
     // Another photo synced: the open one stays as it is, and saves once it is done.
-    assert!(e.activity.begin_sync());
+    assert!(
+        e.activity
+            .begin_sync(std::sync::Arc::new(sync::BatchProgress::new("Sync", 1)))
+    );
     e.document.edit.setup_mut().exposure = 0.4;
     *e.document.edit.save_state_mut() = settled();
     e.autosave(&ctx);
@@ -2888,7 +2892,10 @@ fn a_synced_photo_open_in_develop_opens_again() -> anyhow::Result<()> {
     assert!(e.document.edit.save_state().needs_save());
     // The open photo synced: what an analysis landing during the Sync changed on it
     // (as Upright's would) is not saved over the Sync, and it opens again.
-    assert!(e.activity.begin_sync());
+    assert!(
+        e.activity
+            .begin_sync(std::sync::Arc::new(sync::BatchProgress::new("Sync", 1)))
+    );
     e.document.edit.setup_mut().exposure = 0.9;
     *e.document.edit.save_state_mut() = settled();
     e.autosave(&ctx);
