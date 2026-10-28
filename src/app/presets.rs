@@ -339,7 +339,8 @@ impl Editor {
                     .as_ref()
                     .is_some_and(|(_, t)| t.elapsed() > HOVER_PREVIEW)
                 && let Some(m) = &self.document.metadata
-                && let Ok((mut r, _)) = library.presets[i].apply_lenient(
+                && let Ok(applied) = crate::presets::apply_to_photo(
+                    &library.presets[i],
                     self.document.edit.recipe(),
                     m,
                     &self.document.profiles,
@@ -349,8 +350,7 @@ impl Editor {
                         .map(|m| m as &dyn crate::xmp::PhotoMeasures),
                 )
             {
-                this_photos_upright(&mut r, self.document.edit.recipe());
-                self.presets.preview = Some(r);
+                self.presets.preview = Some(applied.recipe);
                 self.schedule();
             }
             // Woken when the hover has lasted long enough to preview; not after,
@@ -454,7 +454,12 @@ impl Editor {
             .metadata
             .as_ref()
             .context("Open a photo in Develop first")?;
-        let (mut r, skipped) = preset.apply_lenient(
+        let crate::presets::Applied {
+            recipe,
+            skipped,
+            substitute,
+        } = crate::presets::apply_to_photo(
+            preset,
             self.document.edit.recipe(),
             m,
             &self.document.profiles,
@@ -463,11 +468,7 @@ impl Editor {
                 .as_ref()
                 .map(|m| m as &dyn crate::xmp::PhotoMeasures),
         )?;
-        let substitute = preset
-            .profile_substitute(m, &self.document.profiles)
-            .map(|(_, used)| used);
-        this_photos_upright(&mut r, self.document.edit.recipe());
-        let before = self.document.edit.replace(r);
+        let before = self.document.edit.replace(recipe);
         self.ensure_analysis();
         // The settings before it are kept once, and every Amount is computed
         // from them again, so dragging never drifts.
@@ -836,25 +837,6 @@ fn list_row(
     response
 }
 
-/// A preset's Upright mode, with this photo's own corrections rather than any the preset
-/// carries from the photo it was saved from; a mode without one is analysed on apply.
-/// New lens settings call for a new analysis, as pasting them does.
-fn this_photos_upright(r: &mut Recipe, current: &Recipe) {
-    if r.upright != current.upright {
-        let mode = r.upright.mode;
-        r.upright.clone_from(&current.upright);
-        r.upright.mode = mode;
-        if mode == crate::model::transform::UprightMode::Guided && r.upright.correction().is_none()
-        {
-            r.upright.mode = current.upright.mode;
-        }
-    }
-    use crate::model::transform::LensInputs;
-    if LensInputs::of(r) != LensInputs::of(current) {
-        r.upright.analyse_again();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,25 +864,5 @@ mod tests {
         let none_fit = EmptyList::of(&browser, 3);
         assert_eq!(none_fit.title, "No presets fit this camera");
         assert!(matches!(none_fit.action, EmptyAction::ShowAll));
-    }
-    /// A preset that changes only a lens setting leaves no Upright correction analysed
-    /// through the old one: the editor analyses the photo again.
-    #[test]
-    fn presets_with_new_lens_settings_drop_the_photos_upright_analysis() {
-        let mut current = Recipe::default();
-        current.upright.mode = crate::model::transform::UprightMode::Level;
-        current.upright.corrections = vec![[1., 0., 0., 0., 1., 0., 0., 0., 1.]; 4];
-        let mut same = current.clone();
-        same.exposure = 1.;
-        this_photos_upright(&mut same, &current);
-        assert_eq!(same.upright, current.upright);
-        let mut lens = current.clone();
-        lens.lens_manual_distortion = 0.3;
-        this_photos_upright(&mut lens, &current);
-        assert!(lens.upright.corrections.is_empty());
-        assert_eq!(
-            lens.upright.mode,
-            crate::model::transform::UprightMode::Level
-        );
     }
 }
