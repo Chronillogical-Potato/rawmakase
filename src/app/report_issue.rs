@@ -202,7 +202,7 @@ impl Editor {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // The cross, not its hover square, lines up with the
                         // table's right edge.
-                        ui.add_space(-6.);
+                        ui.add_space(-space::S);
                         close = icon_button(ui, super::icons::Icon::Close, "Close · Esc").clicked();
                     });
                 });

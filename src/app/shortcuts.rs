@@ -539,7 +539,7 @@ fn key_cap(ui: &egui::Ui, cap: &str, right: Pos2, paint: bool) -> f32 {
     let action = cap.chars().all(|c| c.is_lowercase() || c == '-') && cap.len() > 1;
     let galley = ui.painter().layout_no_wrap(
         label,
-        FontId::proportional(if action { 11.5 } else { 11. }),
+        FontId::proportional(if action { text::LABEL } else { text::SMALL }),
         palette.tone(if action { Tone::MUTED } else { Tone::TEXT }),
     );
     if action {

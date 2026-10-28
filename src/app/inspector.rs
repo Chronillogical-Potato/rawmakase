@@ -5,9 +5,9 @@ use super::state::{MixerTab, Tool};
 use super::targeted_tool::{hsl_target, target_button};
 use super::tone_drag::tone_drag_ui;
 use super::widgets::{
-    SliderEvent, adjustment_section, keyed_setting_slider, label_column, name_history_step,
-    parametric_curve_ui, segmented, setting_slider, slider, slider_with, switched_section,
-    tone_curve_ui, toolbar_action,
+    LABEL_GAP, SliderEvent, adjustment_section, control_left, keyed_setting_slider, label_column,
+    name_history_step, parametric_curve_ui, segmented, setting_slider, slider, slider_with,
+    switched_section, tone_curve_ui, toolbar_action,
 };
 use super::worker::AutoKind;
 use super::{Editor, basic_keys, bulk_import::ImportKind};
@@ -373,7 +373,7 @@ impl Editor {
             });
             ui.add_space(space::S);
             ui.horizontal(|ui| {
-                ui.add_space(label_column(ui) + 5.);
+                ui.add_space(control_left(ui));
                 let w = (ui.available_width() - 4.) / 2.;
                 if ui
                     .add_sized([w, 24.], egui::Button::new("Reset"))
@@ -403,7 +403,7 @@ impl Editor {
                 }
             });
             ui.horizontal(|ui| {
-                ui.add_space(label_column(ui) + 5.);
+                ui.add_space(control_left(ui));
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new("Drag the frame or its corners on the photo.")
@@ -600,14 +600,14 @@ impl Editor {
             .on_disabled_hover_text("This profile has no Amount");
             if !profile_errors.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.add_space(label_column(ui) + 5.);
+                    ui.add_space(control_left(ui));
                     ui.small(format!("{} profiles unavailable", profile_errors.len()))
                         .on_hover_text(profile_errors.join("\n"));
                 });
                 // On a line of its own, so it never widens the panel.
                 if !adobe.is_empty() {
                     ui.horizontal(|ui| {
-                        ui.add_space(label_column(ui) + 5.);
+                        ui.add_space(control_left(ui));
                         if ui.small_button("Import Adobe base profile").clicked() {
                             import_adobe = true;
                         }
@@ -665,7 +665,7 @@ impl Editor {
                     // with Profile's.
                     let rect = Rect::from_center_size(
                         Pos2::new(
-                            ui.max_rect().left() - label_column(ui) - 5. + 13.,
+                            ui.max_rect().left() - control_left(ui) + 13.,
                             ui.max_rect().center().y,
                         ),
                         Vec2::new(26., 20.),
@@ -1745,7 +1745,7 @@ fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
     ui.add_space(space::M);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.), Sense::hover());
     ui.painter().text(
-        rect.left_center() + Vec2::new(label_column(ui) + 5., 0.),
+        rect.left_center() + Vec2::new(control_left(ui), 0.),
         egui::Align2::LEFT_CENTER,
         text,
         egui::FontId::proportional(text::SMALL),
@@ -1761,13 +1761,16 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
     let column = label_column(ui);
     let (row, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::hover());
     ui.painter().text(
-        Pos2::new(row.left() + column - 5., row.center().y),
+        Pos2::new(row.left() + column - LABEL_GAP, row.center().y),
         egui::Align2::RIGHT_CENTER,
         label,
         egui::FontId::proportional(text::SMALL),
         theme::palette(ui.ctx()).tone(Tone::SOFT),
     );
-    let rect = Rect::from_min_max(Pos2::new(row.left() + column + 5., row.top()), row.max);
+    let rect = Rect::from_min_max(
+        Pos2::new(row.left() + column + LABEL_GAP, row.top()),
+        row.max,
+    );
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -1908,7 +1911,7 @@ pub(super) fn tool_icon(tool: Tool) -> Icon {
 /// A row starting at the slider rails, returning what `add` does.
 fn rail_row<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.horizontal(|ui| {
-        ui.add_space(label_column(ui) + 5. - ui.spacing().item_spacing.x);
+        ui.add_space(control_left(ui) - ui.spacing().item_spacing.x);
         add(ui)
     })
     .inner

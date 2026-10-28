@@ -142,7 +142,7 @@ pub(super) fn point_color_panel(
             ranges(ui, swatch);
         }
         ui.horizontal(|ui| {
-            ui.add_space(83.);
+            ui.add_space(super::widgets::label_column(ui));
             ui.checkbox(&mut pc.visualize, "Visualize Range")
                 .on_hover_text("Show the colors this swatch selects; everything else turns gray");
         });
@@ -411,7 +411,7 @@ fn move_point(points: &mut [f32; 4], k: usize, t: f32, hold: Hold) {
 /// A "Ranges" disclosure row.
 fn disclosure(ui: &mut egui::Ui, open: &mut bool) {
     ui.horizontal(|ui| {
-        ui.add_space(83.);
+        ui.add_space(super::widgets::label_column(ui));
         let text = if *open { "▾ Ranges" } else { "▸ Ranges" };
         if ui
             .add(
@@ -432,7 +432,7 @@ fn disclosure(ui: &mut egui::Ui, open: &mut bool) {
 
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.horizontal(|ui| {
-        ui.add_space(88.);
+        ui.add_space(super::widgets::control_left(ui));
         ui.label(
             egui::RichText::new(text)
                 .size(text::SMALL)

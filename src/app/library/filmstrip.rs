@@ -249,7 +249,7 @@ impl Library {
                             // the row never runs past the window and widens the strip.
                             let width_id = ui.id().with("controls-width");
                             let width = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(250.);
-                            ui.add_space((ui.available_width() - width).max(8.));
+                            ui.add_space((ui.available_width() - width).max(space::M));
                             let start = ui.cursor().left();
                             changed = self.metadata_controls(ui, p.id, whole_selection);
                             let taken = ui.min_rect().right() - start;

@@ -329,7 +329,9 @@ impl Editor {
                     .show(ui, |ui| {
                         let width = (ui.available_width() - 48.).min(640.);
                         let margin = ((ui.available_width() - width) / 2.).max(24.);
-                        ui.add_space((ui.available_height() * 0.1).clamp(32., 96.));
+                        ui.add_space(
+                            (ui.available_height() * 0.1).clamp(space::XXXL, space::HUGE * 2.),
+                        );
                         ui.horizontal(|ui| {
                             ui.add_space(margin);
                             ui.vertical(|ui| {
