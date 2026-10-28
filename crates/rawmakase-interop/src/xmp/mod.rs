@@ -1,5 +1,6 @@
 //! Namespace-aware Adobe settings parsing and application to a develop recipe.
 mod apply;
+pub(crate) use apply::AUTO_TONE_KEYS;
 pub mod descriptive;
 pub mod local;
 pub(crate) mod look;
@@ -10,11 +11,15 @@ use crate::color::curve::ToneCurve;
 pub use parse::parse;
 
 /// What applying settings measures on the decoded photo when they ask for Auto:
-/// Lightroom's Auto white balance and Auto black & white mix, and the camera image
-/// Auto Tone reads. The renderer provides it (`develop::Measures`), so applying
-/// settings needs no rendering code of its own.
+/// Lightroom's Auto Settings (tone), Auto white balance and Auto black & white mix.
+/// The renderer provides it (`develop::Measures`), so applying settings needs no
+/// rendering code of its own, and an Auto in settings is the one the app runs.
 pub trait PhotoMeasures {
-    fn camera_image(&self) -> &crate::camera_data::CameraImage;
+    /// `base` with the six Tone sliders, Vibrance and Saturation Auto Settings picks.
+    fn auto_tone(
+        &self,
+        base: &crate::model::recipe::Recipe,
+    ) -> anyhow::Result<crate::model::recipe::Recipe>;
     /// `base` with the white balance the WB menu's Auto picks.
     fn auto_white_balance(
         &self,

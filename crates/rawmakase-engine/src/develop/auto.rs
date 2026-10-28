@@ -364,8 +364,8 @@ fn round(v: f32, steps: f32) -> f32 {
 pub struct Measures<'a>(pub &'a CameraImage);
 
 impl crate::xmp::PhotoMeasures for Measures<'_> {
-    fn camera_image(&self) -> &CameraImage {
-        self.0
+    fn auto_tone(&self, base: &Recipe) -> Result<Recipe> {
+        auto_tone(self.0, base)
     }
     fn auto_white_balance(&self, base: &Recipe) -> Result<Recipe> {
         auto_white_balance(self.0, base)

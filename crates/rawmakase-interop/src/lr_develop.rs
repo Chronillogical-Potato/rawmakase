@@ -296,6 +296,12 @@ pub fn convert_develop(
         let mut p = preset.clone();
         p.settings.clear();
         p.settings.insert(key.clone(), value.clone());
+        // A tone slider is read with Auto, whose placeholder it may hold.
+        if crate::xmp::AUTO_TONE_KEYS.contains(&key.as_str())
+            && let Some(auto) = preset.settings.get("AutoTone")
+        {
+            p.settings.insert("AutoTone".into(), auto.clone());
+        }
         match p.apply(&Recipe::with_profiles(m, profiles), m, profiles, image) {
             Ok(_) => {
                 accepted.settings.insert(key.clone(), value.clone());

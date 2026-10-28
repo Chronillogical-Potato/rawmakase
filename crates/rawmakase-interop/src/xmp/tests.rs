@@ -85,36 +85,61 @@ fn lenient_white_balance_failure_preserves_its_basic_edits() -> Result<()> {
 }
 
 /// A photo whose Auto results are fixed, recording what applying settings asked.
+#[derive(Default)]
 struct FakeMeasures {
-    image: crate::camera_data::CameraImage,
     white_balance_crops: std::cell::RefCell<Vec<[f32; 4]>>,
     gray_mix_widths: std::cell::RefCell<Vec<u32>>,
-}
-impl Default for FakeMeasures {
-    fn default() -> Self {
-        Self {
-            image: crate::camera_data::CameraImage {
-                width: 1,
-                height: 1,
-                pixels: vec![[0.2; 3]],
-                metadata: Metadata::default(),
-                recovered: Default::default(),
-                fast: false,
-                scale_factor: 1.,
-                scale_clipped: 0,
-            },
-            white_balance_crops: Default::default(),
-            gray_mix_widths: Default::default(),
-        }
-    }
+    /// The settings each Auto Tone was asked to measure the photo under.
+    tone_bases: std::cell::RefCell<Vec<Recipe>>,
 }
 impl FakeMeasures {
     const WB: [f32; 3] = [1.5, 1., 1.25];
     const MIX: [f32; 8] = [-0.1, -0.2, -0.2, -0.3, -0.2, 0.1, 0.2, 0.];
+    /// Exposure, Contrast, Highlights, Shadows, Whites, Blacks, Vibrance, Saturation.
+    const TONE: [f32; 8] = [0.85, 0.06, -0.62, 0.48, 0.21, -0.17, 0.15, 0.04];
+    fn tone(r: &Recipe) -> [f32; 8] {
+        [
+            r.exposure,
+            r.contrast,
+            r.highlights,
+            r.shadows,
+            r.whites,
+            r.blacks,
+            r.vibrance,
+            r.saturation,
+        ]
+    }
+    /// How many times applying asked anything of the photo.
+    fn asked(&self) -> usize {
+        self.white_balance_crops.borrow().len()
+            + self.gray_mix_widths.borrow().len()
+            + self.tone_bases.borrow().len()
+    }
 }
 impl PhotoMeasures for FakeMeasures {
-    fn camera_image(&self) -> &crate::camera_data::CameraImage {
-        &self.image
+    fn auto_tone(&self, base: &Recipe) -> Result<Recipe> {
+        self.tone_bases.borrow_mut().push(base.clone());
+        let [
+            exposure,
+            contrast,
+            highlights,
+            shadows,
+            whites,
+            blacks,
+            vibrance,
+            saturation,
+        ] = Self::TONE;
+        Ok(Recipe {
+            exposure,
+            contrast,
+            highlights,
+            shadows,
+            whites,
+            blacks,
+            vibrance,
+            saturation,
+            ..base.clone()
+        })
     }
     fn auto_white_balance(&self, base: &Recipe) -> Result<Recipe> {
         self.white_balance_crops.borrow_mut().push(base.crop);
@@ -1709,5 +1734,171 @@ fn kelvin_white_balance_is_ignored_on_a_rendered_photo() -> Result<()> {
         warnings,
         vec!["Temperature in Kelvin applies to RAW files only".to_string()]
     );
+    Ok(())
+}
+
+/// Lightroom's Auto Settings saved in a preset (`AutoTone`, no slider values) is
+/// measured on each photo by the engine's Auto: all six Tone sliders, Vibrance and
+/// Saturation, as Auto Settings sets them, and every other setting kept.
+#[test]
+fn an_auto_tone_preset_sets_what_auto_settings_sets() -> Result<()> {
+    let m = Metadata::default();
+    let mut base = Recipe {
+        temperature: 5200.,
+        ..Recipe::default()
+    };
+    base.effects.clarity = 0.3;
+    let preset = parse(
+        Path::new("auto.xmp"),
+        &xml(r#"c:AutoTone="True" c:Sharpness="50""#, ""),
+    )?;
+    let photo = FakeMeasures::default();
+    let r = preset.apply(&base, &m, &[], Some(&photo))?;
+    assert_eq!(FakeMeasures::tone(&r), FakeMeasures::TONE);
+    assert_eq!((r.effects.clarity, r.temperature), (0.3, 5200.));
+    // Measured on the photo as the preset's other settings leave it.
+    let sharpening = photo.tone_bases.borrow()[0].sharpening;
+    assert!((sharpening - 50. / 150.).abs() < 1e-6);
+    // Lenient application measures the same way.
+    let (lenient, warnings) = preset.apply_lenient(&base, &m, &[], Some(&photo))?;
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert_eq!(FakeMeasures::tone(&lenient), FakeMeasures::TONE);
+    Ok(())
+}
+
+/// As in Lightroom, Auto wins over a tone value saved in the same preset.
+#[test]
+fn auto_tone_wins_over_tone_values_saved_with_it() -> Result<()> {
+    let m = Metadata::default();
+    let preset = parse(
+        Path::new("auto-contrast.xmp"),
+        &xml(
+            r#"c:AutoTone="True" c:Contrast2012="77" c:Saturation="-20""#,
+            "",
+        ),
+    )?;
+    let r = preset.apply(&Recipe::default(), &m, &[], Some(&FakeMeasures::default()))?;
+    assert_eq!(FakeMeasures::tone(&r), FakeMeasures::TONE);
+    Ok(())
+}
+
+/// Settings Lightroom resolved (a sidecar or catalog record with the values Auto
+/// chose) keep those values: nothing is measured again, so every route renders the
+/// same edit.
+#[test]
+fn a_resolved_auto_tone_keeps_its_values() -> Result<()> {
+    let m = Metadata::default();
+    let preset = parse(
+        Path::new("resolved.xmp"),
+        &xml(
+            r#"c:AutoTone="True" c:Exposure2012="0.40" c:Contrast2012="6" c:Highlights2012="-55""#,
+            "",
+        ),
+    )?;
+    let photo = FakeMeasures::default();
+    let r = preset.apply(&Recipe::default(), &m, &[], Some(&photo))?;
+    assert_eq!(photo.asked(), 0);
+    assert_eq!((r.exposure, r.contrast, r.highlights), (0.4, 0.06, -0.55));
+    Ok(())
+}
+
+/// Lightroom's catalog holds an Auto not yet measured as -999999 in each of the
+/// eight sliders. Those are Auto's placeholders, not values out of range; any other
+/// value out of range is still refused, Auto or not.
+#[test]
+fn lightroom_unresolved_auto_placeholders_are_measured() -> Result<()> {
+    let m = Metadata::default();
+    let unresolved = [
+        "Exposure2012",
+        "Contrast2012",
+        "Highlights2012",
+        "Shadows2012",
+        "Whites2012",
+        "Blacks2012",
+        "Vibrance",
+        "Saturation",
+    ]
+    .map(|key| format!(r#"c:{key}="-999999""#))
+    .join(" ");
+    let preset = parse(
+        Path::new("unresolved.xmp"),
+        &xml(&format!(r#"c:AutoTone="True" {unresolved}"#), ""),
+    )?;
+    let r = preset.apply(&Recipe::default(), &m, &[], Some(&FakeMeasures::default()))?;
+    assert_eq!(FakeMeasures::tone(&r), FakeMeasures::TONE);
+    // Without the photo to measure (raw defaults, a catalog record read before it
+    // opens) the sliders stay as they were.
+    let base = Recipe {
+        exposure: 0.3,
+        ..Recipe::default()
+    };
+    assert_eq!(preset.apply(&base, &m, &[], None)?.exposure, 0.3);
+    // Without AutoTone, the placeholder is just a value out of range.
+    let plain = parse(
+        Path::new("plain.xmp"),
+        &xml(r#"c:Exposure2012="-999999""#, ""),
+    )?;
+    assert!(plain.apply(&base, &m, &[], None).is_err());
+    // And with it, other values out of range are not taken for Auto.
+    let wrong = parse(
+        Path::new("wrong.xmp"),
+        &xml(r#"c:AutoTone="True" c:Contrast2012="-5000""#, ""),
+    )?;
+    assert!(
+        wrong
+            .apply(&base, &m, &[], Some(&FakeMeasures::default()))
+            .is_err()
+    );
+    // A Lightroom catalog record converts the same way.
+    let text =
+        "s = { AutoTone = true, Exposure2012 = -999999, Contrast2012 = -999999, Sharpness = 40 }";
+    let (r, warnings) = crate::lr_develop::convert_develop(text, &m, &[], None)?;
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!((r.sharpening - 40. / 150.).abs() < 1e-6);
+    Ok(())
+}
+
+/// Raw defaults and imports apply settings without the photo: an Auto Tone preset
+/// then leaves the sliders as they were rather than guess, and asks nothing.
+#[test]
+fn auto_tone_without_the_photo_leaves_the_sliders() -> Result<()> {
+    let m = Metadata::default();
+    let preset = parse(
+        Path::new("auto.xmp"),
+        &xml(r#"c:AutoTone="True" c:Contrast2012="30""#, ""),
+    )?;
+    let base = Recipe {
+        exposure: 0.25,
+        ..Recipe::default()
+    };
+    let r = preset.apply(&base, &m, &[], None)?;
+    assert_eq!(r.exposure, 0.25);
+    assert!((r.contrast - 0.3).abs() < 1e-6);
+    Ok(())
+}
+
+/// Whether a preset measures the photo says when a batch must decode it: a preset
+/// that says no asks nothing of the photo.
+#[test]
+fn a_preset_says_whether_it_measures_the_photo() -> Result<()> {
+    let m = Metadata::default();
+    for (attrs, measures) in [
+        (r#"c:Exposure2012="0.5" c:WhiteBalance="As Shot""#, false),
+        (r#"c:AutoTone="False" c:Contrast2012="10""#, false),
+        (r#"c:AutoTone="True""#, true),
+        (r#"c:WhiteBalance="Auto""#, true),
+        (
+            r#"c:AutoGrayscaleMix="True" c:ConvertToGrayscale="True""#,
+            true,
+        ),
+    ] {
+        let preset = parse(Path::new("p.xmp"), &xml(attrs, ""))?;
+        assert_eq!(preset.measures_photo(), measures, "{attrs}");
+        let photo = FakeMeasures::default();
+        preset.apply_lenient(&Recipe::default(), &m, &[], Some(&photo))?;
+        if !measures {
+            assert_eq!(photo.asked(), 0, "{attrs}");
+        }
+    }
     Ok(())
 }
