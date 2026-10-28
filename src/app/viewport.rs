@@ -58,7 +58,8 @@ impl Editor {
     /// rather than the last photo's: Original at the photo's ratio, a preset it
     /// matches, or else its exact ratio as Custom. An uncropped photo takes the
     /// aspect last chosen from the menu, and a preset crops it as an edit of its
-    /// own, recorded before any frame or command that follows.
+    /// own, recorded before any frame or command that follows; not when the photo
+    /// was loaded again with the tool open, which keeps the edit loaded.
     pub(super) fn read_aspect(&mut self) {
         if !self.view.is(Tool::Crop) || self.view.aspect_read {
             return;
@@ -68,6 +69,10 @@ impl Editor {
         };
         self.view.aspect_read = true;
         let c = self.document.edit.recipe().crop;
+        if c == [0., 0., 1., 1.] && self.view.aspect_reloaded {
+            self.view.aspect = -1.;
+            return;
+        }
         if c == [0., 0., 1., 1.] {
             self.view.aspect = self.view.chosen_aspect;
             if let Some(crop) = self.fitted_crop() {

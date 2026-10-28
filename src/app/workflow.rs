@@ -92,7 +92,7 @@ impl Editor {
             self.preview.before = reference;
         }
         self.presets.clear_document();
-        self.view.clear_document();
+        self.view.next_document(another);
         self.selection.clear_document();
         if let Some(photo) = photo {
             self.request_stand_ins(id, photo, neighbour);

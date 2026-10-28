@@ -3230,6 +3230,86 @@ fn crop_tool_reads_each_photos_own_aspect() {
     assert_eq!(open(&mut editor, [0.1, 0.1, 0.9, 0.9]), -1.);
 }
 #[test]
+fn crop_tool_stays_open_from_photo_to_photo() {
+    let ctx = egui::Context::default();
+    let mut editor = Editor::with_context(
+        &ctx,
+        None,
+        crate::app::session::Session {
+            crop_aspect: "1x1".into(),
+            ..Default::default()
+        },
+        None,
+    );
+    editor.module = Module::Develop;
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 300,
+        height: 200,
+        pixels: vec![[0.1; 3]; 60000],
+        metadata: Metadata {
+            width: 300,
+            height: 200,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    // Another photo, opened while Crop is: the tool stays and reads it as if
+    // opened on it.
+    let next = |editor: &mut Editor, crop: [f32; 4]| {
+        editor.open_raw("missing-crop-fixture.ARW".into(), None);
+        assert!(editor.view.is(state::Tool::Crop));
+        editor.document.set_image(image.clone());
+        editor.document.edit.setup_mut().crop = crop;
+        let frame = editor.begin_edit_frame();
+        editor.finish_edit_frame(frame, &ctx);
+        editor.view.aspect
+    };
+    let crop = |editor: &Editor| editor.document.edit.recipe().crop;
+    let steps = |editor: &Editor| editor.document.edit.history().steps().0.len();
+    editor.document.set_image(image.clone());
+    editor.view.toggle(state::Tool::Crop);
+    // A cropped photo keeps its crop and shows its own aspect: 300 × 111 is
+    // 65 x 24 to within rounding.
+    let xpan = [0., 0.223, 1., 0.777];
+    assert_eq!(next(&mut editor, xpan), 65. / 24.);
+    assert_eq!(crop(&editor), xpan);
+    assert!(!editor.document.edit.save_state().needs_save());
+    // An uncropped photo takes the chosen 1 x 1 as one undoable step.
+    let full = [0., 0., 1., 1.];
+    let before = steps(&editor);
+    assert_eq!(next(&mut editor, full), 1.);
+    let c = crop(&editor);
+    assert!(((c[2] - c[0]) * 300. / ((c[3] - c[1]) * 200.) - 1.).abs() < 1e-3);
+    assert_eq!(steps(&editor), before + 1);
+    assert!(editor.document.edit.save_state().needs_save());
+    assert!(editor.document.edit.undo());
+    assert_eq!(crop(&editor), full);
+    // The same photo loaded again (after a Sync's Undo, say) reads the edit it
+    // loads: its own crop's aspect, and an uncropped one stays uncropped.
+    let path = std::path::PathBuf::from("missing-crop-fixture.ARW");
+    let reload = |editor: &mut Editor, crop: [f32; 4]| {
+        editor.document.path = Some(path.clone());
+        editor.open_raw(path.clone(), None);
+        assert!(editor.view.is(state::Tool::Crop));
+        editor.document.set_image(image.clone());
+        editor.document.edit.setup_mut().crop = crop;
+        let frame = editor.begin_edit_frame();
+        editor.finish_edit_frame(frame, &ctx);
+        assert_eq!(editor.document.edit.recipe().crop, crop);
+        assert_eq!(editor.document.edit.history().steps().0.len(), 0);
+        assert!(!editor.document.edit.save_state().needs_save());
+        editor.view.aspect
+    };
+    assert_eq!(reload(&mut editor, xpan), 65. / 24.);
+    assert_eq!(reload(&mut editor, full), -1.);
+    // Removing the photo closes it.
+    editor.close_removed_document();
+    assert!(editor.view.is(state::Tool::None));
+}
+#[test]
 fn choosing_the_photos_own_aspect_leaves_an_uncropped_photo_alone() {
     let ctx = egui::Context::default();
     let mut editor =
@@ -4610,6 +4690,31 @@ fn a_pasted_auto_straighten_flipped_before_it_is_measured_is_measured_again() {
     );
 }
 
+#[test]
+#[ignore = "writes an image to look at"]
+fn render_the_crop_drawer() -> anyhow::Result<()> {
+    let ctx = egui::Context::default();
+    crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.view.tool = state::Tool::Crop;
+    let mut textures = Default::default();
+    let image =
+        super::ui_snapshot::render(&ctx, &mut textures, Vec2::new(320., 300.), 2., 3, |ui| {
+            let _labels =
+                super::widgets::LabelColumn::enter(ui, super::inspector::DRAWER_LABEL_COLUMN);
+            let palette = super::theme::palette(ui.ctx());
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0., palette.gray(30));
+            let frame = e.begin_edit_frame();
+            e.tool_drawer(ui);
+            e.finish_edit_frame(frame, &ctx);
+        });
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/crop-drawer.png");
+    image.save(&out)?;
+    eprintln!("{}", out.display());
+    Ok(())
+}
 #[test]
 fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
     let ctx = egui::Context::default();
