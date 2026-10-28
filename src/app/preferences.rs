@@ -5,6 +5,7 @@ use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
 use super::icons::{self, Icon};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
+use crate::app::design::{Tone, button, radius, size, space, text};
 use crate::app::theme;
 use crate::catalog::CatalogLocation;
 use crate::catalog::preview_cache::{PreviewCache, PreviewKind};
@@ -232,12 +233,12 @@ impl Editor {
                         ne: 0,
                         se: 0,
                     },
-                    palette.gray(27),
+                    palette.tone(Tone::BAR),
                 );
                 ui.painter().vline(
                     sidebar.right(),
                     sidebar.y_range(),
-                    Stroke::new(1., palette.gray(45)),
+                    Stroke::new(1., palette.tone(Tone::RAISED)),
                 );
                 // The first tab sits level with the top bar.
                 let mut side = ui.new_child(
@@ -255,9 +256,9 @@ impl Editor {
                 );
                 let mut content = ui.new_child(egui::UiBuilder::new().max_rect(page));
                 content.set_clip_rect(page.expand(4.));
-                content.spacing_mut().item_spacing = Vec2::new(8., 10.);
-                content.spacing_mut().button_padding = Vec2::new(12., 5.);
-                content.spacing_mut().interact_size.y = 28.;
+                content.spacing_mut().item_spacing = Vec2::new(space::M, space::L);
+                content.spacing_mut().button_padding = Vec2::new(space::L, space::S);
+                content.spacing_mut().interact_size.y = size::FIELD;
                 match self.preferences.tab {
                     Tab::General => {
                         egui::ScrollArea::vertical()
@@ -294,23 +295,23 @@ impl Editor {
                 ui.painter().hline(
                     (sidebar.right() + 1.)..=rect.right(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., palette.gray(45)),
+                    Stroke::new(1., palette.tone(Tone::RAISED)),
                 );
                 let mut bar = ui.new_child(
                     egui::UiBuilder::new()
                         .max_rect(footer)
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
-                bar.spacing_mut().button_padding = Vec2::new(18., 6.);
+                bar.spacing_mut().button_padding = button::DIALOG;
                 let done = primary_button(&mut bar, "Done").clicked();
                 // Only what happened while the window was open, e.g. an import.
                 if self.status != self.preferences.status_at_open {
-                    bar.add_space(16.);
+                    bar.add_space(space::XL);
                     bar.add(
                         egui::Label::new(
                             egui::RichText::new(&self.status)
-                                .size(12.)
-                                .color(palette.gray(160)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::SECONDARY)),
                         )
                         .truncate(),
                     );
@@ -329,14 +330,14 @@ impl Editor {
         ui.painter().hline(
             (bar.left() + 1.)..=bar.right(),
             bar.bottom(),
-            Stroke::new(1., palette.gray(45)),
+            Stroke::new(1., palette.tone(Tone::RAISED)),
         );
-        let font = egui::FontId::proportional(14.);
+        let font = egui::FontId::proportional(text::LARGE);
         let mut x = bar.left() + 32.;
         for (text, color) in [
-            ("Preferences", palette.gray(140)),
-            ("/", palette.gray(95)),
-            (self.preferences.tab.title(), palette.gray(236)),
+            ("Preferences", palette.tone(Tone::MUTED)),
+            ("/", palette.tone(Tone::DISABLED)),
+            (self.preferences.tab.title(), palette.tone(Tone::STRONG)),
         ] {
             let drawn = ui.painter().text(
                 egui::pos2(x, bar.center().y),
@@ -358,17 +359,19 @@ impl Editor {
     }
     fn preferences_tabs(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
-        ui.spacing_mut().item_spacing.y = 2.;
+        ui.spacing_mut().item_spacing.y = space::XXS;
         for tab in Tab::ALL {
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::click());
             let selected = self.preferences.tab == tab;
             if selected {
-                ui.painter().rect_filled(rect, 6., palette.gray(44));
+                ui.painter()
+                    .rect_filled(rect, radius::CARD, palette.tone(Tone::RAISED));
             } else if response.hovered() {
-                ui.painter().rect_filled(rect, 6., palette.gray(35));
+                ui.painter()
+                    .rect_filled(rect, radius::CARD, palette.tone(Tone::PANEL));
             }
-            let tint = palette.gray(if selected { 240 } else { 170 });
+            let tint = palette.tone(if selected { Tone::STRONG } else { Tone::LABEL });
             icons::paint_at(
                 ui.painter(),
                 tab.icon(),
@@ -380,7 +383,7 @@ impl Editor {
                 rect.left_center() + Vec2::new(38., 0.),
                 egui::Align2::LEFT_CENTER,
                 tab.title(),
-                egui::FontId::proportional(13.),
+                egui::FontId::proportional(text::BODY),
                 tint,
             );
             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -398,7 +401,7 @@ impl Editor {
         group(ui, "About");
         form_row(ui, "RAWmakase", |ui| {
             value(ui, crate::updates::config().current_version);
-            ui.add_space(8.);
+            ui.add_space(space::M);
             self.update_status(ui);
         });
         form_row(ui, "RAW decoder", |ui| {
@@ -915,7 +918,7 @@ impl Editor {
 }
 
 /// The room between a card's edge and what it holds.
-const CARD_INSET: f32 = 16.;
+const CARD_INSET: f32 = space::XL;
 const CARD_PAD: f32 = 10.;
 
 /// A card under way: its background, drawn once its rows are known.
@@ -956,8 +959,8 @@ pub(super) fn group(ui: &mut egui::Ui, title: &str) {
         egui::pos2(rect.left() - CARD_INSET + 2., rect.center().y),
         egui::Align2::LEFT_CENTER,
         title,
-        egui::FontId::proportional(12.5),
-        theme::palette(ui.ctx()).gray(200),
+        egui::FontId::proportional(text::LABEL),
+        theme::palette(ui.ctx()).tone(Tone::SOFT),
     );
     let top = rect.bottom() + 6.;
     let card = OpenCard {
@@ -968,12 +971,12 @@ pub(super) fn group(ui: &mut egui::Ui, title: &str) {
         top,
     };
     ui.ctx().data_mut(|d| d.insert_temp(card_id(), card));
-    ui.add_space(6. + CARD_PAD - ui.spacing().item_spacing.y);
+    ui.add_space(space::S + CARD_PAD - ui.spacing().item_spacing.y);
 }
 /// The space between sections; it ends the open card.
 pub(super) fn gap(ui: &mut egui::Ui) {
     close_card(ui);
-    ui.add_space(14.);
+    ui.add_space(space::XL);
 }
 fn close_card(ui: &mut egui::Ui) {
     let Some(card) = ui.ctx().data_mut(|d| {
@@ -991,8 +994,8 @@ fn close_card(ui: &mut egui::Ui) {
         egui::epaint::RectShape::new(
             rect,
             8.,
-            palette.gray(29),
-            Stroke::new(1., palette.gray(43)),
+            palette.tone(Tone::CARD),
+            Stroke::new(1., palette.tone(Tone::RAISED)),
             egui::StrokeKind::Inside,
         ),
     );
@@ -1000,14 +1003,16 @@ fn close_card(ui: &mut egui::Ui) {
 }
 fn value(ui: &mut egui::Ui, text: &str) {
     ui.add(
-        egui::Label::new(egui::RichText::new(text).color(theme::palette(ui.ctx()).gray(225)))
-            .truncate(),
+        egui::Label::new(
+            egui::RichText::new(text).color(theme::palette(ui.ctx()).tone(Tone::TEXT)),
+        )
+        .truncate(),
     );
 }
 fn path_value(ui: &mut egui::Ui, path: &Path) {
     ui.add(
         egui::Label::new(
-            egui::RichText::new(pretty_path(path)).color(theme::palette(ui.ctx()).gray(225)),
+            egui::RichText::new(pretty_path(path)).color(theme::palette(ui.ctx()).tone(Tone::TEXT)),
         )
         .truncate(),
     )
@@ -1017,8 +1022,8 @@ pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
-                .size(12.)
-                .color(theme::palette(ui.ctx()).gray(135)),
+                .size(text::LABEL)
+                .color(theme::palette(ui.ctx()).tone(Tone::MUTED)),
         )
         .wrap(),
     );
@@ -1037,9 +1042,14 @@ pub(super) fn gear_button(ui: &mut egui::Ui) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(28.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., palette.gray(38));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::FIELD));
     }
-    let color = palette.gray(if response.hovered() { 235 } else { 175 });
+    let color = palette.tone(if response.hovered() {
+        Tone::STRONG
+    } else {
+        Tone::LABEL
+    });
     super::icons::paint_at(
         ui.painter(),
         super::icons::Icon::Settings,

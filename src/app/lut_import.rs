@@ -5,8 +5,9 @@ use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, theme};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::camera_profiles::LutSpace;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Color32};
 
 impl Editor {
     /// Opens the Import .cube LUTs window at sRGB.
@@ -31,24 +32,24 @@ impl Editor {
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("import-luts"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(400.);
                 ui.label(
                     egui::RichText::new("Import .cube LUTs")
-                        .size(17.)
-                        .color(palette.gray(235)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 ui.label(
                     egui::RichText::new(
                         "A LUT expects colours in one colour space. Most are made for sRGB; \
                          choose another only when the LUT's maker says so.",
                     )
-                    .size(11.)
-                    .color(palette.gray(150)),
+                    .size(text::SMALL)
+                    .color(palette.tone(Tone::SECONDARY)),
                 );
-                ui.add_space(12.);
+                ui.add_space(space::L);
                 ui.horizontal(|ui| {
                     ui.label("Colour space");
                     egui::ComboBox::from_id_salt("lut-space")
@@ -60,9 +61,9 @@ impl Editor {
                             }
                         });
                 });
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if primary_button(ui, "Choose Files…").clicked() {
                             choice = Some(Some(FileDialog::Luts(*space)));

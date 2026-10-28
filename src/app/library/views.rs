@@ -3,6 +3,7 @@
 //! is a click away with its key shown on hover; rating, flag and label keys
 //! go where the view shows them.
 use super::Library;
+use crate::app::design::{Tone, radius, space};
 use crate::app::icons::{self, Icon};
 use crate::app::shortcuts::keys_text;
 use crate::app::theme;
@@ -89,16 +90,20 @@ impl Library {
         let palette = theme::palette(ui.ctx());
         let current = self.view();
         ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.;
+            ui.spacing_mut().item_spacing.x = space::XXS;
             for view in View::ALL {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(30., 22.), egui::Sense::click());
                 let on = view == current;
                 if on || response.hovered() {
-                    let fill = palette.gray(if on { 78 } else { 55 });
-                    ui.painter().rect_filled(rect, 3., fill);
+                    let fill = palette.tone(if on {
+                        Tone::OUTLINE_STRONG
+                    } else {
+                        Tone::OUTLINE
+                    });
+                    ui.painter().rect_filled(rect, radius::CONTROL, fill);
                 }
-                let tint = palette.gray(if on { 240 } else { 165 });
+                let tint = palette.tone(if on { Tone::STRONG } else { Tone::LABEL });
                 icons::paint_at(ui.painter(), view.icon(), rect.center(), 15., tint);
                 if response.on_hover_text(view.hover()).clicked() && !on {
                     self.set_view(view);

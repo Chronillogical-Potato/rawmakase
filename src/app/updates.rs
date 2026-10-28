@@ -3,6 +3,7 @@
 //! work on a thread of its own (`crate::updates`); this is what the user sees.
 use super::Editor;
 use super::widgets::{modal_frame, primary_button};
+use crate::app::design::{self, Tone, radius, space, text};
 use crate::app::theme;
 use crate::updates::{INTERVAL, Launch, Prepared, Release, Unsupported, Updater};
 use eframe::egui::{self, Color32, Sense, Vec2};
@@ -247,7 +248,7 @@ impl Editor {
             .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-16., 112.))
             .show(ctx, |ui| {
                 modal_frame(&palette)
-                    .inner_margin(egui::Margin::same(16))
+                    .inner_margin(design::margin_same(space::XL))
                     .shadow(egui::Shadow {
                         offset: [0, 6],
                         blur: 24,
@@ -256,7 +257,7 @@ impl Editor {
                     })
                     .show(ui, |ui| {
                         ui.set_width(WIDTH);
-                        ui.spacing_mut().item_spacing = Vec2::new(8., 6.);
+                        ui.spacing_mut().item_spacing = Vec2::new(space::M, space::S);
                         action = notice_contents(ui, updates, &release);
                     });
             });
@@ -375,8 +376,8 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new("Update available")
-                .size(14.)
-                .color(palette.gray(236)),
+                .size(text::LARGE)
+                .color(palette.tone(Tone::STRONG)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if close_button(ui).on_hover_text("Remind me later").clicked() {
@@ -392,8 +393,8 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
             crate::updates::config().current_version
         ),
     );
-    ui.add_space(6.);
-    ui.spacing_mut().button_padding = Vec2::new(12., 5.);
+    ui.add_space(space::S);
+    ui.spacing_mut().button_padding = Vec2::new(space::L, space::S);
     match &updates.download {
         Download::Downloading(received, total) => {
             let progress = if *total > 0 {
@@ -423,7 +424,11 @@ fn notice_contents(ui: &mut egui::Ui, updates: &Updates, release: &Release) -> O
         Download::Idle | Download::Failed(_) => {
             let failed = matches!(updates.download, Download::Failed(_));
             if let Download::Failed(error) = &updates.download {
-                ui.label(egui::RichText::new(error).size(12.).color(palette.danger()));
+                ui.label(
+                    egui::RichText::new(error)
+                        .size(text::LABEL)
+                        .color(palette.danger()),
+                );
             }
             if let Some(reason) = &updates.unsupported {
                 note(ui, &reason.to_string());
@@ -451,8 +456,8 @@ fn note(ui: &mut egui::Ui, text: &str) -> egui::Response {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
-                .size(12.)
-                .color(theme::palette(ui.ctx()).gray(160)),
+                .size(text::LABEL)
+                .color(theme::palette(ui.ctx()).tone(Tone::SECONDARY)),
         )
         .wrap(),
     )
@@ -463,9 +468,14 @@ fn close_button(ui: &mut egui::Ui) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., palette.gray(48));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::OUTLINE));
     }
-    let color = palette.gray(if response.hovered() { 235 } else { 150 });
+    let color = palette.tone(if response.hovered() {
+        Tone::STRONG
+    } else {
+        Tone::SECONDARY
+    });
     super::icons::paint_at(
         ui.painter(),
         super::icons::Icon::Close,

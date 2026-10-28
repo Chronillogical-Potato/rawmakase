@@ -6,6 +6,7 @@ use super::Editor;
 use super::state::PresetBrowser;
 use super::sync::{BatchChange, BatchPreset, BatchStage};
 use super::theme;
+use crate::app::design::{self, Tone, inset, space, text};
 use eframe::egui::{self, Vec2};
 use std::time::Duration;
 
@@ -34,7 +35,7 @@ pub(super) fn quick_develop(
     let mut request = None;
     let width = ui.available_width();
     let photos = super::widgets::plural(count, "selected photo", "selected photos");
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     let chooser = ui
         .add_enabled(
             count > 0 && !presets.library.presets.is_empty(),
@@ -55,7 +56,7 @@ pub(super) fn quick_develop(
                 ui.close();
             }
         });
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     let keys = if cfg!(target_os = "macos") {
         "⇧⌘U"
     } else {
@@ -96,8 +97,8 @@ fn preset_chooser(ui: &mut egui::Ui, presets: &mut PresetBrowser) -> Option<usiz
             if groups.is_empty() {
                 ui.label(
                     egui::RichText::new("No presets match")
-                        .size(11.)
-                        .color(palette.gray(130)),
+                        .size(text::SMALL)
+                        .color(palette.tone(Tone::FAINT)),
                 );
             }
             let sections = (!favorites.is_empty())
@@ -105,11 +106,11 @@ fn preset_chooser(ui: &mut egui::Ui, presets: &mut PresetBrowser) -> Option<usiz
                 .into_iter()
                 .chain(groups.iter().map(|g| (g.name.as_str(), &g.presets)));
             for (group, list) in sections {
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(group)
-                        .size(10.5)
-                        .color(palette.gray(140)),
+                        .size(text::SMALL)
+                        .color(palette.tone(Tone::MUTED)),
                 );
                 for (i, name) in list {
                     if ui
@@ -165,26 +166,29 @@ impl Editor {
         };
         let mut cancel = false;
         egui::Modal::new(egui::Id::new("batch-progress"))
-            .frame(super::widgets::modal_frame(&palette).inner_margin(24))
+            .frame(
+                super::widgets::modal_frame(&palette)
+                    .inner_margin(design::margin_same(inset::DIALOG)),
+            )
             .show(ctx, |ui| {
                 ui.set_width(360.);
                 ui.label(
                     egui::RichText::new(progress.name())
-                        .size(14.)
-                        .color(palette.gray(230)),
+                        .size(text::LARGE)
+                        .color(palette.tone(Tone::TEXT)),
                 );
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32));
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(line)
-                            .size(11.5)
-                            .color(palette.gray(170)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::LABEL)),
                     )
                     .truncate(),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 cancel = ui
                     .add_enabled(stage == BatchStage::Preparing, egui::Button::new("Cancel"))
                     .on_disabled_hover_text("Saving: it can no longer be cancelled")

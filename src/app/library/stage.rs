@@ -4,6 +4,7 @@
 use super::Library;
 use super::previews::EditSource;
 use super::screen::Shown;
+use crate::app::design::{Tone, inset, radius, text};
 use crate::app::photo_metadata::{flag_icon, label_color};
 use crate::app::theme;
 use crate::catalog::{Photo, PhotoId};
@@ -13,7 +14,7 @@ use std::collections::HashMap;
 /// The strip under each photo: its role, name, rating, flag and label.
 const CAPTION: f32 = 26.;
 /// Space between the photos and around them.
-pub(super) const MARGIN: f32 = 14.;
+pub(super) const MARGIN: f32 = inset::STAGE;
 /// Below this many pixels the grid's preview of a JPEG, TIFF or PNG is
 /// sharp enough, and no screen preview is made.
 const GRID_EDGE: u32 = 640;
@@ -55,7 +56,7 @@ impl Library {
                 ui.painter().rect_stroke(
                     at.expand(3.),
                     1.,
-                    egui::Stroke::new(1.5, palette.gray(225)),
+                    egui::Stroke::new(1.5, palette.tone(Tone::TEXT)),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -66,8 +67,8 @@ impl Library {
                 image_area.center_bottom() - Vec2::new(0., 8.),
                 egui::Align2::CENTER_BOTTOM,
                 note,
-                egui::FontId::proportional(11.),
-                palette.gray(170),
+                egui::FontId::proportional(text::SMALL),
+                palette.tone(Tone::LABEL),
             );
         }
         if captioned {
@@ -147,8 +148,8 @@ fn caption_strip(
             egui::pos2(x, y),
             egui::Align2::LEFT_CENTER,
             role.to_uppercase(),
-            egui::FontId::proportional(10.5),
-            palette.gray(if active { 200 } else { 125 }),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(if active { Tone::SOFT } else { Tone::FAINT }),
         );
         x = shown.right() + 10.;
     }
@@ -156,8 +157,8 @@ fn caption_strip(
         egui::pos2(x, y),
         egui::Align2::LEFT_CENTER,
         format!("{}{}", photo.filename, super::cell::copy_suffix(photo)),
-        egui::FontId::proportional(12.),
-        palette.gray(if active { 235 } else { 175 }),
+        egui::FontId::proportional(text::LABEL),
+        palette.tone(if active { Tone::STRONG } else { Tone::LABEL }),
     );
     let mut x = name.right() + 12.;
     if photo.rating > 0 {
@@ -165,8 +166,8 @@ fn caption_strip(
             egui::pos2(x, y),
             egui::Align2::LEFT_CENTER,
             "★".repeat(photo.rating.clamp(0, 5) as usize),
-            egui::FontId::proportional(11.),
-            palette.gray(210),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(Tone::SOFT),
         );
         x = stars.right() + 10.;
     }
@@ -176,6 +177,6 @@ fn caption_strip(
     }
     if let Some(color) = label_color(&palette, &photo.label) {
         let chip = Rect::from_center_size(egui::pos2(x + 5., y), Vec2::splat(10.));
-        painter.rect_filled(chip, 1., color);
+        painter.rect_filled(chip, radius::SMALL, color);
     }
 }

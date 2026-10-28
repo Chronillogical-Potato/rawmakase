@@ -7,6 +7,7 @@ use super::Editor;
 use super::retouch_tool::{hint, indented};
 use super::theme;
 use super::widgets::{segmented, slider_with};
+use crate::app::design::space;
 use crate::develop::red_eye::PupilGlow;
 use crate::develop::{ViewMapping, red_eye};
 use crate::model::red_eye::{EyeKind, RedEyeOp};
@@ -409,13 +410,13 @@ impl Editor {
             }
             None => hint(ui, "Select a correction to change it"),
         }
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         hint(
             ui,
             "Click the center of the eye; scroll or [ ] to size the circle",
         );
         hint(ui, "Delete removes the selected correction");
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         indented(ui, |ui| {
             let w = (ui.available_width() - 4.) / 2.;
             let any = !self.document.edit.recipe().red_eye.is_empty();

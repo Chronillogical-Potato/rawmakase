@@ -11,6 +11,7 @@ use super::widgets::{
 };
 use super::worker::AutoKind;
 use super::{Editor, basic_keys, bulk_import::ImportKind};
+use crate::app::design::{Tone, button, inset, radius, size, space, text};
 use crate::app::icons::{self, Icon};
 use crate::model::panels::{Panel, PanelState};
 use crate::model::params::ParameterId;
@@ -54,12 +55,12 @@ impl Editor {
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 96.), Sense::hover());
         let painter = ui.painter().clone();
-        painter.rect_filled(rect, 2., palette.gray(20));
+        painter.rect_filled(rect, radius::SMALL, palette.tone(Tone::WELL));
         for i in 1..5 {
             let x = rect.left() + i as f32 / 5. * rect.width();
             painter.line_segment(
                 [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1., palette.gray(32)),
+                Stroke::new(1., palette.tone(Tone::CARD)),
             );
         }
         let histogram = self.preview.histogram;
@@ -104,7 +105,7 @@ impl Editor {
                     );
                 }
             };
-            segment(0., v[0].0, palette.gray(150));
+            segment(0., v[0].0, palette.tone(Tone::SECONDARY));
             segment(v[0].0, v[1].0, pair(v[1].1, v[2].1));
             segment(v[1].0, v[2].0, colors[v[2].1]);
         }
@@ -149,7 +150,13 @@ impl Editor {
             }
             let on = self.view.clipping.is_on(side);
             let color = clipping::indicator_color(clipping::clipped_channels(&histogram, side))
-                .unwrap_or_else(|| palette.gray(if on || response.hovered() { 150 } else { 80 }));
+                .unwrap_or_else(|| {
+                    palette.tone(if on || response.hovered() {
+                        Tone::SECONDARY
+                    } else {
+                        Tone::OUTLINE_STRONG
+                    })
+                });
             painter.add(egui::Shape::convex_polygon(
                 vec![
                     corner,
@@ -194,8 +201,12 @@ impl Editor {
                     })
             });
         ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(exif).size(11.).color(palette.gray(170)))
-                .on_hover_text("Output histogram of the whole photo");
+            ui.label(
+                egui::RichText::new(exif)
+                    .size(text::SMALL)
+                    .color(palette.tone(Tone::LABEL)),
+            )
+            .on_hover_text("Output histogram of the whole photo");
         });
     }
     /// The open tool's drawer, in place of Develop's adjustments: Crop's
@@ -212,7 +223,7 @@ impl Editor {
         super::widgets::panel_caption(ui, name);
         let drawer = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
             drawer_frame().show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
+                ui.spacing_mut().item_spacing = Vec2::new(space::XS, space::S);
                 add(ui)
             });
         };
@@ -245,14 +256,15 @@ impl Editor {
         let analysing = self.document.straighten.is_running();
         let r = self.document.edit.recipe_mut();
         drawer_frame().show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4., 6.);
+            ui.spacing_mut().item_spacing = Vec2::new(space::XS, space::S);
             // Every control one height, centred on its label, at the Develop
             // panels' text size.
-            ui.spacing_mut().button_padding = Vec2::new(8., 2.);
+            ui.spacing_mut().button_padding = Vec2::new(space::M, space::XXS);
             ui.spacing_mut().interact_size.y = CROP_CONTROL;
-            ui.style_mut()
-                .text_styles
-                .insert(egui::TextStyle::Button, egui::FontId::proportional(12.));
+            ui.style_mut().text_styles.insert(
+                egui::TextStyle::Button,
+                egui::FontId::proportional(text::LABEL),
+            );
             control_row(ui, "Aspect", |ui| {
                 let w = ui.available_width() - CROP_CONTROL - 4.;
                 egui::ComboBox::from_id_salt("crop-aspect")
@@ -359,7 +371,7 @@ impl Editor {
                         "When the overlay shows: always, with the pointer over the photo, or never",
                     );
             });
-            ui.add_space(6.);
+            ui.add_space(space::S);
             ui.horizontal(|ui| {
                 ui.add_space(label_column(ui) + 5.);
                 let w = (ui.available_width() - 4.) / 2.;
@@ -380,7 +392,7 @@ impl Editor {
                     .add_sized(
                         [w, 24.],
                         egui::Button::new(
-                            egui::RichText::new("Done").color(palette.on_accent_text(245)),
+                            egui::RichText::new("Done").color(palette.on_accent_text(Tone::BRIGHT)),
                         )
                         .fill(palette.accent()),
                     )
@@ -395,8 +407,8 @@ impl Editor {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new("Drag the frame or its corners on the photo.")
-                            .size(10.)
-                            .color(palette.gray(125)),
+                            .size(text::MICRO)
+                            .color(palette.tone(Tone::FAINT)),
                     )
                     .wrap(),
                 );
@@ -414,10 +426,10 @@ impl Editor {
     }
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
-        ui.spacing_mut().item_spacing = Vec2::new(4., 3.);
-        ui.spacing_mut().button_padding = Vec2::new(6., 2.);
-        ui.spacing_mut().interact_size.y = 20.;
-        ui.add_space(6.);
+        ui.spacing_mut().item_spacing = Vec2::new(space::XS, space::XS);
+        ui.spacing_mut().button_padding = button::COMPACT;
+        ui.spacing_mut().interact_size.y = size::ROW;
+        ui.add_space(space::S);
         let mut import_profiles = false;
         let mut import_lens = false;
         let mut import_folder = None;
@@ -613,7 +625,7 @@ impl Editor {
                 profile_changed_from = Some(old_profile);
             }
             // White balance is its own group below the profile, as in Lightroom.
-            ui.add_space(12.);
+            ui.add_space(space::L);
             let as_shot = metadata.as_ref().map(|m| {
                 let mut shot = r.clone();
                 shot.reset_white_balance(m);
@@ -664,7 +676,11 @@ impl Editor {
                         ui.painter().rect_filled(
                             rect,
                             3.,
-                            palette.gray(if picking { 72 } else { 50 }),
+                            palette.tone(if picking {
+                                Tone::PRESSED
+                            } else {
+                                Tone::OUTLINE
+                            }),
                         );
                     }
                     eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
@@ -780,7 +796,7 @@ impl Editor {
         let mut switch = PanelSwitch::new(r, Panel::ToneCurve);
         if switched_section(ui, "Tone Curve", &mut switch.state, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.;
+                ui.spacing_mut().item_spacing.x = space::S;
                 let (button, _) = ui.allocate_exact_size(Vec2::new(22., 22.), Sense::hover());
                 if target_button(
                     ui,
@@ -806,7 +822,7 @@ impl Editor {
                     );
                 }
             });
-            ui.add_space(4.);
+            ui.add_space(space::XS);
             if view.parametric_curve {
                 let moving = targeted.filter(|w| w.target == Target::ToneCurve);
                 parametric_curve_ui(
@@ -988,7 +1004,7 @@ impl Editor {
                             -1. ..=1.,
                             0.,
                             None,
-                            Some((palette.gray(40), band_color(i))),
+                            Some((palette.tone(Tone::FIELD), band_color(i))),
                         )
                     });
                     highlight_targeted(ui, row.response.rect, moving.map_or(0., |w| w.shares[i]));
@@ -1031,7 +1047,7 @@ impl Editor {
                             ui.painter().circle_stroke(
                                 rect.center(),
                                 10.,
-                                Stroke::new(1.5, palette.gray(215)),
+                                Stroke::new(1.5, palette.tone(Tone::TEXT)),
                             );
                         }
                         if response.on_hover_text(*band).clicked() {
@@ -1063,7 +1079,7 @@ impl Editor {
                     )
                 };
                 control_row(ui, "Adjust", |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.;
+                    ui.spacing_mut().item_spacing.x = space::S;
                     if !all {
                         let (button, _) =
                             ui.allocate_exact_size(Vec2::new(22., 22.), Sense::hover());
@@ -1219,8 +1235,8 @@ impl Editor {
             control_row(ui, "Lens", |ui| {
                 ui.label(
                     egui::RichText::new(lens.as_deref().unwrap_or("Unknown"))
-                        .size(11.)
-                        .color(palette.gray(200)),
+                        .size(text::SMALL)
+                        .color(palette.tone(Tone::SOFT)),
                 );
             });
             lens_profile::profile_menus(ui, r, metadata.as_ref());
@@ -1230,8 +1246,8 @@ impl Editor {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(missing)
-                                .size(11.)
-                                .color(palette.gray(150)),
+                                .size(text::SMALL)
+                                .color(palette.tone(Tone::SECONDARY)),
                         )
                         .wrap(),
                     );
@@ -1274,8 +1290,15 @@ impl Editor {
             let response = ui.interact(rect, ui.id().with("fringe-selector"), Sense::click());
             let picking = view.is(Tool::Defringe);
             if picking || response.hovered() {
-                ui.painter()
-                    .rect_filled(rect, 3., palette.gray(if picking { 72 } else { 50 }));
+                ui.painter().rect_filled(
+                    rect,
+                    radius::CONTROL,
+                    palette.tone(if picking {
+                        Tone::PRESSED
+                    } else {
+                        Tone::OUTLINE
+                    }),
+                );
             }
             eyedropper_icon(ui.painter(), rect.center(), picking || response.hovered());
             if response
@@ -1375,7 +1398,7 @@ impl Editor {
                             "{count} of {}",
                             crate::model::transform::MAX_GUIDES
                         ))
-                        .color(palette.gray(170)),
+                        .color(palette.tone(Tone::LABEL)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
@@ -1450,13 +1473,13 @@ impl Editor {
         if switched_section(ui, "Calibration", &mut switch.state, |ui| {
             // The process version as a row of the slider grid, the camera's
             // exposure baseline under it at the rails' start.
-            ui.add_space(4.);
+            ui.add_space(space::XS);
             control_row(ui, "Process", |ui| {
                 let palette = theme::palette(ui.ctx());
                 ui.label(
                     egui::RichText::new("Current version")
-                        .size(12.)
-                        .color(palette.gray(210)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::SOFT)),
                 );
             });
             if r.profile.is_some()
@@ -1665,8 +1688,11 @@ fn hsl_gradient(palette: &theme::Palette, band: usize, channel: usize) -> (Color
     let color = band_color(band);
     match channel {
         0 => (band_color((band + 7) % 8), band_color((band + 1) % 8)),
-        1 => (palette.gray(110), color),
-        _ => (palette.gray(25), color.lerp_to_gamma(Color32::WHITE, 0.45)),
+        1 => (palette.tone(Tone::DISABLED), color),
+        _ => (
+            palette.tone(Tone::BAR),
+            color.lerp_to_gamma(Color32::WHITE, 0.45),
+        ),
     }
 }
 /// A panel's switch while its section is drawn; a click on it is stored after.
@@ -1692,12 +1718,16 @@ fn highlight_targeted(ui: &egui::Ui, row: Rect, share: f32) {
         return;
     }
     let painter = ui.painter();
-    painter.rect_filled(row, 3., Color32::from_white_alpha((6. + 16. * share) as u8));
+    painter.rect_filled(
+        row,
+        radius::CONTROL,
+        Color32::from_white_alpha((6. + 16. * share) as u8),
+    );
     painter.rect_filled(
         Rect::from_min_size(row.left_top(), Vec2::new(3., row.height())),
         1.5,
         theme::palette(ui.ctx())
-            .gray(235)
+            .tone(Tone::STRONG)
             .gamma_multiply(0.4 + 0.6 * share),
     );
 }
@@ -1712,14 +1742,14 @@ fn targeted_shortcut(key: &str) -> String {
 /// Group caption (Tone, Presence…) starting where the slider rails start.
 fn subheading(ui: &mut egui::Ui, text: &str) -> Rect {
     super::widgets::set_edit_context(ui, text);
-    ui.add_space(8.);
+    ui.add_space(space::M);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 16.), Sense::hover());
     ui.painter().text(
         rect.left_center() + Vec2::new(label_column(ui) + 5., 0.),
         egui::Align2::LEFT_CENTER,
         text,
-        egui::FontId::proportional(11.),
-        theme::palette(ui.ctx()).gray(165),
+        egui::FontId::proportional(text::SMALL),
+        theme::palette(ui.ctx()).tone(Tone::LABEL),
     );
     rect
 }
@@ -1734,8 +1764,8 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
         Pos2::new(row.left() + column - 5., row.center().y),
         egui::Align2::RIGHT_CENTER,
         label,
-        egui::FontId::proportional(11.),
-        theme::palette(ui.ctx()).gray(190),
+        egui::FontId::proportional(text::SMALL),
+        theme::palette(ui.ctx()).tone(Tone::SOFT),
     );
     let rect = Rect::from_min_max(Pos2::new(row.left() + column + 5., row.top()), row.max);
     ui.scope_builder(
@@ -1743,7 +1773,7 @@ fn control_row<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui
             .max_rect(rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
-            ui.spacing_mut().item_spacing.x = 4.;
+            ui.spacing_mut().item_spacing.x = space::XS;
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
             add(ui)
         },
@@ -1807,7 +1837,7 @@ pub(super) fn defringe_sliders(ui: &mut egui::Ui, e: &mut crate::model::effects:
     }
 }
 fn eyedropper_icon(painter: &egui::Painter, c: Pos2, strong: bool) {
-    let color = theme::palette(painter.ctx()).gray(if strong { 235 } else { 170 });
+    let color = theme::palette(painter.ctx()).tone(if strong { Tone::STRONG } else { Tone::LABEL });
     icons::paint_at(painter, Icon::Eyedropper, c, 14., color);
 }
 /// The line that opens the Remove and Masking drawers: both tools are new.
@@ -1821,7 +1851,7 @@ fn experimental(ui: &mut egui::Ui, note: &str) {
         ui.add_space(label_column(ui));
         ui.label(
             egui::RichText::new("Experimental · early version")
-                .size(10.)
+                .size(text::MICRO)
                 .color(theme::palette(ui.ctx()).warning()),
         )
         .on_hover_text(note);
@@ -1855,10 +1885,10 @@ fn crop_icon_button(ui: &mut egui::Ui, icon: Icon, width: f32) -> egui::Response
 /// A tool drawer's contents, at the adjustments sections' margins.
 fn drawer_frame() -> egui::Frame {
     egui::Frame::new().inner_margin(egui::Margin {
-        left: 8,
-        right: 8,
-        top: 6,
-        bottom: 12,
+        left: inset::PANEL as i8,
+        right: inset::PANEL as i8,
+        top: space::M as i8,
+        bottom: space::L as i8,
     })
 }
 /// Whether `tool` has a drawer in place of the adjustments.

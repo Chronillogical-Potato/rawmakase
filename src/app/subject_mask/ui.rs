@@ -4,6 +4,7 @@
 use super::models::download_megabytes;
 use super::{Failure, Feature, Prompt, Request, Target};
 use crate::app::Editor;
+use crate::app::design::{self, Tone, radius, space, text};
 use crate::app::retouch_tool::{control_label, hint, indented};
 use eframe::egui;
 
@@ -78,12 +79,15 @@ impl Editor {
             )
         });
         let hot = response.hovered() && disabled.is_none();
-        ui.painter()
-            .rect_filled(rect, 4., palette.gray(if hot { 54 } else { 38 }));
-        let ink = palette.gray(match (disabled.is_some(), hot) {
-            (true, _) => 95,
-            (false, true) => 245,
-            (false, false) => 200,
+        ui.painter().rect_filled(
+            rect,
+            radius::CONTROL,
+            palette.tone(if hot { Tone::OUTLINE } else { Tone::FIELD }),
+        );
+        let ink = palette.tone(match (disabled.is_some(), hot) {
+            (true, _) => Tone::DISABLED,
+            (false, true) => Tone::BRIGHT,
+            (false, false) => Tone::SOFT,
         });
         paint_feature_icon(
             ui.painter(),
@@ -95,7 +99,7 @@ impl Editor {
             rect.center_bottom() - egui::vec2(0., 9.),
             egui::Align2::CENTER_CENTER,
             feature.name(),
-            egui::FontId::proportional(11.),
+            egui::FontId::proportional(text::SMALL),
             ink,
         );
         let response = match disabled {
@@ -122,8 +126,8 @@ impl Editor {
         egui::Frame::new()
             .fill(egui::Color32::from_rgb(34, 44, 62))
             .stroke(egui::Stroke::new(1.5, accent))
-            .corner_radius(5.)
-            .inner_margin(egui::Margin::same(9))
+            .corner_radius(radius::CONTROL)
+            .inner_margin(design::margin_same(space::M))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
@@ -132,12 +136,12 @@ impl Editor {
                         feature.name()
                     ))
                     .strong()
-                    .size(12.5),
+                    .size(text::LABEL),
                 );
-                ui.add_space(3.);
+                ui.add_space(space::XS);
                 let small = |text: &str| {
                     egui::RichText::new(text)
-                        .size(11.)
+                        .size(text::SMALL)
                         .color(egui::Color32::LIGHT_GRAY)
                 };
                 ui.add(
@@ -159,7 +163,7 @@ impl Editor {
                 if let Some(why) = failure {
                     ui.colored_label(egui::Color32::from_rgb(230, 170, 90), why);
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.horizontal(|ui| {
                     let done = egui::Button::new(egui::RichText::new("Done").strong())
                         .fill(egui::Color32::from_rgb(52, 98, 170));
@@ -282,8 +286,8 @@ impl Editor {
         egui::Frame::new()
             .fill(egui::Color32::from_rgb(34, 44, 62))
             .stroke(egui::Stroke::new(1.5, accent))
-            .corner_radius(5.)
-            .inner_margin(egui::Margin::same(9))
+            .corner_radius(radius::CONTROL)
+            .inner_margin(design::margin_same(space::M))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
@@ -292,9 +296,9 @@ impl Editor {
                         request.feature.name()
                     ))
                     .strong()
-                    .size(12.5),
+                    .size(text::LABEL),
                 );
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 let step = |ui: &mut egui::Ui, done: bool, current: bool, text: &str| {
                     ui.horizontal(|ui| {
                         let (mark, color) = if done {
@@ -322,7 +326,7 @@ impl Editor {
                         download_megabytes()
                     ),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 if !upgraded {
                     self.upgrade_step(ui, request, upgrading);
                 } else if let Some(endpoint) = self.selection.remote.endpoint() {
@@ -337,7 +341,7 @@ impl Editor {
                     self.model_step(ui, installing);
                 }
                 if self.selection.remote.endpoint().is_none() && !super::worker::runtime_present() {
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                     ui.colored_label(
                         egui::Color32::from_rgb(230, 170, 90),
                         "This copy of RAWmakase has no ONNX Runtime library, so selecting \
@@ -349,7 +353,7 @@ impl Editor {
     fn upgrade_step(&mut self, ui: &mut egui::Ui, request: Request, upgrading: bool) {
         let small = |text: &str| {
             egui::RichText::new(text)
-                .size(11.)
+                .size(text::SMALL)
                 .color(egui::Color32::LIGHT_GRAY)
         };
         ui.add(
@@ -362,7 +366,7 @@ impl Editor {
             ))
             .wrap(),
         );
-        ui.add_space(6.);
+        ui.add_space(space::S);
         if upgrading {
             ui.horizontal(|ui| {
                 super::super::widgets::spinner(ui, 14.);
@@ -407,12 +411,12 @@ impl Editor {
                         "The download stopped: {why}. Download again to carry on from \
                          where it stopped."
                     ))
-                    .size(11.)
+                    .size(text::SMALL)
                     .color(egui::Color32::from_rgb(230, 170, 90)),
                 )
                 .wrap(),
             );
-            ui.add_space(4.);
+            ui.add_space(space::XS);
         }
         ui.add(
             egui::Label::new(
@@ -420,12 +424,12 @@ impl Editor {
                     "The model runs on this computer; no photo leaves it. It is a one-time \
                      download and needs about that much free disk space.",
                 )
-                .size(11.)
+                .size(text::SMALL)
                 .color(egui::Color32::LIGHT_GRAY),
             )
             .wrap(),
         );
-        ui.add_space(6.);
+        ui.add_space(space::S);
         ui.horizontal(|ui| {
             let go = egui::Button::new(egui::RichText::new("Download").strong())
                 .fill(egui::Color32::from_rgb(52, 98, 170));

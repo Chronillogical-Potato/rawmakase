@@ -11,6 +11,7 @@ use super::Editor;
 use super::icons::Icon;
 use super::theme;
 use super::worker::Event;
+use crate::app::design::{self, Tone, button, inset, radius, space, text};
 use crate::catalog::folder_sync::{
     Accepted, Applied, PlanKind, SyncPlan, SyncScope, find_on_disk, scan,
 };
@@ -496,15 +497,15 @@ impl Editor {
                 } else {
                     format!("Synchronizing \u{201c}{}\u{201d}", scan.name)
                 },
-                egui::FontId::proportional(12.),
-                palette.gray(210),
+                egui::FontId::proportional(text::LABEL),
+                palette.tone(Tone::SOFT),
             );
             painter.text(
                 rect.left_center() + egui::vec2(0., 8.),
                 egui::Align2::LEFT_CENTER,
                 format!("{} files looked at", thousands(files)),
-                egui::FontId::proportional(10.5),
-                palette.gray(135),
+                egui::FontId::proportional(text::SMALL),
+                palette.tone(Tone::MUTED),
             );
             let close = egui::Rect::from_center_size(
                 rect.right_center() - egui::vec2(10., 0.),
@@ -521,7 +522,11 @@ impl Editor {
                 } else {
                     "Stop synchronizing"
                 });
-            let tint = palette.gray(if stop.hovered() { 235 } else { 150 });
+            let tint = palette.tone(if stop.hovered() {
+                Tone::STRONG
+            } else {
+                Tone::SECONDARY
+            });
             super::icons::paint_at(ui.painter(), Icon::Close, close.center(), 13., tint);
             if stop.clicked() {
                 scan.cancel.store(true, Ordering::Relaxed);
@@ -538,9 +543,12 @@ impl Editor {
             } else {
                 format!("Review synchronization of \u{201c}{}\u{201d}", review.name)
             };
-            let button =
-                egui::Button::new(egui::RichText::new(label).size(12.).color(palette.accent()))
-                    .frame(false);
+            let button = egui::Button::new(
+                egui::RichText::new(label)
+                    .size(text::LABEL)
+                    .color(palette.accent()),
+            )
+            .frame(false);
             if ui
                 .add(button)
                 .on_hover_text("Open the changes found")
@@ -640,26 +648,26 @@ impl Editor {
             .frame(super::widgets::modal_frame(&palette))
             .show(ctx, |ui| {
                 ui.set_width(WIDTH);
-                ui.spacing_mut().item_spacing = egui::vec2(8., 8.);
+                ui.spacing_mut().item_spacing = egui::vec2(space::M, space::M);
                 // Header: what was looked at, and what was found.
                 egui::Frame::new()
                     .inner_margin(egui::Margin {
-                        left: 24,
-                        right: 24,
-                        top: 20,
-                        bottom: 14,
+                        left: inset::DIALOG as i8,
+                        right: inset::DIALOG as i8,
+                        top: inset::DIALOG as i8,
+                        bottom: space::XL as i8,
                     })
                     .show(ui, |ui| {
                         ui.label(
                             egui::RichText::new(review.title())
-                                .size(16.)
-                                .color(palette.gray(236)),
+                                .size(text::TITLE)
+                                .color(palette.tone(Tone::STRONG)),
                         );
-                        ui.add_space(2.);
+                        ui.add_space(space::XXS);
                         ui.label(
                             egui::RichText::new(review.summary())
-                                .size(12.)
-                                .color(palette.gray(150)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::SECONDARY)),
                         );
                     });
                 separator(ui, &palette);
@@ -667,21 +675,19 @@ impl Editor {
                     .max_height((ctx.content_rect().height() - 220.).max(240.))
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        egui::Frame::new()
-                            .inner_margin(egui::Margin::symmetric(16, 14))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(8., 10.);
-                                review.cards(ui, open_master, &thumbnails);
-                            });
+                        egui::Frame::new().inner_margin(inset::CARD).show(ui, |ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(space::M, space::L);
+                            review.cards(ui, open_master, &thumbnails);
+                        });
                     });
                 separator(ui, &palette);
                 // Footer: the promise about the disk, then the buttons.
                 egui::Frame::new()
                     .inner_margin(egui::Margin {
-                        left: 24,
-                        right: 24,
-                        top: 12,
-                        bottom: 16,
+                        left: inset::DIALOG as i8,
+                        right: inset::DIALOG as i8,
+                        top: space::L as i8,
+                        bottom: space::XL as i8,
                     })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -689,13 +695,13 @@ impl Editor {
                                 egui::RichText::new(
                                     "Only the catalog changes. Files on disk stay as they are.",
                                 )
-                                .size(12.)
-                                .color(palette.gray(135)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::MUTED)),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.spacing_mut().button_padding = egui::vec2(18., 6.);
+                                    ui.spacing_mut().button_padding = button::DIALOG;
                                     let removing = review.removals.iter().filter(|r| **r).count();
                                     let nothing = review.accepted_nothing();
                                     let label = if review.finding() {
@@ -1320,15 +1326,15 @@ impl Review {
         let offline = self.plan.moves.iter().filter(|m| m.offline).count();
         if offline > 0 {
             ui.horizontal_wrapped(|ui| {
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(format!(
                         "\u{26a0}  The old drive of {} isn't connected. The files found here match by checksum; \
                          the catalog uses them from now on, even if the old ones are still there.",
                         super::widgets::plural(offline, "photo", "photos")
                     ))
-                    .size(12.)
-                    .color(palette.gray(200)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::SOFT)),
                 );
             });
         }
@@ -1496,9 +1502,9 @@ impl Review {
         }
         if !self.plan.gone_folders.is_empty() {
             let n = self.plan.gone_folders.len();
-            ui.add_space(2.);
+            ui.add_space(space::XXS);
             ui.horizontal(|ui| {
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(format!(
                         "\u{24d8}  {} no longer on disk {} removed from the catalog once {} no photos.",
@@ -1506,8 +1512,8 @@ impl Review {
                         if n == 1 { "is" } else { "are" },
                         if n == 1 { "it holds" } else { "they hold" }
                     ))
-                    .size(12.)
-                    .color(palette.gray(140)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
                 );
             });
         }
@@ -1527,17 +1533,17 @@ impl Review {
                     .iter()
                     .map(|d| format!("{}: more than one catalog folder could be it", d.display())),
             );
-            ui.add_space(2.);
+            ui.add_space(space::XXS);
             ui.horizontal(|ui| {
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(format!(
                         "\u{24d8}  {} could not be checked here, so nothing in {} counts as missing.",
                         super::widgets::plural(not_checked, "place", "places"),
                         if not_checked == 1 { "it" } else { "them" }
                     ))
-                    .size(12.)
-                    .color(palette.gray(140)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
                 )
                 .on_hover_text(lines.join("\n"));
             });
@@ -1563,21 +1569,21 @@ impl Review {
                 kind_icon(ui, palette, Kind::Choice);
                 ui.label(
                     egui::RichText::new(Kind::Choice.title(self.plan.choices.len()))
-                        .size(13.)
-                        .color(palette.gray(230)),
+                        .size(text::BODY)
+                        .color(palette.tone(Tone::TEXT)),
                 );
             });
             ui.label(
                 egui::RichText::new(Kind::Choice.explanation())
-                    .size(12.)
-                    .color(palette.gray(145)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
             );
             for c in 0..self.plan.choices.len() {
                 let choice = self.plan.choices[c].clone();
                 // The photos this choice is about, each with what it holds.
                 let mut photos: Vec<PhotoId> = choice.options.iter().map(|m| m.photo).collect();
                 photos.dedup();
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 for photo in &photos {
                     let from = choice
                         .options
@@ -1600,7 +1606,7 @@ impl Review {
                     );
                 }
                 ui.indent(("folder-sync-choice", c), |ui| {
-                    ui.spacing_mut().item_spacing.y = 4.;
+                    ui.spacing_mut().item_spacing.y = space::XS;
                     let leave = self.picks[c].is_none();
                     if option(
                         ui,
@@ -1726,7 +1732,7 @@ impl Kind {
     fn tint(self, palette: &theme::Palette) -> egui::Color32 {
         match self {
             Self::Moved | Self::New => palette.accent(),
-            Self::Probable | Self::Copies => palette.gray(170),
+            Self::Probable | Self::Copies => palette.tone(Tone::LABEL),
             Self::Missing => palette.danger(),
             Self::Choice => palette.warning(),
         }
@@ -1740,20 +1746,20 @@ fn separator(ui: &mut egui::Ui, palette: &theme::Palette) {
     ui.painter().hline(
         rect.x_range(),
         rect.center().y,
-        egui::Stroke::new(1., palette.gray(45)),
+        egui::Stroke::new(1., palette.tone(Tone::RAISED)),
     );
 }
 
 /// A card: a rounded panel a little lighter than the dialog.
 fn card(ui: &mut egui::Ui, palette: &theme::Palette, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(palette.gray(38))
-        .stroke(egui::Stroke::new(1., palette.gray(48)))
-        .corner_radius(8.)
-        .inner_margin(egui::Margin::symmetric(14, 12))
+        .fill(palette.tone(Tone::FIELD))
+        .stroke(egui::Stroke::new(1., palette.tone(Tone::OUTLINE)))
+        .corner_radius(radius::CARD)
+        .inner_margin(inset::CARD)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = egui::vec2(8., 6.);
+            ui.spacing_mut().item_spacing = egui::vec2(space::M, space::S);
             add(ui);
         });
 }
@@ -1769,7 +1775,7 @@ fn kind_icon(ui: &mut egui::Ui, palette: &theme::Palette, kind: Kind) {
             rect.center(),
             egui::Align2::CENTER_CENTER,
             "?",
-            egui::FontId::proportional(13.),
+            egui::FontId::proportional(text::BODY),
             tint,
         );
     } else {
@@ -1800,25 +1806,29 @@ fn card_header(
             kind_icon(ui, palette, kind);
             ui.label(
                 egui::RichText::new(kind.title(n))
-                    .size(13.)
-                    .color(palette.gray(230)),
+                    .size(text::BODY)
+                    .color(palette.tone(Tone::TEXT)),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let text = if open { "Hide" } else { "Show" };
                 let link = ui.add(
-                    egui::Button::new(egui::RichText::new(text).size(12.).color(palette.gray(170)))
-                        .frame(false),
+                    egui::Button::new(
+                        egui::RichText::new(text)
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::LABEL)),
+                    )
+                    .frame(false),
                 );
                 expand = link.clicked();
             });
         });
         ui.horizontal(|ui| {
-            ui.add_space(30.);
+            ui.add_space(space::XXXL);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(kind.explanation())
-                        .size(12.)
-                        .color(palette.gray(145)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::MUTED)),
                 )
                 .wrap(),
             );
@@ -1830,18 +1840,18 @@ fn card_header(
 /// A card's rows, indented under it.
 fn list(ui: &mut egui::Ui, palette: &theme::Palette, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(palette.gray(30))
-        .corner_radius(6.)
-        .inner_margin(egui::Margin::symmetric(10, 6))
+        .fill(palette.tone(Tone::CARD))
+        .corner_radius(radius::CARD)
+        .inner_margin(design::margin(space::L, space::S))
         .outer_margin(egui::Margin {
-            left: 18,
+            left: space::XL as i8,
             right: 0,
-            top: -4,
+            top: -(space::XS as i8),
             bottom: 0,
         })
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.spacing_mut().item_spacing = egui::vec2(8., 2.);
+            ui.spacing_mut().item_spacing = egui::vec2(space::M, space::XXS);
             add(ui);
         });
 }
@@ -1882,19 +1892,22 @@ fn row(ui: &mut egui::Ui, palette: &theme::Palette, row: Row<'_>) {
                 );
             }
             None => {
-                ui.painter()
-                    .rect_filled(rect.shrink(2.), 4., palette.gray(44));
+                ui.painter().rect_filled(
+                    rect.shrink(2.),
+                    radius::CONTROL,
+                    palette.tone(Tone::RAISED),
+                );
             }
         }
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.;
-            ui.add_space(3.);
+            ui.spacing_mut().item_spacing.y = space::HAIR;
+            ui.add_space(space::XS);
             ui.horizontal(|ui| {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(row.title)
-                            .size(13.)
-                            .color(palette.gray(225)),
+                            .size(text::BODY)
+                            .color(palette.tone(Tone::TEXT)),
                     )
                     .truncate(),
                 )
@@ -1913,8 +1926,8 @@ fn row(ui: &mut egui::Ui, palette: &theme::Palette, row: Row<'_>) {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(detail)
-                        .size(11.5)
-                        .color(palette.gray(140)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::MUTED)),
                 )
                 .truncate(),
             );
@@ -1925,14 +1938,14 @@ fn row(ui: &mut egui::Ui, palette: &theme::Palette, row: Row<'_>) {
 /// A small rounded label: "★★★", "Edited".
 fn chip(ui: &mut egui::Ui, palette: &theme::Palette, text: &str) {
     egui::Frame::new()
-        .fill(palette.gray(50))
-        .corner_radius(4.)
-        .inner_margin(egui::Margin::symmetric(5, 1))
+        .fill(palette.tone(Tone::OUTLINE))
+        .corner_radius(radius::CONTROL)
+        .inner_margin(design::margin(space::S, space::HAIR))
         .show(ui, |ui| {
             ui.label(
                 egui::RichText::new(text)
-                    .size(10.5)
-                    .color(palette.gray(200)),
+                    .size(text::SMALL)
+                    .color(palette.tone(Tone::SOFT)),
             );
         });
 }
@@ -1956,14 +1969,14 @@ fn check(
     let painter = ui.painter();
     let filled = (on || mixed) && enabled;
     if filled {
-        painter.rect_filled(rect, 4., palette.accent());
+        painter.rect_filled(rect, radius::CONTROL, palette.accent());
     } else {
         let stroke = if response.hovered() {
-            palette.gray(150)
+            palette.tone(Tone::SECONDARY)
         } else {
-            palette.gray(95)
+            palette.tone(Tone::DISABLED)
         };
-        painter.rect_filled(rect, 4., palette.gray(30));
+        painter.rect_filled(rect, radius::CONTROL, palette.tone(Tone::CARD));
         painter.rect_stroke(
             rect,
             4.,
@@ -2006,18 +2019,18 @@ fn option(
     let fill = if selected {
         palette.accent().gamma_multiply(0.14)
     } else {
-        palette.gray(32)
+        palette.tone(Tone::CARD)
     };
     let stroke = if selected {
         palette.accent().gamma_multiply(0.8)
     } else {
-        palette.gray(46)
+        palette.tone(Tone::RAISED)
     };
     let inner = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(1., stroke))
-        .corner_radius(6.)
-        .inner_margin(egui::Margin::symmetric(10, 6))
+        .corner_radius(radius::CARD)
+        .inner_margin(design::margin(space::L, space::S))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -2031,7 +2044,7 @@ fn option(
                         if selected {
                             palette.accent()
                         } else {
-                            palette.gray(110)
+                            palette.tone(Tone::DISABLED)
                         },
                     ),
                 );
@@ -2039,16 +2052,16 @@ fn option(
                     painter.circle_filled(rect.center(), 3.5, palette.accent());
                 }
                 let color = if enabled {
-                    palette.gray(225)
+                    palette.tone(Tone::TEXT)
                 } else {
-                    palette.gray(120)
+                    palette.tone(Tone::FAINT)
                 };
-                ui.label(egui::RichText::new(title).size(12.5).color(color));
+                ui.label(egui::RichText::new(title).size(text::LABEL).color(color));
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(detail)
-                            .size(11.5)
-                            .color(palette.gray(135)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::MUTED)),
                     )
                     .truncate(),
                 );

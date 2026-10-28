@@ -7,6 +7,7 @@ use super::overlay;
 use super::retouch_tool::{control_label, hint, indented};
 use super::theme;
 use super::widgets::{local_setting_slider, segmented, set_edit_context, slider_with};
+use crate::app::design::{Tone, space, text};
 use crate::develop::{
     ViewMapping,
     masks::{self, Space},
@@ -702,9 +703,9 @@ impl Editor {
     /// The Masking panel's drawer.
     pub(super) fn mask_panel(&mut self, ui: &mut egui::Ui) {
         self.selection_actions(ui);
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         self.create_row(ui);
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         self.mask_list(ui);
         let Some(m) = self.selected_mask() else {
             hint(
@@ -714,11 +715,11 @@ impl Editor {
             self.masking_done(ui);
             return;
         };
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         self.component_settings(ui, m);
-        ui.add_space(6.);
+        ui.add_space(space::S);
         self.adjustment_sliders(ui, m);
-        ui.add_space(6.);
+        ui.add_space(space::S);
         self.masking_done(ui);
     }
     /// Closes the Masking tool, as Lightroom's Done: the masks and their adjustments stay.
@@ -753,12 +754,12 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    palette.gray(if active {
-                        72
+                    palette.tone(if active {
+                        Tone::PRESSED
                     } else if response.hovered() {
-                        50
+                        Tone::OUTLINE
                     } else {
-                        36
+                        Tone::PANEL
                     }),
                 );
                 kind_icon(
@@ -815,12 +816,12 @@ impl Editor {
                 ui.painter().rect_filled(
                     rect,
                     3.,
-                    palette.gray(if active {
-                        64
+                    palette.tone(if active {
+                        Tone::PRESSED
                     } else if response.hovered() {
-                        46
+                        Tone::RAISED
                     } else {
-                        34
+                        Tone::CARD
                     }),
                 );
                 if let Some(renaming) = self.view.masking.renaming.as_mut().filter(|r| r.mask == i)
@@ -828,7 +829,7 @@ impl Editor {
                     let edit = ui.put(
                         rect.shrink2(Vec2::new(26., 2.)),
                         egui::TextEdit::singleline(&mut renaming.name)
-                            .font(egui::FontId::proportional(11.)),
+                            .font(egui::FontId::proportional(text::SMALL)),
                     );
                     renaming.shown = pass;
                     if !renaming.focused {
@@ -852,8 +853,8 @@ impl Editor {
                         rect.left_center() + Vec2::new(26., 0.),
                         egui::Align2::LEFT_CENTER,
                         mask_name(mask, i),
-                        egui::FontId::proportional(11.5),
-                        palette.gray(if mask.hidden { 120 } else { 225 }),
+                        egui::FontId::proportional(text::LABEL),
+                        palette.tone(if mask.hidden { Tone::FAINT } else { Tone::TEXT }),
                     );
                 }
                 if let Some(c) = mask.components.first() {
@@ -898,7 +899,7 @@ impl Editor {
             if selected == Some(i) {
                 for (k, c) in mask.components.iter().enumerate() {
                     indented(ui, |ui| {
-                        ui.add_space(14.);
+                        ui.add_space(space::XL);
                         let width = ui.available_width();
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(width, 21.), Sense::click());
@@ -907,7 +908,7 @@ impl Editor {
                             ui.painter().rect_filled(
                                 rect,
                                 3.,
-                                palette.gray(if active { 56 } else { 42 }),
+                                palette.tone(if active { Tone::OUTLINE } else { Tone::FIELD }),
                             );
                         }
                         let op = match (k, c.op) {
@@ -932,8 +933,8 @@ impl Editor {
                             rect.left_center() + Vec2::new(24., 0.),
                             egui::Align2::LEFT_CENTER,
                             format!("{op}{kind}"),
-                            egui::FontId::proportional(11.),
-                            palette.gray(200),
+                            egui::FontId::proportional(text::SMALL),
+                            palette.tone(Tone::SOFT),
                         );
                         if response.clicked() {
                             select_component = Some(k);
@@ -954,9 +955,9 @@ impl Editor {
     }
     /// Add, Subtract and Intersect menus, invert, duplicate and delete for mask `i`.
     fn mask_actions(&mut self, ui: &mut egui::Ui, i: usize) {
-        ui.add_space(2.);
+        ui.add_space(space::XXS);
         indented(ui, |ui| {
-            ui.add_space(14.);
+            ui.add_space(space::XL);
             for (op, label) in [
                 (MaskOp::Add, "Add"),
                 (MaskOp::Subtract, "Subtract"),
@@ -976,7 +977,7 @@ impl Editor {
             }
         });
         indented(ui, |ui| {
-            ui.add_space(14.);
+            ui.add_space(space::XL);
             ui.checkbox(
                 &mut self.document.edit.recipe_mut().masks[i].invert,
                 "Invert",
@@ -1145,12 +1146,12 @@ impl Editor {
         );
         let a = &mut mask.adjust;
         for group in LOCAL_GROUPS {
-            ui.add_space(4.);
+            ui.add_space(space::XS);
             for &id in group {
                 local_setting_slider(ui, id, id.value_mut(a), 0.);
             }
         }
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         indented(ui, |ui| {
             if ui
                 .button("Reset Sliders")
@@ -1391,7 +1392,7 @@ fn draw_shape(
 /// Small icons for each kind of mask.
 fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
     let palette = theme::palette(painter.ctx());
-    let color = palette.gray(if strong { 240 } else { 170 });
+    let color = palette.tone(if strong { Tone::STRONG } else { Tone::LABEL });
     let stroke = Stroke::new(1.3, color);
     match kind {
         Kind::Brush => {
@@ -1425,7 +1426,7 @@ fn kind_icon(painter: &egui::Painter, c: Pos2, kind: Kind, strong: bool) {
             super::subject_mask::paint_feature_icon(painter, c, feature, color);
         }
         Kind::Luminance => {
-            painter.circle_filled(c, 5.5, palette.gray(60));
+            painter.circle_filled(c, 5.5, palette.tone(Tone::HOVER));
             let half = (0..=18)
                 .map(|i| {
                     let t = std::f32::consts::FRAC_PI_2 + i as f32 / 18. * std::f32::consts::PI;
@@ -1443,7 +1444,11 @@ fn eye_icon(painter: &egui::Painter, c: Pos2, open: bool, hovered: bool) {
         icon,
         c,
         14.,
-        theme::palette(painter.ctx()).gray(if hovered { 235 } else { 160 }),
+        theme::palette(painter.ctx()).tone(if hovered {
+            Tone::STRONG
+        } else {
+            Tone::SECONDARY
+        }),
     );
 }
 

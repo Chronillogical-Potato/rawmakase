@@ -8,6 +8,7 @@ use super::task::Task;
 use super::widgets::pretty_path;
 use super::worker::Event;
 use crate::app::Module;
+use crate::app::design::{self, Tone, radius, space, text};
 use crate::app::theme;
 use crate::catalog::CatalogLocation;
 use eframe::egui::{self, Color32, Sense, Stroke, Vec2};
@@ -321,7 +322,7 @@ impl Editor {
         }
         let ctx = ui.ctx().clone();
         let area = egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).gray(24)))
+            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).tone(Tone::WINDOW)))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
@@ -336,7 +337,7 @@ impl Editor {
                                 self.lightroom_view(ui, &ctx);
                             });
                         });
-                        ui.add_space(48.);
+                        ui.add_space(space::HUGE);
                     });
             });
         self.drop_area = Some(area.response.rect);
@@ -344,17 +345,22 @@ impl Editor {
 
     /// Lightroom's catalog, profiles and presets, a row each.
     fn lightroom_view(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
-        text(ui, "Bring over your Lightroom library", 26., 240);
-        ui.add_space(8.);
+        ui.spacing_mut().item_spacing = Vec2::new(space::M, 0.);
+        text(
+            ui,
+            "Bring over your Lightroom library",
+            text::DISPLAY,
+            Tone::STRONG,
+        );
+        ui.add_space(space::M);
         paragraph(
             ui,
             "Import your catalog, camera and lens profiles and presets. Everything here \
              is optional, and nothing in Lightroom is changed.",
-            14.,
-            150,
+            text::LARGE,
+            Tone::SECONDARY,
         );
-        ui.add_space(28.);
+        ui.add_space(space::XXXL);
 
         let enabled = !self.activity.is_busy() && self.importing.is_none();
         let scanning = self.onboarding.scanning();
@@ -368,10 +374,10 @@ impl Editor {
         ];
         let palette = theme::palette(ui.ctx());
         egui::Frame::new()
-            .fill(palette.gray(30))
-            .stroke(Stroke::new(1., palette.gray(40)))
-            .corner_radius(10.)
-            .inner_margin(egui::Margin::symmetric(22, 2))
+            .fill(palette.tone(Tone::CARD))
+            .stroke(Stroke::new(1., palette.tone(Tone::FIELD)))
+            .corner_radius(radius::DIALOG)
+            .inner_margin(design::margin(space::XXL, space::XXS))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 for (i, row) in rows.iter().enumerate() {
@@ -387,7 +393,7 @@ impl Editor {
                 }
             });
 
-        ui.add_space(20.);
+        ui.add_space(space::XXL);
         ui.allocate_ui_with_layout(
             Vec2::new(ui.available_width(), 32.),
             egui::Layout::right_to_left(egui::Align::Center),
@@ -396,7 +402,7 @@ impl Editor {
                     .add(
                         egui::Button::new(
                             egui::RichText::new("Continue")
-                                .size(14.)
+                                .size(text::LARGE)
                                 .color(palette.on_accent()),
                         )
                         .fill(palette.accent())
@@ -642,38 +648,38 @@ impl Editor {
         };
         // The setup view's backdrop, not the grid's black.
         ui.painter()
-            .rect_filled(ui.max_rect(), 0., palette.gray(24));
+            .rect_filled(ui.max_rect(), 0., palette.tone(Tone::WINDOW));
         let width = 400_f32.min(ui.available_width() - 64.);
         let height = 380.;
         let top = ((ui.available_height() - height) / 2.).max(24.);
         ui.add_space(top);
         ui.vertical_centered(|ui| {
             ui.set_max_width(width);
-            ui.spacing_mut().item_spacing = Vec2::new(8., 0.);
+            ui.spacing_mut().item_spacing = Vec2::new(space::M, 0.);
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(64.), Sense::hover());
             ui.painter()
-                .circle_filled(rect.center(), 32., palette.gray(36));
+                .circle_filled(rect.center(), 32., palette.tone(Tone::PANEL));
             super::icons::paint_at(
                 ui.painter(),
                 super::icons::Icon::FolderPlus,
                 rect.center(),
                 28.,
-                palette.gray(190),
+                palette.tone(Tone::SOFT),
             );
-            ui.add_space(24.);
-            text(ui, &title, 20., 235);
-            ui.add_space(12.);
+            ui.add_space(space::XXL);
+            text(ui, &title, text::HERO, Tone::STRONG);
+            ui.add_space(space::L);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(detail)
-                        .size(13.)
+                        .size(text::BODY)
                         .line_height(Some(20.))
-                        .color(palette.gray(150)),
+                        .color(palette.tone(Tone::SECONDARY)),
                 )
                 .halign(egui::Align::Center)
                 .wrap(),
             );
-            ui.add_space(32.);
+            ui.add_space(space::XXXL);
             ui.add_enabled_ui(!busy, |ui| {
                 if folders.is_some() {
                     if icon_primary(ui, super::icons::Icon::FolderPlus, "Add photo folder…")
@@ -681,7 +687,7 @@ impl Editor {
                     {
                         self.catalog_dialog(CatalogDialog::Folder(FolderAction::Add), &ctx);
                     }
-                    ui.add_space(14.);
+                    ui.add_space(space::XL);
                     hint(ui, "Or drag a folder onto this window.");
                 } else {
                     if primary(ui, default_catalog_label(&default))
@@ -690,27 +696,32 @@ impl Editor {
                     {
                         self.open_default_catalog(&ctx);
                     }
-                    ui.add_space(8.);
+                    ui.add_space(space::M);
                     if secondary(ui, "Open RAWmakase catalog…").clicked() {
                         self.catalog_dialog(CatalogDialog::Open, &ctx);
                     }
                 }
-                ui.add_space(48.);
-                text(ui, "Coming from Lightroom Classic?", 12., 150);
-                ui.add_space(12.);
+                ui.add_space(space::HUGE);
+                text(
+                    ui,
+                    "Coming from Lightroom Classic?",
+                    text::LABEL,
+                    Tone::SECONDARY,
+                );
+                ui.add_space(space::L);
                 if secondary(ui, "Bring over your Lightroom library…").clicked() {
                     self.open_onboarding();
                 }
             });
             if busy {
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 let status = self
                     .catalog_work
                     .clone()
                     .unwrap_or_else(|| self.status.clone());
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.), egui::Sense::hover());
-                    super::widgets::paint_spinner(ui, rect, Some(palette.gray(170)));
+                    super::widgets::paint_spinner(ui, rect, Some(palette.tone(Tone::LABEL)));
                     hint(ui, &status);
                 });
             }
@@ -826,7 +837,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, enabled: bool) -> Option<RowAction> {
     const BUTTON: f32 = 28.;
     let palette = theme::palette(ui.ctx());
     let mut action = None;
-    ui.add_space(18.);
+    ui.add_space(space::XL);
     let top = ui.cursor().min;
     let width = ui.available_width();
     // Buttons first, right-aligned on the title's line: the text gets the rest.
@@ -840,7 +851,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, enabled: bool) -> Option<RowAction> {
                 .max_rect(line)
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
             |ui| {
-                ui.spacing_mut().item_spacing.x = 8.;
+                ui.spacing_mut().item_spacing.x = space::M;
                 ui.add_enabled_ui(enabled && row.mark != Mark::Working, |ui| {
                     let choose = secondary(ui, "Choose…").on_hover_text(match row.choose {
                         ChooseWith::File => "Pick a Lightroom catalog (.lrcat) elsewhere",
@@ -902,18 +913,18 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, enabled: bool) -> Option<RowAction> {
                 ui.allocate_ui_with_layout(
                     Vec2::new(text_width, LINE),
                     egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| text(ui, row.title, 15., 235),
+                    |ui| text(ui, row.title, text::TITLE, Tone::STRONG),
                 );
-                ui.add_space(2.);
-                paragraph(ui, row.detail, 13., 150);
-                ui.add_space(6.);
+                ui.add_space(space::XXS);
+                paragraph(ui, row.detail, text::BODY, Tone::SECONDARY);
+                ui.add_space(space::S);
                 let status = egui::RichText::new(&row.status)
-                    .size(12.)
+                    .size(text::LABEL)
                     .line_height(Some(17.))
                     .color(match row.mark {
                         Mark::Done => Color32::from_rgb(120, 190, 140),
                         Mark::Failed => Color32::from_rgb(220, 140, 110),
-                        _ => palette.gray(125),
+                        _ => palette.tone(Tone::FAINT),
                     });
                 let response = ui.add(egui::Label::new(status).wrap());
                 if let Some(hover) = &row.hover {
@@ -928,7 +939,7 @@ fn row_ui(ui: &mut egui::Ui, row: &Row, enabled: bool) -> Option<RowAction> {
         top,
         egui::pos2(top.x + width, bottom),
     ));
-    ui.add_space(18.);
+    ui.add_space(space::XL);
     action
 }
 /// A row's mark: an empty ring, a spinner, a check or a cross.
@@ -937,11 +948,15 @@ fn mark(ui: &mut egui::Ui, center: egui::Pos2, mark: Mark) {
     let painter = ui.painter();
     match mark {
         Mark::Todo => {
-            painter.circle_stroke(center, 9., Stroke::new(1.5, palette.gray(80)));
+            painter.circle_stroke(
+                center,
+                9.,
+                Stroke::new(1.5, palette.tone(Tone::OUTLINE_STRONG)),
+            );
         }
         Mark::Working => {
             let rect = egui::Rect::from_center_size(center, Vec2::splat(16.));
-            super::widgets::paint_spinner(ui, rect, Some(palette.gray(190)));
+            super::widgets::paint_spinner(ui, rect, Some(palette.tone(Tone::SOFT)));
         }
         Mark::Done => {
             painter.circle_filled(center, 10., Color32::from_rgb(64, 132, 90));
@@ -995,29 +1010,29 @@ fn count(n: usize, noun: &str) -> String {
 fn divider(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.), Sense::hover());
     ui.painter()
-        .rect_filled(rect, 0., theme::palette(ui.ctx()).gray(40));
+        .rect_filled(rect, 0., theme::palette(ui.ctx()).tone(Tone::FIELD));
 }
 /// Wrapped text with room between its lines.
-fn paragraph(ui: &mut egui::Ui, value: &str, size: f32, gray: u8) {
+fn paragraph(ui: &mut egui::Ui, value: &str, size: f32, tone: Tone) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(value)
                 .size(size)
                 .line_height(Some(size * 1.45))
-                .color(theme::palette(ui.ctx()).gray(gray)),
+                .color(theme::palette(ui.ctx()).tone(tone)),
         )
         .wrap(),
     );
 }
-fn text(ui: &mut egui::Ui, value: &str, size: f32, gray: u8) {
+fn text(ui: &mut egui::Ui, value: &str, size: f32, tone: Tone) {
     ui.label(
         egui::RichText::new(value)
             .size(size)
-            .color(theme::palette(ui.ctx()).gray(gray)),
+            .color(theme::palette(ui.ctx()).tone(tone)),
     );
 }
 fn hint(ui: &mut egui::Ui, value: &str) {
-    text(ui, value, 12., 135);
+    text(ui, value, text::LABEL, Tone::MUTED);
 }
 /// Whether a profile file named `name` is for `camera`, by maker and model
 /// ("Sony ILCE-7M2 Portra 400 SO.dcp") or by model alone.
@@ -1030,7 +1045,7 @@ fn primary(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.add(
         egui::Button::new(
             egui::RichText::new(label)
-                .size(13.)
+                .size(text::BODY)
                 .color(palette.on_accent()),
         )
         .fill(palette.accent())
@@ -1046,7 +1061,7 @@ fn icon_primary(ui: &mut egui::Ui, icon: super::icons::Icon, label: &str) -> egu
                 .fit_to_exact_size(Vec2::splat(15.))
                 .tint(palette.on_accent()),
             egui::RichText::new(label)
-                .size(13.)
+                .size(text::BODY)
                 .color(palette.on_accent()),
         )
         .fill(palette.accent())
@@ -1054,7 +1069,9 @@ fn icon_primary(ui: &mut egui::Ui, icon: super::icons::Icon, label: &str) -> egu
     )
 }
 fn secondary(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.add(egui::Button::new(egui::RichText::new(label).size(13.)).min_size(Vec2::new(0., 28.)))
+    ui.add(
+        egui::Button::new(egui::RichText::new(label).size(text::BODY)).min_size(Vec2::new(0., 28.)),
+    )
 }
 
 #[cfg(test)]

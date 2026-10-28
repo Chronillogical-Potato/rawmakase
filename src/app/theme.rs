@@ -7,6 +7,7 @@
 //! applied to the egui context ([`palette`]), between the palette's own
 //! colours. The photo's backdrop is the palette's panel colour, so it
 //! follows the theme like the rest of the window.
+use super::design::Tone;
 use eframe::egui::{self, Color32, Stroke};
 use std::collections::BTreeSet;
 
@@ -147,10 +148,15 @@ pub(super) fn palette(ctx: &egui::Context) -> Palette {
 }
 
 impl Palette {
+    /// `tone` in this palette: see [`Tone`] for the interface's greys.
+    pub(super) fn tone(&self, tone: Tone) -> Color32 {
+        self.gray(tone.level())
+    }
+
     /// The default palette's grey `level` in this palette: between the two
     /// palette colours whose levels surround it, and beyond the darkest and
-    /// lightest along the same direction.
-    pub(super) fn gray(&self, level: u8) -> Color32 {
+    /// lightest along the same direction. Drawing code names a [`Tone`].
+    fn gray(&self, level: u8) -> Color32 {
         if *self == Palette::DEFAULT {
             return Color32::from_gray(level);
         }
@@ -190,9 +196,9 @@ impl Palette {
         self.accent_hover
     }
     /// Text on a selected row or hovered menu item, which the accent fills.
-    pub(super) fn on_accent_text(&self, level: u8) -> Color32 {
+    pub(super) fn on_accent_text(&self, tone: Tone) -> Color32 {
         if *self == Palette::DEFAULT {
-            return Color32::from_gray(level);
+            return Color32::from_gray(tone.level());
         }
         self.on_accent
     }
@@ -252,17 +258,17 @@ fn luma(c: Color32) -> f32 {
 /// own widgets with it.
 pub(super) fn apply(ctx: &egui::Context, palette: Palette, text: &fastframe_text::TextRendering) {
     ctx.data_mut(|d| d.insert_temp(palette_id(), palette));
-    let gray = |level| palette.gray(level);
+    let gray = |tone| palette.tone(tone);
     let mut visuals = if palette.light {
         egui::Visuals::light()
     } else {
         egui::Visuals::dark()
     };
-    visuals.panel_fill = gray(35);
-    visuals.window_fill = gray(35);
-    visuals.extreme_bg_color = gray(22);
-    visuals.faint_bg_color = gray(40);
-    visuals.code_bg_color = gray(43);
+    visuals.panel_fill = gray(Tone::PANEL);
+    visuals.window_fill = gray(Tone::PANEL);
+    visuals.extreme_bg_color = gray(Tone::WINDOW);
+    visuals.faint_bg_color = gray(Tone::FIELD);
+    visuals.code_bg_color = gray(Tone::RAISED);
     visuals.selection.bg_fill = palette.accent;
     visuals.selection.stroke = Stroke::new(1., palette.on_accent);
     visuals.hyperlink_color = palette.accent_hover;
@@ -270,22 +276,22 @@ pub(super) fn apply(ctx: &egui::Context, palette: Palette, text: &fastframe_text
     visuals.warn_fg_color = palette.warning;
     visuals.window_stroke = Stroke::new(1., palette.outline);
     visuals.widgets.noninteractive.bg_stroke = Stroke::new(1., palette.outline);
-    visuals.widgets.noninteractive.bg_fill = gray(35);
-    visuals.widgets.noninteractive.weak_bg_fill = gray(35);
-    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., gray(194));
-    visuals.widgets.inactive.bg_fill = gray(43);
-    visuals.widgets.inactive.weak_bg_fill = gray(43);
-    visuals.widgets.hovered.bg_fill = gray(59);
-    visuals.widgets.hovered.weak_bg_fill = gray(59);
-    visuals.widgets.active.bg_fill = gray(67);
-    visuals.widgets.active.weak_bg_fill = gray(67);
-    visuals.widgets.open.bg_fill = gray(59);
-    visuals.widgets.open.weak_bg_fill = gray(59);
+    visuals.widgets.noninteractive.bg_fill = gray(Tone::PANEL);
+    visuals.widgets.noninteractive.weak_bg_fill = gray(Tone::PANEL);
+    visuals.widgets.noninteractive.fg_stroke = Stroke::new(1., gray(Tone::SOFT));
+    visuals.widgets.inactive.bg_fill = gray(Tone::RAISED);
+    visuals.widgets.inactive.weak_bg_fill = gray(Tone::RAISED);
+    visuals.widgets.hovered.bg_fill = gray(Tone::HOVER);
+    visuals.widgets.hovered.weak_bg_fill = gray(Tone::HOVER);
+    visuals.widgets.active.bg_fill = gray(Tone::PRESSED);
+    visuals.widgets.active.weak_bg_fill = gray(Tone::PRESSED);
+    visuals.widgets.open.bg_fill = gray(Tone::HOVER);
+    visuals.widgets.open.weak_bg_fill = gray(Tone::HOVER);
     if palette != Palette::DEFAULT {
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1., gray(205));
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, gray(240));
-        visuals.widgets.active.fg_stroke = Stroke::new(2., gray(250));
-        visuals.widgets.open.fg_stroke = Stroke::new(1., gray(225));
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1., gray(Tone::SOFT));
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, gray(Tone::STRONG));
+        visuals.widgets.active.fg_stroke = Stroke::new(2., gray(Tone::BRIGHT));
+        visuals.widgets.open.fg_stroke = Stroke::new(1., gray(Tone::TEXT));
     }
     // egui insets button text by the stroke width, but an unframed item
     // (a menu or list row) has no stroke until hovered, so its text moved

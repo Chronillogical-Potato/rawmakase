@@ -11,6 +11,7 @@ use super::panels::{DevelopTab, PanelChange, WorkspacePanel};
 use super::state::Tool;
 use super::theme;
 use super::widgets::{SectionGroup, SectionSide};
+use crate::app::design::{Tone, radius, space, text};
 use eframe::egui::{self, Pos2, Rect, Sense, Vec2};
 
 /// The rail's width.
@@ -177,7 +178,7 @@ impl Editor {
         }
     }
     fn tab_panel(&mut self, ui: &mut egui::Ui) {
-        let fill = theme::palette(ui.ctx()).gray(22);
+        let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
         egui::Panel::right("presets")
             .default_size(PANEL_WIDTH)
             .min_size(super::workspace::PRESETS_MIN)
@@ -199,7 +200,7 @@ impl Editor {
         egui::Panel::right("develop-rail")
             .resizable(false)
             .exact_size(RAIL_WIDTH)
-            .frame(egui::Frame::new().fill(palette.gray(22)))
+            .frame(egui::Frame::new().fill(palette.tone(Tone::WINDOW)))
             .show(ui, |ui| {
                 let rail = ui.max_rect();
                 ui.allocate_rect(rail, Sense::hover());
@@ -226,8 +227,9 @@ impl Editor {
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
                         let hovered = enabled && response.hovered();
                         if active || hovered {
-                            let fill = palette.gray(if active { 54 } else { 44 });
-                            ui.painter().rect_filled(rect, 6., fill);
+                            let fill =
+                                palette.tone(if active { Tone::OUTLINE } else { Tone::RAISED });
+                            ui.painter().rect_filled(rect, radius::CARD, fill);
                         }
                         if active {
                             ui.painter().rect_filled(
@@ -239,11 +241,11 @@ impl Editor {
                                 palette.accent(),
                             );
                         }
-                        let tint = palette.gray(match (enabled, active, hovered) {
-                            (false, ..) => 80,
-                            (_, true, _) => 245,
-                            (_, _, true) => 230,
-                            _ => 145,
+                        let tint = palette.tone(match (enabled, active, hovered) {
+                            (false, ..) => Tone::OUTLINE_STRONG,
+                            (_, true, _) => Tone::BRIGHT,
+                            (_, _, true) => Tone::TEXT,
+                            _ => Tone::MUTED,
                         });
                         paint(ui.painter(), center, tint);
                         response.clicked()
@@ -295,11 +297,11 @@ impl Editor {
     /// The History tab: the open photo's Snapshots over its History.
     fn history_tab(&mut self, ui: &mut egui::Ui) {
         if self.document.metadata.is_none() {
-            ui.add_space(8.);
+            ui.add_space(space::M);
             ui.label(
                 egui::RichText::new("Open a photo to see its snapshots and history.")
-                    .size(11.)
-                    .color(theme::palette(ui.ctx()).gray(125)),
+                    .size(text::SMALL)
+                    .color(theme::palette(ui.ctx()).tone(Tone::FAINT)),
             );
             return;
         }

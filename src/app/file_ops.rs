@@ -22,6 +22,7 @@
 //! Inside…) and the one for what a crash left unfinished, recovered when a
 //! catalog opens, are in `file_ops_dialogs.rs`.
 use super::{Editor, widgets};
+use crate::app::design::{Tone, text};
 #[cfg(test)]
 use crate::catalog::file_ops::Summary;
 #[cfg(test)]
@@ -1637,7 +1638,11 @@ impl Editor {
             &self.file_ops.state,
             State::Running { cancel, .. } if !cancel.load(Ordering::Relaxed)
         );
-        ui.label(egui::RichText::new(text).size(12.).color(palette.gray(210)));
+        ui.label(
+            egui::RichText::new(text)
+                .size(text::LABEL)
+                .color(palette.tone(Tone::SOFT)),
+        );
         if stoppable
             && ui
                 .small_button("Stop")

@@ -4,6 +4,7 @@ use super::Editor;
 use super::preferences::{group, hint};
 use super::state::EditOrigin;
 use super::widgets::form_row;
+use crate::app::design::{Tone, radius, text};
 use crate::app::theme;
 use crate::raw_defaults::{
     DefaultChoice, DevelopDefaults, RawDefaults, Resolved, camera_name, same_camera, same_name,
@@ -215,7 +216,11 @@ impl Editor {
                             c.camera,
                             choice_text(&c.choice, presets)
                         ))
-                        .color(palette.gray(if on { 215 } else { 140 })),
+                        .color(palette.tone(if on {
+                            Tone::TEXT
+                        } else {
+                            Tone::MUTED
+                        })),
                     )
                     .truncate(),
                 );
@@ -265,12 +270,13 @@ fn remove_button(ui: &mut egui::Ui, enabled: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(22.), sense);
     let hovered = enabled && response.hovered();
     if hovered {
-        ui.painter().rect_filled(rect, 3., palette.gray(50));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::OUTLINE));
     }
-    let tint = palette.gray(match (enabled, hovered) {
-        (false, _) => 90,
-        (true, false) => 160,
-        (true, true) => 235,
+    let tint = palette.tone(match (enabled, hovered) {
+        (false, _) => Tone::OUTLINE_STRONG,
+        (true, false) => Tone::SECONDARY,
+        (true, true) => Tone::STRONG,
     });
     super::icons::paint_at(
         ui.painter(),
@@ -296,7 +302,7 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
                 let label = fixed.label();
                 ui.selectable_value(choice, fixed, label);
             }
-            let caption = theme::palette(ui.ctx()).gray(130);
+            let caption = theme::palette(ui.ctx()).tone(Tone::FAINT);
             let mut last_group = None;
             for p in presets {
                 if last_group != Some(&p.group) {
@@ -306,7 +312,7 @@ fn choice_combo(ui: &mut egui::Ui, id: &str, choice: &mut DefaultChoice, presets
                     } else {
                         &p.group
                     };
-                    ui.label(egui::RichText::new(title).size(11.).color(caption));
+                    ui.label(egui::RichText::new(title).size(text::SMALL).color(caption));
                     last_group = Some(&p.group);
                 }
                 let value = DefaultChoice::preset(p);

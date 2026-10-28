@@ -4705,7 +4705,7 @@ fn render_the_crop_drawer() -> anyhow::Result<()> {
                 super::widgets::LabelColumn::enter(ui, super::inspector::DRAWER_LABEL_COLUMN);
             let palette = super::theme::palette(ui.ctx());
             ui.painter()
-                .rect_filled(ui.max_rect(), 0., palette.gray(30));
+                .rect_filled(ui.max_rect(), 0., palette.tone(super::design::Tone::CARD));
             let frame = e.begin_edit_frame();
             e.tool_drawer(ui);
             e.finish_edit_frame(frame, &ctx);

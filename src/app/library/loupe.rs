@@ -6,6 +6,7 @@
 //! and kept, within a budget, until it is shown. An offline photo shows its
 //! cached preview.
 use super::{Action, Library, thumbnails};
+use crate::app::design::{Tone, inset, text};
 use crate::app::navigator::Zoom;
 use crate::app::theme;
 use crate::app::worker::Latest;
@@ -415,7 +416,7 @@ impl Library {
                 .frame(
                     egui::Frame::new()
                         .fill(palette.photo_backdrop())
-                        .inner_margin(egui::Margin::symmetric(10, 4)),
+                        .inner_margin(inset::BAR),
                 )
                 .show_separator_line(false)
                 .show(ui, |ui| ui.horizontal(|ui| self.view_buttons(ui)));
@@ -601,8 +602,8 @@ impl Library {
                 rect.left_bottom() + Vec2::new(12., -10.),
                 egui::Align2::LEFT_BOTTOM,
                 note,
-                egui::FontId::proportional(11.),
-                palette.gray(170),
+                egui::FontId::proportional(text::SMALL),
+                palette.tone(Tone::LABEL),
             );
         }
         self.loupe_overlay(ui.painter(), rect);

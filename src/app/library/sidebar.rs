@@ -3,6 +3,7 @@
 use super::folder_selection::{Click, FolderSelection};
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::{Action, Library, collections, volumes};
+use crate::app::design::{Tone, space, text};
 use crate::app::theme;
 use crate::app::widgets::section;
 use crate::catalog::{CollectionKind, FolderId, PhotoId, RootId};
@@ -249,7 +250,7 @@ impl Library {
                         let volume = &drive.volume;
                         // Room between drives, so each reads as its own group.
                         if k > 0 {
-                            ui.add_space(10.);
+                            ui.add_space(space::L);
                         }
                         let state = online
                             .get(volume.mount.as_deref().unwrap_or(std::path::Path::new("/")))
@@ -274,7 +275,7 @@ impl Library {
                         if collapsed {
                             continue;
                         }
-                        ui.add_space(2.);
+                        ui.add_space(space::XXS);
                         for tree in &drive.trees {
                             match folder_tree_row(
                                 ui,
@@ -379,7 +380,7 @@ impl Library {
                     if self.session.roots.is_empty() {
                         empty_note(ui, "No folders yet");
                     }
-                    ui.add_space(16.);
+                    ui.add_space(space::XL);
                     if add_row(ui, "Add Folder…")
                         .on_hover_text(
                             "Add a folder of photos to this catalog. Photos stay where they are.",
@@ -685,10 +686,14 @@ impl Library {
 /// A section's note that it is empty, inset as its rows' names are.
 fn empty_note(ui: &mut egui::Ui, text: &str) {
     let palette = theme::palette(ui.ctx());
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     ui.horizontal(|ui| {
-        ui.add_space(10.);
-        ui.label(egui::RichText::new(text).size(11.).color(palette.gray(120)));
+        ui.add_space(space::L);
+        ui.label(
+            egui::RichText::new(text)
+                .size(text::SMALL)
+                .color(palette.tone(Tone::FAINT)),
+        );
     });
 }
 fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
@@ -699,14 +704,23 @@ fn add_row(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.painter().rect(
         rect,
         6.,
-        palette.gray(if hovered { 40 } else { 28 }),
-        egui::Stroke::new(1., palette.gray(if hovered { 70 } else { 52 })),
+        palette.tone(if hovered { Tone::FIELD } else { Tone::BAR }),
+        egui::Stroke::new(
+            1.,
+            palette.tone(if hovered {
+                Tone::PRESSED
+            } else {
+                Tone::OUTLINE
+            }),
+        ),
         egui::StrokeKind::Inside,
     );
-    let color = palette.gray(if hovered { 240 } else { 200 });
-    let text =
-        ui.painter()
-            .layout_no_wrap(label.to_string(), egui::FontId::proportional(12.), color);
+    let color = palette.tone(if hovered { Tone::STRONG } else { Tone::SOFT });
+    let text = ui.painter().layout_no_wrap(
+        label.to_string(),
+        egui::FontId::proportional(text::LABEL),
+        color,
+    );
     // The icon and label centred together.
     let width = 13. + 6. + text.size().x;
     let left = rect.center().x - width / 2.;
@@ -736,7 +750,7 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
             if active {
                 palette.selected_row()
             } else {
-                palette.gray(43)
+                palette.tone(Tone::RAISED)
             },
         );
     }
@@ -745,15 +759,15 @@ fn source_row(ui: &mut egui::Ui, name: &str, count: usize, active: bool) -> egui
         egui::pos2(rect.left() + 10., y),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(12.),
-        palette.gray(if active { 235 } else { 190 }),
+        egui::FontId::proportional(text::LABEL),
+        palette.tone(if active { Tone::STRONG } else { Tone::SOFT }),
     );
     ui.painter().text(
         egui::pos2(rect.right() - 10., y),
         egui::Align2::RIGHT_CENTER,
         count.to_string(),
-        egui::FontId::proportional(11.),
-        palette.gray(125),
+        egui::FontId::proportional(text::SMALL),
+        palette.tone(Tone::FAINT),
     );
     response
 }

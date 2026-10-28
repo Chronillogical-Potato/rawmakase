@@ -1,3 +1,4 @@
+use crate::app::design::{Tone, radius, text};
 use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Vec2};
@@ -91,33 +92,33 @@ pub(super) fn photo_cell(
     let active = mark == super::selection::Mark::Active;
     // The active photo is lighter than the rest of the selection.
     let base = if active {
-        palette.gray(150)
+        palette.tone(Tone::SECONDARY)
     } else if selected {
-        palette.gray(112)
+        palette.tone(Tone::DISABLED)
     } else if response.hovered() {
-        palette.gray(66)
+        palette.tone(Tone::PRESSED)
     } else {
-        palette.gray(56)
+        palette.tone(Tone::OUTLINE)
     };
     let fill = label_color(&palette, &photo.label).map_or(base, |label| {
         base.lerp_to_gamma(label, if selected { 0.35 } else { 0.22 })
     });
     let painter = ui.painter();
-    painter.rect_filled(cell, 1., fill);
+    painter.rect_filled(cell, radius::SMALL, fill);
     painter.rect_stroke(
         cell,
         1.,
         Stroke::new(
             1.,
-            palette.gray(match mark {
-                super::selection::Mark::Active => 205,
-                super::selection::Mark::Selected => 150,
-                super::selection::Mark::None => 40,
+            palette.tone(match mark {
+                super::selection::Mark::Active => Tone::SOFT,
+                super::selection::Mark::Selected => Tone::SECONDARY,
+                super::selection::Mark::None => Tone::FIELD,
             }),
         ),
         StrokeKind::Inside,
     );
-    let ink = palette.gray(if selected { 60 } else { 125 });
+    let ink = palette.tone(if selected { Tone::HOVER } else { Tone::FAINT });
     let header = if extras {
         (width * 0.13).clamp(16., 26.)
     } else {
@@ -129,7 +130,11 @@ pub(super) fn photo_cell(
             Align2::LEFT_TOP,
             number.to_string(),
             FontId::proportional(header * 0.95),
-            palette.gray(if selected { 120 } else { 78 }),
+            palette.tone(if selected {
+                Tone::FAINT
+            } else {
+                Tone::OUTLINE_STRONG
+            }),
         );
     }
     // An expanded cell's details, under its number and name.
@@ -144,7 +149,7 @@ pub(super) fn photo_cell(
                 at,
                 Align2::LEFT_TOP,
                 details,
-                FontId::proportional(10.),
+                FontId::proportional(text::MICRO),
                 ink,
             );
         header + DETAILS
@@ -152,7 +157,11 @@ pub(super) fn photo_cell(
         header
     };
     if extras && width >= 140. {
-        let name = painter.layout_no_wrap(photo.filename.clone(), FontId::proportional(10.), ink);
+        let name = painter.layout_no_wrap(
+            photo.filename.clone(),
+            FontId::proportional(text::MICRO),
+            ink,
+        );
         let space = (cell.width() * 0.62).min(name.size().x);
         painter
             .with_clip_rect(Rect::from_min_size(
@@ -200,7 +209,7 @@ pub(super) fn photo_cell(
             area.center(),
             Align2::CENTER_CENTER,
             if available { &photo.format } else { "Offline" },
-            FontId::proportional(11.),
+            FontId::proportional(text::SMALL),
             ink,
         );
     }
@@ -248,7 +257,7 @@ fn footer_badges(
         painter.circle_filled(
             Pos2::new(cell.right() - 10., cell.bottom() - footer / 2. - 1.),
             3.5,
-            palette.gray(if selected { 40 } else { 225 }),
+            palette.tone(if selected { Tone::FIELD } else { Tone::TEXT }),
         );
     }
     let y = cell.bottom() - footer / 2. - 1.;
@@ -262,8 +271,8 @@ fn footer_badges(
             Pos2::new(x, y),
             Align2::LEFT_CENTER,
             "★".repeat(photo.rating as usize),
-            FontId::proportional(10.),
-            palette.gray(if selected { 35 } else { 185 }),
+            FontId::proportional(text::MICRO),
+            palette.tone(if selected { Tone::PANEL } else { Tone::SOFT }),
         );
     }
     if photo.master.is_some() {
@@ -272,7 +281,7 @@ fn footer_badges(
         } else {
             &photo.copy_name
         };
-        let galley = painter.layout_no_wrap(name.into(), FontId::proportional(10.), ink);
+        let galley = painter.layout_no_wrap(name.into(), FontId::proportional(text::MICRO), ink);
         let space = cell.width() * 0.36;
         let left = cell.center().x - galley.size().x.min(space) / 2.;
         painter
@@ -287,7 +296,7 @@ fn footer_badges(
             Pos2::new(cell.right() - 24., y),
             Align2::RIGHT_CENTER,
             "?",
-            FontId::proportional(11.),
+            FontId::proportional(text::SMALL),
             Color32::from_rgb(210, 150, 60),
         );
     }
@@ -311,7 +320,7 @@ pub(in crate::app) fn copy_badge(
     ));
     painter.add(egui::Shape::convex_polygon(
         vec![up, right, corner + Vec2::new(size, -size)],
-        palette.gray(225),
+        palette.tone(Tone::TEXT),
         egui::Stroke::new(1., Color32::from_black_alpha(160)),
     ));
 }
@@ -563,7 +572,7 @@ pub(in crate::app) fn photo_menu(
                         before + Vec2::new(ui.available_width() - 60., 12.),
                         Vec2::splat(9.),
                     );
-                    ui.painter().rect_filled(chip, 2., color);
+                    ui.painter().rect_filled(chip, radius::SMALL, color);
                 }
             }
         });

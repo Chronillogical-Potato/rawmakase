@@ -5,6 +5,7 @@
 use super::grid::filter_caption;
 use super::stage::MARGIN;
 use super::{Action, Library};
+use crate::app::design::{Tone, inset, space, text};
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use eframe::egui::{self, Rect, Vec2};
@@ -157,7 +158,7 @@ impl Library {
                 .frame(
                     egui::Frame::new()
                         .fill(palette.photo_backdrop())
-                        .inner_margin(egui::Margin::symmetric(10, 4)),
+                        .inner_margin(inset::BAR),
                 )
                 .show_separator_line(false)
                 .show(ui, |ui| self.survey_toolbar(ui));
@@ -196,7 +197,7 @@ impl Library {
         let palette = theme::palette(ui.ctx());
         ui.horizontal(|ui| {
             self.view_buttons(ui);
-            ui.add_space(12.);
+            ui.add_space(space::L);
             let count = self.surveyed().len();
             ui.label(filter_caption(
                 &palette,
@@ -208,7 +209,7 @@ impl Library {
             ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let done = ui
-                    .add(egui::Button::new(egui::RichText::new("Done").size(11.)).small())
+                    .add(egui::Button::new(egui::RichText::new("Done").size(text::SMALL)).small())
                     .on_hover_text("Back to the grid (Esc)");
                 if done.clicked() {
                     self.close_survey();
@@ -250,14 +251,18 @@ impl Library {
             ui.painter().circle_filled(
                 close.center(),
                 10.,
-                palette.gray(if button.hovered() { 70 } else { 30 }),
+                palette.tone(if button.hovered() {
+                    Tone::PRESSED
+                } else {
+                    Tone::CARD
+                }),
             );
             crate::app::icons::paint_at(
                 ui.painter(),
                 crate::app::icons::Icon::Close,
                 close.center(),
                 12.,
-                palette.gray(230),
+                palette.tone(Tone::TEXT),
             );
             if button.on_hover_text("Take out of the survey").clicked() {
                 self.drop_surveyed(id);
@@ -329,7 +334,7 @@ mod tests {
         assert_eq!(tiles(area, 1, ASPECT), [area]);
         // Two photos side by side, four in two rows.
         let two = tiles(area, 2, ASPECT);
-        assert_eq!(two[1].min, egui::pos2(614., 0.));
+        assert_eq!(two[1].min, egui::pos2((1214. - MARGIN) / 2. + MARGIN, 0.));
         let four = tiles(area, 4, ASPECT);
         assert_eq!(four[2].min, egui::pos2(0., four[0].max.y + MARGIN));
         // Three portraits side by side.

@@ -1,6 +1,7 @@
 //! The Collections panel: imported Lightroom collection sets and collections,
 //! read-only. Smart collections stay hidden until their rules are evaluated,
 //! and Lightroom's own (the Quick Collection, unsaved creations) never show.
+use crate::app::design::{Tone, text};
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::catalog::{Collection, CollectionId, CollectionKind, PhotoId};
@@ -102,7 +103,7 @@ pub(super) fn collection_row(
             if active {
                 palette.selected_row()
             } else {
-                palette.gray(43)
+                palette.tone(Tone::RAISED)
             },
         );
     }
@@ -123,7 +124,13 @@ pub(super) fn collection_row(
         } else {
             Icon::ChevronDown
         };
-        icons::paint_at(painter, chevron, Pos2::new(x, y), 11., palette.gray(150));
+        icons::paint_at(
+            painter,
+            chevron,
+            Pos2::new(x, y),
+            11.,
+            palette.tone(Tone::SECONDARY),
+        );
     }
     icons::paint_at(
         painter,
@@ -134,7 +141,7 @@ pub(super) fn collection_row(
         },
         Pos2::new(x + 13., y),
         13.,
-        palette.gray(145),
+        palette.tone(Tone::MUTED),
     );
     let label_rect = Rect::from_min_max(
         Pos2::new(x + 26., rect.top()),
@@ -144,12 +151,12 @@ pub(super) fn collection_row(
         ui,
         Some(egui::TextWrapMode::Truncate),
         label_rect.width().max(1.),
-        FontId::proportional(12.),
+        FontId::proportional(text::LABEL),
     );
     painter.galley(
         Pos2::new(label_rect.left(), y - text.size().y / 2.),
         text,
-        palette.gray(if active { 235 } else { 190 }),
+        palette.tone(if active { Tone::STRONG } else { Tone::SOFT }),
     );
     // Lightroom counts collections, not sets.
     if !node.set {
@@ -157,8 +164,8 @@ pub(super) fn collection_row(
             Pos2::new(rect.right() - 10., y),
             Align2::RIGHT_CENTER,
             node.count.to_string(),
-            FontId::proportional(10.),
-            palette.gray(125),
+            FontId::proportional(text::MICRO),
+            palette.tone(Tone::FAINT),
         );
     }
     let mut clicked = None;

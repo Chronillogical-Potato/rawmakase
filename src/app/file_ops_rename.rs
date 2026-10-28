@@ -27,6 +27,7 @@
 //! Rename Photos (`RenameSettings`) when Rename is asked for.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::app::naming::editor::{NameEditor, Outcome};
 use crate::app::naming::menu::{self, Choice};
 use crate::app::naming::presets::{Library, Preset};
@@ -710,15 +711,15 @@ impl Editor {
         let palette = super::super::theme::palette(ctx);
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("rename-ordering"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(360.);
                 ui.label(
                     egui::RichText::new("Reading when the photos were taken…")
-                        .size(14.)
-                        .color(palette.gray(230)),
+                        .size(text::LARGE)
+                        .color(palette.tone(Tone::TEXT)),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 if ui.button("Cancel").clicked() {
                     cancel = true;
                 }
@@ -775,11 +776,11 @@ impl Editor {
             rename = true;
         }
         let response = egui::Modal::new(egui::Id::new("rename-photos"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(if r.one() { 420. } else { 520. });
-                ui.label(egui::RichText::new(&title).size(15.).color(palette.gray(236)));
-                ui.add_space(10.);
+                ui.label(egui::RichText::new(&title).size(text::TITLE).color(palette.tone(Tone::STRONG)));
+                ui.add_space(space::L);
                 let field = if r.one() {
                     let field = ui.horizontal(|ui| {
                         let output = egui::TextEdit::singleline(&mut r.stem)
@@ -788,7 +789,7 @@ impl Editor {
                         if !r.extension.is_empty() {
                             ui.label(
                                 egui::RichText::new(format!(".{}", r.extension))
-                                    .color(palette.gray(150)),
+                                    .color(palette.tone(Tone::SECONDARY)),
                             );
                         }
                         output
@@ -798,7 +799,7 @@ impl Editor {
                     let label = |ui: &mut egui::Ui, text: &str| {
                         ui.add_sized(
                             Vec2::new(96., 20.),
-                            egui::Label::new(egui::RichText::new(text).color(palette.gray(170))),
+                            egui::Label::new(egui::RichText::new(text).color(palette.tone(Tone::LABEL))),
                         );
                     };
                     ui.horizontal(|ui| {
@@ -841,7 +842,7 @@ impl Editor {
                         label(ui, "Example");
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new(&example.0).color(palette.gray(225)),
+                                egui::RichText::new(&example.0).color(palette.tone(Tone::TEXT)),
                             )
                             .truncate(),
                         );
@@ -849,7 +850,7 @@ impl Editor {
                     if let Some(Status::Failed(why)) = &read {
                         ui.label(
                             egui::RichText::new(format!("Photo info could not be read: {why}"))
-                                .size(12.)
+                                .size(text::LABEL)
                                 .color(palette.warning()),
                         );
                     }
@@ -870,12 +871,12 @@ impl Editor {
                 if field.response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     rename = true;
                 }
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 if checking {
                     ui.label(
                         egui::RichText::new("Checking the names…")
-                            .size(12.)
-                            .color(palette.gray(140)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::MUTED)),
                     );
                 }
                 if let Some(planned) = &r.planned {
@@ -884,20 +885,20 @@ impl Editor {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     egui::RichText::new(&row.old)
-                                        .size(12.)
-                                        .color(palette.gray(150)),
+                                        .size(text::LABEL)
+                                        .color(palette.tone(Tone::SECONDARY)),
                                 );
-                                ui.label(egui::RichText::new("→").size(12.).color(palette.gray(110)));
+                                ui.label(egui::RichText::new("→").size(text::LABEL).color(palette.tone(Tone::DISABLED)));
                                 ui.label(
                                     egui::RichText::new(&row.new)
-                                        .size(12.)
-                                        .color(palette.gray(220)),
+                                        .size(text::LABEL)
+                                        .color(palette.tone(Tone::TEXT)),
                                 );
                             });
                             if let Some(problem) = &row.problem {
                                 ui.label(
                                     egui::RichText::new(problem)
-                                        .size(12.)
+                                        .size(text::LABEL)
                                         .color(palette.warning()),
                                 );
                             }
@@ -905,27 +906,27 @@ impl Editor {
                     };
                     if r.order.photos().len() > 1 {
                         egui::ScrollArea::vertical().max_height(260.).show(ui, rows);
-                        ui.add_space(4.);
+                        ui.add_space(space::XS);
                         ui.label(
                             egui::RichText::new(
                                 "Numbered in the order the photos were taken; those without a capture time come last.",
                             )
-                            .size(12.)
-                            .color(palette.gray(140)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::MUTED)),
                         );
                     } else if planned.rows.iter().any(|r| r.problem.is_some()) {
                         rows(ui);
                     }
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new("Their sidecar files are renamed to match.")
-                        .size(12.)
-                        .color(palette.gray(140)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::MUTED)),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
@@ -1027,15 +1028,15 @@ impl Editor {
         let mut rename = false;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("rename-folder"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(420.);
                 ui.label(
                     egui::RichText::new(format!("Rename Folder “{}”", f.old))
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 let field = egui::TextEdit::singleline(&mut f.name)
                     .desired_width(f32::INFINITY)
                     .show(ui);
@@ -1059,24 +1060,24 @@ impl Editor {
                     rename = true;
                 }
                 if let Some(problem) = problem.filter(|_| f.name != f.old) {
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                     ui.label(
                         egui::RichText::new(problem)
-                            .size(12.)
+                            .size(text::LABEL)
                             .color(palette.warning()),
                     );
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(
                         "The folder is renamed on disk; its photos and the folders in it follow.",
                     )
-                    .size(12.)
-                    .color(palette.gray(140)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }

@@ -6,6 +6,7 @@ use super::icons::{self, Icon};
 use super::theme;
 use super::widgets::{modal_frame, search_field};
 use crate::app::Module;
+use crate::app::design::{self, Tone, inset, radius, space, text};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// A shortcut: its keys and what it does. Keys are written "Cmd+Shift+Z";
@@ -164,7 +165,7 @@ const GUTTER: f32 = 40.;
 /// The space between a shortcut's keys and what it does.
 const GAP: f32 = 14.;
 /// A row's inner padding, so its hover band clears the text.
-const PAD: f32 = 8.;
+const PAD: f32 = space::M;
 /// The height of a one-line row.
 const ROW: f32 = 30.;
 
@@ -216,7 +217,7 @@ impl Editor {
         let height = (ctx.content_rect().height() * 0.85 - 150.).max(220.);
         let response = egui::Modal::new(egui::Id::new("keyboard-shortcuts"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(26, 22)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(width);
                 let mut close = false;
@@ -226,13 +227,13 @@ impl Editor {
                         close = icon_button(ui, Icon::Close, "Close · Esc").clicked();
                     });
                 });
-                ui.add_space(14.);
+                ui.add_space(space::XL);
                 let field =
                     search_field(ui, &mut query, "Search actions or keys, e.g. crop or cmd z");
                 if opened || cleared {
                     field.request_focus();
                 }
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 let tokens = tokens(&query);
                 let (left, right) = filtered(&tokens, &left, &right);
                 egui::ScrollArea::vertical()
@@ -248,8 +249,8 @@ impl Editor {
                                         "No shortcuts match \u{201c}{}\u{201d}",
                                         query.trim()
                                     ))
-                                    .size(13.)
-                                    .color(palette.gray(150)),
+                                    .size(text::BODY)
+                                    .color(palette.tone(Tone::SECONDARY)),
                                 );
                             });
                             return;
@@ -297,13 +298,13 @@ fn title(ui: &mut egui::Ui) {
     let painter = ui.painter();
     let name = painter.layout_no_wrap(
         "Keyboard Shortcuts".into(),
-        FontId::proportional(17.),
-        palette.gray(235),
+        FontId::proportional(text::TITLE),
+        palette.tone(Tone::STRONG),
     );
     let hint = painter.layout_no_wrap(
         format!("{} shows this anytime", keys_text("Cmd+/")),
-        FontId::proportional(12.),
-        palette.gray(125),
+        FontId::proportional(text::LABEL),
+        palette.tone(Tone::FAINT),
     );
     let baseline = |galley: &egui::Galley| {
         let row = galley.rows.first();
@@ -434,13 +435,13 @@ fn group(ui: &mut egui::Ui, title: &str, shortcuts: &[Shortcut], column: f32, ke
         Pos2::new(rect.left() + PAD, rect.top() + 8.),
         Align2::LEFT_CENTER,
         title.to_uppercase(),
-        FontId::proportional(10.5),
-        palette.gray(140),
+        FontId::proportional(text::SMALL),
+        palette.tone(Tone::MUTED),
     );
     ui.painter().hline(
         rect.x_range().shrink(PAD),
         rect.bottom() - 6.,
-        Stroke::new(1., palette.gray(44)),
+        Stroke::new(1., palette.tone(Tone::RAISED)),
     );
     for (shortcut_keys, action) in shortcuts {
         let needed = paint_keys(ui, shortcut_keys, Pos2::ZERO, false);
@@ -449,8 +450,8 @@ fn group(ui: &mut egui::Ui, title: &str, shortcuts: &[Shortcut], column: f32, ke
         let action_x = PAD + keys + GAP;
         let galley = ui.painter().layout(
             action.to_string(),
-            FontId::proportional(12.5),
-            palette.gray(210),
+            FontId::proportional(text::LABEL),
+            palette.tone(Tone::SOFT),
             (column - action_x - PAD).max(80.),
         );
         let first_line = galley.rows.first().map_or(16., |row| row.height());
@@ -462,7 +463,8 @@ fn group(ui: &mut egui::Ui, title: &str, shortcuts: &[Shortcut], column: f32, ke
         };
         let (rect, response) = ui.allocate_exact_size(Vec2::new(column, height), Sense::hover());
         if response.hovered() {
-            ui.painter().rect_filled(rect, 5., palette.gray(39));
+            ui.painter()
+                .rect_filled(rect, radius::CONTROL, palette.tone(Tone::FIELD));
         }
         let keys_y = rect.top() + ROW / 2.;
         let keys_right = if stacked {
@@ -482,7 +484,7 @@ fn group(ui: &mut egui::Ui, title: &str, shortcuts: &[Shortcut], column: f32, ke
             Color32::WHITE,
         );
     }
-    ui.add_space(18.);
+    ui.add_space(space::XL);
 }
 
 /// Draws a shortcut's key caps ending at `right`, alternatives apart by "/",
@@ -507,8 +509,8 @@ fn paint_keys(ui: &egui::Ui, keys: &str, right: Pos2, paint: bool) -> f32 {
                     Pos2::new(x, right.y),
                     Align2::RIGHT_CENTER,
                     if range { "–" } else { "/" },
-                    FontId::proportional(11.),
-                    palette.gray(95),
+                    FontId::proportional(text::SMALL),
+                    palette.tone(Tone::DISABLED),
                 );
             }
             x -= 9.;
@@ -538,7 +540,7 @@ fn key_cap(ui: &egui::Ui, cap: &str, right: Pos2, paint: bool) -> f32 {
     let galley = ui.painter().layout_no_wrap(
         label,
         FontId::proportional(if action { 11.5 } else { 11. }),
-        palette.gray(if action { 145 } else { 228 }),
+        palette.tone(if action { Tone::MUTED } else { Tone::TEXT }),
     );
     if action {
         let left = right.x - galley.size().x;
@@ -558,13 +560,16 @@ fn key_cap(ui: &egui::Ui, cap: &str, right: Pos2, paint: bool) -> f32 {
     );
     if paint {
         // A darker lip under the cap, so it reads as a key.
-        ui.painter()
-            .rect_filled(cap_rect.translate(Vec2::new(0., 1.5)), 4., palette.gray(22));
+        ui.painter().rect_filled(
+            cap_rect.translate(Vec2::new(0., 1.5)),
+            4.,
+            palette.tone(Tone::WINDOW),
+        );
         ui.painter().rect(
             cap_rect,
             4.,
-            palette.gray(47),
-            Stroke::new(1., palette.gray(60)),
+            palette.tone(Tone::OUTLINE),
+            Stroke::new(1., palette.tone(Tone::HOVER)),
             egui::StrokeKind::Inside,
         );
         ui.painter().galley(
@@ -581,9 +586,14 @@ pub(super) fn icon_button(ui: &mut egui::Ui, icon: Icon, hover: &str) -> egui::R
     let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(26.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4., palette.gray(45));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::RAISED));
     }
-    let color = palette.gray(if response.hovered() { 235 } else { 160 });
+    let color = palette.tone(if response.hovered() {
+        Tone::STRONG
+    } else {
+        Tone::SECONDARY
+    });
     icons::paint_at(ui.painter(), icon, rect.center(), 15., color);
     // Named for screen readers by what it does, as its hover text says.
     let enabled = ui.is_enabled();

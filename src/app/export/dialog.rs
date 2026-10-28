@@ -1,6 +1,7 @@
 //! Lightroom's Export dialog, and the question it asks when the file exists.
 use super::super::widgets::{confirm_modal, form_row, modal_frame, pretty_path, primary_button};
 use super::{Editor, Status};
+use crate::app::design::{Tone, button, radius, size, space, text};
 use crate::app::naming::menu::Choice;
 use crate::app::naming::presets::Preset;
 use crate::app::theme;
@@ -93,8 +94,8 @@ impl Editor {
                     } else {
                         format!("Export {count} Files")
                     },
-                    egui::FontId::proportional(16.),
-                    palette.gray(236),
+                    egui::FontId::proportional(text::TITLE),
+                    palette.tone(Tone::STRONG),
                 );
                 // Said before the export starts: what will not be exported, and why.
                 if !left_out.is_empty() {
@@ -122,7 +123,7 @@ impl Editor {
                         at,
                         egui::Label::new(
                             egui::RichText::new(line)
-                                .size(12.)
+                                .size(text::LABEL)
                                 .color(Color32::from_rgb(230, 170, 100)),
                         )
                         .truncate(),
@@ -143,14 +144,14 @@ impl Editor {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(&mut content, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
-                        ui.spacing_mut().interact_size.y = 26.;
+                        ui.spacing_mut().item_spacing = Vec2::new(space::M, space::M);
+                        ui.spacing_mut().interact_size.y = size::FIELD;
                         self.export_sections(ui, &source, &at, read.as_ref());
                     });
                 ui.painter().hline(
                     rect.x_range(),
                     rect.bottom() - 64.,
-                    Stroke::new(1., palette.gray(45)),
+                    Stroke::new(1., palette.tone(Tone::RAISED)),
                 );
                 let footer = egui::Rect::from_min_max(
                     egui::pos2(rect.left() + 24., rect.bottom() - 56.),
@@ -161,7 +162,7 @@ impl Editor {
                         .max_rect(footer)
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
-                bar.spacing_mut().button_padding = Vec2::new(18., 6.);
+                bar.spacing_mut().button_padding = button::DIALOG;
                 let export = match &read {
                     Some(Status::Reading { done, total }) => {
                         format!("Reading photo info… {done} of {total}")
@@ -183,13 +184,13 @@ impl Editor {
                     confirmed = Some(false);
                 }
                 if let Some((target, _)) = self.exports.draft.target_for(&source, &at) {
-                    bar.add_space(12.);
+                    bar.add_space(space::L);
                     bar.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(format!("Saves to {}", pretty_path(&target)))
-                                    .size(12.)
-                                    .color(palette.gray(140)),
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::MUTED)),
                             )
                             .truncate(),
                         )
@@ -251,7 +252,10 @@ impl Editor {
             let text = folder
                 .as_deref()
                 .map_or("No folder chosen".into(), pretty_path);
-            ui.add(egui::Label::new(egui::RichText::new(text).color(palette.gray(150))).truncate());
+            ui.add(
+                egui::Label::new(egui::RichText::new(text).color(palette.tone(Tone::SECONDARY)))
+                    .truncate(),
+            );
         });
         form_row(ui, "", |ui| {
             ui.checkbox(&mut s.subfolder, "Put in Subfolder:");
@@ -304,23 +308,23 @@ impl Editor {
         form_row(ui, "Example", |ui| {
             let (name, notes) = s.file_name_for(source, example);
             match read {
-                Some(Status::Reading { .. }) => {
-                    ui.label(egui::RichText::new("Reading photo info…").color(palette.gray(150)))
-                }
-                _ => ui.label(egui::RichText::new(name).color(palette.gray(225))),
+                Some(Status::Reading { .. }) => ui.label(
+                    egui::RichText::new("Reading photo info…").color(palette.tone(Tone::SECONDARY)),
+                ),
+                _ => ui.label(egui::RichText::new(name).color(palette.tone(Tone::TEXT))),
             };
             if let Some(Status::Failed(why)) = read {
                 ui.label(
                     egui::RichText::new(format!("Photo info could not be read: {why}"))
-                        .size(12.)
+                        .size(text::LABEL)
                         .color(Color32::from_rgb(230, 170, 100)),
                 );
             } else if !notes.is_empty() && !matches!(read, Some(Status::Reading { .. })) {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(notes.join(" · "))
-                            .size(12.)
-                            .color(palette.gray(140)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::MUTED)),
                     )
                     .truncate(),
                 );
@@ -371,15 +375,16 @@ impl Editor {
             }),
             Format::Tiff => form_row(ui, "Bit Depth", |ui| {
                 ui.label(
-                    egui::RichText::new("16 bits/component, uncompressed").color(palette.gray(225)),
+                    egui::RichText::new("16 bits/component, uncompressed")
+                        .color(palette.tone(Tone::TEXT)),
                 );
             }),
             Format::Png => form_row(ui, "Bit Depth", |ui| {
-                ui.label(egui::RichText::new("8 bits/component").color(palette.gray(225)));
+                ui.label(egui::RichText::new("8 bits/component").color(palette.tone(Tone::TEXT)));
             }),
         }
         form_row(ui, "Color Space", |ui| {
-            ui.label(egui::RichText::new("sRGB").color(palette.gray(225)));
+            ui.label(egui::RichText::new("sRGB").color(palette.tone(Tone::TEXT)));
         });
 
         section(ui, "Image Sizing");
@@ -446,7 +451,7 @@ impl Editor {
             if missing {
                 ui.label(
                     egui::RichText::new("Watermark image not found")
-                        .size(12.)
+                        .size(text::LABEL)
                         .color(Color32::from_rgb(230, 120, 100)),
                 );
             }
@@ -477,7 +482,7 @@ impl Editor {
                 ui.checkbox(&mut s.capture, "Camera and capture info (EXIF)");
             });
             form_row(ui, "", |ui| {
-                ui.add_space(24.);
+                ui.add_space(space::XXL);
                 ui.add_enabled(
                     s.capture,
                     egui::Checkbox::new(&mut s.location, "Include location info"),
@@ -520,7 +525,7 @@ impl Editor {
                     }
                 });
         });
-        ui.add_space(8.);
+        ui.add_space(space::M);
         if choose {
             self.choose_export_folder(ui.ctx());
         }
@@ -592,14 +597,15 @@ impl Editor {
 /// A Lightroom section band.
 fn section(ui: &mut egui::Ui, title: &str) {
     let palette = theme::palette(ui.ctx());
-    ui.add_space(6.);
+    ui.add_space(space::S);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    ui.painter().rect_filled(rect, 3., palette.gray(44));
+    ui.painter()
+        .rect_filled(rect, radius::CONTROL, palette.tone(Tone::RAISED));
     ui.painter().text(
         rect.left_center() + Vec2::new(12., 0.),
         egui::Align2::LEFT_CENTER,
         title,
-        egui::FontId::proportional(13.),
-        palette.gray(235),
+        egui::FontId::proportional(text::BODY),
+        palette.tone(Tone::STRONG),
     );
 }

@@ -1,5 +1,6 @@
 //! Device instances have their own settings. Script/AI setup is independent.
 use super::*;
+use crate::app::design::{Tone, text};
 use crate::app::{
     inspector::BANDS,
     preferences::{gap, group},
@@ -124,16 +125,16 @@ fn set_dial(config: &mut Config, cc: u8, choice: DialUse) {
 fn small(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
-            .size(12.)
-            .color(theme::palette(ui.ctx()).gray(135)),
+            .size(text::LABEL)
+            .color(theme::palette(ui.ctx()).tone(Tone::MUTED)),
     );
 }
 pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)
-                .size(12.)
-                .color(theme::palette(ui.ctx()).gray(135)),
+                .size(text::LABEL)
+                .color(theme::palette(ui.ctx()).tone(Tone::MUTED)),
         )
         .wrap(),
     );

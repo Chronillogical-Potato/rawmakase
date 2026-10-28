@@ -3,6 +3,7 @@ use super::bulk_import::ImportKind;
 use super::dialogs::FileDialog;
 use super::widgets::segmented;
 use super::worker::Event;
+use crate::app::design::{Tone, radius, space, text};
 use crate::app::theme;
 use crate::model::recipe::Recipe;
 use anyhow::Context as _;
@@ -97,7 +98,7 @@ impl Editor {
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 ui.scope(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(4., 8.);
+                    ui.spacing_mut().item_spacing = Vec2::new(space::XS, space::M);
                     // The caption names the tab, with how many presets fit
                     // this camera and the import menu at its right.
                     let caption = super::widgets::panel_caption(ui, "Presets");
@@ -107,9 +108,14 @@ impl Editor {
                     );
                     let response = ui.interact(add, ui.id().with("preset-import"), Sense::click());
                     if response.hovered() {
-                        ui.painter().rect_filled(add, 4., palette.gray(44));
+                        ui.painter()
+                            .rect_filled(add, radius::CONTROL, palette.tone(Tone::RAISED));
                     }
-                    let tint = palette.gray(if response.hovered() { 235 } else { 150 });
+                    let tint = palette.tone(if response.hovered() {
+                        Tone::STRONG
+                    } else {
+                        Tone::SECONDARY
+                    });
                     crate::app::icons::paint_at(
                         ui.painter(),
                         crate::app::icons::Icon::Add,
@@ -182,7 +188,7 @@ impl Editor {
                                 "{} unreadable files",
                                 library.errors.len()
                             ))
-                            .size(10.)
+                            .size(text::MICRO)
                             .color(ui.visuals().warn_fg_color),
                         )
                         .on_hover_text(library.errors.join("\n"));
@@ -253,13 +259,13 @@ impl Editor {
                                     star.center(),
                                     egui::Align2::CENTER_CENTER,
                                     "★",
-                                    egui::FontId::proportional(12.),
-                                    palette.gray(if star_response.hovered() {
-                                        240
+                                    egui::FontId::proportional(text::LABEL),
+                                    palette.tone(if star_response.hovered() {
+                                        Tone::STRONG
                                     } else if favorite {
-                                        200
+                                        Tone::SOFT
                                     } else {
-                                        110
+                                        Tone::DISABLED
                                     }),
                                 );
                             }
@@ -548,12 +554,12 @@ impl Editor {
             return;
         };
         let mut amount = session.amount;
-        ui.add_space(2.);
+        ui.add_space(space::XXS);
         ui.add(
             egui::Label::new(
                 egui::RichText::new(&session.name)
-                    .size(11.)
-                    .color(theme::palette(ui.ctx()).gray(170)),
+                    .size(text::SMALL)
+                    .color(theme::palette(ui.ctx()).tone(Tone::LABEL)),
             )
             .truncate(),
         );
@@ -748,28 +754,28 @@ impl EmptyList {
 fn empty_state(ui: &mut egui::Ui, empty: &EmptyList) -> bool {
     let palette = theme::palette(ui.ctx());
     let mut clicked = false;
-    ui.add_space(20.);
+    ui.add_space(space::XXL);
     ui.vertical_centered(|ui| {
-        ui.spacing_mut().item_spacing.y = 6.;
+        ui.spacing_mut().item_spacing.y = space::S;
         ui.label(
             egui::RichText::new(&empty.title)
-                .size(12.5)
-                .color(palette.gray(215)),
+                .size(text::LABEL)
+                .color(palette.tone(Tone::TEXT)),
         );
         ui.label(
             egui::RichText::new(empty.detail)
-                .size(11.)
-                .color(palette.gray(130)),
+                .size(text::SMALL)
+                .color(palette.tone(Tone::FAINT)),
         );
-        ui.add_space(6.);
+        ui.add_space(space::S);
         let label = match empty.action {
             EmptyAction::ClearSearch => "Clear Search",
             EmptyAction::ShowAll => "Show All Presets",
         };
         clicked = ui
             .add(
-                egui::Button::new(egui::RichText::new(label).size(12.))
-                    .corner_radius(6.)
+                egui::Button::new(egui::RichText::new(label).size(text::LABEL))
+                    .corner_radius(radius::CARD)
                     .min_size(Vec2::new(140., 26.)),
             )
             .clicked();
@@ -801,9 +807,9 @@ fn list_row(
         let fill = if selected {
             palette.selected_row()
         } else {
-            palette.gray(34)
+            palette.tone(Tone::CARD)
         };
-        ui.painter().rect_filled(rect, 4., fill);
+        ui.painter().rect_filled(rect, radius::CONTROL, fill);
     }
     // A group's chevron as the folder tree's; a preset's name under the
     // group's.
@@ -815,7 +821,7 @@ fn list_row(
         } else {
             crate::app::icons::Icon::ChevronRight
         };
-        let tint = palette.gray(if hovered { 200 } else { 140 });
+        let tint = palette.tone(if hovered { Tone::SOFT } else { Tone::MUTED });
         crate::app::icons::paint_at(ui.painter(), chevron, Pos2::new(x, y), 11., tint);
     }
     let text_left = x + if open.is_some() { 12. } else { 0. };
@@ -824,15 +830,15 @@ fn list_row(
         ui,
         Some(egui::TextWrapMode::Truncate),
         (right - text_left).max(1.),
-        FontId::proportional(12.),
+        FontId::proportional(text::LABEL),
     );
     ui.painter().galley(
         Pos2::new(text_left, y - galley.size().y / 2.),
         galley,
-        palette.gray(match (enabled, selected || hovered) {
-            (false, _) => 95,
-            (true, true) => 240,
-            (true, false) => 200,
+        palette.tone(match (enabled, selected || hovered) {
+            (false, _) => Tone::DISABLED,
+            (true, true) => Tone::STRONG,
+            (true, false) => Tone::SOFT,
         }),
     );
     if let Some(count) = count {
@@ -840,8 +846,8 @@ fn list_row(
             Pos2::new(rect.right() - 10., y),
             Align2::RIGHT_CENTER,
             count.to_string(),
-            FontId::proportional(10.5),
-            palette.gray(120),
+            FontId::proportional(text::SMALL),
+            palette.tone(Tone::FAINT),
         );
     }
     response

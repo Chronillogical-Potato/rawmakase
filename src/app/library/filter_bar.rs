@@ -5,6 +5,7 @@
 use super::Library;
 use super::filter::{Kind, Label, RatingOp, toggle};
 use super::grid::filter_caption;
+use crate::app::design::{Tone, inset, radius, size, space, text};
 use crate::app::photo_metadata::{LABELS, flag_icon, label_color};
 use crate::app::shortcuts::keys_text;
 use crate::app::theme;
@@ -12,20 +13,20 @@ use crate::app::widgets::{COMPACT_SEGMENT_HEIGHT, segmented};
 use eframe::egui::{self, Rect, Vec2};
 
 /// The height of the bar's toggles and stars.
-const TOGGLE_HEIGHT: f32 = 20.;
+const TOGGLE_HEIGHT: f32 = size::ROW;
 
 impl Library {
     pub(super) fn filter_bar(&mut self, ui: &mut egui::Ui) {
         let mut changed = false;
         egui::Frame::new()
-            .fill(theme::palette(ui.ctx()).gray(38))
-            .inner_margin(egui::Margin::symmetric(10, 6))
+            .fill(theme::palette(ui.ctx()).tone(Tone::FIELD))
+            .inner_margin(inset::BAR)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 // Each control wraps as a whole onto another row when the
                 // window is narrow.
                 ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.;
+                    ui.spacing_mut().item_spacing.x = space::XS;
                     ui.spacing_mut().interact_size.y = TOGGLE_HEIGHT;
                     let compact = ui.available_width() < 640.;
                     let opacity = ui.opacity();
@@ -34,17 +35,17 @@ impl Library {
                         ui.multiply_opacity(0.45);
                     }
                     changed |= ui.horizontal(|ui| self.search_field(ui, compact)).inner;
-                    ui.add_space(10.);
+                    ui.add_space(space::L);
                     changed |= ui.horizontal(|ui| self.flag_filter(ui, compact)).inner;
-                    ui.add_space(10.);
+                    ui.add_space(space::L);
                     changed |= ui.horizontal(|ui| self.rating_filter(ui, compact)).inner;
-                    ui.add_space(10.);
+                    ui.add_space(space::L);
                     changed |= ui.horizontal(|ui| self.label_filter(ui, compact)).inner;
                     if self.has_copies() || self.filters.kind != Kind::All {
-                        ui.add_space(10.);
+                        ui.add_space(space::L);
                         changed |= ui.horizontal(|ui| self.kind_filter(ui, compact)).inner;
                     }
-                    ui.add_space(10.);
+                    ui.add_space(space::L);
                     ui.set_opacity(opacity);
                     changed |= self.filters_switch(ui);
                 });
@@ -63,7 +64,7 @@ impl Library {
             .add(
                 egui::TextEdit::singleline(&mut self.filters.query)
                     .hint_text("Search")
-                    .font(egui::FontId::proportional(12.))
+                    .font(egui::FontId::proportional(text::LABEL))
                     .desired_width(if compact { 120. } else { 190. })
                     // As tall as the segmented controls in the bar.
                     .min_size(Vec2::new(0., COMPACT_SEGMENT_HEIGHT))
@@ -103,7 +104,7 @@ impl Library {
         } else {
             filters.rating_op.symbol()
         };
-        ui.menu_button(egui::RichText::new(shown).size(12.), |ui| {
+        ui.menu_button(egui::RichText::new(shown).size(text::LABEL), |ui| {
             for op in RatingOp::ALL {
                 let on = !unrated && filters.rating_op == op;
                 if ui.selectable_label(on, op.name()).clicked() {
@@ -160,14 +161,18 @@ impl Library {
             let painter = ui.painter();
             match &label {
                 Label::Color(color) => {
-                    painter.rect_filled(chip, 1., label_color(&palette, color).unwrap_or_default());
+                    painter.rect_filled(
+                        chip,
+                        radius::SMALL,
+                        label_color(&palette, color).unwrap_or_default(),
+                    );
                 }
                 Label::None => {
-                    let stroke = egui::Stroke::new(1., palette.gray(150));
-                    painter.rect_stroke(chip, 1., stroke, egui::StrokeKind::Inside);
+                    let stroke = egui::Stroke::new(1., palette.tone(Tone::SECONDARY));
+                    painter.rect_stroke(chip, radius::SMALL, stroke, egui::StrokeKind::Inside);
                 }
                 Label::Other => {
-                    painter.rect_filled(chip, 1., palette.gray(150));
+                    painter.rect_filled(chip, radius::SMALL, palette.tone(Tone::SECONDARY));
                 }
             }
             if response.on_hover_text(name).clicked() {
@@ -249,18 +254,18 @@ fn star_toggle(ui: &mut egui::Ui, lit: bool) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(13., TOGGLE_HEIGHT), egui::Sense::click());
     let level = if lit {
-        225
+        Tone::TEXT
     } else if response.hovered() {
-        140
+        Tone::MUTED
     } else {
-        80
+        Tone::OUTLINE_STRONG
     };
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         "★",
-        egui::FontId::proportional(12.),
-        theme::palette(ui.ctx()).gray(level),
+        egui::FontId::proportional(text::LABEL),
+        theme::palette(ui.ctx()).tone(level),
     );
     response
 }
@@ -271,14 +276,14 @@ fn toggle_cell(ui: &mut egui::Ui, width: f32, on: bool) -> (Rect, egui::Response
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, TOGGLE_HEIGHT), egui::Sense::click());
     let fill = if on {
-        Some(palette.gray(78))
+        Some(palette.tone(Tone::OUTLINE_STRONG))
     } else if response.hovered() {
-        Some(palette.gray(55))
+        Some(palette.tone(Tone::OUTLINE))
     } else {
         None
     };
     if let Some(fill) = fill {
-        ui.painter().rect_filled(rect, 3., fill);
+        ui.painter().rect_filled(rect, radius::CONTROL, fill);
     }
     (rect, response)
 }

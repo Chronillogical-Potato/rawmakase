@@ -2,6 +2,7 @@
 //! gradient handles), and which tool gets the pointer.
 use super::Editor;
 use super::state::Tool;
+use crate::app::design::radius;
 use eframe::egui::{self, Color32, Painter, Pos2, Rect, Stroke, Vec2};
 
 impl Editor {
@@ -131,6 +132,6 @@ pub(super) fn path(painter: &Painter, points: Vec<Pos2>, color: Color32) {
 /// A square handle, as on Lightroom's gradients.
 pub(super) fn handle(painter: &Painter, at: Pos2, active: bool) {
     let r = Rect::from_center_size(at, Vec2::splat(if active { 9. } else { 7. }));
-    painter.rect_filled(r.expand(1.), 1., Color32::from_black_alpha(140));
-    painter.rect_filled(r, 1., Color32::WHITE);
+    painter.rect_filled(r.expand(1.), radius::SMALL, Color32::from_black_alpha(140));
+    painter.rect_filled(r, radius::SMALL, Color32::WHITE);
 }

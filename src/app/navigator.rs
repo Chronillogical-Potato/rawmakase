@@ -4,6 +4,7 @@
 //! place; the panel shows the whole photo with the part in view outlined.
 use super::theme;
 use super::widgets::{HeaderButton, section_with, segmented};
+use crate::app::design::{Tone, space, text};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 /// Zoom levels the Navigator offers; 0 stands for Fit.
@@ -131,7 +132,7 @@ pub(super) fn navigator(
             if segmented(ui, &mut level, &LEVELS, w) {
                 change = Some(Change::Level(level));
             }
-            ui.add_space(6.);
+            ui.add_space(space::S);
         }
         let sense = if zoom.is_some() {
             Sense::click_and_drag()
@@ -148,8 +149,8 @@ pub(super) fn navigator(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "No photo selected",
-                egui::FontId::proportional(11.),
-                palette.gray(95),
+                egui::FontId::proportional(text::SMALL),
+                palette.tone(Tone::DISABLED),
             );
             return;
         };

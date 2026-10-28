@@ -1,6 +1,7 @@
 //! Lens Corrections › Profile: Lightroom's Setup, Make, Model and Profile menus over
 //! the imported Adobe profiles that fit the photo's camera.
 use super::control_row;
+use crate::app::design::{Tone, text};
 use crate::app::theme;
 use crate::camera_data::Metadata;
 use crate::lens::choice::{LensProfileSetup, ProfileMenus};
@@ -112,7 +113,7 @@ fn setup_row(
 fn muted(ui: &mut egui::Ui, text: &str) {
     ui.label(
         egui::RichText::new(text)
-            .size(11.)
-            .color(theme::palette(ui.ctx()).gray(200)),
+            .size(text::SMALL)
+            .color(theme::palette(ui.ctx()).tone(Tone::SOFT)),
     );
 }

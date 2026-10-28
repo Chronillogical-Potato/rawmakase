@@ -3,9 +3,10 @@
 //! curve under a name. Choosing a curve is one History step.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, theme};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::model::panels::{Panel, PanelState};
 use crate::presets::curves::{BuiltinCurve, PointCurve, SavedCurve, SavedCurves};
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Color32};
 
 /// The saved curves, read once when the menu is first shown, and the name being
 /// typed in the Save Point Curve window while it is open.
@@ -95,23 +96,23 @@ impl Editor {
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("save-point-curve"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(380.);
                 ui.label(
                     egui::RichText::new("Save Point Curve")
-                        .size(17.)
-                        .color(palette.gray(235)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 ui.label(
                     egui::RichText::new(
                         "Saves the RGB, Red, Green and Blue curves for the Point Curve menu.",
                     )
-                    .size(11.)
-                    .color(palette.gray(150)),
+                    .size(text::SMALL)
+                    .color(palette.tone(Tone::SECONDARY)),
                 );
-                ui.add_space(12.);
+                ui.add_space(space::L);
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut saving.name)
                         .hint_text("Curve name")
@@ -125,9 +126,9 @@ impl Editor {
                 if named && field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     choice = Some(SaveChoice::Save);
                 }
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add_enabled_ui(named, |ui| primary_button(ui, "Save"))

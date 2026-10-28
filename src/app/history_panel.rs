@@ -2,6 +2,7 @@
 //! Lightroom steps, drawn under Snapshots in the History tab.
 use super::Editor;
 use super::widgets::section;
+use crate::app::design::{Tone, radius, space, text};
 use crate::app::theme;
 use eframe::egui::{self, Sense, Vec2};
 
@@ -51,13 +52,13 @@ impl Editor {
             if self.document.lightroom_history.is_empty() {
                 return;
             }
-            ui.add_space(10.);
+            ui.add_space(space::L);
             ui.label(
                 egui::RichText::new("From Lightroom")
-                    .size(11.)
-                    .color(theme::palette(ui.ctx()).gray(125)),
+                    .size(text::SMALL)
+                    .color(theme::palette(ui.ctx()).tone(Tone::FAINT)),
             );
-            ui.add_space(4.);
+            ui.add_space(space::XS);
             for (i, step) in self.document.lightroom_history.iter().enumerate().rev() {
                 let name = if step.name.is_empty() {
                     "Edit"
@@ -156,21 +157,25 @@ fn history_row(
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     if current {
-        ui.painter().rect_filled(rect, 3., palette.accent());
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.accent());
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, 3., palette.gray(43));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::RAISED));
     }
     let color = if current {
-        palette.on_accent_text(250)
+        palette.on_accent_text(Tone::BRIGHT)
     } else {
-        palette.gray(if undone { 120 } else { 205 })
+        palette.tone(if undone { Tone::FAINT } else { Tone::SOFT })
     };
     let value_width = if value.is_empty() {
         0.
     } else {
-        let galley =
-            ui.painter()
-                .layout_no_wrap(value.to_string(), egui::FontId::proportional(12.), color);
+        let galley = ui.painter().layout_no_wrap(
+            value.to_string(),
+            egui::FontId::proportional(text::LABEL),
+            color,
+        );
         let width = galley.size().x;
         ui.painter().galley(
             egui::pos2(
@@ -190,7 +195,7 @@ fn history_row(
         rect.left_center() + Vec2::new(8., 0.),
         egui::Align2::LEFT_CENTER,
         name,
-        egui::FontId::proportional(12.),
+        egui::FontId::proportional(text::LABEL),
         color,
     );
     response.on_hover_cursor(egui::CursorIcon::PointingHand)

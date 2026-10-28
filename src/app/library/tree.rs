@@ -1,4 +1,5 @@
 use super::folder_selection::{Click, FolderSelection};
+use crate::app::design::{Tone, radius, text};
 use crate::app::icons::{self, Icon};
 use crate::app::theme;
 use crate::catalog::{Folder, FolderId, PhotoId, RootId};
@@ -193,12 +194,12 @@ fn dragged_chip(ui: &egui::Ui, name: &str) {
     let painter = ui.ctx().layer_painter(layer);
     let text = painter.layout_no_wrap(
         name.to_string(),
-        egui::FontId::proportional(12.),
-        palette.gray(240),
+        egui::FontId::proportional(text::LABEL),
+        palette.tone(Tone::STRONG),
     );
     let chip =
         egui::Rect::from_min_size(pos + Vec2::splat(10.), Vec2::new(text.size().x + 34., 22.));
-    painter.rect_filled(chip, 4., palette.selected_row());
+    painter.rect_filled(chip, radius::CONTROL, palette.selected_row());
     painter.rect_stroke(
         chip.shrink(0.5),
         4.,
@@ -210,12 +211,12 @@ fn dragged_chip(ui: &egui::Ui, name: &str) {
         Icon::Folder,
         egui::pos2(chip.left() + 14., chip.center().y),
         13.,
-        palette.gray(200),
+        palette.tone(Tone::SOFT),
     );
     painter.galley(
         egui::pos2(chip.left() + 26., chip.center().y - text.size().y / 2.),
         text,
-        palette.gray(240),
+        palette.tone(Tone::STRONG),
     );
 }
 pub(super) fn folder_tree_row(
@@ -267,7 +268,7 @@ pub(super) fn folder_tree_row(
             .dnd_hover_payload::<super::DraggedFolder>()
             .is_some_and(|d| takes(&d));
     if dropping {
-        painter.rect_filled(rect, 3., palette.selected_row());
+        painter.rect_filled(rect, radius::CONTROL, palette.selected_row());
         painter.rect_stroke(
             rect.shrink(0.5),
             3.,
@@ -281,7 +282,7 @@ pub(super) fn folder_tree_row(
             if active {
                 palette.selected_row()
             } else {
-                palette.gray(43)
+                palette.tone(Tone::RAISED)
             },
         );
     }
@@ -303,14 +304,20 @@ pub(super) fn folder_tree_row(
         } else {
             Icon::ChevronRight
         };
-        icons::paint_at(painter, chevron, Pos2::new(x, y), 11., palette.gray(150));
+        icons::paint_at(
+            painter,
+            chevron,
+            Pos2::new(x, y),
+            11.,
+            palette.tone(Tone::SECONDARY),
+        );
     }
     icons::paint_at(
         painter,
         Icon::Folder,
         Pos2::new(x + 13., y),
         13.,
-        palette.gray(145),
+        palette.tone(Tone::MUTED),
     );
     let label_rect = Rect::from_min_max(
         Pos2::new(x + 26., rect.top()),
@@ -320,19 +327,19 @@ pub(super) fn folder_tree_row(
         ui,
         Some(egui::TextWrapMode::Truncate),
         label_rect.width().max(1.),
-        FontId::proportional(12.),
+        FontId::proportional(text::LABEL),
     );
     painter.galley(
         Pos2::new(label_rect.left(), y - text.size().y / 2.),
         text,
-        palette.gray(if active { 235 } else { 190 }),
+        palette.tone(if active { Tone::STRONG } else { Tone::SOFT }),
     );
     painter.text(
         Pos2::new(rect.right() - 10., y),
         Align2::RIGHT_CENTER,
         shown_count(node, subfolders).to_string(),
-        FontId::proportional(10.),
-        palette.gray(125),
+        FontId::proportional(text::MICRO),
+        palette.tone(Tone::FAINT),
     );
     let relink = || {
         node.root
