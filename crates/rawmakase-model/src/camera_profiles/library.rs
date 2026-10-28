@@ -125,12 +125,18 @@ pub struct Listed {
     pub errors: Vec<String>,
     pub groups: Groups,
 }
-/// The `crs:Group` of each look listed, by its name and UUID. Kept beside the
-/// profiles rather than in them: a profile is embedded in every recipe that uses
-/// it, and earlier releases refuse a recipe whose profile has a field they lack.
-/// Shared, as the menu takes a copy each frame.
+/// The `crs:Group` of each look listed, by its name and UUID, and the menu titles
+/// of camera profile files that share a name and camera. Kept beside the profiles
+/// rather than in them: a profile is embedded in every recipe that uses it, and
+/// earlier releases refuse a recipe whose profile has a field they lack. Shared,
+/// as the menu takes a copy each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Groups(Arc<HashMap<(String, String), String>>);
+pub struct Groups {
+    groups: Arc<HashMap<(String, String), String>>,
+    /// Each DCP whose name and camera another listed DCP has too, titled after
+    /// its file so the menu can tell them apart.
+    titles: Arc<Vec<(Arc<CameraProfile>, String)>>,
+}
 /// Where the profile menu lists a profile: at the top level or in a group's
 /// submenu, under a section heading inside it if any, as `title`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,7 +149,7 @@ pub struct MenuEntry {
 }
 impl Groups {
     fn insert(&mut self, name: &str, uuid: &str, group: &str) {
-        Arc::make_mut(&mut self.0)
+        Arc::make_mut(&mut self.groups)
             .entry((name.into(), uuid.to_ascii_uppercase()))
             .or_insert_with(|| group.into());
     }
@@ -151,21 +157,27 @@ impl Groups {
     /// camera profiles (DCPs, a DNG's own), RAWmakase's and a look without a group
     /// stay at the top level, as does a look in Lightroom's "Profiles" group:
     /// Adobe Color and the other Adobe Raw and Camera Matching looks, which
-    /// Lightroom lists with the camera's profiles.
+    /// Lightroom lists with the camera's profiles. A DCP that shares its name and
+    /// camera with another is titled with its file's name too.
     pub fn entry(&self, profile: &CameraProfile) -> MenuEntry {
         let group = profile
             .enhanced
             .as_ref()
             .and_then(|look| {
-                self.0
+                self.groups
                     .get(&(profile.name.clone(), look.uuid.to_ascii_uppercase()))
             })
             .filter(|group| !group.is_empty() && *group != "Profiles")
             .cloned();
+        let title = self
+            .titles
+            .iter()
+            .find(|(p, _)| p.name == profile.name && p.camera == profile.camera && **p == *profile)
+            .map_or_else(|| profile.name.clone(), |(_, title)| title.clone());
         MenuEntry {
             group,
             section: None,
-            title: profile.name.clone(),
+            title,
         }
     }
 }
@@ -207,6 +219,11 @@ fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
         collect(dir, 0, &mut files);
     }
     let mut looks = Vec::new();
+    // The profiles before the library's: the library's DCPs that only repeat one
+    // of these by name and camera stay hidden behind it.
+    let own = profiles.len();
+    // Each library DCP listed, with the file it came from.
+    let mut sources: Vec<(Arc<CameraProfile>, &Path)> = Vec::new();
     for path in &files {
         if path
             .extension()
@@ -237,10 +254,14 @@ fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
         });
         match loaded {
             Ok(p) => {
-                if !profiles
-                    .iter()
-                    .any(|old| old.name == p.name && old.camera == p.camera)
+                // A DCP that shares its name and camera with another file is
+                // listed too unless it is the same profile, so either can be chosen;
+                // lookups by name still find the first file, as before.
+                let same = |old: &Arc<CameraProfile>| old.name == p.name && old.camera == p.camera;
+                if !profiles[..own].iter().any(same)
+                    && !sources.iter().any(|(old, _)| same(old) && **old == *p)
                 {
+                    sources.push((p.clone(), path));
                     profiles.push(p);
                 }
             }
@@ -253,6 +274,7 @@ fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
         }
     }
     cameras.keep(&files.iter().map(PathBuf::as_path).collect());
+    groups.titles = Arc::new(file_titles(&sources, dirs));
     let bases = profiles.clone();
     for path in looks {
         let composed = LookFile::read(path).and_then(|look| {
@@ -288,6 +310,41 @@ fn listed_in(dirs: &[PathBuf], m: &Metadata, cameras: &Cameras) -> Listed {
         errors,
         groups,
     }
+}
+/// The menu titles of the library DCPs in `sources` that share a name and camera:
+/// the name, then the file's path in its library folder, or its full path when
+/// another library folder has a file at the same place.
+fn file_titles(
+    sources: &[(Arc<CameraProfile>, &Path)],
+    dirs: &[PathBuf],
+) -> Vec<(Arc<CameraProfile>, String)> {
+    let shared: Vec<_> = sources
+        .iter()
+        .filter(|(p, _)| {
+            sources
+                .iter()
+                .filter(|(old, _)| old.name == p.name && old.camera == p.camera)
+                .count()
+                > 1
+        })
+        .map(|(p, path)| {
+            let file = dirs
+                .iter()
+                .find_map(|dir| path.strip_prefix(dir).ok())
+                .unwrap_or(path);
+            (p, *path, file)
+        })
+        .collect();
+    shared
+        .iter()
+        .map(|(p, path, file)| {
+            let clash = shared.iter().any(|(old, other, same)| {
+                other != path && same == file && old.name == p.name && old.camera == p.camera
+            });
+            let file = if clash { path } else { file };
+            ((*p).clone(), format!("{} ({})", p.name, file.display()))
+        })
+        .collect()
 }
 /// A look profile file over the profile it builds on among `bases` (see `look_base`),
 /// without the user's library. `own` is the file's embedded profile, if any.
@@ -743,7 +800,13 @@ mod tests {
         b.extend((entries.len() as u16).to_le_bytes());
         let mut data: Vec<u8> = Vec::new();
         for (tag, kind, bytes) in &entries {
-            let count = if *kind == 10 { 9 } else { bytes.len() };
+            let count = bytes.len()
+                / match kind {
+                    5 | 10 => 8,
+                    4 | 9 | 11 => 4,
+                    3 | 8 => 2,
+                    _ => 1,
+                };
             b.extend(tag.to_le_bytes());
             b.extend(kind.to_le_bytes());
             b.extend((count as u32).to_le_bytes());
@@ -864,6 +927,76 @@ mod tests {
         let new_dest = temp.path().join("fresh-library");
         assert!(import_into(&[source, unsupported], &new_dest, LutSpace::Srgb).is_err());
         assert!(!new_dest.exists());
+        Ok(())
+    }
+    /// Two DCPs that share a name and camera but render differently are both
+    /// listed and titled after their files; one that repeats another exactly is
+    /// not. Lookups by name still find the first file.
+    #[test]
+    fn profiles_sharing_a_name_and_camera_are_listed_by_file() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let dest = temp.path().join("library");
+        let exposure = |stops: i32| (51109, 10, [stops, 1].map(i32::to_le_bytes).concat());
+        let mut picks = Vec::new();
+        for (file, stops) in [("A.dcp", 0), ("B.dcp", 0), ("Z.dcp", 1)] {
+            let path = temp.path().join(file);
+            std::fs::write(
+                &path,
+                dcp_with("Sony ILCE-7M2", "Camera Neutral", [exposure(stops)]),
+            )?;
+            picks.push(path);
+        }
+        std::fs::write(temp.path().join("other.dcp"), dcp("Sony ILCE-7M2", "Other"))?;
+        picks.push(temp.path().join("other.dcp"));
+        import_into(&picks, &dest, LutSpace::Srgb)?;
+        let listed = listed_in(&[dest], &camera("ILCE-7M2"), &Cameras::default());
+        assert_eq!(
+            names(&listed.profiles),
+            ["Camera Neutral", "Camera Neutral", "Other"]
+        );
+        let titles: Vec<_> = listed
+            .profiles
+            .iter()
+            .filter(|p| p.camera.starts_with("Sony"))
+            .map(|p| listed.groups.entry(p).title)
+            .collect();
+        assert_eq!(
+            titles,
+            ["Camera Neutral (A.dcp)", "Camera Neutral (Z.dcp)", "Other"]
+        );
+        // An XMP's profile name resolves to the first file, as before.
+        let first = listed
+            .profiles
+            .iter()
+            .find(|p| p.name == "Camera Neutral")
+            .unwrap();
+        assert_eq!(first.exposure, 0.);
+        // A recipe's own copy of Z's profile is titled as Z's file.
+        let z = listed.profiles.iter().find(|p| p.exposure == 1.).unwrap();
+        let saved = Arc::new((**z).clone());
+        assert_eq!(listed.groups.entry(&saved).title, "Camera Neutral (Z.dcp)");
+        // Files at the same place in two library folders are titled by full path.
+        let (one, two) = (temp.path().join("one"), temp.path().join("two"));
+        for (dir, stops) in [(&one, 0), (&two, 1)] {
+            std::fs::create_dir_all(dir)?;
+            std::fs::write(
+                dir.join("Neutral.dcp"),
+                dcp_with("Sony ILCE-7M2", "Camera Neutral", [exposure(stops)]),
+            )?;
+        }
+        let listed = listed_in(
+            &[one.clone(), two.clone()],
+            &camera("ILCE-7M2"),
+            &Cameras::default(),
+        );
+        let titles: Vec<_> = listed
+            .profiles
+            .iter()
+            .filter(|p| p.camera.starts_with("Sony"))
+            .map(|p| listed.groups.entry(p).title)
+            .collect();
+        let full = |dir: &Path| format!("Camera Neutral ({})", dir.join("Neutral.dcp").display());
+        assert_eq!(titles, [full(&one), full(&two)]);
         Ok(())
     }
     #[test]
