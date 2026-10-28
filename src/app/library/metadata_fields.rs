@@ -6,6 +6,7 @@
 use super::descriptive::{DescriptiveEdit, parse_keywords};
 use super::rows::{ROW, VALUE_GRAY, caption_at, field_rect, paint_truncated, panel_edit, value_at};
 use super::{Library, Place};
+use crate::app::design::{space, text};
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use crate::metadata::{Descriptive, Keyword, Location, TextField, Value};
@@ -330,7 +331,7 @@ impl Library {
         let clear = ui
             .put(
                 button,
-                egui::Button::new(egui::RichText::new("Clear").size(11.)).frame(false),
+                egui::Button::new(egui::RichText::new("Clear").size(text::SMALL)).frame(false),
             )
             .on_hover_text("Clear Location: leave it out of exports, the file's included");
         if clear.clicked() && can_clear {
@@ -363,7 +364,7 @@ impl Library {
                 rect.left_center(),
                 button.left() - rect.left(),
                 &name,
-                palette.gray(VALUE_GRAY),
+                palette.tone(VALUE_GRAY),
             );
             let tip = if *all {
                 "Remove this keyword".to_string()
@@ -373,7 +374,7 @@ impl Library {
             if ui
                 .put(
                     button,
-                    egui::Button::new(egui::RichText::new("×").size(12.)).frame(false),
+                    egui::Button::new(egui::RichText::new("×").size(text::LABEL)).frame(false),
                 )
                 .on_hover_text(tip)
                 .clicked()
@@ -387,7 +388,7 @@ impl Library {
         {
             self.message = format!("Keyword could not be removed: {e}");
         }
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         let (rect, _) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), egui::Sense::hover());
         let response = ui.add_enabled(!targets.is_empty(), |ui: &mut egui::Ui| {
@@ -538,7 +539,7 @@ fn creator_rows(
         if ui
             .put(
                 button,
-                egui::Button::new(egui::RichText::new(label).size(12.)).frame(false),
+                egui::Button::new(egui::RichText::new(label).size(text::LABEL)).frame(false),
             )
             .on_hover_text(tip)
             .clicked()

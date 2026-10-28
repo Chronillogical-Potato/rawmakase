@@ -13,6 +13,7 @@
 //! reference photo in Before's place, rendered in the same lane.
 use super::state::{Picture, TextureMode};
 use super::{Editor, history::Step};
+use crate::app::design::{radius, space, text};
 use crate::rendered::ClipOverlay;
 use crate::{camera_data::CameraImage, develop::Geometry, model::recipe::Recipe};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
@@ -94,7 +95,7 @@ pub(super) struct Panes {
     pub(super) before: Option<Pane>,
 }
 /// Space between the two sides of a side-by-side view.
-const GAP: f32 = 6.;
+const GAP: f32 = space::S;
 
 /// Lays out `area` for `compare`.
 pub(super) fn panes(compare: Compare, area: Rect) -> Panes {
@@ -512,12 +513,12 @@ pub(super) fn badge(ui: &egui::Ui, side: Rect, text: &str) {
     let painter = ui.painter().with_clip_rect(side);
     let galley = painter.layout_no_wrap(
         text.to_owned(),
-        egui::FontId::proportional(12.),
+        egui::FontId::proportional(text::LABEL),
         Color32::WHITE,
     );
     let width = (galley.size().x + 20.).max(62.);
     let rect = Rect::from_min_size(side.left_top() + Vec2::splat(12.), Vec2::new(width, 25.));
-    painter.rect_filled(rect, 3., Color32::from_black_alpha(190));
+    painter.rect_filled(rect, radius::CONTROL, Color32::from_black_alpha(190));
     painter.galley(rect.center() - galley.size() / 2., galley, Color32::WHITE);
 }
 

@@ -3,6 +3,7 @@
 //! with a loupe while an end is placed and an optional grid. Every gesture is one
 //! History step, and the correction is solved again after it (docs/transform.md).
 use super::{Editor, state::Tool};
+use crate::app::design::radius;
 use crate::develop::{Geometry, guided};
 use crate::model::transform::{UprightGuide, UprightMode};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
@@ -377,7 +378,11 @@ fn magnifier(ui: &egui::Ui, texture: egui::TextureId, photo: Rect, at: Pos2, are
         Pos2::new(centre.x - half.x, centre.y - half.y),
         Pos2::new(centre.x + half.x, centre.y + half.y),
     );
-    painter.rect_filled(frame.expand(2.), 3., Color32::from_black_alpha(200));
+    painter.rect_filled(
+        frame.expand(2.),
+        radius::CONTROL,
+        Color32::from_black_alpha(200),
+    );
     painter.rect_filled(frame, 0., super::theme::palette(ui.ctx()).photo_backdrop());
     painter.image(texture, frame, uv, Color32::WHITE);
     let c = frame.center();

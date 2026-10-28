@@ -1,6 +1,7 @@
 //! The Library's right panel: Quick Develop and the selected photo's metadata.
 use super::rows::{ROW, caption_at, paint_truncated, value_at};
 use super::{Action, Library};
+use crate::app::design::{Tone, space};
 use crate::app::theme;
 use crate::app::widgets::section;
 use crate::catalog::{Photo, PhotoId};
@@ -47,7 +48,7 @@ impl Library {
                     {
                         action = Action::Develop(p.id);
                     }
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                     // Why the button is greyed out, in the line kept for this.
                     let note = match &refusal {
                         Some(super::Refusal::Offline) => {
@@ -63,7 +64,7 @@ impl Library {
                     };
                     info_text(ui, &note);
                     quick(ui);
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                 });
                 section(ui, "Metadata", false, |ui| {
                     match &photo {
@@ -79,7 +80,7 @@ impl Library {
                             );
                         }
                     }
-                    ui.add_space(6.);
+                    ui.add_space(space::S);
                     let folder = photo
                         .as_ref()
                         .and_then(|p| p.path.parent()?.file_name())
@@ -188,6 +189,6 @@ fn info_text(ui: &mut egui::Ui, text: &str) {
         rect.left_center(),
         rect.width(),
         text,
-        theme::palette(ui.ctx()).gray(150),
+        theme::palette(ui.ctx()).tone(Tone::SECONDARY),
     );
 }

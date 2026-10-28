@@ -12,6 +12,7 @@ use super::Editor;
 use super::before_after::{Axis, Compare, Pane, Panes, badge};
 use super::navigator::Zoom;
 use super::worker::{ReferenceImage, ReferenceJob, Resolution};
+use crate::app::design::{Tone, text};
 use crate::model::recipe::Recipe;
 use crate::{
     app::{library::DraggedPhoto, theme},
@@ -288,8 +289,8 @@ impl Editor {
                     pane.clip.center(),
                     egui::Align2::CENTER_CENTER,
                     text,
-                    egui::FontId::proportional(13.),
-                    palette.gray(150),
+                    egui::FontId::proportional(text::BODY),
+                    palette.tone(Tone::SECONDARY),
                 );
             }
         }
@@ -298,8 +299,8 @@ impl Editor {
                 pane.clip.center_bottom() - Vec2::new(0., 24.),
                 egui::Align2::CENTER_CENTER,
                 error,
-                egui::FontId::proportional(12.),
-                palette.gray(170),
+                egui::FontId::proportional(text::LABEL),
+                palette.tone(Tone::LABEL),
             );
         }
         badge(ui, pane.clip, "Reference");

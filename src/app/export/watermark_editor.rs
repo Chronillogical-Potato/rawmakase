@@ -4,6 +4,7 @@
 //! its own copy of the image.
 use super::super::widgets::{modal_frame, primary_button};
 use super::Editor;
+use crate::app::design::{Tone, button, radius, size, space, text};
 use crate::app::theme;
 use crate::rendered::unit_to_u8;
 use crate::watermark::{self, Align, Anchor, Size, Style, Watermark};
@@ -98,8 +99,8 @@ impl Editor {
                     rect.left_top() + Vec2::new(24., 26.),
                     egui::Align2::LEFT_CENTER,
                     "Watermark Editor",
-                    egui::FontId::proportional(16.),
-                    palette.gray(236),
+                    egui::FontId::proportional(text::TITLE),
+                    palette.tone(Tone::STRONG),
                 );
                 let preview = egui::Rect::from_min_max(
                     rect.left_top() + Vec2::new(24., 52.),
@@ -114,7 +115,7 @@ impl Editor {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
                     .show(&mut content, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::new(8., 6.);
+                        ui.spacing_mut().item_spacing = Vec2::new(space::M, space::S);
                         controls(ui, &mut state, ctx);
                     });
                 let footer = egui::Rect::from_min_max(
@@ -126,7 +127,7 @@ impl Editor {
                         .max_rect(footer)
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
-                bar.spacing_mut().button_padding = Vec2::new(18., 6.);
+                bar.spacing_mut().button_padding = button::DIALOG;
                 if primary_button(&mut bar, "Save").clicked() {
                     close = Some(true);
                 }
@@ -136,7 +137,7 @@ impl Editor {
                 {
                     close = Some(false);
                 }
-                bar.add_space(12.);
+                bar.add_space(space::L);
                 bar.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     if state.original.is_some()
                         && ui
@@ -147,7 +148,7 @@ impl Editor {
                         close = Some(false);
                         delete = true;
                     }
-                    ui.label(egui::RichText::new("Name").color(palette.gray(150)));
+                    ui.label(egui::RichText::new("Name").color(palette.tone(Tone::SECONDARY)));
                     ui.add(
                         egui::TextEdit::singleline(&mut state.watermark.name)
                             .desired_width(200.)
@@ -157,7 +158,7 @@ impl Editor {
                     if !notice.is_empty() {
                         ui.label(
                             egui::RichText::new(notice)
-                                .size(12.)
+                                .size(text::LABEL)
                                 .color(Color32::from_rgb(230, 120, 100)),
                         );
                     }
@@ -258,14 +259,15 @@ fn draw_preview(
     photo: Option<(egui::TextureId, Vec2)>,
 ) {
     let palette = theme::palette(ui.ctx());
-    ui.painter().rect_filled(area, 2., palette.gray(24));
+    ui.painter()
+        .rect_filled(area, radius::SMALL, palette.tone(Tone::WINDOW));
     let Some((texture, size)) = photo.filter(|(_, s)| s.x > 0. && s.y > 0.) else {
         ui.painter().text(
             area.center(),
             egui::Align2::CENTER_CENTER,
             "Open a photo to preview the watermark",
-            egui::FontId::proportional(12.),
-            palette.gray(130),
+            egui::FontId::proportional(text::LABEL),
+            palette.tone(Tone::FAINT),
         );
         return;
     };
@@ -378,22 +380,22 @@ fn mark_texture(
 /// The panel's grid: a label column, then every control from the same x,
 /// on rows of one height, so nothing is out of line.
 const LABEL: f32 = 76.;
-const ROW: f32 = 26.;
-const GAP: f32 = 8.;
+const ROW: f32 = size::FIELD;
+const GAP: f32 = space::M;
 /// The number box after a slider.
 const VALUE: f32 = 48.;
 
 fn heading(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(10.);
+    ui.add_space(space::L);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.), Sense::hover());
     ui.painter().text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         title,
-        egui::FontId::proportional(12.),
-        theme::palette(ui.ctx()).gray(215),
+        egui::FontId::proportional(text::LABEL),
+        theme::palette(ui.ctx()).tone(Tone::TEXT),
     );
-    ui.add_space(2.);
+    ui.add_space(space::XXS);
 }
 /// One row: `label` right-aligned in the label column, then `contents`,
 /// vertically centered, in the rest of the width.
@@ -411,8 +413,8 @@ fn row_of<R>(
         egui::pos2(rect.left() + LABEL, rect.top() + ROW / 2.),
         egui::Align2::RIGHT_CENTER,
         label,
-        egui::FontId::proportional(12.),
-        theme::palette(ui.ctx()).gray(150),
+        egui::FontId::proportional(text::LABEL),
+        theme::palette(ui.ctx()).tone(Tone::SECONDARY),
     );
     let controls = egui::Rect::from_min_max(
         egui::pos2(rect.left() + LABEL + GAP, rect.top()),
@@ -459,7 +461,7 @@ fn percent_slider(
 }
 /// Choices side by side, as a segmented control.
 fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T, &str)]) {
-    ui.spacing_mut().item_spacing.x = 4.;
+    ui.spacing_mut().item_spacing.x = space::XS;
     for (option, text) in options {
         ui.selectable_value(value, *option, *text);
     }
@@ -468,7 +470,7 @@ fn choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, options: &[(T,
 /// Style, image or text options, shadow and effects, as Lightroom's
 /// editor has them.
 fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context) {
-    ui.spacing_mut().item_spacing.y = 4.;
+    ui.spacing_mut().item_spacing.y = space::XS;
     let w = &mut state.watermark;
     heading(ui, "Watermark Style");
     row(ui, "", |ui| {
@@ -510,8 +512,8 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(name)
-                                .size(12.)
-                                .color(theme::palette(ui.ctx()).gray(180)),
+                                .size(text::LABEL)
+                                .color(theme::palette(ui.ctx()).tone(Tone::LABEL)),
                         )
                         .truncate(),
                     );
@@ -593,7 +595,7 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
     heading(ui, "Watermark Effects");
     percent_slider(ui, "Opacity", &mut w.opacity, 0.0..=100.);
     row(ui, "Size", |ui| {
-        ui.spacing_mut().item_spacing.x = 4.;
+        ui.spacing_mut().item_spacing.x = space::XS;
         let proportional = matches!(w.size, Size::Proportional(_));
         if ui.selectable_label(proportional, "Proportional").clicked() && !proportional {
             w.size = Size::default();
@@ -618,7 +620,7 @@ fn controls(ui: &mut egui::Ui, state: &mut WatermarkEditor, ctx: &egui::Context)
     heading(ui, "Position");
     row_of(ui, "Anchor", 3. * 20. + 4., |ui| {
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6., 2.);
+            ui.spacing_mut().item_spacing = Vec2::new(space::S, space::XXS);
             for v in 0..3 {
                 ui.horizontal(|ui| {
                     for h in 0..3 {

@@ -5,6 +5,7 @@ use super::icons::{self, Icon};
 use super::navigator;
 use super::state::{TextureMode, Tool};
 use crate::app::Module;
+use crate::app::design::{Tone, radius, text};
 use crate::app::theme;
 use crate::develop::{self, Geometry};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -177,8 +178,8 @@ impl Editor {
                 } else {
                     "Pick a photo in the Library to edit it"
                 },
-                egui::FontId::proportional(15.),
-                palette.gray(120),
+                egui::FontId::proportional(text::TITLE),
+                palette.tone(Tone::FAINT),
             );
             return;
         }
@@ -215,8 +216,8 @@ impl Editor {
                 badge.center(),
                 egui::Align2::CENTER_CENTER,
                 "Couldn't open this photo",
-                egui::FontId::proportional(12.),
-                palette.gray(225),
+                egui::FontId::proportional(text::LABEL),
+                palette.tone(Tone::TEXT),
             );
             return;
         }
@@ -227,8 +228,8 @@ impl Editor {
             badge.left_center() + Vec2::new(36., 0.),
             egui::Align2::LEFT_CENTER,
             "Loading photo…",
-            egui::FontId::proportional(12.),
-            palette.gray(225),
+            egui::FontId::proportional(text::LABEL),
+            palette.tone(Tone::TEXT),
         );
     }
     /// Sets a zoom level; 0 means Fit.
@@ -900,8 +901,11 @@ impl Editor {
                 p.map(|v| f32::from(v) / 255.),
             ))
         });
-        let values =
-            painter.layout_no_wrap(text, egui::FontId::proportional(13.), palette.gray(225));
+        let values = painter.layout_no_wrap(
+            text,
+            egui::FontId::proportional(text::BODY),
+            palette.tone(Tone::TEXT),
+        );
         let grid = CELLS as f32 * CELL;
         let pad = 8.;
         let line = 24.;
@@ -930,17 +934,17 @@ impl Editor {
             }
             .as_shape(frame, 8.),
         );
-        painter.rect_filled(frame, 8., palette.gray(24));
+        painter.rect_filled(frame, radius::CARD, palette.tone(Tone::WINDOW));
         painter.text(
             Pos2::new(frame.center().x, frame.top() + line / 2.),
             egui::Align2::CENTER_CENTER,
             self.view.loupe_prompt(),
-            egui::FontId::proportional(12.),
-            palette.gray(215),
+            egui::FontId::proportional(text::LABEL),
+            palette.tone(Tone::TEXT),
         );
         let origin = Pos2::new(frame.center().x - grid / 2., frame.top() + line);
         let cells = Rect::from_min_size(origin, Vec2::splat(grid));
-        painter.rect_filled(cells, 0., palette.gray(60));
+        painter.rect_filled(cells, 0., palette.tone(Tone::HOVER));
         let half = CELLS / 2;
         for j in 0..CELLS {
             for i in 0..CELLS {
@@ -972,7 +976,7 @@ impl Editor {
         painter.galley(
             Pos2::new(frame.center().x, frame.bottom() - line / 2.) - values.size() / 2.,
             values,
-            palette.gray(225),
+            palette.tone(Tone::TEXT),
         );
     }
 }

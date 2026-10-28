@@ -7,6 +7,7 @@
 //!
 //! File formats, persistence and pixel processing belong in the domain modules.
 //! See `docs/code-map.md` for panel, library and worker implementation locations.
+use crate::app::design::{Tone, button, space, text};
 use crate::app::worker::{Event, Latest};
 use crate::catalog::{CatalogLocation, PhotoId};
 #[cfg(test)]
@@ -219,18 +220,21 @@ impl Editor {
             d.insert_temp(widgets::pinned_sections_id(), session.pinned.clone());
         });
         ctx.all_styles_mut(|style| {
-            style.spacing.item_spacing = Vec2::new(8., 5.);
-            style.spacing.button_padding = Vec2::new(9., 5.);
-            style.spacing.indent = 18.;
-            style
-                .text_styles
-                .insert(egui::TextStyle::Body, egui::FontId::proportional(13.));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Button, egui::FontId::proportional(13.));
-            style
-                .text_styles
-                .insert(egui::TextStyle::Small, egui::FontId::proportional(11.));
+            style.spacing.item_spacing = Vec2::new(space::M, space::S);
+            style.spacing.button_padding = button::PADDING;
+            style.spacing.indent = space::XL;
+            style.text_styles.insert(
+                egui::TextStyle::Body,
+                egui::FontId::proportional(text::BODY),
+            );
+            style.text_styles.insert(
+                egui::TextStyle::Button,
+                egui::FontId::proportional(text::BODY),
+            );
+            style.text_styles.insert(
+                egui::TextStyle::Small,
+                egui::FontId::proportional(text::SMALL),
+            );
         });
         // Only a real session (not an isolated test) shows first-run setup.
         // Shown on a first launch only to bring over Lightroom's catalog,
@@ -524,7 +528,10 @@ impl eframe::App for Editor {
     /// theme's darkest grey rather than eframe's near-black.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         // eframe gives no context here; the palette last applied to it.
-        self.themes.applied().gray(12).to_normalized_gamma_f32()
+        self.themes
+            .applied()
+            .tone(Tone::DEEP)
+            .to_normalized_gamma_f32()
     }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
@@ -870,6 +877,7 @@ mod commands;
 mod crash_log;
 mod crop_tool;
 mod curve_menu;
+mod design;
 mod dialogs;
 mod display;
 mod export;

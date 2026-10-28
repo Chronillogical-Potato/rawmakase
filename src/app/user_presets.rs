@@ -3,10 +3,11 @@
 //! into it; and Reveal in Finder for any preset file.
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, settings_transfer::PresetForm, theme};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::model::settings_groups::GroupSelection;
 use crate::presets::user::UserPresets;
 use crate::xmp::preset_write::PresetInfo;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Color32};
 
 /// A change asked for in a preset's menu.
 #[derive(Clone, Debug, PartialEq)]
@@ -156,23 +157,23 @@ impl Editor {
         let mut choice = None;
         let response = egui::Modal::new(egui::Id::new("rename-preset"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(380.);
                 ui.label(
                     egui::RichText::new("Rename Preset")
-                        .size(17.)
-                        .color(palette.gray(235)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(12.);
+                ui.add_space(space::L);
                 let field = ui
                     .add(egui::TextEdit::singleline(&mut rename.name).desired_width(f32::INFINITY));
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     choice = Some(RenameChoice::Rename);
                 }
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if primary_button(ui, "Rename").clicked() {
                             choice = Some(RenameChoice::Rename);

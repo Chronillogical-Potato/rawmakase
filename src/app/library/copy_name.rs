@@ -85,7 +85,7 @@ impl CopyNames {
                 egui::Align2::LEFT_CENTER,
                 &photo.copy_name,
                 font(),
-                palette.gray(VALUE_GRAY),
+                palette.tone(VALUE_GRAY),
             );
             return outcome;
         };

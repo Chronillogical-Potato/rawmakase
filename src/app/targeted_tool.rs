@@ -7,6 +7,7 @@
 use super::state::Tool;
 use super::{Editor, history::Step, theme};
 use crate::app::Module;
+use crate::app::design::{Tone, radius};
 use crate::develop::targeted::{DRAG_RATE, HslChannel, Target, TargetSample, TargetWeights};
 use crate::model::recipe::Recipe;
 use crate::model::recipe::Treatment;
@@ -301,17 +302,17 @@ pub(super) fn target_button(ui: &mut egui::Ui, rect: Rect, active: bool, tip: &s
         .interact(rect, ui.id().with(("targeted", tip)), Sense::click())
         .on_hover_text(tip);
     let fill = if active {
-        palette.gray(72)
+        palette.tone(Tone::PRESSED)
     } else if response.hovered() {
-        palette.gray(50)
+        palette.tone(Tone::OUTLINE)
     } else {
         Color32::TRANSPARENT
     };
-    ui.painter().rect_filled(rect, 3., fill);
-    let ink = palette.gray(if active || response.hovered() {
-        235
+    ui.painter().rect_filled(rect, radius::CONTROL, fill);
+    let ink = palette.tone(if active || response.hovered() {
+        Tone::STRONG
     } else {
-        175
+        Tone::LABEL
     });
     target_icon(ui.painter(), rect.center(), rect.height() * 0.32, ink);
     response.clicked()

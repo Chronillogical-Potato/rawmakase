@@ -5,9 +5,10 @@
 //! stays the same folder, its photos follow.
 use super::super::{Editor, widgets};
 use super::{State, Verb};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::catalog::file_ops::FileOp;
 use crate::catalog::{CatalogLocation, RootId};
-use eframe::egui::{self, Vec2};
+use eframe::egui;
 
 /// Move Folder…, while where it goes is chosen. Holds nothing.
 pub(super) struct ChoosingParent {
@@ -250,21 +251,21 @@ impl Editor {
         let mut go = None;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("move-folder"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(460.);
                 ui.label(
                     egui::RichText::new(format!("Move Folder “{}”", c.name))
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 ui.add(
                     egui::TextEdit::singleline(&mut c.filter)
                         .hint_text("Filter folders")
                         .desired_width(f32::INFINITY),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 egui::ScrollArea::vertical()
                     .max_height(320.)
                     .auto_shrink([false, true])
@@ -283,22 +284,22 @@ impl Editor {
                         if rows.is_empty() {
                             ui.label(
                                 egui::RichText::new("No folder is named so.")
-                                    .size(12.)
-                                    .color(palette.gray(140)),
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::MUTED)),
                             );
                         }
                     });
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new(
                         "To another drive, a folder is copied, checked, and then put in the Trash.",
                     )
-                    .size(12.)
-                    .color(palette.gray(140)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }

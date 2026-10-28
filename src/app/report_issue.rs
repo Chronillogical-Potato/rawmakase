@@ -13,6 +13,7 @@ use super::Editor;
 use super::shortcuts::icon_button;
 use super::widgets::{modal_frame, primary_button};
 use super::worker::Event;
+use crate::app::design::{self, Tone, button, inset, radius, space, text};
 use crate::app::theme;
 use crate::diagnostics::{self, Build, System};
 use eframe::egui::{self, Color32};
@@ -187,7 +188,7 @@ impl Editor {
         let (mut copy, mut open, mut close) = (false, false, false);
         let response = egui::Modal::new(egui::Id::new("report-an-issue"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 24)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(WIDTH);
                 ui.horizontal(|ui| {
@@ -195,8 +196,8 @@ impl Editor {
                     ui.set_min_height(26.);
                     ui.label(
                         egui::RichText::new("Report an Issue")
-                            .size(17.)
-                            .color(palette.gray(236)),
+                            .size(text::TITLE)
+                            .color(palette.tone(Tone::STRONG)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // The cross, not its hover square, lines up with the
@@ -205,7 +206,7 @@ impl Editor {
                         close = icon_button(ui, super::icons::Icon::Close, "Close · Esc").clicked();
                     });
                 });
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(
@@ -213,13 +214,13 @@ impl Editor {
                              open an issue on GitHub and paste this into its \
                              \u{201c}System information\u{201d} field.",
                         )
-                        .size(12.5)
+                        .size(text::LABEL)
                         .line_height(Some(19.))
-                        .color(palette.gray(165)),
+                        .color(palette.tone(Tone::LABEL)),
                     )
                     .wrap(),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 // What the window has left once the rest of the dialog is
                 // laid out: its margins, title, introduction and footer,
                 // and a note of up to three lines once one shows.
@@ -227,14 +228,14 @@ impl Editor {
                 let height = (ctx.content_rect().height() - reserved).clamp(120., 460.);
                 system_info(ui, &palette, &dialog.text, height, collecting);
                 if let Some(note) = &dialog.note {
-                    ui.add_space(12.);
+                    ui.add_space(space::L);
                     note_ui(ui, &palette, note, self.report_issue.build.version);
                 }
-                ui.add_space(20.);
+                ui.add_space(space::XXL);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     ui.hyperlink_to(
-                        egui::RichText::new("Search existing issues").size(12.5),
+                        egui::RichText::new("Search existing issues").size(text::LABEL),
                         diagnostics::SEARCH_ISSUES,
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -289,26 +290,30 @@ fn system_info(
     const GROUPS: [&str; 2] = ["Installation", "GPU"];
     const NAME_WIDTH: f32 = 112.;
     egui::Frame::new()
-        .fill(palette.gray(24))
-        .stroke(egui::Stroke::new(1., palette.gray(44)))
-        .corner_radius(8.)
-        .inner_margin(egui::Margin::symmetric(16, 12))
+        .fill(palette.tone(Tone::WINDOW))
+        .stroke(egui::Stroke::new(1., palette.tone(Tone::RAISED)))
+        .corner_radius(radius::CARD)
+        .inner_margin(inset::CARD)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             egui::ScrollArea::vertical()
                 .max_height(height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 6.;
-                    let mono = egui::FontId::monospace(12.);
+                    ui.spacing_mut().item_spacing.y = space::S;
+                    let mono = egui::FontId::monospace(text::LABEL);
                     for (i, line) in text.lines().enumerate() {
                         let (name, value) = line.split_once(": ").unwrap_or((line, ""));
                         if i > 0 && GROUPS.contains(&name) {
-                            ui.add_space(14.);
+                            ui.add_space(space::XL);
                         }
                         ui.horizontal_top(|ui| {
                             let width = ui
-                                .label(egui::RichText::new(name).size(12.).color(palette.gray(135)))
+                                .label(
+                                    egui::RichText::new(name)
+                                        .size(text::LABEL)
+                                        .color(palette.tone(Tone::MUTED)),
+                                )
                                 .rect
                                 .width();
                             ui.add_space((NAME_WIDTH - width).max(0.));
@@ -317,7 +322,7 @@ fn system_info(
                                 egui::Label::new(
                                     egui::RichText::new(value)
                                         .font(mono.clone())
-                                        .color(palette.gray(222)),
+                                        .color(palette.tone(Tone::TEXT)),
                                 )
                                 .selectable(true)
                                 .wrap(),
@@ -325,13 +330,13 @@ fn system_info(
                         });
                     }
                     if collecting {
-                        ui.add_space(8.);
+                        ui.add_space(space::M);
                         ui.horizontal(|ui| {
                             super::widgets::spinner(ui, 12.);
                             ui.label(
                                 egui::RichText::new("Collecting system details…")
-                                    .size(12.)
-                                    .color(palette.gray(150)),
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::SECONDARY)),
                             );
                         });
                     }
@@ -345,7 +350,7 @@ fn note_ui(ui: &mut egui::Ui, palette: &theme::Palette, note: &Note, version: &s
     let (text, color, link) = match note {
         Note::Copied => (
             "Copied to the clipboard.".to_string(),
-            palette.gray(200),
+            palette.tone(Tone::SOFT),
             false,
         ),
         // The launcher only starts: whether a browser then opens isn't
@@ -354,7 +359,7 @@ fn note_ui(ui: &mut egui::Ui, palette: &theme::Palette, note: &Note, version: &s
             "Copied. Paste it into \u{201c}System information\u{201d} in the issue. \
              If no browser opened, go to:"
                 .to_string(),
-            palette.gray(200),
+            palette.tone(Tone::SOFT),
             true,
         ),
         Note::NotOpened(error) => (
@@ -367,7 +372,7 @@ fn note_ui(ui: &mut egui::Ui, palette: &theme::Palette, note: &Note, version: &s
         ),
     };
     ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.;
+        ui.spacing_mut().item_spacing.x = space::M;
         if !matches!(note, Note::NotOpened(_)) {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(14., 16.), egui::Sense::hover());
             super::icons::paint_at(
@@ -379,10 +384,12 @@ fn note_ui(ui: &mut egui::Ui, palette: &theme::Palette, note: &Note, version: &s
             );
         }
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 2.;
-            ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(color)).wrap());
+            ui.spacing_mut().item_spacing.y = space::XXS;
+            ui.add(
+                egui::Label::new(egui::RichText::new(text).size(text::LABEL).color(color)).wrap(),
+            );
             if link {
-                ui.hyperlink_to(egui::RichText::new(&url).size(12.), &url);
+                ui.hyperlink_to(egui::RichText::new(&url).size(text::LABEL), &url);
             }
         });
     });

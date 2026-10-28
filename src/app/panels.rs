@@ -3,6 +3,7 @@
 //! launches. Hiding a panel changes only whether it is drawn, never what it holds.
 use super::Editor;
 use crate::app::Module;
+use crate::app::design::{Tone, radius};
 use eframe::egui::{self, Key, Modifiers};
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -373,9 +374,14 @@ impl Editor {
         let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(26.), egui::Sense::hover());
         let response = ui.interact(rect, toggle_id(panel), egui::Sense::click());
         if response.hovered() {
-            ui.painter().rect_filled(rect, 4., palette.gray(45));
+            ui.painter()
+                .rect_filled(rect, radius::CONTROL, palette.tone(Tone::RAISED));
         }
-        let color = palette.gray(if response.hovered() { 235 } else { 160 });
+        let color = palette.tone(if response.hovered() {
+            Tone::STRONG
+        } else {
+            Tone::SECONDARY
+        });
         super::icons::paint_at(ui.painter(), icon, rect.center(), 15., color);
         if response
             .on_hover_text(format!("{verb} {name}{key}"))

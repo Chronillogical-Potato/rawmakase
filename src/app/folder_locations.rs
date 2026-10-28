@@ -7,6 +7,7 @@ use super::preferences::{gap, group, hint};
 use super::theme;
 use super::widgets::{confirm_modal, form_row, pretty_path};
 use super::worker::Event;
+use crate::app::design::{Tone, inset, radius, space, text};
 use crate::catalog::{
     Ambiguity, Catalog, CatalogLocation, Choice, Conflict, Override, Overrides, RootId,
     RootLocations,
@@ -136,9 +137,9 @@ impl Editor {
         });
         let found = view.found.lock().unwrap().clone();
         let status = |path: &Path| match found.get(path) {
-            Some(true) => ("Found", palette.gray(150)),
+            Some(true) => ("Found", palette.tone(Tone::SECONDARY)),
             Some(false) => ("Offline", egui::Color32::from_rgb(222, 150, 90)),
-            None => ("Checking…", palette.gray(120)),
+            None => ("Checking…", palette.tone(Tone::FAINT)),
         };
         enum Click {
             Change(FolderAction),
@@ -150,11 +151,11 @@ impl Editor {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| root.original.clone());
-            ui.add_space(6.);
+            ui.add_space(space::S);
             egui::Frame::new()
-                .fill(palette.gray(36))
-                .corner_radius(6.)
-                .inner_margin(egui::Margin::symmetric(12, 8))
+                .fill(palette.tone(Tone::PANEL))
+                .corner_radius(radius::CARD)
+                .inner_margin(inset::CARD)
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let note = if root.location.is_some() {
@@ -177,9 +178,9 @@ impl Editor {
                         None => {}
                     }
                     for over in &root.overrides {
-                        ui.add_space(6.);
+                        ui.add_space(space::S);
                         ui.horizontal(|ui| {
-                            ui.add_space(16.);
+                            ui.add_space(space::XL);
                             ui.vertical(|ui| {
                                 let note = format!("Folder of {name}, located separately");
                                 match entry(
@@ -210,15 +211,15 @@ impl Editor {
                         } else {
                             format!("{relative} at ")
                         };
-                        ui.add_space(4.);
+                        ui.add_space(space::XS);
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(format!(
                                     "On {computer}: {what}{}",
                                     pretty_path(path)
                                 ))
-                                .size(11.)
-                                .color(palette.gray(120)),
+                                .size(text::SMALL)
+                                .color(palette.tone(Tone::FAINT)),
                             )
                             .truncate(),
                         );
@@ -500,15 +501,19 @@ fn entry(
         if ui.button("Change…").clicked() {
             clicked = Some(Button::Change);
         }
-        ui.add_space(6.);
-        ui.label(egui::RichText::new(status.0).size(11.).color(status.1));
+        ui.add_space(space::S);
+        ui.label(
+            egui::RichText::new(status.0)
+                .size(text::SMALL)
+                .color(status.1),
+        );
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(name)
-                        .size(13.)
+                        .size(text::BODY)
                         .strong()
-                        .color(palette.gray(230)),
+                        .color(palette.tone(Tone::TEXT)),
                 )
                 .truncate(),
             );
@@ -517,13 +522,17 @@ fn entry(
     ui.add(
         egui::Label::new(
             egui::RichText::new(pretty_path(path))
-                .size(12.)
-                .color(palette.gray(200)),
+                .size(text::LABEL)
+                .color(palette.tone(Tone::SOFT)),
         )
         .truncate(),
     )
     .on_hover_text(path.display().to_string());
-    ui.label(egui::RichText::new(note).size(11.).color(palette.gray(125)));
+    ui.label(
+        egui::RichText::new(note)
+            .size(text::SMALL)
+            .color(palette.tone(Tone::FAINT)),
+    );
     clicked
 }
 /// The catalog at `location` opened again after a folder change, with what

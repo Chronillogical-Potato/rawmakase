@@ -5,6 +5,7 @@
 //! Delete preset… for a saved template. A saved template is acted on by the
 //! one chosen here, never found again by its tokens. Each change is saved
 //! before the menu shows it (`SavedTemplates`); one that can't be is said.
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::app::theme;
 use crate::app::widgets::{modal_frame, primary_button};
 use crate::export_settings::{BUILTIN, Builtin, Naming, SavedTemplate, SavedTemplates, builtin};
@@ -194,7 +195,7 @@ impl Presets {
         let mut picked: Option<(Preset, String)> = None;
         let mut action = None;
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Preset:").color(palette.gray(150)));
+            ui.label(egui::RichText::new("Preset:").color(palette.tone(Tone::SECONDARY)));
             egui::ComboBox::from_id_salt("filename-template-preset")
                 .width(300.)
                 .selected_text(shown)
@@ -263,13 +264,13 @@ impl Presets {
         if let Err(why) = &library.0 {
             ui.label(
                 egui::RichText::new(format!("Saved presets can't be changed: {why}"))
-                    .size(12.)
+                    .size(text::LABEL)
                     .color(palette.warning()),
             );
         } else if let Some(message) = &self.message {
             ui.label(
                 egui::RichText::new(message)
-                    .size(12.)
+                    .size(text::LABEL)
                     .color(Color32::from_rgb(235, 110, 100)),
             );
         }
@@ -315,10 +316,10 @@ impl Presets {
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("filename-preset-prompt"))
             .backdrop_color(Color32::from_black_alpha(60))
-            .frame(modal_frame(&palette).inner_margin(20))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(360.);
-                ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
+                ui.spacing_mut().item_spacing = Vec2::new(space::M, space::M);
                 let (title, action) = match &*prompt {
                     Prompt::New(_) => ("New Preset".to_string(), "Create"),
                     Prompt::Rename { old, .. } => (format!("Rename Preset “{old}”"), "Rename"),
@@ -328,8 +329,8 @@ impl Presets {
                 };
                 ui.label(
                     egui::RichText::new(title)
-                        .size(14.)
-                        .color(palette.gray(236)),
+                        .size(text::LARGE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
                 match prompt {
                     Prompt::New(name) | Prompt::Rename { name, .. } => {
@@ -357,7 +358,7 @@ impl Presets {
                         if let Some(problem) = &problem {
                             ui.label(
                                 egui::RichText::new(problem)
-                                    .size(12.)
+                                    .size(text::LABEL)
                                     .color(palette.warning()),
                             );
                         }
@@ -365,14 +366,14 @@ impl Presets {
                     Prompt::Delete(_) => {
                         ui.label(
                             egui::RichText::new("This can't be undone.")
-                                .size(12.)
-                                .color(palette.gray(150)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::SECONDARY)),
                         );
                     }
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(16., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     let ok = problem.is_none();
                     confirm = ui
                         .add_enabled_ui(ok, |ui| primary_button(ui, action))

@@ -3,6 +3,7 @@ use super::before_after::{Compare, Transfer};
 use super::dialogs::FileDialog;
 use super::icons::Icon;
 use super::widgets::{menu_item, menu_separator, toolbar_action, toolbar_divider};
+use crate::app::design::{Tone, size, space, text};
 use crate::app::theme;
 use crate::model::recipe::Recipe;
 use eframe::egui::{self, Stroke, Vec2};
@@ -24,20 +25,21 @@ impl Editor {
                         left: super::workspace::PHOTO_MARGIN as i8,
                         right: super::workspace::PHOTO_MARGIN as i8,
                         top: 0,
-                        bottom: 10,
+                        bottom: space::L as i8,
                     }),
             )
             .show_separator_line(false)
             .show(ui, |ui| {
-                ui.spacing_mut().button_padding = Vec2::new(12., 8.);
-                ui.spacing_mut().interact_size.y = 32.;
-                ui.spacing_mut().item_spacing.x = 8.;
+                ui.spacing_mut().button_padding = Vec2::new(space::L, space::M);
+                ui.spacing_mut().interact_size.y = size::TOOL;
+                ui.spacing_mut().item_spacing.x = space::M;
                 ui.visuals_mut().button_frame = true;
-                ui.visuals_mut().widgets.inactive.bg_fill = palette.gray(38);
-                ui.visuals_mut().widgets.inactive.weak_bg_fill = palette.gray(38);
-                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::new(1., palette.gray(53));
-                ui.visuals_mut().widgets.hovered.bg_fill = palette.gray(52);
-                ui.visuals_mut().widgets.hovered.weak_bg_fill = palette.gray(52);
+                ui.visuals_mut().widgets.inactive.bg_fill = palette.tone(Tone::FIELD);
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = palette.tone(Tone::FIELD);
+                ui.visuals_mut().widgets.inactive.bg_stroke =
+                    Stroke::new(1., palette.tone(Tone::OUTLINE));
+                ui.visuals_mut().widgets.hovered.bg_fill = palette.tone(Tone::OUTLINE);
+                ui.visuals_mut().widgets.hovered.weak_bg_fill = palette.tone(Tone::OUTLINE);
                 ui.horizontal(|ui| {
                     if toolbar_action(ui, "", 32., false, can_undo, 1)
                         .on_hover_text("Undo · Ctrl+Z")
@@ -209,7 +211,7 @@ impl Editor {
                             }
                         });
                         if self.load.is_running() || self.preview.task.is_running() {
-                            ui.add_space(10.);
+                            ui.add_space(space::L);
                             super::widgets::spinner(ui, 14.);
                         }
                     });
@@ -321,13 +323,17 @@ fn photo_menu_button(ui: &mut egui::Ui) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let response = toolbar_action(ui, "", 82., false, true, 0)
         .on_hover_text("Copy, paste and sync settings, presets and export");
-    let color = palette.gray(if response.hovered() { 235 } else { 175 });
+    let color = palette.tone(if response.hovered() {
+        Tone::STRONG
+    } else {
+        Tone::LABEL
+    });
     let rect = response.rect;
     ui.painter().text(
         rect.left_center() + Vec2::new(14., 0.),
         egui::Align2::LEFT_CENTER,
         "Photo",
-        egui::FontId::proportional(12.),
+        egui::FontId::proportional(text::LABEL),
         color,
     );
     super::icons::paint_at(

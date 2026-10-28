@@ -9,6 +9,7 @@ use super::Editor;
 use super::overlay;
 use super::theme;
 use super::widgets::{segmented, slider_with};
+use crate::app::design::{Tone, space, text};
 use crate::develop::{ViewMapping, retouch};
 use crate::model::retouch::{RetouchMode, RetouchOp, RetouchShape};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
@@ -410,7 +411,7 @@ impl Editor {
                 }
             }
         });
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         let (mut size, mut feather, mut opacity) = match selected {
             Some(i) => {
                 let op = &self.document.edit.recipe().retouch[i];
@@ -455,7 +456,7 @@ impl Editor {
             op.set_radius(size);
             (op.feather, op.opacity) = (feather, opacity);
         }
-        ui.add_space(6.);
+        ui.add_space(space::S);
         indented(ui, |ui| {
             ui.checkbox(&mut self.view.retouch.visualize, "Visualize Spots")
                 .on_hover_text("A: show fine detail in black and white, so dust stands out");
@@ -475,7 +476,7 @@ impl Editor {
             ui.checkbox(&mut self.view.retouch.hide_pins, "Hide pins")
                 .on_hover_text("H");
         });
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         hint(
             ui,
             "Click a spot to remove it · drag to paint · ⌘/Ctrl-drag to pick the source",
@@ -484,7 +485,7 @@ impl Editor {
             ui,
             "[ ] size · ⇧[ ] feather · / new source · Delete removes",
         );
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         indented(ui, |ui| {
             let w = (ui.available_width() - 4.) / 2.;
             let any = !self.document.edit.recipe().retouch.is_empty();
@@ -562,8 +563,8 @@ pub(super) fn control_label(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mu
             rect.right_center(),
             egui::Align2::RIGHT_CENTER,
             label,
-            egui::FontId::proportional(11.),
-            theme::palette(ui.ctx()).gray(190),
+            egui::FontId::proportional(text::SMALL),
+            theme::palette(ui.ctx()).tone(Tone::SOFT),
         );
         add(ui);
     });
@@ -580,8 +581,8 @@ pub(super) fn hint(ui: &mut egui::Ui, text: &str) {
         ui.add(
             egui::Label::new(
                 egui::RichText::new(text)
-                    .size(10.)
-                    .color(theme::palette(ui.ctx()).gray(125)),
+                    .size(text::MICRO)
+                    .color(theme::palette(ui.ctx()).tone(Tone::FAINT)),
             )
             .wrap(),
         );

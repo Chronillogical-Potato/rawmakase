@@ -5,6 +5,7 @@
 //! template; Cancel drops it. A file name has no line breaks, so the
 //! template has none either.
 use super::presets::{Library, Preset, Presets};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::app::theme;
 use crate::app::widgets::{modal_frame, primary_button};
 use crate::export_settings::{Menu, Span, TokenTemplate, menu as tokens_in};
@@ -151,14 +152,14 @@ impl NameEditor {
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("filename-template-editor"))
             .backdrop_color(Color32::from_black_alpha(100))
-            .frame(modal_frame(&palette).inner_margin(20))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(560.);
-                ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
+                ui.spacing_mut().item_spacing = Vec2::new(space::M, space::M);
                 ui.label(
                     egui::RichText::new("Filename Template Editor")
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
                 let tokens = TokenTemplate::from_display(&editor.text)
                     .ok()
@@ -167,10 +168,12 @@ impl NameEditor {
                     editor.text = TokenTemplate::parse(&tokens).to_display();
                 }
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Example:").color(palette.gray(150)));
+                    ui.label(egui::RichText::new("Example:").color(palette.tone(Tone::SECONDARY)));
                     ui.add(
-                        egui::Label::new(egui::RichText::new(&example.0).color(palette.gray(225)))
-                            .truncate(),
+                        egui::Label::new(
+                            egui::RichText::new(&example.0).color(palette.tone(Tone::TEXT)),
+                        )
+                        .truncate(),
                     );
                 });
                 let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap: f32| {
@@ -191,14 +194,18 @@ impl NameEditor {
                         for e in errors.iter().take(3) {
                             ui.label(
                                 egui::RichText::new(&e.message)
-                                    .size(12.)
+                                    .size(text::LABEL)
                                     .color(Color32::from_rgb(235, 110, 100)),
                             );
                         }
                     }
                     Ok(template) => {
                         for note in &example.1 {
-                            ui.label(egui::RichText::new(note).size(12.).color(palette.gray(140)));
+                            ui.label(
+                                egui::RichText::new(note)
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::MUTED)),
+                            );
                         }
                         if !template.names_each_photo() {
                             ui.label(
@@ -206,27 +213,27 @@ impl NameEditor {
                                     "Without Filename or a Sequence #, photos may share a name: \
                                      those after the first get “-2”, “-3”…",
                                 )
-                                .size(12.)
-                                .color(palette.gray(140)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::MUTED)),
                             );
                         }
                     }
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 let mut chosen = editor.chosen;
                 let mut inserted = None;
                 for (group, menus) in GROUPS {
                     ui.label(
                         egui::RichText::new(group)
-                            .size(12.)
-                            .color(palette.gray(200)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::SOFT)),
                     );
                     for &m in menus {
                         let slot = MENUS.iter().position(|x| *x == m).unwrap_or(0);
                         let defs: Vec<_> = tokens_in(m).collect();
                         let index = chosen[slot].min(defs.len().saturating_sub(1));
                         ui.horizontal(|ui| {
-                            ui.add_space(16.);
+                            ui.add_space(space::XL);
                             egui::ComboBox::from_id_salt(("filename-token-menu", slot))
                                 .width(260.)
                                 .selected_text(defs.get(index).map_or("", |d| d.label))
@@ -247,10 +254,10 @@ impl NameEditor {
                 if let Some(label) = inserted {
                     insert(ui.ctx(), &mut editor.text, label);
                 }
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().button_padding = Vec2::new(18., 6.);
+                        ui.spacing_mut().button_padding = button::DIALOG;
                         let valid = TokenTemplate::from_display(&editor.text).is_ok();
                         done = ui
                             .add_enabled_ui(valid, |ui| primary_button(ui, "Done"))
@@ -284,16 +291,16 @@ impl NameEditor {
 /// The editor's text laid out: tokens as chips, tokens RAWmakase doesn't
 /// fill greyed, mistakes underlined.
 fn layout(text: &str, wrap: f32, palette: &theme::Palette) -> LayoutJob {
-    let font = egui::FontId::proportional(14.);
+    let font = egui::FontId::proportional(text::LARGE);
     let format = |span: Span| match span {
-        Span::Text => TextFormat::simple(font.clone(), palette.gray(225)),
+        Span::Text => TextFormat::simple(font.clone(), palette.tone(Tone::TEXT)),
         Span::Token => TextFormat {
             background: palette.accent(),
             ..TextFormat::simple(font.clone(), palette.on_accent())
         },
         Span::Inert => TextFormat {
-            background: palette.gray(70),
-            ..TextFormat::simple(font.clone(), palette.gray(190))
+            background: palette.tone(Tone::PRESSED),
+            ..TextFormat::simple(font.clone(), palette.tone(Tone::SOFT))
         },
         Span::Error => TextFormat {
             underline: Stroke::new(1.5, Color32::from_rgb(235, 110, 100)),

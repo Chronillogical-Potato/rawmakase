@@ -2,6 +2,7 @@
 //! alphabetically. + saves the current state and starts naming it; clicking one
 //! applies it as a History step; its menu updates, renames or deletes it.
 use super::{Editor, history::Step, theme};
+use crate::app::design::{Tone, radius, text};
 use crate::catalog::{Snapshot, SnapshotSettings};
 use eframe::egui::{self, Sense, Vec2};
 
@@ -67,8 +68,8 @@ impl Editor {
                 if panel.list.is_empty() {
                     ui.label(
                         egui::RichText::new("+ saves the photo as it is now")
-                            .size(11.)
-                            .color(theme::palette(ui.ctx()).gray(125)),
+                            .size(text::SMALL)
+                            .color(theme::palette(ui.ctx()).tone(Tone::FAINT)),
                     );
                 }
                 for snapshot in &panel.list {
@@ -246,7 +247,8 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, 3., palette.gray(43));
+        ui.painter()
+            .rect_filled(rect, radius::CONTROL, palette.tone(Tone::RAISED));
     }
     ui.painter()
         .with_clip_rect(rect.shrink2(Vec2::new(8., 0.)))
@@ -254,8 +256,8 @@ fn snapshot_row(ui: &mut egui::Ui, name: &str) -> egui::Response {
             rect.left_center() + Vec2::new(8., 0.),
             egui::Align2::LEFT_CENTER,
             name,
-            egui::FontId::proportional(12.),
-            palette.gray(205),
+            egui::FontId::proportional(text::LABEL),
+            palette.tone(Tone::SOFT),
         );
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)

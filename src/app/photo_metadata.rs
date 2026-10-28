@@ -1,4 +1,5 @@
 //! Lightroom-compatible catalog metadata and keyboard commands.
+use crate::app::design::{Tone, size, space, text};
 use crate::app::theme;
 use crate::catalog::Photo;
 use eframe::egui::{self, Color32, Key};
@@ -110,12 +111,12 @@ pub(super) fn label_color(palette: &theme::Palette, label: &str) -> Option<Color
         "Blue" => Color32::from_rgb(87, 143, 207),
         "Purple" => Color32::from_rgb(164, 111, 194),
         // Lightroom stores label text; custom label-set colors cannot be inferred.
-        _ => palette.gray(220),
+        _ => palette.tone(Tone::TEXT),
     })
 }
 
 /// The height of a rating, flag or label control.
-pub(crate) const CONTROLS_HEIGHT: f32 = 22.;
+pub(crate) const CONTROLS_HEIGHT: f32 = size::CONTROL;
 /// The icon the controls' menu button shows.
 const MENU_ICON: f32 = 14.;
 /// The height a row of the controls takes: the controls themselves, or the
@@ -160,15 +161,15 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
                     rect.center(),
                     Align2::CENTER_CENTER,
                     "★",
-                    FontId::proportional(14.),
-                    palette.gray(match (lit, hovered.is_some()) {
-                        (true, false) => 230,
-                        (true, true) => 175,
-                        _ => 72,
+                    FontId::proportional(text::LARGE),
+                    palette.tone(match (lit, hovered.is_some()) {
+                        (true, false) => Tone::TEXT,
+                        (true, true) => Tone::LABEL,
+                        _ => Tone::PRESSED,
                     }),
                 );
             }
-            ui.add_space(12.);
+            ui.add_space(space::L);
             for (flag, tip) in [(1, "Pick · P"), (-1, "Reject · X")] {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(24., CONTROLS_HEIGHT), Sense::click());
@@ -177,7 +178,7 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
                     ui.painter().rect_filled(
                         rect.shrink2(Vec2::new(2., 2.)),
                         3.,
-                        palette.gray(if active { 70 } else { 50 }),
+                        palette.tone(if active { Tone::PRESSED } else { Tone::OUTLINE }),
                     );
                 }
                 flag_icon(ui.painter(), &palette, rect.center(), flag, active);
@@ -185,7 +186,7 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
                     edit = Some(Edit::Flag(if active { 0 } else { flag }));
                 }
             }
-            ui.add_space(12.);
+            ui.add_space(space::L);
             for label in LABELS {
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::new(18., CONTROLS_HEIGHT), Sense::click());
@@ -200,7 +201,10 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
                     ui.painter().rect_stroke(
                         chip.expand(2.),
                         3.,
-                        Stroke::new(1.2, palette.gray(if active { 235 } else { 140 })),
+                        Stroke::new(
+                            1.2,
+                            palette.tone(if active { Tone::STRONG } else { Tone::MUTED }),
+                        ),
                         StrokeKind::Outside,
                     );
                 }
@@ -217,9 +221,9 @@ pub(crate) fn controls(ui: &mut egui::Ui, photo: &Photo, labels: &[String]) -> O
                 .filter(|l| !LABELS.contains(&l.as_str()))
                 .collect();
             // Always shown, so a photo's label never changes the row's width.
-            ui.add_space(4.);
+            ui.add_space(space::XS);
             ui.menu_image_button(
-                crate::app::icons::Icon::More.image(palette.gray(200), MENU_ICON),
+                crate::app::icons::Icon::More.image(palette.tone(Tone::SOFT), MENU_ICON),
                 |ui| {
                     for label in custom {
                         if ui.selectable_label(photo.label == *label, label).clicked() {
@@ -255,9 +259,19 @@ pub(super) fn flag_icon(
     let (icon, color) = if flag < 0 {
         (Icon::Rejected, Color32::from_rgb(214, 78, 66))
     } else if flag > 0 {
-        (Icon::Flag, palette.gray(if strong { 245 } else { 200 }))
+        (
+            Icon::Flag,
+            palette.tone(if strong { Tone::BRIGHT } else { Tone::SOFT }),
+        )
     } else {
-        (Icon::Flag, palette.gray(if strong { 150 } else { 110 }))
+        (
+            Icon::Flag,
+            palette.tone(if strong {
+                Tone::SECONDARY
+            } else {
+                Tone::DISABLED
+            }),
+        )
     };
     icons::paint_at(painter, icon, at, 13., color);
 }
@@ -344,7 +358,7 @@ mod tests {
         let palette = theme::Palette::DEFAULT;
         assert_eq!(
             label_color(&palette, "Client approved"),
-            Some(palette.gray(220))
+            Some(palette.tone(Tone::TEXT))
         );
         assert_eq!(label_color(&palette, ""), None);
         assert_ne!(label_color(&palette, "Red"), label_color(&palette, "Green"));

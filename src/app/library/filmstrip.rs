@@ -6,6 +6,7 @@ use super::grid::filter_caption;
 use super::selection::{Mark, Selection};
 use super::views::View;
 use super::{Action, Library, cell};
+use crate::app::design::{Tone, inset, radius, space, text};
 use crate::app::theme;
 use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Color32, Vec2};
@@ -17,7 +18,7 @@ pub(crate) const HEIGHT: f32 = 128.;
 pub(super) const ID: &str = "filmstrip";
 /// A card's inset in its cell: cards are twice this apart, and the strip
 /// pads its ends by it so the first and last are as far from its edges.
-const CARD_INSET: f32 = 2.;
+const CARD_INSET: f32 = space::XXS;
 
 /// The module the strip is shown in. Both mark the whole selection; the Library lets
 /// the view shown take a click, and Develop marks the photo it has open as active.
@@ -106,7 +107,7 @@ impl Library {
     ) -> Outcome {
         egui::Panel::bottom(ID)
             .exact_size(HEIGHT)
-            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).gray(26)))
+            .frame(egui::Frame::new().fill(theme::palette(ui.ctx()).tone(Tone::BAR)))
             .show(ui, |ui| self.filmstrip(ui, current, module))
             .inner
     }
@@ -200,13 +201,13 @@ impl Library {
         let mut remeasured = false;
         // In Develop on the photo area's margin, so its ends line up with the
         // toolbar's; in the Library with its view bar's.
-        let inset = if library {
-            10
+        let side = if library {
+            inset::BAR.left
         } else {
             crate::app::workspace::PHOTO_MARGIN as i8
         };
         egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(inset, 3))
+            .inner_margin(egui::Margin::symmetric(side, space::XS as i8))
             .show(ui, |ui| {
                 // As tall as the rating and label controls on the right, so
                 // the captions placed before them centre on the same line,
@@ -221,8 +222,8 @@ impl Library {
                     |ui| {
                         ui.label(
                             egui::RichText::new(self.source_name())
-                                .size(11.)
-                                .color(palette.gray(200)),
+                                .size(text::SMALL)
+                                .color(palette.tone(Tone::SOFT)),
                         );
                         let selected = self.selection.selected.len();
                         ui.label(filter_caption(
@@ -425,17 +426,17 @@ fn paint_cell(
 ) {
     let active = mark == Mark::Active;
     let cell = rect.shrink(CARD_INSET);
-    let base = palette.gray(match mark {
-        Mark::Active => 120,
-        Mark::Selected => 78,
-        Mark::None if hovered => 58,
-        Mark::None => 40,
+    let base = palette.tone(match mark {
+        Mark::Active => Tone::FAINT,
+        Mark::Selected => Tone::OUTLINE_STRONG,
+        Mark::None if hovered => Tone::HOVER,
+        Mark::None => Tone::FIELD,
     });
     let fill = crate::app::photo_metadata::label_color(palette, &photo.label)
         .map_or(base, |label| {
             base.lerp_to_gamma(label, if mark == Mark::None { 0.25 } else { 0.35 })
         });
-    painter.rect_filled(cell, 2., fill);
+    painter.rect_filled(cell, radius::SMALL, fill);
     let strip = 14.;
     if let Some(texture) = texture {
         let area = egui::Rect::from_min_max(
@@ -472,8 +473,8 @@ fn paint_cell(
             egui::pos2(x, y),
             egui::Align2::LEFT_CENTER,
             "★".repeat(photo.rating as usize),
-            egui::FontId::proportional(9.),
-            palette.gray(if active { 30 } else { 200 }),
+            egui::FontId::proportional(text::MICRO),
+            palette.tone(if active { Tone::CARD } else { Tone::SOFT }),
         );
     }
 }

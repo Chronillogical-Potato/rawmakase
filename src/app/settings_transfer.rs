@@ -2,6 +2,7 @@
 //! photo to another by group (see `model::settings_groups`).
 use super::widgets::{modal_frame, primary_button};
 use super::{Editor, theme};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::model::recipe::Recipe;
 use crate::{
     camera_data::Metadata,
@@ -124,18 +125,18 @@ impl Editor {
         let mut choice = confirm.then_some(CopyChoice::Confirm);
         let response = egui::Modal::new(egui::Id::new("copy-settings"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 22)))
+            .frame(modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(COLUMN * 2. + GAP);
                 ui.label(
                     egui::RichText::new(dialog.purpose.title())
-                        .size(17.)
-                        .color(palette.gray(235)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(14.);
+                ui.add_space(space::XL);
                 if dialog.purpose == Transfer::NewPreset {
                     preset_fields(ui, &mut dialog.preset, &self.presets.library);
-                    ui.add_space(10.);
+                    ui.add_space(space::L);
                 }
                 // Sections fill the left column, then the right, in Lightroom's order.
                 // They scroll in a short window, so the buttons stay in view.
@@ -164,9 +165,9 @@ impl Editor {
                             }
                         });
                     });
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Check All").clicked() {
                         dialog.groups = GroupSelection::all();
                     }
@@ -307,7 +308,7 @@ fn section_checkboxes(
             }
         });
     }
-    ui.add_space(6.);
+    ui.add_space(space::S);
 }
 
 /// New Develop Preset's name and group, as form rows; the group can be typed or picked

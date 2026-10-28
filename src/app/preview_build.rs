@@ -11,6 +11,7 @@
 //! between photos and inside the decode and the render when cancelled, and is
 //! joined at exit within the shutdown deadline (docs/shutdown.md).
 use super::Editor;
+use crate::app::design::{Tone, radius, text};
 use crate::app::theme;
 use crate::app::widgets::plural;
 use crate::camera_data::{Decode, Demosaic, Metadata};
@@ -1035,7 +1036,7 @@ impl Editor {
                 "{} could not be built",
                 plural(progress.failed.len(), "preview", "previews")
             ))
-            .size(11.)
+            .size(text::SMALL)
             .color(Color32::from_rgb(230, 170, 100));
             let reasons = progress
                 .failed
@@ -1060,15 +1061,15 @@ impl Editor {
             egui::pos2(rect.left(), rect.top() + 7.),
             egui::Align2::LEFT_CENTER,
             format!("Building previews {current} / {}", progress.total),
-            egui::FontId::proportional(11.),
-            palette.gray(190),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(Tone::SOFT),
         );
         let fraction = progress.done as f32 / progress.total.max(1) as f32;
         let bar = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.top() + 17.),
             Vec2::new(rect.width() - 26., 4.),
         );
-        painter.rect_filled(bar, 2., palette.gray(50));
+        painter.rect_filled(bar, radius::SMALL, palette.tone(Tone::OUTLINE));
         painter.rect_filled(
             egui::Rect::from_min_size(bar.min, Vec2::new(bar.width() * fraction.min(1.), 4.)),
             2.,
@@ -1081,7 +1082,11 @@ impl Editor {
         let cancel = ui
             .interact(close, ui.id().with("cancel-preview-build"), Sense::click())
             .on_hover_text("Stop building previews");
-        let color = palette.gray(if cancel.hovered() { 235 } else { 150 });
+        let color = palette.tone(if cancel.hovered() {
+            Tone::STRONG
+        } else {
+            Tone::SECONDARY
+        });
         crate::app::icons::paint_at(
             ui.painter(),
             crate::app::icons::Icon::Close,

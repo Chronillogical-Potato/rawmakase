@@ -1,6 +1,7 @@
 //! Which drive each root folder is on, whether each drive is attached and
 //! its free space, checked off the UI thread so a hung network mount can't
 //! stall drawing; and Lightroom's volume header row that shows it.
+use crate::app::design::{Tone, radius, text};
 use crate::app::theme;
 use crate::platform::volume::Volume;
 use eframe::egui::{self, Color32, Vec2};
@@ -285,7 +286,7 @@ pub(super) fn volume_row(
     let painter = ui.painter();
     let hovered = response.hovered();
     if hovered {
-        painter.rect_filled(rect, 5., palette.gray(32));
+        painter.rect_filled(rect, radius::CONTROL, palette.tone(Tone::CARD));
     }
     let y = rect.center().y;
     // The dot over the folder tree's chevrons, the name over its folder
@@ -294,7 +295,11 @@ pub(super) fn volume_row(
     if attached == Some(true) {
         painter.circle_filled(dot, 3.5, Color32::from_rgb(110, 200, 90));
     } else {
-        let ring = palette.gray(if attached == Some(false) { 150 } else { 90 });
+        let ring = palette.tone(if attached == Some(false) {
+            Tone::SECONDARY
+        } else {
+            Tone::OUTLINE_STRONG
+        });
         painter.circle_stroke(dot, 3., egui::Stroke::new(1., ring));
     }
     let chevron = if open {
@@ -307,7 +312,7 @@ pub(super) fn volume_row(
         chevron,
         egui::pos2(rect.right() - 15.5, y),
         11.,
-        palette.gray(if hovered { 200 } else { 110 }),
+        palette.tone(if hovered { Tone::SOFT } else { Tone::DISABLED }),
     );
     let gb = |bytes: u64| bytes as f64 / 1e9;
     let detail = match (attached, space) {
@@ -321,9 +326,13 @@ pub(super) fn volume_row(
     let detail_color = if full {
         palette.warning()
     } else {
-        palette.gray(125)
+        palette.tone(Tone::FAINT)
     };
-    let detail = painter.layout_no_wrap(detail, egui::FontId::proportional(10.5), detail_color);
+    let detail = painter.layout_no_wrap(
+        detail,
+        egui::FontId::proportional(text::SMALL),
+        detail_color,
+    );
     let detail_left = rect.right() - 27. - detail.size().x;
     painter.galley(
         egui::pos2(detail_left, y - detail.size().y / 2.),
@@ -333,15 +342,15 @@ pub(super) fn volume_row(
     let name_left = rect.left() + 22.;
     let name = painter.layout_no_wrap(
         volume.name.clone(),
-        egui::FontId::proportional(12.5),
-        palette.gray(if hovered { 240 } else { 220 }),
+        egui::FontId::proportional(text::LABEL),
+        palette.tone(if hovered { Tone::STRONG } else { Tone::TEXT }),
     );
     painter
         .with_clip_rect(rect.with_min_x(name_left).with_max_x(detail_left - 8.))
         .galley(
             egui::pos2(name_left, y - name.size().y / 2.),
             name,
-            palette.gray(220),
+            palette.tone(Tone::TEXT),
         );
     let space_text = space
         .map(|(free, total)| format!(" · {:.0} of {:.0} GB free", gb(free), gb(total)))

@@ -11,6 +11,7 @@ use super::theme;
 use super::widgets::{
     SliderStyle, name_history_step, set_edit_context, setting_slider, slider_styled, slider_with,
 };
+use crate::app::design::{Tone, radius, size, space, text};
 use crate::model::params::ParameterId;
 use crate::model::recipe::Recipe;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -82,17 +83,17 @@ const LOCK_DISTANCE: f32 = 0.03;
 const PUCK_GRAB: f32 = 8.;
 /// Height of a region's caption and of each row under a small wheel.
 const CAPTION: f32 = 16.;
-const ROW: f32 = 22.;
+const ROW: f32 = size::CONTROL;
 
 /// The Color Grading panel's contents.
 pub(super) fn color_grading_ui(ui: &mut egui::Ui, r: &mut Recipe, view: &mut GradingView) {
     view_buttons(ui, view);
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     match *view {
         GradingView::ThreeWay => three_way(ui, r),
         GradingView::Single(region) => single(ui, r, region),
     }
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     set_edit_context(ui, "Color Grading");
     // The wheels' own sliders stay with them: their rails follow the wheel's color.
     for (id, default) in [
@@ -122,13 +123,16 @@ fn view_buttons(ui: &mut egui::Ui, view: &mut GradingView) {
             .on_hover_text(name);
         let selected = *view == option;
         if selected || response.hovered() {
-            ui.painter()
-                .rect_filled(rect, 4., palette.gray(if selected { 62 } else { 48 }));
+            ui.painter().rect_filled(
+                rect,
+                radius::CONTROL,
+                palette.tone(if selected { Tone::HOVER } else { Tone::OUTLINE }),
+            );
         }
-        let color = palette.gray(if selected || response.hovered() {
-            235
+        let color = palette.tone(if selected || response.hovered() {
+            Tone::STRONG
         } else {
-            165
+            Tone::LABEL
         });
         view_icon(ui.painter(), option, rect.center(), color);
         if response.clicked() {
@@ -152,11 +156,11 @@ fn view_icon(painter: &egui::Painter, view: GradingView, c: Pos2, color: Color32
             painter.circle_stroke(c, 6., stroke);
             return;
         }
-        GradingView::Single(Region::Shadows) => 25,
-        GradingView::Single(Region::Midtones) => 120,
-        GradingView::Single(Region::Highlights) => 235,
+        GradingView::Single(Region::Shadows) => Tone::BAR,
+        GradingView::Single(Region::Midtones) => Tone::FAINT,
+        GradingView::Single(Region::Highlights) => Tone::STRONG,
     };
-    painter.circle(c, 6., theme::palette(painter.ctx()).gray(fill), stroke);
+    painter.circle(c, 6., theme::palette(painter.ctx()).tone(fill), stroke);
 }
 
 /// Midtones above, Shadows and Highlights side by side below, each with its numbers.
@@ -172,7 +176,7 @@ fn three_way(ui: &mut egui::Ui, r: &mut Recipe) {
         Vec2::new(column, height),
     );
     region_column(ui, centre, r, Region::Midtones, diameter);
-    ui.add_space(6.);
+    ui.add_space(space::S);
     let (bottom, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let left = Rect::from_min_size(bottom.min, Vec2::new(column, height));
     let right = Rect::from_min_size(
@@ -191,8 +195,8 @@ fn region_column(ui: &mut egui::Ui, rect: Rect, r: &mut Recipe, region: Region, 
         Pos2::new(rect.center().x, rect.top() + CAPTION / 2.),
         egui::Align2::CENTER_CENTER,
         region.title(),
-        egui::FontId::proportional(11.),
-        theme::palette(ui.ctx()).gray(190),
+        egui::FontId::proportional(text::SMALL),
+        theme::palette(ui.ctx()).tone(Tone::SOFT),
     );
     let wheel_rect = Rect::from_min_size(
         Pos2::new(rect.center().x - diameter / 2., rect.top() + CAPTION),
@@ -224,7 +228,7 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
         grade,
         region,
     );
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     set_edit_context(ui, region.step());
     ui.push_id(("grade", region), |ui| {
         let mut degrees = grade[0] * 360.;
@@ -244,7 +248,7 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
             0. ..=1.,
             0.,
             None,
-            Some((palette.gray(90), tint)),
+            Some((palette.tone(Tone::OUTLINE_STRONG), tint)),
         );
         slider_with(
             ui,
@@ -253,7 +257,7 @@ fn single(ui: &mut egui::Ui, r: &mut Recipe, region: Region) {
             -1. ..=1.,
             0.,
             None,
-            Some((palette.gray(25), palette.gray(210))),
+            Some((palette.tone(Tone::BAR), palette.tone(Tone::SOFT))),
         );
     });
 }
@@ -550,7 +554,7 @@ fn wheel(ui: &mut egui::Ui, rect: Rect, grade: &mut [f32; 3], region: Region) {
     painter.circle_stroke(
         center,
         radius,
-        Stroke::new(1., theme::palette(ui.ctx()).gray(28)),
+        Stroke::new(1., theme::palette(ui.ctx()).tone(Tone::BAR)),
     );
     painter.circle_filled(center, 1.5, Color32::from_gray(150));
     let puck = center + after.offset() * radius;
@@ -729,10 +733,10 @@ fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region
         *value = percent / 100.;
     }
     let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(rail.left_top(), palette.gray(25));
-    mesh.colored_vertex(rail.right_top(), palette.gray(210));
-    mesh.colored_vertex(rail.right_bottom(), palette.gray(210));
-    mesh.colored_vertex(rail.left_bottom(), palette.gray(25));
+    mesh.colored_vertex(rail.left_top(), palette.tone(Tone::BAR));
+    mesh.colored_vertex(rail.right_top(), palette.tone(Tone::SOFT));
+    mesh.colored_vertex(rail.right_bottom(), palette.tone(Tone::SOFT));
+    mesh.colored_vertex(rail.left_bottom(), palette.tone(Tone::BAR));
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     let painter = ui.painter();
@@ -743,11 +747,11 @@ fn luminance_rail(ui: &mut egui::Ui, rect: Rect, value: &mut f32, region: Region
             Pos2::new(rail.center().x, area.center().y - 4.),
             Pos2::new(rail.center().x, area.center().y + 4.),
         ],
-        Stroke::new(1., palette.gray(115)),
+        Stroke::new(1., palette.tone(Tone::DISABLED)),
     );
     let thumb = Pos2::new(x, area.center().y);
-    painter.circle_filled(thumb, 3.5, palette.gray(205));
-    painter.circle_stroke(thumb, 3.5, Stroke::new(1., palette.gray(26)));
+    painter.circle_filled(thumb, 3.5, palette.tone(Tone::SOFT));
+    painter.circle_stroke(thumb, 3.5, Stroke::new(1., palette.tone(Tone::BAR)));
     if *value != before {
         name_history_step(
             ui,

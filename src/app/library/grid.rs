@@ -1,6 +1,7 @@
 //! The grid, with the filter bar above it and its toolbar below.
 use super::cell::{self, photo_cell};
 use super::{Action, Library};
+use crate::app::design::{self, Tone, inset, space, text};
 use crate::app::theme;
 use crate::catalog::{Photo, PhotoId};
 use eframe::egui::{self, Vec2};
@@ -9,17 +10,17 @@ impl Library {
     pub(super) fn grid_toolbar(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
         egui::Frame::new()
-            .fill(palette.gray(38))
-            .inner_margin(egui::Margin::symmetric(10, 4))
+            .fill(palette.tone(Tone::FIELD))
+            .inner_margin(inset::BAR)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     self.view_buttons(ui);
-                    ui.add_space(12.);
+                    ui.add_space(space::L);
                     self.sort_menu(ui);
-                    ui.add_space(12.);
+                    ui.add_space(space::L);
                     self.cell_style_menu(ui);
-                    ui.add_space(12.);
+                    ui.add_space(space::L);
                     ui.small(if self.visible.len() == self.session.photos.len() {
                         format!("{} photos", self.session.photos.len())
                     } else {
@@ -125,7 +126,7 @@ impl Library {
         }
         egui::Frame::new()
             .fill(theme::palette(ui.ctx()).photo_backdrop())
-            .inner_margin(egui::Margin::same(margin as i8))
+            .inner_margin(design::margin_same(margin))
             .show(ui, |ui| {
                 // A key moved the active photo: bring its row into view.
                 if std::mem::take(&mut self.scroll_to_active)
@@ -329,12 +330,16 @@ impl Library {
         }
         let text = painter.layout_no_wrap(
             count.to_string(),
-            egui::FontId::proportional(11.),
-            palette.gray(240),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(Tone::STRONG),
         );
         let badge = egui::Rect::from_center_size(corner, text.size() + egui::vec2(10., 4.));
         painter.rect_filled(badge, badge.height() / 2., palette.selected_marker());
-        painter.galley(badge.center() - text.size() / 2., text, palette.gray(240));
+        painter.galley(
+            badge.center() - text.size() / 2.,
+            text,
+            palette.tone(Tone::STRONG),
+        );
     }
 }
 impl Library {
@@ -359,7 +364,7 @@ impl Library {
         ui.label(filter_caption(&palette, "Sort"));
         let mut changed = false;
         ui.menu_button(
-            egui::RichText::new(self.filters.sort.name()).size(11.),
+            egui::RichText::new(self.filters.sort.name()).size(text::SMALL),
             |ui| {
                 for sort in super::sort::Sort::ALL {
                     if ui
@@ -378,7 +383,7 @@ impl Library {
         let arrow = if self.filters.reverse { "↓" } else { "↑" };
         if ui
             .add(
-                egui::Button::new(egui::RichText::new(arrow).size(11.))
+                egui::Button::new(egui::RichText::new(arrow).size(text::SMALL))
                     .small()
                     .frame(false),
             )
@@ -398,8 +403,8 @@ impl Library {
         let keys = crate::app::shortcuts::keys_text("J");
         ui.menu_button(
             egui::RichText::new(self.cell_style.name())
-                .size(11.)
-                .color(theme::palette(ui.ctx()).gray(150)),
+                .size(text::SMALL)
+                .color(theme::palette(ui.ctx()).tone(Tone::SECONDARY)),
             |ui| {
                 for style in cell::Style::ALL {
                     if ui
@@ -417,7 +422,9 @@ impl Library {
     }
 }
 pub(super) fn filter_caption(palette: &theme::Palette, text: &str) -> egui::RichText {
-    egui::RichText::new(text).size(11.).color(palette.gray(150))
+    egui::RichText::new(text)
+        .size(text::SMALL)
+        .color(palette.tone(Tone::SECONDARY))
 }
 
 /// How far the pointer goes from where it was pressed before photos are

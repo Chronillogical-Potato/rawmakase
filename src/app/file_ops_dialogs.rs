@@ -8,11 +8,12 @@
 //! keep as it is, or add (a folder made).
 use super::super::{Editor, widgets};
 use super::{State, Verb};
+use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::catalog::file_ops::{
     self, FileOp, ItemOutcome, ItemResult, OperationId, Outcome, Recovery, Resolution, Unfinished,
 };
 use crate::catalog::{CatalogLocation, FolderId, PhotoId, RootId};
-use eframe::egui::{self, Vec2};
+use eframe::egui;
 use std::path::{Path, PathBuf};
 
 /// Move to Folder…, while the folder is chosen.
@@ -147,7 +148,7 @@ impl Editor {
         let mut go = None;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("move-to-folder"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(460.);
                 ui.label(
@@ -155,16 +156,16 @@ impl Editor {
                         "Move {} to Folder",
                         widgets::plural(c.photos.len(), "Photo", "Photos")
                     ))
-                    .size(15.)
-                    .color(palette.gray(236)),
+                    .size(text::TITLE)
+                    .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 ui.add(
                     egui::TextEdit::singleline(&mut c.filter)
                         .hint_text("Filter folders")
                         .desired_width(f32::INFINITY),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 egui::ScrollArea::vertical()
                     .max_height(320.)
                     .auto_shrink([false, true])
@@ -181,14 +182,14 @@ impl Editor {
                         if rows.is_empty() {
                             ui.label(
                                 egui::RichText::new("No folder of the catalog is named so.")
-                                    .size(12.)
-                                    .color(palette.gray(140)),
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::MUTED)),
                             );
                         }
                     });
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
@@ -234,15 +235,15 @@ impl Editor {
         let mut create = false;
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("new-folder-inside"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(420.);
                 ui.label(
                     egui::RichText::new(format!("New Folder Inside “{}”", n.parent_name))
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut n.name)
                         .hint_text("Folder name")
@@ -256,15 +257,15 @@ impl Editor {
                     create = true;
                 }
                 if let Some(problem) = problem {
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                     ui.label(
                         egui::RichText::new(problem)
-                            .size(12.)
+                            .size(text::LABEL)
                             .color(palette.warning()),
                     );
                 }
                 if !n.photos.is_empty() {
-                    ui.add_space(8.);
+                    ui.add_space(space::M);
                     ui.checkbox(
                         &mut n.move_them,
                         format!(
@@ -273,15 +274,15 @@ impl Editor {
                         ),
                     );
                 }
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 ui.label(
                     egui::RichText::new("The folder is made on disk, and added to the catalog.")
-                        .size(12.)
-                        .color(palette.gray(140)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::MUTED)),
                 );
-                ui.add_space(16.);
+                ui.add_space(space::XL);
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(14., 6.);
+                    ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
@@ -497,23 +498,23 @@ impl Editor {
         };
         let mut decided = None;
         let response = egui::Modal::new(egui::Id::new("unfinished-file-operations"))
-            .frame(widgets::modal_frame(&palette).inner_margin(24))
+            .frame(widgets::modal_frame(&palette).inner_margin(design::margin_same(inset::DIALOG)))
             .show(ctx, |ui| {
                 ui.set_width(560.);
                 ui.label(
                     egui::RichText::new("Unfinished file operations")
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 ui.label(
                     egui::RichText::new(
                         "RAWmakase stopped while it was changing these files. Their photos stay as they are in the catalog until you decide.",
                     )
-                    .size(12.)
-                    .color(palette.gray(150)),
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::SECONDARY)),
                 );
-                ui.add_space(10.);
+                ui.add_space(space::L);
                 egui::ScrollArea::vertical()
                     .max_height(380.)
                     .auto_shrink([false, true])
@@ -521,13 +522,13 @@ impl Editor {
                         for item in items {
                             ui.label(
                                 egui::RichText::new(name_of(item))
-                                    .size(13.)
-                                    .color(palette.gray(220)),
+                                    .size(text::BODY)
+                                    .color(palette.tone(Tone::TEXT)),
                             );
                             if !item.reason.is_empty() {
                                 ui.label(
                                     egui::RichText::new(&item.reason)
-                                        .size(12.)
+                                        .size(text::LABEL)
                                         .color(palette.warning()),
                                 );
                             }
@@ -543,7 +544,7 @@ impl Editor {
                                     _ => m.source.display().to_string(),
                                 };
                                 ui.label(
-                                    egui::RichText::new(text).size(11.).color(palette.gray(140)),
+                                    egui::RichText::new(text).size(text::SMALL).color(palette.tone(Tone::MUTED)),
                                 );
                             }
                             if item.members.len() > MEMBERS_SHOWN {
@@ -552,11 +553,11 @@ impl Editor {
                                         "and {} more",
                                         item.members.len() - MEMBERS_SHOWN
                                     ))
-                                    .size(11.)
-                                    .color(palette.gray(140)),
+                                    .size(text::SMALL)
+                                    .color(palette.tone(Tone::MUTED)),
                                 );
                             }
-                            ui.add_space(4.);
+                            ui.add_space(space::XS);
                             ui.horizontal(|ui| {
                                 for choice in &item.choices {
                                     let label = match choice {
@@ -573,10 +574,10 @@ impl Editor {
                                     decided = Some(Decided::Reveal(shown_path(item)));
                                 }
                             });
-                            ui.add_space(12.);
+                            ui.add_space(space::L);
                         }
                     });
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 if ui.button("Decide Later").clicked() {
                     decided = Some(Decided::Later);
                 }

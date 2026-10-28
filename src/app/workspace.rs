@@ -6,6 +6,7 @@ use super::state::Tool;
 use super::widgets::{TOP_BAR_SEGMENTS, segment_bar};
 use super::workflow::Flushed;
 use crate::app::Module;
+use crate::app::design::{self, Tone, inset, space, text};
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2};
@@ -518,16 +519,16 @@ impl Editor {
             .map(|l| l.session.catalog.location().clone());
         // Which catalog this is and how many photos it holds; where it lives
         // is in its hover.
-        ui.add_space(4.);
+        ui.add_space(space::XS);
         egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(12, 6))
+            .inner_margin(design::margin(space::L, space::S))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let Some(library) = &self.library else {
                     ui.label(
                         egui::RichText::new("No catalog open")
-                            .size(13.)
-                            .color(palette.gray(200)),
+                            .size(text::BODY)
+                            .color(palette.tone(Tone::SOFT)),
                     );
                     return;
                 };
@@ -535,19 +536,19 @@ impl Editor {
                 let crate::catalog::CatalogLocation::File(path) = location;
                 ui.label(
                     egui::RichText::new(location.name())
-                        .size(13.)
-                        .color(palette.gray(235)),
+                        .size(text::BODY)
+                        .color(palette.tone(Tone::STRONG)),
                 )
                 .on_hover_text(super::widgets::pretty_path(path));
-                ui.add_space(2.);
+                ui.add_space(space::XXS);
                 let photos = match library.session.photos.len() {
                     1 => "1 photo".to_string(),
                     n => format!("{n} photos"),
                 };
                 ui.label(
                     egui::RichText::new(photos)
-                        .size(11.5)
-                        .color(palette.gray(130)),
+                        .size(text::LABEL)
+                        .color(palette.tone(Tone::FAINT)),
                 );
             });
         menu_separator(ui);
@@ -624,7 +625,7 @@ impl Editor {
             self.open_onboarding();
             ui.close();
         }
-        ui.add_space(4.);
+        ui.add_space(space::XS);
     }
     /// Whether the catalog's sidebar shows: in both modules, not the setup view.
     fn sidebar_shown(&self) -> bool {
@@ -643,8 +644,8 @@ impl Editor {
             .unwrap_or_else(|| "No catalog".into());
         let name = ui.painter().layout_no_wrap(
             catalog,
-            egui::FontId::proportional(13.),
-            palette.gray(255),
+            egui::FontId::proportional(text::BODY),
+            palette.tone(Tone::BRIGHT),
         );
         let busy = self.activity.is_busy();
         // In the bar, every element is painted in a 28 px slot so all centers line up.
@@ -666,10 +667,14 @@ impl Editor {
             ui.painter().rect_filled(
                 rect,
                 6.,
-                palette.gray(if width.is_some() { 32 } else { 38 }),
+                palette.tone(if width.is_some() {
+                    Tone::CARD
+                } else {
+                    Tone::FIELD
+                }),
             );
         }
-        let color = palette.gray(if lit { 240 } else { 215 });
+        let color = palette.tone(if lit { Tone::STRONG } else { Tone::TEXT });
         // In the sidebar, on the columns of its captions and counts.
         let (text_left, chevron_x) = if width.is_some() {
             (rect.left() + 10., rect.right() - 15.5)
@@ -693,8 +698,8 @@ impl Editor {
                 Pos2::new(text_left, rect.center().y + 2.),
                 egui::Align2::LEFT_TOP,
                 "Catalog",
-                egui::FontId::proportional(10.),
-                palette.gray(120),
+                egui::FontId::proportional(text::MICRO),
+                palette.tone(Tone::FAINT),
             );
         }
         super::icons::paint_at(
@@ -702,7 +707,7 @@ impl Editor {
             super::icons::Icon::ChevronDown,
             Pos2::new(chevron_x, rect.center().y),
             11.,
-            palette.gray(if lit { 220 } else { 130 }),
+            palette.tone(if lit { Tone::TEXT } else { Tone::FAINT }),
         );
         let response = response
             .on_hover_text("Catalog: open, create or import")
@@ -745,8 +750,8 @@ impl Editor {
             .exact_size(BAR_HEIGHT)
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(26))
-                    .inner_margin(egui::Margin::symmetric(18, 0)),
+                    .fill(palette.tone(Tone::BAR))
+                    .inner_margin(design::margin(inset::STAGE, 0.)),
             )
             .show(ui, |ui| {
                 // The bar is the title bar on macOS: its empty space moves the
@@ -765,12 +770,12 @@ impl Editor {
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
                             self.panel_toggle(ui, WorkspacePanel::Left);
                         });
-                        ui.add_space(8.);
+                        ui.add_space(space::M);
                     }
                     // The setup view has no sidebar; its catalog menu stays here.
                     if self.onboarding.visible {
                         self.catalog_switcher(ui, None);
-                        ui.add_space(8.);
+                        ui.add_space(space::M);
                     }
                     if self.activity.is_busy() {
                         super::widgets::spinner(ui, 14.);
@@ -784,9 +789,9 @@ impl Editor {
                         ui.add_enabled_ui(!self.activity.is_busy(), |ui| {
                             if toggles {
                                 self.panel_toggle(ui, WorkspacePanel::Right);
-                                ui.add_space(2.);
+                                ui.add_space(space::XXS);
                                 self.panel_toggle(ui, WorkspacePanel::Filmstrip);
-                                ui.add_space(12.);
+                                ui.add_space(space::L);
                             }
                             let setup = self.onboarding.visible;
                             // The setup assistant shows neither module as active.
@@ -856,7 +861,8 @@ impl Editor {
         if self.document.catalog_photo != Some(id) {
             ui.centered_and_justified(|ui| {
                 ui.label(
-                    egui::RichText::new(&self.status).color(theme::palette(ui.ctx()).gray(150)),
+                    egui::RichText::new(&self.status)
+                        .color(theme::palette(ui.ctx()).tone(Tone::SECONDARY)),
                 );
             });
             return;
@@ -1031,8 +1037,8 @@ impl Editor {
             .max_size(500.)
             .frame(
                 egui::Frame::new()
-                    .fill(palette.gray(22))
-                    .inner_margin(egui::Margin::symmetric(8, 0)),
+                    .fill(palette.tone(Tone::WINDOW))
+                    .inner_margin(design::margin(inset::PANEL, 0.)),
             )
             .show(ui, |ui| {
                 let busy = self.activity.is_busy();
@@ -1043,17 +1049,17 @@ impl Editor {
                 // the sidebar is disabled.
                 let mut export = false;
                 egui::Panel::bottom("library-export")
-                    .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                    .frame(egui::Frame::new().inner_margin(design::margin(0., space::M)))
                     .show_separator_line(false)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.;
                             ui.add_enabled_ui(!busy, |ui| {
                                 self.gear_button(ui);
-                                ui.add_space(4.);
+                                ui.add_space(space::XS);
                                 self.shortcuts_button(ui);
                             });
-                            ui.add_space(4.);
+                            ui.add_space(space::XS);
                             self.report_issue_button(ui);
                             if self.library.is_some() && self.module == Module::Library {
                                 ui.with_layout(
@@ -1095,11 +1101,11 @@ impl Editor {
                         .max_rect(row)
                         .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     |ui| {
-                        ui.add_space(10. + fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
+                        ui.add_space(space::L + fastframe_titlebar::footprint(ui.ctx(), BAR_HEIGHT).left);
                         self.panel_toggle(ui, WorkspacePanel::Left);
                     },
                 );
-                ui.add_space(4.);
+                ui.add_space(space::XS);
                 self.catalog_switcher(ui, Some(ui.available_width()));
                 if export {
                     self.open_export_dialog();
@@ -1107,17 +1113,17 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     action.then(library.sidebar(ui));
                 } else {
-                    ui.add_space(12.);
+                    ui.add_space(space::L);
                     // On the catalog name's column.
                     egui::Frame::new()
-                        .inner_margin(egui::Margin::symmetric(10, 0))
+                        .inner_margin(design::margin(inset::PANEL, 0.))
                         .show(ui, |ui| {
                             ui.label(
                                 egui::RichText::new(
                                     "Create a RAWmakase catalog or import a Lightroom catalog from the catalog menu above.",
                                 )
-                                .size(12.)
-                                .color(palette.gray(150)),
+                                .size(text::LABEL)
+                                .color(palette.tone(Tone::SECONDARY)),
                             );
                         });
                 }
@@ -1149,7 +1155,7 @@ impl Editor {
     ) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
         // Dark as Develop's right panels and the catalog's sidebar.
-        let fill = theme::palette(ui.ctx()).gray(22);
+        let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
         egui::Panel::right("library-info")
             .default_size(270.)
             .min_size(LIBRARY_INFO_MIN)
@@ -1166,7 +1172,7 @@ impl Editor {
                 if self.library.is_some() {
                     let targets = self.sync_target_count();
                     egui::Panel::bottom("library-sync")
-                        .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)))
+                        .frame(egui::Frame::new().inner_margin(design::margin(0., space::M)))
                         .show_separator_line(false)
                         .show(ui, |ui| {
                             let layout = egui::Layout::right_to_left(egui::Align::Center);
@@ -1242,7 +1248,7 @@ impl Editor {
     fn library_status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("library-status")
             .exact_size(STATUS_HEIGHT)
-            .frame(status_frame(ui, 8))
+            .frame(status_frame(ui))
             .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 if let Some(work) = &self.catalog_work {
@@ -1652,7 +1658,7 @@ impl Editor {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("status")
             .exact_size(STATUS_HEIGHT)
-            .frame(status_frame(ui, PHOTO_MARGIN as i8))
+            .frame(status_frame(ui))
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     let display = format!(
@@ -1764,7 +1770,7 @@ impl Editor {
             .frame(
                 egui::Frame::new()
                     .fill(backdrop)
-                    .inner_margin(egui::Margin::same(PHOTO_MARGIN as i8)),
+                    .inner_margin(design::margin_same(PHOTO_MARGIN)),
             )
             .show(ui, |ui| self.viewport_ui(ui))
             .response
@@ -1773,7 +1779,7 @@ impl Editor {
     }
     fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
         // Dark as the catalog's sidebar, around the lighter photo.
-        let fill = theme::palette(ui.ctx()).gray(22);
+        let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
         egui::Panel::right("adjustments")
             .default_size(ADJUSTMENTS_DEFAULT)
             .min_size(ADJUSTMENTS_MIN)
@@ -1806,7 +1812,7 @@ impl Editor {
                 };
                 top(self, ui, true);
                 if navigator || histogram {
-                    ui.add_space(4.);
+                    ui.add_space(space::XS);
                 }
                 if super::inspector::has_drawer(self.view.tool) {
                     // The drawers' labels are short: their controls take the room.
@@ -2003,7 +2009,7 @@ fn drop_overlay(ctx: &egui::Context, area: egui::Rect, catalog: Option<&str>) {
             egui::Id::new("drop-overlay"),
         ))
         .with_clip_rect(area);
-    painter.rect_filled(area, 0., palette.gray(24));
+    painter.rect_filled(area, 0., palette.tone(Tone::WINDOW));
     // A dashed outline inset from the area's edges.
     let zone = area.shrink(16.);
     let stroke = egui::Stroke::new(1.5, palette.accent());
@@ -2042,15 +2048,15 @@ fn drop_overlay(ctx: &egui::Context, area: egui::Rect, catalog: Option<&str>) {
         c + Vec2::new(0., 16.),
         egui::Align2::CENTER_CENTER,
         title,
-        egui::FontId::proportional(18.),
-        palette.gray(240),
+        egui::FontId::proportional(text::HERO),
+        palette.tone(Tone::STRONG),
     );
     painter.text(
         c + Vec2::new(0., 44.),
         egui::Align2::CENTER_CENTER,
         detail,
-        egui::FontId::proportional(13.),
-        palette.gray(150),
+        egui::FontId::proportional(text::BODY),
+        palette.tone(Tone::SECONDARY),
     );
 }
 
@@ -2071,13 +2077,16 @@ fn menu_row(
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), sense);
     let hovered = enabled && response.hovered();
     if hovered {
-        ui.painter()
-            .rect_filled(rect.shrink2(Vec2::new(4., 1.)), 5., palette.gray(50));
+        ui.painter().rect_filled(
+            rect.shrink2(Vec2::new(4., 1.)),
+            5.,
+            palette.tone(Tone::OUTLINE),
+        );
     }
     let color = match (enabled, hovered) {
-        (false, _) => palette.gray(95),
-        (true, true) => palette.gray(245),
-        (true, false) => palette.gray(205),
+        (false, _) => palette.tone(Tone::DISABLED),
+        (true, true) => palette.tone(Tone::BRIGHT),
+        (true, false) => palette.tone(Tone::SOFT),
     };
     let y = rect.center().y;
     super::icons::paint_at(
@@ -2086,16 +2095,16 @@ fn menu_row(
         egui::pos2(rect.left() + 20., y),
         15.,
         if enabled {
-            palette.gray(160)
+            palette.tone(Tone::SECONDARY)
         } else {
-            palette.gray(80)
+            palette.tone(Tone::OUTLINE_STRONG)
         },
     );
     ui.painter().text(
         egui::pos2(rect.left() + 40., y),
         egui::Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(13.),
+        egui::FontId::proportional(text::BODY),
         color,
     );
     if enabled {
@@ -2106,27 +2115,26 @@ fn menu_row(
 }
 /// A hairline between a menu's groups.
 fn menu_separator(ui: &mut egui::Ui) {
-    ui.add_space(4.);
+    ui.add_space(space::XS);
     let (rect, _) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.), egui::Sense::hover());
     ui.painter().rect_filled(
         rect.shrink2(Vec2::new(10., 0.)),
         0.,
-        theme::palette(ui.ctx()).gray(48),
+        theme::palette(ui.ctx()).tone(Tone::OUTLINE),
     );
-    ui.add_space(4.);
+    ui.add_space(space::XS);
 }
 
 /// The photo's backdrop around it in Develop and the Library's views.
-pub(super) const PHOTO_MARGIN: f32 = 20.;
+pub(super) const PHOTO_MARGIN: f32 = inset::STAGE;
 
 /// The status line's height, its text centred in it.
 const STATUS_HEIGHT: f32 = 26.;
-/// The status line's frame: the panels' fill, inset at the sides only, so its
-/// text sits midway between the filmstrip and the window's edge; `side` is
-/// the inset, Develop's the photo area's margin.
-fn status_frame(ui: &egui::Ui, side: i8) -> egui::Frame {
-    egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(side, 0))
+/// The status line's frame: the panels' fill, inset at the sides by the
+/// stage's inset, so its text lines up with the photo in every module.
+fn status_frame(ui: &egui::Ui) -> egui::Frame {
+    egui::Frame::side_top_panel(ui.style()).inner_margin(design::margin(inset::STAGE, 0.))
 }
 
 /// What the close guard calls an export or preview a control command started.

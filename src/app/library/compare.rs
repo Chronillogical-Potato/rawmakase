@@ -6,6 +6,7 @@
 use super::grid::filter_caption;
 use super::stage::MARGIN;
 use super::{Action, Library};
+use crate::app::design::{Tone, inset, space, text};
 use crate::app::theme;
 use crate::catalog::PhotoId;
 use eframe::egui::{self, Rect, Vec2};
@@ -344,7 +345,7 @@ impl Library {
                 .frame(
                     egui::Frame::new()
                         .fill(palette.photo_backdrop())
-                        .inner_margin(egui::Margin::symmetric(10, 4)),
+                        .inner_margin(inset::BAR),
                 )
                 .show_separator_line(false)
                 .show(ui, |ui| self.compare_toolbar(ui));
@@ -371,14 +372,14 @@ impl Library {
         let button = |ui: &mut egui::Ui, text: &str, hover: &str, enabled: bool| {
             ui.add_enabled(
                 enabled,
-                egui::Button::new(egui::RichText::new(text).size(11.)).small(),
+                egui::Button::new(egui::RichText::new(text).size(text::SMALL)).small(),
             )
             .on_hover_text(hover)
             .clicked()
         };
         ui.horizontal(|ui| {
             self.view_buttons(ui);
-            ui.add_space(12.);
+            ui.add_space(space::L);
             let two = self.compare.candidate.is_some();
             if button(ui, "Swap", "Swap the select and the candidate (Down)", two) {
                 self.swap_compare();
@@ -407,8 +408,8 @@ impl Library {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 "No other photo to compare",
-                egui::FontId::proportional(12.),
-                theme::palette(ui.ctx()).gray(120),
+                egui::FontId::proportional(text::LABEL),
+                theme::palette(ui.ctx()).tone(Tone::FAINT),
             );
             return;
         };

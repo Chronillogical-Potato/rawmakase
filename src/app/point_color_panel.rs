@@ -4,6 +4,7 @@
 use super::state::{PointColorView, Tool, ViewState};
 use super::theme;
 use super::widgets::{name_history_step, set_edit_context, slider_with};
+use crate::app::design::{Tone, radius, text};
 use crate::model::point_color::{MAX_SWATCHES, PointColor};
 use crate::model::recipe::Recipe;
 use crate::{
@@ -163,8 +164,15 @@ fn swatch_row(
     );
     let response = ui.interact(dropper, ui.id().with("point-color-dropper"), Sense::click());
     if picking || response.hovered() {
-        ui.painter()
-            .rect_filled(dropper, 3., palette.gray(if picking { 72 } else { 50 }));
+        ui.painter().rect_filled(
+            dropper,
+            radius::CONTROL,
+            palette.tone(if picking {
+                Tone::PRESSED
+            } else {
+                Tone::OUTLINE
+            }),
+        );
     }
     let strong = picking || response.hovered();
     super::icons::paint_at(
@@ -172,7 +180,7 @@ fn swatch_row(
         super::icons::Icon::Eyedropper,
         dropper.center(),
         14.,
-        palette.gray(if strong { 235 } else { 170 }),
+        palette.tone(if strong { Tone::STRONG } else { Tone::LABEL }),
     );
     let toggle = response
         .on_hover_text("Point Color dropper: click a color in the photo to add a swatch")
@@ -186,7 +194,7 @@ fn swatch_row(
         );
         let Some(swatch) = list.get(slot) else {
             ui.painter()
-                .circle_stroke(center, 7., Stroke::new(1., palette.gray(60)));
+                .circle_stroke(center, 7., Stroke::new(1., palette.tone(Tone::HOVER)));
             continue;
         };
         let rect = Rect::from_center_size(center, Vec2::splat(step));
@@ -195,7 +203,7 @@ fn swatch_row(
             .circle_filled(center, 8., display(swatch.source_prophoto()));
         if pc.selected == Some(slot) {
             ui.painter()
-                .circle_stroke(center, 10.5, Stroke::new(1.5, palette.gray(215)));
+                .circle_stroke(center, 10.5, Stroke::new(1.5, palette.tone(Tone::TEXT)));
         }
         if response.clicked() {
             pc.selected = Some(slot);
@@ -303,8 +311,8 @@ fn range_points(
             Pos2::new(row.left() + 78., row.center().y),
             egui::Align2::RIGHT_CENTER,
             label,
-            egui::FontId::proportional(11.),
-            palette.gray(190),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(Tone::SOFT),
         );
         let area = Rect::from_min_max(Pos2::new(row.left() + 88., row.top()), row.max);
         let rail = Rect::from_min_max(
@@ -348,7 +356,7 @@ fn range_points(
             Pos2::new(x(points[3]), rail.bottom() + 5.),
         ];
         ui.painter()
-            .line(shape.to_vec(), Stroke::new(1., palette.gray(215)));
+            .line(shape.to_vec(), Stroke::new(1., palette.tone(Tone::TEXT)));
         for (k, t) in points.iter().enumerate() {
             let c = Pos2::new(x(*t), rail.bottom() + 6.);
             let triangle = vec![c, c + Vec2::new(-4., 6.), c + Vec2::new(4., 6.)];
@@ -356,11 +364,11 @@ fn range_points(
             ui.painter().add(egui::Shape::convex_polygon(
                 triangle,
                 if inner {
-                    palette.gray(215)
+                    palette.tone(Tone::TEXT)
                 } else {
-                    palette.gray(40)
+                    palette.tone(Tone::FIELD)
                 },
-                Stroke::new(1., palette.gray(215)),
+                Stroke::new(1., palette.tone(Tone::TEXT)),
             ));
         }
         response.on_hover_text("Drag the outer or inner points · double-click to reset");
@@ -409,8 +417,8 @@ fn disclosure(ui: &mut egui::Ui, open: &mut bool) {
             .add(
                 egui::Label::new(
                     egui::RichText::new(text)
-                        .size(11.)
-                        .color(theme::palette(ui.ctx()).gray(190)),
+                        .size(text::SMALL)
+                        .color(theme::palette(ui.ctx()).tone(Tone::SOFT)),
                 )
                 .sense(Sense::click()),
             )
@@ -427,8 +435,8 @@ fn hint(ui: &mut egui::Ui, text: &str) {
         ui.add_space(88.);
         ui.label(
             egui::RichText::new(text)
-                .size(11.)
-                .color(theme::palette(ui.ctx()).gray(150)),
+                .size(text::SMALL)
+                .color(theme::palette(ui.ctx()).tone(Tone::SECONDARY)),
         );
     });
 }

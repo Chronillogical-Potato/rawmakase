@@ -8,6 +8,7 @@ mod watermark_editor;
 
 use super::naming::editor::{self, NameEditor};
 use super::naming::read::{self as name_read, NameRead, Reads, Status, ToRead};
+use crate::app::design::{self, Tone, inset, radius, space, text};
 
 use crate::app::Module;
 use crate::catalog::PhotoId;
@@ -464,11 +465,18 @@ impl Editor {
         };
         let mut cancel = false;
         let response = egui::Modal::new(egui::Id::new("export-names-reading"))
-            .frame(super::widgets::modal_frame(&palette).inner_margin(24))
+            .frame(
+                super::widgets::modal_frame(&palette)
+                    .inner_margin(design::margin_same(inset::DIALOG)),
+            )
             .show(ctx, |ui| {
                 ui.set_width(360.);
-                ui.label(egui::RichText::new(line).size(14.).color(palette.gray(230)));
-                ui.add_space(16.);
+                ui.label(
+                    egui::RichText::new(line)
+                        .size(text::LARGE)
+                        .color(palette.tone(Tone::TEXT)),
+                );
+                ui.add_space(space::XL);
                 cancel = ui.button("Cancel").clicked();
             });
         if cancel || response.should_close() {
@@ -759,15 +767,15 @@ impl Editor {
             egui::pos2(rect.left(), rect.top() + 7.),
             egui::Align2::LEFT_CENTER,
             label,
-            egui::FontId::proportional(11.),
-            palette.gray(190),
+            egui::FontId::proportional(text::SMALL),
+            palette.tone(Tone::SOFT),
         );
         let fraction = (progress.done as f32 + progress.fraction) / progress.total.max(1) as f32;
         let bar = egui::Rect::from_min_size(
             egui::pos2(rect.left(), rect.top() + 17.),
             Vec2::new(rect.width() - 26., 4.),
         );
-        painter.rect_filled(bar, 2., palette.gray(50));
+        painter.rect_filled(bar, radius::SMALL, palette.tone(Tone::OUTLINE));
         painter.rect_filled(
             egui::Rect::from_min_size(bar.min, Vec2::new(bar.width() * fraction.min(1.), 4.)),
             2.,
@@ -795,7 +803,11 @@ impl Editor {
         let cancel = ui
             .interact(close, ui.id().with("cancel-export"), Sense::click())
             .on_hover_text("Cancel export");
-        let color = palette.gray(if cancel.hovered() { 235 } else { 150 });
+        let color = palette.tone(if cancel.hovered() {
+            Tone::STRONG
+        } else {
+            Tone::SECONDARY
+        });
         crate::app::icons::paint_at(
             ui.painter(),
             crate::app::icons::Icon::Close,
@@ -816,7 +828,7 @@ impl Editor {
             return;
         };
         let line = egui::RichText::new(summary.line())
-            .size(11.)
+            .size(text::SMALL)
             .color(Color32::from_rgb(230, 170, 100));
         if ui
             .add(egui::Button::new(line).frame(false))
@@ -841,23 +853,26 @@ impl Editor {
         let mut close = false;
         let mut dismiss = false;
         let response = egui::Modal::new(egui::Id::new("export-report"))
-            .frame(super::widgets::modal_frame(&palette).inner_margin(24))
+            .frame(
+                super::widgets::modal_frame(&palette)
+                    .inner_margin(design::margin_same(inset::DIALOG)),
+            )
             .show(ctx, |ui| {
                 ui.set_width(520.);
                 ui.label(
                     egui::RichText::new("Problem Exporting Files")
-                        .size(15.)
-                        .color(palette.gray(236)),
+                        .size(text::TITLE)
+                        .color(palette.tone(Tone::STRONG)),
                 );
-                ui.add_space(6.);
+                ui.add_space(space::S);
                 if !summary.problems.is_empty() {
                     ui.label(
                         egui::RichText::new("Some export operations were not performed.")
-                            .size(12.)
-                            .color(palette.gray(170)),
+                            .size(text::LABEL)
+                            .color(palette.tone(Tone::LABEL)),
                     );
                 }
-                ui.add_space(8.);
+                ui.add_space(space::M);
                 egui::ScrollArea::vertical()
                     .max_height(320.)
                     .show(ui, |ui| {
@@ -870,20 +885,20 @@ impl Editor {
                             }
                             ui.label(
                                 egui::RichText::new(title)
-                                    .size(12.)
-                                    .color(palette.gray(220)),
+                                    .size(text::LABEL)
+                                    .color(palette.tone(Tone::TEXT)),
                             );
                             for (name, reason) in rows {
                                 ui.label(
                                     egui::RichText::new(format!("{name}: {reason}"))
-                                        .size(12.)
-                                        .color(palette.gray(160)),
+                                        .size(text::LABEL)
+                                        .color(palette.tone(Tone::SECONDARY)),
                                 );
                             }
-                            ui.add_space(8.);
+                            ui.add_space(space::M);
                         }
                     });
-                ui.add_space(12.);
+                ui.add_space(space::L);
                 ui.horizontal(|ui| {
                     dismiss = ui.button("Dismiss").clicked();
                     close = super::widgets::primary_button(ui, "OK").clicked();
