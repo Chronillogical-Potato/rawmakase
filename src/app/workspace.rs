@@ -24,6 +24,11 @@ impl Editor {
             || self.lut_import_open()
             || self.folder_sync.is_reviewing()
             || self.file_ops.dialog_open()
+            || self.auto_stack_open()
+    }
+    /// Whether the Library's Auto-Stack by Capture Time window is open.
+    pub(super) fn auto_stack_open(&self) -> bool {
+        self.library.as_ref().is_some_and(|l| l.auto_stack_open())
     }
 
     pub(super) fn metadata_shortcuts(&mut self, ctx: &egui::Context) {

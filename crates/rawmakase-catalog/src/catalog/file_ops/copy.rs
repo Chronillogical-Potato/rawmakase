@@ -513,6 +513,7 @@ fn commit(w: &mut Write<'_>, cx: &Cx<'_>, item: &Item) -> Result<Option<String>>
         Ok(to) => to,
         Err(why) => return Ok(Some(why)),
     };
+    crate::catalog::stacks::leave_folder(w, pre.master, to)?;
     w.execute(
         sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
         &[&to, &text, &pre.master, &pre.master],

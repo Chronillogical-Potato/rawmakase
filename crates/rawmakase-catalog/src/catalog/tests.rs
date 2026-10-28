@@ -30,6 +30,41 @@ fn fixture(path: &Path) -> Result<()> {
     Ok(())
 }
 #[test]
+fn lightroom_folder_stacks_are_imported_with_their_top_and_collapse() -> Result<()> {
+    let d = tempfile::tempdir()?;
+    let source = d.path().join("stacks.lrcat");
+    fixture(&source)?;
+    {
+        let db = Connection::open(&source)?;
+        // As Lightroom Classic 13 has them: the top at position 1, positions
+        // as text or numbers, and collapse kept on the stack.
+        db.execute_batch(
+            "CREATE TABLE AgLibraryFolderStack(id_local INTEGER PRIMARY KEY,id_global UNIQUE NOT NULL,collapsed INTEGER NOT NULL DEFAULT 0,text NOT NULL DEFAULT '');
+             CREATE TABLE AgLibraryFolderStackImage(id_local INTEGER PRIMARY KEY,collapsed INTEGER NOT NULL DEFAULT 0,image INTEGER NOT NULL DEFAULT 0,position NOT NULL DEFAULT '',stack INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO AgLibraryFile VALUES(31,20,'other.ARW','other','ARW'),(32,20,'third.ARW','third','ARW');
+             INSERT INTO Adobe_images VALUES(42,31,'2021-06-06T10:00:01',0,0,'','RAW','',NULL,'AB'),(43,32,'2021-06-06T10:00:02',0,0,'','RAW','',NULL,'AB');
+             INSERT INTO AgLibraryFolderStack VALUES(70,'A',1,''),(71,'B',0,''),(72,'C',0,'');
+             INSERT INTO AgLibraryFolderStackImage VALUES(1,1,40,'2',70),(2,1,42,'1',70),(3,1,41,'3',70),
+                 (4,0,43,1,71),(5,0,999,2,71);",
+        )?;
+    }
+    let destination = d.path().join("stacks.rawmakase");
+    import_lightroom(&source, &destination)?;
+    let cat = Catalog::open(&destination)?;
+    assert_eq!(
+        cat.stack_of(PhotoId(40))?,
+        [PhotoId(42), PhotoId(40), PhotoId(41)]
+    );
+    assert!(cat.stack_places()?[&PhotoId(42)].collapsed);
+    // A stack whose other photo isn't in the catalog is none.
+    assert!(cat.stack_of(PhotoId(43))?.is_empty());
+    let stacks: i64 = cat
+        .db_for_tests()
+        .query_row("SELECT count(*) FROM stacks", [], |r| r.get(0))?;
+    assert_eq!(stacks, 2);
+    Ok(())
+}
+#[test]
 fn lightroom_metadata_preserves_all_labels_flags_and_unrated_photos() -> Result<()> {
     let d = tempfile::tempdir()?;
     let source = d.path().join("metadata.lrcat");

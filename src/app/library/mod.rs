@@ -57,6 +57,8 @@ pub(crate) use filmstrip::{DraggedPhoto, Module, Pick};
 pub(crate) use metadata::{Metadata, MetadataCommand};
 pub(in crate::app) use previews::EditSource;
 pub(crate) use quick::CollectionCommand;
+pub(in crate::app) use stacks::StackAction;
+pub(crate) use stacks::StackCommand;
 /// Lightroom's virtual copy commands, carried out by the editor so the open
 /// edit is saved first.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -229,6 +231,10 @@ pub(crate) struct Library {
     collection_done: Vec<quick::CollectionCommand>,
     /// Descriptive metadata changes not yet handed to the shared undo log.
     descriptive_done: Vec<DescriptiveCommand>,
+    /// Stack changes not yet handed to the shared undo log.
+    stack_done: Vec<StackCommand>,
+    /// Auto-Stack by Capture Time's window, while it is open.
+    auto_stack: Option<stacks::AutoStack>,
     /// The Loupe's Info overlay.
     loupe_info: photo_info::Overlay,
     /// Times photo info read from files was saved, so views know to refresh.
@@ -328,6 +334,8 @@ impl Library {
             done: Vec::new(),
             collection_done: Vec::new(),
             descriptive_done: Vec::new(),
+            stack_done: Vec::new(),
+            auto_stack: None,
             loupe,
             compare: Default::default(),
             survey: Default::default(),
@@ -1188,6 +1196,8 @@ impl Library {
     }
     /// Selects `id`, leaving filters that would hide it so it stays in view.
     fn show(&mut self, id: PhotoId) {
+        // A photo a collapsed stack hides shows once its stack is expanded.
+        self.expand_stack_of(id);
         if !self
             .visible
             .iter()
@@ -1444,6 +1454,7 @@ mod screen;
 mod selection;
 mod sidebar;
 mod sort;
+mod stacks;
 mod stage;
 mod survey;
 mod textures;

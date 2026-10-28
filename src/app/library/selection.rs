@@ -289,6 +289,26 @@ impl Library {
                     let ids = self.selected_ids();
                     self.request_rename(ids)
                 }
+                // Lightroom's stacks: Cmd+G groups, Cmd+Shift+G unstacks,
+                // S collapses or expands and Shift+S moves to the top.
+                (Key::G, true) if !press.repeat && !press.modifiers.alt => {
+                    let action = if shift {
+                        super::StackAction::Unstack
+                    } else {
+                        super::StackAction::Group
+                    };
+                    self.stack_key(action, self.selected_ids())
+                }
+                (Key::S, false)
+                    if !press.repeat && !press.modifiers.alt && !press.modifiers.ctrl =>
+                {
+                    let action = if shift {
+                        super::StackAction::MoveToTop
+                    } else {
+                        super::StackAction::Toggle
+                    };
+                    self.stack_key(action, self.selected_ids())
+                }
                 (Key::A, true) => self.select_all(),
                 (Key::D, true) => self.select(None),
                 (Key::Slash, false) => self.deselect_active(),
@@ -331,6 +351,18 @@ impl Library {
                 // Once per press: a held I must not flicker through them.
                 (Key::I, false) if !press.modifiers.any() && !press.repeat => {
                     self.cycle_loupe_info()
+                }
+                // As in the grid: S collapses or expands the photo's stack
+                // and Shift+S moves it to the top.
+                (Key::S, false)
+                    if !press.repeat && !press.modifiers.alt && !press.modifiers.ctrl =>
+                {
+                    let action = if press.modifiers.shift {
+                        super::StackAction::MoveToTop
+                    } else {
+                        super::StackAction::Toggle
+                    };
+                    self.stack_key(action, self.selection.active.into_iter().collect())
                 }
                 _ => {}
             }

@@ -7,7 +7,8 @@ use anyhow::{Context, Result, ensure};
 impl Catalog {
     /// Lightroom's Create Virtual Copy: a new photo of the same file with the
     /// edit, rating, flag, label, keywords and descriptive metadata of `id`, named "Copy N" after
-    /// its master's other copies. Returns the copy's id.
+    /// its master's other copies, stacked right after `id` (see `stacks`).
+    /// Returns the copy's id.
     pub fn create_virtual_copy(&mut self, id: PhotoId) -> Result<PhotoId> {
         let master: PhotoId = self
             .db
@@ -38,6 +39,7 @@ impl Catalog {
                 &[&copy, &id],
             )?;
             super::descriptive::copy_rows(w, id, copy)?;
+            super::stacks::stack_copy(w, id, copy)?;
             Ok(copy)
         })
     }
@@ -146,6 +148,7 @@ pub(super) fn delete_photo(w: &mut Write<'_>, id: PhotoId) -> Result<()> {
         sql!("DELETE FROM photo_info WHERE photo=?"),
         sql!("DELETE FROM photo_checksums WHERE photo=?"),
         sql!("DELETE FROM photo_imports WHERE photo=?"),
+        sql!("DELETE FROM stack_photos WHERE photo=?"),
     ]
     .into_iter()
     .chain(super::descriptive::DELETE_ROWS)

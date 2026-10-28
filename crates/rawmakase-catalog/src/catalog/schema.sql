@@ -321,3 +321,20 @@ CREATE TABLE IF NOT EXISTS file_operation_copies (
     kept TEXT,
     PRIMARY KEY(operation, ordinal)
 );
+
+-- Lightroom's folder stacks: photos of one folder grouped under the first
+-- (the lowest position, the top), shown as that photo while `collapsed`.
+-- Rows go with their photo, also when a release that does not know these
+-- tables removes it. A stack is the rows of one `stack` whose photos share
+-- a folder: a photo moved to another folder by itself leaves it, and
+-- photos moved together stay stacked there (see `stacks`).
+CREATE TABLE IF NOT EXISTS stacks (
+    id INTEGER PRIMARY KEY,
+    collapsed INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS stack_photos (
+    photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+    stack INTEGER NOT NULL REFERENCES stacks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stack_photos_stack ON stack_photos(stack);

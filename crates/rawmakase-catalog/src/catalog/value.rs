@@ -5,7 +5,7 @@
 //! integers only as integers, reals from integers too, any nonzero integer
 //! as `true`, and narrower integers through checked conversions.
 use super::db::Row;
-use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
+use crate::ids::{CollectionId, FolderId, PhotoId, RootId, StackId};
 use std::fmt;
 
 /// One stored value, borrowed: SQL's five storage classes. Text is bytes,
@@ -250,7 +250,7 @@ macro_rules! row_id {
     )*};
 }
 
-row_id!(CollectionId, FolderId, PhotoId, RootId);
+row_id!(CollectionId, FolderId, PhotoId, RootId, StackId);
 
 /// A row the catalog can read: usually a named struct, or a single value
 /// from a one-column query.

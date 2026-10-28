@@ -55,6 +55,8 @@ pub(super) struct Shown {
     pub details: String,
     /// Its menu acts on this photo alone, not a selection of several.
     pub single: bool,
+    /// The source shows stacks (see `Filters::shows_stacks`).
+    pub stacks: bool,
 }
 pub(super) fn photo_cell(
     ui: &mut egui::Ui,
@@ -72,7 +74,9 @@ pub(super) fn photo_cell(
         style,
         details,
         single,
+        stacks,
     } = shown;
+    let stack = photo.stack.filter(|_| stacks);
     use crate::app::photo_metadata::label_color;
     use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, StrokeKind};
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, style.height(width)), Sense::hover());
@@ -204,7 +208,31 @@ pub(super) fn photo_cell(
         if photo.master.is_some() {
             copy_badge(painter, &palette, image, fill);
         }
-    } else {
+    }
+    // Lightroom's stack badge, on the photo's upper left corner: a click
+    // collapses or expands the stack.
+    let mut badge_clicked = false;
+    if let Some(place) = stack {
+        let corner = texture.map_or(area.left_top(), |t| {
+            let size = t.size_vec2();
+            let scale = (area.width() / size.x).min(area.height() / size.y);
+            Rect::from_center_size(area.center(), size * scale).left_top()
+        });
+        let badge = stack_badge(painter, &palette, corner, place);
+        badge_clicked = ui
+            .interact(
+                badge,
+                egui::Id::new(("catalog-stack-badge", photo.id)),
+                Sense::click(),
+            )
+            .on_hover_text(if place.collapsed {
+                "Expand Stack (S)"
+            } else {
+                "Collapse Stack (S)"
+            })
+            .clicked();
+    }
+    if texture.is_none() {
         painter.text(
             area.center(),
             Align2::CENTER_CENTER,
@@ -222,7 +250,15 @@ pub(super) fn photo_cell(
         };
         footer_badges(painter, &palette, cell, footer, photo, badges);
     }
-    let action = photo_menu(&response, photo, available, single, super::Module::Library);
+    let action = photo_menu(
+        &response,
+        photo,
+        available,
+        single,
+        super::Module::Library,
+        stacks,
+    );
+    let action = action.or(badge_clicked.then_some(PhotoAction::StackBadge));
     (response, action)
 }
 /// What a cell's footer shows besides the photo's own flag and rating.
@@ -324,6 +360,52 @@ pub(in crate::app) fn copy_badge(
         egui::Stroke::new(1., Color32::from_black_alpha(160)),
     ));
 }
+/// The stack badge at `corner`: the stack's count on its top, collapsed or
+/// not, and each other photo's place in it while expanded. Returns where it
+/// is, for a click.
+pub(in crate::app) fn stack_badge(
+    painter: &egui::Painter,
+    palette: &theme::Palette,
+    corner: egui::Pos2,
+    place: crate::catalog::StackPlace,
+) -> egui::Rect {
+    let label = if place.is_top() {
+        place.count.to_string()
+    } else {
+        format!("{} of {}", place.index + 1, place.count)
+    };
+    let galley = painter.layout_no_wrap(
+        label,
+        egui::FontId::proportional(text::MICRO),
+        palette.tone(Tone::STRONG),
+    );
+    let lines = if place.is_top() { 7. } else { 0. };
+    let size = galley.size() + Vec2::new(8. + lines, 2.);
+    let badge = egui::Rect::from_min_size(corner + Vec2::splat(3.), size);
+    painter.rect_filled(badge, radius::SMALL, Color32::from_black_alpha(170));
+    if place.is_top() {
+        // Two cards, one behind the other: a stack, collapsed or not.
+        let card = egui::Rect::from_min_size(badge.min + Vec2::new(4., 3.5), Vec2::splat(5.));
+        let ink = palette.tone(if place.collapsed {
+            Tone::STRONG
+        } else {
+            Tone::SOFT
+        });
+        painter.rect_stroke(
+            card.translate(Vec2::new(1.5, -1.5)),
+            0.,
+            egui::Stroke::new(1., ink),
+            egui::StrokeKind::Inside,
+        );
+        painter.rect_filled(card, 0., ink);
+    }
+    painter.galley(
+        badge.min + Vec2::new(4. + lines, 1.),
+        galley,
+        palette.tone(Tone::STRONG),
+    );
+    badge
+}
 /// " / Copy 1" for a virtual copy, as Lightroom names it after the file.
 pub(in crate::app) fn copy_suffix(photo: &Photo) -> String {
     match photo.master {
@@ -357,6 +439,10 @@ pub(in crate::app) enum PhotoAction {
     DiscardPreviews(Vec<crate::catalog::preview_cache::PreviewKind>),
     /// Develop's Set as Reference Photo.
     SetReference,
+    /// A Photo › Stacking command.
+    Stack(super::StackAction),
+    /// The stack badge was clicked: that stack collapses or expands.
+    StackBadge,
 }
 /// Remove from Catalog's shortcut, as Lightroom shows it.
 const REMOVE_SHORTCUT: &str = if cfg!(target_os = "macos") {
@@ -376,6 +462,63 @@ pub(in crate::app) const VIRTUAL_COPY_SHORTCUT: &str = if cfg!(target_os = "maco
 } else {
     "Ctrl+'"
 };
+/// Group into Stack's and Unstack's shortcuts, as Lightroom shows them.
+const GROUP_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘G"
+} else {
+    "Ctrl+G"
+};
+const UNSTACK_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⇧⌘G"
+} else {
+    "Ctrl+Shift+G"
+};
+/// Photo › Stacking, for `photo`; the choice made.
+fn stacking_menu(
+    ui: &mut egui::Ui,
+    photo: &Photo,
+    module: super::Module,
+) -> Option<super::StackAction> {
+    use super::StackAction as A;
+    use crate::app::widgets::{menu_item, menu_separator};
+    let stacked = photo.stack.is_some();
+    let (top, last) = photo
+        .stack
+        .map_or((false, false), |s| (s.is_top(), s.index + 1 == s.count));
+    let library = module == super::Module::Library;
+    let toggle = if photo.stack.is_some_and(|s| s.collapsed) {
+        "Expand Stack"
+    } else {
+        "Collapse Stack"
+    };
+    let items = [
+        Some(("Group into Stack", GROUP_SHORTCUT, true, A::Group)),
+        Some(("Unstack", UNSTACK_SHORTCUT, stacked, A::Unstack)),
+        Some(("Remove from Stack", "", stacked, A::Remove)),
+        None,
+        Some(("Move to Top of Stack", "⇧S", stacked && !top, A::MoveToTop)),
+        Some(("Move Up in Stack", "", stacked && !top, A::MoveUp)),
+        Some(("Move Down in Stack", "", stacked && !last, A::MoveDown)),
+        None,
+        Some((toggle, "S", stacked, A::Toggle)),
+        Some(("Collapse All Stacks", "", true, A::CollapseAll)),
+        Some(("Expand All Stacks", "", true, A::ExpandAll)),
+        None,
+        Some(("Auto-Stack by Capture Time…", "", library, A::AutoStack)),
+    ];
+    let mut choice = None;
+    for item in items {
+        match item {
+            None => menu_separator(ui),
+            Some((title, shortcut, enabled, action)) => {
+                if menu_item(ui, title, shortcut, enabled, false) {
+                    choice = Some(action);
+                }
+            }
+        }
+    }
+    choice
+}
 /// Whether Find on Disk… is offered: for one photo, offline.
 pub(in crate::app) fn find_on_disk_enabled(available: bool, single: bool) -> bool {
     !available && single
@@ -385,13 +528,15 @@ pub(in crate::app) fn find_on_disk_enabled(available: bool, single: bool) -> boo
 /// not `available`, with the reason in place of its shortcut. In Develop's
 /// filmstrip it starts with Set as Reference Photo, as in Lightroom. Find on
 /// Disk… is offered for a photo not `available` when the menu acts on it
-/// alone (`single`).
+/// alone (`single`). Stacking is offered where the source shows stacks
+/// (`stacks`), or for a photo in none.
 pub(in crate::app) fn photo_menu(
     response: &egui::Response,
     photo: &Photo,
     available: bool,
     single: bool,
     module: super::Module,
+    stacks: bool,
 ) -> Option<PhotoAction> {
     use crate::app::photo_metadata::{Edit, LABELS};
     use crate::app::widgets::{menu_item, menu_separator, submenu_style};
@@ -468,6 +613,18 @@ pub(in crate::app) fn photo_menu(
                 ui.close();
             }
         }
+        menu_separator(ui);
+        submenu_style(ui);
+        ui.add_enabled_ui(stacks, |ui| {
+            ui.menu_button("Stacking", |ui| {
+                ui.set_width(250.);
+                ui.spacing_mut().item_spacing.y = 0.;
+                if let Some(choice) = stacking_menu(ui, photo, module) {
+                    action = Some(PhotoAction::Stack(choice));
+                    ui.close();
+                }
+            })
+        });
         menu_separator(ui);
         if menu_item(ui, "Read Metadata from Files…", "", true, false) {
             action = Some(PhotoAction::ReadMetadata);

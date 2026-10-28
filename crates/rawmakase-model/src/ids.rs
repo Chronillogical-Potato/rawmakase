@@ -31,6 +31,11 @@ row_id!(
     FolderId
 );
 row_id!(
+    /// A folder stack (`stacks.id`): photos of one folder shown under the
+    /// first.
+    StackId
+);
+row_id!(
     /// A root folder, as a catalog records it (`roots.id`); its folders are paths
     /// under it.
     RootId

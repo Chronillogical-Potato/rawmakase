@@ -342,7 +342,8 @@ impl Library {
         }
     }
     /// One photo in the strip, with its menu. Returns a photo chosen and
-    /// whether the menu changed its metadata.
+    /// whether the menu changed its metadata or stacks, and so maybe the
+    /// visible list.
     fn strip_cell(
         &mut self,
         ui: &mut egui::Ui,
@@ -360,25 +361,53 @@ impl Library {
         let response = ui.interact(rect, ui.id().with(photo.id), sense);
         self.request_previews(photo, ui.ctx());
         // One palette read per cell, shared by everything the cell paints.
-        paint_cell(
+        let palette = theme::palette(ui.ctx());
+        let image = paint_cell(
             ui.painter(),
-            &theme::palette(ui.ctx()),
+            &palette,
             rect,
             photo,
             self.texture(photo),
             mark,
             response.hovered(),
         );
+        // The badge collapses or expands the stack, as in the grid.
+        let mut badge_clicked = false;
+        if let Some(place) = photo.stack
+            && self.filters.shows_stacks()
+        {
+            let badge = cell::stack_badge(ui.painter(), &palette, image.left_top(), place);
+            badge_clicked = ui
+                .interact(
+                    badge,
+                    egui::Id::new(("strip-stack-badge", photo.id)),
+                    egui::Sense::click(),
+                )
+                .on_hover_text(if place.collapsed {
+                    "Expand Stack"
+                } else {
+                    "Collapse Stack"
+                })
+                .clicked();
+        }
         if module == Module::Develop {
             self.drag_source(ui, &response, photo);
         }
         let available = self.is_available(&photo.path);
         let single = self.menu_single(photo.id, whole_selection);
-        if let Some(menu) = cell::photo_menu(&response, photo, available, single, module) {
+        let stacks = self.filters.shows_stacks();
+        let menu = cell::photo_menu(&response, photo, available, single, module, stacks)
+            .or(badge_clicked.then_some(cell::PhotoAction::StackBadge));
+        if let Some(menu) = menu {
             if matches!(menu, cell::PhotoAction::SetReference) {
                 return (Some(Pick::Reference(photo.id)), false);
             }
-            let edited = matches!(menu, cell::PhotoAction::Edit(_));
+            let edited = matches!(
+                menu,
+                cell::PhotoAction::Edit(_)
+                    | cell::PhotoAction::Stack(_)
+                    | cell::PhotoAction::StackBadge
+            );
             let develop = self.photo_action(ui.ctx(), photo, menu, whole_selection);
             return (develop.map(Pick::Develop), edited);
         }
@@ -414,7 +443,8 @@ impl Library {
 }
 
 /// A strip cell: the preview over a row for its flag and stars, tinted by
-/// its label, with the same cues as the grid.
+/// its label, with the same cues as the grid. Returns where the preview is,
+/// or the space it will fill while there is none.
 fn paint_cell(
     painter: &egui::Painter,
     palette: &theme::Palette,
@@ -423,7 +453,7 @@ fn paint_cell(
     texture: Option<&egui::TextureHandle>,
     mark: Mark,
     hovered: bool,
-) {
+) -> egui::Rect {
     let active = mark == Mark::Active;
     let cell = rect.shrink(CARD_INSET);
     let base = palette.tone(match mark {
@@ -438,11 +468,12 @@ fn paint_cell(
         });
     painter.rect_filled(cell, radius::SMALL, fill);
     let strip = 14.;
+    let area = egui::Rect::from_min_max(
+        cell.min + Vec2::splat(5.),
+        cell.max - Vec2::new(5., strip + 2.),
+    );
+    let mut drawn = area;
     if let Some(texture) = texture {
-        let area = egui::Rect::from_min_max(
-            cell.min + Vec2::splat(5.),
-            cell.max - Vec2::new(5., strip + 2.),
-        );
         let size = texture.size_vec2();
         let scale = (area.width() / size.x).min(area.height() / size.y);
         let image = egui::Rect::from_center_size(area.center(), size * scale);
@@ -455,6 +486,7 @@ fn paint_cell(
         if photo.master.is_some() {
             cell::copy_badge(painter, palette, image, fill);
         }
+        drawn = image;
     }
     let y = cell.bottom() - strip / 2. - 2.;
     let mut x = cell.left() + 6.;
@@ -477,4 +509,5 @@ fn paint_cell(
             palette.tone(if active { Tone::CARD } else { Tone::SOFT }),
         );
     }
+    drawn
 }

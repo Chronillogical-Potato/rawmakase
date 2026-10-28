@@ -4,6 +4,7 @@ mod backfill;
 pub(crate) mod background;
 mod checksums;
 mod descriptive;
+mod stacks;
 
 use crate::catalog::{
     Catalog, CatalogLocation, Collection, CollectionId, Folder, FolderId, Photo, PhotoId, RootId,
