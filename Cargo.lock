@@ -3632,6 +3632,7 @@ version = "0.4.6"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "block2 0.6.2",
  "bytemuck",
  "clap",
  "dispatch2",
