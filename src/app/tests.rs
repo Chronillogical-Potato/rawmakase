@@ -4824,6 +4824,26 @@ fn render_the_library_loupe_toolbar() -> anyhow::Result<()> {
 }
 #[test]
 #[ignore = "writes an image to look at"]
+fn render_the_develop_right_panel() -> anyhow::Result<()> {
+    let ctx = egui::Context::default();
+    crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.module = Module::Develop;
+    let mut textures = Default::default();
+    let image =
+        super::ui_snapshot::render(&ctx, &mut textures, Vec2::new(340., 420.), 2., 3, |ui| {
+            let frame = e.begin_edit_frame();
+            e.develop_right_panel(ui);
+            e.finish_edit_frame(frame, &ctx);
+        });
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/develop-right-panel.png");
+    image.save(&out)?;
+    Ok(())
+}
+#[test]
+#[ignore = "writes an image to look at"]
 fn render_the_develop_toolbar() -> anyhow::Result<()> {
     for width in [1400., 900., 760.] {
         let ctx = egui::Context::default();
@@ -6197,81 +6217,6 @@ fn the_panel_header_menu_fits_its_item_not_the_header() {
     assert_eq!(menus.len(), 1, "{menus:?}");
     // The header spans the 360 pt panel; Solo Mode needs far less.
     assert!(menus[0].width() < 200., "{menus:?}");
-}
-#[test]
-fn a_pinned_panel_opens_and_closes_on_its_own_in_solo_mode() {
-    use super::widgets::{HeaderButton, SectionGroup, SectionSide};
-    let ctx = egui::Context::default();
-    ctx.data_mut(|d| {
-        d.insert_temp(
-            super::widgets::solo_sections_id(),
-            std::collections::BTreeSet::from(["develop-right".to_string()]),
-        );
-        d.insert_temp(
-            super::widgets::collapsed_sections_id(),
-            std::collections::BTreeSet::from(["Tone Curve".to_string()]),
-        );
-    });
-    let headers = std::cell::RefCell::new(Vec::new());
-    let draw = |events, time| {
-        widget_frame(&ctx, time, events, |ui| {
-            let _side = SectionSide::enter(ui, SectionGroup::DevelopRight);
-            headers.borrow_mut().clear();
-            headers.borrow_mut().push(ui.cursor().top() + 14. + 14.);
-            super::widgets::section_with(ui, "Histogram", HeaderButton::Pin, |ui| {
-                ui.label("Histogram");
-            });
-            for title in ["Basic", "Tone Curve"] {
-                headers.borrow_mut().push(ui.cursor().top() + 14. + 14.);
-                super::widgets::section(ui, title, false, |ui| {
-                    ui.label(title);
-                });
-            }
-        })
-    };
-    let collapsed = || -> std::collections::BTreeSet<String> {
-        ctx.data(|d| d.get_temp(super::widgets::collapsed_sections_id()))
-            .unwrap_or_default()
-    };
-    // Drawn unpinned first, the Histogram solos with the others until pinned.
-    draw(vec![], 0.);
-    ctx.data_mut(|d| {
-        d.insert_temp(
-            super::widgets::pinned_sections_id(),
-            std::collections::BTreeSet::from(["Histogram".to_string()]),
-        )
-    });
-    draw(vec![], 0.5);
-    // Opening Tone Curve closes Basic, but not the pinned Histogram.
-    let tone_curve = Pos2::new(60., headers.borrow()[2]);
-    draw(click_at(tone_curve, egui::PointerButton::Primary), 1.);
-    assert_eq!(collapsed(), ["Basic".to_string()].into());
-    // The Histogram folds and opens again without closing Tone Curve.
-    draw(vec![], 2.);
-    let histogram = Pos2::new(60., headers.borrow()[0]);
-    draw(click_at(histogram, egui::PointerButton::Primary), 3.);
-    assert_eq!(
-        collapsed(),
-        ["Basic".to_string(), "Histogram".to_string()].into()
-    );
-    draw(vec![], 4.);
-    let histogram = Pos2::new(60., headers.borrow()[0]);
-    draw(click_at(histogram, egui::PointerButton::Primary), 5.);
-    assert_eq!(collapsed(), ["Basic".to_string()].into());
-    // Unpinned, it scrolls and solos with the others again.
-    ctx.data_mut(|d| {
-        d.insert_temp(
-            super::widgets::pinned_sections_id(),
-            std::collections::BTreeSet::<String>::new(),
-        )
-    });
-    draw(vec![], 6.);
-    let basic = Pos2::new(60., headers.borrow()[1]);
-    draw(click_at(basic, egui::PointerButton::Primary), 7.);
-    assert_eq!(
-        collapsed(),
-        ["Histogram".to_string(), "Tone Curve".to_string()].into()
-    );
 }
 #[test]
 fn up_and_down_nudge_the_hovered_slider_but_never_while_typing_or_scrolling() {
@@ -7986,37 +7931,6 @@ fn hiding_the_presets_ends_a_preset_preview() {
     assert!(e.presets.hover.is_none());
 }
 #[test]
-fn a_pinned_panel_is_kept_for_the_next_launch() {
-    let dir = tempfile::tempdir().unwrap();
-    let session = dir.path().join("session.json");
-    let ctx = egui::Context::default();
-    let mut e = Editor::with_context(
-        &ctx,
-        None,
-        crate::app::session::Session::default(),
-        Some(session.clone()),
-    );
-    e.module = Module::Develop;
-    e.onboarding.visible = false;
-    panel_frame(&mut e, vec![], FocusedButton::No);
-    // Nothing is pinned until the user pins it.
-    assert!(!super::widgets::pinned(&ctx, "Navigator"));
-    ctx.data_mut(|d| {
-        d.insert_temp(
-            super::widgets::pinned_sections_id(),
-            std::collections::BTreeSet::from(["Histogram".to_string()]),
-        )
-    });
-    panel_frame(&mut e, vec![], FocusedButton::No);
-    let saved: crate::app::session::Session =
-        serde_json::from_slice(&std::fs::read(&session).unwrap()).unwrap();
-    assert!(saved.pinned.contains("Histogram"));
-    // Read back, it is pinned again.
-    let ctx = egui::Context::default();
-    let _e = Editor::with_context(&ctx, None, saved, None);
-    assert!(super::widgets::pinned(&ctx, "Histogram"));
-}
-#[test]
 fn a_narrow_window_folds_develops_tabs_until_one_is_asked_for() {
     use super::panels::{DevelopTab, WorkspacePanel};
     use super::side_tabs::rail_id;
@@ -8251,6 +8165,17 @@ fn a_side_panels_edge_shows_the_resize_cursor() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Pinned panels are gone: a session saved with some still opens, the rest of it
+/// kept.
+#[test]
+fn a_session_with_pinned_panels_still_opens() {
+    let saved: crate::app::session::Session = serde_json::from_str(
+        r#"{"pinned": ["Histogram", "Navigator"], "solo": ["develop-right"]}"#,
+    )
+    .expect("an older session");
+    assert!(saved.solo.contains("develop-right"));
 }
 
 /// With the chrome hidden the Loupe's toolbar goes, and its photo takes the row.

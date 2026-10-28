@@ -55,8 +55,6 @@ fastframe_icons::icons! {
         PanelLeft => lucide "panel-left",
         Eye => lucide "eye",
         Search => lucide "search",
-        Pin => lucide "pin",
-        PinOff => lucide "pin-off",
         EyeOff => lucide "eye-off",
     }
 }

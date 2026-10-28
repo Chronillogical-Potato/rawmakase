@@ -278,15 +278,6 @@ impl Editor {
             self.solo = solo;
             let _ = self.save_session();
         }
-        let pinned = ctx.data(|d| {
-            d.get_temp::<std::collections::BTreeSet<String>>(super::widgets::pinned_sections_id())
-        });
-        if let Some(pinned) = pinned
-            && pinned != self.pinned
-        {
-            self.pinned = pinned;
-            let _ = self.save_session();
-        }
         self.remember_maximized(&ctx);
         self.sync_undo();
         // The layout is kept once a drag (the thumbnail size) or typing (the search)
@@ -1795,7 +1786,7 @@ impl Editor {
             .rect;
         self.drop_area = Some(area);
     }
-    fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
         // Dark as the catalog's sidebar, around the lighter photo.
         let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
         egui::Panel::right("adjustments")
@@ -1809,26 +1800,26 @@ impl Editor {
                     super::widgets::SectionGroup::DevelopRight,
                 );
                 let enabled = self.document.full().is_some() && !self.view.compare.before_only();
-                // The Histogram scrolls with the panels below it, or stays at
-                // the top once pinned. Develop has no Navigator: the toolbar's
-                // zoom slider and the minimap over the photo do its work.
-                let histogram = super::widgets::pinned(ui.ctx(), "Histogram");
-                let top = |editor: &mut Self, ui: &mut egui::Ui, pinned: bool| {
-                    if histogram == pinned {
-                        super::widgets::section_with(
-                            ui,
-                            "Histogram",
-                            super::widgets::HeaderButton::Pin,
-                            |ui| {
-                                ui.add_enabled_ui(enabled, |ui| editor.histogram_ui(ui));
-                            },
-                        );
-                    }
-                };
-                top(self, ui, true);
-                if histogram {
-                    ui.add_space(space::XS);
-                }
+                // The Histogram is always shown, above the panels that scroll;
+                // it has no header to fold or pin it. Develop has no Navigator:
+                // the toolbar's zoom slider and the minimap over the photo do
+                // its work.
+                // In a card of its well's tone, padded as the panels' contents
+                // are, at the panel headers' side margins.
+                let palette = theme::palette(ui.ctx());
+                egui::Frame::new()
+                    .fill(palette.tone(Tone::WELL))
+                    .corner_radius(design::radius::CARD)
+                    .inner_margin(design::margin_same(space::M))
+                    .outer_margin(egui::Margin {
+                        left: 0,
+                        right: 0,
+                        top: space::S as i8,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(enabled, |ui| self.histogram_ui(ui));
+                    });
                 if super::inspector::has_drawer(self.view.tool) {
                     // The drawers' labels are short: their controls take the room.
                     let _labels = super::widgets::LabelColumn::enter(
@@ -1838,12 +1829,10 @@ impl Editor {
                     egui::ScrollArea::vertical()
                         .id_salt("tool-drawer")
                         .show(ui, |ui| {
-                            top(self, ui, false);
                             ui.add_enabled_ui(enabled, |ui| self.tool_drawer(ui));
                         });
                 } else {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        top(self, ui, false);
                         ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                     });
                 }

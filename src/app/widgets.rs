@@ -103,18 +103,6 @@ pub(super) fn adjustment_section(
 pub(super) fn collapsed_sections_id() -> egui::Id {
     egui::Id::new("rawmakase-collapsed-sections")
 }
-/// Where the set of pinned section titles lives in egui memory; the editor
-/// seeds it from the session and saves it back when it changes.
-pub(super) fn pinned_sections_id() -> egui::Id {
-    egui::Id::new("rawmakase-pinned-sections")
-}
-/// Whether the section `title` is pinned above its side's scrolling panels.
-pub(super) fn pinned(ctx: &egui::Context, title: &str) -> bool {
-    ctx.data(|d| {
-        d.get_temp::<std::collections::BTreeSet<String>>(pinned_sections_id())
-            .is_some_and(|set| set.contains(title))
-    })
-}
 /// Where a control names the edit it just made, for the History panel. The
 /// editor takes it at the end of the frame.
 pub(super) fn history_step_id() -> egui::Id {
@@ -160,9 +148,6 @@ pub(super) enum HeaderButton {
     Reset,
     /// Adds an item, as the Snapshots panel's +.
     Add,
-    /// Pins the panel above the side's scrolling panels, or lets it scroll
-    /// with them; see [`pinned`].
-    Pin,
 }
 /// [`section`] with any header button; returns whether it was clicked.
 pub(super) fn section_with(
@@ -308,20 +293,12 @@ fn section_header(
     let id = ui.make_persistent_id(("adjustment-section-v3", title));
     let key = section_key(title);
     let group = current_group(ui);
-    // A pinned panel stays out of Solo Mode: it opens and closes on its own, and
-    // opening another panel leaves it as it is.
-    let solo_exempt = button == HeaderButton::Pin && pinned(ui.ctx(), title);
     if let Some(group) = group {
         ui.ctx().data_mut(|d| {
-            let titles = d
-                .get_temp_mut_or_default::<SectionTitles>(section_titles_id())
+            d.get_temp_mut_or_default::<SectionTitles>(section_titles_id())
                 .entry(group.to_string())
-                .or_default();
-            if solo_exempt {
-                titles.remove(key);
-            } else {
-                titles.insert(key.to_string());
-            }
+                .or_default()
+                .insert(key.to_string());
         });
     }
     let mut open = !ui.ctx().data(|d| {
@@ -374,10 +351,6 @@ fn section_header(
     let reset = match button {
         HeaderButton::Reset => reset.on_hover_text(format!("Reset {title}")),
         HeaderButton::Add => reset.on_hover_text(format!("New {}", title.trim_end_matches('s'))),
-        HeaderButton::Pin if pinned(ui.ctx(), title) => {
-            reset.on_hover_text(format!("Unpin {title}: it scrolls with the panels"))
-        }
-        HeaderButton::Pin => reset.on_hover_text(format!("Pin {title} at the top")),
         HeaderButton::None => reset,
     };
     let enabled = switch.as_deref().is_none_or(|s| *s == PanelState::On);
@@ -423,31 +396,7 @@ fn section_header(
             tint,
         );
     }
-    if button == HeaderButton::Pin {
-        // Lit while pinned; at rest it stays quiet.
-        let on = pinned(ui.ctx(), title);
-        let color = palette.tone(match (reset.hovered(), on) {
-            (true, _) => Tone::STRONG,
-            (false, true) => Tone::SOFT,
-            (false, false) => Tone::DISABLED,
-        });
-        let icon = if on && reset.hovered() {
-            Icon::PinOff
-        } else {
-            Icon::Pin
-        };
-        icons::paint_at(ui.painter(), icon, reset_rect.center(), 12., color);
-        if reset.clicked() {
-            ui.ctx().data_mut(|d| {
-                let set = d.get_temp_mut_or_default::<std::collections::BTreeSet<String>>(
-                    pinned_sections_id(),
-                );
-                if !set.remove(title) {
-                    set.insert(title.to_string());
-                }
-            });
-        }
-    } else if resettable {
+    if resettable {
         let color = palette.tone(if reset.hovered() {
             Tone::STRONG
         } else {
@@ -481,7 +430,7 @@ fn section_header(
             };
         }
     }
-    if let Some(group) = group.filter(|_| !solo_exempt) {
+    if let Some(group) = group {
         context_menu(&toggle, |ui| {
             // Menu rows fill the width they are given, and an unsized popup gives
             // them all it can.
@@ -497,7 +446,7 @@ fn section_header(
     {
         open = !open;
         set_open(ui, key, open);
-        if open && let Some(group) = group.filter(|g| !solo_exempt && solo(ui, g)) {
+        if open && let Some(group) = group.filter(|g| solo(ui, g)) {
             close_others(ui, group, key);
         }
     }
