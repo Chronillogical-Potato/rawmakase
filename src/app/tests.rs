@@ -4691,6 +4691,31 @@ fn a_pasted_auto_straighten_flipped_before_it_is_measured_is_measured_again() {
 }
 
 #[test]
+#[ignore = "writes an image to look at"]
+fn render_the_crop_drawer() -> anyhow::Result<()> {
+    let ctx = egui::Context::default();
+    crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.view.tool = state::Tool::Crop;
+    let mut textures = Default::default();
+    let image =
+        super::ui_snapshot::render(&ctx, &mut textures, Vec2::new(320., 300.), 2., 3, |ui| {
+            let _labels =
+                super::widgets::LabelColumn::enter(ui, super::inspector::DRAWER_LABEL_COLUMN);
+            let palette = super::theme::palette(ui.ctx());
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0., palette.gray(30));
+            let frame = e.begin_edit_frame();
+            e.tool_drawer(ui);
+            e.finish_edit_frame(frame, &ctx);
+        });
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/crop-drawer.png");
+    image.save(&out)?;
+    eprintln!("{}", out.display());
+    Ok(())
+}
+#[test]
 fn the_crop_drawer_keeps_its_layout_whatever_its_buttons_show() {
     let ctx = egui::Context::default();
     super::icons::install(&ctx);
