@@ -293,6 +293,9 @@ fn prepare(
     let mut notes = starting_warnings;
     notes.extend(transferred.notes);
     let mut after = transferred.recipe;
+    // As the same change made in Develop: one that only edits a switched-off panel
+    // turns it on.
+    crate::model::edit::turn_on_edited_panel(before.recipe(), &mut after);
     // Upright's corrections and a Straighten Auto are measured on each photo; the
     // open photo's editor does it on Paste, and here the photo is developed for it.
     // Guided solves this photo's own guides beside that analysis.
@@ -943,6 +946,72 @@ mod tests {
         std::fs::write(changed, bytes)?;
         assert!(restore(&mut c, &result.synced, SyncSide::After, path).is_err());
         assert!(c.load_edit(photos[2].0, &photos[2].1)?.is_none());
+        Ok(())
+    }
+
+    /// A Sync that only edits a switched-off panel turns it on, as the same change
+    /// made in Develop does: the photo shows what was synchronized.
+    #[test]
+    fn sync_turns_on_a_switched_off_panel_it_edits_as_develop_does() -> Result<()> {
+        use crate::model::panels::{Panel, PanelState};
+        let Fixture {
+            _dir,
+            catalog: mut c,
+            photos,
+        } = catalog()?;
+        let metadata = crate::photo::open(&photos[0].1)?.metadata;
+        let (profiles, _) = crate::camera_profiles::installed(&metadata);
+        let mut source = Recipe::with_profiles(&metadata, &profiles);
+        source.sharpening = 0.9;
+        source.panels.set(Panel::Detail, PanelState::Off);
+        let (id, path) = photos[1].clone();
+        let mut before = Recipe::with_profiles(&metadata, &profiles);
+        before.panels.set(Panel::Detail, PanelState::Off);
+        c.save_edit(
+            id,
+            &path,
+            &before,
+            &ExportOptions::default(),
+            HistoryUpdate::Keep,
+        )?;
+        let mut sharpening = GroupSelection::none();
+        sharpening.set(
+            settings_groups::SettingGroup::Sharpening,
+            settings_groups::GroupInclusion::Included,
+        );
+        let source = Settings {
+            recipe: source,
+            metadata: metadata.clone(),
+        };
+        let result = synchronize(
+            &mut c,
+            &SyncSource::Open(Box::new(source.clone())),
+            &BatchChange::Settings(sharpening.clone()),
+            &[target(id, &path)],
+            &DevelopDefaults::default(),
+            crate::camera_data::Demosaic::default(),
+        );
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        let saved = c.load_edit(id, &path)?.unwrap().recipe;
+        // What Develop makes of the same change.
+        let transferred = settings_groups::transfer(
+            Source {
+                recipe: &source.recipe,
+                metadata: &metadata,
+            },
+            &before,
+            &sharpening,
+            Target {
+                metadata: &metadata,
+                profiles: &profiles,
+            },
+        )
+        .recipe;
+        let mut develop = crate::edit_session::EditSession::default();
+        *develop.setup_mut() = before;
+        develop.change(None, |r| *r = transferred);
+        assert_eq!(saved.panels.state(Panel::Detail), PanelState::On);
+        assert_eq!(saved, *develop.recipe());
         Ok(())
     }
 
