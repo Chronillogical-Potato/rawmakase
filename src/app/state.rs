@@ -310,6 +310,10 @@ pub(super) struct ViewState {
     pub(super) aspect: f32,
     /// Whether `aspect` was read from this photo's crop since the Crop tool opened.
     pub(super) aspect_read: bool,
+    /// The photo was loaded again with the Crop tool open: its aspect is read from
+    /// the edit loaded, which an uncropped photo keeps rather than taking the
+    /// chosen aspect.
+    pub(super) aspect_reloaded: bool,
     /// The aspect last chosen from the Crop tool's menu, which an uncropped photo
     /// opens with; saved in the session.
     pub(super) chosen_aspect: f32,
@@ -365,6 +369,7 @@ impl Default for ViewState {
             crop_drag: None,
             aspect: -1.,
             aspect_read: false,
+            aspect_reloaded: false,
             chosen_aspect: -1.,
             crop_guides: Default::default(),
             crop_guides_changed: None,
@@ -616,9 +621,23 @@ impl ViewState {
         if matches!(self.tool, Tool::Crop) {
             self.zoom.on = false;
             self.aspect_read = false;
+            self.aspect_reloaded = false;
         }
         self.ruler = Default::default();
         self.guided.drag = None;
+    }
+    /// Loads a photo in Develop: as `clear_document`, but the Crop tool stays open,
+    /// as Lightroom's does from photo to photo. `another` photo's aspect is read as
+    /// if the tool were opened on it; the same photo loaded again (after a Sync's
+    /// Undo, say) reads the edit it loads, not cropped to the chosen aspect.
+    pub(crate) fn next_document(&mut self, another: bool) {
+        let crop = self.is(Tool::Crop);
+        self.clear_document();
+        if crop {
+            self.tool = Tool::Crop;
+            self.aspect_read = false;
+            self.aspect_reloaded = !another;
+        }
     }
     pub(crate) fn clear_document(&mut self) {
         self.zoom.on = false;
