@@ -19,8 +19,10 @@
 //! LibRaw's output on every PEF of our dataset.
 use crate::codec::bits::Msb;
 use crate::codec::huffman::extend;
+use crate::codec::speculative::{self, Stream};
 use crate::error::{Error, Result, corrupt};
 use crate::io::Order;
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Prefix codes by the next 12 bits: (length, difference length).
@@ -126,6 +128,28 @@ pub(crate) fn decode(
     out: &mut [u16],
     cancel: &AtomicBool,
 ) -> Result<()> {
+    decode_with(data, codes, width, height, out, cancel, true)
+}
+
+/// [`decode`], on all threads where it can (`shared`).
+fn decode_with(
+    data: &[u8],
+    codes: &Codes,
+    width: usize,
+    height: usize,
+    out: &mut [u16],
+    cancel: &AtomicBool,
+    shared: bool,
+) -> Result<()> {
+    let samples = width * height;
+    if shared && width > 0 && out.len() >= samples {
+        let out = &mut out[..samples];
+        let stream = Differences { data, codes };
+        if speculative::decode(&stream, out, cancel)?.is_some() {
+            predict(out, width);
+            return Ok(());
+        }
+    }
     let mut bits = Msb::new(data);
     // The first two samples of the last row of each parity.
     let mut first = [[0i32; 2]; 2];
@@ -150,6 +174,54 @@ pub(crate) fn decode(
     Ok(())
 }
 
+/// The data's differences, each as the 16 bits of an `i16`.
+struct Differences<'a> {
+    data: &'a [u8],
+    codes: &'a Codes,
+}
+
+impl Stream for Differences<'_> {
+    fn data(&self) -> &[u8] {
+        self.data
+    }
+    fn next(&self, bits: &mut Msb, _: usize) -> Option<u16> {
+        // Every code is valid: values no code covers take no bits.
+        Some(self.codes.difference(bits) as u16)
+    }
+}
+
+/// The samples of the differences in `out` (rows of `width`), as [`decode`]
+/// predicts them: the first two of each row in order, the rest of each row
+/// on all threads.
+fn predict(out: &mut [u16], width: usize) {
+    let mut first = [[0u16; 2]; 2];
+    let starts: Vec<[u16; 2]> = out
+        .chunks_exact(width)
+        .enumerate()
+        .map(|(y, row)| {
+            let p = &mut first[y & 1];
+            for (p, &d) in p.iter_mut().zip(row) {
+                *p = p.wrapping_add(d);
+            }
+            *p
+        })
+        .collect();
+    out.par_chunks_exact_mut(width)
+        .zip(starts)
+        .for_each(|(row, start)| {
+            let mut last = start;
+            for (col, v) in row.iter_mut().enumerate() {
+                let p = if col < 2 {
+                    start[col]
+                } else {
+                    last[col & 1].wrapping_add(*v)
+                };
+                last[col & 1] = p;
+                *v = p;
+            }
+        });
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -162,6 +234,34 @@ pub(crate) mod tests {
         assert_eq!(codes.table[0], (3, 4));
         assert_eq!(codes.table[0xf00], (4, 2));
         assert_eq!(codes.table[0xd00], (6, 0));
+    }
+
+    /// Long streams decode on all threads as they do in order, with
+    /// Samsung's complete table and with one leaving values uncovered.
+    #[test]
+    fn parallel_decoding_is_the_sequential_one() {
+        let data: Vec<u8> = (0..1_500_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect();
+        let sparse = Codes::new(&[(0, 2), (0x400, 3), (0x800, 4), (0xa00, 4)]).unwrap();
+        for codes in [Codes::samsung(), sparse] {
+            let cancel = AtomicBool::new(false);
+            let (width, height) = (1500, 1200);
+            let mut parallel = vec![0; width * height + 7];
+            let mut sequential = parallel.clone();
+            decode_with(&data, &codes, width, height, &mut parallel, &cancel, true).unwrap();
+            decode_with(
+                &data,
+                &codes,
+                width,
+                height,
+                &mut sequential,
+                &cancel,
+                false,
+            )
+            .unwrap();
+            assert!(parallel == sequential);
+        }
     }
 
     #[test]

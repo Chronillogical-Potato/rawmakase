@@ -8,7 +8,9 @@
 //! tiles, small-RAW YCbCr).
 use super::bits::Msb;
 use super::huffman::Huffman;
+use super::speculative::{self, Stream};
 use crate::error::{Error, Result, corrupt};
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A component of the frame.
@@ -247,7 +249,8 @@ pub(crate) fn decode_into(
 }
 
 /// What reading a stream left: the bits of its data not consumed, whether
-/// it read past them, and how many differences of length 16 it had.
+/// it read past them, and, read as T.81 says, how many differences of
+/// length 16 it had.
 #[derive(Clone, Copy)]
 struct Read {
     unread: u64,
@@ -282,7 +285,6 @@ fn decode_with(
     out: &mut Vec<u16>,
     sixteen: bool,
 ) -> Result<Read> {
-    let mut sixteens = 0;
     let per_mcu = h.samples_per_mcu();
     let (across, rows) = h.mcus();
     let row = across * per_mcu;
@@ -317,10 +319,14 @@ fn decode_with(
         }
         offset += bw * bh;
     }
+    let tables: Vec<&Huffman> = slots.iter().map(|s| s.table).collect();
+    let scan = &data[h.scan.min(data.len())..];
+    let (unread, overrun) = differences(h, scan, &tables, sixteen, cancel, out)?;
+    // As T.81 reads them, only a difference of length 16 is 32768.
+    let sixteens = out.iter().filter(|&&d| d == 0x8000).count() as u64;
     let shift = u32::from(h.point_transform);
     let initial = 1i32 << (u32::from(h.precision) - shift - 1);
     let mask = (1i32 << h.precision) - 1;
-    let mut bits = Msb::jpeg(&data[h.scan.min(data.len())..]);
     let restart = usize::from(h.restart);
     let mut mcus_left = restart;
     let mut fresh = true;
@@ -329,16 +335,20 @@ fn decode_with(
     let at = |s: &Slot, y: usize, x: usize, i: usize, j: usize| {
         y * row + x * per_mcu + s.offset + i * s.bw + j
     };
+    // Predicting from the left, the MCUs after a row's first depend on that
+    // row alone: the first MCU of each row is predicted here, in order, and
+    // the rest of the rows below on all threads.
+    let by_rows = h.predictor == 1 && restart == 0;
+    let mcus = if by_rows { 1.min(across) } else { across };
     for y in 0..rows {
         if y % 64 == 0 && cancel.load(Ordering::Relaxed) {
             return Err(Error::Cancelled);
         }
         // Whether the MCU row above is a line to predict from.
         let mut above = y > 0;
-        for x in 0..across {
+        for x in 0..mcus {
             if restart > 0 {
                 if mcus_left == 0 {
-                    bits.restart();
                     mcus_left = restart;
                     fresh = true;
                     // A restart interval starting a row starts its first line:
@@ -350,9 +360,9 @@ fn decode_with(
                 mcus_left -= 1;
             }
             for s in &slots {
-                let diff = s.table.difference(&mut bits, sixteen)?;
-                // Only a difference of length 16 reaches 32768.
-                sixteens += u64::from(diff.abs() >= 32768);
+                let i = at(s, y, x, s.i, s.j);
+                // The sample's difference, which its value replaces.
+                let diff = i32::from(out[i]);
                 // Each component is predicted within its own samples: the
                 // neighbours left (a), above (b) and above left (c).
                 let left = |i: usize| {
@@ -399,7 +409,6 @@ fn decode_with(
                     (None, Some(rb), _) => rb,
                     _ => initial,
                 };
-                let i = at(s, y, x, s.i, s.j);
                 out[i] = ((prediction + diff) & mask) as u16;
             }
             // Only the first MCU of the stream or of a restart interval starts
@@ -407,16 +416,134 @@ fn decode_with(
             fresh = false;
         }
     }
+    if by_rows && across > 1 {
+        // Each sample's place in its MCU and its left neighbour's, counted
+        // from the MCU before: the sample before it in its block's row, else
+        // the last of that row in the MCU before.
+        let left: Vec<(usize, usize)> = slots
+            .iter()
+            .map(|s| {
+                let own = s.offset + s.i * s.bw + s.j;
+                let from = if s.j > 0 {
+                    per_mcu + own - 1
+                } else {
+                    s.offset + s.i * s.bw + s.bw - 1
+                };
+                (own, from)
+            })
+            .collect();
+        out.par_chunks_exact_mut(row).for_each(|line| {
+            for x in 1..across {
+                let before = (x - 1) * per_mcu;
+                for &(own, from) in &left {
+                    let i = before + per_mcu + own;
+                    let v = i32::from(line[before + from]) + i32::from(line[i]);
+                    line[i] = (v & mask) as u16;
+                }
+            }
+        });
+    }
     if shift > 0 {
         for v in out.iter_mut() {
             *v <<= shift;
         }
     }
     Ok(Read {
-        unread: bits.unread(),
-        overrun: bits.overrun(),
+        unread,
+        overrun,
         sixteens,
     })
+}
+
+/// Decodes the differences of the scan's entropy-coded data `scan` into
+/// `out`, each as its low 16 bits, sample `k` coded with `tables[k % n]`;
+/// gives the bits of the data left unread and whether it read past them.
+/// Without restart intervals a long scan is decoded on all threads.
+fn differences(
+    h: &Header,
+    scan: &[u8],
+    tables: &[&Huffman],
+    sixteen: bool,
+    cancel: &AtomicBool,
+    out: &mut [u16],
+) -> Result<(u64, bool)> {
+    let restart = usize::from(h.restart) * tables.len();
+    if restart == 0 && speculative::shares(scan.len()) {
+        let data = unstuffed(scan);
+        // Components sharing one table are one table to cycle through.
+        let cycle = if tables.iter().all(|t| *t == tables[0]) {
+            1
+        } else {
+            tables.len()
+        };
+        let stream = Differences {
+            data: &data,
+            tables,
+            cycle,
+            sixteen,
+        };
+        if let Some(end) = speculative::decode(&stream, out, cancel)? {
+            let bits = data.len() as u64 * 8;
+            return Ok((bits.saturating_sub(end), end > bits));
+        }
+    }
+    let mut bits = Msb::jpeg(scan);
+    for (k, d) in out.iter_mut().enumerate() {
+        if k % (64 << 10) == 0 && cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
+        if restart > 0 && k > 0 && k % restart == 0 {
+            bits.restart();
+        }
+        *d = tables[k % tables.len()].difference(&mut bits, sixteen)? as u16;
+    }
+    Ok((bits.unread(), bits.overrun()))
+}
+
+/// Entropy-coded data with its stuffed zero bytes taken out, up to the
+/// first marker, as [`Msb::jpeg`] reads it.
+fn unstuffed(scan: &[u8]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(scan.len());
+    let mut i = 0;
+    while i < scan.len() {
+        let b = scan[i];
+        if b == 0xff {
+            match scan.get(i + 1) {
+                Some(0) => i += 1,
+                Some(_) => break,
+                None => {}
+            }
+        }
+        data.push(b);
+        i += 1;
+    }
+    data
+}
+
+/// A scan's differences, `cycle` tables used in turn.
+struct Differences<'a> {
+    data: &'a [u8],
+    tables: &'a [&'a Huffman],
+    cycle: usize,
+    sixteen: bool,
+}
+
+impl Stream for Differences<'_> {
+    fn data(&self) -> &[u8] {
+        self.data
+    }
+    fn cycle(&self) -> usize {
+        self.cycle
+    }
+    fn next(&self, bits: &mut Msb, table: usize) -> Option<u16> {
+        match self.tables[table].difference(bits, self.sixteen) {
+            Ok(d) => Some(d as u16),
+            Err(_) => {
+                bits.skip(1);
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -433,6 +560,22 @@ pub(crate) mod tests {
         jpeg[sof + 10] = jpeg[sof + 10].wrapping_add(7);
         let (_, out) = decode(&jpeg, &AtomicBool::new(false)).unwrap();
         assert_eq!(out, samples);
+    }
+
+    /// A long stream, decoded on all threads, gives back its samples: by
+    /// rows from the left (predictor 1) and from above and the left.
+    #[test]
+    fn long_streams_decode_to_their_samples() {
+        let (width, height) = (1200, 500);
+        let samples: Vec<u16> = (0..width * height)
+            .map(|i| ((i as u32).wrapping_mul(2_654_435_761) >> 17) as u16)
+            .collect();
+        for predictor in [1, 4] {
+            let jpeg = encode(&samples, width, 16, predictor);
+            assert!(speculative::shares(jpeg.len()) || rayon::current_num_threads() < 2);
+            let (_, out) = decode(&jpeg, &AtomicBool::new(false)).unwrap();
+            assert!(out == samples, "predictor {predictor}");
+        }
     }
 
     /// A lossless JPEG of `width × height` samples of one component with

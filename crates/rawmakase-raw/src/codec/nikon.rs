@@ -16,7 +16,9 @@
 //! of the same files.
 use super::bits::Msb;
 use super::huffman::Huffman;
+use super::speculative::{self, Stream};
 use crate::error::{Error, Result};
+use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The linearization table's version of lossless data.
@@ -45,6 +47,18 @@ pub(crate) fn decode(
     coding: &Coding,
     cancel: &AtomicBool,
 ) -> Result<Vec<u16>> {
+    decode_with(data, width, height, coding, cancel, true)
+}
+
+/// [`decode`], on all threads where it can (`shared`).
+fn decode_with(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    coding: &Coding,
+    cancel: &AtomicBool,
+    shared: bool,
+) -> Result<Vec<u16>> {
     if !matches!(coding.bits, 12 | 14) {
         return Err(Error::Unsupported(format!(
             "Nikon compressed data of {} bits",
@@ -65,6 +79,17 @@ pub(crate) fn decode(
     let (counts, symbols) = TABLES[table];
     let mut huffman = Huffman::new(&counts, symbols)?;
     let mut out = vec![0u16; samples];
+    // Data that keeps one table is decoded on all threads.
+    if shared && split.is_none_or(|s| s >= height) {
+        let stream = Differences {
+            data,
+            huffman: &huffman,
+        };
+        if speculative::decode(&stream, &mut out, cancel)?.is_some() {
+            predict(&mut out, width, coding, &curve);
+            return Ok(out);
+        }
+    }
     let mut bits = Msb::new(data);
     let mut first = coding.predictors.map(|row| row.map(i32::from));
     for (y, row) in out.chunks_exact_mut(width).enumerate() {
@@ -91,6 +116,59 @@ pub(crate) fn decode(
         }
     }
     Ok(out)
+}
+
+/// The data's differences, each as the 16 bits of an `i16`.
+struct Differences<'a> {
+    data: &'a [u8],
+    huffman: &'a Huffman,
+}
+
+impl Stream for Differences<'_> {
+    fn data(&self) -> &[u8] {
+        self.data
+    }
+    fn next(&self, bits: &mut Msb, _: usize) -> Option<u16> {
+        let Ok(symbol) = self.huffman.symbol(bits) else {
+            bits.skip(1);
+            return None;
+        };
+        // A difference of at most 15 bits.
+        Some(difference(bits, u32::from(symbol)) as i16 as u16)
+    }
+}
+
+/// The samples of the differences in `out` (rows of `width`), as [`decode`]
+/// predicts them: the first two of each row in order, the rest of each row
+/// on all threads.
+fn predict(out: &mut [u16], width: usize, coding: &Coding, curve: &[u16]) {
+    let diff = |v: u16| i32::from(v as i16);
+    let mut first = coding.predictors.map(|row| row.map(i32::from));
+    let starts: Vec<[i32; 2]> = out
+        .chunks_exact(width)
+        .enumerate()
+        .map(|(y, row)| {
+            let p = &mut first[y & 1];
+            for (p, &v) in p.iter_mut().zip(row) {
+                *p += diff(v);
+            }
+            *p
+        })
+        .collect();
+    out.par_chunks_exact_mut(width)
+        .zip(starts)
+        .for_each(|(row, start)| {
+            let mut left = start;
+            for (x, v) in row.iter_mut().enumerate() {
+                let p = if x < 2 {
+                    start[x]
+                } else {
+                    left[x & 1] + diff(*v)
+                };
+                left[x & 1] = p;
+                *v = curve[p.clamp(0, 0x3fff) as usize];
+            }
+        });
 }
 
 /// The difference a symbol and its additional bits code: the low four bits
@@ -405,6 +483,27 @@ mod tests {
         c.predictors = [[16000; 2]; 2];
         let bits = ["11111111", "1", &"0".repeat(13)].concat();
         assert_eq!(run(&stream(&bits), 2, 1, &c)[0], 16383);
+    }
+
+    /// Long streams decode on all threads as they do in order, the tables
+    /// switching at a split past the last row or not at all.
+    #[test]
+    fn parallel_decoding_is_the_sequential_one() {
+        let data: Vec<u8> = (0..1_500_000u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+            .collect();
+        let points: Vec<u16> = (0..257).map(|i| (i * 16).min(4095)).collect();
+        for c in [
+            coding([0x46, 0x30], 12, &[], 0),
+            coding([0x46, 0x30], 14, &[], 0),
+            coding([0x44, 0x20], 12, &points, 2000),
+        ] {
+            let cancel = AtomicBool::new(false);
+            let (width, height) = (1500, 1000);
+            let parallel = decode_with(&data, width, height, &c, &cancel, true).unwrap();
+            let sequential = decode_with(&data, width, height, &c, &cancel, false).unwrap();
+            assert!(parallel == sequential, "{:?}", c.version);
+        }
     }
 
     #[test]

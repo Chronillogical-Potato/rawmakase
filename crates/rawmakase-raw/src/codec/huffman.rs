@@ -4,6 +4,7 @@
 use super::bits::Msb;
 use crate::error::{Result, corrupt};
 
+#[derive(PartialEq)]
 pub(crate) struct Huffman {
     /// By the next 16 bits: the code's length (0 for none) and its symbol.
     table: Vec<(u8, u8)>,

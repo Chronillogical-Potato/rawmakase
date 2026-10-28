@@ -40,6 +40,21 @@ Three operations on the file's bytes, read into memory once:
 - `decode(&RawInfo, bytes, &cancel) -> Sensor`: the sensor data, with the
   levels read after unpacking. Decoders check `cancel` inside their loops.
 
+Codings stored as one stream of prefix codes (Nikon's Huffman-coded NEF,
+Pentax's and Samsung's 32772 differences, lossless JPEG without restart
+intervals: CR2 and sRAW, and other writers' long single strips) decode on
+all threads when the stream is at least 512 KB (`codec::speculative`): the
+stream is cut into chunks, each decoded from its first bit, and the true
+stream is followed into each chunk until it starts a symbol where the
+chunk's decoding did, with the same table. Where that can't be shown (no
+meeting point, an invalid code), the stream is decoded in order, so the
+samples and errors are always the sequential decoder's. Prediction comes
+after, by rows where it allows: Nikon's and Pentax's rows after their first
+two samples, lossless JPEG's MCU rows after their first MCU with predictor
+1 and no restart intervals; other lossless JPEG predicts in order. Nikon's
+lossy data that switches tables at a split row, and Olympus's coding (its
+code lengths follow the decoded values), decode in order.
+
 Two more read pieces of the file instead, for the containers whose EXIF is
 not a TIFF at the file's start. `exif_tiffs(file)` is where such a file
 keeps its camera's EXIF, as TIFFs of their own: CR3's `CMT1` (IFD0), `CMT2`
@@ -65,7 +80,7 @@ Modules, each with a small `pub(crate)` surface:
 | `io` | Bounded byte reads, in memory or in pieces of the file, and the allocation limits |
 | `exif_tiffs` | Where a CR3, MRW or X3F keeps its camera's EXIF, read from the file's pieces (`exif_tiffs`) |
 | `captured` | Capture dates read from a file's pieces, by container (`capture_dates`) |
-| `codec/` | Decoders from bytes to samples, knowing no container or camera: bit pumps, JPEG Huffman codes, lossless JPEG, DNG's JPEG XL tiles, Nikon's Huffman-coded data and small RAWs, Nikon High Efficiency (JPEG XS), Panasonic's blocks and strips, Sony's codings, Fujifilm's compressed stripes, Canon's CRX, Olympus's coding, packed samples, Pentax's Huffman-coded differences, Samsung's codings, Canon's CRW blocks, Phase One's IIQ rows, Hasselblad's pairs |
+| `codec/` | Decoders from bytes to samples, knowing no container or camera: bit pumps, JPEG Huffman codes, the parallel decoding of one stream of prefix codes (`speculative`), lossless JPEG, DNG's JPEG XL tiles, Nikon's Huffman-coded data and small RAWs, Nikon High Efficiency (JPEG XS), Panasonic's blocks and strips, Sony's codings, Fujifilm's compressed stripes, Canon's CRX, Olympus's coding, packed samples, Pentax's Huffman-coded differences, Samsung's codings, Canon's CRW blocks, Phase One's IIQ rows, Hasselblad's pairs |
 | `container/` | Probing and structure per container family: where the sensor data, previews and maker notes are (`tiff`, `dng`, `nef`, `rw2`, `arw`, `raf`, `cr3`, `orf`, `pef`, `srw`, `erf`, `cr2`, `headerless`, `ciff`, `iiq`, `fff`, `mos`, `sti`, `brcm`, `mrw`, `dcs`, `kdc`; `x3f` for its EXIF, capture dates and property list alone) |
 | `vendor/` | Per-maker rules: what a maker's own tags and maker notes mean (white balance, presets, lens, crops, levels) and their decryption (`nikon`, `panasonic`, `sony`, `fujifilm`, `canon_cr3`, `olympus`, `pentax`, `samsung`, `epson`, `canon`, `phase_one`, `hasselblad`, `leaf`) |
 | `variant` | The one selector: `enum Variant`, and one exhaustive `match` from variant to reader and codec |
