@@ -534,7 +534,10 @@ impl Editor {
             control_row(ui, "Profile", |ui| {
                 egui::ComboBox::from_id_salt("camera-profile")
                     .width(ui.available_width())
-                    .selected_text(r.profile.as_ref().map_or(matrix, |p| p.name.as_str()))
+                    .selected_text(r.profile.as_ref().map_or_else(
+                        || matrix.to_owned(),
+                        |p| profile_groups.entry(p).title,
+                    ))
                     .show_ui(ui, |ui| {
                         if !rendered {
                             ui.selectable_value(&mut r.profile, None, matrix);
