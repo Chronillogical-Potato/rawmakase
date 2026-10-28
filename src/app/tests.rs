@@ -295,6 +295,71 @@ fn keyboard_fit_and_physical_pixel_region() {
     e.view.viewport = Vec2::new(4., 2.);
     assert_eq!(e.region(), Some([4, 3, 4, 2]));
 }
+/// Cmd+0 is 100%, Cmd+1 fits, and Cmd+= / Cmd+- zoom by a constant factor from
+/// the fitted size, stopping at 100% on the way.
+#[test]
+fn zoom_keys_go_to_100_percent_fit_and_step_by_a_factor() {
+    let ctx = egui::Context::default();
+    let mut editor =
+        Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    editor.module = Module::Develop;
+    let image = Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 1000,
+        height: 1000,
+        pixels: vec![[0.1; 3]; 1_000_000],
+        metadata: Metadata {
+            width: 1000,
+            height: 1000,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    });
+    editor.document.set_image(image);
+    // Fits at 0.2: 200 pixels of view for 1000 of photo.
+    editor.view.viewport = Vec2::splat(200.);
+    let mut press = |key, physical, modifiers| {
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: Some(physical),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |_| editor.zoom_keys(&ctx),
+        )
+        .textures_delta
+        .clear();
+        (editor.view.zoom.on, editor.view.zoom.level)
+    };
+    let cmd = egui::Modifiers::COMMAND;
+    assert_eq!(press(egui::Key::Num0, egui::Key::Num0, cmd), (true, 1.));
+    assert!(!press(egui::Key::Num1, egui::Key::Num1, cmd).0);
+    let (on, level) = press(egui::Key::Equals, egui::Key::Equals, cmd);
+    assert!(on && (level - 0.2 * std::f32::consts::SQRT_2).abs() < 1e-4);
+    // 0.28, 0.4, 0.57, 0.8, then 100% rather than 113%.
+    for _ in 0..3 {
+        press(egui::Key::Equals, egui::Key::Equals, cmd);
+    }
+    assert_eq!(press(egui::Key::Equals, egui::Key::Equals, cmd), (true, 1.));
+    // Cmd+Option+0 types another character on macOS; the physical key counts.
+    press(egui::Key::Num1, egui::Key::Num1, cmd);
+    let alt = egui::Modifiers {
+        alt: true,
+        ..egui::Modifiers::COMMAND
+    };
+    assert_eq!(press(egui::Key::Equals, egui::Key::Num0, alt), (true, 1.));
+    // Fit again from just above it.
+    press(egui::Key::Num1, egui::Key::Num1, cmd);
+    press(egui::Key::Equals, egui::Key::Equals, cmd);
+    assert!(!press(egui::Key::Minus, egui::Key::Minus, cmd).0);
+}
 #[test]
 fn photo_click_zooms_and_drag_pans_without_editing() {
     let ctx = egui::Context::default();
@@ -714,6 +779,45 @@ fn a_failed_before_render_renders_the_edit_again_but_not_before() {
     assert!(e.preview.task.is_running());
     // Before's failed job is not asked for again.
     assert_eq!(e.preview.before.task.id(), before);
+}
+
+#[test]
+fn a_failed_magnifier_render_renders_the_edit_again_but_not_the_magnifier() {
+    use worker::{Pane, TaskKind};
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.document.set_image(Arc::new(CameraImage {
+        recovered: Default::default(),
+        width: 2,
+        height: 2,
+        pixels: vec![[0.2; 3]; 4],
+        metadata: Metadata {
+            width: 2,
+            height: 2,
+            ..Default::default()
+        },
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    }));
+    e.view.viewport = Vec2::new(40., 40.);
+    e.schedule();
+    let after = e.preview.task.id();
+    e.preview.task.finish(after);
+    let (magnifier, _) = e.preview.magnifier.task.start();
+    // The renderer reset after a panic: the edit's textures are gone as well.
+    e.preview.texture = None;
+    e.tx.send(Event::Failed {
+        id: magnifier,
+        task: TaskKind::Render(Pane::Magnifier),
+        error: "Rendering failed".into(),
+    })
+    .unwrap();
+    e.events(&ctx);
+    assert!(e.preview.task.id() > after);
+    assert!(e.preview.task.is_running());
+    // The magnifier's failed job is not asked for again.
+    assert_eq!(e.preview.magnifier.task.id(), magnifier);
 }
 
 #[test]
@@ -4692,6 +4796,55 @@ fn a_pasted_auto_straighten_flipped_before_it_is_measured_is_measured_again() {
 
 #[test]
 #[ignore = "writes an image to look at"]
+fn render_the_library_loupe_toolbar() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::new(300, 200).save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
+    super::icons::install(&ctx);
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let mut library = library::Library::load(&path, ctx.clone())?;
+    library.select(Some(library.session.photos[0].id));
+    library.open_loupe();
+    e.library = Some(Box::new(library));
+    e.module = Module::Library;
+    let mut textures = Default::default();
+    let image =
+        super::ui_snapshot::render(&ctx, &mut textures, Vec2::new(900., 60.), 2., 3, |ui| {
+            e.library_loupe_toolbar(ui);
+        });
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/library-loupe-toolbar.png");
+    image.save(&out)?;
+    Ok(())
+}
+#[test]
+#[ignore = "writes an image to look at"]
+fn render_the_develop_toolbar() -> anyhow::Result<()> {
+    for width in [1400., 900., 760.] {
+        let ctx = egui::Context::default();
+        crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
+        super::icons::install(&ctx);
+        let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+        e.module = Module::Develop;
+        let mut textures = Default::default();
+        let image =
+            super::ui_snapshot::render(&ctx, &mut textures, Vec2::new(width, 60.), 2., 3, |ui| {
+                e.toolbar(ui);
+            });
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target/develop-toolbar-{width}.png"));
+        image.save(&out)?;
+        eprintln!("{}", out.display());
+    }
+    Ok(())
+}
+#[test]
+#[ignore = "writes an image to look at"]
 fn render_the_crop_drawer() -> anyhow::Result<()> {
     let ctx = egui::Context::default();
     crate::app::install_fonts(&ctx, &fastframe_text::TextRendering::platform_default());
@@ -8100,8 +8253,57 @@ fn a_side_panels_edge_shows_the_resize_cursor() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// With the chrome hidden the Loupe's toolbar goes, and its photo takes the row.
 #[test]
-fn a_zoom_chosen_in_the_librarys_navigator_opens_the_loupe_at_it() -> anyhow::Result<()> {
+fn the_chrome_hidden_gives_the_loupe_its_toolbar_row() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::from_fn(300, 200, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+    })
+    .save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    crate::catalog::Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    let mut library = library::Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    library.select(Some(library.session.photos[0].id));
+    library.open_loupe();
+    e.library = Some(Box::new(library));
+    e.module = Module::Library;
+    let mut view = |chrome: bool| {
+        for _ in 0..2 {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 800.))),
+                    ..Default::default()
+                },
+                |ui| {
+                    e.library_view(ui, chrome);
+                },
+            )
+            .textures_delta
+            .clear();
+        }
+        e.library.as_ref().unwrap().loupe_view()
+    };
+    let with_toolbar = view(true);
+    let without = view(false);
+    // The view is taller by the toolbar's row, and no wider for it.
+    assert!(
+        without.y > with_toolbar.y + 20.,
+        "{without:?} against {with_toolbar:?}"
+    );
+    assert_eq!(without.x, with_toolbar.x);
+    Ok(())
+}
+/// In the Library's Loupe, a RAW (drawn through Develop's pipeline) can be
+/// magnified at Fit, not zoomed in; a point chosen on the minimap of a photo the
+/// Loupe draws itself zooms in there.
+#[test]
+fn the_librarys_loupe_magnifies_raws_at_fit_and_its_minimap_zooms() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("photos.rawmakase");
     let photos = dir.path().join("photos");
@@ -8114,25 +8316,15 @@ fn a_zoom_chosen_in_the_librarys_navigator_opens_the_loupe_at_it() -> anyhow::Re
     let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
     e.library = Some(Box::new(library::Library::load(&path, ctx)?));
     e.module = Module::Library;
-    assert!(!e.library.as_ref().unwrap().loupe_open());
-
-    // Nothing selected: 100% opens the first photo shown, at 100%.
-    e.library_zoom(navigator::Change::Level(1.));
-    let library = e.library.as_ref().unwrap();
-    assert!(library.loupe_open());
-    assert!(library.selected().is_some());
-    assert!(e.view.zoom.on);
-    assert_eq!(e.view.zoom.level, 1.);
-
-    // Fit from the Loupe stays in it, fitted.
-    e.library_zoom(navigator::Change::Level(0.));
-    assert!(e.library.as_ref().unwrap().loupe_open());
-    assert!(!e.view.zoom.on);
-
-    // A click in the preview zooms in on that spot.
-    e.library_zoom(navigator::Change::Inspect([0.25, 0.75]));
+    e.library.as_mut().unwrap().open_loupe();
+    assert!(e.library.as_ref().unwrap().loupe_develops().is_some());
+    assert_eq!(e.magnifier_blocked(), None);
+    e.toggle_magnifier();
+    assert!(e.view.magnifier.on);
+    e.library_inspect([0.25, 0.75]);
     assert!(e.view.zoom.on);
     assert_eq!(e.view.zoom.pan, [0.25, 0.75]);
+    assert!(e.magnifier_blocked().is_some());
     Ok(())
 }
 

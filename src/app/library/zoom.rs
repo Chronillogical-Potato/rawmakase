@@ -107,6 +107,10 @@ impl Regions {
             error: None,
         }
     }
+    /// Whether a region is held or asked for, with the full decode behind it.
+    pub(super) fn holds(&self) -> bool {
+        self.region.is_some() || self.requested.is_some()
+    }
     /// Drops the region and lets the worker free the full decode.
     pub(super) fn release(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);

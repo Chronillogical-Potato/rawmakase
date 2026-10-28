@@ -24,9 +24,21 @@ pub(super) fn toolbar_action(
     enabled: bool,
     icon: u8,
 ) -> egui::Response {
+    toolbar_action_sized(ui, label, Vec2::new(width, 32.), selected, enabled, icon)
+}
+/// A toolbar button of `size`: Develop's are 32 points high, the Library's bars'
+/// 22.
+pub(super) fn toolbar_action_sized(
+    ui: &mut egui::Ui,
+    label: &str,
+    size: Vec2,
+    selected: bool,
+    enabled: bool,
+    icon: u8,
+) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(width, 32.),
+        size,
         if enabled {
             Sense::click()
         } else {
@@ -67,6 +79,7 @@ pub(super) fn toolbar_action(
         1 => Some(Icon::Undo),
         2 => Some(Icon::Redo),
         3 => Some(Icon::BeforeAfter),
+        4 => Some(Icon::Search),
         _ => None,
     };
     if let Some(glyph) = glyph {

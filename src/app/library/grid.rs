@@ -74,6 +74,7 @@ impl Library {
         ui: &mut egui::Ui,
         zoom: &mut crate::app::navigator::Zoom,
         chrome: bool,
+        magnifier: Option<&mut crate::app::magnifier::Magnifier>,
     ) -> Action {
         self.auto_stack_window(ui.ctx());
         if self.compare.open {
@@ -83,7 +84,7 @@ impl Library {
             return self.survey(ui, chrome);
         }
         if self.loupe.open {
-            return self.loupe(ui, zoom, chrome);
+            return self.loupe(ui, zoom, magnifier);
         }
         let mut action = Action::None;
         if chrome {

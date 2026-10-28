@@ -403,6 +403,7 @@ impl Editor {
         let image = self.document.full().cloned();
         if let Some(image) = image {
             self.yield_before();
+            self.yield_magnifier();
             let region = self.region();
             self.preview.last_region = region;
             let geometry = Geometry::new(&image, &self.effective_recipe(), 0);
@@ -485,7 +486,7 @@ impl Editor {
             self.preview.stand_in = None;
             return;
         }
-        // Zoomed in, a whole render still fills a Navigator that has none,
+        // Zoomed in, a whole render still fills a minimap that has none,
         // e.g. after moving on to the next photo at the same zoom.
         if (!self.view.zoom.on || self.preview.navigator.is_none())
             && let Some(small) = navigator

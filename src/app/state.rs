@@ -188,7 +188,7 @@ pub(super) struct PreviewState {
     pub(super) texture: Option<Picture>,
     /// The last 100% region render, drawn over `texture` while `mode` is a region.
     pub(super) region: Option<Picture>,
-    /// Small copy of the last whole-photo render for the Navigator.
+    /// Small copy of the last whole-photo render for the minimap.
     pub(super) navigator: Option<Picture>,
     pub(super) histogram: crate::rendered::Histogram,
     /// The shown pixels of `texture` and `region` while the white balance selector
@@ -219,6 +219,8 @@ pub(super) struct PreviewState {
     pub(super) crop: Option<[f32; 4]>,
     /// Before's render, while it shows beside the edit.
     pub(super) before: super::before_after::BeforePreview,
+    /// The magnifier's render, while it is shown.
+    pub(super) magnifier: super::magnifier::MagnifierPreview,
     /// The photo's stored Standard preview, shown while it opens until the
     /// first live render; nothing else reads it.
     pub(super) stand_in: Option<Picture>,
@@ -247,6 +249,7 @@ impl Default for PreviewState {
             mode: TextureMode::Whole,
             crop: None,
             before: Default::default(),
+            magnifier: Default::default(),
             stand_in: None,
             embedded: false,
         }
@@ -294,6 +297,10 @@ pub(super) struct PointColorView {
 pub(super) struct ViewState {
     /// Fit or a zoom level, and where; Develop's and the Library's.
     pub(super) zoom: super::navigator::Zoom,
+    /// Aperture's Loupe over the fitted photo in Develop.
+    pub(super) magnifier: super::magnifier::Magnifier,
+    /// The corner the minimap sits in while zoomed in.
+    pub(super) minimap: super::minimap::Minimap,
     /// The size, in pixels, of the area the edit is shown in: the viewport, or its
     /// half beside Before.
     pub(super) viewport: Vec2,
@@ -360,6 +367,8 @@ impl Default for ViewState {
     fn default() -> Self {
         Self {
             zoom: Default::default(),
+            magnifier: Default::default(),
+            minimap: Default::default(),
             viewport: Vec2::ZERO,
             compare: Default::default(),
             clipping: Default::default(),
@@ -509,6 +518,7 @@ impl PreviewState {
         self.mode = TextureMode::Whole;
         self.crop = None;
         self.before.clear();
+        self.magnifier.clear();
         // The pixels the readout and loupes read belong to the photo left.
         self.samples = None;
         self.region_samples = None;
@@ -565,6 +575,7 @@ impl PreviewState {
             &self.navigator,
             &self.before.texture,
             &self.before.region,
+            &self.magnifier.texture,
         ]
         .into_iter()
         .flatten()
@@ -582,6 +593,7 @@ impl PreviewState {
             &mut self.navigator,
             before,
             before_region,
+            &mut self.magnifier.texture,
         ] {
             if slot.as_ref().is_some_and(Picture::is_presented) {
                 *slot = None;

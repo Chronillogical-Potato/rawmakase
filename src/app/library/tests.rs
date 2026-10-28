@@ -1861,7 +1861,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
         ..Default::default()
     };
     let mut output = ctx.run_ui(input(), |ui| {
-        library.grid(ui, &mut Default::default(), true);
+        library.grid(ui, &mut Default::default(), true, None);
     });
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
@@ -1871,7 +1871,7 @@ fn loupe_shows_a_jpeg_at_the_size_of_the_view() -> Result<()> {
     // The next photo replaces it; a damaged file says why.
     library.step(selection::Step::By(1), false);
     let mut output = ctx.run_ui(input(), |ui| {
-        library.grid(ui, &mut Default::default(), true);
+        library.grid(ui, &mut Default::default(), true, None);
     });
     output.textures_delta.clear();
     library.loupe.wait(&ctx);
@@ -1903,6 +1903,120 @@ fn flag_steps_up_and_down_and_stops_at_the_ends() {
     assert_eq!(Edit::FlagDelta(1).values(&photo(0)).1, 1);
     assert_eq!(Edit::FlagDelta(1).values(&photo(1)).1, 1);
     assert_eq!(Edit::FlagDelta(-1).values(&photo(-1)).1, -1);
+}
+/// With the magnifier on at Fit, the Loupe's own view reads the region under the
+/// lens from the file at full resolution, keeps it while the lens is on, and lets
+/// the decode go once it is off.
+#[test]
+fn the_loupes_own_view_magnifies_from_the_full_resolution_file() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    image::RgbImage::from_fn(3000, 2000, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+    })
+    .save(folder.join("a.jpg"))?;
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    library.select(Some(library.session.photos[0].id));
+    library.open_loupe();
+    assert!(library.loupe_develops().is_none());
+    assert!(library.loupe_zoomable());
+    let mut zoom = crate::app::navigator::Zoom::default();
+    let mut magnifier = crate::app::magnifier::Magnifier::default();
+    let mut frame = |library: &mut Library, lens: bool| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                events: vec![egui::Event::PointerMoved(egui::pos2(600., 380.))],
+                ..Default::default()
+            },
+            |ui| {
+                library.grid(ui, &mut zoom, true, lens.then_some(&mut magnifier));
+            },
+        )
+        .textures_delta
+        .clear();
+    };
+    frame(&mut library, true);
+    library.loupe.wait(&ctx);
+    frame(&mut library, true);
+    frame(&mut library, true);
+    library.loupe.regions.wait(&ctx);
+    assert_eq!(library.loupe.regions.full, Some([3000, 2000]));
+    let (region, rect) = library
+        .loupe
+        .regions
+        .region
+        .clone()
+        .expect("the lens's region");
+    // A little wider than the 240-point lens at 100%, around the middle.
+    assert_eq!(region.size(), [384, 384]);
+    assert!((rect[0] + rect[2] / 2. - 0.5).abs() < 0.05);
+    // The lens off, at Fit, the decode goes.
+    frame(&mut library, false);
+    assert!(library.loupe.regions.region.is_none());
+    Ok(())
+}
+/// Moving on to another photo with the magnifier on lets the last one's full
+/// decode go, though the pointer is not over the new one to read it.
+#[test]
+fn moving_on_with_the_magnifier_lets_the_last_photos_decode_go() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let folder = directory.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in ["a.jpg", "b.jpg"] {
+        image::RgbImage::from_fn(3000, 2000, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
+        })
+        .save(folder.join(name))?;
+    }
+    let path = directory.path().join("library.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let ctx = egui::Context::default();
+    let mut library = Library::load(&path, ctx.clone())?;
+    library.wait_for_availability();
+    library.select(Some(library.session.photos[0].id));
+    library.open_loupe();
+    let mut zoom = crate::app::navigator::Zoom::default();
+    let mut magnifier = crate::app::magnifier::Magnifier::default();
+    let mut frame = |library: &mut Library, pointer: egui::Event| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                events: vec![pointer],
+                ..Default::default()
+            },
+            |ui| {
+                library.grid(ui, &mut zoom, true, Some(&mut magnifier));
+            },
+        )
+        .textures_delta
+        .clear();
+    };
+    let over = || egui::Event::PointerMoved(egui::pos2(600., 380.));
+    frame(&mut library, over());
+    library.loupe.wait(&ctx);
+    frame(&mut library, over());
+    frame(&mut library, over());
+    library.loupe.regions.wait(&ctx);
+    assert!(library.loupe.regions.holds());
+    // The pointer leaves the photo (onto the filmstrip, say), and the next
+    // photo is selected.
+    frame(&mut library, egui::Event::PointerGone);
+    library.step(selection::Step::By(1), false);
+    frame(&mut library, egui::Event::PointerGone);
+    assert!(!library.loupe.regions.holds());
+    Ok(())
 }
 #[test]
 fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<()> {
@@ -1936,7 +2050,7 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
                 // The filmstrip below, as the workspace draws it.
                 let active = library.selected();
                 library.filmstrip_panel(ui, active, Module::Library);
-                library.grid(ui, zoom, true);
+                library.grid(ui, zoom, true, None);
             },
         );
         output.textures_delta.clear();
@@ -1949,20 +2063,21 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     library.step(selection::Step::By(1), false);
     frame(&mut library, &mut zoom);
     assert_eq!(library.loupe.state, loupe::State::Ready);
-    // 100% reads only the view: 1200 by 642 pixels of the 3000 by 2000.
+    // 100% reads only the view: 1200 by 672 pixels of the 3000 by 2000 (the
+    // toolbar is the editor's, below the Loupe's area).
     zoom.set(1.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     assert_eq!(library.loupe.regions.full, Some([3000, 2000]));
     let (region, rect) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [1200, 642]);
+    assert_eq!(region.size(), [1200, 672]);
     assert!((rect[0] - 0.3).abs() < 1e-3 && (rect[2] - 0.4).abs() < 1e-3);
     // At 200% half as many image pixels fill the view.
     zoom.set(2.);
     frame(&mut library, &mut zoom);
     library.loupe.regions.wait(&ctx);
     let (region, _) = library.loupe.regions.region.clone().unwrap();
-    assert_eq!(region.size(), [600, 321]);
+    assert_eq!(region.size(), [600, 336]);
     // Panning past the corner stops at the edge of the photo.
     zoom.pan = [0., 0.];
     frame(&mut library, &mut zoom);
@@ -1973,50 +2088,6 @@ fn loupe_zooms_at_the_navigator_levels_and_prepares_the_next_photo() -> Result<(
     zoom.set(0.);
     frame(&mut library, &mut zoom);
     assert!(library.loupe.regions.region.is_none());
-    Ok(())
-}
-#[test]
-fn the_chrome_hidden_gives_the_loupe_its_toolbar_row() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let folder = directory.path().join("photos");
-    std::fs::create_dir(&folder)?;
-    image::RgbImage::from_fn(300, 200, |x, y| {
-        image::Rgb([(x % 256) as u8, (y % 256) as u8, 90])
-    })
-    .save(folder.join("a.jpg"))?;
-    let path = directory.path().join("library.rawmakase");
-    Catalog::create(&path)?.add_folder(&folder)?;
-    let ctx = egui::Context::default();
-    let mut library = Library::load(&path, ctx.clone())?;
-    library.wait_for_availability();
-    library.select(Some(library.session.photos[0].id));
-    library.open_loupe();
-    let mut zoom = crate::app::navigator::Zoom::default();
-    let frame = |library: &mut Library, zoom: &mut crate::app::navigator::Zoom, chrome: bool| {
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1200., 800.),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                library.grid(ui, zoom, chrome);
-            },
-        );
-        output.textures_delta.clear();
-    };
-    frame(&mut library, &mut zoom, true);
-    let with_toolbar = library.loupe.view;
-    frame(&mut library, &mut zoom, false);
-    // The view is taller by the toolbar's row, and no wider for it.
-    assert!(
-        library.loupe.view.y > with_toolbar.y + 20.,
-        "{:?} against {with_toolbar:?}",
-        library.loupe.view
-    );
-    assert_eq!(library.loupe.view.x, with_toolbar.x);
     Ok(())
 }
 #[test]

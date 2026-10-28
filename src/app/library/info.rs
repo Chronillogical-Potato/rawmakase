@@ -10,13 +10,11 @@ use eframe::egui::{self, Vec2};
 
 impl Library {
     /// Right panel: the selected photo's rating, flag, label and file details,
-    /// under `top` (the Navigator, while it scrolls with them), with `quick` (the
-    /// batch edits of the selection) in Quick Develop. The layout is identical with
+    /// with `quick` (the batch edits of the selection) in Quick Develop. The layout is identical with
     /// or without a selection, so nothing moves.
     pub(crate) fn info_panel(
         &mut self,
         ui: &mut egui::Ui,
-        top: impl FnOnce(&mut egui::Ui),
         quick: impl FnOnce(&mut egui::Ui),
     ) -> Action {
         let mut action = Action::None;
@@ -27,7 +25,6 @@ impl Library {
             .id_salt("library-info")
             .auto_shrink(false)
             .show(ui, |ui| {
-                top(ui);
                 section(ui, "Quick Develop", false, |ui| {
                     let refusal = photo.as_ref().and_then(|p| self.shown_refusal(p));
                     let open = ui

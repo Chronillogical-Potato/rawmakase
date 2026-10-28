@@ -108,24 +108,14 @@ impl Editor {
                 .unwrap_or(aspect)
         };
     }
-    /// Lightroom's Navigator: the whole photo with the zoomed area outlined.
-    /// Clicking or dragging in it moves the zoomed view there.
-    pub(super) fn navigator_ui(&mut self, ui: &mut egui::Ui) {
-        let (photo, shown) = self.navigator_view();
-        if let Some(change) = navigator::navigator(ui, photo, Some(self.view.zoom), shown) {
-            self.navigator_change(change);
-        }
-    }
-    /// What Develop's Navigator shows: the photo, and the part in view.
+    /// What Develop's minimap shows: the photo, and the part in view, at any
+    /// zoom (the 100% region the renderer draws exists only from 100% up).
     pub(super) fn navigator_view(&self) -> (Option<navigator::Photo>, Option<[f32; 4]>) {
-        let shown = self
-            .region()
-            .zip(self.document.full())
-            .map(|([x, y, w, h], im)| {
-                let g = Geometry::new(im, &self.effective_recipe(), 0);
-                let (gw, gh) = (g.width as f32, g.height as f32);
-                [x as f32 / gw, y as f32 / gh, w as f32 / gw, h as f32 / gh]
-            });
+        let shown = self.document.full().and_then(|im| {
+            let g = Geometry::new(im, &self.effective_recipe(), 0);
+            let size = Vec2::new(g.width as f32, g.height as f32);
+            self.view.zoom.shown(self.view.viewport, size)
+        });
         // Until a whole render makes one (none while zoomed in), the
         // Library's preview stands in.
         let photo = self
@@ -142,17 +132,12 @@ impl Editor {
             });
         (photo, shown)
     }
-    /// A zoom chosen in Develop's Navigator.
-    pub(super) fn navigator_change(&mut self, change: navigator::Change) {
-        match change {
-            navigator::Change::Level(level) => self.set_zoom(level),
-            navigator::Change::Inspect(at) => {
-                self.view.zoom.pan = at;
-                self.view.zoom.on = true;
-                if self.view.is(Tool::Crop) {
-                    self.view.tool = Tool::None;
-                }
-            }
+    /// A point of the edit chosen on the minimap: zoomed in there.
+    pub(super) fn inspect(&mut self, at: [f32; 2]) {
+        self.view.zoom.pan = at;
+        self.view.zoom.on = true;
+        if self.view.is(Tool::Crop) {
+            self.view.tool = Tool::None;
         }
     }
     /// Before the first image arrives: the Library preview of the photo being
@@ -250,46 +235,34 @@ impl Editor {
         }
         self.schedule();
     }
-    /// Cmd/Ctrl + and −: step through Lightroom-like zoom levels, with Fit
-    /// below the first level larger than the fitted size.
-    pub(super) fn step_zoom(&mut self, direction: i32) {
-        const LEVELS: [f32; 6] = [0.25, 0.5, 1., 2., 3., 4.];
-        // A JPEG, TIFF or PNG in the Loupe fits by its own size.
-        let raster_fit = self
-            .library
-            .as_ref()
-            .filter(|l| {
-                self.module == Module::Library && l.loupe_open() && l.loupe_develops().is_none()
-            })
-            .map(|l| l.loupe_fit());
-        // Not known until the image is decoded: no step until then.
-        if raster_fit == Some(None) {
-            return;
+    /// The level the photo shown fits the view at: Develop's photo, or a JPEG,
+    /// TIFF or PNG in the Library's Loupe. None until its size is known.
+    pub(super) fn fit_level(&self) -> Option<f32> {
+        let raster = self.module == Module::Library
+            && self
+                .library
+                .as_ref()
+                .is_some_and(|l| l.loupe_open() && l.loupe_develops().is_none());
+        if raster {
+            return self.library.as_ref()?.loupe_fit();
         }
-        let fit = raster_fit.flatten().unwrap_or_else(|| {
-            self.document.full().map_or(0., |im| {
-                let g = Geometry::new(im, &self.effective_recipe(), 0);
-                (self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32)
-            })
-        });
+        let im = self.document.full()?;
+        let g = Geometry::new(im, &self.effective_recipe(), 0);
+        Some((self.view.viewport.x / g.width as f32).min(self.view.viewport.y / g.height as f32))
+    }
+    /// Cmd/Ctrl = and −: zoom in or out by a constant factor, stopping at 100% and
+    /// Fit (see `navigator::stepped`).
+    pub(super) fn step_zoom(&mut self, direction: i32) {
+        // Not known until the image is decoded: no step until then.
+        let Some(fit) = self.fit_level() else {
+            return;
+        };
         let current = if self.view.zoom.on {
             self.view.zoom.level
         } else {
             fit
         };
-        let next = if direction > 0 {
-            LEVELS.iter().copied().find(|l| *l > current + 1e-3)
-        } else {
-            LEVELS
-                .iter()
-                .rev()
-                .copied()
-                .find(|l| *l < current - 1e-3 && *l > fit + 1e-3)
-                .or(Some(0.))
-        };
-        if let Some(level) = next {
-            self.set_zoom(level);
-        }
+        self.set_zoom(navigator::stepped(current, fit, direction > 0));
     }
     /// Screen rectangle of the whole photo for the current zoom: see `Zoom::photo_rect`.
     fn photo_rect(&self, area: Rect, g: &Geometry, ppp: f32) -> Rect {
@@ -459,12 +432,14 @@ impl Editor {
                 ui.ctx().request_repaint();
             }
         }
+        // Zoomed in, the minimap shows where, as Lightroom's Navigator does.
+        let on_minimap = self.view.zoom.on && self.develop_minimap(ui, panes.after.clip);
         let tool_owns_pointer = self.tool_overlay(ui, &response, rect, area);
         // Holding Space pans while an eyedropper is open, as in Lightroom.
         let space = ui.input(|i| i.key_down(egui::Key::Space));
         let picking = self.view.picks_color() && !space && !self.view.compare.shows_before();
         let hand = !tool_owns_pointer && (!self.view.picks_color() || space);
-        if self.view.zoom.on && hand && response.dragged() && !on_reference {
+        if self.view.zoom.on && hand && response.dragged() && !on_reference && !on_minimap {
             let delta = ui.input(|i| i.pointer.delta());
             // Moved by the photo under the hand: Before's when the drag is on it.
             let on_before = response
@@ -485,6 +460,17 @@ impl Editor {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             }
         }
+        // The magnifier over the fitted edit, in Develop or the Library's Loupe,
+        // when no tool owns the pointer.
+        if self.view.magnifier.on
+            && !self.view.zoom.on
+            && self.view.zoom_anim.is_none()
+            && self.view.compare == before_after::Compare::Off
+            && self.view.is(Tool::None)
+            && !response.dragged()
+        {
+            self.magnifier_ui(ui, response.hover_pos(), rect);
+        }
         // Lightroom: a click zooms in keeping the clicked point under the
         // pointer; the next click returns to Fit.
         // The second click of a double-click is not another toggle.
@@ -493,6 +479,7 @@ impl Editor {
             && !response.triple_clicked()
             && hand
             && !on_reference
+            && !on_minimap
             && !self.view.is(Tool::Crop)
             && let Some(pos) = response.interact_pointer_pos().map(on_after)
             && rect.contains(pos)

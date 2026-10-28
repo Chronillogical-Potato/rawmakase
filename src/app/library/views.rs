@@ -85,15 +85,18 @@ impl Library {
             _ => self.edit_selection(edit, advance).map(drop),
         }
     }
-    /// The view buttons, the current one lit.
-    pub(super) fn view_buttons(&mut self, ui: &mut egui::Ui) {
+    /// The view buttons, the current one lit, at the Library bars' size.
+    pub(crate) fn view_buttons(&mut self, ui: &mut egui::Ui) {
+        self.view_buttons_sized(ui, Vec2::new(30., 22.));
+    }
+    /// The view buttons, each `size`: the Loupe's toolbar has Develop's.
+    pub(crate) fn view_buttons_sized(&mut self, ui: &mut egui::Ui, size: Vec2) {
         let palette = theme::palette(ui.ctx());
         let current = self.view();
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.x = space::XXS;
             for view in View::ALL {
-                let (rect, response) =
-                    ui.allocate_exact_size(Vec2::new(30., 22.), egui::Sense::click());
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
                 let on = view == current;
                 if on || response.hovered() {
                     let fill = palette.tone(if on {

@@ -22,7 +22,7 @@ pub(in crate::app) enum RenderBackend {
     /// the viewport draws, and otherwise read back from a device of their own.
     Gpu(Option<egui_wgpu::RenderState>),
 }
-/// Long edges of the Navigator's and the library thumbnail's copies.
+/// Long edges of the minimap's and the library thumbnail's copies.
 const NAVIGATOR: u32 = 360;
 const THUMBNAIL: u32 = 640;
 /// A full render presented within this needs no reduced preview first.
@@ -147,8 +147,8 @@ impl Textures {
     }
 }
 
-/// The preview renderer: one thread, with a lane for the edit and one for Before, so
-/// each keeps its latest job and the edit's goes first.
+/// The preview renderer: one thread, with a lane for the edit, one for Before and one
+/// for the magnifier, so each keeps its latest job and the edit's goes first.
 pub(crate) struct Renderer(Latest<RenderJob>);
 impl Renderer {
     /// Stops rendering once the current job is done.
@@ -161,6 +161,7 @@ impl Renderer {
         let lane = match job.pane {
             Pane::After => 0,
             Pane::Before => 1,
+            Pane::Magnifier => 2,
         };
         self.0.submit_to(lane, job).map(|replaced| replaced.id)
     }
@@ -173,7 +174,7 @@ pub(in crate::app) fn holding(
     taken: Sender<u64>,
     release: std::sync::mpsc::Receiver<()>,
 ) -> Renderer {
-    Renderer(Latest::with_lanes(2, move |job: RenderJob| {
+    Renderer(Latest::with_lanes(3, move |job: RenderJob| {
         let _ = taken.send(job.id);
         let _ = release.recv();
     }))
@@ -190,7 +191,7 @@ pub(in crate::app) fn renderer_with_backend(
     backend: RenderBackend,
 ) -> Renderer {
     let mut state = RendererState::default();
-    Renderer(Latest::with_lanes(2, move |job: RenderJob| {
+    Renderer(Latest::with_lanes(3, move |job: RenderJob| {
         let pane = job.pane;
         let id = job.id;
         let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -230,9 +231,10 @@ struct RendererState {
     textures: Option<Textures>,
     /// The monitor profile as the GPU applies it, per profile path.
     lut: Option<(PathBuf, Result<Arc<gpu::MonitorLut>, String>)>,
-    /// What each pane last showed: the edit's, and Before's.
+    /// What each pane last showed: the edit's, Before's and the magnifier's.
     after: PaneState,
     before: PaneState,
+    magnifier: PaneState,
 }
 /// What the renderer keeps between one pane's jobs.
 #[derive(Default)]
@@ -267,6 +269,7 @@ fn render(
         lut,
         after,
         before,
+        magnifier,
     } = state;
     let PaneState {
         fit,
@@ -278,10 +281,12 @@ fn render(
     } = match job.pane {
         Pane::After => after,
         Pane::Before => before,
+        Pane::Magnifier => magnifier,
     };
     let (whole_slot, region_slot) = match job.pane {
         Pane::After => (gpu::Slot::Whole, gpu::Slot::Region),
         Pane::Before => (gpu::Slot::BeforeWhole, gpu::Slot::BeforeRegion),
+        Pane::Magnifier => (gpu::Slot::Magnifier, gpu::Slot::Magnifier),
     };
     {
         let processor = processor.get_or_insert_with(|| match backend {
