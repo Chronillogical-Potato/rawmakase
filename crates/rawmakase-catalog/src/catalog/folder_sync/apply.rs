@@ -263,6 +263,7 @@ impl Catalog {
                     sql!("SELECT id FROM photos WHERE id=? OR master_id=?"),
                     &[&m.photo, &m.photo],
                 )?;
+                crate::catalog::stacks::leave_folder(w, m.photo, folder)?;
                 w.execute(
                     sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
                     &[&folder, &filename, &m.photo, &m.photo],

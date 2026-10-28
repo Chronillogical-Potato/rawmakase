@@ -268,6 +268,28 @@ fn copy_tables(lr: &mut LightroomWrite<'_>) -> Result<()> {
             &[],
         )?;
     }
+    // Folder stacks: Lightroom's top is position 1, and it keeps whether a
+    // stack is collapsed on the stack.
+    if lr.has_table("AgLibraryFolderStack")? && lr.has_table("AgLibraryFolderStackImage")? {
+        for statement in [
+            sqlite_sql!(
+                "INSERT INTO stacks(id,collapsed) SELECT id_local,collapsed<>0
+                 FROM lr.AgLibraryFolderStack"
+            ),
+            sqlite_sql!(
+                "INSERT INTO stack_photos(photo,stack,position)
+                 SELECT image,stack,ROW_NUMBER() OVER (PARTITION BY stack
+                     ORDER BY CAST(position AS REAL),id_local)
+                 FROM lr.AgLibraryFolderStackImage
+                 WHERE image IN(SELECT id FROM photos) AND stack IN(SELECT id FROM stacks)
+                 ORDER BY stack,CAST(position AS REAL),id_local
+                 ON CONFLICT DO NOTHING"
+            ),
+            sqlite_sql!("DELETE FROM stacks WHERE id NOT IN(SELECT stack FROM stack_photos)"),
+        ] {
+            lr.execute_sqlite(statement, &[])?;
+        }
+    }
     if lr.has_table("AgLibraryKeyword")? {
         lr.execute_sqlite(
             sqlite_sql!(

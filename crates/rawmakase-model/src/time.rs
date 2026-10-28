@@ -17,6 +17,17 @@ pub fn utc(seconds: i64) -> [i64; 6] {
     [year, month, day, rest / 3600, rest % 3600 / 60, rest % 60]
 }
 
+/// Days since 1970-01-01 of a civil date: the inverse of [`utc`]'s date.
+pub fn days(year: i64, month: i64, day: i64) -> i64 {
+    // Days-from-civil (Howard Hinnant).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 /// Seconds since 1970 now.
 fn now() -> i64 {
     std::time::SystemTime::now()
@@ -55,5 +66,12 @@ mod tests {
         assert!(now.len() == 20 && now.ends_with('Z'));
         assert_eq!(super::utc_text(1_469_686_444), "2016-07-28 06:14:04");
         assert_eq!(super::now_text().len(), 19);
+    }
+    #[test]
+    fn days_invert_utc_dates() {
+        for seconds in [0, 951_782_400, 1_469_686_444, -86_400 * 400] {
+            let [y, m, d, ..] = super::utc(seconds);
+            assert_eq!(super::days(y, m, d), seconds.div_euclid(86_400));
+        }
     }
 }

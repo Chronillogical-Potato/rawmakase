@@ -1450,6 +1450,7 @@ fn moved(
         Ok(to) => to,
         Err(why) => return Ok(Some(why)),
     };
+    crate::catalog::stacks::leave_folder(w, pre.master, to)?;
     w.execute(
         sql!("UPDATE photos SET folder=?, filename=? WHERE id=? OR master_id=?"),
         &[&to, &name, &pre.master, &pre.master],

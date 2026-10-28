@@ -908,6 +908,8 @@ mod reference;
 mod report_issue;
 mod retouch_tool;
 mod side_tabs;
+#[cfg(test)]
+mod stacks_tests;
 mod stand_in;
 mod stroke_outline;
 mod subject_mask;

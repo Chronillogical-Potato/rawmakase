@@ -43,8 +43,9 @@ mod naming;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
 mod sidecar;
 mod snapshots;
+mod stacks;
 mod value;
-pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId};
+pub use crate::ids::{CollectionId, FolderId, PhotoId, RootId, StackId};
 pub use crate::xmp::descriptive::Read as FileMetadata;
 #[doc(hidden)]
 pub use checksums::ReadChecksum;
@@ -60,6 +61,7 @@ pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
 pub use sidecar::{RawXmpReader, SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
+pub use stacks::{SavedStack, StackChange, StackPlace, StackState, StacksChanged, auto_stacks};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {
         ensure!(!path.exists(), "Catalog already exists: {}", path.display());
@@ -125,6 +127,7 @@ impl Catalog {
             }
         }
         let mappings = self.folders()?;
+        let stacks = self.stack_places()?;
         let paths: std::collections::HashMap<_, _> =
             mappings.into_iter().map(|f| (f.id, f.path)).collect();
         let rows: Vec<PhotoRow> = self.db.read(
@@ -155,6 +158,7 @@ impl Catalog {
                 format: r.format,
                 copy_name: r.copy_name,
                 master: r.master,
+                stack: stacks.get(&r.id).copied(),
                 keywords: r.keywords,
                 has_lightroom_edits: r.has_lightroom_edits,
             })
@@ -396,5 +400,7 @@ pub mod preview_cache;
 mod private_tests;
 #[cfg(test)]
 mod sql_scan;
+#[cfg(test)]
+mod stacks_tests;
 #[cfg(test)]
 mod tests;

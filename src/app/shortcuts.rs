@@ -79,6 +79,12 @@ const QUICK: [Shortcut; 3] = [
     ("Cmd+B", "Show it"),
     ("Cmd+Shift+B", "Clear it"),
 ];
+const STACKS: [Shortcut; 4] = [
+    ("Cmd+G", "Group into stack"),
+    ("Cmd+Shift+G", "Unstack"),
+    ("S", "Collapse / expand the stack"),
+    ("Shift+S", "Move to the top of the stack"),
+];
 const GENERAL: [Shortcut; 11] = [
     ("G", "Library"),
     ("D", "Develop"),
@@ -195,8 +201,12 @@ impl Editor {
         if cleared {
             query.clear();
         }
-        let views: [Group; 4] = [
+        let views: [Group; 5] = [
             ("Library grid", &LIBRARY),
+            (
+                "Stacks, in the grid; S and Shift+S in the Loupe too",
+                &STACKS,
+            ),
             ("Loupe", &LOUPE),
             ("Compare", &COMPARE),
             ("Survey", &SURVEY),

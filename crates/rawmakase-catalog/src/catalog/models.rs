@@ -13,6 +13,8 @@ pub struct Photo {
     pub copy_name: String,
     /// The photo this one is a virtual copy of; `None` for a master.
     pub master: Option<super::PhotoId>,
+    /// Its place in a folder stack, if it is in one.
+    pub stack: Option<super::StackPlace>,
     pub keywords: String,
     pub has_lightroom_edits: bool,
 }

@@ -6,7 +6,7 @@
 use crate::app::photo_metadata::LABELS;
 use crate::catalog::{Photo, PhotoId};
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
     path::Path,
 };
 
@@ -133,7 +133,16 @@ impl Filters {
             .map(|(i, _)| i)
             .collect();
         self.sort.sort(photos, &mut visible, keys, self.reverse);
+        if self.shows_stacks() {
+            visible = stacked(photos, visible);
+        }
         visible
+    }
+    /// Whether the source shows folder stacks: All Photographs and folders,
+    /// as Lightroom shows them. A collection and Previous Import list their
+    /// photos one by one.
+    pub(super) fn shows_stacks(&self) -> bool {
+        self.collection.is_none() && !self.previous_import
     }
     /// Whether the source (the folders, the collection, the previous
     /// import or the offline photos shown) has `p`, whatever the filter bar
@@ -184,6 +193,43 @@ impl Filters {
         self.kind = Kind::All;
         self.enabled = true;
     }
+}
+
+/// `visible`, filtered and sorted, with each stack's photos together in
+/// stack order, where the first of them shown (its top, unless the filters
+/// hide it) sorts; a collapsed stack shows that photo alone. A photo the
+/// filters hide stays hidden, stacked or not: a filter shows each match.
+fn stacked(photos: &[Photo], visible: Vec<usize>) -> Vec<usize> {
+    let key = |i: usize| photos[i].stack.map(|s| (s.id, photos[i].folder));
+    let mut members: HashMap<_, Vec<usize>> = HashMap::new();
+    for &i in &visible {
+        if let Some(k) = key(i) {
+            members.entry(k).or_default().push(i);
+        }
+    }
+    if members.is_empty() {
+        return visible;
+    }
+    for m in members.values_mut() {
+        m.sort_by_key(|i| photos[*i].stack.map(|s| s.index));
+    }
+    let mut out = Vec::with_capacity(visible.len());
+    for &i in &visible {
+        let Some(k) = key(i) else {
+            out.push(i);
+            continue;
+        };
+        // The stack's photos come where its first one shown sorts.
+        if members.get(&k).is_some_and(|m| m[0] == i) {
+            let m = members.remove(&k).unwrap_or_default();
+            if photos[i].stack.is_some_and(|s| s.collapsed) {
+                out.push(i);
+            } else {
+                out.extend(m);
+            }
+        }
+    }
+    out
 }
 
 /// Adds `item` to `set`, or takes it out if it is there.

@@ -1,5 +1,6 @@
 use super::cell::photo_cell;
 use super::filter::{Kind, Label, RatingOp};
+use super::stacks::StackAction;
 use super::tree::{FolderNode, TreeAction, folder_tree_row};
 use super::*;
 use crate::catalog::{Folder, PhotoId};
@@ -288,6 +289,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
         format: "RAF".into(),
         copy_name: String::new(),
         master: None,
+        stack: None,
         keywords: String::new(),
         has_lightroom_edits: false,
     };
@@ -307,6 +309,7 @@ fn photo_cells_preserve_texture_proportions_at_different_grid_widths() {
                     style: cell::Style::Compact,
                     details: String::new(),
                     single: true,
+                    stacks: true,
                 };
                 photo_cell(ui, &photo, Some(&texture), shown, width);
             });
@@ -1892,6 +1895,7 @@ fn flag_steps_up_and_down_and_stops_at_the_ends() {
         format: "RAF".into(),
         copy_name: String::new(),
         master: None,
+        stack: None,
         keywords: String::new(),
         has_lightroom_edits: false,
     };
@@ -3739,4 +3743,203 @@ fn a_folder_holding_only_folders_can_be_located() {
         "{labels:?}"
     );
     assert!(matches!(action, Some(TreeAction::RelinkRoot(RootId(42)))));
+}
+
+/// A Library over `names` in one folder, and their ids in that order.
+fn stack_library(names: &[&str]) -> Result<(tempfile::TempDir, Library, Vec<PhotoId>)> {
+    let d = tempfile::tempdir()?;
+    let folder = d.path().join("photos");
+    std::fs::create_dir(&folder)?;
+    for name in names {
+        std::fs::write(folder.join(name), b"fixture")?;
+    }
+    let path = d.path().join("stacks.rawmakase");
+    Catalog::create(&path)?.add_folder(&folder)?;
+    let library = Library::load(&path, egui::Context::default())?;
+    let ids = names
+        .iter()
+        .map(|n| {
+            library
+                .session
+                .photos
+                .iter()
+                .find(|p| p.filename == *n)
+                .unwrap()
+                .id
+        })
+        .collect();
+    Ok((d, library, ids))
+}
+
+#[test]
+fn a_stack_shows_where_its_top_sorts_and_the_filters_show_every_match() -> Result<()> {
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF", "c.RAF", "d.RAF", "e.RAF"])?;
+    let [a, b, c, d, e] = ids[..] else { panic!() };
+    library.select(Some(d));
+    library.selection.selected = [b, d].into();
+    library.stack_action(StackAction::Group, vec![b, d]);
+    // The active photo is the top; collapsed, it shows alone where it sorts.
+    assert_eq!(library.session.catalog.stack_of(b)?, [d, b]);
+    assert_eq!(library.shown(), [a, c, d, e]);
+    assert_eq!(library.selected(), Some(d));
+    library.stack_action(StackAction::Toggle, vec![d]);
+    assert_eq!(library.shown(), [a, c, d, b, e]);
+    // Reversed, the stack keeps its own order.
+    library.filters.reverse = true;
+    library.filter();
+    assert_eq!(library.shown(), [e, d, b, c, a]);
+    library.filters.reverse = false;
+
+    // Collapsed, a filter hiding the top shows the stack's photo that matches.
+    library.stack_action(StackAction::Toggle, vec![d]);
+    library.session.set_ratings(&[(b, 3, 0, String::new())])?;
+    library.filters.rating = Some(3);
+    library.filter();
+    assert_eq!(library.shown(), [b]);
+    library.filters.rating = None;
+    library.filter();
+
+    // A collection lists its photos one by one.
+    let quick = library.session.ensure_quick_collection()?;
+    library.change_collection(quick, &[b, d], &[])?;
+    library.select_collection(quick);
+    assert_eq!(library.shown(), [b, d]);
+    Ok(())
+}
+
+#[test]
+fn collapsing_hands_the_selection_to_the_photo_its_stack_shows() -> Result<()> {
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let [a, b, c] = ids[..] else { panic!() };
+    library.select(Some(a));
+    library.stack_action(StackAction::Group, vec![a, b, c]);
+    library.stack_action(StackAction::Toggle, vec![a]);
+    library.select(Some(c));
+    library.stack_action(StackAction::Toggle, vec![c]);
+    assert_eq!(library.shown(), [a]);
+    assert_eq!(library.selected(), Some(a));
+    // Showing a photo a collapsed stack hides expands the stack.
+    library.reveal(b);
+    assert_eq!(library.shown(), [a, b, c]);
+    assert_eq!(library.selected(), Some(b));
+    assert!(!library.session.catalog.stack_places()?[&b].collapsed);
+    Ok(())
+}
+
+#[test]
+fn grouping_a_collapsed_stack_takes_all_of_its_photos() -> Result<()> {
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let [a, b, c, d] = ids[..] else { panic!() };
+    library.select(Some(a));
+    library.stack_action(StackAction::Group, vec![a, b]);
+    library.stack_action(StackAction::Group, vec![c, d]);
+    // Both shown collapsed by their tops; d active, so c's stack comes first.
+    library.select(Some(c));
+    library.stack_action(StackAction::Group, vec![a, c]);
+    assert_eq!(library.session.catalog.stack_of(a)?, [c, d, a, b]);
+    // Unstack on the collapsed top takes the whole stack apart.
+    library.stack_action(StackAction::Unstack, vec![c]);
+    assert!(library.session.catalog.stack_places()?.is_empty());
+    assert_eq!(library.shown(), [a, b, c, d]);
+    // A single photo is no stack.
+    library.stack_action(StackAction::Group, vec![a]);
+    assert!(
+        library.message.contains("two photos"),
+        "{}",
+        library.message
+    );
+    Ok(())
+}
+
+#[test]
+fn auto_stack_stacks_runs_of_the_source_in_one_undoable_command() -> Result<()> {
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF", "c.RAF", "d.RAF"])?;
+    let [a, b, c, d] = ids[..] else { panic!() };
+    let times = [
+        (a, "2024-03-02T10:00:00.000"),
+        (b, "2024-03-02T10:00:20.000"),
+        (c, "2024-03-02T10:05:00.000"),
+        (d, "2024-03-02T10:05:30.000"),
+    ];
+    for photo in &mut library.session.photos {
+        if let Some((_, t)) = times.iter().find(|(id, _)| *id == photo.id) {
+            photo.captured = (*t).into();
+        }
+    }
+    assert_eq!(library.auto_stacks(60.), [vec![a, b], vec![c, d]]);
+    assert_eq!(library.auto_stacks(25.), [vec![a, b]]);
+    library.auto_stack_now(60.)?;
+    assert_eq!(library.shown(), [a, c]);
+    let done = library.take_stack_done();
+    assert_eq!(done.len(), 1);
+    library.restore_stacks(&done[0].before)?;
+    assert_eq!(library.shown(), [a, b, c, d]);
+    Ok(())
+}
+
+#[test]
+fn grouping_puts_the_active_photo_on_top_even_for_a_stack_whose_top_is_filtered_out() -> Result<()>
+{
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF", "c.RAF"])?;
+    let [a, b, c] = ids[..] else { panic!() };
+    library.select(Some(a));
+    library.stack_action(StackAction::Group, vec![a, b]);
+    library
+        .session
+        .set_ratings(&[(b, 3, 0, String::new()), (c, 3, 0, String::new())])?;
+    library.filters.rating = Some(3);
+    library.filter();
+    // a is filtered out: b shows for the collapsed stack.
+    assert_eq!(library.shown(), [b, c]);
+    library.select(Some(b));
+    library.selection.selected = [b, c].into();
+    library.stack_action(StackAction::Group, vec![b, c]);
+    assert_eq!(library.session.catalog.stack_of(a)?, [b, a, c]);
+    assert_eq!(library.shown(), [b]);
+    assert_eq!(library.selected(), Some(b));
+    Ok(())
+}
+
+#[test]
+fn a_filmstrip_badge_collapses_an_open_stack_shown_whole() -> Result<()> {
+    let (_d, mut library, ids) = stack_library(&["a.RAF", "b.RAF"])?;
+    let [a, b] = ids[..] else { panic!() };
+    library.select(Some(a));
+    library.stack_action(StackAction::Group, vec![a, b]);
+    library.stack_action(StackAction::Toggle, vec![a]);
+    assert_eq!(library.shown(), [a, b]);
+    let ctx = library.ctx.clone();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200., 800.));
+    let frame = |library: &mut Library, events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                library.filmstrip_panel(ui, Some(a), Module::Library);
+            },
+        );
+        output.textures_delta.clear();
+    };
+    frame(&mut library, vec![]);
+    let badge = ctx
+        .read_response(egui::Id::new(("strip-stack-badge", a)))
+        .expect("the top photo's badge")
+        .rect
+        .center();
+    let click = |pressed| egui::Event::PointerButton {
+        pos: badge,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame(&mut library, vec![egui::Event::PointerMoved(badge)]);
+    frame(&mut library, vec![click(true)]);
+    // The click shortens the list under the strip as it draws.
+    frame(&mut library, vec![click(false)]);
+    assert_eq!(library.shown(), [a]);
+    frame(&mut library, vec![]);
+    Ok(())
 }

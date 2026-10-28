@@ -75,6 +75,7 @@ impl Library {
         zoom: &mut crate::app::navigator::Zoom,
         chrome: bool,
     ) -> Action {
+        self.auto_stack_window(ui.ctx());
         if self.compare.open {
             return self.compare(ui, chrome);
         }
@@ -173,6 +174,7 @@ impl Library {
                                             String::new()
                                         },
                                         single: self.menu_single(p.id, true),
+                                        stacks: self.filters.shows_stacks(),
                                     };
                                     let (response, edit) =
                                         photo_cell(ui, &p, self.texture(&p), shown, width);
@@ -249,6 +251,17 @@ impl Library {
                 }
             }
             PhotoAction::Copy(copy) => self.copy_request = Some(copy),
+            PhotoAction::Stack(stack) => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                self.stack_action(stack, ids);
+            }
+            PhotoAction::StackBadge => {
+                self.stack_action(super::StackAction::Toggle, vec![photo.id]);
+            }
             // The selection when the photo is in it, in the grid and the
             // filmstrip alike, as Export.
             PhotoAction::BuildPreviews(kind) => {

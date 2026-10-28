@@ -5,7 +5,9 @@
 //! It lives in memory and is cleared when another catalog opens.
 use super::Editor;
 use super::history::{Recorded, Step};
-use super::library::{CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place};
+use super::library::{
+    CollectionCommand, DescriptiveCommand, Library, MetadataCommand, Place, StackCommand,
+};
 use crate::app::Module;
 use crate::catalog::PhotoId;
 use anyhow::Result;
@@ -37,6 +39,9 @@ pub(super) enum Command {
     },
     /// Settings synchronized to several photos at once; undone and redone together.
     Sync(Box<super::sync::SyncCommand>),
+    /// Photos grouped into, taken out of or moved in stacks; undone in the
+    /// Library.
+    Stack(Box<StackCommand>),
 }
 
 impl Command {
@@ -71,6 +76,7 @@ impl Command {
                 !change.before.is_empty()
             }
             Command::Develop { photo, .. } => *photo != Some(id),
+            Command::Stack(change) => change.forget_photo(id),
             Command::Sync(sync) => {
                 sync.edits.retain(|e| e.id != id);
                 !sync.edits.is_empty()
@@ -164,6 +170,12 @@ impl Editor {
                     .take_collection_done()
                     .into_iter()
                     .map(|change| (change.sequence, Command::Collection(Box::new(change)))),
+            );
+            commands.extend(
+                library
+                    .take_stack_done()
+                    .into_iter()
+                    .map(|change| (change.sequence, Command::Stack(Box::new(change)))),
             );
             commands.extend(
                 library
@@ -272,6 +284,15 @@ impl Editor {
                 };
                 self.apply_library(verb, &change.summary, place, None, |library| {
                     library.restore_descriptive(values, ratings)
+                })
+            }
+            Command::Stack(change) => {
+                let (state, place) = match direction {
+                    Direction::Undo => (&change.before, &change.place_before),
+                    Direction::Redo => (&change.after, &change.place_after),
+                };
+                self.apply_library(verb, &change.summary, place, None, |library| {
+                    library.restore_stacks(state)
                 })
             }
             Command::Sync(sync) => {
