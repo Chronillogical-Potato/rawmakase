@@ -606,17 +606,26 @@ fn curve_color(palette: &theme::Palette, channel: usize) -> Color32 {
     }
 }
 /// Read-out under a curve: the input and output values at the pointer.
-fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>) {
+fn curve_readout(ui: &mut egui::Ui, value: Option<[f32; 2]>, hint: &str) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 18.), Sense::hover());
-    if let Some([x, y]) = value {
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
+    let palette = theme::palette(ui.ctx());
+    // The value under the pointer, or else how to use the graph, centred
+    // under it in the same row.
+    let (text, size, color) = match value {
+        Some([x, y]) => (
             format!("{:.0} / {:.0}", x * 255., y * 255.),
-            egui::FontId::proportional(11.),
-            theme::palette(ui.ctx()).gray(170),
-        );
-    }
+            11.,
+            palette.gray(170),
+        ),
+        None => (hint.to_string(), 10.5, palette.gray(115)),
+    };
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::proportional(size),
+        color,
+    );
 }
 /// Parametric curve: dragging up or down in the graph changes the region
 /// under the pointer, and the three handles below move the region splits.
@@ -858,7 +867,11 @@ pub(super) fn tone_curve_ui(
     } else {
         egui::CursorIcon::Crosshair
     });
-    curve_readout(ui, readout);
+    curve_readout(
+        ui,
+        readout,
+        "Click to add · drag to shape · right-click to remove",
+    );
     if let Some(i) = state.selected {
         let mut point = curve.points[i].map(|v| v * 255.);
         let changed = ui
@@ -890,11 +903,6 @@ pub(super) fn tone_curve_ui(
             curve.move_point(i, point.map(|v| v / 255.));
         }
     }
-    ui.label(
-        egui::RichText::new("Click to add · drag to shape · right-click to remove")
-            .size(10.)
-            .color(palette.gray(125)),
-    );
     ui.ctx().data_mut(|d| d.insert_temp(id, state));
 }
 /// Width of a slider's number field at the right of its row.
