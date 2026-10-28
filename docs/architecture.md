@@ -52,7 +52,7 @@ files should preserve.
 | `develop` | Rendering a recipe: geometry, color processing, the scene tone stage, curves, effects, local adjustments, detail rendering and the GPU port | `pipeline/`, `scene_tone/`, `quality/`, `geometry.rs`, `gpu/` |
 | `xmp` | Namespace-aware Adobe settings parsing and application to recipes. Settings that ask for Auto measure the photo through `PhotoMeasures`, which `develop::Measures` provides, and packets take the crop as rendered from the caller, so XMP needs no rendering code | `parse.rs`, `apply.rs` |
 | `raw_defaults` | Lightroom's Raw Defaults: the master and per-camera choices and a photo's starting settings. Above `presets`, whose library it reads | `raw_defaults.rs` |
-| `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import | `native.rs`, `library.rs` |
+| `presets` | Native JSON recipe presets, installed XMP collections, favorites and preset import, and a preset's application to one photo, which Develop and the Library's batch share | `native.rs`, `library.rs`, `photo.rs` |
 | `storage` | RAW identity checks, which files are photos and the rendered formats' facts (`RasterFormat`: extensions, MIME types, names; the codecs are `raster`'s and `export`'s), application paths and atomic JSON writes, and the file system primitives moving a user's files needs (`fsops`: exclusive rename, file ids, exact listings, name comparison, containment, volume facts and free space, and a copy's steps; policy-free, one file per OS). Saved-recipe versions are `model::saved_format`, the desktop session is `app::session` and legacy sidecar import is `catalog::legacy_sidecar` | `identity.rs`, `files.rs`, `formats.rs`, `fsops/` |
 | `export_settings` | Export choices as values: the Export dialog's settings, Rename Photos' remembered choices (`RenameSettings`), the user's saved file-name templates (`SavedTemplates`), a photo's saved `ExportOptions`, and the naming templates (`NameTemplate`: Lightroom's presets and Filename Template Editor templates, `TokenTemplate`) exports and renames name files by, from the `NameFields` taken once per export | `export_settings.rs`, `export_settings/tokens.rs`, `export_settings/rename.rs`, `export_settings/saved.rs` |
 | `export` | JPEG, 16-bit TIFF and PNG encoding, selected EXIF, sRGB ICC embedding, atomic output publication | `mod.rs`, `metadata.rs` |
@@ -212,7 +212,13 @@ inject a temporary file, without changing the process-wide environment.
   earlier format (`Catalog::write_recipes`, from saving edits and snapshots),
   once that write's checks have passed.
 - Parsing XMP produces settings, while application validates and resolves a
-  recipe. Collection discovery and favorites belong in `presets`.
+  recipe. Collection discovery and favorites belong in `presets`. Auto settings in
+  XMP are interpreted in `xmp` and measured by the engine through `PhotoMeasures`,
+  so a preset's Auto is the app's Auto. A preset applied to a photo (Develop's
+  click, a batch on the Library's selection) goes through
+  `presets::apply_to_photo`, and the rule that turns on a switched-off panel a
+  change edits is `model::edit::turn_on_edited_panel`, applied by Develop's edit
+  session and by batch edits alike.
 - Validate recipe changes at domain boundaries. Saved format versions and
   migrations are shared by native presets, catalog edits and legacy sidecars. Every saved recipe renders
   with the one engine, and fields it lacks take the recipe defaults, so changes to

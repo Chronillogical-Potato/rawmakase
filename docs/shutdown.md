@@ -76,7 +76,10 @@ that drops it.
 
 One-shot jobs stay detached: Auto, Upright, Auto straighten, the Point Color and
 Targeted Adjustment samples, the onboarding scan, catalog open and import, file
-dialogs, bulk import, the preset scan, Sync Settings, folder relink and move, the
+dialogs, bulk import, the preset scan, batch edits (Sync Settings, Auto Settings or a
+preset on the Library's selection; their Cancel is taken between photos and right
+before saving, discards the whole batch, and the batch ends only when its worker
+reports back, a panic included), folder relink and move, the
 file operations' plan, run and recovery (Remove from Catalog, moving photos, New
 Folder Inside, and deciding what a crash left when a catalog opens; the close guard
 waits for a run, with Close anyway, and the journal leaves anything cut short to
@@ -88,7 +91,7 @@ macOS run their panel on the main thread, so they are never joined from it.
 
 ## The exit sequence
 
-1. Close guard, on a window close: refuse while an export, Sync Settings, a
+1. Close guard, on a window close: refuse while an export, a batch edit, a
    folder change or a command output job runs, and save the edit after the
    autosave in flight, on the autosave thread. A save the catalog does not answer
    within the deadline keeps the window open, saying so, with Close without saving.
@@ -113,7 +116,7 @@ macOS run their panel on the main thread, so they are never joined from it.
 
 ## Quit on macOS
 
-The close guard refuses to close while an export, Sync Settings, a folder change
+The close guard refuses to close while an export, a batch edit, a folder change
 or a command output job runs, and asks before closing when the edit cannot be
 saved. winit's app menu binds Quit to
 `terminate:`, which skips it, so at launch the app points that item at the key
