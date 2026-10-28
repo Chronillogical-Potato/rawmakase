@@ -34,6 +34,11 @@ pub(in crate::app) mod inset {
     pub(in crate::app) const PANEL: f32 = space::M;
     /// A modal window's content from its border.
     pub(in crate::app) const DIALOG: f32 = space::XXL;
+    /// Above a side panel's section header or caption band, so the first
+    /// headers of neighbouring columns (Presets beside the adjustments) line
+    /// up. The catalog's sidebar, whose headers are quiet captions, uses
+    /// [`space::M`].
+    pub(in crate::app) const SECTION: f32 = space::L;
     /// A card's content (a group inside a dialog) from its border.
     pub(in crate::app) const CARD: Margin = margin(space::XL, space::L);
     /// A toolbar strip's content (the Library's views, its filter bar).
@@ -82,6 +87,8 @@ pub(in crate::app) mod size {
     pub(in crate::app) const MENU: f32 = 24.;
     /// A control in a dialog or form.
     pub(in crate::app) const FIELD: f32 = 26.;
+    /// A side panel's section header or caption band.
+    pub(in crate::app) const HEADER: f32 = 28.;
     /// A tool button on Develop's toolbar.
     pub(in crate::app) const TOOL: f32 = 32.;
 }
@@ -218,5 +225,312 @@ mod tests {
         assert_eq!(margin(space::XL, space::L), egui::Margin::symmetric(16, 12));
         assert_eq!(margin_same(inset::DIALOG), egui::Margin::same(24));
         assert_eq!(inset::CARD, egui::Margin::symmetric(16, 12));
+    }
+
+    /// Calls that take a size, spacing or radius: the interface's code
+    /// gives them a token, so a number here is a value outside the system.
+    const SIZED: [&str; 7] = [
+        "add_space(",
+        "FontId::proportional(",
+        "FontId::monospace(",
+        ".size(",
+        "corner_radius(",
+        "Margin::same(",
+        "Margin::symmetric(",
+    ];
+
+    /// `code` with its comments, string and character literals blanked to
+    /// spaces, keeping newlines, so only code is scanned and line numbers hold.
+    fn code_only(code: &str) -> String {
+        let chars: Vec<char> = code.chars().collect();
+        let mut out = String::with_capacity(code.len());
+        let mut i = 0;
+        let blank = |out: &mut String, c: char| out.push(if c == '\n' { '\n' } else { ' ' });
+        while i < chars.len() {
+            let c = chars[i];
+            let next = chars.get(i + 1).copied();
+            if c == '/' && next == Some('/') {
+                while i < chars.len() && chars[i] != '\n' {
+                    blank(&mut out, chars[i]);
+                    i += 1;
+                }
+            } else if c == '/' && next == Some('*') {
+                let mut depth = 0;
+                loop {
+                    if i >= chars.len() {
+                        break;
+                    }
+                    if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+                        depth += 1;
+                        out.push_str("  ");
+                        i += 2;
+                    } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        depth -= 1;
+                        out.push_str("  ");
+                        i += 2;
+                        if depth == 0 {
+                            break;
+                        }
+                    } else {
+                        blank(&mut out, chars[i]);
+                        i += 1;
+                    }
+                }
+            } else if c == 'r' && raw_prefix(&chars, i) && matches!(next, Some('"' | '#')) {
+                // A raw string: r"…", r#"…"#, and br/cr ones.
+                let hashes = chars[i + 1..].iter().take_while(|&&c| c == '#').count();
+                if chars.get(i + 1 + hashes) != Some(&'"') {
+                    out.push(c);
+                    i += 1;
+                    continue;
+                }
+                let close: String = std::iter::once('"')
+                    .chain(std::iter::repeat_n('#', hashes))
+                    .collect();
+                let start = i;
+                i += 2 + hashes;
+                let rest: String = chars[i..].iter().collect();
+                let end = rest.find(&close).map_or(chars.len(), |at| {
+                    i + rest[..at].chars().count() + close.chars().count()
+                });
+                for &c in &chars[start..end] {
+                    blank(&mut out, c);
+                }
+                i = end;
+            } else if c == '"' {
+                blank(&mut out, c);
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    let escaped = chars[i] == '\\';
+                    blank(&mut out, chars[i]);
+                    i += 1;
+                    if escaped && i < chars.len() {
+                        blank(&mut out, chars[i]);
+                        i += 1;
+                    }
+                }
+                if i < chars.len() {
+                    blank(&mut out, chars[i]);
+                    i += 1;
+                }
+            } else if c == '\'' {
+                // A character literal ('x', '\n', '\u{..}'), not a lifetime ('a).
+                let len = if next == Some('\\') {
+                    chars[i + 2..]
+                        .iter()
+                        .position(|&c| c == '\'')
+                        .map(|p| p + 3)
+                } else if chars.get(i + 2) == Some(&'\'') {
+                    Some(3)
+                } else {
+                    None
+                };
+                match len {
+                    Some(len) => {
+                        for &c in &chars[i..(i + len).min(chars.len())] {
+                            blank(&mut out, c);
+                        }
+                        i += len;
+                    }
+                    None => {
+                        out.push(c);
+                        i += 1;
+                    }
+                }
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    /// Whether the `r` at `i` starts a raw string's prefix: at a token's
+    /// start, or after a `b` or `c` that is (`br"…"`, `cr"…"`).
+    fn raw_prefix(chars: &[char], i: usize) -> bool {
+        let boundary =
+            |at: usize| at == 0 || !(chars[at - 1].is_alphanumeric() || chars[at - 1] == '_');
+        boundary(i) || (i > 0 && matches!(chars[i - 1], 'b' | 'c') && boundary(i - 1))
+    }
+
+    /// Whether the Rust literal `literal` is zero, in any spelling.
+    fn is_zero(literal: &str) -> bool {
+        let radix = ["0x", "0o", "0b"]
+            .iter()
+            .find_map(|p| literal.strip_prefix(p));
+        if let Some(digits) = radix {
+            return digits
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit() || *c == '_')
+                .all(|c| c == '0' || c == '_');
+        }
+        let value: String = literal
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || matches!(c, '_' | '.' | 'e' | 'E' | '+' | '-'))
+            .filter(|&c| c != '_')
+            .collect();
+        value
+            .trim_end_matches(['e', 'E'])
+            .parse::<f64>()
+            .is_ok_and(|v| v == 0.)
+    }
+
+    /// The number literals in `arg` that stand for a size: not zero, and not
+    /// a factor or divisor (`/ 2.` centres, `* 0.1` scales).
+    fn sized_numbers(arg: &str) -> Vec<&str> {
+        let bytes = arg.as_bytes();
+        let mut found = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let starts = bytes[i].is_ascii_digit()
+                && (i == 0
+                    || !(bytes[i - 1].is_ascii_alphanumeric() || b"_.".contains(&bytes[i - 1])));
+            if !starts {
+                i += 1;
+                continue;
+            }
+            // A whole Rust literal: digits and _, a fraction, an exponent, a suffix.
+            let mut end = i;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || b"_.".contains(&bytes[end]))
+            {
+                let exponent_sign = matches!(bytes[end], b'e' | b'E')
+                    && matches!(bytes.get(end + 1), Some(b'+' | b'-'));
+                end += if exponent_sign { 2 } else { 1 };
+            }
+            let literal = &arg[i..end];
+            let zero = is_zero(literal);
+            let follows_operator = arg[..i].trim_end().ends_with(['/', '*']);
+            if !zero && !follows_operator {
+                found.push(literal);
+            }
+            i = end;
+        }
+        found
+    }
+
+    /// Each call in `code` that gives a size a number: its line and text.
+    fn violations(code: &str) -> Vec<(usize, String)> {
+        let code = code_only(&code.replace("\r\n", "\n"));
+        let mut found = Vec::new();
+        for call in SIZED {
+            for (at, _) in code.match_indices(call) {
+                let start = at + call.len();
+                let mut depth = 1;
+                let end = code[start..]
+                    .char_indices()
+                    .find(|&(_, c)| {
+                        depth += match c {
+                            '(' => 1,
+                            ')' => -1,
+                            _ => 0,
+                        };
+                        depth == 0
+                    })
+                    .map_or(code.len(), |(j, _)| start + j);
+                if !sized_numbers(&code[start..end]).is_empty() {
+                    let line = code[..at].matches('\n').count() + 1;
+                    let text = code[at..(end + 1).min(code.len())]
+                        .split_whitespace()
+                        .collect::<Vec<_>>();
+                    found.push((line, text.join(" ")));
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// The interface's production code, without its tests: each file's text
+    /// up to its `#[cfg(test)]` module, files in path order.
+    fn interface_sources() -> Vec<(std::path::PathBuf, String)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
+        let mut dirs = vec![root];
+        let mut files = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if name.ends_with(".rs")
+                    && !name.contains("tests")
+                    && !["design.rs", "theme.rs", "ui_snapshot.rs"].contains(&name.as_str())
+                {
+                    let text = std::fs::read_to_string(&path)
+                        .unwrap()
+                        .replace("\r\n", "\n");
+                    let code = text
+                        .split("#[cfg(test)]\nmod tests")
+                        .next()
+                        .unwrap()
+                        .to_owned();
+                    files.push((path, code));
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn the_interface_names_tokens_not_numbers() {
+        let mut found = Vec::new();
+        for (path, code) in interface_sources() {
+            for (line, text) in violations(&code) {
+                found.push(format!("{}:{line}: {text}", path.display()));
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "use a token from design.rs instead of a number:\n{}",
+            found.join("\n")
+        );
+    }
+
+    #[test]
+    fn the_guard_reads_numbers_as_rust_does() {
+        assert_eq!(
+            sized_numbers("if sidebar { 8. } else { 14. }"),
+            ["8.", "14."]
+        );
+        assert_eq!(sized_numbers("-6."), ["6."]);
+        assert_eq!(sized_numbers("14.0_f32"), ["14.0_f32"]);
+        assert_eq!(sized_numbers("1e1"), ["1e1"]);
+        assert_eq!(sized_numbers("1.5e-1f32"), ["1.5e-1f32"]);
+        assert!(sized_numbers("space::M").is_empty());
+        assert!(sized_numbers("text::H2").is_empty());
+        assert!(sized_numbers("(w - x) / 2.").is_empty());
+        assert!(sized_numbers("(h * 0.1).clamp(space::XXXL, space::HUGE * 2.)").is_empty());
+        assert_eq!(sized_numbers("0x0e"), ["0x0e"]);
+        assert_eq!(sized_numbers("0b10i8"), ["0b10i8"]);
+        for zero in ["0", "0.", "0.0", "0_f32", "0.0e0", "0x00u8", "0o0", "0b0_0"] {
+            assert!(sized_numbers(zero).is_empty(), "{zero}");
+        }
+    }
+
+    #[test]
+    fn the_guard_scans_code_not_comments_or_strings() {
+        // A `//` in a string hides nothing after it.
+        let url = "ui.label(RichText::new(\"https://a.co\").size(14.));";
+        assert_eq!(violations(url).len(), 1);
+        // Commented-out calls, and numbers or brackets in strings, are not code.
+        assert!(violations("// ui.add_space(14.);\n/* ui.add_space(14.); */").is_empty());
+        assert!(violations("ui.add_space(width(\"(12\"));").is_empty());
+        assert!(violations("let s = r#\"ui.add_space(3.)\"#; let c = '(';").is_empty());
+        // A prefixed raw string ends where it ends: the code after it is read.
+        assert_eq!(
+            violations("let p = br#\"[\"]\"#; ui.add_space(14.);").len(),
+            1
+        );
+        assert_eq!(violations("let p = cr\"x\"; ui.add_space(14.);").len(), 1);
+        // A call over several lines is found, at its first line.
+        let multiline = "a();\r\nui.add_space(\r\n    if x { space::M } else { 9. },\r\n);";
+        assert_eq!(violations(multiline)[0].0, 2);
+        // Lifetimes are not character literals.
+        assert_eq!(
+            violations("fn f<'a>(ui: &'a mut Ui) { ui.add_space(5.); }").len(),
+            1
+        );
     }
 }

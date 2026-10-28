@@ -317,8 +317,11 @@ fn section_header(
     });
     let sidebar = group == Some(SectionGroup::LibraryLeft.key());
     // Space parts the panels; the catalog's sidebar lists sources closer.
-    ui.add_space(if sidebar { 8. } else { 14. });
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    ui.add_space(if sidebar { space::M } else { inset::SECTION });
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), size::HEADER),
+        Sense::hover(),
+    );
     // Outside the catalog's sidebar the chevron keeps the header's right end,
     // its buttons before it.
     let chevron_rect = (!sidebar).then(|| {
@@ -2552,6 +2555,13 @@ pub(super) fn label_column(ui: &egui::Ui) -> f32 {
         .data(|d| d.get_temp::<f32>(label_column_id()))
         .unwrap_or(LABEL_COLUMN)
 }
+/// Between the label column and what is beside it: captions end this far
+/// short of it, slider rails and controls start this far past it.
+pub(super) const LABEL_GAP: f32 = 5.;
+/// Where a row's slider rail or control starts, from the row's left.
+pub(super) fn control_left(ui: &egui::Ui) -> f32 {
+    label_column(ui) + LABEL_GAP
+}
 /// While alive, the slider grid's label column is `width` wide: Develop's
 /// tool drawers, whose labels are short, give the controls the room.
 pub(super) struct LabelColumn {
@@ -2585,8 +2595,11 @@ impl Drop for LabelColumn {
 /// end holds.
 pub(super) fn panel_caption(ui: &mut egui::Ui, name: &str) -> Rect {
     let palette = theme::palette(ui.ctx());
-    ui.add_space(space::M);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    ui.add_space(inset::SECTION);
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), size::HEADER),
+        Sense::hover(),
+    );
     ui.painter()
         .rect_filled(rect, radius::CONTROL, palette.tone(Tone::CARD));
     ui.painter().text(
