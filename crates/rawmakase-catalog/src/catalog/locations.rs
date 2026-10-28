@@ -739,3 +739,137 @@ fn own_rows(db: &impl Reads, computer: &str, root: RootId) -> Result<Vec<String>
         &[&root, &computer],
     )
 }
+
+/// The folders of `db`, each with its root and logical path.
+fn every_logical(db: &impl Reads) -> Result<Vec<(FolderId, RootId, String)>> {
+    let ids: Vec<FolderId> = db.read(sql!("SELECT id FROM folders ORDER BY id"), &[])?;
+    let mut folders = Vec::new();
+    for id in ids {
+        if let Some((root, logical)) = logical_path(db, id)? {
+            folders.push((id, root, logical));
+        }
+    }
+    Ok(folders)
+}
+/// `kept` with every catalog folder above one of them in its root: removing
+/// one would take the locations below it with it, which `kept` resolve by.
+pub(super) fn with_ancestors(
+    db: &impl Reads,
+    kept: &std::collections::BTreeSet<FolderId>,
+) -> Result<std::collections::BTreeSet<FolderId>> {
+    let folders = every_logical(db)?;
+    let places: Vec<(RootId, &str)> = folders
+        .iter()
+        .filter(|(id, ..)| kept.contains(id))
+        .map(|(_, root, logical)| (*root, logical.as_str()))
+        .collect();
+    Ok(folders
+        .iter()
+        .filter(|(id, root, logical)| {
+            kept.contains(id)
+                || places
+                    .iter()
+                    .any(|(r, place)| r == root && within(logical, place))
+        })
+        .map(|(id, ..)| *id)
+        .collect())
+}
+/// Deletes every location no folder left is at or below, on every computer,
+/// and the roots no folder is left in: what is left places only the folders
+/// left, and names nothing else. Run once the other folders are removed.
+pub(super) fn forget_unused(w: &mut Write<'_>) -> Result<()> {
+    row! {
+        struct Any {
+            root: RootId,
+            relative: String,
+        }
+    }
+    let folders = every_logical(w)?;
+    let rows: Vec<Any> = w.read(
+        sql!("SELECT DISTINCT root, relative_path FROM folder_locations"),
+        &[],
+    )?;
+    for row in rows {
+        let used = folders
+            .iter()
+            .any(|(_, root, logical)| *root == row.root && within(&row.relative, logical));
+        if !used {
+            w.execute(
+                sql!("DELETE FROM folder_locations WHERE root=? AND relative_path=?"),
+                &[&row.root, &row.relative],
+            )?;
+        }
+    }
+    w.execute(
+        sql!(
+            "DELETE FROM folder_locations
+             WHERE root NOT IN (SELECT root FROM folders)"
+        ),
+        &[],
+    )?;
+    w.execute(
+        sql!("DELETE FROM roots WHERE id NOT IN (SELECT root FROM folders)"),
+        &[],
+    )?;
+    Ok(())
+}
+/// Where `folders` are, as the catalog records it for every computer: their
+/// rows and logical paths, their roots, and every location in those roots.
+/// Equal only while nothing moved or relinked any of them.
+pub(super) fn placement_of(db: &impl Reads, folders: &[FolderId]) -> Result<Vec<String>> {
+    row! {
+        struct Placed {
+            root: RootId,
+            original: String,
+            mapped: Option<String>,
+            relative: String,
+            logical: Option<String>,
+            legacy: Option<String>,
+        }
+    }
+    row! {
+        struct Located {
+            relative: String,
+            computer: String,
+            path: String,
+        }
+    }
+    let mut placement = Vec::new();
+    let mut roots = std::collections::BTreeSet::new();
+    for folder in folders {
+        let placed: Option<Placed> = db.read_optional(
+            sql!(
+                "SELECT f.root, r.original_path, r.mapped_path, f.relative_path, p.path, m.path
+                 FROM folders f JOIN roots r ON r.id=f.root
+                 LEFT JOIN folder_paths p ON p.folder=f.id
+                 LEFT JOIN folder_mappings m ON m.folder=f.id WHERE f.id=?"
+            ),
+            &[folder],
+        )?;
+        placement.push(format!(
+            "{folder:?} {:?}",
+            placed.as_ref().map(|p| (
+                p.root,
+                &p.original,
+                &p.mapped,
+                &p.relative,
+                &p.logical,
+                &p.legacy,
+            ))
+        ));
+        roots.extend(placed.map(|p| p.root));
+    }
+    for root in roots {
+        let rows: Vec<Located> = db.read(
+            sql!(
+                "SELECT relative_path, computer, path FROM folder_locations
+                 WHERE root=? ORDER BY relative_path, computer"
+            ),
+            &[&root],
+        )?;
+        for l in rows {
+            placement.push(format!("{root:?} {:?}", (l.relative, l.computer, l.path)));
+        }
+    }
+    Ok(placement)
+}

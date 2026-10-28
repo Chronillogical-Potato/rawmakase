@@ -322,6 +322,7 @@ impl Library {
                                         folders: HashSet::new(),
                                         photos: 0,
                                         empty_root: Some(root),
+                                        exported: None,
                                     });
                                 }
                                 Some(TreeAction::DropFolder {
@@ -356,6 +357,23 @@ impl Library {
                                         folders,
                                         photos,
                                         empty_root: None,
+                                        exported: None,
+                                    })
+                                }
+                                Some(TreeAction::ExportCatalog(name, folders, photos)) => {
+                                    let mut ids: Vec<_> = folders.iter().copied().collect();
+                                    ids.sort();
+                                    self.export_request = Some(super::CatalogExportRequest {
+                                        name: name.clone(),
+                                        scope: crate::catalog::ExportScope::Folders(ids),
+                                        removal: Some(super::FolderRemoval {
+                                            catalog: self.session.catalog.location().clone(),
+                                            name,
+                                            folders,
+                                            photos,
+                                            empty_root: None,
+                                            exported: None,
+                                        }),
                                     })
                                 }
                                 Some(TreeAction::ShowSubfolders(shown)) => {

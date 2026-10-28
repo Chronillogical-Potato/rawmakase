@@ -117,6 +117,9 @@ pub(super) enum TreeAction {
     /// Remove from Catalog: the folder's name, it and its subfolders, and
     /// their photos' count.
     Remove(String, HashSet<FolderId>, usize),
+    /// Export Folder as Catalog: the folder's name, it and its subfolders,
+    /// and their photos' count.
+    ExportCatalog(String, HashSet<FolderId>, usize),
     /// Synchronize Folder: what to synchronize, and its name.
     Synchronize(crate::catalog::folder_sync::SyncScope, String),
     /// New Folder Inside…: the folder's root, logical path, name and
@@ -449,6 +452,14 @@ pub(super) fn folder_tree_row(
         }
         if movable || !node.ids.is_empty() || node.root.is_some() {
             menu_separator(ui);
+        }
+        if !node.ids.is_empty() && menu_item(ui, "Export Folder as Catalog…", "", true, false) {
+            action = Some(TreeAction::ExportCatalog(
+                node.name.clone(),
+                node.ids.clone(),
+                node.count,
+            ));
+            ui.close();
         }
         if !node.ids.is_empty() && menu_item(ui, "Remove from Catalog…", "", true, false) {
             action = Some(TreeAction::Remove(

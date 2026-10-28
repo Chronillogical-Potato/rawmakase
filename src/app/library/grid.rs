@@ -317,6 +317,24 @@ impl Library {
                 };
                 self.file_request = Some(super::FileRequest::ChooseFolder(ids));
             }
+            PhotoAction::ExportCatalog => {
+                let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
+                    self.selected_ids()
+                } else {
+                    vec![photo.id]
+                };
+                let name = match ids.len() {
+                    1 => std::path::Path::new(&photo.filename)
+                        .file_stem()
+                        .map_or_else(String::new, |s| s.to_string_lossy().into_owned()),
+                    _ => "Selected Photos".into(),
+                };
+                self.export_request = Some(super::CatalogExportRequest {
+                    name,
+                    scope: crate::catalog::ExportScope::Photos(ids),
+                    removal: None,
+                });
+            }
         }
         None
     }

@@ -4,7 +4,7 @@ use crate::lr_develop::{convert_develop, develop_fields};
 use crate::metadata::{LangAlt, PhotoInfo, Value};
 use crate::{export_settings::ExportOptions, model::recipe::Recipe, storage::Identity};
 use rusqlite::{Connection, params};
-fn fixture(path: &Path) -> Result<()> {
+pub(super) fn fixture(path: &Path) -> Result<()> {
     let db = Connection::open(path)?;
     db.execute_batch("CREATE TABLE AgLibraryRootFolder(id_local INTEGER, absolutePath TEXT);
         CREATE TABLE AgLibraryFolder(id_local INTEGER,rootFolder INTEGER,pathFromRoot TEXT);

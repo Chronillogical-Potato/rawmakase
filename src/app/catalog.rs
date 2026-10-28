@@ -672,6 +672,11 @@ impl Editor {
             n => format!("its {n} photos"),
         };
         let body = match removal.empty_root {
+            None if removal.exported.is_some() => format!(
+                "The folder, its subfolders and {photos} leave this catalog. The \
+                 exported catalog keeps them with their edits, ratings, keywords \
+                 and places in collections. The files stay on disk."
+            ),
             Some(_) => "The root folder has nothing left in the catalog. Its folder stays on disk; add it again to bring it back.".to_string(),
             None => format!(
                 "The folder, its subfolders and {photos} leave the catalog, with \
@@ -722,7 +727,7 @@ impl Editor {
             };
             return;
         }
-        match library.remove_folders(&removal.folders, &removal.name) {
+        match library.remove_folders(&removal.folders, &removal.name, removal.exported.as_ref()) {
             // Removed, even if the catalog could not be read again: their ids
             // may be given to new photos, so nothing may keep them.
             Ok(removed) => {
@@ -846,7 +851,7 @@ impl Editor {
     }
 }
 /// A file dialog for RAWmakase catalogs.
-fn catalog_file_dialog() -> rfd::FileDialog {
+pub(super) fn catalog_file_dialog() -> rfd::FileDialog {
     rfd::FileDialog::new().add_filter("RAWmakase catalog", &["rawmakase"])
 }
 /// Where another computer has the root or folder of `action`, when that

@@ -71,6 +71,12 @@ pub use recover::{
 pub use rename::{Ordered, RenameOrder, RenamePreview, RenameRow, rename_order, rename_preview};
 
 use super::{CatalogLocation, FolderId, PhotoId, RootId};
+
+/// Whether any computer has a file operation still to be decided: its
+/// catalog rows may then be halfway between where the files were and are.
+pub(in crate::catalog) fn any_unresolved(db: &impl super::db::Reads) -> anyhow::Result<bool> {
+    Ok(!journal::unresolved_anywhere(db)?.is_empty())
+}
 use std::fmt;
 use std::path::PathBuf;
 

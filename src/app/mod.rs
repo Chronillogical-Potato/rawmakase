@@ -510,6 +510,8 @@ enum Modal {
     RemoveCopy(PhotoId),
     /// The folder waiting for the user to confirm its removal from the catalog.
     RemoveFolder(library::FolderRemoval),
+    /// What Export as Catalog wrote, and what it could not carry.
+    CatalogExported(Box<export_catalog::Exported>),
     /// Photos waiting for the user to confirm Read Metadata from Files.
     ReadMetadata(Vec<PhotoId>),
     /// A folder change waiting for the user's answer.
@@ -876,6 +878,9 @@ mod design;
 mod dialogs;
 mod display;
 mod export;
+mod export_catalog;
+#[cfg(test)]
+mod export_catalog_tests;
 mod file_ops;
 pub(crate) mod folder_locations;
 mod folder_sync;

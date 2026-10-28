@@ -143,13 +143,20 @@ fn compress(stored: &impl Serialize) -> Result<Vec<u8>> {
     Ok(z.finish()?)
 }
 
-/// The stored History in `data` as JSON; `None` for a format from a newer release.
-fn stored_json(data: &[u8]) -> Result<Option<(Vec<u8>, Value)>> {
+/// The stored History in `data` as the JSON text it was written as, whatever
+/// release wrote it.
+pub(super) fn text(data: &[u8]) -> Result<Vec<u8>> {
     let mut text = Vec::new();
     ZlibDecoder::new(data)
         .take(MAX_BYTES + 1)
         .read_to_end(&mut text)?;
     ensure!(text.len() as u64 <= MAX_BYTES, "Develop History too large");
+    Ok(text)
+}
+
+/// The stored History in `data` as JSON; `None` for a format from a newer release.
+fn stored_json(data: &[u8]) -> Result<Option<(Vec<u8>, Value)>> {
+    let text = text(data)?;
     let value: Value = serde_json::from_slice(&text)?;
     let version = value
         .get("version")
