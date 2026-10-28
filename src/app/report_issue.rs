@@ -11,14 +11,14 @@
 //! and copied.
 use super::Editor;
 use super::shortcuts::icon_button;
-use super::widgets::modal_frame;
+use super::widgets::{modal_frame, primary_button};
 use super::worker::Event;
 use crate::app::theme;
 use crate::diagnostics::{self, Build, System};
 use eframe::egui::{self, Color32};
 use std::sync::Arc;
 
-const WIDTH: f32 = 560.;
+const WIDTH: f32 = 520.;
 
 /// Probes the system; replaced in tests.
 type Probe = Arc<dyn Fn() -> System + Send + Sync>;
@@ -187,82 +187,63 @@ impl Editor {
         let (mut copy, mut open, mut close) = (false, false, false);
         let response = egui::Modal::new(egui::Id::new("report-an-issue"))
             .backdrop_color(Color32::from_black_alpha(140))
-            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(24, 20)))
+            .frame(modal_frame(&palette).inner_margin(egui::Margin::symmetric(28, 24)))
             .show(ctx, |ui| {
                 ui.set_width(WIDTH);
                 ui.horizontal(|ui| {
+                    // The close button's height, so the title centres on it.
+                    ui.set_min_height(26.);
                     ui.label(
                         egui::RichText::new("Report an Issue")
                             .size(17.)
-                            .color(palette.gray(235)),
+                            .color(palette.gray(236)),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // The cross, not its hover square, lines up with the
+                        // table's right edge.
+                        ui.add_space(-6.);
                         close = icon_button(ui, super::icons::Icon::Close, "Close · Esc").clicked();
                     });
                 });
-                ui.add_space(8.);
-                ui.label(
-                    egui::RichText::new(
-                        "Found a problem? Check whether it has been reported already. \
-                         Otherwise open a new issue on GitHub and paste this system \
-                         information into its \u{201c}System information\u{201d} field. \
-                         It names no files, folders, catalogs or profiles.",
-                    )
-                    .color(palette.gray(190)),
-                );
-                ui.hyperlink_to("Search existing issues", diagnostics::SEARCH_ISSUES);
-                ui.add_space(8.);
-                egui::ScrollArea::vertical()
-                    .max_height(300.)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        // Read-only: it can be selected, never changed.
-                        ui.add(
-                            egui::TextEdit::multiline(&mut dialog.text.as_str())
-                                .id_salt("report-an-issue-text")
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
-                if collecting {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(
-                            egui::RichText::new("Collecting system details…")
-                                .color(palette.gray(150)),
-                        );
-                    });
-                }
-                if let Some(note) = &dialog.note {
-                    let (text, color) = match note {
-                        Note::Copied => ("Copied.".to_string(), palette.gray(170)),
-                        // The launcher only starts: whether a browser
-                        // then opens isn't known, so the address is given.
-                        Note::Opened => (
-                            format!(
-                                "Copied. Paste it into \u{201c}System information\u{201d} \
-                                 in the issue. If no browser opened, go to {}",
-                                diagnostics::new_issue_url(self.report_issue.build.version)
-                            ),
-                            palette.gray(170),
-                        ),
-                        Note::NotOpened(error) => (
-                            format!(
-                                "The browser couldn't be opened: {error}. The system \
-                                 information is copied; open {} yourself.",
-                                diagnostics::new_issue_url(self.report_issue.build.version)
-                            ),
-                            palette.danger(),
-                        ),
-                    };
-                    ui.add(egui::Label::new(egui::RichText::new(text).color(color)).wrap());
-                }
                 ui.add_space(10.);
-                ui.horizontal(|ui| {
-                    copy = ui.button("Copy System Info").clicked();
-                    open = ui.button("Open GitHub Issue…").clicked();
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(
+                            "Found a problem? Search the existing issues first. If it's new, \
+                             open an issue on GitHub and paste this into its \
+                             \u{201c}System information\u{201d} field.",
+                        )
+                        .size(12.5)
+                        .line_height(Some(19.))
+                        .color(palette.gray(165)),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(16.);
+                // What the window has left once the rest of the dialog is
+                // laid out: its margins, title, introduction and footer,
+                // and a note of up to three lines once one shows.
+                let reserved = if dialog.note.is_some() { 400. } else { 340. };
+                let height = (ctx.content_rect().height() - reserved).clamp(120., 460.);
+                system_info(ui, &palette, &dialog.text, height, collecting);
+                if let Some(note) = &dialog.note {
+                    ui.add_space(12.);
+                    note_ui(ui, &palette, note, self.report_issue.build.version);
+                }
+                ui.add_space(20.);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.spacing_mut().button_padding = egui::Vec2::new(14., 6.);
+                    ui.hyperlink_to(
+                        egui::RichText::new("Search existing issues").size(12.5),
+                        diagnostics::SEARCH_ISSUES,
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        close |= ui.button("Close").clicked();
+                        open = primary_button(ui, "Open GitHub Issue…").clicked();
+                        copy = ui
+                            .add(
+                                egui::Button::new("Copy System Info").min_size(egui::vec2(0., 30.)),
+                            )
+                            .clicked();
                     });
                 });
             });
@@ -291,6 +272,120 @@ impl Editor {
             }
         });
     }
+}
+
+/// The report as a recessed table, scrolling past `height`: names on the
+/// left, values in a fixed font on the right, grouped into build, system
+/// and window by space alone. The text itself stays the one string that is
+/// copied.
+fn system_info(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    text: &str,
+    height: f32,
+    collecting: bool,
+) {
+    // The first line of each group after the build's.
+    const GROUPS: [&str; 2] = ["Installation", "GPU"];
+    const NAME_WIDTH: f32 = 112.;
+    egui::Frame::new()
+        .fill(palette.gray(24))
+        .stroke(egui::Stroke::new(1., palette.gray(44)))
+        .corner_radius(8.)
+        .inner_margin(egui::Margin::symmetric(16, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            egui::ScrollArea::vertical()
+                .max_height(height)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 6.;
+                    let mono = egui::FontId::monospace(12.);
+                    for (i, line) in text.lines().enumerate() {
+                        let (name, value) = line.split_once(": ").unwrap_or((line, ""));
+                        if i > 0 && GROUPS.contains(&name) {
+                            ui.add_space(14.);
+                        }
+                        ui.horizontal_top(|ui| {
+                            let width = ui
+                                .label(egui::RichText::new(name).size(12.).color(palette.gray(135)))
+                                .rect
+                                .width();
+                            ui.add_space((NAME_WIDTH - width).max(0.));
+                            // Selectable, never editable.
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(value)
+                                        .font(mono.clone())
+                                        .color(palette.gray(222)),
+                                )
+                                .selectable(true)
+                                .wrap(),
+                            );
+                        });
+                    }
+                    if collecting {
+                        ui.add_space(8.);
+                        ui.horizontal(|ui| {
+                            super::widgets::spinner(ui, 12.);
+                            ui.label(
+                                egui::RichText::new("Collecting system details…")
+                                    .size(12.)
+                                    .color(palette.gray(150)),
+                            );
+                        });
+                    }
+                });
+        });
+}
+
+/// What the last button did, under the table.
+fn note_ui(ui: &mut egui::Ui, palette: &theme::Palette, note: &Note, version: &str) {
+    let url = diagnostics::new_issue_url(version);
+    let (text, color, link) = match note {
+        Note::Copied => (
+            "Copied to the clipboard.".to_string(),
+            palette.gray(200),
+            false,
+        ),
+        // The launcher only starts: whether a browser then opens isn't
+        // known, so the address is given.
+        Note::Opened => (
+            "Copied. Paste it into \u{201c}System information\u{201d} in the issue. \
+             If no browser opened, go to:"
+                .to_string(),
+            palette.gray(200),
+            true,
+        ),
+        Note::NotOpened(error) => (
+            format!(
+                "The browser couldn't be opened: {error}. The system information is \
+                 copied; open this address yourself:"
+            ),
+            palette.danger(),
+            true,
+        ),
+    };
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.;
+        if !matches!(note, Note::NotOpened(_)) {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(14., 16.), egui::Sense::hover());
+            super::icons::paint_at(
+                ui.painter(),
+                super::icons::Icon::Check,
+                rect.center(),
+                14.,
+                palette.accent(),
+            );
+        }
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.;
+            ui.add(egui::Label::new(egui::RichText::new(text).size(12.).color(color)).wrap());
+            if link {
+                ui.hyperlink_to(egui::RichText::new(&url).size(12.), &url);
+            }
+        });
+    });
 }
 
 #[cfg(test)]
@@ -377,7 +472,11 @@ mod tests {
     /// Clicks the button labelled `label`, as a person would.
     fn click(e: &mut Editor, label: &str) -> egui::PlatformOutput {
         // Lay the dialog out, then find the button by its text's position.
-        frame(e, vec![]);
+        // A modal centres on its size in the frame before, so after the
+        // report grows (the probe answered) it takes a few frames to settle.
+        for _ in 0..3 {
+            frame(e, vec![]);
+        }
         let at = find(e, label).unwrap_or_else(|| panic!("no {label}"));
         frame(e, vec![egui::Event::PointerMoved(at)]);
         frame(
@@ -707,6 +806,55 @@ mod tests {
         .chain((login.len() > 3).then_some(login.as_str()))
         {
             assert!(!shown.contains(private), "{private:?} in {shown}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_buttons_fit_the_smallest_window() -> anyhow::Result<()> {
+        let (_dir, mut e, _) = editor_with_catalog(&["one.ARW"])?;
+        e.onboarding.visible = false;
+        // The longest report: a GPU, and the lines only Linux has.
+        e.report_issue.gpu = Some(diagnostics::Gpu {
+            name: Field::Value("Test GPU".into()),
+            vendor: "0x0000".into(),
+            backend: "Vulkan",
+            device_type: "integrated",
+            driver: Field::Value("Test driver".into()),
+        });
+        e.report_issue.probe = Arc::new(|| System {
+            kernel: Some(Field::Value("6.0".into())),
+            desktop: Some(Field::Value("GNOME".into())),
+            display_server: Some(Field::Value("Wayland".into())),
+            ..system("Test OS")
+        });
+        let _urls = opened_urls(&mut e, true);
+        e.open_report_issue();
+        settle(&mut e);
+        // The longest note, with the window's smallest height.
+        click(&mut e, "Open GitHub Issue…");
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000., 650.));
+        let ctx = e.context.clone();
+        for _ in 0..3 {
+            let raw = egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(raw, |ui| e.draw(ui));
+            output.textures_delta.clear();
+            for label in ["Report an Issue", "Copy System Info", "Open GitHub Issue…"] {
+                let rect = output
+                    .shapes
+                    .iter()
+                    .find_map(|clipped| match &clipped.shape {
+                        egui::Shape::Text(text) if text.galley.text() == label => {
+                            Some(text.visual_bounding_rect())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("no {label}"));
+                assert!(screen.contains_rect(rect), "{label} at {rect:?}");
+            }
         }
         Ok(())
     }
