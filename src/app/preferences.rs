@@ -3,6 +3,7 @@
 //! fixed-size page on the right so switching tabs never moves the window.
 use super::Editor;
 use super::dialogs::{CatalogDialog, FileDialog};
+use super::icons::{self, Icon};
 use super::widgets::{form_row, modal_frame, plural, pretty_path, primary_button};
 use crate::app::theme;
 use crate::catalog::CatalogLocation;
@@ -37,6 +38,16 @@ impl Tab {
             Tab::Performance => "Performance",
             Tab::Display => "Display",
             Tab::Automation => "Automation",
+        }
+    }
+    fn icon(self) -> Icon {
+        match self {
+            Tab::General => Icon::Settings,
+            Tab::Catalog => Icon::Catalog,
+            Tab::Profiles => Icon::Presets,
+            Tab::Performance => Icon::Performance,
+            Tab::Display => Icon::Monitor,
+            Tab::Automation => Icon::Automation,
         }
     }
 }
@@ -77,9 +88,11 @@ pub(super) struct Preferences {
     pub(super) locations: Option<super::folder_locations::LocationsView>,
 }
 
-const WIDTH: f32 = 780.;
-const HEIGHT: f32 = 520.;
+const WIDTH: f32 = 860.;
+const HEIGHT: f32 = 600.;
 const SIDEBAR: f32 = 196.;
+/// The height of the bar over the page.
+const BAR: f32 = 52.;
 
 fn camera_profiles_dir() -> PathBuf {
     crate::storage::data_dir().join("camera-profiles")
@@ -226,12 +239,18 @@ impl Editor {
                     sidebar.y_range(),
                     Stroke::new(1., palette.gray(45)),
                 );
+                // The first tab sits level with the top bar.
                 let mut side = ui.new_child(
-                    egui::UiBuilder::new().max_rect(sidebar.shrink2(Vec2::new(12., 20.))),
+                    egui::UiBuilder::new().max_rect(
+                        sidebar
+                            .with_min_y(sidebar.top() + (BAR - 32.) / 2.)
+                            .shrink2(Vec2::new(12., 0.)),
+                    ),
                 );
                 self.preferences_tabs(&mut side);
+                let close = self.preferences_bar(ui, rect.with_min_x(sidebar.right()));
                 let page = egui::Rect::from_min_max(
-                    egui::pos2(sidebar.right() + 32., rect.top() + 26.),
+                    egui::pos2(sidebar.right() + 32., rect.top() + BAR + 20.),
                     egui::pos2(rect.right() - 32., rect.bottom() - 72.),
                 );
                 let mut content = ui.new_child(egui::UiBuilder::new().max_rect(page));
@@ -239,39 +258,33 @@ impl Editor {
                 content.spacing_mut().item_spacing = Vec2::new(8., 10.);
                 content.spacing_mut().button_padding = Vec2::new(12., 5.);
                 content.spacing_mut().interact_size.y = 28.;
-                content.label(
-                    egui::RichText::new(self.preferences.tab.title())
-                        .size(18.)
-                        .color(palette.gray(236)),
-                );
-                content.add_space(10.);
                 match self.preferences.tab {
                     Tab::General => {
                         egui::ScrollArea::vertical()
                             .auto_shrink(false)
-                            .show(&mut content, |ui| self.general_page(ui));
+                            .show(&mut content, |ui| cards(ui, |ui| self.general_page(ui)));
                     }
                     Tab::Catalog => {
                         egui::ScrollArea::vertical()
                             .auto_shrink(false)
-                            .show(&mut content, |ui| self.catalog_page(ui));
+                            .show(&mut content, |ui| cards(ui, |ui| self.catalog_page(ui)));
                     }
                     Tab::Profiles => {
                         egui::ScrollArea::vertical()
                             .auto_shrink(false)
-                            .show(&mut content, |ui| self.profiles_page(ui));
+                            .show(&mut content, |ui| cards(ui, |ui| self.profiles_page(ui)));
                     }
                     // Taller than the window while a chosen folder is missing.
                     Tab::Performance => {
                         egui::ScrollArea::vertical()
                             .auto_shrink(false)
-                            .show(&mut content, |ui| self.performance_page(ui));
+                            .show(&mut content, |ui| cards(ui, |ui| self.performance_page(ui)));
                     }
-                    Tab::Display => self.display_page(&mut content),
+                    Tab::Display => cards(&mut content, |ui| self.display_page(ui)),
                     Tab::Automation => {
                         egui::ScrollArea::vertical()
                             .auto_shrink(false)
-                            .show(&mut content, |ui| self.automation_page(ui));
+                            .show(&mut content, |ui| cards(ui, |ui| self.automation_page(ui)));
                     }
                 }
                 let footer = egui::Rect::from_min_max(
@@ -302,41 +315,78 @@ impl Editor {
                         .truncate(),
                     );
                 }
-                done
+                done || close
             });
         if response.inner || response.should_close() {
             self.preferences.open = false;
         }
     }
+    /// The bar over the page: where you are, "Preferences / Catalog", and a
+    /// close button. Returns whether it was clicked.
+    fn preferences_bar(&self, ui: &mut egui::Ui, area: egui::Rect) -> bool {
+        let palette = theme::palette(ui.ctx());
+        let bar = area.with_max_y(area.top() + BAR);
+        ui.painter().hline(
+            (bar.left() + 1.)..=bar.right(),
+            bar.bottom(),
+            Stroke::new(1., palette.gray(45)),
+        );
+        let font = egui::FontId::proportional(14.);
+        let mut x = bar.left() + 32.;
+        for (text, color) in [
+            ("Preferences", palette.gray(140)),
+            ("/", palette.gray(95)),
+            (self.preferences.tab.title(), palette.gray(236)),
+        ] {
+            let drawn = ui.painter().text(
+                egui::pos2(x, bar.center().y),
+                egui::Align2::LEFT_CENTER,
+                text,
+                font.clone(),
+                color,
+            );
+            x = drawn.right() + 10.;
+        }
+        let button = egui::Rect::from_center_size(
+            egui::pos2(bar.right() - 30., bar.center().y),
+            Vec2::splat(26.),
+        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(button), |ui| {
+            super::shortcuts::icon_button(ui, Icon::Close, "Close · Esc").clicked()
+        })
+        .inner
+    }
     fn preferences_tabs(&mut self, ui: &mut egui::Ui) {
         let palette = theme::palette(ui.ctx());
         ui.spacing_mut().item_spacing.y = 2.;
-        ui.label(
-            egui::RichText::new("Preferences")
-                .size(11.)
-                .color(palette.gray(130)),
-        );
-        ui.add_space(8.);
         for tab in Tab::ALL {
             let (rect, response) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::click());
             let selected = self.preferences.tab == tab;
             if selected {
-                ui.painter().rect_filled(rect, 5., palette.accent());
+                ui.painter().rect_filled(rect, 6., palette.gray(44));
             } else if response.hovered() {
-                ui.painter().rect_filled(rect, 5., palette.gray(40));
+                ui.painter().rect_filled(rect, 6., palette.gray(35));
             }
+            let tint = palette.gray(if selected { 240 } else { 170 });
+            icons::paint_at(
+                ui.painter(),
+                tab.icon(),
+                rect.left_center() + Vec2::new(20., 0.),
+                15.,
+                if selected { palette.accent() } else { tint },
+            );
             ui.painter().text(
-                rect.left_center() + Vec2::new(12., 0.),
+                rect.left_center() + Vec2::new(38., 0.),
                 egui::Align2::LEFT_CENTER,
                 tab.title(),
                 egui::FontId::proportional(13.),
-                if selected {
-                    palette.on_accent_text(250)
-                } else {
-                    palette.gray(205)
-                },
+                tint,
             );
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, tab.title())
+            });
             if response.clicked() && !selected {
                 self.preferences.tab = tab;
                 self.measure_usage();
@@ -425,7 +475,9 @@ impl Editor {
             self.checksums_paused = paused;
             let _ = self.save_session();
         }
-        form_row(ui, "Previews", |ui| {
+        gap(ui);
+        group(ui, "Previews");
+        form_row(ui, "Size", |ui| {
             value(ui, &bytes(usage.previews));
         });
         let preview_kinds = usage.preview_kinds;
@@ -862,16 +914,89 @@ impl Editor {
     }
 }
 
-pub(super) fn group(ui: &mut egui::Ui, title: &str) {
-    ui.label(
-        egui::RichText::new(title)
-            .size(12.)
-            .strong()
-            .color(theme::palette(ui.ctx()).gray(175)),
-    );
+/// The room between a card's edge and what it holds.
+const CARD_INSET: f32 = 16.;
+const CARD_PAD: f32 = 10.;
+
+/// A card under way: its background, drawn once its rows are known.
+#[derive(Clone, Copy)]
+struct OpenCard {
+    layer: egui::LayerId,
+    clip: egui::Rect,
+    background: egui::layers::ShapeIdx,
+    x: egui::Rangef,
+    top: f32,
 }
+fn card_id() -> egui::Id {
+    egui::Id::new("preferences-open-card")
+}
+
+/// Lays out a page as titled cards: each [`group`] starts one, which the next
+/// group, a [`gap`] or the page's end closes. The page's rows sit inset in
+/// the cards.
+fn cards(ui: &mut egui::Ui, page: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: CARD_INSET as i8,
+            right: CARD_INSET as i8 + 4,
+            top: 0,
+            bottom: 12,
+        })
+        .show(ui, |ui| {
+            page(ui);
+            close_card(ui);
+        });
+}
+/// A section's title, and the card its rows sit on.
+pub(super) fn group(ui: &mut egui::Ui, title: &str) {
+    close_card(ui);
+    // Over the card's edge, in line with the page's title.
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.), Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() - CARD_INSET + 2., rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        egui::FontId::proportional(12.5),
+        theme::palette(ui.ctx()).gray(200),
+    );
+    let top = rect.bottom() + 6.;
+    let card = OpenCard {
+        layer: ui.layer_id(),
+        clip: ui.clip_rect(),
+        background: ui.painter().add(egui::Shape::Noop),
+        x: ui.max_rect().x_range().expand(CARD_INSET),
+        top,
+    };
+    ui.ctx().data_mut(|d| d.insert_temp(card_id(), card));
+    ui.add_space(6. + CARD_PAD - ui.spacing().item_spacing.y);
+}
+/// The space between sections; it ends the open card.
 pub(super) fn gap(ui: &mut egui::Ui) {
+    close_card(ui);
     ui.add_space(14.);
+}
+fn close_card(ui: &mut egui::Ui) {
+    let Some(card) = ui.ctx().data_mut(|d| {
+        let card = d.get_temp::<OpenCard>(card_id());
+        d.remove::<OpenCard>(card_id());
+        card
+    }) else {
+        return;
+    };
+    let palette = theme::palette(ui.ctx());
+    let bottom = ui.cursor().top() - ui.spacing().item_spacing.y + CARD_PAD;
+    let rect = egui::Rect::from_x_y_ranges(card.x, card.top..=bottom);
+    egui::Painter::new(ui.ctx().clone(), card.layer, card.clip).set(
+        card.background,
+        egui::epaint::RectShape::new(
+            rect,
+            8.,
+            palette.gray(29),
+            Stroke::new(1., palette.gray(43)),
+            egui::StrokeKind::Inside,
+        ),
+    );
+    ui.add_space(CARD_PAD);
 }
 fn value(ui: &mut egui::Ui, text: &str) {
     ui.add(
