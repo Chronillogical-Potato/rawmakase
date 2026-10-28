@@ -602,8 +602,17 @@ fn local_gain(pos: vec2<f32>, lum: f32, clarity_lum: f32) -> f32 {
         if r >= 0 {
             lift = family(3u, s, 0.0, base - region, base - region) + family(4u, s, p(P_LOCAL_KEYS + 2u), region, region);
         }
-        return exp2(family(0u, s, p(P_LOCAL_KEYS), base, base)
-            + family(1u, h, p(P_LOCAL_KEYS + 1u), base, tail_base) + lift + clarity);
+        // Positive Shadows and negative Highlights follow the photo's global rule
+        // (`local_tone_rule`), scaled by the slider; the other signs their families.
+        var sg = family(0u, s, p(P_LOCAL_KEYS), base, base);
+        if s > 0.0 && offset(P_RULE) >= 0 {
+            sg = local_curve(P_RULE, base, base) * min(s, 1.0);
+        }
+        var hg = family(1u, h, p(P_LOCAL_KEYS + 1u), base, tail_base);
+        if h < 0.0 && offset(P_RULE + 4u) >= 0 {
+            hg = local_curve(P_RULE + 4u, base, base) * min(-h, 1.0);
+        }
+        return exp2(sg + hg + lift + clarity);
     }
     var lift = 0.0;
     if r >= 0 {

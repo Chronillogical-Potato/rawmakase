@@ -178,6 +178,92 @@ Exposure, and parts of the cool magenta corner of Temp and Tint.
   order and the calibration identity. This corrects black rendering; it does not
   establish parity for the separate spatial Shadows operator.
 
+### The global rule
+
+Positive Shadows and negative Highlights read a curve computed per photo from the
+photo's histogram of base levels (`local_tone_rule.rs`; measured and fitted by
+`scripts/corpus/scene-tone-rule.py`, 2026-10-27). The measurement: 1024-pixel
+mosaics of flat square patches whose log levels form a chosen histogram, patch
+positions permuted so level is uncorrelated with position, rendered with a linear
+profile at Shadows +100 and Highlights −100. On them Camera Raw's gain is a function
+of the patch's level given the histogram: eight arrangements of the same 16-level
+staircase agree per level to 0.06 EV, with no dependence on a patch's neighbours. The
+gain scales linearly with the slider (±50 is half of ±100 at every level), and the two
+sliders together give about 0.9 of the sum of their gains.
+
+What the rule looks like on filled histograms: Shadows lifts nothing within about 3
+stops of the top, then about 0.5 EV per stop of depth, and the darkest half stop a
+little less; Highlights is a hump over the top 3 to 4 stops, peaking half a stop
+below the top, whose amplitude grows with the photo's range (top pull 0.5, 0.7, 0.9,
+1.4 and 3.0 EV at ranges of 2, 4, 6, 8 and 10 stops). The shape of the histogram
+matters beyond its keys: a gap under the brightest cluster adds about 0.5 EV of lift
+per stop of gap to the cluster below it and pulls the bright cluster harder; a
+dark-heavy histogram pulls its highlights more and lifts its darks less than a
+bright-heavy one. No percentile-keyed table reproduces this: on the same mosaics the
+previous tables missed by 0.2 to 0.7 EV root mean square, and by 1 to 3.6 EV on gapped
+ones.
+
+Deeper down, the Shadows lift keeps growing: on mosaics spanning 10.5 to 13.5 stops
+it is 3.0 EV at 7 to 8 stops under the top, 3.7 at 9 to 10, 4.25 at 11 to 12 and
+saturates near 4.3 EV at 12 stops and below (2026-10-28). How much a level is lifted
+at a given depth still depends on the rest of the histogram, by 1 to 2 EV: with most
+of the frame 9 to 12 stops down and the rest 2 to 5 stops down, Camera Raw lifts the
+deep cluster 3 to 4.8 EV and the mid cluster only 0.1 to 0.3, where a filled
+histogram lifts the same mid levels 0.9 to 1.4 EV. Highlights −100 pulls a patch
+clipped in every channel, one clipped in green only and one just under white all
+alike, −0.8 to −1.3 EV depending on the histogram: clipping as such does not hold
+whites, so a clipped sky that renders darker than Camera Raw's is a reconstruction
+difference ([parity gaps](parity-gaps.md#the-global-rule-2026-10-28)).
+
+A perfectly flat maximum is a degenerate case for Camera Raw. Texture of 0.03 stop on
+the brightest patch alone adds about 0.4 EV of Shadows lift to every dark patch and
+removes the two-valued Highlights collapse; texture elsewhere, or a brighter spot,
+does nothing. Flat charts and two-valued probes therefore never predicted photos; the
+training mosaics carry a faint blob texture, and the rule's two texture inputs are
+clamped so it cannot extrapolate on amplitude.
+
+The rule is a small network (20 inputs, two hidden layers of 64, two outputs) from
+level-relative descriptors of the histogram: the level's distance below the top
+(the maximum of the base) and above the bottom (0.1th percentile), from the mean and
+five quantiles, the cumulative fraction at the level, the range, the mass in eight
+bands of stops around the level, and the two texture measures. It is trained on 354
+mosaics (random histograms at fixed and random texture, histograms sampled from the
+training photos' base levels, small bright and small dark minorities above or below a
+gap, a few tiny bright spots in a dark field, deep ranges, bimodal deep-and-mid
+histograms, and clipped top patches) and on 221 training photos of all three families
+rendered with the linear profile, with targets counted down to 13 stops under white:
+a first fit that stopped at 9 stops had never seen the deepest tones and lifted a
+sunlit cabin's floor 2 EV where Camera Raw lifts it 3.7. The inputs come from the engine's own
+measurement map of each probe and photo (`RAWMAKASE_RULE_DUMP`, the `taps` step): a
+re-implementation of the map differed in its dark tail, since the engine averages
+signed camera values before the matrix, and a rule fitted on the re-implementation
+over-lifted bright-keyed photos by half a stop. Evaluated once per photo at 48 base
+levels, it gives a `Curve` the per-pixel code, masks and the GPU read like the tables;
+levels above the top or below the bottom hold the ends, and the output (level plus
+gain) is projected onto nondecreasing values as the fitted tables are, so a clipped
+plateau keeps no bright rim.
+
+Camera Raw renders of linear-profile DNGs need `CameraProfile` set to the embedded
+profile's name, or Camera Raw silently uses Adobe Color; with it, RAWmakase's scene
+output equals Camera Raw's on real photos to 0.00 EV at default and at Exposure −3.
+
+Scene gains against Camera Raw on the 221 training photos (per map pixel, EV root
+mean square, median over photos): held out by photo the rule sits at 0.18 (Shadows
++100) and 0.12 (Highlights −100), where doing nothing is 0.78 and 0.41. Final renders
+on the train sets against current main, median ΔE00: Shadows +100 2.12 → 1.81 (7 of
+14 photos better, 1 worse), +50 1.19 → 1.08, Highlights −100 1.53 → 1.13 (8 better, 0
+worse), −50 1.12 → 0.94, Shadows +50 with Highlights −50 1.21 → 1.29. The validation
+gate's figures are in [parity gaps](parity-gaps.md#the-global-rule-2026-10-28).
+
+Not in the rule: Camera Raw's spatial regime. Textured bright squares smaller than
+about 0.4% of the frame in a dark field are pulled by their size (an 8-pixel square
+at 1024 −2 EV, 32 pixels −6 EV, 7 stops over the field), and the same pixels arranged
+as scattered gaps or as a strip lift a dark scene differently (0.35 EV on the
+scene-probe test). Textured dark squares in a bright field, by contrast, are lifted
+by their level alone (depth 5: 1.8 to 2.4 EV from 16 to 512 pixels). The rule reads
+such scenes through the histogram alone: the shadow-gap probe lifts 0.4 EV against
+Camera Raw's 0.6.
+
 ### Local operators
 
 Shadows, Highlights and Clarity are luminance gains from a smooth, edge-aware base

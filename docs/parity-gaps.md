@@ -8,13 +8,74 @@ These controls were fitted to Camera Raw renders and match within the default-re
 
 ## Tone
 
-- **Scene tone stage**: Exposure, the default white and black point, Whites, Blacks, Shadows, Highlights, Clarity, Texture and Dehaze render on scene values before the profile, fitted on linear-profile Camera Raw 18.7 renders ([scene tone stage](scene-tone-stage.md), [tone controls](tone-controls.md#whites-and-blacks)). How Camera Raw adapts them to each photo stays fitted: keys from the photo's statistics and tables over its measures, not Camera Raw's own rule. Shadows and Highlights on the synthetic chart's flat patches are still far from Camera Raw; Dehaze (a curve per amount, no spatial part) and positive Whites (+100 especially) are fitted but still differ. The Shadows/Highlights investigation below did not produce a candidate that passed its shipping gates.
+- **Scene tone stage**: Exposure, the default white and black point, Whites, Blacks, Shadows, Highlights, Clarity, Texture and Dehaze render on scene values before the profile, fitted on linear-profile Camera Raw 18.7 renders ([scene tone stage](scene-tone-stage.md), [tone controls](tone-controls.md#whites-and-blacks)). Positive Shadows and negative Highlights follow the measured [global rule](scene-tone-stage.md#the-global-rule) (2026-10-28): a curve per photo from the histogram of its base levels, which the earlier percentile-keyed tables could not express. Negative Shadows, positive Highlights, Dehaze (a curve per amount, no spatial part) and positive Whites (+100 especially) stay fitted and still differ. Shadows and Highlights on the synthetic chart's flat patches are a degenerate case for Camera Raw (a flat maximum) and are not a measure of either engine.
 - **Contrast** follows Camera Raw's curve, after the profile and so after Whites and Blacks, at a pivot predicted from the photo ([tone controls](tone-controls.md#contrast)); the prediction is within about 0.03 of the pivot that fits each photo best, and its extra error over the default render on photos is 0.003–0.007.
 - **Clarity** of both signs follows a model fitted to Camera Raw's scene-value renders of synthetic scenes ([tone controls](tone-controls.md#clarity)); its residual is not modelled. **Texture** follows a model fitted to Camera Raw on synthetic charts ([tone controls](tone-controls.md#texture)): on the corpus chart its ΔE00 to Camera Raw drops from 2.0–2.2 to 1.5–1.6 at ±100.
 - **Parametric tone curve** renders as Camera Raw 18.7 does on the chart ([tone controls](tone-controls.md#parametric-curve)): the 24 `parametric-*` cases sit at mean ΔE00 0.8–3.0, down from 0.95–7.9, and the looks carrying one at 0.9–1.6, down from 1.7–4.9. With out-of-gamut colors clipped per channel as Camera Raw does ([out-of-gamut colors](color-pipeline.md#out-of-gamut-colors)), the cases sit at 0.48–1.15. A look's own parametric curve is a second curve after the user's, as in Camera Raw (`look-parametric-darks+30`: 0.93, was 1.41); at Amount 200 Camera Raw's look curve does about 1.6 times its effect at 100, where RAWmakase doubles it. **Point curves** match on ramps, but saturated colors under an S master curve still differ (ramp MAE 0.0024, peak 0.11).
 - **Curve Refine Saturation** renders as Camera Raw 18.7 does on the chart ([tone controls](tone-controls.md#refine-saturation)): the `curve-*-refine-saturation-*` cases sit at mean ΔE00 1.1–1.5, against 1.4 for the same S curve at 100. Values above 100 render as 100, as in Camera Raw. It imports, is written back, and has a Refine › Saturation slider (0–100) under the RGB point curve.
 - **Point Curve menu** has Lightroom's Linear, Medium Contrast and Strong Contrast (points from Lightroom Classic's catalog), saved curves and Save…; saved curves live in RAWmakase's data folder, not in Lightroom's Curves folder, and the menu's curve name is not written to XMP ([tone controls](tone-controls.md#point-curve-menu)). Whether Lightroom's built-in choices also reset the colour curves was not checked; here they set the RGB curve only.
 - **Auto** tone is fitted to Lightroom Classic's own Auto values, from 452 Auto Settings steps on 439 catalog photos with every fifth photo held out; each slider is a linear fit of one or two display-encoded percentiles of luminance, of the brightest channel or of chroma, and the held-out error is a median 1 step on Contrast and 0.21 EV on Exposure. Lightroom changed Auto in mid-2019 and the catalog's history shows both versions, so the slopes are fitted on every photo and the levels, Contrast, Vibrance and Saturation on the current Auto alone. The WB menu's Auto white balance is fitted to Lightroom's Auto values (a median of 2.7 mired off on 133 photos); see [tone controls](tone-controls.md#auto).
+
+### The global rule (2026-10-28)
+
+Measured on flat-patch mosaics with controlled histograms instead of fitting tables on
+photos ([scene tone stage](scene-tone-stage.md#the-global-rule)). The earlier models
+failed for two reasons the mosaics made visible: Camera Raw's gain is a function of the
+level's place in the whole histogram (gaps, mass above and below, range), not of a
+percentile key, and perfectly flat maxima are a degenerate case (two-valued probes, the
+synthetic charts, flat squares), so synthetic results never transferred to photos.
+
+Median ΔE00 is not enough to judge Shadows: it hid both a deep-tone failure and
+texture loss. Each comparison is therefore also reported as the signed L* error in
+Camera Raw's own bands (0 to 10, 10 to 25, 25 to 50, 50 to 100) and as the fine
+texture kept in the dark bands, with a side-by-side panel (main, rule, Camera Raw).
+That report found the first fit lifting deep interiors 1.5 to 2 EV less than Camera
+Raw (a sunlit cabin's floor 2.0 against 3.7 EV): its training targets stopped 9 stops
+under white. Counting targets to 13 stops and adding mosaic families for deep ranges,
+bimodal histograms and clipped tops fixed those photos (cabin 6.3 → 1.1, DC-S1 field
+5.2 → 2.1, X-T30 II 6.5 → 3.9 median ΔE00 at Shadows +100) at the price of 0.2 to 0.4
+EV less lift in the mid-shadows of ordinary photos. Weighting the photos up, or a
+wider and longer-trained network, moved that trade the other way and over-lifted
+dark-heavy photos instead: three stress photos with alike histograms (a dusk freeway,
+star trails over a lit bridge, a backyard from the ZS200D) need opposite corrections,
+which is the spatial and colour regime a histogram rule cannot see. Over the 24
+stress photos and all Shadows settings the fits tie at the median (1.20 to 1.29
+against main's 1.43) and the shipped one has the lowest mean (1.57 against 1.63 for
+the 9-stop fit and 1.79 for main), with the fewest large failures.
+
+Final renders against current main, median ΔE00 per photo (validation sets; better
+and worse count photos that moved by more than 0.3):
+
+| Set | Shadows +100 | Highlights −100 | Shadows +50 with Highlights −50 |
+| --- | --- | --- | --- |
+| pixls | 1.81 → 1.61 (2 better, 3 worse) | 1.43 → 1.13 (4, 1) | 1.26 → 1.04 (3, 1) |
+| own | 1.92 → 1.63 (1, 2) | 1.00 → 1.09 (2, 1) | 1.43 → 1.12 (3, 0) |
+| signature edits | 2.58 → 1.86 (8, 0) | 1.02 → 0.79 (3, 1) | 0.94 → 0.79 (2, 1) |
+| pixls stress | 2.58 → 3.08 (2, 4) | 1.39 → 1.49 (3, 3) | 1.63 → 1.65 (5, 1) |
+| own stress | 2.74 → 2.04 (3, 2) | 1.65 → 1.00 (3, 1) | 1.56 → 1.54 (1, 1) |
+| signature edits stress | 1.62 → 1.21 (5, 2) | 0.85 → 0.68 (4, 1) | 0.90 → 0.83 (0, 1) |
+
+On the train sets: Shadows +100 2.12 → 1.81, +50 1.19 → 1.08, +25 0.77 → 0.74,
+Highlights −100 1.53 → 1.13, −50 1.12 → 0.94, −25 1.01 → 0.89, Shadows +50 with
+Highlights −50 1.21 → 1.29; the worst spatial regions at Highlights −100 11.2 → 5.3.
+Shadows +100 under a changed white balance (the mixed sets' "colour + Shadows" case)
+is worse at the median on four of seven sets (train 1.88 → 3.79, pixls 1.11 → 1.29,
+own 1.41 → 1.50, own stress 2.28 → 2.46) and better on three (signature edits 1.30 →
+0.98 and its stress set 1.61 → 1.08, pixls stress 2.89 → 2.71): two or three photos
+per set (a C-Lux, an L2D-20c) land 3 to 4 ΔE00 off under both the rule and the
+earlier fit, which the committed tables did not do; the interaction of white balance
+with the histogram rule is open. Other settings are untouched by the rule.
+
+Issue #464's sky at Highlights −100 renders at L* 87 against Camera Raw's 90 with its
+cloud structure kept (2.4 L* against 3.1; before 1.3). Clipped skies at Highlights
+−100 can still render darker and warmer than Camera Raw's (an RX100 VII sunrise 5 L*
+darker over a quarter of the frame): the mosaics show Highlights pulling fully clipped
+patches like any other, and at Exposure −3 the same sky reconstructs to 3.3× white in
+RAWmakase against 3.8× in Camera Raw (an X-T30 II sky 2.2× against 2.8×), so this is
+highlight reconstruction in the decode stage, not the tone rule. Still open besides
+that: the spatial regime (tiny bright lights in dark scenes, scattered gaps against a
+strip), the dark-heavy conflict above, and the darkest band of some cameras whose
+default render already sits 0.3 to 0.4 EV too light (#471).
 
 ### Shadows/Highlights research: what did not work (2026-10-16)
 
