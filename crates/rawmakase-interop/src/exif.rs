@@ -2,7 +2,8 @@
 //! XL: for an export to carry as Lightroom's do (capture settings, lens, dates,
 //! serial numbers and GPS), and for the catalog's capture time and photo info.
 //! Maker notes, thumbnail offsets and other pointers into the RAW are left out;
-//! they would not survive the move to a new file.
+//! they would not survive the move to a new file. `sequence` reads a few
+//! maker-note tags apart, for Auto-Stack, and gives none of them to exports.
 use crate::{
     jpeg::{APP1, Segments},
     tiff::{
@@ -16,6 +17,11 @@ use std::{
     path::Path,
 };
 use tag::*;
+
+mod sequence;
+#[cfg(any(test, feature = "test-support"))]
+pub use sequence::fixture as sequence_fixture;
+pub use sequence::{Mark, Sequence, sequence};
 
 /// The tags RAWmakase reads or writes, by their EXIF names: of the main
 /// directory, the EXIF directory and the GPS directory.
@@ -64,6 +70,7 @@ pub mod tag {
     pub const PIXEL_X_DIMENSION: u16 = 0xa002;
     pub const PIXEL_Y_DIMENSION: u16 = 0xa003;
     pub const INTEROPERABILITY_IFD: u16 = 0xa005;
+    pub const BODY_SERIAL_NUMBER: u16 = 0xa431;
     pub const LENS_MODEL: u16 = 0xa434;
 
     pub const GPS_VERSION_ID: u16 = 0x0000;
@@ -402,6 +409,22 @@ pub fn lightroom_time(date: &str, subseconds: Option<&str>) -> Option<String> {
 }
 
 fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
+    match open_tiff(path)? {
+        Source::File(t) => camera_exif(t, keep_main),
+        Source::Memory(t) => camera_exif(t, keep_main),
+    }
+}
+
+/// The TIFF holding a file's EXIF, read where it is or, when its container
+/// may store it in pieces or compressed, from memory.
+enum Source {
+    File(Tiff<File>),
+    Memory(Tiff<std::io::Cursor<Vec<u8>>>),
+}
+
+/// The TIFF holding the EXIF of the RAW, JPEG, TIFF, PNG, WebP, AVIF or
+/// JPEG XL at `path`; `None` when there is none to read.
+fn open_tiff(path: &Path) -> Option<Source> {
     let mut f = File::open(path).ok()?;
     // Enough to tell the containers apart and find a RAF's preview; a small
     // PNG or JPEG can be shorter.
@@ -429,20 +452,20 @@ fn directories(path: &Path, keep_main: impl Fn(u16) -> bool) -> Option<CameraExi
     } else if head.get(4..8) == Some(b"ftyp") && has_heif_brand(&head) {
         // Its Exif item may be stored in pieces, so the TIFF is read from the
         // joined item in memory.
-        return exif_in_memory(exif_in_heif(&mut f)?, keep_main);
+        return exif_in_memory(exif_in_heif(&mut f)?).map(Source::Memory);
     } else if head.starts_with(&crate::isobmff::JXL_CONTAINER) {
         // Its Exif box may be brotli-compressed ("brob"), so the TIFF is read
         // from the box's body in memory.
-        return exif_in_memory(crate::isobmff::jxl_metadata(&mut f, *b"Exif")?, keep_main);
+        return exif_in_memory(crate::isobmff::jxl_metadata(&mut f, *b"Exif")?).map(Source::Memory);
     } else {
         (0, None)
     };
     let f = File::open(path).ok()?;
-    let t = match len {
-        Some(len) => Tiff::open_within(f, base, len)?,
-        None => Tiff::open(f, base)?,
-    };
-    camera_exif(t, keep_main)
+    match len {
+        Some(len) => Tiff::open_within(f, base, len),
+        None => Tiff::open(f, base),
+    }
+    .map(Source::File)
 }
 
 /// The main, EXIF and GPS directories' fields of `t`, keeping the main
@@ -519,13 +542,13 @@ fn exif_in_heif(f: &mut File) -> Option<Vec<u8>> {
     heif.data_up_to(f, id, 16 << 20)
 }
 
-/// The directories of the TIFF in `body`, an Exif item or box: the
-/// big-endian u32 offset to the TIFF header, then the TIFF.
-fn exif_in_memory(body: Vec<u8>, keep_main: impl Fn(u16) -> bool) -> Option<CameraExif> {
+/// The TIFF in `body`, an Exif item or box: the big-endian u32 offset to
+/// the TIFF header, then the TIFF.
+fn exif_in_memory(body: Vec<u8>) -> Option<Tiff<std::io::Cursor<Vec<u8>>>> {
     let len = body.len() as u64;
     let mut body = std::io::Cursor::new(body);
     let (at, len) = after_offset(&mut body, 0, len)?;
-    camera_exif(Tiff::open_within(body, at, len)?, keep_main)
+    Tiff::open_within(body, at, len)
 }
 
 /// The TIFF header of the `len` bytes at `start`, after the big-endian u32

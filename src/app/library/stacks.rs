@@ -13,9 +13,15 @@
 use super::{Library, Place};
 use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::app::widgets::{self, plural};
-use crate::catalog::{Photo, PhotoId, StackChange, StackId, StackState, StacksChanged};
+use crate::catalog::{
+    BurstCandidate, Photo, PhotoId, StackChange, StackId, StackState, StacksChanged,
+};
+use crate::catalog_session::background::Reader;
+use crate::exif::Sequence;
 use anyhow::Result;
 use eframe::egui;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// A stack command from a thumbnail's menu or a key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,15 +65,54 @@ impl StackCommand {
 }
 
 /// Auto-Stack by Capture Time's window, while it is open.
-#[derive(Clone, Debug, PartialEq)]
 pub(super) struct AutoStack {
     /// Time Between Stacks, in seconds.
-    seconds: f64,
+    pub(super) seconds: f64,
+    /// Group Camera Bursts: stacks the bursts the cameras numbered as they
+    /// numbered them, and the other photos by time.
+    pub(super) bursts: bool,
+    /// What the cameras say of the photos, read once Group Camera Bursts is
+    /// first ticked, and dropped with the window.
+    sequences: Sequences,
+}
+impl AutoStack {
+    /// Whether what it shows can be made: not while reading the cameras'
+    /// data, nor once the read stopped before every photo.
+    pub(super) fn can_stack(&self) -> bool {
+        !self.bursts || (self.sequences.reader.is_none() && self.sequences.pending.is_empty())
+    }
 }
 impl Default for AutoStack {
     fn default() -> Self {
-        // Lightroom's default.
-        Self { seconds: 60. }
+        Self {
+            // Lightroom's default.
+            seconds: 60.,
+            bursts: false,
+            sequences: Sequences::default(),
+        }
+    }
+}
+
+/// What the cameras say of the sequences the source's photos are in.
+#[derive(Default)]
+struct Sequences {
+    /// Each photo read, with the file it was read from: a photo whose file
+    /// is another now counts as not read.
+    read: HashMap<PhotoId, (PathBuf, Option<Sequence>)>,
+    /// Reading the files, with how many there are; `None` before and after.
+    reader: Option<(Reader<Option<Sequence>>, usize)>,
+    /// The photos the reader has still to read; after it, those it never
+    /// read, as it stopped (a panic) before them.
+    pending: std::collections::HashSet<PhotoId>,
+    /// The session's structural generation when the read started: under
+    /// another, photo ids may name other photos, and it starts again.
+    generation: u64,
+}
+impl Sequences {
+    /// What photo `p`'s camera says, as read from its file now.
+    fn of(&self, p: &Photo) -> Option<&Sequence> {
+        let (path, sequence) = self.read.get(&p.id)?;
+        (*path == p.path).then_some(sequence.as_ref()).flatten()
     }
 }
 
@@ -330,14 +375,101 @@ impl Library {
             .collect();
         crate::catalog::auto_stacks(&photos, seconds)
     }
-    /// Auto-Stack by Capture Time's window: Time Between Stacks, what it
-    /// would make, and Stack.
+    /// The stacks Auto-Stack would make with the window's choices. With
+    /// Group Camera Bursts, virtual copies are left alone: a copy's camera
+    /// numbers it as its master.
+    pub(super) fn auto_stacks_of(&self, dialog: &AutoStack) -> Vec<Vec<PhotoId>> {
+        if !dialog.bursts {
+            return self.auto_stacks(dialog.seconds);
+        }
+        let photos: Vec<_> = self
+            .auto_stack_photos()
+            .into_iter()
+            .filter(|p| p.master.is_none())
+            .map(|p| BurstCandidate {
+                id: p.id,
+                folder: p.folder,
+                captured: &p.captured,
+                filename: &p.filename,
+                format: &p.format,
+                sequence: dialog.sequences.of(p),
+            })
+            .collect();
+        crate::catalog::auto_stacks_with_bursts(&photos, dialog.seconds)
+    }
+    /// Reads what the cameras say of the candidates, once, and saves what
+    /// has been read since the last call. True while reading.
+    pub(super) fn read_sequences(&self, dialog: &mut AutoStack) -> bool {
+        self.read_sequences_by(dialog, crate::exif::sequence)
+    }
+    /// [`Self::read_sequences`], each file read by `read`.
+    pub(super) fn read_sequences_by(
+        &self,
+        dialog: &mut AutoStack,
+        read: fn(&std::path::Path) -> Option<Sequence>,
+    ) -> bool {
+        let generation = self.session.generation();
+        let sequences = &mut dialog.sequences;
+        let failed = sequences.reader.is_none() && !sequences.pending.is_empty();
+        if sequences.generation != generation || (!dialog.bursts && failed) {
+            // Dropping the reader stops it after the file it is reading.
+            *sequences = Sequences {
+                generation,
+                ..Sequences::default()
+            };
+        }
+        if !dialog.bursts && sequences.reader.is_none() {
+            return false;
+        }
+        if sequences.reader.is_none() && sequences.read.is_empty() {
+            let todo: Vec<(PhotoId, PathBuf)> = self
+                .auto_stack_photos()
+                .into_iter()
+                .filter(|p| p.master.is_none())
+                .map(|p| (p.id, p.path.clone()))
+                .collect();
+            if todo.is_empty() {
+                return false;
+            }
+            let paths: HashMap<PhotoId, PathBuf> = todo.iter().cloned().collect();
+            let count = todo.len();
+            let reader = Reader::start(todo, self.wake(), read);
+            sequences.reader = Some((reader, count));
+            // Each photo is recorded as read from the file it was asked
+            // for, so a read finishing after the photo's file changed
+            // counts for nothing.
+            sequences.read = paths
+                .into_iter()
+                .map(|(id, path)| (id, (path, None)))
+                .collect();
+            // Not read yet: kept apart from those read as saying nothing.
+            sequences.pending = sequences.read.keys().copied().collect();
+        }
+        let Some((reader, _)) = &sequences.reader else {
+            return false;
+        };
+        let (read, done) = reader.poll();
+        for (id, sequence) in read {
+            sequences.pending.remove(&id);
+            if let Some((_, slot)) = sequences.read.get_mut(&id) {
+                *slot = sequence;
+            }
+        }
+        if done {
+            // What it didn't read stays pending: the read failed.
+            sequences.reader = None;
+        }
+        sequences.reader.is_some()
+    }
+    /// Auto-Stack by Capture Time's window: Time Between Stacks, Group
+    /// Camera Bursts, what it would make, and Stack.
     pub(in crate::app) fn auto_stack_window(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.auto_stack.take() else {
             return;
         };
         let palette = crate::app::theme::palette(ctx);
-        let stacks = self.auto_stacks(dialog.seconds);
+        self.read_sequences(&mut dialog);
+        let stacks = self.auto_stacks_of(&dialog);
         let photos: usize = stacks.iter().map(Vec::len).sum();
         let mut stack = false;
         let mut cancel = false;
@@ -371,28 +503,43 @@ impl Library {
                     );
                 });
                 ui.add_space(space::S);
+                ui.checkbox(&mut dialog.bursts, "Group camera bursts");
                 ui.label(
-                    egui::RichText::new(if stacks.is_empty() {
-                        "No stacks".to_string()
-                    } else {
-                        format!(
-                            "{} of {}",
-                            plural(stacks.len(), "stack", "stacks"),
-                            plural(photos, "photo", "photos")
-                        )
-                    })
-                    .size(text::LABEL),
+                    egui::RichText::new(
+                        "Bursts and brackets stack as the camera numbered them, however long \
+                         they took; single shots are left alone. Read from Sony, Fujifilm and \
+                         Panasonic cameras and iPhones; other photos stack by time.",
+                    )
+                    .size(text::LABEL)
+                    .color(palette.tone(Tone::MUTED)),
                 );
+                ui.add_space(space::S);
+                let unread = dialog.sequences.pending.len();
+                let summary = match &dialog.sequences.reader {
+                    Some((_, count)) if dialog.bursts => {
+                        format!("Reading camera bursts… {} of {count}", count - unread)
+                    }
+                    None if dialog.bursts && unread > 0 => format!(
+                        "Reading camera bursts stopped before {}",
+                        plural(unread, "photo", "photos")
+                    ),
+                    _ if stacks.is_empty() => "No stacks".to_string(),
+                    _ => format!(
+                        "{} of {}",
+                        plural(stacks.len(), "stack", "stacks"),
+                        plural(photos, "photo", "photos")
+                    ),
+                };
+                ui.label(egui::RichText::new(summary).size(text::LABEL));
                 ui.add_space(space::XL);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().button_padding = button::DIALOG;
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
+                    let ready = !stacks.is_empty() && dialog.can_stack();
                     stack = ui
-                        .add_enabled_ui(!stacks.is_empty(), |ui| {
-                            widgets::primary_button(ui, "Stack")
-                        })
+                        .add_enabled_ui(ready, |ui| widgets::primary_button(ui, "Stack"))
                         .inner
                         .clicked();
                 });
@@ -404,13 +551,12 @@ impl Library {
             self.auto_stack = Some(dialog);
             return;
         }
-        if let Err(e) = self.auto_stack_now(dialog.seconds) {
+        if let Err(e) = self.auto_stack_now(stacks) {
             self.message = format!("Stacks not changed: {e:#}");
         }
     }
-    /// Auto-Stack's Stack: the stacks it makes at `seconds`, as one command.
-    pub(super) fn auto_stack_now(&mut self, seconds: f64) -> Result<()> {
-        let stacks = self.auto_stacks(seconds);
+    /// Auto-Stack's Stack: the stacks the window showed, as one command.
+    pub(super) fn auto_stack_now(&mut self, stacks: Vec<Vec<PhotoId>>) -> Result<()> {
         let summary = format!("Auto-Stacked · {}", plural(stacks.len(), "stack", "stacks"));
         self.record_stacks(summary, StackChange::Groups(stacks))
     }

@@ -61,7 +61,10 @@ pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
 pub use sidecar::{RawXmpReader, SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
-pub use stacks::{SavedStack, StackChange, StackPlace, StackState, StacksChanged, auto_stacks};
+pub use stacks::{
+    BurstCandidate, SavedStack, StackChange, StackPlace, StackState, StacksChanged, auto_stacks,
+    auto_stacks_with_bursts,
+};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {
         ensure!(!path.exists(), "Catalog already exists: {}", path.display());
