@@ -146,8 +146,7 @@ fn decode_with(
         let out = &mut out[..samples];
         let stream = Differences { data, codes };
         if speculative::decode(&stream, out, cancel)?.is_some() {
-            predict(out, width);
-            return Ok(());
+            return predict(out, width, cancel);
         }
     }
     let mut bits = Msb::new(data);
@@ -193,7 +192,7 @@ impl Stream for Differences<'_> {
 /// The samples of the differences in `out` (rows of `width`), as [`decode`]
 /// predicts them: the first two of each row in order, the rest of each row
 /// on all threads.
-fn predict(out: &mut [u16], width: usize) {
+fn predict(out: &mut [u16], width: usize, cancel: &AtomicBool) -> Result<()> {
     let mut first = [[0u16; 2]; 2];
     let starts: Vec<[u16; 2]> = out
         .chunks_exact(width)
@@ -208,7 +207,10 @@ fn predict(out: &mut [u16], width: usize) {
         .collect();
     out.par_chunks_exact_mut(width)
         .zip(starts)
-        .for_each(|(row, start)| {
+        .try_for_each(|(row, start)| {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
             let mut last = start;
             for (col, v) in row.iter_mut().enumerate() {
                 let p = if col < 2 {
@@ -219,7 +221,8 @@ fn predict(out: &mut [u16], width: usize) {
                 last[col & 1] = p;
                 *v = p;
             }
-        });
+            Ok(())
+        })
 }
 
 #[cfg(test)]
@@ -262,6 +265,15 @@ pub(crate) mod tests {
             .unwrap();
             assert!(parallel == sequential);
         }
+    }
+
+    #[test]
+    fn cancelling_stops_the_prediction() {
+        let mut out = vec![0; 64];
+        assert_eq!(
+            predict(&mut out, 8, &AtomicBool::new(true)),
+            Err(Error::Cancelled)
+        );
     }
 
     #[test]

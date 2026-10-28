@@ -432,7 +432,10 @@ fn decode_with(
                 (own, from)
             })
             .collect();
-        out.par_chunks_exact_mut(row).for_each(|line| {
+        out.par_chunks_exact_mut(row).try_for_each(|line| {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
             for x in 1..across {
                 let before = (x - 1) * per_mcu;
                 for &(own, from) in &left {
@@ -441,7 +444,8 @@ fn decode_with(
                     line[i] = (v & mask) as u16;
                 }
             }
-        });
+            Ok(())
+        })?;
     }
     if shift > 0 {
         for v in out.iter_mut() {

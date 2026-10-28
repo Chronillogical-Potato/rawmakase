@@ -86,7 +86,7 @@ fn decode_with(
             huffman: &huffman,
         };
         if speculative::decode(&stream, &mut out, cancel)?.is_some() {
-            predict(&mut out, width, coding, &curve);
+            predict(&mut out, width, coding, &curve, cancel)?;
             return Ok(out);
         }
     }
@@ -141,7 +141,13 @@ impl Stream for Differences<'_> {
 /// The samples of the differences in `out` (rows of `width`), as [`decode`]
 /// predicts them: the first two of each row in order, the rest of each row
 /// on all threads.
-fn predict(out: &mut [u16], width: usize, coding: &Coding, curve: &[u16]) {
+fn predict(
+    out: &mut [u16],
+    width: usize,
+    coding: &Coding,
+    curve: &[u16],
+    cancel: &AtomicBool,
+) -> Result<()> {
     let diff = |v: u16| i32::from(v as i16);
     let mut first = coding.predictors.map(|row| row.map(i32::from));
     let starts: Vec<[i32; 2]> = out
@@ -157,7 +163,10 @@ fn predict(out: &mut [u16], width: usize, coding: &Coding, curve: &[u16]) {
         .collect();
     out.par_chunks_exact_mut(width)
         .zip(starts)
-        .for_each(|(row, start)| {
+        .try_for_each(|(row, start)| {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(Error::Cancelled);
+            }
             let mut left = start;
             for (x, v) in row.iter_mut().enumerate() {
                 let p = if x < 2 {
@@ -168,7 +177,8 @@ fn predict(out: &mut [u16], width: usize, coding: &Coding, curve: &[u16]) {
                 left[x & 1] = p;
                 *v = curve[p.clamp(0, 0x3fff) as usize];
             }
-        });
+            Ok(())
+        })
 }
 
 /// The difference a symbol and its additional bits code: the low four bits
@@ -504,6 +514,17 @@ mod tests {
             let sequential = decode_with(&data, width, height, &c, &cancel, false).unwrap();
             assert!(parallel == sequential, "{:?}", c.version);
         }
+    }
+
+    #[test]
+    fn cancelling_stops_the_prediction() {
+        let c = coding([0x46, 0x30], 12, &[], 0);
+        let curve: Vec<u16> = (0..0x4000).collect();
+        let mut out = vec![0; 64];
+        assert_eq!(
+            predict(&mut out, 8, &c, &curve, &AtomicBool::new(true)),
+            Err(Error::Cancelled)
+        );
     }
 
     #[test]

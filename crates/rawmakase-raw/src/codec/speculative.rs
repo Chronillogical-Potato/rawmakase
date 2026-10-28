@@ -93,6 +93,9 @@ struct Spec {
     invalid: Vec<usize>,
     /// Where the symbol after the last starts.
     end: u64,
+    /// Whether a symbol took no bits, after which the decoding repeats
+    /// itself and its values could fill all of `out`.
+    stalled: bool,
 }
 
 /// Decodes `out.len()` symbols of `s` on all threads into `out`, and gives
@@ -145,11 +148,14 @@ fn decode_in_chunks<S: Stream>(
             Ok(all)
         })
         .collect::<Result<Vec<Vec<Spec>>>>()?;
+    if specs.iter().flatten().any(|spec| spec.stalled) {
+        return Ok(None);
+    }
     Ok(resolve(s, &specs, chunk, out))
 }
 
 /// Decodes from `start` until a symbol ends at or past `stop` (or `cap`
-/// symbols), the first coded with table `phase`. With `main`, the starts of
+/// symbols, or one takes no bits), the first coded with table `phase`. With `main`, the starts of
 /// the chunk's decoding with the first table, it stops where it meets them
 /// within [`SYNC`] symbols.
 fn speculate<S: Stream>(
@@ -171,6 +177,7 @@ fn speculate<S: Stream>(
         values: Vec::new(),
         invalid: Vec::new(),
         end: start,
+        stalled: false,
     };
     spec.values.reserve(if main.is_none() {
         ((stop - start) / 4) as usize
@@ -207,7 +214,12 @@ fn speculate<S: Stream>(
             0
         });
         spec.values.push(v);
-        pos = pump.position();
+        let at = pump.position();
+        if at == pos {
+            spec.stalled = true;
+            break;
+        }
+        pos = at;
         table = if table + 1 == cycle { 0 } else { table + 1 };
         j += 1;
     }
@@ -393,6 +405,30 @@ mod tests {
             let expected = if complete { 39 * 3 * 2 } else { 39 * 3 };
             assert!(shared >= expected, "complete {complete}: {shared}");
         }
+    }
+
+    /// Symbols of no bits (values a table leaves uncovered) repeat
+    /// forever: the decoding declines rather than keep a chunk's worth of
+    /// `out` for each chunk.
+    #[test]
+    fn symbols_taking_no_bits_decline() {
+        struct Empty<'a>(&'a [u8]);
+        impl Stream for Empty<'_> {
+            fn data(&self) -> &[u8] {
+                self.0
+            }
+            fn next(&self, bits: &mut Msb, _: usize) -> Option<u16> {
+                if bits.peek(1) == 1 {
+                    return Some(0);
+                }
+                bits.skip(1);
+                Some(1)
+            }
+        }
+        let data = [0xffu8; 50_000];
+        let mut out = vec![0; 1_000_000];
+        let got = decode_in_chunks(&Empty(&data), &mut out, 4096, &AtomicBool::new(false));
+        assert_eq!(got, Ok(None));
     }
 
     #[test]
