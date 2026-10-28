@@ -90,14 +90,17 @@ UI without reaching editor state. The AppKit objects stay on the main thread;
 `app::native_menu` owns availability and revalidates each action before calling
 the existing editor operations. Close and Quit retain the normal save guard.
 
-`platform::titlebar` configures the macOS window so fastframe's explicit
-title-bar actions do not also trigger AppKit's implicit action on release.
-Suppression applies only when fastframe owns the press, and lasts until release
-or focus loss; native gestures on modal backdrops and ordinary dragging stay
-enabled. Its adapter reads the pinned fastframe drag widget's egui response; the
-native regression probe must accompany updates to that dependency.
-Fastframe owns Zoom/Minimize and preference parsing; AppKit alone owns Fill.
-Explicit window dragging and the native traffic-light buttons remain available.
+`platform::titlebar` owns the macOS header's drag widget and double-click
+(fastframe's widget is used elsewhere). `configure` registers the native window
+for the current viewport. An application-lifetime AppKit event monitor retains
+the latest left mouse-down for each registered window; closed windows are pruned.
+An accepted egui header press consumes that event once, across repeated passes.
+Other windows, controls and modal input cannot spend its event. Native dragging
+receives the original mouse-down, never `currentEvent`, which can already be a
+trackpad pressure, drag or release event. The second press performs the system's
+Zoom or Minimize setting once across the entire header; Fill remains native as
+in fastframe. There is no native-strip ownership split or `setMovable` override.
+Fullscreen skips the handler; native traffic-light buttons remain available.
 
 `Editor` deliberately remains the coordinator for state shared across panels.
 A panel should call the domain API responsible for an operation, rather than

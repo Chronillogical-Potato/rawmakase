@@ -24,6 +24,8 @@ fn main() -> eframe::Result {
             }
             ui.add_space(60.);
             ui.label("RAWmakase title-bar regression probe — no photos or catalog");
+            ui.label("Use a real trackpad: double-click at 10 and 40 px below the top edge.");
+            ui.label("Check zoom/restore, a held second click, and dragging at both heights.");
             if std::env::var_os("RAWMAKASE_TITLEBAR_MODAL").is_some() {
                 eframe::egui::Modal::new(eframe::egui::Id::new("probe-modal")).show(
                     ui.ctx(),
