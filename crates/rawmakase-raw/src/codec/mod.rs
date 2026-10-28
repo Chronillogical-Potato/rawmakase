@@ -22,3 +22,4 @@ pub(crate) mod pentax;
 pub(crate) mod phase_one;
 pub(crate) mod samsung;
 pub(crate) mod sony;
+pub(crate) mod speculative;
