@@ -605,50 +605,60 @@ impl PresetList {
             && self.revision == browser.revision
     }
     fn build(browser: &super::state::PresetBrowser) -> Self {
-        let query = browser.filter.to_lowercase();
-        // Built-in groups first, in Lightroom's order, then imported groups
-        // by name. A built-in and an imported group of the same name stay
-        // apart.
-        let mut groups: std::collections::BTreeMap<(bool, usize, String), Vec<(usize, String)>> =
-            Default::default();
-        for (i, p) in browser.library.presets.iter().enumerate() {
+        let groups = preset_groups(&browser.library, &browser.filter, |i, p| {
             let issue = browser.issues.get(i).and_then(Option::as_ref);
-            if (browser.compatible_only && issue.is_some())
-                || (browser.favorites_only && !browser.favorites.contains(&p.id))
-                || !crate::presets::display_name(&format!("{} {}", p.group, p.name))
-                    .to_lowercase()
-                    .contains(&query)
-            {
-                continue;
-            }
-            let rank = if p.builtin {
-                crate::presets::builtin::group_rank(&p.group)
-            } else {
-                0
-            };
-            groups
-                .entry((!p.builtin, rank, p.group.clone()))
-                .or_default()
-                .push((i, crate::presets::display_name(&p.name)));
-        }
+            !(browser.compatible_only && issue.is_some())
+                && !(browser.favorites_only && !browser.favorites.contains(&p.id))
+        });
         Self {
             library: browser.library.clone(),
             filter: browser.filter.clone(),
             favorites_only: browser.favorites_only,
             compatible_only: browser.compatible_only,
             revision: browser.revision,
-            groups: Arc::new(
-                groups
-                    .into_iter()
-                    .map(|((imported, _, name), presets)| PresetGroup {
-                        imported,
-                        name,
-                        presets,
-                    })
-                    .collect(),
-            ),
+            groups: Arc::new(groups),
         }
     }
+}
+
+/// The presets of `library` that `keep` keeps and whose group or name contains
+/// `filter`, in their groups: built-in groups first, in Lightroom's order, then
+/// imported groups by name. A built-in and an imported group of the same name stay
+/// apart.
+pub(super) fn preset_groups(
+    library: &crate::presets::Library,
+    filter: &str,
+    keep: impl Fn(usize, &crate::xmp::Preset) -> bool,
+) -> Vec<PresetGroup> {
+    let query = filter.to_lowercase();
+    let mut groups: std::collections::BTreeMap<(bool, usize, String), Vec<(usize, String)>> =
+        Default::default();
+    for (i, p) in library.presets.iter().enumerate() {
+        if !keep(i, p)
+            || !crate::presets::display_name(&format!("{} {}", p.group, p.name))
+                .to_lowercase()
+                .contains(&query)
+        {
+            continue;
+        }
+        let rank = if p.builtin {
+            crate::presets::builtin::group_rank(&p.group)
+        } else {
+            0
+        };
+        groups
+            .entry((!p.builtin, rank, p.group.clone()))
+            .or_default()
+            .push((i, crate::presets::display_name(&p.name)));
+    }
+    groups
+        .into_iter()
+        .map(|((imported, _, name), presets)| PresetGroup {
+            imported,
+            name,
+            presets,
+        })
+        .collect()
 }
 
 impl Editor {
