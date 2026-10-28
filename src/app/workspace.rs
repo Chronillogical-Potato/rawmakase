@@ -278,15 +278,6 @@ impl Editor {
             self.solo = solo;
             let _ = self.save_session();
         }
-        let pinned = ctx.data(|d| {
-            d.get_temp::<std::collections::BTreeSet<String>>(super::widgets::pinned_sections_id())
-        });
-        if let Some(pinned) = pinned
-            && pinned != self.pinned
-        {
-            self.pinned = pinned;
-            let _ = self.save_session();
-        }
         self.remember_maximized(&ctx);
         self.sync_undo();
         // The layout is kept once a drag (the thumbnail size) or typing (the search)
@@ -985,20 +976,12 @@ impl Editor {
         }
         self.loupe_stored_preview();
         if self.panel_shown(WorkspacePanel::Right) {
-            action.then(self.library_right_panel(ui, develops));
+            action.then(self.library_right_panel(ui));
         }
         let chrome = self.chrome.shown(self.module);
         let area = egui::CentralPanel::default()
             .frame(egui::Frame::new())
-            .show(ui, |ui| match &mut self.library {
-                Some(l) if !l.session.photos.is_empty() => {
-                    action.then(l.grid(ui, &mut self.view.zoom, chrome));
-                    if let Some(id) = l.loupe_develops() {
-                        self.loupe_viewport(ui, id);
-                    }
-                }
-                _ => self.library_start(ui),
-            });
+            .show(ui, |ui| action.then(self.library_view(ui, chrome)));
         let area = area.response.rect;
         self.drop_area = Some(area);
         // A click in the view, drawn after the strip, shows there next frame.
@@ -1135,29 +1118,81 @@ impl Editor {
             });
         action
     }
-    /// A zoom chosen in the Library's Navigator: applied to the Loupe, which
-    /// opens on the selected photo (or the first shown) if it is not open.
-    pub(super) fn library_zoom(&mut self, change: crate::app::navigator::Change) {
-        match change {
-            crate::app::navigator::Change::Level(level) => self.view.zoom.set(level),
-            crate::app::navigator::Change::Inspect(at) => {
-                self.view.zoom.pan = at;
-                self.view.zoom.on = true;
-            }
-        }
-        if let Some(library) = &mut self.library
-            && !library.loupe_open()
-        {
-            library.open_loupe();
-        }
-    }
-    /// The Library's right panel: the Navigator, which stays at the top, over
-    /// the active photo's info and metadata.
-    fn library_right_panel(
+    /// The Library's view: the grid, the Loupe with its toolbar (unless the
+    /// chrome is hidden) and minimap, Compare or Survey; the start screen without
+    /// photos.
+    pub(super) fn library_view(
         &mut self,
         ui: &mut egui::Ui,
-        develops: Option<PhotoId>,
+        chrome: bool,
     ) -> crate::app::library::Action {
+        let loupe = self
+            .library
+            .as_ref()
+            .is_some_and(|l| !l.session.photos.is_empty() && l.loupe_open());
+        if loupe && chrome {
+            self.library_loupe_toolbar(ui);
+        }
+        let photo_area = ui.available_rect_before_wrap().shrink(PHOTO_MARGIN);
+        let magnify = self.view.magnifier.on && self.magnifier_blocked().is_none();
+        match &mut self.library {
+            Some(l) if !l.session.photos.is_empty() => {
+                let magnifier = magnify.then_some(&mut self.view.magnifier);
+                let action = l.grid(ui, &mut self.view.zoom, chrome, magnifier);
+                if let Some(id) = l.loupe_develops() {
+                    self.loupe_viewport(ui, id);
+                } else if loupe && self.view.zoom.on {
+                    self.raster_minimap(ui, photo_area);
+                }
+                action
+            }
+            _ => {
+                self.library_start(ui);
+                crate::app::library::Action::None
+            }
+        }
+    }
+    /// The Loupe's toolbar, under the photo: the Library's view buttons, then the
+    /// magnifier and the zoom slider on the right, as Develop's toolbar has them.
+    pub(super) fn library_loupe_toolbar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
+        // Framed and sized as Develop's toolbar, so both photo views' bars match.
+        egui::Panel::bottom("library-loupe-toolbar")
+            .frame(super::toolbar::photo_toolbar_frame(&palette))
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = space::M;
+                ui.horizontal(|ui| {
+                    if let Some(library) = &mut self.library {
+                        library.view_buttons_sized(ui, egui::Vec2::new(40., 32.));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.zoom_controls(ui, 32.);
+                    });
+                });
+            });
+    }
+    /// Zoomed in on a photo the Library's Loupe shows itself (a JPEG, TIFF or PNG
+    /// without an edit, or an offline RAW's 1:1 preview), the minimap over it.
+    fn raster_minimap(&mut self, ui: &egui::Ui, area: egui::Rect) {
+        let Some((photo, Some(shown))) = self.library.as_ref().and_then(|l| l.loupe_minimap())
+        else {
+            return;
+        };
+        if let Some(at) = self.minimap_ui(ui, area, photo, shown).1 {
+            self.library_inspect(at);
+        }
+    }
+    /// A point chosen on the minimap of a photo the Loupe shows itself: zoomed
+    /// in there.
+    pub(super) fn library_inspect(&mut self, at: [f32; 2]) {
+        self.view.zoom.pan = at;
+        self.view.zoom.on = true;
+    }
+    /// The Library's right panel: the active photo's Quick Develop, info and
+    /// metadata. It has no Navigator: the Loupe's toolbar zooms, and its minimap
+    /// shows where.
+    fn library_right_panel(&mut self, ui: &mut egui::Ui) -> crate::app::library::Action {
         let mut action = crate::app::library::Action::None;
         // Dark as Develop's right panels and the catalog's sidebar.
         let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
@@ -1196,56 +1231,17 @@ impl Editor {
                 if sync {
                     self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
                 }
-                // The Navigator controls the zoom: Develop's for a RAW in the
-                // Loupe, the same one for other photos. Outside the Loupe it
-                // shows the selected photo, and a zoom chosen there opens it.
-                let loupe = self.library.as_ref().is_some_and(|l| l.loupe_open());
-                let (photo, shown) = match &self.library {
-                    _ if develops.is_some() => self.navigator_view(),
-                    Some(l) if loupe => l
-                        .loupe_navigator()
-                        .map_or((None, None), |(photo, shown)| (Some(photo), shown)),
-                    Some(l) => (l.selected_preview(), None),
-                    None => (None, None),
-                };
-                let zoom = self.view.zoom;
-                let mut change = None;
-                let mut navigator = |ui: &mut egui::Ui| {
-                    ui.scope(|ui| {
-                        change = crate::app::navigator::navigator(ui, photo, Some(zoom), shown);
-                    });
-                };
-                // It scrolls with the info below it, or stays at the top once pinned.
-                let pinned = super::widgets::pinned(ui.ctx(), "Navigator");
-                if pinned {
-                    navigator(ui);
-                }
                 // Quick Develop's Saved Preset and Auto Settings, on the selection.
                 let count = self.batch_target_count();
                 let presets = &mut self.presets;
                 let mut quick = None;
-                match &mut self.library {
-                    Some(library) => {
-                        action.then(library.info_panel(
-                            ui,
-                            |ui| {
-                                if !pinned {
-                                    navigator(ui);
-                                }
-                            },
-                            |ui| quick = super::batch::quick_develop(ui, presets, count),
-                        ));
-                    }
-                    None if !pinned => navigator(ui),
-                    None => {}
+                if let Some(library) = &mut self.library {
+                    action.then(library.info_panel(ui, |ui| {
+                        quick = super::batch::quick_develop(ui, presets, count)
+                    }));
                 }
                 if let Some(request) = quick {
                     self.quick_develop_request(request);
-                }
-                match change {
-                    Some(change) if develops.is_some() => self.navigator_change(change),
-                    Some(change) => self.library_zoom(change),
-                    None => {}
                 }
             });
         action
@@ -1319,14 +1315,22 @@ impl Editor {
         });
         for (key, physical, modifiers, repeat) in presses {
             match key {
-                // Cmd+Option+0: 1:1. Option changes the typed key on macOS.
-                _ if physical == Some(Key::Num0) && modifiers.command && modifiers.alt => {
+                // Cmd+0 (and Lightroom's Cmd+Option+0): 100%; Cmd+1 fits. By the
+                // physical key: Option changes the typed one on macOS.
+                _ if physical.unwrap_or(key) == Key::Num0
+                    && modifiers.command
+                    && !modifiers.shift =>
+                {
                     self.set_zoom(1.)
+                }
+                _ if physical.unwrap_or(key) == Key::Num1 && modifiers.command_only() => {
+                    self.set_zoom(0.)
                 }
                 Key::Plus | Key::Equals if modifiers.command => self.step_zoom(1),
                 Key::Minus if modifiers.command => self.step_zoom(-1),
                 // Once per press: a held Z must not flicker the zoom.
                 Key::Z if !modifiers.any() && !repeat => self.view.zoom.on = !self.view.zoom.on,
+                Key::Z if modifiers.shift_only() && !repeat => self.toggle_magnifier(),
                 _ => {}
             }
         }
@@ -1782,7 +1786,7 @@ impl Editor {
             .rect;
         self.drop_area = Some(area);
     }
-    fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn develop_right_panel(&mut self, ui: &mut egui::Ui) {
         // Dark as the catalog's sidebar, around the lighter photo.
         let fill = theme::palette(ui.ctx()).tone(Tone::WINDOW);
         egui::Panel::right("adjustments")
@@ -1796,29 +1800,26 @@ impl Editor {
                     super::widgets::SectionGroup::DevelopRight,
                 );
                 let enabled = self.document.full().is_some() && !self.view.compare.before_only();
-                // The Navigator and Histogram scroll with the panels below
-                // them, or stay at the top once pinned.
-                let navigator = super::widgets::pinned(ui.ctx(), "Navigator");
-                let histogram = super::widgets::pinned(ui.ctx(), "Histogram");
-                let top = |editor: &mut Self, ui: &mut egui::Ui, pinned: bool| {
-                    if navigator == pinned {
-                        ui.scope(|ui| editor.navigator_ui(ui));
-                    }
-                    if histogram == pinned {
-                        super::widgets::section_with(
-                            ui,
-                            "Histogram",
-                            super::widgets::HeaderButton::Pin,
-                            |ui| {
-                                ui.add_enabled_ui(enabled, |ui| editor.histogram_ui(ui));
-                            },
-                        );
-                    }
-                };
-                top(self, ui, true);
-                if navigator || histogram {
-                    ui.add_space(space::XS);
-                }
+                // The Histogram is always shown, above the panels that scroll;
+                // it has no header to fold or pin it. Develop has no Navigator:
+                // the toolbar's zoom slider and the minimap over the photo do
+                // its work.
+                // In a card of its well's tone, padded as the panels' contents
+                // are, at the panel headers' side margins.
+                let palette = theme::palette(ui.ctx());
+                egui::Frame::new()
+                    .fill(palette.tone(Tone::WELL))
+                    .corner_radius(design::radius::CARD)
+                    .inner_margin(design::margin_same(space::M))
+                    .outer_margin(egui::Margin {
+                        left: 0,
+                        right: 0,
+                        top: space::S as i8,
+                        bottom: 0,
+                    })
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(enabled, |ui| self.histogram_ui(ui));
+                    });
                 if super::inspector::has_drawer(self.view.tool) {
                     // The drawers' labels are short: their controls take the room.
                     let _labels = super::widgets::LabelColumn::enter(
@@ -1828,12 +1829,10 @@ impl Editor {
                     egui::ScrollArea::vertical()
                         .id_salt("tool-drawer")
                         .show(ui, |ui| {
-                            top(self, ui, false);
                             ui.add_enabled_ui(enabled, |ui| self.tool_drawer(ui));
                         });
                 } else {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        top(self, ui, false);
                         ui.add_enabled_ui(enabled, |ui| self.controls(ui));
                     });
                 }
@@ -2150,9 +2149,8 @@ const FILE_CHANGE: &str = "the file operation";
 
 /// The side panels' narrowest widths, no less than their contents need: a
 /// panel dragged narrower is painted only that wide but laid out as wide as
-/// its contents, leaving a strip of the window's black between. The right
-/// panels hold the Navigator, whose zoom levels need 224 points, as do the
-/// catalog's sidebar and Develop's Presets.
+/// its contents, leaving a strip of the window's black between. The catalog's
+/// sidebar and Develop's Presets need 224 points.
 pub(super) const PRESETS_MIN: f32 = 224.;
 pub(super) const ADJUSTMENTS_MIN: f32 = 300.;
 /// The adjustments' width until the user drags it; Develop's tab panel folds

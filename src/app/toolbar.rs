@@ -18,16 +18,7 @@ impl Editor {
         // Under the photo, as the Library's view bar is, on its backdrop with
         // no rule: the canvas's own margin spaces them from the photo.
         egui::Panel::bottom("toolbar")
-            .frame(
-                egui::Frame::new()
-                    .fill(palette.photo_backdrop())
-                    .inner_margin(egui::Margin {
-                        left: super::workspace::PHOTO_MARGIN as i8,
-                        right: super::workspace::PHOTO_MARGIN as i8,
-                        top: 0,
-                        bottom: space::L as i8,
-                    }),
-            )
+            .frame(photo_toolbar_frame(&palette))
             .show_separator_line(false)
             .show(ui, |ui| {
                 ui.spacing_mut().button_padding = Vec2::new(space::L, space::M);
@@ -55,7 +46,14 @@ impl Editor {
                     }
                     toolbar_divider(ui);
                     let before_only = self.view.compare.before_only();
-                    if toolbar_action(ui, "Before", 70., before_only, true, 3)
+                    // Short of room, Before is its icon: the zoom slider keeps its
+                    // width on the right.
+                    let (label, width) = if ui.available_width() >= NARROW_TOOLBAR {
+                        ("Before", 70.)
+                    } else {
+                        ("", 32.)
+                    };
+                    if toolbar_action(ui, label, width, before_only, true, 3)
                         .on_hover_text("Show Before · Backslash")
                         .clicked()
                     {
@@ -72,7 +70,15 @@ impl Editor {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // The photo's menu: its settings, presets and export.
-                        let settings = photo_menu_button(ui);
+                        // The slider never shrinks out of use: room for it comes first
+                        // from the menu, which narrows to its icon.
+                        let wide_menu = ui.available_width()
+                            >= PHOTO_MENU_WIDTH
+                                + ZOOM_SLIDER.0
+                                + super::magnifier::CONTROLS_NARROW_WIDTH
+                                + space::L * 2.
+                                + space::M * 3.;
+                        let settings = photo_menu_button(ui, wide_menu);
                         egui::Popup::menu(&settings).show(|ui| {
                             ui.set_width(270.);
                             ui.spacing_mut().item_spacing.y = 0.;
@@ -210,6 +216,8 @@ impl Editor {
                                 ui.close();
                             }
                         });
+                        toolbar_divider(ui);
+                        self.zoom_controls(ui, 32.);
                         if self.load.is_running() || self.preview.task.is_running() {
                             ui.add_space(space::L);
                             super::widgets::spinner(ui, 14.);
@@ -217,6 +225,32 @@ impl Editor {
                     });
                 });
             });
+    }
+    /// Viewing, at the right of a photo's toolbar (Develop's, the Library Loupe's),
+    /// laid out right to left: the zoom slider, always there as neither has a
+    /// Navigator, and the magnifier. When room runs short the slider narrows to its
+    /// least width, then the magnifier's menu shows a chevron without the level.
+    /// `height` is the toolbar's buttons'.
+    pub(super) fn zoom_controls(&mut self, ui: &mut egui::Ui, height: f32) {
+        let room = ui.available_width() - space::L * 2. - space::M * 2.;
+        let full = super::magnifier::CONTROLS_WIDTH;
+        let (magnifier, width) = if room >= ZOOM_SLIDER.0 + full {
+            (full, (room - full).min(ZOOM_SLIDER.1))
+        } else {
+            (super::magnifier::CONTROLS_NARROW_WIDTH, ZOOM_SLIDER.0)
+        };
+        let fit = self.fit_level();
+        let slider = ui.allocate_ui(Vec2::new(width, height), |ui| {
+            super::navigator::zoom_slider(ui, self.view.zoom, fit, width, height)
+        });
+        if let Some(level) = slider.inner {
+            self.set_zoom(level);
+            // The photo follows the knob at once: an eased zoom would trail behind
+            // every move of it.
+            self.view.zoom_key = (self.view.zoom.on, self.view.zoom.level);
+            self.view.zoom_anim = None;
+        }
+        self.magnifier_controls(ui, magnifier == super::magnifier::CONTROLS_WIDTH, height);
     }
     /// Reference View's button, and while it shows, its layout and lock, as in
     /// Lightroom's toolbar.
@@ -319,16 +353,42 @@ impl Editor {
 
 /// The toolbar's Photo button, a toolbar button like the rest with a chevron
 /// for its menu.
-fn photo_menu_button(ui: &mut egui::Ui) -> egui::Response {
+/// The frame of a photo view's toolbar, Develop's and the Library Loupe's: on the
+/// photo's backdrop with no rule, the canvas's own margin spacing it from the
+/// photo.
+pub(super) fn photo_toolbar_frame(palette: &theme::Palette) -> egui::Frame {
+    egui::Frame::new()
+        .fill(palette.photo_backdrop())
+        .inner_margin(egui::Margin {
+            left: super::workspace::PHOTO_MARGIN as i8,
+            right: super::workspace::PHOTO_MARGIN as i8,
+            top: 0,
+            bottom: space::L as i8,
+        })
+}
+
+/// Narrower than this, the toolbar's Before button shows its icon alone.
+const NARROW_TOOLBAR: f32 = 1000.;
+/// The zoom slider's least and greatest widths in the toolbar.
+const ZOOM_SLIDER: (f32, f32) = (176., 220.);
+const PHOTO_MENU_WIDTH: f32 = 82.;
+
+/// The photo's menu button: "Photo" and a chevron, or `…` alone when not `wide`.
+fn photo_menu_button(ui: &mut egui::Ui, wide: bool) -> egui::Response {
     let palette = theme::palette(ui.ctx());
-    let response = toolbar_action(ui, "", 82., false, true, 0)
-        .on_hover_text("Copy, paste and sync settings, presets and export");
+    let width = if wide { PHOTO_MENU_WIDTH } else { 32. };
+    let response = toolbar_action(ui, "", width, false, true, 0)
+        .on_hover_text("Photo: copy, paste and sync settings, presets and export");
     let color = palette.tone(if response.hovered() {
         Tone::STRONG
     } else {
         Tone::LABEL
     });
     let rect = response.rect;
+    if !wide {
+        super::icons::paint_at(ui.painter(), Icon::More, rect.center(), 15., color);
+        return response;
+    }
     ui.painter().text(
         rect.left_center() + Vec2::new(14., 0.),
         egui::Align2::LEFT_CENTER,

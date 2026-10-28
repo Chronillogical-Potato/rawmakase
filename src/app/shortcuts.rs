@@ -45,7 +45,7 @@ const LOUPE: [Shortcut; 7] = [
     ("G / Esc / double-click", "Back to the grid"),
     ("Z / click", "Fit or the last zoom"),
     ("Cmd+= / Cmd+-", "Zoom in / out"),
-    ("Cmd+Alt+0", "100%"),
+    ("Cmd+0 / Cmd+1", "100% / Fit"),
     ("drag", "Pan"),
     ("I", "Cycle photo info"),
 ];
@@ -98,7 +98,7 @@ const GENERAL: [Shortcut; 11] = [
     ("Cmd+,", "Preferences"),
     ("Cmd+/", "These shortcuts"),
 ];
-const DEVELOP: [Shortcut; 51] = [
+const DEVELOP: [Shortcut; 53] = [
     ("R", "Crop & Straighten"),
     ("Return", "Finish the crop"),
     ("X", "Swap the crop's orientation"),
@@ -138,6 +138,11 @@ const DEVELOP: [Shortcut; 51] = [
     ("I", "Photo info overlay: Info 1, Info 2, off"),
     ("J", "Show shadow and highlight clipping"),
     ("Z", "Toggle zoom / fit"),
+    (
+        "Cmd+= / Cmd+- / Cmd+0 / Cmd+1",
+        "Zoom in / out / 100% / Fit",
+    ),
+    ("Shift+Z", "Magnifier over the photo; wheel: magnification"),
     ("Left / Right", "Previous / next photo"),
     ("Cmd+A", "Select all in the filmstrip, for Sync"),
     ("Cmd+D", "Select none in the filmstrip"),

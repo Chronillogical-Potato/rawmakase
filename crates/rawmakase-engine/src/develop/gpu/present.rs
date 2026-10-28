@@ -37,6 +37,8 @@ pub enum Slot {
     /// apart so neither side is presented into a texture the other still shows.
     BeforeWhole,
     BeforeRegion,
+    /// The magnifier's 100% region over a fitted photo.
+    Magnifier,
 }
 /// How a preview is shown.
 pub struct Display {

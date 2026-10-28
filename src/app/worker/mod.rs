@@ -39,14 +39,15 @@ pub(crate) enum TaskKind {
     Load,
     Render(Pane),
 }
-/// Which view of the edit a render is for: the edit itself, or the Before beside it
-/// in Lightroom's Before/After views. Each has its own render lane and caches, so an
-/// edit renders only the After.
+/// Which view of the edit a render is for: the edit itself, the Before beside it
+/// in Lightroom's Before/After views, or the magnifier's 100% region over a fitted
+/// photo. Each has its own render lane and caches, so an edit renders only the After.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Pane {
     #[default]
     After,
     Before,
+    Magnifier,
 }
 
 /// What an Auto request sets.
@@ -273,7 +274,7 @@ pub(crate) enum Preview {
     Pixels {
         image: Rendered,
         display_rgb: Vec<u8>,
-        /// The Navigator's copy, for whole-photo views.
+        /// The minimap's copy, for whole-photo views.
         navigator: Option<image::RgbImage>,
     },
     /// Presented on the GPU into textures registered with the UI's renderer.
@@ -328,7 +329,7 @@ pub(crate) struct RenderJob {
     pub monitor: Option<PathBuf>,
     /// The clipping warnings painted over the shown pixels.
     pub clipping: crate::rendered::ClipOverlay,
-    /// Update the Navigator (Fit views).
+    /// Update the minimap's copy (Fit views).
     pub navigator: bool,
     /// Also produce a library thumbnail of the result.
     pub thumbnail: bool,

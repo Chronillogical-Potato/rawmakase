@@ -6,7 +6,7 @@
 //! and kept, within a budget, until it is shown. An offline photo shows its
 //! cached preview.
 use super::{Action, Library, thumbnails};
-use crate::app::design::{Tone, inset, text};
+use crate::app::design::{Tone, text};
 use crate::app::navigator::Zoom;
 use crate::app::theme;
 use crate::app::worker::Latest;
@@ -345,9 +345,26 @@ impl Library {
         let view = self.loupe.view;
         Some((view.x / w as f32).min(view.y / h as f32))
     }
-    /// What the Navigator shows for a photo in the Loupe's own view: its
+    /// Whether the Loupe's own view has full-resolution pixels for the active
+    /// photo: its file, or an offline RAW's stored 1:1 preview.
+    pub(in crate::app) fn loupe_zoomable(&self) -> bool {
+        let Some(photo) = self.selection.active.and_then(|id| self.photo(id)) else {
+            return false;
+        };
+        self.is_available(&photo.path)
+            || self
+                .loupe_stored
+                .as_ref()
+                .is_some_and(|(id, _)| *id == photo.id)
+    }
+    /// The size, in pixels, of the area the Loupe's own view fits its photo in.
+    #[cfg(test)]
+    pub(in crate::app) fn loupe_view(&self) -> egui::Vec2 {
+        self.loupe.view
+    }
+    /// What the minimap shows for a photo in the Loupe's own view: its
     /// preview, and the part in view when zoomed.
-    pub(in crate::app) fn loupe_navigator(
+    pub(in crate::app) fn loupe_minimap(
         &self,
     ) -> Option<(crate::app::navigator::Photo, Option<[f32; 4]>)> {
         let photo = self.selection.active.and_then(|id| self.photo(id))?;
@@ -402,25 +419,24 @@ impl Library {
             self.scroll_to_active = true;
         }
     }
-    /// The Loupe in place of the grid, with its toolbar below.
-    pub(super) fn loupe(&mut self, ui: &mut egui::Ui, zoom: &mut Zoom, chrome: bool) -> Action {
+    /// The Loupe in place of the grid. Its toolbar, with the view buttons, zoom
+    /// and the magnifier, is the editor's (`Editor::library_loupe_toolbar`), drawn
+    /// below it first.
+    /// With the `magnifier` on, its lens reads the file's full-resolution pixels
+    /// (an offline RAW's 1:1 preview) through the zoomed view's region reader,
+    /// idle at Fit.
+    pub(super) fn loupe(
+        &mut self,
+        ui: &mut egui::Ui,
+        zoom: &mut Zoom,
+        magnifier: Option<&mut crate::app::magnifier::Magnifier>,
+    ) -> Action {
         let palette = theme::palette(ui.ctx());
         self.loupe.poll(ui.ctx());
         let Some(id) = self.selection.active else {
             self.close_loupe();
             return Action::None;
         };
-        // On the photo's backdrop, as the view above it.
-        if chrome {
-            egui::Panel::bottom("library-loupe-toolbar")
-                .frame(
-                    egui::Frame::new()
-                        .fill(palette.photo_backdrop())
-                        .inner_margin(inset::BAR),
-                )
-                .show_separator_line(false)
-                .show(ui, |ui| ui.horizontal(|ui| self.view_buttons(ui)));
-        }
         let Some(photo) = self.photo(id).cloned() else {
             return Action::None;
         };
@@ -516,7 +532,11 @@ impl Library {
             }
             return Action::None;
         }
-        if !zoom.on && self.loupe.regions.region.is_some() {
+        // At Fit the full decode goes, unless the magnifier reads this photo's:
+        // moving on lets the last one's go, wherever the pointer is.
+        let regions = &self.loupe.regions;
+        let lens_reads = magnifier.is_some() && regions.photo == Some(photo.id);
+        if !zoom.on && !lens_reads && regions.holds() {
             self.loupe.regions.release();
         }
         let regions = &mut self.loupe.regions;
@@ -570,6 +590,38 @@ impl Library {
                 egui::vec2(w * at.width(), h * at.height()),
             );
             painter.image(region.id(), place, uv, Color32::WHITE);
+        }
+        // The magnifier at Fit, over the photo.
+        if let Some(magnifier) = magnifier.filter(|_| !zoom.on && zoomable)
+            && let Some((fitted, pos)) = fit
+                .zip(response.hover_pos())
+                .filter(|(f, p)| f.contains(*p))
+        {
+            magnifier.read_wheel(ui);
+            let level = magnifier.level();
+            let size = regions
+                .full
+                .filter(|_| regions.photo == Some(photo.id))
+                .or(self.loupe.full.map(|(w, h)| [w, h]));
+            if let Some(size) = size
+                && let Some(aim) = crate::app::magnifier::Aim::new(pos, fitted, size, level, ppp)
+            {
+                let [x, y, w, h] = aim.region(size);
+                let centre = [
+                    (x as f32 + w as f32 / 2.) / size[0] as f32,
+                    (y as f32 + h as f32 / 2.) / size[1] as f32,
+                ];
+                let stored = stored.as_deref().filter(|_| !available);
+                regions.request(photo.id, &photo.path, stored, centre, [w, h], 1.);
+                let [fw, fh] = size.map(|v| v as f32);
+                let sharp = regions
+                    .region
+                    .as_ref()
+                    .filter(|_| regions.photo == Some(photo.id))
+                    .map(|(t, [rx, ry, rw, rh])| (t.id(), [rx * fw, ry * fh, rw * fw, rh * fh]));
+                let preview = texture.as_ref().map(|t| t.id());
+                crate::app::magnifier::paint_lens(ui, pos, &aim, level, sharp, preview, size);
+            }
         }
         if zoom.on && zoomable {
             ui.ctx().set_cursor_icon(if response.dragged() {

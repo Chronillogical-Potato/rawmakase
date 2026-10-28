@@ -410,14 +410,6 @@ impl Library {
             });
         action
     }
-    /// What the Navigator shows outside the Loupe: the selected photo's
-    /// preview.
-    pub(in crate::app) fn selected_preview(&self) -> Option<crate::app::navigator::Photo> {
-        self.selected()
-            .and_then(|id| self.photo(id))
-            .and_then(|p| self.texture(p))
-            .map(|t| (t.id(), t.size_vec2()))
-    }
     /// Shows collection `id`'s photos; the filter bar still applies.
     /// Shows Previous Import: the photos the last import added.
     pub(in crate::app) fn show_previous_import(&mut self) {

@@ -363,7 +363,7 @@ When the GPU renders a preview, the developed pixels stay on the device and
 as a native texture by the render worker): sharpening, vignettes and grain, the
 clipping overlay, the monitor profile (a 52³ lattice sampled from `color_management` once per
 profile, interpolated trilinearly) and 8-bit encoding, in the CPU reference's order.
-The histogram is counted in the same pass and the Navigator copy is reduced on the
+The histogram is counted in the same pass and the minimap's copy is reduced on the
 GPU; only the histogram (3 KB) and, for catalog photos, a 640-pixel library
 thumbnail are read back. Nothing is converted or uploaded on the UI thread. Recipes
 the port does not cover and machines without a usable adapter render

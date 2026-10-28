@@ -163,7 +163,7 @@ impl Palette {
         map(self, level)
     }
 
-    /// Behind the photo and the Navigator: the palette's panel colour,
+    /// Behind the photo and the minimap: the palette's panel colour,
     /// lighter than the side panels around it (Lightroom's grey in the
     /// default palette).
     pub(super) fn photo_backdrop(&self) -> Color32 {
