@@ -15,7 +15,7 @@ type Shortcut = (&'static str, &'static str);
 /// A titled group of shortcuts.
 type Group<'a> = (&'a str, &'a [Shortcut]);
 
-const LIBRARY: [Shortcut; 15] = [
+const LIBRARY: [Shortcut; 16] = [
     ("Arrows", "Move the active photo"),
     ("Home / End", "First / last photo"),
     ("Shift+Arrows / Shift+click", "Extend the selection"),
@@ -37,6 +37,7 @@ const LIBRARY: [Shortcut; 15] = [
         "Cmd+Shift+S",
         "Sync the active photo's settings to the selection",
     ),
+    ("Cmd+Shift+U", "Auto Settings on each selected photo"),
 ];
 const LOUPE: [Shortcut; 7] = [
     ("E / Return / double-click", "Open the Loupe"),

@@ -243,6 +243,7 @@ impl Editor {
         // Above Preferences too, which opens it.
         self.lut_import_window(&ctx);
         self.export_windows(&ctx);
+        self.batch_window(&ctx);
         let dialog = modal || self.view.shortcuts || self.report_issue.is_open();
         self.update_notice(&ctx, dialog);
         // Last, after whatever else this frame opened or asked: see its docs.
@@ -939,6 +940,17 @@ impl Editor {
             if sync && !self.sync_targets().is_empty() {
                 self.open_copy_dialog(super::settings_transfer::Transfer::Sync);
             }
+            // Lightroom's Auto Settings, here on each selected photo; in Develop it
+            // stays the open photo's.
+            let auto = ctx.input_mut(|i| {
+                i.consume_key(
+                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                    egui::Key::U,
+                )
+            });
+            if auto {
+                self.start_batch(super::sync::BatchChange::AutoSettings);
+            }
         }
         // The catalog's sidebar, drawn before the bar, asked for this.
         let mut action = sidebar;
@@ -1197,16 +1209,27 @@ impl Editor {
                 if pinned {
                     navigator(ui);
                 }
+                // Quick Develop's Saved Preset and Auto Settings, on the selection.
+                let count = self.batch_target_count();
+                let presets = &mut self.presets;
+                let mut quick = None;
                 match &mut self.library {
                     Some(library) => {
-                        action.then(library.info_panel(ui, |ui| {
-                            if !pinned {
-                                navigator(ui);
-                            }
-                        }));
+                        action.then(library.info_panel(
+                            ui,
+                            |ui| {
+                                if !pinned {
+                                    navigator(ui);
+                                }
+                            },
+                            |ui| quick = super::batch::quick_develop(ui, presets, count),
+                        ));
                     }
                     None if !pinned => navigator(ui),
                     None => {}
+                }
+                if let Some(request) = quick {
+                    self.quick_develop_request(request);
                 }
                 match change {
                     Some(change) if develops.is_some() => self.navigator_change(change),
@@ -1819,17 +1842,18 @@ impl Editor {
     }
     /// The work closing waits for, as the close guard names it: closing would cut
     /// it off, and nothing can be saved in its place.
-    fn closing_waits_for(&self) -> Option<&'static str> {
+    fn closing_waits_for(&self) -> Option<std::borrow::Cow<'static, str>> {
         if self.exporting() {
-            Some("the export")
-        } else if self.activity.is_syncing() {
-            Some("Sync Settings")
+            Some("the export".into())
+        } else if let Some(batch) = self.activity.batch() {
+            // Sync Settings, Auto Settings or a preset on the selection.
+            Some(batch.name().to_string().into())
         } else if self.activity.is_changing_folder() {
-            Some(FOLDER_CHANGE)
+            Some(FOLDER_CHANGE.into())
         } else if self.activity.is_changing_files() {
-            Some(FILE_CHANGE)
+            Some(FILE_CHANGE.into())
         } else if self.automation.outputs_running() {
-            Some(OUTPUT)
+            Some(OUTPUT.into())
         } else {
             None
         }
@@ -1874,7 +1898,7 @@ impl Editor {
         if self.close_confirm {
             let waits_for = self.closing_waits_for();
             egui::Window::new("Work still pending").show(ctx, |ui| {
-                ui.label(if let Some(work) = waits_for {
+                ui.label(if let Some(work) = &waits_for {
                     format!("Wait for {work} to finish before closing.")
                 } else if self.autosave.busy() {
                     "Edits are still being saved: the catalog is not answering. Wait, or \
@@ -1889,7 +1913,7 @@ impl Editor {
                 }
                 // What only runs without its own way to stop it: closing anyway
                 // must stay possible should it stall on a network share.
-                let anyway = match waits_for {
+                let anyway = match waits_for.as_deref() {
                     Some(OUTPUT) => Some("Cancel it and close"),
                     Some(FOLDER_CHANGE | FILE_CHANGE) => Some("Close anyway"),
                     _ => None,

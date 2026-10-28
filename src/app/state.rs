@@ -401,6 +401,8 @@ pub(super) struct PresetBrowser {
     /// Per preset: the profile it names and the one it renders with instead.
     pub(super) substitutes: Vec<Option<(String, String)>>,
     pub(super) filter: String,
+    /// The search in the Library's Saved Preset chooser.
+    pub(super) chooser_filter: String,
     pub(super) favorites: std::collections::BTreeSet<String>,
     pub(super) compatible_only: bool,
     pub(super) favorites_only: bool,

@@ -857,6 +857,7 @@ fn survive_surface_errors(device: &wgpu::Device) {
 mod auto;
 mod automation;
 mod basic_keys;
+mod batch;
 mod before_after;
 mod brush_scroll;
 mod bulk_import;
