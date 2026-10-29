@@ -631,3 +631,46 @@ fn only_a_stated_range_that_fits_the_calibration_counts() {
     assert_eq!(focal("XF70-300mmF4-5.6 R LM OIS WR + 1.4x"), [98., 420.]);
     assert_eq!(focal("Sigma 35–80mm f/4–5.6 DL-II AF"), [35., 80.]);
 }
+
+/// Without a database, a choice taken to another aspect mode of a body whose modes
+/// Lensfun lists apart keeps no crop factor it can't establish: the photo's EXIF,
+/// else none (and the panel says so), never the source mode's.
+#[test]
+fn without_a_database_another_aspect_mode_isn_t_guessed() {
+    use crate::camera_data::Metadata;
+    let db = db();
+    let lx3 = |w: u32, h: u32, focal_35mm: f32| Metadata {
+        exif_make: "Panasonic".into(),
+        exif_model: "DMC-LX3".into(),
+        focal: 5.1,
+        focal_35mm,
+        width: w,
+        height: h,
+        lensfun: installed::Handle::Given(None),
+        ..Default::default()
+    };
+    let from = lx3(3648, 2736, 0.);
+    let chosen = LensfunChoice::of(&db.lenses[0], &db, choice::camera_for(&db, &from));
+    assert!(chosen.camera.as_ref().unwrap().per_aspect);
+    let square = lx3(2736, 2736, 0.);
+    let moved = chosen.for_photo(&square);
+    assert!(moved.camera.is_none() && moved.frame(&square).is_none());
+    let with_exif = lx3(2736, 2736, 27.);
+    let moved = chosen.for_photo(&with_exif);
+    assert!((moved.frame(&with_exif).unwrap().crop - 27. / 5.1).abs() < 1e-4);
+    // The same mode keeps its camera.
+    assert_eq!(chosen.for_photo(&from).camera, chosen.camera);
+    // A body with one entry still computes its readout (a G6's 1:1).
+    let g6 = |w: u32, h: u32| Metadata {
+        exif_make: "Panasonic".into(),
+        exif_model: "DMC-G6".into(),
+        focal: 19.,
+        width: w,
+        height: h,
+        lensfun: installed::Handle::Given(None),
+        ..Default::default()
+    };
+    let chosen = LensfunChoice::of(&db.lenses[0], &db, choice::camera_for(&db, &g6(4608, 3456)));
+    let square = g6(3456, 3456);
+    assert!((chosen.for_photo(&square).frame(&square).unwrap().crop - 2.357_022_6).abs() < 1e-4);
+}

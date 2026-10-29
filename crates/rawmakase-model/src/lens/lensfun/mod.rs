@@ -258,7 +258,7 @@ fn camera(node: roxmltree::Node) -> Result<Camera> {
     })
 }
 /// "16:9" as 16/9 (long edge over short); `None` for other variant names.
-fn ratio(text: &str) -> Option<f32> {
+pub(crate) fn ratio(text: &str) -> Option<f32> {
     let (a, b) = text.trim().split_once(':')?;
     let (a, b): (f32, f32) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
     (a > 0. && b > 0.).then(|| a.max(b) / a.min(b))

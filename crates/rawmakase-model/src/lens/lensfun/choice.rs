@@ -45,6 +45,10 @@ pub struct LensfunCamera {
     /// length, a crop mode included, not the sensor's.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub from_exif: bool,
+    /// The crop factor is one aspect mode's (Lensfun lists the body's modes apart,
+    /// as variants), so it says nothing of the body's other modes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub per_aspect: bool,
 }
 
 /// Where a calibration was copied from, under which terms: kept with every copy, so
@@ -151,8 +155,15 @@ impl LensfunChoice {
         let photo = photo_of(m, [rect[2], rect[3]]);
         let crop = match &self.camera {
             Some(c) if same_text(&c.make, photo.make) && same_text(&c.model, photo.model) => {
+                let other_mode = c.per_aspect
+                    && c.aspect
+                        .zip(aspect_of(photo.frame))
+                        .is_none_or(|(a, b)| (a / b - 1.).abs() > 0.02);
                 if c.from_exif {
                     Some(exif_crop(&photo).unwrap_or(c.crop))
+                } else if other_mode {
+                    // One aspect mode's crop factor says nothing of another's.
+                    exif_crop(&photo)
                 } else {
                     Some(photo_crop(c.crop, c.aspect, &photo))
                 }
@@ -242,6 +253,7 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
             crop: c.crop,
             aspect: super::matching::native_aspect(c),
             from_exif: false,
+            per_aspect: super::ratio(&c.variant).is_some(),
         }),
         // The 35 mm equivalent describes the frame as recorded.
         None => exif_crop(&photo).map(|crop| LensfunCamera {
@@ -250,6 +262,7 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
             crop,
             aspect,
             from_exif: true,
+            per_aspect: false,
         }),
     }
 }
@@ -266,8 +279,15 @@ impl LensfunChoice {
         // aspect variants differ in crop factor), even of the same body.
         let camera = match m.lensfun.get() {
             Some(installed) => camera_for(&installed.db, m),
+            // Without one, the same body keeps its camera, unless it is one aspect
+            // mode's and this frame is another's.
             None if self.camera.as_ref().is_some_and(|c| {
-                same_text(&c.make, photo.make) && same_text(&c.model, photo.model)
+                same_text(&c.make, photo.make)
+                    && same_text(&c.model, photo.model)
+                    && !(c.per_aspect
+                        && c.aspect
+                            .zip(aspect_of(frame))
+                            .is_none_or(|(a, b)| (a / b - 1.).abs() > 0.02))
             }) =>
             {
                 return self.clone();
@@ -278,6 +298,7 @@ impl LensfunChoice {
                 crop,
                 aspect: None,
                 from_exif: true,
+                per_aspect: false,
             }),
         };
         Self {
@@ -339,4 +360,10 @@ pub fn frame_rect(m: &Metadata) -> [f32; 4] {
 pub fn frame_size(m: &Metadata) -> [f32; 2] {
     let [_, _, w, h] = frame_rect(m);
     [w, h]
+}
+
+/// Long edge over short of a frame; `None` for an empty one.
+fn aspect_of(frame: [f32; 2]) -> Option<f32> {
+    let [w, h] = frame;
+    (w > 0. && h > 0.).then(|| w.max(h) / w.min(h))
 }
