@@ -42,7 +42,6 @@ pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
     if share {
         return Err(TrashError::Unsupported);
     }
-    let path = &for_the_shell(path)?;
     let _com = Com::init()?;
     let seen = recycle(path).map_err(|e| TrashError::Failed(said(&e)))?;
     match seen {
@@ -59,30 +58,6 @@ pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
             "the Recycle Bin didn't say where the file went".into(),
         )),
     }
-}
-
-/// `path` as the shell parses it: without the `\\?\` prefix a catalog
-/// root keeps (it is canonicalised), which the shell refuses as an
-/// incorrect parameter (#744). Only where the plain path names the same
-/// file: one whose name the prefix kept literal (a trailing dot, `CON`)
-/// may name another without it, and fails instead.
-fn for_the_shell(path: &Path) -> Result<PathBuf, TrashError> {
-    let plain = crate::platform::volume::plain(path);
-    if plain == path {
-        return Ok(plain);
-    }
-    let same = match (std::fs::canonicalize(path), std::fs::canonicalize(&plain)) {
-        (Ok(a), Ok(b)) => a == b,
-        (Err(e), _) => return Err(TrashError::Failed(e.to_string())),
-        (_, Err(_)) => false,
-    };
-    if !same {
-        return Err(TrashError::Failed(format!(
-            "the Recycle Bin can't be given “{}” by another name",
-            path.display()
-        )));
-    }
-    Ok(plain)
 }
 
 /// Whether `path` can go to the Recycle Bin, by its drive's type.
@@ -127,7 +102,15 @@ struct Seen {
 
 /// Deletes `path` to the Recycle Bin. An error is a step that didn't
 /// happen; what the shell did is in [`Seen`].
+///
+/// The shell is given `path` without the `\\?\` prefix a catalog root
+/// keeps (it is canonicalised), as it refuses those as an incorrect
+/// parameter (#744). It parses a plain path its own way: a name only the
+/// prefix kept literal (a trailing dot or space, on the file or a folder
+/// on the way) may name another file, so the item it made is checked to
+/// be `path`'s file before anything is deleted.
 fn recycle(path: &Path) -> windows::core::Result<Seen> {
+    let plain = crate::platform::volume::plain(path);
     let sink = ComObject::new(Sink::default());
     let progress: IFileOperationProgressSink = sink.to_interface();
     // SAFETY: COM is initialised on this thread (`Com`), every pointer the
@@ -138,7 +121,16 @@ fn recycle(path: &Path) -> windows::core::Result<Seen> {
         operation.SetOperationFlags(
             FOFX_RECYCLEONDELETE | FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT,
         )?;
-        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None)?;
+        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(plain.as_path()), None)?;
+        if !names(&item, path)? {
+            return Ok(Seen {
+                failed: Some(format!(
+                    "the Recycle Bin can't be given “{}” by another name",
+                    path.display()
+                )),
+                ..Seen::default()
+            });
+        }
         operation.DeleteItem(&item, &progress)?;
         let performed = operation.PerformOperations();
         (performed, operation.GetAnyOperationsAborted()?.as_bool())
@@ -325,6 +317,18 @@ fn said(e: &windows::core::Error) -> String {
     }
 }
 
+/// Whether the shell's `item` is the file at `path`: the same file once
+/// both paths are resolved by the file system.
+fn names(item: &IShellItem, path: &Path) -> windows::core::Result<bool> {
+    let named = file_path(item)?;
+    Ok(
+        match (std::fs::canonicalize(path), std::fs::canonicalize(&named)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        },
+    )
+}
+
 /// Where `item` is on disk.
 fn file_path(item: &IShellItem) -> windows::core::Result<PathBuf> {
     // SAFETY: `GetDisplayName` returns a string this owns; it is copied,
@@ -363,6 +367,26 @@ mod tests {
         );
         assert_eq!(std::fs::read(&dotted).unwrap(), b"dotted");
         assert_eq!(std::fs::read(&other).unwrap(), b"other");
+    }
+
+    /// The same for a folder on the way: Windows' file calls keep the
+    /// trailing space of `album `, the shell drops it and names `album`.
+    #[test]
+    fn a_folder_the_shell_would_name_otherwise_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let (spaced, other) = (canonical.join("album "), canonical.join("album"));
+        std::fs::create_dir(&spaced).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        std::fs::write(spaced.join("a.jpg"), b"spaced").unwrap();
+        std::fs::write(other.join("a.jpg"), b"other").unwrap();
+        let got = super::trash(&spaced.join("a.jpg"));
+        assert!(
+            matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+            "{got:?}"
+        );
+        assert_eq!(std::fs::read(spaced.join("a.jpg")).unwrap(), b"spaced");
+        assert_eq!(std::fs::read(other.join("a.jpg")).unwrap(), b"other");
     }
 
     #[test]
