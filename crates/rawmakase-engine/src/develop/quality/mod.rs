@@ -93,7 +93,7 @@ pub use render::*;
 pub use samples::*;
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     #[test]
     fn cancelled_highlight_recovery_keeps_nothing() {
@@ -102,7 +102,7 @@ mod tests {
         assert!(recover_highlights_cancellable(&image, &cancel).is_err());
         assert!(image.recovered.get().is_none());
     }
-    fn fixture() -> CameraImage {
+    pub(super) fn fixture() -> CameraImage {
         CameraImage {
             width: 96,
             height: 80,
@@ -203,112 +203,6 @@ mod tests {
         let fit = render(&im, &r.checked()?, 48, None)?;
         assert_eq!(fit.pixels, expected.pixels);
         Ok(())
-    }
-    #[test]
-    fn partial_highlight_uses_neighbor_ratios_and_full_clip_is_neutral() {
-        let mut im = fixture();
-        im.pixels.fill([0.8, 0.4, 0.2]);
-        let i = 40 * 96 + 40;
-        im.pixels[i] = [1., 0.6, 0.3];
-        let recovered = recover_highlights(&im);
-        assert!((recovered.pixels[i][0] - 1.2).abs() < 1e-5);
-        assert_eq!(recovered.pixels[i][1], 0.6);
-        im.pixels.fill([1., 1., 1.]);
-        assert!(recover_highlights(&im).pixels.iter().all(|p| *p == [1.; 3]));
-    }
-    #[test]
-    fn recovery_never_darkens_a_clipped_channel() {
-        // Neighbours whose ratio puts red at 0.5, under a red the sensor clipped at
-        // 1: the light was at least that bright, so red keeps 1.
-        let mut im = fixture();
-        im.pixels.fill([0.5, 0.4, 0.2]);
-        let i = 40 * 96 + 40;
-        im.pixels[i] = [1., 0.4, 0.2];
-        assert_eq!(recover_highlights(&im).pixels[i], [1., 0.4, 0.2]);
-        // The same where no neighbour is unclipped (the neutral fallback, 0.3).
-        for y in 30..51 {
-            for x in 30..51 {
-                im.pixels[y * 96 + x] = [1., 0.4, 0.2];
-            }
-        }
-        im.pixels
-            .iter_mut()
-            .filter(|p| p[0] < 1.)
-            .for_each(|p| *p = [0.05; 3]);
-        assert_eq!(recover_highlights(&im).pixels[i], [1., 0.4, 0.2]);
-    }
-    #[test]
-    fn the_floor_fades_as_a_second_channel_clips() {
-        // Red clipped over neighbours that put it at 0.5; green rises through the
-        // clip threshold. The floor goes with green's own blend: no jump at 0.97,
-        // and none left once green is clipped too.
-        let red = |g: f32| {
-            let mut im = fixture();
-            im.pixels.fill([0.5, 0.969, 0.4]);
-            let i = 40 * 96 + 40;
-            im.pixels[i] = [1., g, 0.4];
-            recover_highlights(&im).pixels[i][0]
-        };
-        assert_eq!(red(0.96), 1.);
-        assert!((red(0.96999) - red(0.97001)).abs() < 1e-3);
-        assert!((red(0.985) - 0.75).abs() < 0.01, "{}", red(0.985));
-        assert!((red(1.) - 0.5).abs() < 1e-3);
-    }
-    #[test]
-    fn wide_partial_highlight_keeps_the_surviving_channels_colour() {
-        let mut im = fixture();
-        im.pixels.fill([0.8, 0.4, 0.2]);
-        for y in 30..51 {
-            for x in 30..51 {
-                im.pixels[y * 96 + x] = [1., 0.6, 0.3];
-            }
-        }
-        let recovered = recover_highlights(&im);
-        for x in 30..51 {
-            let p = recovered.pixels[40 * 96 + x];
-            assert!((p[0] - 1.2).abs() < 1e-4, "x {x}: {p:?}");
-            assert_eq!(p[1..], [0.6, 0.3]);
-        }
-        assert_eq!(recovered.pixels[0], im.pixels[0]);
-    }
-    #[test]
-    fn wide_highlight_with_only_red_remaining_uses_white_balanced_ratios() {
-        let mut im = fixture();
-        im.metadata.wb = [2., 1., 1.5];
-        im.pixels.fill([0.6, 0.8, 1.35]);
-        for y in 30..51 {
-            for x in 30..51 {
-                // 1.5× the surrounding colour, with green and blue sensor-clipped.
-                im.pixels[y * 96 + x] = [0.9, 1., 1.5];
-            }
-        }
-        let recovered = recover_highlights(&im);
-        for x in 30..51 {
-            let p = recovered.pixels[40 * 96 + x];
-            assert_eq!(p[0], 0.9);
-            assert!((p[1] - 1.2).abs() < 1e-4, "x {x}: {p:?}");
-            assert!((p[2] - 2.025).abs() < 1e-4, "x {x}: {p:?}");
-        }
-    }
-    #[test]
-    fn wide_highlight_does_not_borrow_colour_across_a_dark_gap() {
-        let mut im = fixture();
-        im.pixels.fill([0.05; 3]);
-        for y in 20..51 {
-            for x in 5..21 {
-                im.pixels[y * 96 + x] = [0.8, 0.4, 0.2];
-            }
-            for x in 50..71 {
-                im.pixels[y * 96 + x] = [1., 0.6, 0.3];
-            }
-        }
-        let recovered = recover_highlights(&im);
-        // The clipped object's colour is unknown. The separate red object must
-        // not cause its missing channel to be extrapolated to 1.2; it keeps what
-        // the sensor recorded.
-        let p = recovered.pixels[35 * 96 + 60];
-        assert_eq!(p[0], 1., "{p:?}");
-        assert_eq!(p[1..], [0.6, 0.3]);
     }
     #[test]
     fn cancellation_does_not_publish_partial_frame() {
