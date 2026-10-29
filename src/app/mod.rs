@@ -125,6 +125,8 @@ pub(crate) struct Editor {
     /// Select Subject and Select Background: the running selection, the selection
     /// model's install and what the drawer asks.
     selection: subject_mask::Selection,
+    /// Lensfun's lens database: installing, updating and removing it.
+    lensfun: lensfun::Lensfun,
     /// Photo > Auto Advance, saved in the session.
     auto_advance: bool,
     /// Synchronize Folder: the scan under way or the plan waiting for review.
@@ -352,6 +354,7 @@ impl Editor {
             not_editable: None,
             undo_log: Default::default(),
             selection: Default::default(),
+            lensfun: lensfun::Lensfun::suggesting(!session.no_lensfun_suggestions),
             auto_advance: session.auto_advance,
             folder_sync: Default::default(),
             file_ops: Default::default(),
@@ -412,6 +415,7 @@ impl Editor {
                     auto_advance: self.auto_advance,
                     no_auto_black_white_mix: self.first_conversion
                         == treatment::FirstConversion::KeepMix,
+                    no_lensfun_suggestions: !self.lensfun.suggest,
                     pause_checksums: self.checksums_paused,
                     library_layout: self.saved_layout.clone(),
                     copy_groups: Some(self.copy_groups.clone()),
@@ -887,6 +891,7 @@ mod folder_sync;
 mod guided_tool;
 mod history_panel;
 mod inspector;
+mod lensfun;
 pub(crate) mod library;
 mod lut_import;
 mod magnifier;

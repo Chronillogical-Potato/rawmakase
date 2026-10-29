@@ -839,60 +839,6 @@ fn save_stage(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn tap() -> rawmakase::rendered::Rendered {
-        rawmakase::rendered::Rendered {
-            width: 2,
-            height: 1,
-            pixels: vec![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
-        }
-    }
-
-    #[test]
-    fn stage_taps_never_replace_raws_their_source_or_unasked_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let raw = dir.path().join("photo.dng");
-        std::fs::write(&raw, b"raw bytes").unwrap();
-        // Over the RAW it was rendered from, with or without --overwrite.
-        for overwrite in [false, true] {
-            assert!(save_stage(&raw, &raw, tap(), overwrite).is_err());
-            assert_eq!(std::fs::read(&raw).unwrap(), b"raw bytes");
-        }
-        // Over the source under a non-RAW name.
-        let source = dir.path().join("source.tif");
-        std::fs::write(&source, b"source").unwrap();
-        assert!(save_stage(&source, &source, tap(), true).is_err());
-        assert_eq!(std::fs::read(&source).unwrap(), b"source");
-        // An existing file only with --overwrite.
-        let output = dir.path().join("tap.tif");
-        std::fs::write(&output, b"old").unwrap();
-        assert!(save_stage(&output, &raw, tap(), false).is_err());
-        assert_eq!(std::fs::read(&output).unwrap(), b"old");
-        save_stage(&output, &raw, tap(), true).unwrap();
-        let written = image::open(&output).unwrap().to_rgb32f();
-        assert_eq!(written.dimensions(), (2, 1));
-        assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
-    }
-
-    #[test]
-    fn a_stage_tap_is_only_written_under_a_tiff_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("photo.dng");
-        for name in ["tap.jpg", "tap.png", "tap.exr", "tap"] {
-            let output = dir.path().join(name);
-            let refused = save_stage(&output, &source, tap(), false).unwrap_err();
-            assert!(refused.to_string().contains(".tif"), "{name}: {refused}");
-            assert!(!output.exists(), "{name}");
-        }
-        for name in ["tap.tif", "tap.TIFF"] {
-            save_stage(&dir.path().join(name), &source, tap(), false).unwrap();
-        }
-    }
-}
-
 /// `rawmakase lensfun`.
 fn lensfun(command: LensfunCommand) -> Result<()> {
     use rawmakase::lens::lensfun::{choice, installed};
@@ -965,4 +911,58 @@ fn lensfun(command: LensfunCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tap() -> rawmakase::rendered::Rendered {
+        rawmakase::rendered::Rendered {
+            width: 2,
+            height: 1,
+            pixels: vec![[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+        }
+    }
+
+    #[test]
+    fn stage_taps_never_replace_raws_their_source_or_unasked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("photo.dng");
+        std::fs::write(&raw, b"raw bytes").unwrap();
+        // Over the RAW it was rendered from, with or without --overwrite.
+        for overwrite in [false, true] {
+            assert!(save_stage(&raw, &raw, tap(), overwrite).is_err());
+            assert_eq!(std::fs::read(&raw).unwrap(), b"raw bytes");
+        }
+        // Over the source under a non-RAW name.
+        let source = dir.path().join("source.tif");
+        std::fs::write(&source, b"source").unwrap();
+        assert!(save_stage(&source, &source, tap(), true).is_err());
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+        // An existing file only with --overwrite.
+        let output = dir.path().join("tap.tif");
+        std::fs::write(&output, b"old").unwrap();
+        assert!(save_stage(&output, &raw, tap(), false).is_err());
+        assert_eq!(std::fs::read(&output).unwrap(), b"old");
+        save_stage(&output, &raw, tap(), true).unwrap();
+        let written = image::open(&output).unwrap().to_rgb32f();
+        assert_eq!(written.dimensions(), (2, 1));
+        assert_eq!(written.get_pixel(1, 0).0, [0.4, 0.5, 0.6]);
+    }
+
+    #[test]
+    fn a_stage_tap_is_only_written_under_a_tiff_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("photo.dng");
+        for name in ["tap.jpg", "tap.png", "tap.exr", "tap"] {
+            let output = dir.path().join(name);
+            let refused = save_stage(&output, &source, tap(), false).unwrap_err();
+            assert!(refused.to_string().contains(".tif"), "{name}: {refused}");
+            assert!(!output.exists(), "{name}");
+        }
+        for name in ["tap.tif", "tap.TIFF"] {
+            save_stage(&dir.path().join(name), &source, tap(), false).unwrap();
+        }
+    }
 }

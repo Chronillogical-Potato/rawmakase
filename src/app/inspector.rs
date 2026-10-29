@@ -22,6 +22,9 @@ use crate::{app::theme, develop::targeted::Target};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 mod lens_profile;
+mod lensfun;
+/// Lensfun's terms, for Preferences.
+pub(super) use lensfun::terms as lensfun_terms;
 mod profile_menu;
 
 /// A histogram corner's clipping triangle: its corner point, which way it
@@ -432,6 +435,18 @@ impl Editor {
         ui.add_space(space::S);
         let mut import_profiles = false;
         let mut import_lens = false;
+        // Lensfun's database as the Lens Corrections panel shows it this frame.
+        let lensfun_view = lensfun::View {
+            db: self.lensfun.database(),
+            running: self.lensfun.running(),
+            progress: self.lensfun.progress(),
+            failure: self
+                .lensfun
+                .failure(crate::app::lensfun::Job::Install)
+                .map(str::to_string),
+            suggest: self.lensfun.suggest,
+        };
+        let mut lensfun_action = None;
         let mut import_folder = None;
         let mut import_luts = false;
         let mut import_adobe = false;
@@ -1242,7 +1257,7 @@ impl Editor {
                         .color(palette.tone(Tone::SOFT)),
                 );
             });
-            lens_profile::profile_menus(ui, r, metadata.as_ref());
+            lens_profile::profile_menus(ui, r, metadata.as_ref(), &lensfun_view);
             // Said here as well as on import, so a missing profile is never silent.
             if let Some(missing) = metadata.as_ref().and_then(|m| r.missing_lens_profile(m)) {
                 control_row(ui, "", |ui| {
@@ -1255,6 +1270,9 @@ impl Editor {
                         .wrap(),
                     );
                 });
+            }
+            if let Some(m) = &metadata {
+                lensfun_action = lensfun::card(ui, r, m, &lensfun_view);
             }
             if r.lens_profile {
                 subheading(ui, "Amount");
@@ -1561,6 +1579,24 @@ impl Editor {
         }
         if import_lens {
             self.dialog(FileDialog::LensProfile, &ui.ctx().clone());
+        }
+        match lensfun_action {
+            Some(lensfun::Action::Download) => {
+                self.lensfun.start(
+                    crate::app::lensfun::Job::Install,
+                    self.tx.clone(),
+                    ui.ctx().clone(),
+                );
+            }
+            Some(lensfun::Action::Cancel) => self.lensfun.cancel(),
+            Some(lensfun::Action::Dismiss) => {
+                self.lensfun.suggest = false;
+                self.status =
+                    "Lensfun suggestions are off; Preferences › Profiles & Presets turns them on"
+                        .into();
+                let _ = self.save_session();
+            }
+            None => {}
         }
         if let Some(kind) = import_folder {
             self.dialog(FileDialog::ImportFolder(kind), &ui.ctx().clone());

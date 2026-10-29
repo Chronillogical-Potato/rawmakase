@@ -74,6 +74,8 @@ pub(super) struct Preferences {
     usage: Usage,
     /// Measured with a file dialog open, so its import is counted on close.
     stale: bool,
+    /// Remove was clicked for Lensfun's profiles, waiting for the confirmation.
+    lensfun_remove: bool,
     /// The status line when the window opened; only later messages are shown.
     status_at_open: String,
     /// Default Creator and Copyright for photos added from folders, as typed.
@@ -714,6 +716,8 @@ impl Editor {
             reveal_button(ui, &lens_profiles_dir());
         });
         gap(ui);
+        self.lensfun_block(ui);
+        gap(ui);
         group(ui, "Develop presets");
         form_row(ui, "Installed", |ui| {
             value(ui, &plural(presets, "preset", "presets"));
@@ -737,6 +741,125 @@ impl Editor {
         if luts {
             self.open_lut_import();
             self.preferences.stale = true;
+        }
+    }
+
+    /// Lensfun's community lens profiles: installed or not, checking for and
+    /// installing a newer database, removing it, and Lens Corrections' suggestions.
+    fn lensfun_block(&mut self, ui: &mut egui::Ui) {
+        use crate::app::lensfun::Job;
+        group(ui, "Lensfun profiles");
+        let installed = self.lensfun.installed();
+        let running = self.lensfun.running();
+        let mut start = None;
+        form_row(ui, "Installed", |ui| match &installed {
+            Some(m) => value(
+                ui,
+                &format!(
+                    "Version {} · {}",
+                    m.date(),
+                    plural(m.lenses, "lens", "lenses")
+                ),
+            ),
+            None => value(ui, "Not installed"),
+        });
+        if let Some(job) = running {
+            form_row(ui, "", |ui| {
+                match (job, self.lensfun.progress()) {
+                    (Job::Install, Some((done, total))) if total > 0 => {
+                        ui.add(
+                            egui::ProgressBar::new(done as f32 / total as f32)
+                                .desired_width(160.)
+                                .text(format!("{:.1} MB", done as f32 / 1e6)),
+                        );
+                    }
+                    _ => {
+                        crate::app::widgets::spinner(ui, 14.);
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    self.lensfun.cancel();
+                }
+            });
+        } else if installed.is_none() {
+            form_row(ui, "", |ui| {
+                if ui
+                    .button(format!(
+                        "Download ({:.1} MB)",
+                        crate::lensfun_install::ABOUT_MEGABYTES
+                    ))
+                    .clicked()
+                {
+                    start = Some(Job::Install);
+                }
+            });
+        } else if self.preferences.lensfun_remove {
+            form_row(ui, "", |ui| {
+                hint(
+                    ui,
+                    "Remove Lensfun profiles? Edits that use a Lensfun lens keep their corrections.",
+                );
+            });
+            form_row(ui, "", |ui| {
+                if ui.button("Remove").clicked() {
+                    start = Some(Job::Remove);
+                    self.preferences.lensfun_remove = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.preferences.lensfun_remove = false;
+                }
+            });
+        } else {
+            form_row(ui, "", |ui| {
+                match self.lensfun.newer() {
+                    Some(newer) => {
+                        let [y, m, d, ..] = crate::time::utc(newer);
+                        if ui
+                            .button(format!("Update to {y:04}-{m:02}-{d:02}"))
+                            .clicked()
+                        {
+                            start = Some(Job::Install);
+                        }
+                    }
+                    None => {
+                        if ui.button("Check for Updates").clicked() {
+                            start = Some(Job::Check);
+                        }
+                    }
+                }
+                if ui.button("Remove…").clicked() {
+                    self.preferences.lensfun_remove = true;
+                }
+                reveal_button(ui, &self.lensfun.dir());
+            });
+            if self.lensfun.up_to_date() {
+                form_row(ui, "", |ui| hint(ui, "Up to date"));
+            }
+        }
+        for job in [Job::Install, Job::Check, Job::Remove] {
+            if let Some(why) = self.lensfun.failure(job) {
+                form_row(ui, "", |ui| hint(ui, why));
+            }
+        }
+        form_row(ui, "", |ui| {
+            let mut suggest = self.lensfun.suggest;
+            if ui
+                .checkbox(&mut suggest, "Suggest Lensfun profiles in Lens Corrections")
+                .changed()
+            {
+                self.lensfun.suggest = suggest;
+                let _ = self.save_session();
+            }
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "Community lens profiles, downloaded from Lensfun on request; never applied unless you choose one. Edits keep a copy of the calibration they use.",
+            );
+        });
+        form_row(ui, "", crate::app::inspector::lensfun_terms);
+        if let Some(job) = start {
+            self.lensfun.start(job, self.tx.clone(), ui.ctx().clone());
         }
     }
 

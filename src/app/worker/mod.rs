@@ -70,6 +70,12 @@ pub(crate) enum Event {
     /// The selection model finished installing, or why not.
     ModelInstalled(Result<(), String>),
     ModelRemoved(Result<(), String>),
+    /// A Lensfun database job finished (`app::lensfun`).
+    Lensfun {
+        generation: u64,
+        job: crate::app::lensfun::Job,
+        result: Result<crate::app::lensfun::Done, crate::app::lensfun::Failure>,
+    },
     /// A catalog upgrade for raster masks finished: the backup it made, or why not.
     CatalogUpgraded {
         generation: u64,

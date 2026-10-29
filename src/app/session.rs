@@ -59,6 +59,10 @@ pub(crate) struct Session {
     /// white, which is on by default.
     #[serde(default)]
     pub no_auto_black_white_mix: bool,
+    /// Preferences > Profiles & Presets: the user turned off Lens Corrections'
+    /// suggestions of Lensfun profiles, which are on by default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_lensfun_suggestions: bool,
     /// Preferences > Catalog: the user paused reading checksums.
     #[serde(default)]
     pub pause_checksums: bool,
