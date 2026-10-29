@@ -1,9 +1,10 @@
 //! The lens model the renderer evaluates: radial functions of the normalized image
 //! radius for vignetting, distortion and lateral chromatic aberration. Readers in
 //! [`lens`](crate::lens) and [`dng`](crate::dng) produce it. [`lcp`] holds Adobe
-//! lens profiles as data. Only `lcp` depends on anything in the crate: `xml`, to
-//! parse the profiles.
+//! lens profiles as data, [`lensfun`] Lensfun calibrations and their evaluation.
+//! Only `lcp` depends on anything in the crate: `xml`, to parse the profiles.
 pub mod lcp;
+pub mod lensfun;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,14 +20,16 @@ pub struct Radial {
     pub values: Vec<f32>,
 }
 impl Radial {
+    /// The most knots a table may have; `develop`'s GPU port sizes its search by it.
+    pub const MAX_KNOTS: usize = 256;
     pub(crate) fn new(knots: Vec<f32>, values: Vec<f32>) -> Option<Self> {
         let r = Self { knots, values };
         r.valid().then_some(r)
     }
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.knots.len() >= 2
             && self.knots.len() == self.values.len()
-            && self.knots.len() <= 64
+            && self.knots.len() <= Self::MAX_KNOTS
             && self.knots.iter().chain(&self.values).all(|v| v.is_finite())
             && self.knots.windows(2).all(|k| k[0] < k[1])
             && self.knots[0] >= 0.
@@ -143,6 +146,11 @@ pub struct LensCorrection {
     pub distortion: Option<Radial>,
     /// Additional source radius scale for red and blue relative to green (1 = none).
     pub chromatic: Option<[Radial; 2]>,
+    /// `chromatic` is a function of green's source radius (after distortion), as
+    /// Lensfun's lateral CA is, rather than of the output radius. Corrections with it
+    /// are made while rendering and never saved.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub chromatic_at_source: bool,
     /// Gain per channel over the image, before distortion, as a DNG's OpcodeList3
     /// GainMap applies it (1 = none).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,6 +173,7 @@ impl Default for LensCorrection {
             vignetting: None,
             distortion: None,
             chromatic: None,
+            chromatic_at_source: false,
             gain_map: None,
             centre: Self::image_centre(),
         }
@@ -177,6 +186,7 @@ pub static NO_CORRECTION: LensCorrection = LensCorrection {
     vignetting: None,
     distortion: None,
     chromatic: None,
+    chromatic_at_source: false,
     gain_map: None,
     centre: [0.5, 0.5],
 };
@@ -241,7 +251,8 @@ impl LensCorrection {
     }
     /// As `radial_scale_with`, with `chromatic` measured from the decoded image in place
     /// of the lens data's own. A measurement is a function of the decoded radius, so it
-    /// is evaluated where green samples, after distortion.
+    /// is evaluated where green samples, after distortion, as the lens data's own is
+    /// when it says so (`chromatic_at_source`).
     pub fn radial_scale_ca(
         &self,
         r: f32,
@@ -254,6 +265,9 @@ impl LensCorrection {
             .map_or(1., |d| 1. + (d.eval(r) - 1.) * amount);
         match (chromatic, &self.chromatic) {
             (Some([red, blue]), _) => [g * red.eval(r * g), g, g * blue.eval(r * g)],
+            (None, Some([red, blue])) if self.chromatic_at_source => {
+                [g * red.eval(r * g), g, g * blue.eval(r * g)]
+            }
             (None, Some([red, blue])) => [g * red.eval(r), g, g * blue.eval(r)],
             (None, None) => [g; 3],
         }
@@ -331,6 +345,38 @@ impl LensCorrection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Lateral CA given as a function of green's source radius is read there, so the
+    /// Distortion amount doesn't move it; the default reads it at the output radius.
+    #[test]
+    fn chromatic_at_source_follows_green() {
+        let c = LensCorrection {
+            distortion: Radial::new(vec![0., 1.], vec![1., 1.2]),
+            chromatic: Some([
+                Radial::new(vec![0., 2.], vec![1., 1.2]).unwrap(),
+                Radial::new(vec![0., 2.], vec![1., 0.8]).unwrap(),
+            ]),
+            chromatic_at_source: true,
+            ..Default::default()
+        };
+        for amount in [0., 1., 2.] {
+            let [r, g, b] = c.radial_scale_with(1., amount);
+            let source = 1. * g;
+            assert!((r / g - (1. + 0.1 * source)).abs() < 1e-6, "{amount}");
+            assert!((b / g - (1. - 0.1 * source)).abs() < 1e-6, "{amount}");
+        }
+        let output = LensCorrection {
+            chromatic_at_source: false,
+            ..c
+        };
+        let [r, g, _] = output.radial_scale_with(1., 1.);
+        assert!((r / g - 1.1).abs() < 1e-6);
+        // Never saved: corrections that are saved don't have it.
+        assert!(
+            !serde_json::to_string(&output)
+                .unwrap()
+                .contains("chromatic_at_source")
+        );
+    }
     #[test]
     fn radial_interpolates_and_clamps() {
         let r = Radial::new(vec![0., 0.5, 1.], vec![1., 1.2, 1.6]).unwrap();

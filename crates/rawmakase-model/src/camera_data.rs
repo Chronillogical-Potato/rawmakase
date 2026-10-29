@@ -79,6 +79,13 @@ impl WhiteBalancePresets {
 pub struct Metadata {
     pub make: String,
     pub model: String,
+    /// The make and model as the file itself writes them (EXIF Make and Model, e.g.
+    /// "NIKON CORPORATION", "NIKON D6"), for matching Lensfun's camera entries, which
+    /// use them; `make` and `model` are RAWmakase's names. Empty when not read.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exif_make: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub exif_model: String,
     pub width: u32,
     pub height: u32,
     pub raw_width: u32,

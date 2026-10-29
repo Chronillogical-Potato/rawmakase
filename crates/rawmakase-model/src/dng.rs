@@ -147,6 +147,7 @@ pub fn read(path: &Path) -> Option<Dng> {
         vignetting,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map,
         centre,
     };

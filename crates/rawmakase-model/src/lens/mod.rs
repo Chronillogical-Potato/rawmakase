@@ -7,3 +7,4 @@ pub mod auto_ca;
 pub mod choice;
 pub mod embedded;
 pub mod lcp;
+pub mod lensfun;

@@ -35,8 +35,13 @@ pub(crate) fn lens_gpu_params(
     };
     let vignetting = push(warp.vignetting.as_ref().map(VignetteField::table));
     let m = &warp.map;
-    // 2 marks a measured aberration, evaluated at the distorted radius.
-    let mode = if m.chromatic.is_some() { 2. } else { 1. };
+    // 2 marks an aberration evaluated at the distorted radius: a measured one, or lens
+    // data given as a function of it (Lensfun's).
+    let mode = if m.chromatic.is_some() || lens.chromatic_at_source {
+        2.
+    } else {
+        1.
+    };
     out[..5].copy_from_slice(&[mode, m.center[0], m.center[1], m.half, m.fill]);
     out[5] = m.amount;
     out[6..8].copy_from_slice(&distortion);

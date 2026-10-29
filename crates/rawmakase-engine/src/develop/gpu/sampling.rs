@@ -61,11 +61,21 @@ slots! {
     XTRANS: 1,
 }
 
-/// `S_*` offset constants for `local.wgsl`.
+/// `S_*` offset constants for `local.wgsl`, and `RADIAL_STEPS`, the halvings its
+/// table search needs to reach any knot of the largest table `optics::Radial` allows.
 pub(crate) fn wgsl_prelude() -> String {
     ALL.iter()
         .map(|(name, range)| format!("const S_{name}: u32 = {}u;\n", range.start))
+        .chain([format!("const RADIAL_STEPS: u32 = {}u;\n", radial_steps())])
         .collect()
+}
+
+/// The halvings of `local.wgsl`'s `table_eval` that narrow a window of
+/// `optics::Radial::MAX_KNOTS` knots to none.
+pub(crate) fn radial_steps() -> u32 {
+    (crate::optics::Radial::MAX_KNOTS + 1)
+        .next_power_of_two()
+        .trailing_zeros()
 }
 
 #[cfg(test)]

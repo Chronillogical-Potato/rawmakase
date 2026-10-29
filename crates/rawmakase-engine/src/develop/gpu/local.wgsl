@@ -26,11 +26,11 @@ fn table_eval(field: u32, r: f32) -> f32 {
     let at = u32(s(field));
     let len = su(field + 1u);
     // `Radial::eval`'s `partition_point(|x| *x <= r)`: the knots at or below `r`. The
-    // window `i..i + n` shrinks by half each round, so seven reach any table of the 64
-    // knots `optics::Radial` allows.
+    // window `i..i + n` shrinks by half each round, so `RADIAL_STEPS` reach any table of
+    // the knots `optics::Radial` allows (`sampling::radial_steps`).
     var i = 0u;
     var n = len;
-    for (var k = 0u; k < 7u && n > 0u; k++) {
+    for (var k = 0u; k < RADIAL_STEPS && n > 0u; k++) {
         let half = n / 2u;
         if sp[at + i + half] <= r {
             i += half + 1u;
