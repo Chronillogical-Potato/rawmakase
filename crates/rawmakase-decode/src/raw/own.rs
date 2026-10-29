@@ -93,7 +93,12 @@ impl Own {
             );
             let [_, _, w, h] = s.area;
             let grey = visible(&s, |_, _| 0);
-            return Ok(Some((w, h, grey.into_iter().map(|v| [v; 3]).collect())));
+            // Nothing interpolates a monochrome sample, so it is clipped here.
+            return Ok(Some((
+                w,
+                h,
+                grey.into_iter().map(|v| [v.max(0.); 3]).collect(),
+            )));
         }
         ensure!(
             s.channels >= 3,
@@ -143,7 +148,8 @@ impl Own {
 }
 
 /// The visible area of one-sample sensor data `s` as development reads it:
-/// (raw − black) / (white − black), at least 0, each sample's black that of
+/// (raw − black) / (white − black), negative below black (noise is clipped only
+/// after demosaicing, where interpolated samples carry less of it), each sample's black that of
 /// channel `channel(y, x)` plus its position's in the black pattern.
 fn visible(s: &rawmakase_raw::Sensor, channel: impl Fn(usize, usize) -> usize) -> Vec<f32> {
     let [left, top, w, h] = s.area.map(|v| v as usize);
@@ -165,7 +171,7 @@ fn visible(s: &rawmakase_raw::Sensor, channel: impl Fn(usize, usize) -> usize) -
         for (x, (dst, &v)) in data[y * w..(y + 1) * w].iter_mut().zip(src).enumerate() {
             let mut black = s.black[channel(y, x)] as f32;
             black += pattern_black(y, x) as f32;
-            *dst = ((f32::from(v) - black) / (white - black).max(1.)).max(0.);
+            *dst = (f32::from(v) - black) / (white - black).max(1.);
         }
     }
     data

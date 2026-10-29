@@ -50,13 +50,19 @@ def filmic(x):
 
 
 def write(path, image, *, curve='linear', look=None, hue_sat=None, baseline_exposure=0.,
-          black_render=None, name='RAWmakase Probe'):
+          black_render=None, name='RAWmakase Probe', as_shot_neutral=(1., 1., 1.), black_level=0):
     """Write `image` (scene values, divided by 2**baseline_exposure on the sensor) as a
     mosaic DNG.
 
     `look`/`hue_sat`: optional (dims, data) for ProfileLookTable/ProfileHueSatMap, data
     as (hue, sat, val) triples [hue shift degrees, sat scale, val scale] in DNG order.
     `black_render`: DefaultBlackRender (0 Auto, 1 None); omitted when None.
+    `as_shot_neutral`: per-channel sensor response to scene white (AsShotNeutral). The
+    sensor stores the scene scaled by it, so channels with a smaller value clip later
+    in scene terms: a renderer's white balance multiplies them back and its highlight
+    reconstruction has to deal with the partially clipped patches.
+    `black_level`: BlackLevel in 16-bit units; the sensor's 0 is stored there, so noise
+    below black survives in the file (negative scene values down to -black/(65535-black)).
     """
     image = np.asarray(image, dtype=np.float64)
     h, w, _ = image.shape
@@ -71,14 +77,17 @@ def write(path, image, *, curve='linear', look=None, hue_sat=None, baseline_expo
 
     if h % 2 or w % 2:
         raise ValueError('probe images need even dimensions')
-    sensor = image / 2. ** baseline_exposure
+    neutral = np.asarray(as_shot_neutral, dtype=np.float64)
+    sensor = image / 2. ** baseline_exposure * neutral
     mosaic = np.empty((h, w))
     mosaic[0::2, 0::2] = sensor[0::2, 0::2, 0]
     mosaic[0::2, 1::2] = sensor[0::2, 1::2, 1]
     mosaic[1::2, 0::2] = sensor[1::2, 0::2, 1]
     mosaic[1::2, 1::2] = sensor[1::2, 1::2, 2]
-    pixels = np.round(np.clip(mosaic, 0, 1) * 65535).astype('<u2').tobytes()
-    camera = np.linalg.inv(PROPHOTO_TO_XYZ)
+    pixels = np.round(np.clip(black_level + mosaic * (65535 - black_level), 0, 65535)).astype('<u2').tobytes()
+    # The matrix carries the channel gains too, so the neutral maps back to the D50 white
+    # and a renderer adapts nothing.
+    camera = np.diag(neutral) @ np.linalg.inv(PROPHOTO_TO_XYZ)
     add(254, 4, [0])
     add(256, 4, [w])
     add(257, 4, [h])
@@ -100,10 +109,10 @@ def write(path, image, *, curve='linear', look=None, hue_sat=None, baseline_expo
     add(50708, 2, 'RAWmakase Probe')
     add(50710, 1, [0, 1, 2])
     add(50711, 3, [1])
-    add(50714, 4, [0])
+    add(50714, 4, [int(black_level)])
     add(50717, 4, [65535])
     add(50721, 10, _srational(camera.flatten()))
-    add(50728, 5, [1, 1, 1, 1, 1, 1])
+    add(50728, 5, [v for n in neutral for v in ((1, 1) if n == 1 else (int(round(n * 10000)), 10000))])
     add(50730, 10, _srational([baseline_exposure]))
     add(50778, 3, [D50])
     add(50936, 2, name)
