@@ -66,6 +66,42 @@ per set (a C-Lux, an L2D-20c) land 3 to 4 ΔE00 off under both the rule and the
 earlier fit, which the committed tables did not do; the interaction of white balance
 with the histogram rule is open. Other settings are untouched by the rule.
 
+### Per-level texture and the ensemble (2026-10-28)
+
+Dark regions of varying texture under a fixed sky, rendered in Camera Raw, showed the
+mechanism behind the dark-heavy conflict: at the same depth a smooth region is lifted
+1.95 EV and a rough one 3.21 (seven stops down; 2.71 against 4.11 at ten), and the
+histogram rule, which had no way to tell them apart, over-lifted smooth deep regions
+by up to 3 EV on those probes. Two inputs for the texture of the pixels at the level
+itself bring the probes to 0.11 EV rms and hold the dusk freeway's smooth sky and road
+at Camera Raw's level while keeping the cabin's floor. A single fit, however, moved
+other photos by ±0.3 EV in bands where texture plays no part: four fits of the same
+configuration from different seeds disagree by 0.1 to 0.3 EV per level on real photos.
+Averaging four seeds lowers held-out error in every depth band (median 0.178 → 0.166
+EV) and is what ships.
+
+Final renders against current main (which ships the first rule), median ΔE00 per
+photo on the validation sets (better and worse count photos that moved by more than
+0.3):
+
+| Set | Shadows +100 | Highlights −100 | Shadows +50 with Highlights −50 |
+| --- | --- | --- | --- |
+| pixls | 1.61 → 1.41 (2 better, 1 worse) | 1.13 → 1.06 (1, 2) | 1.04 → 1.15 (1, 1) |
+| own | 1.63 → 1.67 (0, 2) | 1.09 → 1.11 (0, 0) | 1.12 → 1.12 (0, 0) |
+| signature edits | 1.86 → 2.06 (0, 6) | 0.79 → 0.87 (1, 1) | 0.79 → 0.76 (0, 1) |
+| pixls stress | 3.08 → 2.20 (4, 0) | 1.49 → 1.26 (3, 1) | 1.65 → 1.94 (1, 1) |
+| own stress | 2.04 → 1.93 (1, 3) | 1.00 → 1.06 (0, 1) | 1.54 → 1.59 (1, 0) |
+| signature edits stress | 1.21 → 1.21 (1, 2) | 0.68 → 0.66 (2, 0) | 0.83 → 0.76 (1, 0) |
+
+On the train sets against main: Shadows +100 2.12 → 1.53, +50 1.19 → 0.97, Highlights
+−100 1.53 → 1.27, −50 1.12 → 1.01. The gain is concentrated where the first rule
+failed, dark-heavy and noisy photos (pixls stress Shadows +100 with no photo worse,
+the 80D tree 2.41 → 1.09, the ZS200D backyard 3.40 → 2.20, the dusk freeway 2.10 →
+1.54); the signature-edits Shadows set loses 0.2 at the median, with the DC-S1 field
+(2.08 → 3.59) the largest single regression, where the deep trees come up 0.3 to 0.5
+EV more than Camera Raw's. Over all stress photos and Shadows settings the median
+moves 1.27 → 1.24 and the mean 1.65 → 1.57.
+
 Issue #464's sky at Highlights −100 renders at L* 87 against Camera Raw's 90 with its
 cloud structure kept (2.4 L* against 3.1; before 1.3). Clipped skies at Highlights
 −100 can still render darker and warmer than Camera Raw's (an RX100 VII sunrise 5 L*
