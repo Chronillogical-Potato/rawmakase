@@ -24,6 +24,10 @@ pub(super) struct Backfill {
     /// Photo info was asked for while it was being read.
     info_again: bool,
     pub(super) checksums: super::checksums::Checksums,
+    /// Reading the files of batches whose bursts are to be stacked.
+    pub(super) bursts: Option<super::import_stacks::Reading>,
+    /// Asked to read them while reading: once done, read again.
+    pub(super) bursts_again: bool,
 }
 
 /// What one poll of a backfill saved.

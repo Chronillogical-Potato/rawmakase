@@ -83,6 +83,9 @@ pub(super) struct Preferences {
     defaults_dirty: bool,
     /// Saving failed; tried again after the next edit, not every frame.
     defaults_failed: bool,
+    /// What is done with photos added from folders (Stack Camera Bursts),
+    /// saved as it is changed.
+    import: crate::catalog::ImportOptions,
     /// Raw Defaults' camera rows.
     pub(super) raw_defaults: super::raw_defaults::Form,
     /// Folder locations, read when the Catalog page first shows.
@@ -157,6 +160,7 @@ impl Editor {
         if !self.preferences.defaults_dirty {
             self.preferences.defaults = crate::catalog::MetadataDefaults::load();
         }
+        self.preferences.import = crate::catalog::ImportOptions::load();
         self.measure_usage();
         self.measure_raw_defaults();
     }
@@ -641,6 +645,26 @@ impl Editor {
         if left {
             self.save_defaults();
         }
+        gap(ui);
+        group(ui, "Adding photos");
+        let import = &mut self.preferences.import;
+        form_row(ui, "", |ui| {
+            if ui
+                .checkbox(&mut import.stack_bursts, "Stack camera bursts")
+                .changed()
+                && let Err(e) = import.save()
+            {
+                self.status = format!("Preferences not saved: {e:#}");
+            }
+        });
+        form_row(ui, "", |ui| {
+            hint(
+                ui,
+                "For photos added from folders or by Synchronize Folder: once their files are \
+                 read, each burst or bracket their camera numbered or shot in continuous drive \
+                 becomes a stack. Photos whose camera says nothing are left alone.",
+            );
+        });
         gap(ui);
         group(ui, "Catalogs");
         form_row(ui, "", |ui| {

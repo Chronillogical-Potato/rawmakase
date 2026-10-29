@@ -156,6 +156,10 @@ CREATE TABLE IF NOT EXISTS photo_imports (
     photo BIGINT PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
     batch BIGINT NOT NULL REFERENCES import_batches(id)
 );
+CREATE TABLE IF NOT EXISTS import_burst_stacks (
+    batch BIGINT PRIMARY KEY REFERENCES import_batches(id) ON DELETE CASCADE,
+    seconds DOUBLE PRECISION NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

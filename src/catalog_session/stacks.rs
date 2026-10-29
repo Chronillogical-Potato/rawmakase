@@ -30,6 +30,20 @@ impl CatalogSession {
             listed: self.refresh_stacks(),
         })
     }
+    /// Stacks the bursts of import `batches` as `stacks` and marks them done,
+    /// in one transaction, as [`crate::catalog::Catalog::stack_imported_bursts`]
+    /// does; then reads the photos' places again.
+    pub(crate) fn stack_imported_bursts(
+        &mut self,
+        batches: &[i64],
+        stacks: &[Vec<crate::catalog::PhotoId>],
+    ) -> Result<Committed<Option<StacksChanged>>> {
+        let value = self.catalog.stack_imported_bursts(batches, stacks)?;
+        Ok(Committed {
+            value,
+            listed: self.refresh_stacks(),
+        })
+    }
     /// Collapses or expands stacks `ids`.
     pub(crate) fn set_stacks_collapsed(
         &mut self,

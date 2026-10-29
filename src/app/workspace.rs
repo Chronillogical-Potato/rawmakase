@@ -76,10 +76,20 @@ impl Editor {
             || self.exporting()
             || self.load.is_running()
             || self.preview_builds.progress().is_some_and(|p| p.running());
+        // Bursts of photos added are stacked in the Library alone, with
+        // nothing over it and nothing else changing the catalog.
+        let stack_bursts = self.module == Module::Library
+            && !self.onboarding.visible
+            && !self.activity.is_busy()
+            && !self.workspace_modal()
+            && !self.close_confirm;
         if let Some(library) = &mut self.library {
             library.session.pause_checksums(busy);
             library.publish_shown();
             library.poll_previews(&ctx);
+            if stack_bursts {
+                library.make_import_stacks();
+            }
         }
         self.poll_preview_builds();
         // Entering a module draws its chrome: the whole-window mode belongs to

@@ -14,6 +14,8 @@ pub(crate) enum Action {
     Copy,
     Paste,
     SelectAll,
+    /// Photo › Stacking › Auto-Stack by Capture Time…
+    AutoStack,
     Library,
     Develop,
     Sidebar,

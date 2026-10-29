@@ -52,12 +52,12 @@ pub use crate::xmp::descriptive::Read as FileMetadata;
 #[doc(hidden)]
 pub use checksums::ReadChecksum;
 pub use db::assert_shape as assert_sql_shape;
-pub use defaults::{CameraExifReader, MetadataDefaults, NewPhotoDefaults};
+pub use defaults::{CameraExifReader, ImportOptions, MetadataDefaults, NewPhotoDefaults};
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
 pub use export_catalog::{CatalogExport, ExportScope, ExportedFolders};
-pub use ingest::{Ambiguity, Choice, Conflict};
+pub use ingest::{Ambiguity, Choice, Conflict, IMPORT_BURST_SECONDS, PendingBurstStacks};
 pub use lightroom::HistoryStep;
 pub use location::CatalogLocation;
 pub use locations::{Override, Overrides, RootLocations};
@@ -392,6 +392,8 @@ mod edit_rows_tests;
 mod export_catalog_tests;
 #[cfg(test)]
 mod format_upgrade_tests;
+#[cfg(test)]
+mod import_bursts_tests;
 #[cfg(test)]
 mod ingest_tests;
 #[cfg(test)]

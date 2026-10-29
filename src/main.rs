@@ -698,7 +698,8 @@ fn sync_folder(
             rawmakase::catalog::MetadataDefaults::load(),
             rawmakase::photo::camera_exif,
             rawmakase::photo::raw_xmp,
-        ),
+        )
+        .with_options(rawmakase::catalog::ImportOptions::load()),
     )?;
     for s in &applied.skipped {
         println!("skipped: {} ({})", shown(&s.path), s.reason);

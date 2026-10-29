@@ -149,6 +149,12 @@ impl Sequences {
 const MOST_SECONDS: f64 = 3600.;
 
 impl Library {
+    /// Whether the source shown shows stacks: All Photographs and folders.
+    /// For the macOS menu bar's Photo › Stacking.
+    #[cfg(any(target_os = "macos", test))]
+    pub(in crate::app) fn shows_stacks(&self) -> bool {
+        self.filters.shows_stacks()
+    }
     /// Whether Auto-Stack by Capture Time's window is open.
     pub(in crate::app) fn auto_stack_open(&self) -> bool {
         self.auto_stack.is_some()
@@ -360,7 +366,7 @@ impl Library {
     /// and is hidden now hands over to the photo its stack shows. False,
     /// with the status line saying so, when the stacks saved could not be
     /// read again.
-    fn stacks_changed(&mut self, listed: Result<()>) -> bool {
+    pub(super) fn stacks_changed(&mut self, listed: Result<()>) -> bool {
         let read = listed.is_ok();
         if let Err(e) = listed {
             self.message = format!("Stacks were saved but could not be read again: {e:#}");

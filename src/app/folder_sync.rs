@@ -853,7 +853,7 @@ impl Editor {
         // What the readers bring back could land on photos given removed
         // photos' ids.
         if let Some(library) = &mut self.library {
-            library.session.stop_background_reads();
+            library.stop_background_reads();
         }
         let location = review.catalog.clone();
         self.folder_sync.applying_find = review.finding();
@@ -930,6 +930,10 @@ impl Editor {
             Ok(synced) => synced,
             Err(e) => {
                 self.activity.finish_dialog();
+                // Nothing applied: the reads applying stopped go on.
+                if let Some(library) = &mut self.library {
+                    library.start_background_reads();
+                }
                 self.status = if self.folder_sync.applying_find {
                     format!("Find on Disk failed: {e}")
                 } else {
@@ -2252,6 +2256,26 @@ mod tests {
         scanned(&mut e);
         assert!(e.folder_sync.review.is_none());
         assert!(e.status.contains("changed during the scan"), "{}", e.status);
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_synchronization_starts_the_reads_it_stopped_again() -> anyhow::Result<()> {
+        let (_dir, mut e, _) = editor()?;
+        let library = e.library.as_mut().unwrap();
+        // A batch whose bursts are still to be stacked.
+        library.session.catalog.db_for_tests().execute_batch(
+            "INSERT INTO import_burst_stacks(batch, seconds) SELECT id, 2.0 FROM import_batches",
+        )?;
+        // Applying stops them; it fails.
+        library.stop_background_reads();
+        assert!(e.activity.begin_folder_change());
+        e.folder_synced(Err("boom".into()));
+        assert!(!e.activity.is_busy());
+        assert!(
+            e.library.as_ref().unwrap().session.reading_import_stacks(),
+            "read again"
+        );
         Ok(())
     }
 

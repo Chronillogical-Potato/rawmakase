@@ -1,6 +1,7 @@
 //! Default Creator and Copyright from Preferences, written for photos added
 //! from folders where neither the file nor its sidecar has one: below an
-//! edit or an imported value, above the file's EXIF, and never at export.
+//! edit or an imported value, above the file's EXIF, and never at export;
+//! and Preferences' other choices for photos added (Stack Camera Bursts).
 use super::PhotoId;
 use super::db::Write;
 use crate::metadata::{LangAlt, Value};
@@ -30,6 +31,30 @@ impl MetadataDefaults {
     }
 }
 
+/// What Preferences says to do with photos added from folders (Add Folder,
+/// and Synchronize's new files), beside the metadata defaults.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ImportOptions {
+    /// Stack the bursts their cameras numbered or shot in continuous drive,
+    /// once their files are read (see `Catalog::pending_burst_stacks`).
+    pub stack_bursts: bool,
+    /// Choices a later release added, saved back untouched.
+    #[serde(flatten)]
+    pub later_fields: rawmakase_interop::export_settings::LaterFields,
+}
+impl ImportOptions {
+    fn path() -> PathBuf {
+        crate::storage::data_dir().join("import-options.json")
+    }
+    pub fn load() -> Self {
+        crate::storage::read_json_or_default(&Self::path())
+    }
+    pub fn save(&self) -> Result<()> {
+        crate::storage::atomic_json(&Self::path(), self)
+    }
+}
+
 /// Reads the camera's EXIF of a photo's file. The catalog can't read it
 /// from every RAW itself (a CR3's, MRW's or X3F's is found by RAWmakase's
 /// RAW decoders), so the app passes its reader in: `photo::camera_exif`.
@@ -39,12 +64,14 @@ pub type CameraExifReader = fn(&Path) -> Option<crate::exif::CameraExif>;
 /// Preferences' Creator and Copyright, which give way to the camera's own,
 /// read by the reader given; and the reader of the XMP a RAW's camera
 /// embeds, which the defaults give way to as well. The default is none,
-/// which reads nothing.
+/// which reads nothing. Also the Preferences' choices for what is done with
+/// the photos added, taken once when adding starts.
 #[derive(Clone, Debug, Default)]
 pub struct NewPhotoDefaults {
     metadata: MetadataDefaults,
     camera_exif: Option<CameraExifReader>,
     raw_xmp: Option<super::RawXmpReader>,
+    options: ImportOptions,
 }
 impl NewPhotoDefaults {
     /// `metadata` where `camera_exif` finds no Artist or Copyright of the
@@ -58,7 +85,16 @@ impl NewPhotoDefaults {
             metadata,
             camera_exif: Some(camera_exif),
             raw_xmp: Some(raw_xmp),
+            options: ImportOptions::default(),
         }
+    }
+    /// These defaults, with `options` for what is done with the photos added.
+    pub fn with_options(self, options: ImportOptions) -> Self {
+        Self { options, ..self }
+    }
+    /// Whether the bursts of the photos added are to be stacked.
+    pub(super) fn stack_bursts(&self) -> bool {
+        self.options.stack_bursts
     }
     /// What reads the XMP a new photo's RAW embeds; nothing by default.
     pub(super) fn raw_xmp(&self) -> super::RawXmpReader {
