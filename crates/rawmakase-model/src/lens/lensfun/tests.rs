@@ -328,8 +328,41 @@ fn readouts_of_another_aspect_ratio_have_their_own_crop_factor() {
     assert!((one - 2. * (5. / 3.) / 2f32.sqrt()).abs() < 1e-4, "{one}");
     assert_eq!(frame_crop(2., Some(4. / 3.), [4608., 3456.]), 2.);
     // 16:9 from 3:2 keeps the width.
-    let wide = frame_crop(1., None, [6000., 3375.]);
+    let wide = frame_crop(1., Some(1.5), [6000., 3375.]);
     assert!((wide - 43.2666 / 36f32.hypot(20.25)).abs() < 1e-3, "{wide}");
+    // Without the sensor's aspect ratio, the frame is the sensor, as Lensfun has it.
+    assert_eq!(frame_crop(4.63, None, [3648., 2736.]), 4.63);
+    // Lensfun names no aspect ratio for most Micro Four Thirds bodies; they are 4:3.
+    let db = db();
+    let g6 = db.cameras.iter().find(|c| c.model.id == "DMC-G6").unwrap();
+    assert_eq!(matching::native_aspect(g6), Some(4. / 3.));
+    let mut no_aspect = g6.clone();
+    no_aspect.aspect = None;
+    assert_eq!(matching::native_aspect(&no_aspect), Some(4. / 3.));
+    no_aspect.mount = "Canon EF".into();
+    assert_eq!(matching::native_aspect(&no_aspect), None);
+}
+
+/// A default crop the decoder centres (it gives no position) is read where
+/// `ImageFrame` puts it.
+#[test]
+fn a_centred_default_crop_is_the_frame() {
+    let m = crate::camera_data::Metadata {
+        width: 4608,
+        height: 3072,
+        crop_left: 65535,
+        crop_top: 65535,
+        crop_width: 4592,
+        crop_height: 3056,
+        ..Default::default()
+    };
+    assert_eq!(choice::frame_rect(&m), [8., 8., 4592., 3056.]);
+    let whole = crate::camera_data::Metadata {
+        width: 600,
+        height: 400,
+        ..Default::default()
+    };
+    assert_eq!(choice::frame_rect(&whole), [0., 0., 600., 400.]);
 }
 
 /// An edit's copy of a calibration renders without the database, and is found again

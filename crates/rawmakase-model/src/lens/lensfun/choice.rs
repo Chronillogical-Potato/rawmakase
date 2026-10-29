@@ -143,16 +143,7 @@ impl LensfunChoice {
     /// crop and that crop's crop factor; `None` without a crop factor.
     pub fn frame(&self, m: &Metadata) -> Option<Frame> {
         let size = [m.width as f32, m.height as f32];
-        let rect = if m.crop_width > 0 && m.crop_height > 0 {
-            [
-                m.crop_left as f32,
-                m.crop_top as f32,
-                m.crop_width as f32,
-                m.crop_height as f32,
-            ]
-        } else {
-            [0., 0., size[0], size[1]]
-        };
+        let rect = frame_rect(m);
         let photo = photo_of(m, [rect[2], rect[3]]);
         let crop = match &self.camera {
             Some(c) if same_text(&c.make, photo.make) && same_text(&c.model, photo.model) => {
@@ -241,8 +232,9 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
             make: photo.make.to_string(),
             model: photo.model.to_string(),
             crop: c.crop,
-            aspect: c.aspect,
+            aspect: super::matching::native_aspect(c),
         }),
+        // The 35 mm equivalent describes the frame as recorded.
         None => exif_crop(&photo).map(|crop| LensfunCamera {
             make: photo.make.to_string(),
             model: photo.model.to_string(),
@@ -281,11 +273,29 @@ pub fn photo_of(m: &Metadata, frame: [f32; 2]) -> Photo<'_> {
     }
 }
 
+/// The photo frame of `m` in decoded pixels, `[left, top, width, height]`: its default
+/// crop, centred where the decoder gives no position for it (as `ImageFrame` reads
+/// it), else the decoded image.
+pub fn frame_rect(m: &Metadata) -> [f32; 4] {
+    let (w, h) = (m.width, m.height);
+    if m.crop_width == 0 || m.crop_height == 0 || m.crop_width > w || m.crop_height > h {
+        return [0., 0., w as f32, h as f32];
+    }
+    let left = if m.crop_left.saturating_add(m.crop_width) <= w {
+        m.crop_left as f32
+    } else {
+        (w - m.crop_width) as f32 / 2.
+    };
+    let top = if m.crop_top.saturating_add(m.crop_height) <= h {
+        m.crop_top as f32
+    } else {
+        (h - m.crop_height) as f32 / 2.
+    };
+    [left, top, m.crop_width as f32, m.crop_height as f32]
+}
+
 /// The photo frame of `m`, in pixels: its default crop, else the decoded image.
 pub fn frame_size(m: &Metadata) -> [f32; 2] {
-    if m.crop_width > 0 && m.crop_height > 0 {
-        [m.crop_width as f32, m.crop_height as f32]
-    } else {
-        [m.width as f32, m.height as f32]
-    }
+    let [_, _, w, h] = frame_rect(m);
+    [w, h]
 }

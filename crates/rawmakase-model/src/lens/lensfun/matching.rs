@@ -85,14 +85,24 @@ fn aspect_of(frame: [f32; 2]) -> Option<f32> {
     (w > 0. && h > 0.).then(|| w.max(h) / w.min(h))
 }
 
+/// The aspect ratio of `camera`'s sensor: Lensfun's, else 4:3 for a (Micro) Four
+/// Thirds mount, whose sensors all are; `None` when neither tells.
+pub fn native_aspect(camera: &Camera) -> Option<f32> {
+    camera.aspect.or_else(|| {
+        let mount = camera.mount.to_lowercase();
+        (mount.contains("4/3") || mount.contains("four thirds")).then_some(4. / 3.)
+    })
+}
+
 /// The crop factor of a photo frame of `frame` pixels from a camera of `crop` whose
-/// sensor has the aspect ratio `aspect` (Lensfun's default 3:2 when not given): a
-/// readout of another aspect ratio (a 1:1 or 16:9 mode that records only that) is the
-/// largest such rectangle on the sensor, a smaller diagonal.
+/// sensor has the aspect ratio `aspect`: a readout of another aspect ratio (a 1:1 or
+/// 16:9 mode that records only that) is the largest such rectangle on the sensor, a
+/// smaller diagonal. Without the sensor's aspect ratio the frame is taken as the
+/// whole sensor, as Lensfun takes the image it is given.
 pub fn frame_crop(crop: f32, aspect: Option<f32>, frame: [f32; 2]) -> f32 {
-    let native = aspect
-        .unwrap_or(crate::optics::lensfun::DEFAULT_ASPECT)
-        .max(1.);
+    let Some(native) = aspect.map(|a| a.max(1.)) else {
+        return crop;
+    };
     let Some(shot) = aspect_of(frame) else {
         return crop;
     };
@@ -155,7 +165,7 @@ pub fn choices(db: &Database, photo: &Photo) -> (Option<f32>, Vec<usize>) {
 
 fn crop_for(camera: Option<&Camera>, photo: &Photo) -> Option<f32> {
     match camera {
-        Some(c) => Some(frame_crop(c.crop, c.aspect, photo.frame)),
+        Some(c) => Some(frame_crop(c.crop, native_aspect(c), photo.frame)),
         None => exif_crop(photo),
     }
 }
