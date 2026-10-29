@@ -3974,11 +3974,7 @@ fn auto_stack_groups_camera_bursts_as_the_camera_numbered_them() -> Result<()> {
     assert_eq!(library.auto_stacks(60.), [vec![a, b, c, e, f, x]]);
     let mut dialog = super::stacks::AutoStack::default();
     dialog.bursts = true;
-    let start = std::time::Instant::now();
-    while library.read_sequences(&mut dialog) {
-        assert!(start.elapsed().as_secs() < 30, "reading never finished");
-        std::thread::yield_now();
-    }
+    finish_sequences(&mut library, &mut dialog, crate::exif::sequence);
     assert_eq!(library.auto_stacks_of(&dialog), [vec![a, b], vec![c, e]]);
     library.auto_stack_now(library.auto_stacks_of(&dialog))?;
     assert_eq!(library.shown(), [a, c, f, x]);
@@ -3988,12 +3984,90 @@ fn auto_stack_groups_camera_bursts_as_the_camera_numbered_them() -> Result<()> {
     assert_eq!(library.shown(), [a, b, c, e, f, x]);
     library.restore_stacks(&done[0].after)?;
     assert_eq!(library.shown(), [a, c, f, x]);
+    // What the files said is kept: a new window reads none of them again.
+    library.restore_stacks(&done[0].before)?;
+    let mut again = super::stacks::AutoStack::default();
+    again.bursts = true;
+    finish_sequences(&mut library, &mut again, |_| panic!("read again"));
+    assert!(again.can_stack());
+    assert_eq!(library.auto_stacks_of(&again), [vec![a, b], vec![c, e]]);
+    // A file replaced in place is read again; one offline stacks by time,
+    // and what was read of it stays for when it is back.
+    let paths: std::collections::HashMap<PhotoId, std::path::PathBuf> = library
+        .session
+        .photos
+        .iter()
+        .map(|p| (p.id, p.path.clone()))
+        .collect();
+    let path = |id| paths[&id].clone();
+    std::fs::write(path(e), sony_raw("22", 0))?;
+    std::fs::remove_file(path(f))?;
+    let mut again = super::stacks::AutoStack::default();
+    again.bursts = true;
+    finish_sequences(&mut library, &mut again, crate::exif::sequence);
+    assert_eq!(library.auto_stacks_of(&again), [vec![a, b], vec![f, x]]);
+    let stored = library.session.catalog.sequences()?;
+    assert_eq!(
+        stored[&e].sequence.as_ref().map(|s| &s.mark),
+        Some(&crate::exif::Mark::Single)
+    );
+    assert_eq!(
+        stored[&f].sequence.as_ref().map(|s| &s.mark),
+        Some(&crate::exif::Mark::Single)
+    );
+    // A file whose contents can't be read now, though its size and time
+    // can, is never saved as saying nothing: allowed again with the same
+    // stamp, it is read.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let denied =
+            |mode| std::fs::set_permissions(path(c), std::fs::Permissions::from_mode(mode));
+        library
+            .session
+            .catalog
+            .db_for_tests()
+            .execute("DELETE FROM photo_sequences WHERE photo=?", [c.0])?;
+        denied(0o000)?;
+        // Root reads it anyway.
+        if std::fs::read(path(c)).is_err() {
+            let mut again = super::stacks::AutoStack::default();
+            again.bursts = true;
+            finish_sequences(&mut library, &mut again, crate::exif::sequence);
+            assert!(!library.session.catalog.sequences()?.contains_key(&c));
+        }
+        denied(0o644)?;
+        let mut again = super::stacks::AutoStack::default();
+        again.bursts = true;
+        finish_sequences(&mut library, &mut again, crate::exif::sequence);
+        assert_eq!(
+            library.session.catalog.sequences()?[&c]
+                .sequence
+                .as_ref()
+                .map(|s| &s.mark),
+            Some(&crate::exif::Mark::Frame(1))
+        );
+    }
     drop(d);
     Ok(())
 }
 
+/// Runs Group Camera Bursts' check of the candidates to its end, each file
+/// read by `read`.
+fn finish_sequences(
+    library: &mut Library,
+    dialog: &mut super::stacks::AutoStack,
+    read: fn(&std::path::Path) -> Option<crate::exif::Sequence>,
+) {
+    let start = std::time::Instant::now();
+    while library.read_sequences_by(dialog, read) {
+        assert!(start.elapsed().as_secs() < 30, "reading never finished");
+        std::thread::yield_now();
+    }
+}
+
 #[test]
-fn auto_stack_reads_bursts_again_under_a_new_generation_and_never_stacks_after_a_lost_read()
+fn auto_stack_checks_bursts_again_under_a_new_generation_and_never_stacks_after_a_lost_read()
 -> Result<()> {
     let (_d, mut library, ids) = stack_library(&["a.ARW", "b.ARW"])?;
     let [a, b] = ids[..] else { panic!() };
@@ -4002,16 +4076,9 @@ fn auto_stack_reads_bursts_again_under_a_new_generation_and_never_stacks_after_a
     }
     let mut dialog = super::stacks::AutoStack::default();
     dialog.bursts = true;
-    let finish = |library: &Library, dialog: &mut super::stacks::AutoStack, read| {
-        let start = std::time::Instant::now();
-        while library.read_sequences_by(dialog, read) {
-            assert!(start.elapsed().as_secs() < 30, "reading never finished");
-            std::thread::yield_now();
-        }
-    };
     // The worker is lost before reading anything: nothing counts as read,
     // so the photos aren't stacked by time in its stead.
-    finish(&library, &mut dialog, |_| panic!("worker lost"));
+    finish_sequences(&mut library, &mut dialog, |_| panic!("worker lost"));
     assert!(!library.read_sequences(&mut dialog));
     assert!(!dialog.can_stack(), "a lost read blocks Stack");
     // Unticking and ticking again reads them again; by time when the
@@ -4019,15 +4086,16 @@ fn auto_stack_reads_bursts_again_under_a_new_generation_and_never_stacks_after_a
     dialog.bursts = false;
     assert!(!library.read_sequences(&mut dialog));
     dialog.bursts = true;
-    finish(&library, &mut dialog, |_| None);
+    finish_sequences(&mut library, &mut dialog, |_| None);
     assert!(dialog.can_stack());
     assert_eq!(library.auto_stacks_of(&dialog), [vec![a, b]]);
-    // A new structural generation drops what was read and reads again.
+    // A new structural generation checks them again, against what the
+    // catalog kept: their files are unchanged, so none is read.
     library.session.bump_generation();
-    assert!(library.read_sequences_by(&mut dialog, |_| {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        None
-    }));
+    assert!(library.read_sequences_by(&mut dialog, |_| panic!("read again")));
+    finish_sequences(&mut library, &mut dialog, |_| panic!("read again"));
+    assert!(dialog.can_stack());
+    assert_eq!(library.auto_stacks_of(&dialog), [vec![a, b]]);
     Ok(())
 }
 

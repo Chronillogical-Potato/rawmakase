@@ -41,6 +41,11 @@ pub enum Mark {
     Single,
 }
 
+/// The version of what [`sequence`] reads. A catalog keeps what it read
+/// with the version, and reads the file again under another: one more
+/// camera's notes read, the files that said nothing may now say something.
+pub const SEQUENCE_VERSION: u32 = 1;
+
 /// The sequence the photo at `path` is in, as its maker note says; `None`
 /// when the file can't be read, has no maker note this reads, or the note
 /// doesn't say.

@@ -14,14 +14,14 @@ use super::{Library, Place};
 use crate::app::design::{self, Tone, button, inset, space, text};
 use crate::app::widgets::{self, plural};
 use crate::catalog::{
-    BurstCandidate, Photo, PhotoId, StackChange, StackId, StackState, StacksChanged,
+    BurstCandidate, Photo, PhotoId, SavedSequence, StackChange, StackId, StackState, StacksChanged,
 };
 use crate::catalog_session::background::Reader;
 use crate::exif::Sequence;
 use anyhow::Result;
 use eframe::egui;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 /// A stack command from a thumbnail's menu or a key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,8 +71,9 @@ pub(super) struct AutoStack {
     /// Group Camera Bursts: stacks the bursts the cameras numbered as they
     /// numbered them, and the other photos by time.
     pub(super) bursts: bool,
-    /// What the cameras say of the photos, read once Group Camera Bursts is
-    /// first ticked, and dropped with the window.
+    /// What the cameras say of the photos, once Group Camera Bursts is
+    /// first ticked: from the catalog for files unchanged since they were
+    /// read, else read from them and saved.
     sequences: Sequences,
 }
 impl AutoStack {
@@ -96,23 +97,51 @@ impl Default for AutoStack {
 /// What the cameras say of the sequences the source's photos are in.
 #[derive(Default)]
 struct Sequences {
-    /// Each photo read, with the file it was read from: a photo whose file
-    /// is another now counts as not read.
-    read: HashMap<PhotoId, (PathBuf, Option<Sequence>)>,
-    /// Reading the files, with how many there are; `None` before and after.
-    reader: Option<(Reader<Option<Sequence>>, usize)>,
-    /// The photos the reader has still to read; after it, those it never
-    /// read, as it stopped (a panic) before them.
-    pending: std::collections::HashSet<PhotoId>,
-    /// The session's structural generation when the read started: under
+    /// What each candidate's camera says, as checked so far; `None` before
+    /// the check starts.
+    read: Option<std::collections::HashMap<PhotoId, Option<Sequence>>>,
+    /// Checking the candidates' files, with how many there are; `None`
+    /// before and after.
+    reader: Option<(Reader<Checked>, usize)>,
+    /// The photos the reader has still to check; after it, those it never
+    /// checked, as it stopped (a panic) before them.
+    pending: HashSet<PhotoId>,
+    /// The session's structural generation when the check started: under
     /// another, photo ids may name other photos, and it starts again.
     generation: u64,
 }
+
+/// What checking a candidate's file found.
+enum Checked {
+    /// The file is the one the catalog read: what it said then.
+    Kept(Option<Sequence>),
+    /// Read now, to be saved.
+    Read(SavedSequence),
+    /// Offline, or changed while being read: it stacks by time, and
+    /// nothing is saved, so it is read once it can be.
+    Unreadable,
+}
+
+/// Checks the file at `path` against what the catalog read of it, `stored`,
+/// and reads it with `read` when it isn't that file.
+fn check(
+    path: &Path,
+    stored: Option<&SavedSequence>,
+    read: fn(&Path) -> Option<Sequence>,
+) -> Checked {
+    let Ok(stamp) = crate::storage::Stamp::read(path) else {
+        return Checked::Unreadable;
+    };
+    match stored {
+        Some(saved) if saved.stamp == stamp => Checked::Kept(saved.sequence.clone()),
+        _ => crate::catalog_session::file_sequence(path, read)
+            .map_or(Checked::Unreadable, Checked::Read),
+    }
+}
 impl Sequences {
-    /// What photo `p`'s camera says, as read from its file now.
+    /// What photo `p`'s camera says.
     fn of(&self, p: &Photo) -> Option<&Sequence> {
-        let (path, sequence) = self.read.get(&p.id)?;
-        (*path == p.path).then_some(sequence.as_ref()).flatten()
+        self.read.as_ref()?.get(&p.id)?.as_ref()
     }
 }
 
@@ -397,14 +426,15 @@ impl Library {
             .collect();
         crate::catalog::auto_stacks_with_bursts(&photos, dialog.seconds)
     }
-    /// Reads what the cameras say of the candidates, once, and saves what
-    /// has been read since the last call. True while reading.
-    pub(super) fn read_sequences(&self, dialog: &mut AutoStack) -> bool {
+    /// Checks what the cameras say of the candidates, once: what the
+    /// catalog keeps of a file unchanged since, else read from the file.
+    /// Saves what has been read since the last call. True while checking.
+    pub(super) fn read_sequences(&mut self, dialog: &mut AutoStack) -> bool {
         self.read_sequences_by(dialog, crate::exif::sequence)
     }
     /// [`Self::read_sequences`], each file read by `read`.
     pub(super) fn read_sequences_by(
-        &self,
+        &mut self,
         dialog: &mut AutoStack,
         read: fn(&std::path::Path) -> Option<Sequence>,
     ) -> bool {
@@ -412,7 +442,8 @@ impl Library {
         let sequences = &mut dialog.sequences;
         let failed = sequences.reader.is_none() && !sequences.pending.is_empty();
         if sequences.generation != generation || (!dialog.bursts && failed) {
-            // Dropping the reader stops it after the file it is reading.
+            // Dropping the reader stops it after the batch it is reading;
+            // what it read under the old generation is never saved.
             *sequences = Sequences {
                 generation,
                 ..Sequences::default()
@@ -421,43 +452,65 @@ impl Library {
         if !dialog.bursts && sequences.reader.is_none() {
             return false;
         }
-        if sequences.reader.is_none() && sequences.read.is_empty() {
+        if sequences.read.is_none() {
+            let mut stored = match self.session.catalog.sequences() {
+                Ok(stored) => stored,
+                Err(e) => {
+                    self.message = format!("Camera bursts could not be read: {e:#}");
+                    Default::default()
+                }
+            };
             let todo: Vec<(PhotoId, PathBuf)> = self
                 .auto_stack_photos()
                 .into_iter()
                 .filter(|p| p.master.is_none())
                 .map(|p| (p.id, p.path.clone()))
                 .collect();
-            if todo.is_empty() {
-                return false;
-            }
-            let paths: HashMap<PhotoId, PathBuf> = todo.iter().cloned().collect();
-            let count = todo.len();
-            let reader = Reader::start(todo, self.wake(), read);
-            sequences.reader = Some((reader, count));
-            // Each photo is recorded as read from the file it was asked
-            // for, so a read finishing after the photo's file changed
-            // counts for nothing.
-            sequences.read = paths
-                .into_iter()
-                .map(|(id, path)| (id, (path, None)))
+            // By the file each was asked for, so what was read of a photo
+            // is only ever checked against its own file.
+            let stored: std::collections::HashMap<PathBuf, SavedSequence> = todo
+                .iter()
+                .filter_map(|(id, path)| Some((path.clone(), stored.remove(id)?)))
                 .collect();
-            // Not read yet: kept apart from those read as saying nothing.
-            sequences.pending = sequences.read.keys().copied().collect();
+            // Not checked yet: kept apart from those that say nothing.
+            sequences.pending = todo.iter().map(|(id, _)| *id).collect();
+            sequences.read = Some(Default::default());
+            if !todo.is_empty() {
+                let count = todo.len();
+                let reader = Reader::start(todo, self.wake(), move |path| {
+                    check(path, stored.get(path), read)
+                });
+                sequences.reader = Some((reader, count));
+            }
         }
         let Some((reader, _)) = &sequences.reader else {
             return false;
         };
         let (read, done) = reader.poll();
-        for (id, sequence) in read {
-            sequences.pending.remove(&id);
-            if let Some((_, slot)) = sequences.read.get_mut(&id) {
-                *slot = sequence;
-            }
-        }
         if done {
             // What it didn't read stays pending: the read failed.
             sequences.reader = None;
+        }
+        let known = sequences.read.get_or_insert_default();
+        let mut save = Vec::new();
+        for (id, checked) in read {
+            sequences.pending.remove(&id);
+            let sequence = match checked {
+                Checked::Kept(sequence) => sequence,
+                Checked::Read(saved) => {
+                    let sequence = saved.sequence.clone();
+                    save.push((id, saved));
+                    sequence
+                }
+                Checked::Unreadable => None,
+            };
+            known.insert(id, sequence);
+        }
+        if !save.is_empty()
+            && let Err(e) = self.session.catalog.save_sequences(&save)
+        {
+            // Still used while the window is open; read again next time.
+            self.message = format!("Camera bursts could not be saved: {e:#}");
         }
         sequences.reader.is_some()
     }
