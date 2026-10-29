@@ -1589,13 +1589,6 @@ impl Editor {
                 );
             }
             Some(lensfun::Action::Cancel) => self.lensfun.cancel(),
-            Some(lensfun::Action::Dismiss) => {
-                self.lensfun.suggest = false;
-                self.status =
-                    "Lensfun suggestions are off; Preferences › Profiles & Presets turns them on"
-                        .into();
-                let _ = self.save_session();
-            }
             None => {}
         }
         if let Some(kind) = import_folder {

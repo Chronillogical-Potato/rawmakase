@@ -1,9 +1,9 @@
-//! Lens Corrections › Profile's Lensfun parts: the card that offers Lensfun's
+//! Lens Corrections › Profile's Lensfun parts: the row that offers Lensfun's
 //! community profiles where no imported profile fits (a download first, then the
 //! lens this photo matches), the Lensfun lenses in the Make, Model and Profile menus,
 //! and resolving or updating the lens an edit names. Choosing one is an edit like
 //! any other, one History step on the photo shown; the download only installs.
-use super::control_row;
+use super::{LABEL_GAP, control_left, label_column};
 use crate::app::design::{Tone, radius, space, text};
 use crate::app::lensfun::Job;
 use crate::app::theme;
@@ -31,8 +31,6 @@ pub(in crate::app) struct View {
 pub(in crate::app) enum Action {
     Download,
     Cancel,
-    /// Stop suggesting Lensfun profiles (Preferences turns it on again).
-    Dismiss,
 }
 
 /// The lenses a photo may choose from: those fitting its camera and frame.
@@ -85,13 +83,21 @@ pub(super) fn choose(r: &mut Recipe, m: &Metadata, db: &Installed, lens: &Lens) 
         .choose_lensfun(LensfunChoice::of(lens, &db.db, camera_for(&db.db, m)));
 }
 
-/// The card under the Profile menus. Returns what it can't do itself.
+/// The Lensfun offer under the Profile menus: "Lensfun" in the label column and,
+/// beside it on a faint accent band, what it offers (a lens, the download, a menu
+/// of lenses), what that does or why it can't, and its button. The text wraps
+/// within the panel. Returns what it can't do itself.
 pub(super) fn card(ui: &mut egui::Ui, r: &mut Recipe, m: &Metadata, view: &View) -> Option<Action> {
+    let mut action = None;
+    band(ui, |ui| action = contents(ui, r, m, view));
+    action
+}
+fn contents(ui: &mut egui::Ui, r: &mut Recipe, m: &Metadata, view: &View) -> Option<Action> {
     if m.is_rendered() {
         return None;
     }
     if let Some(chosen) = r.lens_profile_choice.lensfun().cloned() {
-        return chosen_card(ui, r, m, view, &chosen);
+        return chosen_offer(ui, r, m, view, &chosen);
     }
     // Only where no imported Adobe profile fits this lens, and while suggestions
     // are on.
@@ -111,88 +117,89 @@ pub(super) fn card(ui: &mut egui::Ui, r: &mut Recipe, m: &Metadata, view: &View)
         return None;
     }
     let Some(db) = &view.db else {
-        return download_card(ui, view);
+        return download_offer(ui, view);
     };
     let photo = photo_of(m, frame_size(m));
     let matched = matching::find(&db.db, &photo);
-    let mut action = None;
-    frame(ui, |ui| {
-        match &matched.outcome {
-            Outcome::Unique(i) => {
-                let lens = &db.db.lenses[*i];
-                if let Some(why) = lens.refusal() {
-                    note(
-                        ui,
-                        &format!(
-                            "Lensfun's profile for this lens, {}, is {why}.",
-                            lens.label()
-                        ),
-                    );
-                    return;
-                }
-                let gives = given(lens, db, m);
-                let adds = Components {
-                    distortion: gives.distortion && !builtin.distortion,
-                    chromatic: gives.chromatic && !builtin.chromatic,
-                    vignetting: gives.vignetting && !builtin.vignetting,
-                };
-                if !adds.any() {
-                    return;
-                }
-                strong(ui, &format!("Lensfun: {}", lens.label()));
+    match &matched.outcome {
+        Outcome::Unique(i) => {
+            let lens = &db.db.lenses[*i];
+            if let Some(why) = lens.refusal() {
+                title(ui, &lens_name(lens, m));
                 note(
                     ui,
-                    &format!("Corrects {} for this photo.", gives.describe()),
+                    &format!("Can't be applied: Lensfun's profile is {why}."),
                 );
-                ui.horizontal(|ui| {
-                    if ui.button("Use").clicked() {
-                        choose(r, m, db, lens);
-                    }
-                    if ui.small_button("Don't show").clicked() {
-                        action = Some(Action::Dismiss);
-                    }
-                });
+                return None;
             }
-            Outcome::Ambiguous(all) => {
-                strong(ui, &format!("Lensfun: {} possible lenses", all.len()));
-                note(
-                    ui,
-                    "The lens's name fits more than one Lensfun profile; choose the one used.",
-                );
-                let lenses: Vec<&Lens> = all.iter().map(|i| &db.db.lenses[*i]).collect();
-                pick(ui, r, m, db, "lensfun-ambiguous", "Choose…", &lenses);
+            let gives = given(lens, db, m);
+            let adds = Components {
+                distortion: gives.distortion && !builtin.distortion,
+                chromatic: gives.chromatic && !builtin.chromatic,
+                vignetting: gives.vignetting && !builtin.vignetting,
+            };
+            if !adds.any() {
+                return None;
             }
-            Outcome::UnknownCamera if matched.crop.is_none() => {
-                note(
-                    ui,
-                    "Lensfun doesn't know this camera, and the photo records no 35 mm equivalent focal length to tell its crop factor, so no Lensfun profile can be applied.",
-                );
-            }
-            Outcome::NoMatch | Outcome::NoLensName | Outcome::UnknownCamera => {
-                note(
-                    ui,
-                    match matched.outcome {
-                        Outcome::UnknownCamera => {
-                            "Lensfun doesn't know this camera; you can choose a lens yourself."
-                        }
-                        Outcome::NoLensName => {
-                            "This photo doesn't name its lens; you can choose it yourself."
-                        }
-                        _ => "No Lensfun profile matched this lens; you can choose one yourself.",
-                    },
-                );
-                let lenses = choices(db, m);
-                pick(ui, r, m, db, "lensfun-manual", "Choose manually…", &lenses);
+            title(ui, &lens_name(lens, m));
+            note(ui, &format!("Corrects {}.", gives.describe()));
+            if accent_button(ui, "Use")
+                .on_hover_text("Correct this photo with Lensfun's profile of this lens")
+                .clicked()
+            {
+                choose(r, m, db, lens);
             }
         }
-        if action.is_none()
-            && !matches!(matched.outcome, Outcome::Unique(_))
-            && ui.small_button("Don't show").clicked()
-        {
-            action = Some(Action::Dismiss);
+        Outcome::Ambiguous(all) => {
+            let lenses: Vec<&Lens> = all.iter().map(|i| &db.db.lenses[*i]).collect();
+            title(ui, &format!("{} possible lenses", lenses.len()));
+            note(
+                ui,
+                "The lens name fits more than one profile: choose the one used.",
+            );
+            pick(ui, r, m, db, "lensfun-ambiguous", "Choose a lens…", &lenses);
         }
-    });
-    action
+        Outcome::UnknownCamera if matched.crop.is_none() => {
+            title(ui, "Unknown camera");
+            note(
+                ui,
+                "Lensfun doesn't know this camera, and the photo records no 35 mm equivalent focal length to tell its crop factor.",
+            );
+        }
+        Outcome::NoMatch | Outcome::NoLensName | Outcome::UnknownCamera => {
+            title(
+                ui,
+                match matched.outcome {
+                    Outcome::UnknownCamera => "Unknown camera",
+                    Outcome::NoLensName => "Lens not named",
+                    _ => "No matching profile",
+                },
+            );
+            note(
+                ui,
+                match matched.outcome {
+                    Outcome::UnknownCamera => {
+                        "Lensfun doesn't know this camera; choose the lens used."
+                    }
+                    Outcome::NoLensName => "The photo doesn't name its lens; choose the lens used.",
+                    _ => "No profile matched this lens's name; choose the lens used.",
+                },
+            );
+            let lenses = choices(db, m);
+            pick(ui, r, m, db, "lensfun-manual", "Choose a lens…", &lenses);
+        }
+    }
+    None
+}
+
+/// How the panel names a Lensfun lens: a compact's "fixed lens" by its camera.
+fn lens_name(lens: &Lens, m: &Metadata) -> String {
+    let label = lens.label();
+    if label.eq_ignore_ascii_case("fixed lens") && !m.model.is_empty() {
+        format!("{} {} lens", m.make, m.model).trim().to_string()
+    } else {
+        label
+    }
 }
 
 /// The corrections `lens` gives photo `m`.
@@ -205,57 +212,45 @@ fn given(lens: &Lens, db: &Installed, m: &Metadata) -> Components {
         .unwrap_or_default()
 }
 
-/// Before Lensfun is installed: what it is, the download and its terms.
-fn download_card(ui: &mut egui::Ui, view: &View) -> Option<Action> {
+/// Before Lensfun is installed: the download, its progress, and its terms.
+fn download_offer(ui: &mut egui::Ui, view: &View) -> Option<Action> {
     let mut action = None;
-    frame(ui, |ui| {
-        strong(ui, "Lensfun community profiles may cover this lens.");
-        if let Some((done, total)) = view.progress.filter(|_| view.running.is_some()) {
-            let fraction = if total > 0 {
-                done as f32 / total as f32
-            } else {
-                0.
-            };
-            ui.add(
-                egui::ProgressBar::new(fraction)
-                    .desired_width(ui.available_width())
-                    .text(format!("{:.1} MB", done as f32 / 1e6)),
-            );
-            if ui.button("Cancel").clicked() {
-                action = Some(Action::Cancel);
-            }
-            return;
+    title(ui, "Community lens profiles");
+    note(
+        ui,
+        "Lensfun's free database may have a profile for this lens. Nothing changes until you choose one.",
+    );
+    if let Some(why) = &view.failure {
+        warning(ui, &format!("The download failed: {why}"));
+    }
+    if let Some((done, total)) = view.progress.filter(|_| view.running.is_some()) {
+        if progress(ui, done, total) {
+            action = Some(Action::Cancel);
         }
-        if let Some(why) = &view.failure {
-            note(ui, &format!("The download failed: {why}"));
+    } else {
+        let label = if view.failure.is_some() {
+            "Retry".to_string()
+        } else {
+            format!(
+                "Download · {:.1} MB",
+                crate::lensfun_install::ABOUT_MEGABYTES
+            )
+        };
+        if ui
+            .add_enabled_ui(view.running.is_none(), |ui| accent_button(ui, &label))
+            .inner
+            .clicked()
+        {
+            action = Some(Action::Download);
         }
-        ui.horizontal(|ui| {
-            let label = if view.failure.is_some() {
-                "Retry".to_string()
-            } else {
-                format!(
-                    "Download Lensfun profiles ({:.1} MB)",
-                    crate::lensfun_install::ABOUT_MEGABYTES
-                )
-            };
-            if ui
-                .add_enabled(view.running.is_none(), egui::Button::new(label))
-                .clicked()
-            {
-                action = Some(Action::Download);
-            }
-            if ui.small_button("Don't show").clicked() {
-                action = Some(Action::Dismiss);
-            }
-        });
-        terms(ui);
-    });
+    }
+    terms(ui);
     action
 }
 
 /// The lens the edit chose: unresolved ones offer the download or resolving it,
 /// resolved ones a newer calibration when the database has one.
-fn chosen_card(
+fn chosen_offer(
     ui: &mut egui::Ui,
     r: &mut Recipe,
     m: &Metadata,
@@ -268,30 +263,22 @@ fn chosen_card(
         .and_then(|db| db.db.find(&chosen.lens).map(|lens| (db, lens)));
     if !chosen.is_resolved() {
         let mut action = None;
-        frame(ui, |ui| match (&view.db, found) {
+        title(ui, chosen.name());
+        match (&view.db, found) {
             (None, _) => {
                 note(
                     ui,
-                    &format!(
-                        "This edit names the Lensfun profile \"{}\", which needs Lensfun's profiles to be installed.",
-                        chosen.name()
-                    ),
+                    "This edit names a Lensfun profile: download Lensfun's profiles to apply it.",
                 );
                 if let Some((done, total)) = view.progress.filter(|_| view.running.is_some()) {
-                    let fraction = if total > 0 {
-                        done as f32 / total as f32
-                    } else {
-                        0.
-                    };
-                    ui.add(egui::ProgressBar::new(fraction).desired_width(ui.available_width()));
-                    if ui.button("Cancel").clicked() {
+                    if progress(ui, done, total) {
                         action = Some(Action::Cancel);
                     }
                 } else if ui
-                    .add_enabled(
-                        view.running.is_none(),
-                        egui::Button::new("Download Lensfun Profiles"),
-                    )
+                    .add_enabled_ui(view.running.is_none(), |ui| {
+                        accent_button(ui, "Download Lensfun Profiles")
+                    })
+                    .inner
                     .clicked()
                 {
                     action = Some(Action::Download);
@@ -301,12 +288,9 @@ fn chosen_card(
             (Some(db), Some(_)) => {
                 note(
                     ui,
-                    &format!(
-                        "Resolve \"{}\" against the installed Lensfun profiles to apply it.",
-                        chosen.name()
-                    ),
+                    "Not applied yet: resolve it against the installed profiles.",
                 );
-                if ui.button("Resolve").clicked()
+                if accent_button(ui, "Resolve").clicked()
                     && let Some(resolved) = chosen.resolved(&db.db, m)
                 {
                     r.lens_profile_choice.choose_lensfun(resolved);
@@ -314,12 +298,9 @@ fn chosen_card(
             }
             (Some(_), None) => note(
                 ui,
-                &format!(
-                    "The installed Lensfun profiles don't have \"{}\"; it may be in a newer version (Preferences › Profiles & Presets).",
-                    chosen.name()
-                ),
+                "Not in the installed Lensfun profiles; a newer version may have it (Preferences › Profiles & Presets).",
             ),
-        });
+        }
         return action;
     }
     // A newer calibration of the same lens.
@@ -327,20 +308,19 @@ fn chosen_card(
         && chosen.calibration.as_deref() != Some(&lens.calibration)
         && db.db.timestamp > chosen.provenance.database
     {
-        frame(ui, |ui| {
-            note(
-                ui,
-                &format!(
-                    "A newer Lensfun calibration of this lens is installed ({}).",
-                    db.manifest.date()
-                ),
-            );
-            if ui.button("Update").clicked()
-                && let Some(resolved) = chosen.resolved(&db.db, m)
-            {
-                r.lens_profile_choice.choose_lensfun(resolved);
-            }
-        });
+        title(ui, "Newer calibration");
+        note(
+            ui,
+            &format!(
+                "Lensfun's version of {} has a newer calibration of this lens.",
+                db.manifest.date()
+            ),
+        );
+        if accent_button(ui, "Update").clicked()
+            && let Some(resolved) = chosen.resolved(&db.db, m)
+        {
+            r.lens_profile_choice.choose_lensfun(resolved);
+        }
     }
     None
 }
@@ -394,23 +374,111 @@ pub(in crate::app) fn terms(ui: &mut egui::Ui) {
     });
 }
 
-fn frame(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    control_row(ui, "", |ui| {
-        let palette = theme::palette(ui.ctx());
-        egui::Frame::new()
-            .fill(palette.tone(Tone::CARD))
-            .stroke(egui::Stroke::new(1., palette.tone(Tone::RAISED)))
-            .corner_radius(radius::CONTROL)
-            .inner_margin(egui::Margin::same(space::S as i8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = space::XS;
-                add(ui);
-            });
-    });
+/// Lays `add` out beside the label column, from the rail start to the panel's edge
+/// less a margin, wrapping; when it adds anything, puts "Lensfun" in the label
+/// column at its first line and a faint accent band with an outline behind both.
+/// Adds nothing to the panel when `add` shows nothing.
+fn band(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    const PAD: f32 = space::M;
+    let background = ui.painter().add(egui::Shape::Noop);
+    let full = ui.available_rect_before_wrap();
+    let content = egui::Rect::from_min_max(
+        egui::pos2(full.left() + control_left(ui), full.top() + PAD),
+        egui::pos2(full.right() - PAD, full.bottom()),
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(content)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    child.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+    child.spacing_mut().item_spacing.y = space::XS;
+    add(&mut child);
+    let used = child.min_rect();
+    if used.height() <= 0. {
+        return;
+    }
+    let palette = theme::palette(ui.ctx());
+    let rect = egui::Rect::from_x_y_ranges(full.x_range(), full.top()..=used.bottom() + PAD);
+    ui.painter().set(
+        background,
+        egui::epaint::RectShape::new(
+            rect,
+            radius::CONTROL,
+            palette.accent().gamma_multiply(0.10),
+            egui::Stroke::new(1., palette.accent().gamma_multiply(0.40)),
+            egui::StrokeKind::Inside,
+        ),
+    );
+    ui.painter().text(
+        egui::pos2(full.left() + label_column(ui) - LABEL_GAP, used.top()),
+        egui::Align2::RIGHT_TOP,
+        "Lensfun",
+        egui::FontId::proportional(text::SMALL),
+        palette.tone(Tone::SOFT),
+    );
+    ui.allocate_rect(rect, egui::Sense::hover());
+    ui.add_space(space::XS);
 }
-fn strong(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(egui::RichText::new(text).size(text::SMALL).strong()).wrap());
+/// The offer's first line: a lens, or what the offer is about.
+fn title(ui: &mut egui::Ui, text: &str) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(text::SMALL)
+                .color(theme::palette(ui.ctx()).tone(Tone::STRONG)),
+        )
+        .wrap(),
+    );
+}
+/// The offer's one action, in the accent colour.
+fn accent_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let fill = if ui.is_enabled() {
+        palette.accent()
+    } else {
+        palette.tone(Tone::RAISED)
+    };
+    ui.add_space(space::XXS);
+    ui.spacing_mut().button_padding = egui::vec2(space::L, space::XXS);
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(label)
+                .size(text::SMALL)
+                .color(palette.on_accent()),
+        )
+        .fill(fill)
+        .min_size(egui::vec2(0., 22.)),
+    )
+}
+/// The download's bar and Cancel. Returns whether Cancel was clicked.
+fn progress(ui: &mut egui::Ui, done: u64, total: u64) -> bool {
+    let fraction = if total > 0 {
+        done as f32 / total as f32
+    } else {
+        0.
+    };
+    ui.add(
+        egui::ProgressBar::new(fraction)
+            .desired_width(ui.available_width())
+            .desired_height(4.),
+    );
+    let mut cancel = false;
+    ui.horizontal(|ui| {
+        small(ui, &format!("{:.1} MB", done as f32 / 1e6));
+        cancel = ui.small_button("Cancel").clicked();
+    });
+    cancel
+}
+fn warning(ui: &mut egui::Ui, text: &str) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .size(text::SMALL)
+                .color(theme::palette(ui.ctx()).warning()),
+        )
+        .wrap(),
+    );
 }
 fn note(ui: &mut egui::Ui, text: &str) {
     ui.add(
