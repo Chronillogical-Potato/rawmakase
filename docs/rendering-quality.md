@@ -33,7 +33,7 @@ Profile-based recipes also store a camera exposure baseline independently of the
 
 Every resolved recipe has a camera profile (without an imported or embedded one, the camera matrix with the DNG default tone curve) and uses the profile tone curve. Before it, the scene tone stage keeps scene values above 1 and rolls them off to a white point measured from the sensor's white and the photo's maximum, as Camera Raw's default render does; Shadows and Highlights are a measured local operator there ([tone controls](tone-controls.md#shadows-and-highlights)).
 
-Highlight reconstruction estimates clipped camera channels from nearby unclipped channel ratios, before color conversion. It retains unclipped channels and blends in recovery near the sensor ceiling. With no usable color evidence, it falls back to neutral; it cannot recreate fully clipped texture. The recovered image is lazily cached per decoded image. Extreme WB changes after demosaicing still have limitations.
+Highlight reconstruction follows Camera Raw 18.7's measured rule in white-balanced camera space, before color conversion ([partially clipped highlights](#partially-clipped-highlights)): every channel is pulled up towards the mean of the other two by a weight that rises with its own sensor level, so a clipped channel becomes that mean and a channel near the sensor's white mostly follows the others. It cannot recreate fully clipped texture. The recovered image is lazily cached per decoded image. Extreme WB changes after demosaicing still have limitations.
 
 Master point curves still have a saturated-color residual. The parametric curve is measured ([tone controls](tone-controls.md#parametric-curve)). Generated-ramp regression data checks neutral master and independent RGB curves separately from RAW/profile differences; see `tests/data/README.md`. Exact Lightroom rendering parity is **not** established.
 
@@ -50,31 +50,32 @@ The primary sliders render Camera Raw 18.7's measured changes (in `calibration.r
 ## Partially clipped highlights
 
 Highlight recovery runs once on the full decoded camera image, before the scene
-tone controls, and feeds Fit, regions and export. The existing 7×7 neighbourhood
-uses unclipped neighbours' channel ratios. A wider partially clipped area used to
-fall back to neutral even when a channel still held useful information, producing
-hard grey patches when Highlights darkened it.
+tone controls, and feeds Fit, regions and export. It is Camera Raw 18.7's rule as
+measured on flat patches rendered through a linear profile (`scripts/corpus/probe_dng.py`
+with an As Shot neutral, so channels clip at different scene levels): in
+white-balanced camera space each channel is pulled up towards the mean of the other
+two, never down, by the weight `((s − 0.25) / 0.75)^1.8`, where `s` is the channel's
+own fraction of the sensor's white. A clipped channel (`s` = 1) becomes the mean of the
+other two outright; a channel at 0.9 of its white follows them by 0.77 of the gap, one
+at half by 0.14, one in the lower quarter not at all. The
+three pulls are solved together (each channel's target is the others' pulled values,
+anchored at what the sensor recorded), so with two channels clipped the lower one lands
+between the unclipped channel and the higher clip, and once the unclipped channel passes
+the higher clip the pixel is neutral at that level, as Camera Raw renders it. Nothing
+reads neighbouring pixels: on flat patches Camera Raw's result is exactly this per-pixel
+rule, and a clipped sky keeps whatever gradient its unclipped channels carry.
 
-When that local search finds nothing, a lazily built map (at most 512 pixels on
-the long edge) supplies a colour reference from the same connected bright area.
-Only smooth, unclipped samples contribute; dark gaps separate areas so an unrelated
-bright object cannot provide the reference. The surviving channels stay unchanged;
-only clipped channels are estimated, with the existing blend near saturation.
-Fully clipped pixels and areas without a usable reference keep the neutral fallback.
-Where one channel is clipped, no estimate lowers it below the value the sensor
-recorded, which is only a lower bound on the light: a neighbour ratio or a neutral
-fallback that comes out lower keeps the recorded value. Darkening it rendered bright
-lights duller and darker than Camera Raw (on the test dataset's own-stress sets, the
-highlight-region error fell from about 3–4 to 1.3–1.8 ΔE00). Where two are clipped
-the estimate is kept: Camera Raw renders such a core whiter than the recorded pair
-(a sunset sun with red and blue clipped is yellow-white), and the floor turned it
-magenta. The floor fades out with the second channel's own recovery blend (0.97 to
-1.0 of its clip), so it adds no step where a second channel reaches the cutoff. The
-estimate itself still switches its reference channels there, as it did before.
-This infers missing colour, not missing detail, and is not Adobe's recovery algorithm.
-Cancellation discards the map and recovered image together. Tests cover a wide
-partially clipped area, dark gaps, untouched surviving channels, fully clipped
-fallback and cancellation.
+Measured on 136 patches (six hue directions at two saturations and six levels of the
+sensor's white, all unclipped; four hues at eight levels through every clip, under two
+As Shot neutrals), the rule reproduces Camera Raw within 0.005 RMS of the level per
+channel, the shoulder both renderers apply above white excluded. It replaces the
+neighbourhood-ratio estimate and the connected-area colour map of earlier releases: those
+reconstructed the patch's true colour (a warm patch with green clipped stayed warm,
+where Camera Raw moves it towards neutral and brighter), which is why clipped skies
+rendered duller and pinker than Camera Raw's. The rule also changes unclipped colours
+whose channels approach the white, as Camera Raw does: a saturated red at 0.9 of its
+white loses a third of its chroma. This infers Camera Raw's colour, not missing detail,
+and is not Adobe's algorithm. Cancellation discards the recovered image.
 
 ## Camera profiles
 

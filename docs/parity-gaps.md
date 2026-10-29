@@ -146,6 +146,49 @@ to 0.7 EV short of Camera Raw's, which the oracle cannot close either) and the
 demosaic's own noise. Not changed: X-Trans, whose demosaic still clips each sample
 first; the D7000 interior and the OM-5, which are not noise cases.
 
+### Highlight reconstruction colour (2026-10-29)
+
+Clipped skies at Highlights −100 rendered duller and pinker than Camera Raw's,
+with a hard edge where the second channel clipped (an RX100 VII sunrise: median
+ΔE00 2.79, chroma-only 1.33). Highlight recovery rebuilt a clipped channel from the
+ratios of unclipped neighbours, or from a colour map of the same bright area, so a
+warm patch with green clipped stayed warm. Flat coloured patches rendered through a
+linear profile with an As Shot neutral, so that the channels clip at different scene
+levels, give Camera Raw's rule: in white-balanced camera space every channel is pulled
+up towards the mean of the other two, never down, by a weight
+((s − 0.25) / 0.75)^1.8 of its own sensor fraction s, solved as a fixed point anchored
+at the recorded values. A clipped channel becomes the mean of the other two, past two
+clips the pixel is neutral, and unclipped colours near the white are desaturated the
+same way; over 136 patches the fit is within 0.005 RMS of the level per channel. The
+rule reads no neighbours, as the flat patches show, and replaces the neighbourhood
+estimate and the colour map ([rendering quality](rendering-quality.md)).
+
+The sunrise goes 2.79 → 2.55 (chroma 1.33 → 1.05). Dataset gate against the engine
+with the noise-clipping change above (median ΔE00 of the validation sets; Default
+and Highlights from the highlights sets, Shadows from the shadows sets):
+
+| Set | Default | Highlights −100 | Highlights −50 | Shadows +100 | Shadows −50 |
+| --- | --- | --- | --- | --- | --- |
+| pixls | 0.46 → 0.46 | 1.06 → 1.28 | 0.81 → 0.89 | 1.41 → 1.40 | 0.99 → 0.93 |
+| own | 0.58 → 0.58 | 1.11 → 1.11 | 0.86 → 0.86 | 1.56 → 1.61 | 0.74 → 0.74 |
+| signature edits | 0.30 → 0.30 | 0.87 → 0.88 | 0.62 → 0.60 | 2.05 → 2.11 | 0.60 → 0.51 |
+| pixls stress | 0.90 → 0.79 | 1.26 → 1.18 | 1.14 → 1.02 | 2.20 → 2.14 | 1.16 → 1.16 |
+| own stress | 0.53 → 0.53 | 1.05 → 0.87 | 0.84 → 0.72 | 1.77 → 1.77 | 0.39 → 0.39 |
+| signature edits stress | 0.34 → 0.33 | 0.66 → 0.56 | 0.49 → 0.45 | 1.19 → 1.14 | 0.57 → 0.43 |
+
+Across all 18 sets 21 photo/setting rows improve by more than 0.3 and 12 worsen, the
+mixed sets' Dehaze + Clarity and colour Shadows cases most (up to 5.25 → 3.38). The
+rows that worsen are luminance, not colour, and come from the Shadows/Highlights
+rule rather than from the reconstruction: fully clipped pixels now reconstruct to the
+highest white-balance gain instead of the colour map's ceiling, so the histogram top
+the rule reads rises by 0.44 stops on clipped photos (a DC-S1 field 0.36 → 0.80, a
+Rebel T7i 0.06 → 0.50 stops above white) and the rule, fitted to maps from the old
+decode, lifts the field 4 L* too far at Shadows +100 (3.59 → 5.48) and darkens the
+T7i 2 L* too far at Highlights −100 (1.06 → 1.61), while both default renders
+improve. Next: refit the rule on measurement maps from this decode. Still open: the
+X-T30 II plateau that is darker than Camera Raw's already at default (white level or
+X-Trans clipping), and the demosaic's red/blue noise above Camera Raw's.
+
 ### Shadows/Highlights research: what did not work (2026-10-16)
 
 **No candidate from this investigation passed the requirements for shipping.**

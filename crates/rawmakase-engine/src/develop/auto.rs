@@ -630,8 +630,10 @@ mod tests {
     #[test]
     fn white_balance_ignores_colour_invented_by_highlight_recovery() {
         // A warm left half where every other pixel clipped in red and green, and a
-        // cool right half. Recovery rebuilds the clipped pixels as warm, below the
-        // clipping cutoff, which would weigh the warm half double.
+        // cool right half. Recovery raises the clipped pixels' blue from 0.4 to
+        // about 0.433; red and green stay at 1, so those pixels remain excluded by
+        // the gray-world clipping cutoff. Auto WB must use the decoded samples
+        // rather than recovery-altered colours.
         let mut im = scene([1.; 3], 0.5);
         let width = im.width as usize;
         for (i, p) in im.pixels.iter_mut().enumerate() {
