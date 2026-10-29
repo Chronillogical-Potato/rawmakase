@@ -817,6 +817,23 @@ fn sample(
             break;
         }
     }
+    // Out of knots before every stretch followed the model: refused if it strays by
+    // more than twice the tolerance anywhere.
+    let worst = knots
+        .windows(2)
+        .flat_map(|pair| {
+            let (a, b) = (pair[0], pair[1]);
+            let (fa, fb) = (f(a), f(b));
+            (1..8).map(move |i| (a, b, fa, fb, f64::from(i) / 8.))
+        })
+        .map(|(a, b, fa, fb, t)| {
+            let at = a + (b - a) * t;
+            (fa + (fb - fa) * t - f(at)).abs() * weight(at).max(0.)
+        })
+        .fold(0f64, f64::max);
+    if worst > 2. * tolerance {
+        return None;
+    }
     let mut table = Radial {
         knots: knots.iter().map(|k| *k as f32).collect(),
         values: knots.iter().map(|k| f(*k) as f32).collect(),

@@ -29,6 +29,9 @@ pub struct Photo<'a> {
     pub focal_35mm: f32,
     /// The photo frame's width and height (the camera's default crop), in pixels.
     pub frame: [f32; 2],
+    /// The crop mode's crop factor over the sensor's, when the camera says
+    /// (`Metadata::sensor_crop`).
+    pub sensor_crop: Option<f32>,
 }
 
 /// How a photo matched.
@@ -75,7 +78,13 @@ pub fn camera<'d>(
                     || same_text(&c.model.id, &format!("{make} {model}")))
         })
         .min_by(|a, b| {
-            let off = |c: &Camera| aspect.map_or(0., |x| (c.aspect.unwrap_or(x) - x).abs());
+            // An entry for another aspect ratio (Lensfun's variants) is worse than
+            // one without any.
+            let off = |c: &Camera| match (aspect, c.aspect) {
+                (Some(x), Some(y)) => (x - y).abs(),
+                (Some(_), None) => 0.01,
+                (None, _) => 0.,
+            };
             off(a).total_cmp(&off(b))
         })
 }
@@ -165,8 +174,24 @@ pub fn choices(db: &Database, photo: &Photo) -> (Option<f32>, Vec<usize>) {
 
 fn crop_for(camera: Option<&Camera>, photo: &Photo) -> Option<f32> {
     match camera {
-        Some(c) => Some(frame_crop(c.crop, native_aspect(c), photo.frame)),
+        Some(c) => Some(photo_crop(c.crop, native_aspect(c), photo)),
         None => exif_crop(photo),
+    }
+}
+
+/// The crop factor of `photo`'s frame from a camera of `crop` with a sensor of
+/// `aspect` (`frame_crop`), in a crop mode the camera records (Canon's APS-C mode)
+/// that much larger; else, where the 35 mm equivalent focal length disagrees with it
+/// by more than rounding (10%), the crop factor that gives (Nikon's DX and Sony's
+/// APS-C modes write it so).
+pub fn photo_crop(crop: f32, aspect: Option<f32>, photo: &Photo) -> f32 {
+    let frame = frame_crop(crop, aspect, photo.frame);
+    if let Some(k) = photo.sensor_crop.filter(|k| k.is_finite() && *k >= 1.) {
+        return frame * k;
+    }
+    match exif_crop(photo) {
+        Some(exif) if (exif / frame - 1.).abs() > 0.1 => exif,
+        _ => frame,
     }
 }
 
@@ -217,7 +242,7 @@ pub fn find<'d>(db: &'d Database, photo: &Photo) -> Matched<'d> {
     let outcome = match scored.as_slice() {
         [] => Outcome::NoMatch,
         [(best, s), rest @ ..]
-            if !bare(photo.lens) && rest.first().is_none_or(|r| r.1 < s - 1e-6) =>
+            if !bare(photo.lens, cam) && rest.first().is_none_or(|r| r.1 < s - 1e-6) =>
         {
             Outcome::Unique(*best)
         }
@@ -230,12 +255,38 @@ pub fn find<'d>(db: &'d Database, photo: &Photo) -> Matched<'d> {
     }
 }
 
-/// A name of numbers alone ("24-70mm", "17-50mm f/2.8").
-fn bare(name: &str) -> bool {
+/// A name of numbers alone ("24-70mm", "17-50mm f/2.8"), makers' names aside
+/// ("Canon 50mm f/1.8" says no more than "50mm f/1.8").
+fn bare(name: &str, camera: &Camera) -> bool {
+    let camera_maker = maker_words(&camera.maker.id);
     words(name)
         .iter()
+        .filter(|w| {
+            !camera_maker.contains(w)
+                && !THIRD_PARTY.contains(&w.as_str())
+                && !MAKERS.contains(&w.as_str())
+        })
         .all(|w| w == "mm" || w.chars().all(|c| c.is_ascii_digit() || c == '.'))
 }
+/// Camera makers' names, as lens names may carry them.
+const MAKERS: [&str; 16] = [
+    "canon",
+    "nikon",
+    "sony",
+    "pentax",
+    "olympus",
+    "panasonic",
+    "lumix",
+    "leica",
+    "fujifilm",
+    "fuji",
+    "samsung",
+    "minolta",
+    "konica",
+    "ricoh",
+    "hasselblad",
+    "om",
+];
 
 /// How much of `lens`'s name `photo`'s lens name explains (0–1), or `None` when it
 /// can't be that lens.

@@ -32,6 +32,7 @@ fn main() -> anyhow::Result<()> {
             focal: number(4),
             focal_35mm: number(8),
             frame,
+            sensor_crop: None,
         };
         let m = find(&db, &photo);
         let (kind, lenses) = match &m.outcome {

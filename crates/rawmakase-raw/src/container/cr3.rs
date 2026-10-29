@@ -479,6 +479,7 @@ pub(crate) fn open(bytes: &[u8]) -> Result<RawInfo> {
             info.aspect = [x, y, w, h];
         }
         info.highlight_tone_priority = notes::highlight_tone_priority(&t, notes);
+        info.sensor_crop = notes::sensor_crop(&t, notes);
     }
     let (mut noted_black, mut noted_white) = (None, None);
     if let Some((cam_mul, presets, black, white)) = first_timed_note(bytes, &c.tracks, |note| {

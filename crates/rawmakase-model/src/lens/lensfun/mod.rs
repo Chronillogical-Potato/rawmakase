@@ -245,14 +245,23 @@ fn aspect_of(node: roxmltree::Node) -> Result<Option<f32>> {
     Ok(Some(ratio.max(1. / ratio)))
 }
 fn camera(node: roxmltree::Node) -> Result<Camera> {
+    let variant = text_of(node, "variant").unwrap_or_default();
     Ok(Camera {
         maker: Name::read(node, "maker").context("a camera without a maker")?,
         model: Name::read(node, "model").context("a camera without a model")?,
-        variant: text_of(node, "variant").unwrap_or_default(),
         mount: text_of(node, "mount").context("a camera without a mount")?,
         crop: crop_of(node)?,
-        aspect: aspect_of(node)?,
+        // Lensfun gives a body's aspect-ratio modes as variants ("16:9") with their
+        // own crop factors.
+        aspect: aspect_of(node)?.or_else(|| ratio(&variant)),
+        variant,
     })
+}
+/// "16:9" as 16/9 (long edge over short); `None` for other variant names.
+fn ratio(text: &str) -> Option<f32> {
+    let (a, b) = text.trim().split_once(':')?;
+    let (a, b): (f32, f32) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
+    (a > 0. && b > 0.).then(|| a.max(b) / a.min(b))
 }
 fn attr(node: roxmltree::Node, name: &str) -> Result<f32> {
     node.attribute(name).map_or(Ok(0.), number)
@@ -345,7 +354,8 @@ fn lens(node: roxmltree::Node) -> Result<Lens> {
             }
         }
     }
-    // The focal range: `<focal>`, else the calibration's.
+    // The focal range: `<focal>`, else what the name says (unless a converter
+    // changes it), else the calibration's.
     let calibrated = c
         .distortion
         .iter()
@@ -370,7 +380,14 @@ fn lens(node: roxmltree::Node) -> Result<Lens> {
                 .unwrap_or(hi.max(min));
             [min, max]
         }
-        None => [lo, hi],
+        None => {
+            let id = model.id.to_lowercase();
+            let converted = id.contains("converter") || id.contains("extender");
+            match names::stated(&model.id).focal {
+                Some([a, b]) if !converted && a > 0. && b >= a => [a, b],
+                _ => [lo, hi],
+            }
+        }
     };
     if !(c.focal[0].is_finite() && c.focal[0] > 0. && c.focal[1] >= c.focal[0]) {
         // Neither declared nor calibrated: a lens listed for its name only.

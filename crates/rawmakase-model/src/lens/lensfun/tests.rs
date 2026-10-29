@@ -13,6 +13,9 @@ const DB: &str = r#"<!DOCTYPE lensdatabase SYSTEM "lensfun-database.dtd">
   <camera><maker>Nikon Corporation</maker><maker lang="en">Nikon</maker><model>Nikon D6</model><mount>Nikon F AF</mount><cropfactor>1</cropfactor></camera>
   <camera><maker>Panasonic</maker><model>DMC-G6</model><mount>Micro 4/3 System</mount><cropfactor>2</cropfactor><aspect-ratio>4:3</aspect-ratio></camera>
   <camera><maker>Canon</maker><model>Canon PowerShot G12</model><mount>canonG12</mount><cropfactor>4.6</cropfactor><aspect-ratio>4:3</aspect-ratio></camera>
+  <camera><maker>Panasonic</maker><model>DMC-LX3</model><variant>4:3</variant><mount>panasonicLX3</mount><cropfactor>4.7</cropfactor></camera>
+  <camera><maker>Panasonic</maker><model>DMC-LX3</model><variant>16:9</variant><mount>panasonicLX3</mount><cropfactor>4.45</cropfactor></camera>
+  <camera><maker>Panasonic</maker><model>DMC-LX3</model><variant>1:1</variant><mount>panasonicLX3</mount><cropfactor>5.32</cropfactor></camera>
   <camera><maker>Sony</maker><model>ILCE-1M2</model><mount>Sony E</mount><cropfactor>1</cropfactor></camera>
   <lens><maker>Canon</maker><model>Canon EF 70-200mm f/2.8L IS II USM</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
     <calibration><distortion model="ptlens" focal="70" a="0" b="0.01" c="0"/><distortion model="ptlens" focal="200" a="0" b="0.02" c="0"/></calibration></lens>
@@ -36,6 +39,12 @@ const DB: &str = r#"<!DOCTYPE lensdatabase SYSTEM "lensfun-database.dtd">
     <calibration><distortion model="poly3" focal="70" k1="0.01"/></calibration></lens>
   <lens><maker>Samyang</maker><model>Samyang 8mm f/3.5 Fish-Eye CS</model><mount>Canon EF</mount><cropfactor>1.6</cropfactor><type>stereographic</type>
     <calibration><distortion model="poly3" focal="8" k1="0.01"/></calibration></lens>
+  <lens><maker>Pentacon</maker><model>Pentacon 50mm f/1.8</model><mount>M42</mount><cropfactor>1</cropfactor>
+    <calibration><distortion model="poly3" focal="50" k1="0.01"/></calibration></lens>
+  <lens><maker>Minolta</maker><model>Minolta AF 70-210mm f/4 Macro</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
+    <calibration><distortion model="poly3" focal="75" k1="0.01"/><distortion model="poly3" focal="210" k1="0.02"/></calibration></lens>
+  <lens><maker>Test</maker><model>Test Zoom 24-70mm f/2.8</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
+    <calibration><distortion model="poly3" focal="35" k1="0.01"/></calibration></lens>
   <lens><maker>Test</maker><model>Test 35mm f/2 ACM</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
     <calibration><distortion model="acm" focal="35" k1="0.01"/></calibration></lens>
 </lensdatabase>"#;
@@ -51,6 +60,7 @@ fn photo<'a>(make: &'a str, model: &'a str, lens: &'a str, focal: f32) -> Photo<
         focal,
         focal_35mm: 0.,
         frame: [6000., 4000.],
+        sensor_crop: None,
     }
 }
 fn model_of(db: &Database, outcome: &Outcome) -> Vec<String> {
@@ -80,7 +90,15 @@ fn reads_lensfun_s_format() {
     // The focal range from the calibration, the aspect ratio Lensfun's default.
     assert_eq!((zoom.focal, zoom.aspect), ([70., 200.], 1.5));
     assert!(db.lenses[10].refusal().unwrap().contains("stereographic"));
-    assert!(db.lenses[11].refusal().unwrap().contains("acm"));
+    assert!(
+        db.lenses
+            .iter()
+            .find(|l| l.model.id == "Test 35mm f/2 ACM")
+            .unwrap()
+            .refusal()
+            .unwrap()
+            .contains("acm")
+    );
     assert!(db.lenses[0].refusal().is_none());
     // Formats this reader doesn't know, and files that aren't Lensfun's, are refused.
     assert!(Database::from_texts([("x", r#"<lensdatabase version="3"/>"#)]).is_err());
@@ -230,6 +248,21 @@ fn bare_and_tied_names_stay_a_choice() {
     let db = db();
     let m = find(
         &db,
+        &photo("Canon", "Canon EOS 5D Mark III", "24-70mm", 40.),
+    );
+    assert_eq!(
+        model_of(&db, &m.outcome),
+        ["Test Zoom 24-70mm f/2.8", "Canon EF 24-70mm f/2.8L USM"]
+    );
+    // Even when only one lens fits, it isn't suggested alone.
+    let one = Database::from_texts([(
+        "one.xml",
+        DB.replace("Test Zoom 24-70mm", "Test Zoom 28-75mm")
+            .as_str(),
+    )])
+    .unwrap();
+    let m = find(
+        &one,
         &photo("Canon", "Canon EOS 5D Mark III", "24-70mm", 40.),
     );
     assert_eq!(m.outcome, Outcome::Ambiguous(vec![2]));
@@ -384,4 +417,111 @@ fn choices_copy_their_calibration() {
         serde_json::from_str::<LensfunChoice>(&text).unwrap(),
         choice
     );
+}
+
+/// A maker's name doesn't make a name of numbers say more: "Canon 50mm f/1.8" on a
+/// Canon fits other makers' 50mm f/1.8 too, and is never one alone.
+#[test]
+fn a_maker_and_numbers_is_still_a_bare_name() {
+    let db = db();
+    let m = find(
+        &db,
+        &photo("Canon", "Canon EOS 5D Mark III", "Canon 50mm f/1.8", 50.),
+    );
+    assert!(
+        !matches!(m.outcome, Outcome::Unique(_)),
+        "{:?}",
+        model_of(&db, &m.outcome)
+    );
+}
+
+/// Lensfun gives a camera's aspect ratios as variants with their own crop factors:
+/// the photo's frame picks its own.
+#[test]
+fn aspect_ratio_variants_pick_their_crop_factor() {
+    let db = db();
+    for (frame, crop) in [
+        ([3648., 2736.], 4.7),
+        ([3968., 2232.], 4.45),
+        ([2736., 2736.], 5.32),
+    ] {
+        let c = matching::camera(&db, "Panasonic", "DMC-LX3", frame).unwrap();
+        assert_eq!(c.crop, crop, "{frame:?}");
+        let found = find(
+            &db,
+            &Photo {
+                frame,
+                ..photo("Panasonic", "DMC-LX3", "", 5.1)
+            },
+        );
+        assert_eq!(found.crop, Some(crop), "{frame:?}");
+    }
+}
+
+/// A lens's focal range is its `<focal>`, else what its name says, else its
+/// calibration's: a zoom calibrated at one focal length is still a zoom.
+#[test]
+fn a_lens_s_focal_range_comes_from_its_name_before_its_calibration() {
+    let db = db();
+    let lens = |name: &str| db.lenses.iter().find(|l| l.model.id == name).unwrap();
+    assert_eq!(
+        lens("Minolta AF 70-210mm f/4 Macro").calibration.focal,
+        [70., 210.]
+    );
+    let zoom = &lens("Test Zoom 24-70mm f/2.8").calibration;
+    assert_eq!(zoom.focal, [24., 70.]);
+    assert!(!zoom.is_prime());
+    let m = find(
+        &db,
+        &photo(
+            "Canon",
+            "Canon EOS 5D Mark III",
+            "AF 70-210mm f/4 Macro",
+            70.,
+        ),
+    );
+    assert_eq!(model_of(&db, &m.outcome), ["Minolta AF 70-210mm f/4 Macro"]);
+}
+
+/// A camera's crop mode records a frame of a larger crop factor: Canon's AspectInfo
+/// says so, and so does a 35 mm equivalent focal length that disagrees.
+#[test]
+fn crop_modes_take_their_crop_factor() {
+    use crate::camera_data::Metadata;
+    let db = db();
+    let full = Metadata {
+        exif_make: "Canon".into(),
+        exif_model: "Canon EOS 5D Mark III".into(),
+        focal: 100.,
+        width: 3408,
+        height: 2272,
+        ..Default::default()
+    };
+    let crop_of = |m: &Metadata| {
+        let c = choice::camera_for(&db, m).unwrap();
+        LensfunChoice {
+            camera: Some(c),
+            ..LensfunChoice::of(&db.lenses[0], &db, None)
+        }
+        .frame(m)
+        .unwrap()
+        .crop
+    };
+    assert_eq!(crop_of(&full), 1.);
+    let canon = Metadata {
+        sensor_crop: Some(1.6),
+        ..full.clone()
+    };
+    assert_eq!(crop_of(&canon), 1.6);
+    let exif = Metadata {
+        focal_35mm: 160.,
+        ..full.clone()
+    };
+    assert!((crop_of(&exif) - 1.6).abs() < 1e-6);
+    // A 35 mm equivalent within rounding of the camera's own changes nothing.
+    let rounded = Metadata {
+        focal_35mm: 103.,
+        ..full
+    };
+    assert_eq!(crop_of(&rounded), 1.);
 }

@@ -87,6 +87,10 @@ pub struct Metadata {
     pub exif_make: String,
     #[serde(skip)]
     pub exif_model: String,
+    /// The frame's crop factor over the sensor's when the camera recorded only part
+    /// of it in a crop mode (Canon's APS-C mode: 1.6); read again on open, not saved.
+    #[serde(skip)]
+    pub sensor_crop: Option<f32>,
     pub width: u32,
     pub height: u32,
     pub raw_width: u32,

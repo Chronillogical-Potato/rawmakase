@@ -3,7 +3,7 @@
 //! from. The copy is what renders, so updating or removing the database never changes
 //! an edit; an edit read from XMP names only the lens and stays unresolved, rendering
 //! no Lensfun correction, until the user resolves it against an installed database.
-use super::matching::{Photo, exif_crop, frame_crop};
+use super::matching::{Photo, exif_crop, photo_crop};
 use super::names::same_text;
 use crate::camera_data::Metadata;
 use crate::optics::LensCorrection;
@@ -147,7 +147,7 @@ impl LensfunChoice {
         let photo = photo_of(m, [rect[2], rect[3]]);
         let crop = match &self.camera {
             Some(c) if same_text(&c.make, photo.make) && same_text(&c.model, photo.model) => {
-                Some(frame_crop(c.crop, c.aspect, photo.frame))
+                Some(photo_crop(c.crop, c.aspect, &photo))
             }
             _ => exif_crop(&photo),
         }?;
@@ -298,6 +298,7 @@ pub fn photo_of(m: &Metadata, frame: [f32; 2]) -> Photo<'_> {
         focal: m.focal,
         focal_35mm: m.focal_35mm,
         frame,
+        sensor_crop: m.sensor_crop,
     }
 }
 

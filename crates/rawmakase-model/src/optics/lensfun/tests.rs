@@ -463,3 +463,49 @@ fn every_real_calibration_evaluates() {
         db.lenses.len()
     );
 }
+
+/// A calibration the table's knots can't follow within 0.02 px at the photo's size is
+/// refused, not applied less accurately than the model.
+#[test]
+fn a_table_that_can_t_follow_the_model_is_refused() {
+    let c = simple(
+        "",
+        1.,
+        r#"<distortion model="poly5" focal="50" k1="-0.61538464" k2="0.18934911"/>"#,
+    );
+    let e = c.evaluate(
+        &whole(6000., 4000., 1.),
+        &Shot {
+            focal: 50.,
+            aperture: 0.,
+            distance: DISTANCE,
+        },
+        "t",
+    );
+    match &e.correction {
+        Some(c) => {
+            // Within budget after all: then within 0.02 px.
+            let d = c.distortion.as_ref().unwrap();
+            assert!(d.knots.len() <= Radial::MAX_KNOTS);
+        }
+        None => assert_eq!(e.shortfalls, vec![Shortfall::OutOfRange("distortion")]),
+    }
+    assert!(
+        e.correction.is_none() || e.shortfalls.is_empty(),
+        "{:?}",
+        e.shortfalls
+    );
+    let g = Geometry::new(&c, &whole(6000., 4000., 1.)).unwrap();
+    if let Some(corr) = &e.correction {
+        let d = corr.distortion.as_ref().unwrap();
+        let model = c.distortion_at(50.).unwrap();
+        let half = 6000f64.hypot(4000.) * 0.5;
+        let worst = (0..=4000)
+            .map(|i| {
+                let rho = g.reach * f64::from(i) / 4000.;
+                (f64::from(d.eval(rho as f32)) - model.ratio(g.u(rho))).abs() * rho * half
+            })
+            .fold(0f64, f64::max);
+        assert!(worst <= 0.02, "{worst}");
+    }
+}

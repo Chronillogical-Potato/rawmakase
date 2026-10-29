@@ -128,6 +128,7 @@ impl Notes {
             // A mosaic's starts on even rows and columns, keeping the filter.
             let aspect = self.aspect_crop(frame);
             info.aspect = if info.sraw { aspect } else { even(aspect) };
+            info.sensor_crop = self.sensor_crop();
         }
         info.flip = crate::geometry::flip(orientation);
         if orientation == 1
@@ -203,6 +204,13 @@ impl Notes {
             specular: white.and_then(word),
             normal: white.and_then(|w| word(w - 1)),
         }
+    }
+
+    /// The crop mode AspectInfo's ratio code names, as the frame's crop factor over
+    /// the sensor's: 12 is 3:2 in APS-H crop, 13 is 3:2 in APS-C crop (as ExifTool
+    /// names the codes).
+    fn sensor_crop(&self) -> Option<f32> {
+        crop_mode(self.aspect?[0])
     }
 
     /// The camera's aspect-ratio crop in sensor coordinates: AspectInfo's
@@ -585,6 +593,17 @@ pub(crate) fn custom_function(b: &[u8], little: bool, record: u32) -> Option<u32
     None
 }
 
+/// The crop factor over the sensor's of AspectInfo's ratio `code`: 12 is 3:2 in APS-H
+/// crop, 13 is 3:2 in APS-C crop (as ExifTool names the codes); `None` for the
+/// whole sensor.
+pub(crate) fn crop_mode(code: u32) -> Option<f32> {
+    match code {
+        12 => Some(1.3),
+        13 => Some(1.6),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,6 +619,16 @@ mod tests {
         assert_eq!(spaced_lens("TS-E24mm"), "TS-E24mm");
     }
 
+    /// AspectInfo's crop modes, as ExifTool names them: APS-C (13) and APS-H (12)
+    /// record part of the sensor; the aspect ratios don't change its crop factor.
+    #[test]
+    fn crop_modes_name_their_crop_factor() {
+        assert_eq!(super::crop_mode(13), Some(1.6));
+        assert_eq!(super::crop_mode(12), Some(1.3));
+        for code in [0, 1, 2, 7] {
+            assert_eq!(super::crop_mode(code), None);
+        }
+    }
     #[test]
     fn aspect_crops_start_on_even_rows() {
         let notes = Notes {
