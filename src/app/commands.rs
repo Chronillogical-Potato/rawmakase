@@ -1041,6 +1041,9 @@ impl Editor {
         let next = next.map_err(|e| Error::new("save_failed", e.to_string()))?;
         self.status = library.message.clone();
         self.sync_undo();
+        // The Library shows the photo made active itself; Develop follows it
+        // when the edit advanced or the filter hid the photo open.
+        let next = next.filter(|_| advance || self.module == Module::Develop);
         if let Some(next) = next {
             self.develop_catalog_photo(next);
             if self.document.catalog_photo != Some(next)
