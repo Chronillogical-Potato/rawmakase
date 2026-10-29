@@ -45,8 +45,8 @@ files should preserve.
 | `decode` | A photo's full-size image, made one way for Develop, prefetch, Reference View and export: the cache's copy, else a decode with highlights recovered and stored, as a `DecodePolicy` asks | `decode.rs` |
 | `decode_cache` | Disk cache of developed camera images, keyed by file identity, demosaic setting and build; the app shares one live size limit and folder across Develop, prefetch, Reference View, export and preview builds, persisted in its session | `decode_cache.rs` |
 | `camera_profiles` | DCP parsing and validation, camera transforms, RAWmakase's own profiles, profile library and camera matching, `.cube` LUTs imported as look profiles, DNG temperature/tint | `dcp.rs`, `library.rs`, `open.rs`, `cube_look.rs`, `reference.rs` |
-| `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), and Adobe lens profiles (LCP) as data; depends only on `xml` | `mod.rs`, `lcp.rs` |
-| `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs and lateral CA measurement, plus profile selection | `embedded.rs`, `lcp.rs`, `auto_ca.rs`, `choice.rs` |
+| `optics` | The lens correction model the renderer evaluates (vignetting, distortion and lateral CA as radial functions), Adobe lens profiles (LCP) as data, and Lensfun calibrations as data with their evaluation for a photo; depends only on `xml` | `mod.rs`, `lcp.rs`, `lensfun.rs` |
+| `lens` | Readers that fill the `optics` model: the tables cameras embed in their RAWs, imported Adobe LCPs, Lensfun's database (read, matched, installed) and lateral CA measurement, plus profile selection; an edit's Lensfun lens carries its own copy of the calibration, so rendering never reads the database | `embedded.rs`, `lcp.rs`, `lensfun/`, `auto_ca.rs`, `choice.rs` |
 | `rendered` | Developed pixels as values: an output image, its histogram and clipping overlay, which the renderer produces and export and watermarks use; depends on nothing | `rendered.rs` |
 | `model` | What an edit is, as values shared by the renderer, the catalog and file formats: the `Recipe` with its validation (`ValidRecipe`), saved versions and migration, panel switches, and the settings it is made of: Effects, Heal and Clone, Red Eye, Point Color, masks, Transform with Upright, white balance from metadata, the image space positions are kept in (`image_frame.rs`), the sliders as parameters, the rules an edit follows and the setting groups Copy Settings, Sync and presets use. Depends on camera profiles, lenses and optics, never on rendering | `recipe.rs`, `valid.rs`, `saved_format.rs`, `panels.rs`, `operators.rs`, `effects.rs`, `masks.rs`, `transform.rs` |
 | `develop` | Rendering a recipe: geometry, color processing, the scene tone stage, curves, effects, local adjustments, detail rendering and the GPU port | `pipeline/`, `scene_tone/`, `quality/`, `geometry.rs`, `gpu/` |
@@ -70,6 +70,7 @@ files should preserve.
 | `platform` | OS integration: the Linux GVFS filesystem bridge, drives, the file manager, the browser, the system Trash file operations get (`trash::SystemTrash`, failing closed, and whether a drive has one; no policy), and the display's color management (macOS surface tagging, the Windows display profile) | `network.rs`, `volume.rs`, `reveal.rs`, `web.rs`, `trash.rs`, `display.rs` |
 | `diagnostics` | The system report a bug report asks for (Report an Issue…, `rawmakase system-info`): this build, the system probed once per process and what the window knew, as plain snapshots, with no path, user, file, catalog or profile name | `diagnostics.rs` |
 | `updates` | Release checks and self-update through fastframe-update; the notice itself is in `app` | `updates.rs` |
+| `lensfun_install` | Downloading, checking, publishing and removing Lensfun's lens database on request (never bundled, never fetched unasked); reading it is `lens::lensfun::installed`'s, the panels and the job thread are `app`'s | `lensfun_install.rs` |
 | `comparison` | Reproducible reference-image comparisons using the same develop APIs | `comparison.rs` |
 
 `color` holds shared numeric primitives (matrices, sRGB transfer, HSV) and the tone-curve
@@ -313,10 +314,11 @@ kept for outside callers. `src/lib.rs` exports only the modules they use; the re
 are `pub(crate)`, and the desktop app exposes only `app::run`, so the
 compiler reports what in them nothing uses. The compatibility surface is the saved data: recipe and
 preset envelopes are versioned and migrated by `model::saved_format` (written as
-version 11, which releases before the one engine refuse); a catalog opens at
-versions 1 to 3 (others are refused, the file left unchanged), is upgraded to 3
-before a recipe is stored in it, and its schema only ever gains tables, applied
-idempotently on open; see [catalogs](catalogs.md#sqlite-format-versions-1-to-3).
+version 11, which releases before the one engine refuse, or 12 for a recipe naming a
+Lensfun lens, which releases before Lensfun refuse); a catalog opens at versions 1
+to 4 (others are refused, the file left unchanged), is upgraded to 3 before a recipe
+is stored in it and to 4 before a Lensfun choice is, and its schema only ever gains
+tables, applied idempotently on open; see [catalogs](catalogs.md#sqlite-format-versions-1-to-4).
 
 ## Validation
 
