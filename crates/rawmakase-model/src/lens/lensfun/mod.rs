@@ -354,8 +354,7 @@ fn lens(node: roxmltree::Node) -> Result<Lens> {
             }
         }
     }
-    // The focal range: `<focal>`, else what the name says (unless a converter
-    // changes it), else the calibration's.
+    // The focal range: `<focal>`, else what the name states, else the calibration's.
     let calibrated = c
         .distortion
         .iter()
@@ -380,14 +379,16 @@ fn lens(node: roxmltree::Node) -> Result<Lens> {
                 .unwrap_or(hi.max(min));
             [min, max]
         }
-        None => {
-            let id = model.id.to_lowercase();
-            let converted = id.contains("converter") || id.contains("extender");
-            match names::stated(&model.id).focal {
-                Some([a, b]) if !converted && a > 0. && b >= a => [a, b],
-                _ => [lo, hi],
+        // A range the name states in millimetres, when the calibration fits inside
+        // it (a converter's, "+ 1.4x", lies outside the name's range).
+        None => match names::stated_millimetres(&model.id) {
+            Some([a, b])
+                if a > 0. && b >= a && (!lo.is_finite() || (lo >= a * 0.97 && hi <= b * 1.03)) =>
+            {
+                [a, b]
             }
-        }
+            _ => [lo, hi],
+        },
     };
     if !(c.focal[0].is_finite() && c.focal[0] > 0. && c.focal[1] >= c.focal[0]) {
         // Neither declared nor calibrated: a lens listed for its name only.

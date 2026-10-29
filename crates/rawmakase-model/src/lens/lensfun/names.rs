@@ -153,7 +153,13 @@ pub struct Stated {
 /// The focal range and widest aperture `name` states: "70-200mm f/2.8", "18-55
 /// 3.5-5.6", "50 f2", "F1.8", "1:2/35", "2.8-3.5/25-45".
 pub fn stated(name: &str) -> Stated {
-    let lower = name.to_lowercase();
+    // Any dash between numbers is a range ("35–80mm").
+    let lower = name.to_lowercase().replace(
+        [
+            '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2212}',
+        ],
+        "-",
+    );
     let mut s = Stated::default();
     // A number or a range of two: (first, last, byte range).
     let bytes = lower.as_bytes();
@@ -289,4 +295,13 @@ pub fn same_text(a: &str, b: &str) -> bool {
             .to_lowercase()
     };
     norm(a) == norm(b)
+}
+
+/// The focal range `name` states in millimetres ("70-200mm", "35–80mm"), as a range
+/// read before any other number; `None` for a name that says no "mm" (a compact's
+/// model number).
+pub fn stated_millimetres(name: &str) -> Option<[f32; 2]> {
+    let s = stated(name);
+    let lower = name.to_lowercase();
+    s.focal.filter(|_| lower.contains("mm"))
 }

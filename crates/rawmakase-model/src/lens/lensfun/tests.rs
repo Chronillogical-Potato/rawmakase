@@ -45,6 +45,12 @@ const DB: &str = r#"<!DOCTYPE lensdatabase SYSTEM "lensfun-database.dtd">
     <calibration><distortion model="poly3" focal="75" k1="0.01"/><distortion model="poly3" focal="210" k1="0.02"/></calibration></lens>
   <lens><maker>Test</maker><model>Test Zoom 24-70mm f/2.8</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
     <calibration><distortion model="poly3" focal="35" k1="0.01"/></calibration></lens>
+  <lens><maker>Fujifilm</maker><model>XF70-300mmF4-5.6 R LM OIS WR + 1.4x</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
+    <calibration><distortion model="poly3" focal="98" k1="0.01"/><distortion model="poly3" focal="420" k1="0.02"/></calibration></lens>
+  <lens><maker>Sigma</maker><model>Sigma 35–80mm f/4–5.6 DL-II AF</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
+    <calibration><distortion model="poly3" focal="35" k1="0.01"/><distortion model="poly3" focal="80" k1="0.02"/></calibration></lens>
+  <lens><maker>Sony</maker><model>DSC-RX100 II</model><mount>sonyRX100</mount><cropfactor>2.7</cropfactor>
+    <calibration><distortion model="poly3" focal="10.4" k1="0.01"/><distortion model="poly3" focal="37.1" k1="0.02"/></calibration></lens>
   <lens><maker>Test</maker><model>Test 35mm f/2 ACM</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
     <calibration><distortion model="acm" focal="35" k1="0.01"/></calibration></lens>
 </lensdatabase>"#;
@@ -604,4 +610,24 @@ fn a_35mm_equivalent_of_the_sensor_leaves_a_readout_s_crop() {
         "{:?}",
         found.crop
     );
+}
+
+/// Only a focal range a name states in millimetres, and that its calibration fits,
+/// is the lens's: not a compact's model number, nor a converter's bare range, and
+/// an en dash is a range too.
+#[test]
+fn only_a_stated_range_that_fits_the_calibration_counts() {
+    let db = db();
+    let focal = |name: &str| {
+        db.lenses
+            .iter()
+            .find(|l| l.model.id == name)
+            .unwrap()
+            .calibration
+            .focal
+    };
+    assert_eq!(focal("DSC-RX100 II"), [10.4, 37.1]);
+    assert_eq!(focal("PowerShot G12"), [6.1, 30.5]);
+    assert_eq!(focal("XF70-300mmF4-5.6 R LM OIS WR + 1.4x"), [98., 420.]);
+    assert_eq!(focal("Sigma 35–80mm f/4–5.6 DL-II AF"), [35., 80.]);
 }
