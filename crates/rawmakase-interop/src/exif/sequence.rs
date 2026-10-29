@@ -15,7 +15,9 @@
 //!
 //! A DNG converted by Adobe keeps the camera's maker note in its
 //! DNGPrivateData ("Adobe", then a "MakN" block with the note's byte order
-//! and where it was in its file). A CR3 keeps it in its `CMT3` box.
+//! and where it was in its file), or, converted from a Panasonic RW2, the
+//! RW2's first directory in a "Pano" block, whose JpgFromRaw holds it. A CR3
+//! keeps it in its `CMT3` box.
 //! Older Sony bodies (DSLR-A, NEX, SLT, some RX) write no SequenceNumber and
 //! keep their drive mode in model-specific blocks; they are not read.
 use super::{
@@ -68,7 +70,9 @@ pub fn sequence(path: &Path) -> Option<Sequence> {
         return in_cr3(path);
     }
     match open_tiff(path)? {
-        Source::File(t) => sequence_of(t).or_else(|| in_jpg_from_raw(path)),
+        Source::File(t) => sequence_of(t)
+            .or_else(|| in_jpg_from_raw(path))
+            .or_else(|| in_adobe_pano(path)),
         Source::Memory(t) => sequence_of(t),
     }
 }
@@ -91,10 +95,67 @@ fn in_jpg_from_raw(path: &Path) -> Option<Sequence> {
     let mut t = Tiff::open(File::open(path).ok()?, 0)?;
     let main = t.ifd(t.first)?;
     let e = main.get(&JPG_FROM_RAW)?;
-    let jpeg = t.u32(&e.value) as u64;
-    let (at, len) = exif_in_jpeg(&mut File::open(path).ok()?, jpeg, e.count as usize)?;
-    sequence_of(Tiff::open_within(File::open(path).ok()?, jpeg + at, len)?)
+    in_jpeg(path, t.u32(&e.value) as u64, e.count as u64)
 }
+
+/// [`sequence`] of the EXIF of the JPEG of `len` bytes `at` the start of
+/// the file at `path`; none when its EXIF segment says it runs past them.
+fn in_jpeg(path: &Path, at: u64, len: u64) -> Option<Sequence> {
+    let (exif, exif_len) =
+        exif_in_jpeg(&mut File::open(path).ok()?, at, usize::try_from(len).ok()?)?;
+    if exif.checked_add(exif_len)? > len {
+        return None;
+    }
+    sequence_of(Tiff::open_within(
+        File::open(path).ok()?,
+        at + exif,
+        exif_len,
+    )?)
+}
+
+/// [`sequence`] of a DNG Adobe converted from a Panasonic RW2, which keeps
+/// the RW2's first directory in a "Pano" block of its private data: its byte
+/// order, a big-endian count, then entries of a big-endian tag, type and
+/// count, each followed by its value in that byte order. Its JpgFromRaw
+/// holds the camera's EXIF, as in the RW2.
+fn in_adobe_pano(path: &Path) -> Option<Sequence> {
+    let mut t = Tiff::open(File::open(path).ok()?, 0)?;
+    let main = t.ifd(t.first)?;
+    let (start, size) = dng_block(&mut t, main.get(&DNG_PRIVATE_DATA)?, b"Pano")?;
+    let end = start + size;
+    let head = t.bytes(start, 4)?;
+    if !matches!(&head[..2], b"II" | b"MM") {
+        return None;
+    }
+    let count = u16::from_be_bytes([head[2], head[3]]);
+    let mut at = start + 4;
+    for _ in 0..count.min(MOST_PANO_ENTRIES) {
+        if at.checked_add(8)? > end {
+            return None;
+        }
+        let e = t.bytes(at, 8)?;
+        let tag = u16::from_be_bytes([e[0], e[1]]);
+        let entry = Entry {
+            kind: u16::from_be_bytes([e[2], e[3]]),
+            count: u32::from_be_bytes(e[4..8].try_into().ok()?),
+            value: [0; 4],
+        };
+        let len = (entry.count as u64).checked_mul(entry.type_size()? as u64)?;
+        let value = at + 8;
+        if value.checked_add(len)? > end {
+            return None;
+        }
+        if tag == JPG_FROM_RAW {
+            return in_jpeg(path, value, len);
+        }
+        at = value + len;
+    }
+    None
+}
+
+/// How many entries of a "Pano" block are looked at for its JpgFromRaw: an
+/// RW2's first directory has some fifty.
+const MOST_PANO_ENTRIES: u16 = 256;
 
 /// A Panasonic RW2's preview JPEG, with the camera's whole EXIF.
 const JPG_FROM_RAW: u16 = 0x002e;
@@ -162,12 +223,21 @@ fn sequence_of<R: Read + Seek>(mut t: Tiff<R>) -> Option<Sequence> {
 }
 
 /// Where in `t` the maker note an Adobe DNG keeps in its private data `e`
-/// is, how long it is, and where it was in the file it came from: the
-/// private data is "Adobe\0", then blocks of a four-letter kind and a
-/// big-endian length, each padded to an even length (at most
-/// [`MOST_DNG_BLOCKS`] are looked at); a "MakN" block holds the note's byte order, its
-/// big-endian offset in its original file, then the note.
+/// is, how long it is, and where it was in the file it came from: a "MakN"
+/// block holds the note's byte order, its big-endian offset in its original
+/// file, then the note.
 fn in_dng_private_data<R: Read + Seek>(t: &mut Tiff<R>, e: &Entry) -> Option<(u64, u64, u64)> {
+    let (body, size) = dng_block(t, e, b"MakN")?;
+    let head = t.bytes(body, 6)?;
+    let origin = u32::from_be_bytes(head[2..6].try_into().ok()?) as u64;
+    Some((body + 6, size.checked_sub(6)?, origin))
+}
+
+/// Where in `t` the body of the first `kind` block of an Adobe DNG's private
+/// data `e` is, and how long: the private data is "Adobe\0", then blocks of
+/// a four-letter kind and a big-endian length, each padded to an even length
+/// (at most [`MOST_DNG_BLOCKS`] are looked at).
+fn dng_block<R: Read + Seek>(t: &mut Tiff<R>, e: &Entry, kind: &[u8; 4]) -> Option<(u64, u64)> {
     let len = e.count as u64;
     let start = if len > 4 {
         t.u32(&e.value) as u64
@@ -189,18 +259,16 @@ fn in_dng_private_data<R: Read + Seek>(t: &mut Tiff<R>, e: &Entry) -> Option<(u6
         if body.checked_add(size)? > end {
             return None;
         }
-        if &header[..4] == b"MakN" {
-            let head = t.bytes(body, 6)?;
-            let origin = u32::from_be_bytes(head[2..6].try_into().ok()?) as u64;
-            return Some((body + 6, size.checked_sub(6)?, origin));
+        if header[..4] == kind[..] {
+            return Some((body, size));
         }
         at = body + size + (size & 1);
     }
     None
 }
 
-/// How many blocks of a DNG's private data are looked at for "MakN": Adobe
-/// writes a few.
+/// How many blocks of a DNG's private data are looked at: Adobe writes a
+/// few.
 const MOST_DNG_BLOCKS: usize = 64;
 
 /// [`sequence`] of a CR3: make and model in the TIFF in its `CMT1` box, the
@@ -1120,6 +1188,58 @@ mod tests {
             vec![],
         );
         assert_eq!(read_mark(&many), None);
+    }
+
+    #[test]
+    fn a_panasonic_dngs_note_is_read_from_the_jpeg_in_its_pano_block() {
+        let mut note = b"Panasonic\0\0\0".to_vec();
+        note.extend(note_ifd(true, &[(0x002b, 4, 1, 3)], &[]));
+        let preview = jpeg(&tiff(true, "Panasonic", "DC-S1", "9", &note));
+        // The RW2's first directory: big-endian entries, each value after
+        // its entry in the block's byte order.
+        let pano = |count: u16, preview: &[u8]| {
+            let mut p = b"II".to_vec();
+            p.extend(count.to_be_bytes());
+            p.extend(0x0002u16.to_be_bytes());
+            p.extend(3u16.to_be_bytes());
+            p.extend(1u32.to_be_bytes());
+            p.extend(6000u16.to_le_bytes());
+            p.extend(0x002eu16.to_be_bytes());
+            p.extend(7u16.to_be_bytes());
+            p.extend((preview.len() as u32).to_be_bytes());
+            p.extend(preview);
+            p
+        };
+        let dng = |pano: Vec<u8>| {
+            let mut private = b"Adobe\0Pano".to_vec();
+            private.extend((pano.len() as u32).to_be_bytes());
+            private.extend(&pano);
+            file(
+                true,
+                vec![
+                    ascii(0x010f, "Panasonic"),
+                    entry(0xc634, 1, private.len() as u32, move |_| private.clone()),
+                ],
+                vec![],
+            )
+        };
+        let read = read(&dng(pano(2, &preview)), "a.dng").unwrap();
+        assert_eq!(read.mark, Mark::Frame(3));
+        assert_eq!(read.camera, "Panasonic\nDC-S1\n9");
+        // A preview said to run past the block, or entries that aren't there.
+        let mut cut = pano(2, &preview);
+        cut.truncate(cut.len() - 10);
+        assert_eq!(read_mark(&dng(cut)), None);
+        // A preview said to end inside its EXIF segment: what follows the
+        // block is not read as its EXIF.
+        let mut short = pano(2, &preview);
+        let at = short.len() - preview.len() - 4;
+        short[at..at + 4].copy_from_slice(&12u32.to_be_bytes());
+        assert_eq!(read_mark(&dng(short)), None);
+        let mut many = pano(2, &preview);
+        many[2..4].copy_from_slice(&3u16.to_be_bytes());
+        many.truncate(18);
+        assert_eq!(read_mark(&dng(many)), None);
     }
 
     fn read_mark(file: &[u8]) -> Option<Mark> {
