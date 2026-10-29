@@ -317,16 +317,24 @@ fn said(e: &windows::core::Error) -> String {
     }
 }
 
-/// Whether the shell's `item` is the file at `path`: the same file once
-/// both paths are resolved by the file system.
+/// Whether the shell's `item` is the entry at `path`, each read without
+/// following a link it ends in: the same file object, under the same name
+/// in the same folder. A link or another hard link of the file, where the
+/// shell parsed the path otherwise, is a different entry: the shell would
+/// recycle it and leave `path`.
 fn names(item: &IShellItem, path: &Path) -> windows::core::Result<bool> {
     let named = file_path(item)?;
-    Ok(
-        match (std::fs::canonicalize(path), std::fs::canonicalize(&named)) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => false,
-        },
-    )
+    let same = |a: &Path, b: &Path| match (fsops::entry(a), fsops::entry(b)) {
+        (Ok(a), Ok(b)) => a.id == b.id && a.kind == b.kind,
+        _ => false,
+    };
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    Ok(match (named.parent(), path.parent()) {
+        (Some(a), Some(b)) => {
+            same(&named, path) && same(a, b) && name(&named).is_some() && name(&named) == name(path)
+        }
+        _ => false,
+    })
 }
 
 /// Where `item` is on disk.
@@ -387,6 +395,44 @@ mod tests {
         );
         assert_eq!(std::fs::read(spaced.join("a.jpg")).unwrap(), b"spaced");
         assert_eq!(std::fs::read(other.join("a.jpg")).unwrap(), b"other");
+    }
+
+    /// Where the shell names `album\a.jpg` for `album \a.jpg`, a link or a
+    /// hard link there to the photo is the same file once followed, but not
+    /// the same entry: the shell would recycle it and leave the photo.
+    #[test]
+    fn a_link_to_the_file_where_the_shell_would_look_is_refused() {
+        type Link = fn(&std::path::Path, &std::path::Path) -> std::io::Result<()>;
+        let links: [(&str, Link); 2] = [
+            ("symlink", |to, at| {
+                std::os::windows::fs::symlink_file(to, at)
+            }),
+            ("hard link", |to, at| std::fs::hard_link(to, at)),
+        ];
+        for (kind, link) in links {
+            let dir = tempfile::tempdir().unwrap();
+            let canonical = dir.path().canonicalize().unwrap();
+            let (spaced, other) = (canonical.join("album "), canonical.join("album"));
+            std::fs::create_dir(&spaced).unwrap();
+            std::fs::create_dir(&other).unwrap();
+            let photo = spaced.join("a.jpg");
+            std::fs::write(&photo, b"photo").unwrap();
+            // Making a symlink takes a privilege (or Developer Mode).
+            if let Err(e) = link(&photo, &other.join("a.jpg")) {
+                println!("no {kind}: {e}");
+                continue;
+            }
+            let got = super::trash(&photo);
+            assert!(
+                matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+                "{kind}: {got:?}"
+            );
+            assert_eq!(std::fs::read(&photo).unwrap(), b"photo", "{kind}");
+            assert!(
+                std::fs::symlink_metadata(other.join("a.jpg")).is_ok(),
+                "{kind}"
+            );
+        }
     }
 
     #[test]
