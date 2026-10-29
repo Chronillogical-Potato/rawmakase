@@ -72,8 +72,10 @@ fn an_update_publishes_a_new_version_beside_the_old() -> Result<()> {
     // Old enough, it goes.
     // Out of use long enough (the manifest naming another version that old), it goes.
     for name in ["1793180205", MANIFEST] {
-        std::fs::File::open(dir.path().join(name))?
-            .set_modified(std::time::SystemTime::now() - KEEP_OLD * 2)?;
+        set_time(
+            &dir.path().join(name),
+            std::time::SystemTime::now() - KEEP_OLD * 2,
+        )?;
     }
     install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
     assert_eq!(listing(dir.path()), ["1800000000", "installed.json"]);
@@ -169,7 +171,7 @@ fn removal_takes_every_version_and_old_staging() -> Result<()> {
     install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
     let staging = dir.path().join(".staging-1-1");
     std::fs::create_dir(&staging)?;
-    std::fs::File::open(&staging)?.set_modified(std::time::SystemTime::now() - KEEP_STAGING * 2)?;
+    set_time(&staging, std::time::SystemTime::now() - KEEP_STAGING * 2)?;
     let recent = dir.path().join(".staging-2-2");
     std::fs::create_dir(&recent)?;
     assert!(remove(dir.path(), &progress)?);
@@ -229,8 +231,10 @@ fn a_version_just_replaced_stays_for_its_readers() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let progress = Progress::default();
     install(dir.path(), &archive("good.tar.bz2"), &progress)?;
-    std::fs::File::open(dir.path().join("1793180205"))?
-        .set_modified(std::time::SystemTime::now() - KEEP_OLD * 2)?;
+    set_time(
+        &dir.path().join("1793180205"),
+        std::time::SystemTime::now() - KEEP_OLD * 2,
+    )?;
     install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
     install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
     assert_eq!(
@@ -238,4 +242,21 @@ fn a_version_just_replaced_stays_for_its_readers() -> Result<()> {
         ["1793180205", "1800000000", "installed.json"]
     );
     Ok(())
+}
+
+/// Sets file or folder `path`'s modification time. Windows needs a handle opened to
+/// write attributes, and a folder's opened with backup semantics.
+fn set_time(path: &Path, when: std::time::SystemTime) -> Result<()> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        // FILE_WRITE_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS.
+        std::fs::OpenOptions::new()
+            .access_mode(0x100)
+            .custom_flags(0x0200_0000)
+            .open(path)?
+    };
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(path)?;
+    Ok(file.set_modified(when)?)
 }
