@@ -1,11 +1,14 @@
 //! What adding a folder leaves out, read from the photos' files in the
 //! background and kept in the catalog: capture times, so the photos sort as
-//! they were taken, and photo info (camera, lens, exposure, size). Photos
-//! imported from Lightroom already have both. Checksums are read beside them
-//! (see `checksums`).
+//! they were taken, and photo info (camera, lens, exposure, size), with
+//! where the photo falls in its camera's sequences, for Auto-Stack. Photos
+//! imported from Lightroom already have the first two; Auto-Stack reads
+//! their sequences when it needs them. Checksums are read beside them (see
+//! `checksums`).
 use super::CatalogSession;
 use super::background::{Reader, can_read};
-use crate::catalog::PhotoId;
+use crate::catalog::{PhotoId, SavedSequence};
+use crate::exif::Sequence;
 use crate::metadata::PhotoInfo;
 
 use std::collections::{HashMap, HashSet};
@@ -17,7 +20,7 @@ pub(super) struct Backfill {
     capture: Option<Reader<CaptureRead>>,
     /// Photos the capture-time backfill tried since the last online check.
     capture_tried: HashSet<PhotoId>,
-    info: Option<Reader<Option<Option<PhotoInfo>>>>,
+    info: Option<Reader<Option<InfoRead>>>,
     /// Photo info was asked for while it was being read.
     info_again: bool,
     pub(super) checksums: super::checksums::Checksums,
@@ -151,7 +154,11 @@ impl CatalogSession {
             .map(|p| (p.id, p.path.clone()))
             .collect();
         if !todo.is_empty() {
-            self.backfill.info = Some(Reader::start(todo, self.wake.clone(), read_info));
+            self.backfill.info = Some(Reader::start(
+                todo,
+                self.wake.clone(),
+                read_info_and_sequence,
+            ));
         }
     }
     /// Whether photo info is being read.
@@ -170,12 +177,21 @@ impl CatalogSession {
             self.backfill.info = None;
             out.start_again = std::mem::take(&mut self.backfill.info_again);
         }
+        let mut sequences = Vec::new();
         let infos: Vec<_> = read
             .into_iter()
-            .filter_map(|(id, info)| Some((id, info?)))
+            .filter_map(|(id, read)| {
+                let InfoRead { info, sequence } = read?;
+                sequences.extend(sequence.map(|sequence| (id, sequence)));
+                Some((id, info))
+            })
             .collect();
         if !infos.is_empty() {
-            match self.catalog.fill_photo_info(&infos) {
+            let saved = self
+                .catalog
+                .fill_photo_info(&infos)
+                .and_then(|()| self.catalog.save_sequences(&sequences));
+            match saved {
                 Ok(()) => out.saved = infos.len(),
                 Err(e) => out.error = Some(e),
             }
@@ -227,6 +243,39 @@ fn read_capture(path: &Path) -> CaptureRead {
 /// (the RAW decoders tell CR3, CRW, MRW and X3F files by their first bytes).
 pub(crate) fn capture_time(path: &Path) -> Option<String> {
     crate::exif::capture_time(path).or_else(|| crate::raw::capture_time(path))
+}
+
+/// What the photo-info backfill reads of a file.
+struct InfoRead {
+    info: Option<PhotoInfo>,
+    /// `None` when it could not be read now; read when Auto-Stack wants it.
+    sequence: Option<SavedSequence>,
+}
+
+/// The file's info and sequence, read in one pass over new photos; `None`
+/// when the file cannot be read now.
+fn read_info_and_sequence(path: &Path) -> Option<InfoRead> {
+    let info = read_info(path)?;
+    Some(InfoRead {
+        info,
+        sequence: read_sequence(path, crate::exif::sequence),
+    })
+}
+
+/// What the file at `path` says of its sequence, as `read` reads it, with
+/// the file it was read from; `None` when the file can't be read now (its
+/// contents included: a file without permission keeps its stamp once
+/// allowed) or changed while it was read, so nothing is kept of it.
+pub(crate) fn read_sequence(
+    path: &Path,
+    read: fn(&Path) -> Option<Sequence>,
+) -> Option<SavedSequence> {
+    let stamp = crate::storage::Stamp::read(path).ok()?;
+    if !can_read(path) {
+        return None;
+    }
+    let sequence = read(path);
+    (crate::storage::Stamp::read(path).ok()? == stamp).then_some(SavedSequence { stamp, sequence })
 }
 
 /// The file's info: `None` when it cannot be read now, `Some(None)` when it

@@ -42,6 +42,7 @@ mod mask_assets;
 mod models;
 mod naming;
 // XMP metadata sidecars; `legacy_sidecar` is the old `*.rawmakase.json` edits.
+mod sequences;
 mod sidecar;
 mod snapshots;
 mod stacks;
@@ -61,9 +62,13 @@ pub use lightroom::HistoryStep;
 pub use location::CatalogLocation;
 pub use locations::{Override, Overrides, RootLocations};
 pub use models::{Collection, CollectionKind, Folder, Photo, QUICK_COLLECTION};
+pub use sequences::SavedSequence;
 pub use sidecar::{RawXmpReader, SidecarReport, read_file as read_file_metadata, sidecars};
 pub use snapshots::{Snapshot, SnapshotSettings};
-pub use stacks::{SavedStack, StackChange, StackPlace, StackState, StacksChanged, auto_stacks};
+pub use stacks::{
+    BurstCandidate, SavedStack, StackChange, StackPlace, StackState, StacksChanged, auto_stacks,
+    auto_stacks_with_bursts,
+};
 impl Catalog {
     pub fn create(path: &Path) -> Result<Self> {
         ensure!(!path.exists(), "Catalog already exists: {}", path.display());
@@ -402,6 +407,8 @@ mod portable_sql_tests;
 pub mod preview_cache;
 #[cfg(test)]
 mod private_tests;
+#[cfg(test)]
+mod sequences_tests;
 #[cfg(test)]
 mod sql_scan;
 #[cfg(test)]

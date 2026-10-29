@@ -12,7 +12,9 @@ use crate::catalog::{
 use anyhow::Result;
 /// A file's photo info as the catalog reads it for photos added from
 /// folders; export names read a photo's without a catalog the same way.
-pub(crate) use backfill::{capture_time as file_capture_time, read_info as file_photo_info};
+pub(crate) use backfill::{
+    capture_time as file_capture_time, read_info as file_photo_info, read_sequence as file_sequence,
+};
 
 /// What photos added from folders get where their files have none: the
 /// Preferences' Creator and Copyright, giving way to the camera's own,
@@ -335,6 +337,12 @@ mod tests {
         }
         let info = session.catalog.photo_info(b)?.expect("read from the file");
         assert_eq!(info.dimensions, Some((6, 4)));
+        // Its sequence is read in the same pass, so Auto-Stack opens no
+        // file of it: it says nothing. a's info is left for later (no image
+        // to size), and so is its sequence.
+        let sequences = session.catalog.sequences()?;
+        assert_eq!(sequences.keys().collect::<Vec<_>>(), [&b]);
+        assert_eq!(sequences[&b].sequence, None);
         session.reload()?;
         let captured = |id| {
             session

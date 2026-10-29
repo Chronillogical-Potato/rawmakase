@@ -301,6 +301,213 @@ fn auto_stack_joins_runs_of_photos_less_than_the_interval_apart() {
     );
 }
 
+mod bursts {
+    use super::super::{BurstCandidate, FolderId, PhotoId, auto_stacks_with_bursts};
+    use rawmakase_interop::exif::{Mark, Sequence};
+
+    fn sequence(camera: &str, mark: Mark) -> Sequence {
+        Sequence {
+            camera: camera.into(),
+            mark,
+        }
+    }
+    fn frame(camera: &str, n: u32) -> Sequence {
+        sequence(camera, Mark::Frame(n))
+    }
+
+    /// Photos of folder 1 in this order, the `n`th taken `at` seconds after
+    /// 10:00, as RAWs named in that order.
+    fn plan(photos: &[(f64, Option<Sequence>)], seconds: f64) -> Vec<Vec<u64>> {
+        let times: Vec<String> = photos
+            .iter()
+            .map(|(at, _)| {
+                let at = *at;
+                let whole = at.floor() as u64;
+                format!(
+                    "2024-03-02T{:02}:{:02}:{:02}.{:03}",
+                    10 + whole / 3600,
+                    whole / 60 % 60,
+                    whole % 60,
+                    ((at - at.floor()) * 1000.).round() as u64
+                )
+            })
+            .collect();
+        let names: Vec<String> = (0..photos.len())
+            .map(|i| format!("DSC{i:05}.ARW"))
+            .collect();
+        let candidates: Vec<BurstCandidate<'_>> = photos
+            .iter()
+            .enumerate()
+            .map(|(i, (_, sequence))| BurstCandidate {
+                id: PhotoId(i as i64 + 1),
+                folder: FolderId(1),
+                captured: &times[i],
+                filename: &names[i],
+                format: "ARW",
+                sequence: sequence.as_ref(),
+            })
+            .collect();
+        auto_stacks_with_bursts(&candidates, seconds)
+            .into_iter()
+            .map(|s| s.into_iter().map(|id| id.0 as u64).collect())
+            .collect()
+    }
+
+    #[test]
+    fn two_bursts_inside_the_interval_stay_apart() {
+        let photos = [
+            (0.0, Some(frame("A", 1))),
+            (0.1, Some(frame("A", 2))),
+            (0.2, Some(frame("A", 3))),
+            (0.5, Some(frame("A", 1))),
+            (0.6, Some(frame("A", 2))),
+        ];
+        assert_eq!(plan(&photos, 60.), [vec![1, 2, 3], vec![4, 5]]);
+        // A press of one frame is no stack.
+        let single = [(0.0, Some(frame("A", 1))), (0.5, Some(frame("A", 1)))];
+        assert!(plan(&single, 60.).is_empty());
+    }
+
+    #[test]
+    fn a_slow_burst_with_culled_frames_stays_one_stack() {
+        let photos = [
+            (0.0, Some(frame("A", 1))),
+            (35.0, Some(frame("A", 2))),
+            // 3 and 4 deleted.
+            (90.0, Some(frame("A", 5))),
+        ];
+        assert_eq!(plan(&photos, 1.), [vec![1, 2, 3]]);
+    }
+
+    #[test]
+    fn frames_more_than_a_minute_apart_are_two_stacks_whatever_their_numbers() {
+        let photos = [
+            (0.0, Some(frame("A", 1))),
+            (0.1, Some(frame("A", 2))),
+            // The next burst's first frames deleted, 100 minutes later.
+            (6000.0, Some(frame("A", 102))),
+            (6000.1, Some(frame("A", 103))),
+        ];
+        assert_eq!(plan(&photos, 3600.), [vec![1, 2], vec![3, 4]]);
+        // Within the minute, frame numbers can't tell them apart: the
+        // heuristic's known limit.
+        let close = [
+            (0.0, Some(frame("A", 1))),
+            (0.1, Some(frame("A", 2))),
+            (10.0, Some(frame("A", 3))),
+        ];
+        assert_eq!(plan(&close, 0.), [vec![1, 2, 3]]);
+    }
+
+    #[test]
+    fn a_burst_whose_first_frames_were_deleted_starts_its_own_stack_later() {
+        let photos = [
+            (0.0, Some(frame("A", 1))),
+            (0.1, Some(frame("A", 2))),
+            // The next burst's frames 1 and 2 deleted; five minutes later.
+            (300.0, Some(frame("A", 3))),
+            (300.1, Some(frame("A", 4))),
+        ];
+        assert_eq!(plan(&photos, 600.), [vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn photos_of_one_second_follow_their_file_names_not_their_ids() {
+        // Two presses in one second, without subseconds: 1 2 3, then 1 2,
+        // listed in the catalog in another order.
+        let a = [frame("A", 1), frame("A", 2), frame("A", 3)];
+        let b = [frame("A", 1), frame("A", 2)];
+        let names = ["DSC1.ARW", "DSC2.ARW", "DSC3.ARW", "DSC4.ARW", "DSC5.ARW"];
+        let photo = |id, name: usize, s| BurstCandidate {
+            id: PhotoId(id),
+            folder: FolderId(1),
+            captured: "2024-03-02T10:00:00",
+            filename: names[name],
+            format: "ARW",
+            sequence: Some(s),
+        };
+        let photos = [
+            photo(5, 0, &a[0]),
+            photo(3, 3, &b[0]),
+            photo(1, 1, &a[1]),
+            photo(4, 4, &b[1]),
+            photo(2, 2, &a[2]),
+        ];
+        let stacks = auto_stacks_with_bursts(&photos, 0.);
+        assert_eq!(
+            stacks,
+            [
+                vec![PhotoId(5), PhotoId(1), PhotoId(2)],
+                vec![PhotoId(3), PhotoId(4)]
+            ]
+        );
+    }
+
+    #[test]
+    fn two_bodies_and_burst_ids_never_mix() {
+        let photos = [
+            (0.0, Some(frame("A", 1))),
+            (0.1, Some(frame("B", 1))),
+            (0.2, Some(frame("A", 2))),
+            (0.3, Some(frame("B", 2))),
+            (0.4, Some(sequence("iPhone", Mark::Burst("x".into())))),
+            (0.5, Some(sequence("iPhone", Mark::Burst("y".into())))),
+            (90.0, Some(sequence("iPhone", Mark::Burst("x".into())))),
+        ];
+        assert_eq!(plan(&photos, 0.), [vec![1, 3], vec![2, 4], vec![5, 7]]);
+    }
+
+    #[test]
+    fn single_shots_are_left_alone_and_unknown_photos_go_by_time_between_them() {
+        let photos = [
+            (0.0, None),
+            (1.0, None),
+            (2.0, Some(sequence("A", Mark::Single))),
+            (3.0, None),
+            (4.0, Some(sequence("A", Mark::Single))),
+            (5.0, Some(frame("A", 1))),
+            (6.0, None),
+            (7.0, None),
+        ];
+        assert_eq!(plan(&photos, 10.), [vec![1, 2], vec![7, 8]]);
+        // Unknown photos alone are stacked as Auto-Stack by Capture Time does.
+        let unknown = [(0.0, None), (5.0, None), (20.0, None), (21.0, None)];
+        assert_eq!(plan(&unknown, 10.), [vec![1, 2], vec![3, 4]]);
+    }
+
+    #[test]
+    fn a_raw_and_its_jpeg_make_two_runs_and_folders_stay_apart() {
+        let (a1, a2) = (frame("A", 1), frame("A", 2));
+        let times = ["2024-03-02T10:00:00.000", "2024-03-02T10:00:00.100"];
+        let photo = |id, folder, at: usize, format, s| BurstCandidate {
+            id: PhotoId(id),
+            folder: FolderId(folder),
+            captured: times[at],
+            filename: "DSC1.ARW",
+            format,
+            sequence: Some(s),
+        };
+        let photos = [
+            photo(1, 1, 0, "ARW", &a1),
+            photo(2, 1, 0, "JPG", &a1),
+            photo(3, 1, 1, "ARW", &a2),
+            photo(4, 1, 1, "JPG", &a2),
+            photo(5, 2, 1, "ARW", &a2),
+        ];
+        let stacks = auto_stacks_with_bursts(&photos, 60.);
+        assert_eq!(
+            stacks,
+            [vec![PhotoId(1), PhotoId(3)], vec![PhotoId(2), PhotoId(4)]]
+        );
+        // No time: left alone.
+        let no_time = [BurstCandidate {
+            captured: "",
+            ..photos[4]
+        }];
+        assert!(auto_stacks_with_bursts(&[photos[3], no_time[0]], 60.).is_empty());
+    }
+}
+
 #[test]
 fn several_stacks_are_made_all_or_none() -> Result<()> {
     let (_dir, mut cat, ids, _) = catalog(&["a.ARW", "b.ARW", "c.ARW", "d.ARW"])?;

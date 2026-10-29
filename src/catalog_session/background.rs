@@ -24,7 +24,11 @@ pub(crate) struct Reader<T> {
 }
 impl<T: Send + 'static> Reader<T> {
     /// Reads `photos` with `read` on a thread of its own.
-    pub(crate) fn start(photos: Vec<(PhotoId, PathBuf)>, wake: Wake, read: fn(&Path) -> T) -> Self {
+    pub(crate) fn start(
+        photos: Vec<(PhotoId, PathBuf)>,
+        wake: Wake,
+        read: impl Fn(&Path) -> T + Send + 'static,
+    ) -> Self {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancelled = cancel.clone();

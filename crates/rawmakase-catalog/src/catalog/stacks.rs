@@ -19,6 +19,7 @@ use super::db::{Reads, Write, sql};
 use super::value::row;
 use super::{Catalog, FolderId, PhotoId, StackId};
 use anyhow::{Result, ensure};
+use rawmakase_interop::exif::{Mark, Sequence};
 use std::collections::{HashMap, HashSet};
 
 /// A photo's place in its stack.
@@ -438,6 +439,103 @@ pub fn auto_stacks(photos: &[(PhotoId, FolderId, &str)], seconds: f64) -> Vec<Ve
     }
     runs.retain(|r| r.len() >= 2);
     runs
+}
+
+/// A photo for Auto-Stack's Group Camera Bursts: [`auto_stacks`]' tuple
+/// and the sequence its camera says it is in, `None` when the camera says
+/// nothing this reads.
+#[derive(Clone, Copy, Debug)]
+pub struct BurstCandidate<'a> {
+    pub id: PhotoId,
+    pub folder: FolderId,
+    /// The capture time as the catalog keeps it.
+    pub captured: &'a str,
+    /// The file name, which orders photos taken in the same second (a
+    /// camera without subseconds shoots several frames a second) as the
+    /// camera counted its files.
+    pub filename: &'a str,
+    /// The file's format ("RAF", "JPG"…): a RAW and the JPEG shot with it
+    /// are numbered alike and make two runs.
+    pub format: &'a str,
+    pub sequence: Option<&'a Sequence>,
+}
+
+/// The longest a frame of a burst may come after the one before it: room
+/// for a long exposure or a full buffer in continuous drive.
+const MOST_SECONDS_BETWEEN_FRAMES: f64 = 60.;
+
+/// Auto-Stack with Group Camera Bursts: a folder's photos of one burst id,
+/// or one run of a camera's frame numbers, become a stack, earliest first,
+/// however long they took. A run goes on while the frames' numbers rise (a
+/// burst's culled frames may be gone), each frame at most
+/// [`MOST_SECONDS_BETWEEN_FRAMES`] after the one before; a number that
+/// doesn't rise starts the next press's run. Frame numbers are no burst's
+/// id: a burst whose first frames were deleted, shot within that time of
+/// the one before, joins it. A photo the camera says is a single shot is left alone. Photos it
+/// says nothing of are stacked by capture time as [`auto_stacks`] does,
+/// except that a photo that the camera says something of comes between
+/// them. Photos without a time that can be read are left alone.
+pub fn auto_stacks_with_bursts(photos: &[BurstCandidate<'_>], seconds: f64) -> Vec<Vec<PhotoId>> {
+    let mut timed: Vec<(f64, &BurstCandidate<'_>)> = photos
+        .iter()
+        .filter_map(|c| Some((capture_seconds(c.captured)?, c)))
+        .collect();
+    timed.sort_by(|(at, a), (bt, b)| {
+        (a.folder.cmp(&b.folder))
+            .then(at.total_cmp(bt))
+            .then(a.filename.cmp(b.filename))
+            .then(a.id.cmp(&b.id))
+    });
+    let mut stacks: Vec<Vec<PhotoId>> = Vec::new();
+    for folder in timed.chunk_by(|(_, a), (_, b)| a.folder == b.folder) {
+        let mut bursts: HashMap<(&str, &str), Vec<PhotoId>> = HashMap::new();
+        // Each camera's and format's run, with its last frame's number and time.
+        let mut runs: HashMap<(&str, &str), (Vec<PhotoId>, u32, f64)> = HashMap::new();
+        let mut by_time: Vec<Vec<PhotoId>> = Vec::new();
+        let mut ended: Vec<Vec<PhotoId>> = Vec::new();
+        // The time of the last photo, when it was one the camera said nothing of.
+        let mut last_unknown: Option<f64> = None;
+        for (at, c) in folder {
+            let Some(sequence) = c.sequence else {
+                match (by_time.last_mut(), last_unknown) {
+                    (Some(run), Some(t)) if at - t < seconds => run.push(c.id),
+                    _ => by_time.push(vec![c.id]),
+                }
+                last_unknown = Some(*at);
+                continue;
+            };
+            last_unknown = None;
+            let camera = sequence.camera.as_str();
+            match &sequence.mark {
+                Mark::Burst(id) => bursts.entry((camera, id)).or_default().push(c.id),
+                Mark::Frame(n) => {
+                    let run = runs
+                        .entry((camera, c.format))
+                        .or_insert((Vec::new(), 0, *at));
+                    let (photos, last, t) = run;
+                    if !(*n > *last && at - *t <= MOST_SECONDS_BETWEEN_FRAMES) {
+                        ended.push(std::mem::take(photos));
+                    }
+                    photos.push(c.id);
+                    (*last, *t) = (*n, *at);
+                }
+                Mark::Single => {}
+            }
+        }
+        // In the order their first photos were taken.
+        let mut found: Vec<Vec<PhotoId>> = bursts.into_values().collect();
+        found.extend(runs.into_values().map(|(photos, ..)| photos));
+        found.extend(ended.into_iter().chain(by_time));
+        let first: HashMap<PhotoId, usize> = folder
+            .iter()
+            .enumerate()
+            .map(|(i, (_, c))| (c.id, i))
+            .collect();
+        found.sort_by_key(|stack| stack.first().map(|id| first[id]));
+        stacks.extend(found);
+    }
+    stacks.retain(|s| s.len() >= 2);
+    stacks
 }
 
 /// Seconds since an arbitrary epoch of a capture time as the catalog keeps

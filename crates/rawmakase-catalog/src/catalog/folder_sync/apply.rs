@@ -291,9 +291,13 @@ impl Catalog {
                     )?;
                 } else {
                     // Its edit opens only if the file passes the check every
-                    // photo's does; its checksum is read again.
+                    // photo's does; its checksum and sequence are read again.
                     w.execute(
                         sql!("DELETE FROM photo_checksums WHERE photo=?"),
+                        &[&m.photo],
+                    )?;
+                    w.execute(
+                        sql!("DELETE FROM photo_sequences WHERE photo=?"),
                         &[&m.photo],
                     )?;
                 }
