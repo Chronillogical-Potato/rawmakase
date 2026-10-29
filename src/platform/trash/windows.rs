@@ -42,6 +42,7 @@ pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
     if share {
         return Err(TrashError::Unsupported);
     }
+    let path = &for_the_shell(path)?;
     let _com = Com::init()?;
     let seen = recycle(path).map_err(|e| TrashError::Failed(said(&e)))?;
     match seen {
@@ -58,6 +59,30 @@ pub(super) fn trash(path: &Path) -> Result<TrashReceipt, TrashError> {
             "the Recycle Bin didn't say where the file went".into(),
         )),
     }
+}
+
+/// `path` as the shell parses it: without the `\\?\` prefix a catalog
+/// root keeps (it is canonicalised), which the shell refuses as an
+/// incorrect parameter (#744). Only where the plain path names the same
+/// file: one whose name the prefix kept literal (a trailing dot, `CON`)
+/// may name another without it, and fails instead.
+fn for_the_shell(path: &Path) -> Result<PathBuf, TrashError> {
+    let plain = crate::platform::volume::plain(path);
+    if plain == path {
+        return Ok(plain);
+    }
+    let same = match (std::fs::canonicalize(path), std::fs::canonicalize(&plain)) {
+        (Ok(a), Ok(b)) => a == b,
+        (Err(e), _) => return Err(TrashError::Failed(e.to_string())),
+        (_, Err(_)) => false,
+    };
+    if !same {
+        return Err(TrashError::Failed(format!(
+            "the Recycle Bin can't be given “{}” by another name",
+            path.display()
+        )));
+    }
+    Ok(plain)
 }
 
 /// Whether `path` can go to the Recycle Bin, by its drive's type.
@@ -320,6 +345,25 @@ mod tests {
         DRIVE_CDROM, DRIVE_FIXED, DRIVE_NO_ROOT_DIR, DRIVE_RAMDISK, DRIVE_REMOTE, DRIVE_REMOVABLE,
         DRIVE_UNKNOWN,
     };
+
+    /// A name only the `\\?\` prefix keeps (a trailing dot) is not given
+    /// to the shell without it, where it names another file: nothing goes.
+    #[test]
+    fn a_name_the_plain_path_would_change_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let dotted = canonical.join("a.jpg.");
+        let other = canonical.join("a.jpg");
+        std::fs::write(&dotted, b"dotted").unwrap();
+        std::fs::write(&other, b"other").unwrap();
+        let got = super::trash(&dotted);
+        assert!(
+            matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+            "{got:?}"
+        );
+        assert_eq!(std::fs::read(&dotted).unwrap(), b"dotted");
+        assert_eq!(std::fs::read(&other).unwrap(), b"other");
+    }
 
     #[test]
     fn drives_without_a_recycle_bin_say_no() {
