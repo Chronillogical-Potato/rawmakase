@@ -67,6 +67,10 @@ rfd = "0.17.2"
 # The HTTP client behind fastframe-update; rustls with bundled roots needs no
 # system TLS library.
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+# Lensfun's database comes as a .tar.bz2 (lensfun_install): both read in pure Rust,
+# no libbz2; tar without extended attributes, nothing is unpacked to disk by it.
+bzip2-rs = "0.1"
+tar = { version = "0.4", default-features = false }
 # Shared egui app foundation (github.com/crmne/fastframe). Not on crates.io
 # yet: pin a tag and update it deliberately.
 fastframe-update = { git = "https://github.com/crmne/fastframe", tag = "v0.13.0", version = "0.13.0" }

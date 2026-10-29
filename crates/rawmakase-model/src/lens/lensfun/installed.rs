@@ -113,8 +113,15 @@ pub struct Cache {
     cached: Mutex<Option<Seen>>,
 }
 type Stamp = (std::time::SystemTime, u64);
-/// The manifest's stamp when last read, and what it named.
-type Seen = (Option<Stamp>, Option<Arc<Installed>>);
+/// The manifest's stamp when last read, what it named, and when a read failed.
+type Seen = (
+    Option<Stamp>,
+    Option<Arc<Installed>>,
+    Option<std::time::Instant>,
+);
+/// How long a database that could not be read counts as none before it is read
+/// again (an update or removal may have been under way).
+const RETRY: std::time::Duration = std::time::Duration::from_secs(30);
 fn stamp(dir: &Path) -> Option<Stamp> {
     let m = std::fs::metadata(dir.join(MANIFEST)).ok()?;
     Some((m.modified().ok()?, m.len()))
@@ -129,20 +136,22 @@ impl Cache {
     /// none.
     pub fn current(&self, dir: &Path) -> Option<Arc<Installed>> {
         let now = stamp(dir);
-        if let Some((s, installed)) = self.lock().as_ref()
+        if let Some((s, installed, failed)) = self.lock().as_ref()
             && *s == now
+            && failed.is_none_or(|at| at.elapsed() < RETRY)
         {
             return installed.clone();
         }
         // Read without the lock, as `lcp::LibraryCache` does.
-        let installed = now.and_then(|_| match load(dir) {
-            Ok(i) => Some(Arc::new(i)),
-            Err(e) => {
+        let (installed, failed) = match now.map(|_| load(dir)) {
+            None => (None, None),
+            Some(Ok(i)) => (Some(Arc::new(i)), None),
+            Some(Err(e)) => {
                 eprintln!("Lensfun profiles: {e:#}");
-                None
+                (None, Some(std::time::Instant::now()))
             }
-        });
-        *self.lock() = Some((now, installed.clone()));
+        };
+        *self.lock() = Some((now, installed.clone(), failed));
         installed
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Option<Seen>> {
