@@ -128,7 +128,7 @@ pub fn install(dir: &Path, source: &Source, progress: &Progress) -> Result<Insta
     let (archive, expected, url) = match source {
         Source::Lensfun => {
             let version = latest(progress)?;
-            if let Some(m) = current(dir).filter(|m| m.version == version) {
+            if let Some(m) = current(dir).filter(|m| is_current(m.version, version)) {
                 return Ok(Installed::Current(m));
             }
             let archive = fetch(ARCHIVE_URL, MAX_ARCHIVE, progress, true)?;
@@ -174,12 +174,19 @@ pub fn install(dir: &Path, source: &Source, progress: &Progress) -> Result<Insta
     Ok(Installed::New(manifest))
 }
 
+/// Whether a version installed is current against Lensfun's newest: the same, or
+/// newer (installed from a file); an update never goes back.
+fn is_current(installed: i64, latest: i64) -> bool {
+    installed >= latest
+}
+
 /// Removes the installed database. Edits keep their copies of what they use.
 pub fn remove(dir: &Path, progress: &Progress) -> Result<bool> {
     if !dir.exists() {
         return Ok(false);
     }
     let _lock = lock(dir, progress)?;
+    progress.check()?;
     let manifest = dir.join(MANIFEST);
     let was = manifest.exists();
     if was {
@@ -216,8 +223,12 @@ struct Unpacked {
 /// version is its newest file's time, which Lensfun sets to the database's
 /// timestamp; a `timestamp.txt`, where there is one, must agree.
 fn unpack(archive: &[u8], progress: &Progress) -> Result<Unpacked> {
-    let tar = bzip2_rs::DecoderReader::new(archive).take(installed::MAX_BYTES + (1 << 20));
+    let tar = Limited {
+        inner: bzip2_rs::DecoderReader::new(archive),
+        left: installed::MAX_BYTES + (1 << 20),
+    };
     let mut entries = tar::Archive::new(tar);
+    let mut count = 0usize;
     let mut files = Vec::new();
     let mut total = 0u64;
     let mut newest = 0i64;
@@ -225,6 +236,11 @@ fn unpack(archive: &[u8], progress: &Progress) -> Result<Unpacked> {
     for entry in entries.entries().context("Not a tar archive")? {
         progress.check()?;
         let mut entry = entry.context("A damaged tar archive")?;
+        count += 1;
+        ensure!(
+            count <= installed::MAX_FILES,
+            "The archive is larger than a Lensfun database"
+        );
         let header = entry.header();
         let path = entry
             .path()
@@ -266,6 +282,10 @@ fn unpack(archive: &[u8], progress: &Progress) -> Result<Unpacked> {
         newest = newest.max(mtime);
         files.push((name, bytes));
     }
+    // The whole compressed stream, read to its end: a cut-short or padded archive
+    // fails here rather than counting as whole.
+    std::io::copy(&mut entries.into_inner(), &mut std::io::sink())
+        .context("The archive is damaged or larger than a Lensfun database")?;
     ensure!(!files.is_empty(), "The archive holds no database files");
     if let Some(stated) = stated {
         ensure!(
@@ -362,17 +382,36 @@ fn publish(
             return Err(e);
         }
     }
+    // The manifest is written and synced beside its place, and replaces the old one
+    // only if no cancel came meanwhile.
+    let mut staged =
+        tempfile::NamedTempFile::new_in(dir).context("Could not record the installed version")?;
+    serde_json::to_writer_pretty(&mut staged, manifest)?;
+    staged.as_file().sync_all()?;
     progress.check()?;
-    crate::storage::write_atomic(
-        &dir.join(MANIFEST),
-        crate::storage::Replace::Overwrite,
-        |out| {
-            serde_json::to_writer_pretty(&mut *out, manifest)?;
-            Ok(())
-        },
-    )
-    .context("Could not record the installed version")?;
+    staged
+        .persist(dir.join(MANIFEST))
+        .map_err(|e| e.error)
+        .context("Could not record the installed version")?;
+    let _ = crate::storage::sync_dir(dir);
     Ok(())
+}
+
+/// A reader that fails, rather than ends, past its limit: a stream cut there would
+/// otherwise read as a whole, smaller archive.
+struct Limited<R> {
+    inner: R,
+    left: u64,
+}
+impl<R: Read> Read for Limited<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n as u64 > self.left {
+            return Err(std::io::Error::other("larger than a Lensfun database"));
+        }
+        self.left -= n as u64;
+        Ok(n)
+    }
 }
 
 /// A version folder's name: its timestamp.
@@ -382,10 +421,16 @@ fn version_folder(name: &str) -> Option<i64> {
         .filter(|v: &i64| *v > 0 && Manifest::folder(*v) == name)
 }
 
-/// Removes, under the lock, versions no longer named that have had time to be read,
-/// and staging folders older installs left.
+/// Removes, under the lock, versions no longer named that have had time to be read
+/// (out of use since the manifest last changed, that long ago), and staging folders
+/// older installs left.
 fn clean(dir: &Path) {
     let active = installed::manifest(dir).map(|m| m.version);
+    // No manifest: nothing is in use. One dated ahead of the clock is new.
+    let out_of_use = match std::fs::metadata(dir.join(MANIFEST)).and_then(|m| m.modified()) {
+        Err(_) => true,
+        Ok(at) => at.elapsed().is_ok_and(|age| age > KEEP_OLD),
+    };
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -397,8 +442,9 @@ fn clean(dir: &Path) {
             .ok()
             .and_then(|t| t.elapsed().ok())
             .unwrap_or_default();
-        let old_version =
-            version_folder(&name).is_some_and(|v| Some(v) != active) && age > KEEP_OLD;
+        let old_version = version_folder(&name).is_some_and(|v| Some(v) != active)
+            && age > KEEP_OLD
+            && out_of_use;
         let stale = name.starts_with(STAGING) && age > KEEP_STAGING;
         if (old_version || stale) && entry.path().is_dir() {
             let _ = std::fs::remove_dir_all(entry.path());

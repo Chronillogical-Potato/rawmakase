@@ -68,6 +68,13 @@ def main():
     # 40 MB of zeros packs into a few hundred bytes: more than any database.
     write("too-large.tar.bz2", good + [("huge.xml", bytes(40 << 20), OLD, "file")])
     (HERE / "not-bzip2.tar.bz2").write_bytes(b"<lensdatabase/>")
+    # Past the limits by the number of entries, with a damaged file at the end that
+    # a reader stopping at its limit would never see.
+    stamps = [("timestamp.txt", f"{OLD}\n".encode(), OLD, "file")] * 70000
+    write("many-entries.tar.bz2", good + stamps + [("broken.xml", b"<lensdatabase version='2'><lens>", OLD, "file")])
+    # Cut short: the last byte of a whole archive missing.
+    whole = (HERE / "good.tar.bz2").read_bytes()
+    (HERE / "truncated.tar.bz2").write_bytes(whole[:-1])
 
 
 main()

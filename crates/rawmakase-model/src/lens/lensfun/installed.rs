@@ -67,13 +67,27 @@ pub fn manifest(dir: &Path) -> Option<Manifest> {
     serde_json::from_str(&text).ok()
 }
 
-/// Reads the version `dir`'s manifest names.
+/// Reads the version `dir`'s manifest names. An update or removal may replace the
+/// manifest and, later, take away the version it named while it is read: then the
+/// manifest is read again, a few times.
 pub fn load(dir: &Path) -> Result<Installed> {
-    let manifest = manifest(dir).context("Lensfun profiles aren't installed")?;
-    let folder = dir.join(Manifest::folder(manifest.version));
-    let mut db = read_folder(&folder)?;
-    db.timestamp = manifest.version;
-    Ok(Installed { manifest, db })
+    let mut tries = 0;
+    loop {
+        let manifest = manifest(dir).context("Lensfun profiles aren't installed")?;
+        let folder = dir.join(Manifest::folder(manifest.version));
+        match read_folder(&folder) {
+            Ok(mut db) => {
+                db.timestamp = manifest.version;
+                return Ok(Installed { manifest, db });
+            }
+            Err(e) => {
+                tries += 1;
+                if tries >= 3 || self::manifest(dir).as_ref() == Some(&manifest) {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
 
 /// Reads every `.xml` file of a version folder, within the limits.

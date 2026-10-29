@@ -70,8 +70,11 @@ fn an_update_publishes_a_new_version_beside_the_old() -> Result<()> {
     );
     assert_eq!(installed::load(dir.path())?.db.timestamp, NEW);
     // Old enough, it goes.
-    let old = std::fs::File::open(dir.path().join("1793180205"))?;
-    old.set_modified(std::time::SystemTime::now() - KEEP_OLD * 2)?;
+    // Out of use long enough (the manifest naming another version that old), it goes.
+    for name in ["1793180205", MANIFEST] {
+        std::fs::File::open(dir.path().join(name))?
+            .set_modified(std::time::SystemTime::now() - KEEP_OLD * 2)?;
+    }
     install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
     assert_eq!(listing(dir.path()), ["1800000000", "installed.json"]);
     Ok(())
@@ -97,6 +100,8 @@ fn a_bad_archive_leaves_the_installed_version() -> Result<()> {
         ("stamp-differs.tar.bz2", "timestamp.txt"),
         ("too-large.tar.bz2", "larger"),
         ("not-bzip2.tar.bz2", ""),
+        ("many-entries.tar.bz2", "larger"),
+        ("truncated.tar.bz2", ""),
     ] {
         let error = install(dir.path(), &archive(name), &progress).unwrap_err();
         assert!(format!("{error:#}").contains(why), "{name}: {error:#}");
@@ -195,5 +200,42 @@ fn lensfun_s_own_archive_installs() -> Result<()> {
     };
     eprintln!("{m:?}");
     assert!(m.lenses > 1000 && m.cameras > 1000);
+    Ok(())
+}
+
+/// A newer version installed than Lensfun offers now (a database installed from a
+/// file) is current: an update never goes back.
+#[test]
+fn an_update_never_goes_back() {
+    assert!(is_current(NEW, OLD) && is_current(OLD, OLD) && !is_current(OLD, NEW));
+}
+
+/// A removal cancelled before it starts removes nothing.
+#[test]
+fn a_cancelled_removal_keeps_the_database() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    install(dir.path(), &archive("good.tar.bz2"), &Progress::default())?;
+    let cancelled = Progress::default();
+    cancelled.cancel.store(true, Ordering::Relaxed);
+    assert!(is_cancelled(&remove(dir.path(), &cancelled).unwrap_err()));
+    assert_eq!(current(dir.path()).unwrap().version, OLD);
+    Ok(())
+}
+
+/// A version stays for readers until it has been out of use a while, however old its
+/// folder: a reader that read the manifest just before an update still finds it.
+#[test]
+fn a_version_just_replaced_stays_for_its_readers() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let progress = Progress::default();
+    install(dir.path(), &archive("good.tar.bz2"), &progress)?;
+    std::fs::File::open(dir.path().join("1793180205"))?
+        .set_modified(std::time::SystemTime::now() - KEEP_OLD * 2)?;
+    install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
+    install(dir.path(), &archive("newer.tar.bz2"), &progress)?;
+    assert_eq!(
+        listing(dir.path()),
+        ["1793180205", "1800000000", "installed.json"]
+    );
     Ok(())
 }
