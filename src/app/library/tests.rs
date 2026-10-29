@@ -579,7 +579,7 @@ fn a_folder_can_show_only_its_own_photos() -> Result<()> {
     // Removing a folder of folders shown alone shows All Photographs.
     library.click_folder(&key("trip"), Click::Replace, &[]);
     let trip_folders = library.folder_ids(&key("trip"), true).unwrap();
-    library.remove_folders(&trip_folders, "trip")?;
+    library.remove_folders(&trip_folders, "trip", None)?;
     assert_eq!(library.source_key(), "");
     assert_eq!(shown(&library), "deep.RAF one.RAF top.RAF");
 
@@ -818,7 +818,7 @@ fn the_online_count_follows_photos_removed_from_the_catalog() -> Result<()> {
         .map(|f| f.id)
         .collect();
     assert_eq!(b.len(), 1);
-    l.remove_folders(&b, "b")?;
+    l.remove_folders(&b, "b", None)?;
     assert_eq!(l.available_count(), 2);
     Ok(())
 }

@@ -91,6 +91,9 @@ pub(crate) enum Event {
     FolderSyncApplied(Result<Box<crate::app::folder_sync::Synced>, String>),
     /// A folder change waiting for the user's answer.
     FolderQuestion(Box<crate::app::folder_locations::FolderQuestion>),
+    /// Export as Catalog finished: what it wrote, nothing when the user
+    /// chose no file, or why it failed.
+    CatalogExported(Box<Result<Option<crate::app::export_catalog::Exported>, String>>),
     /// A file operation was planned (see `app::file_ops`).
     /// What export file names need from the photos' files, for the read
     /// `request` (see `app::naming::read`).

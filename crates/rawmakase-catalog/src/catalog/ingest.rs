@@ -122,24 +122,7 @@ impl Catalog {
     /// and a root left without folders goes too. Nothing on disk is touched.
     /// Returns the photos removed; their ids may be given to new photos.
     pub fn remove_folders(&mut self, folders: &[FolderId]) -> Result<Vec<PhotoId>> {
-        self.db.write(|w| {
-            let mut roots = BTreeSet::new();
-            for folder in folders {
-                let root: Option<RootId> =
-                    w.read_optional(sql!("SELECT root FROM folders WHERE id=?"), &[folder])?;
-                roots.extend(root);
-            }
-            let photos = remove_folder_rows(w, folders)?;
-            for root in &roots {
-                let left: Option<FolderId> =
-                    w.read_optional(sql!("SELECT id FROM folders WHERE root=?"), &[root])?;
-                if left.is_none() {
-                    w.execute(sql!("DELETE FROM folder_locations WHERE root=?"), &[root])?;
-                    w.execute(sql!("DELETE FROM roots WHERE id=?"), &[root])?;
-                }
-            }
-            Ok(photos)
-        })
+        self.db.write(|w| remove_folders(w, folders))
     }
     /// Removes root `root` from the catalog when it has no folder left (a
     /// folder put in the Trash or moved to another root took its last one);
@@ -708,6 +691,28 @@ impl Matcher {
 /// is touched. Returns the photos removed, sorted. Ungated: its callers
 /// decide that the rows may go (Remove Folder from Catalog, or a folder
 /// proven in the Trash).
+/// [`Catalog::remove_folders`] in `w`'s transaction.
+pub(in crate::catalog) fn remove_folders(
+    w: &mut Write<'_>,
+    folders: &[FolderId],
+) -> Result<Vec<PhotoId>> {
+    let mut roots = BTreeSet::new();
+    for folder in folders {
+        let root: Option<RootId> =
+            w.read_optional(sql!("SELECT root FROM folders WHERE id=?"), &[folder])?;
+        roots.extend(root);
+    }
+    let photos = remove_folder_rows(w, folders)?;
+    for root in &roots {
+        let left: Option<FolderId> =
+            w.read_optional(sql!("SELECT id FROM folders WHERE root=?"), &[root])?;
+        if left.is_none() {
+            w.execute(sql!("DELETE FROM folder_locations WHERE root=?"), &[root])?;
+            w.execute(sql!("DELETE FROM roots WHERE id=?"), &[root])?;
+        }
+    }
+    Ok(photos)
+}
 pub(in crate::catalog) fn remove_folder_rows(
     w: &mut Write<'_>,
     folders: &[FolderId],
