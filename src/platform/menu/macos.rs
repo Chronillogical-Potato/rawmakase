@@ -57,9 +57,12 @@ impl Menu {
         let application = bar.itemAtIndex(0)?.submenu()?;
         let (send, receive) = mpsc::channel();
         type Entry = (Action, &'static str, &'static str, bool);
-        let definitions: &[(&str, &[Entry])] = &[
+        // A menu's entries, or a submenu's when it has a title, as Photo's
+        // Stacking.
+        let definitions: &[(&str, Option<&str>, &[Entry])] = &[
             (
                 "File",
+                None,
                 &[
                     (Action::NewCatalog, "New Catalog…", "", false),
                     (Action::OpenCatalog, "Open Catalog…", "o", false),
@@ -70,6 +73,7 @@ impl Menu {
             ),
             (
                 "Edit",
+                None,
                 &[
                     (Action::Undo, "Undo", "z", false),
                     (Action::Redo, "Redo", "z", true),
@@ -80,7 +84,13 @@ impl Menu {
                 ],
             ),
             (
+                "Photo",
+                Some("Stacking"),
+                &[(Action::AutoStack, "Auto-Stack by Capture Time…", "", false)],
+            ),
+            (
                 "View",
+                None,
                 &[
                     (Action::Library, "Library", "", false),
                     (Action::Develop, "Develop", "", false),
@@ -92,6 +102,7 @@ impl Menu {
             ),
             (
                 "Help",
+                None,
                 &[
                     (Action::Shortcuts, "Keyboard Shortcuts", "/", false),
                     (Action::ReportIssue, "Report an Issue…", "", false),
@@ -102,7 +113,7 @@ impl Menu {
             .chain(
                 definitions
                     .iter()
-                    .flat_map(|(_, entries)| entries.iter().map(|e| e.0)),
+                    .flat_map(|(_, _, entries)| entries.iter().map(|e| e.0)),
             )
             .collect();
         let allocated = MenuTarget::alloc(mtm).set_ivars(TargetState {
@@ -121,7 +132,7 @@ impl Menu {
         application.insertItem_atIndex(&preferences, 2);
         application.insertItem_atIndex(&NSMenuItem::separatorItem(mtm), 3);
         // The winit application menu and its guarded Quit action stay in place.
-        for (title, entries) in definitions {
+        for (title, nested, entries) in definitions {
             if *title == "Help" {
                 let window = submenu(&bar, "Window", mtm);
                 for (label, action, key) in [
@@ -142,8 +153,16 @@ impl Menu {
                 }
                 app.setWindowsMenu(Some(&window));
             }
-            let sub = submenu(&bar, title, mtm);
-            sub.setAutoenablesItems(false);
+            let top = submenu(&bar, title, mtm);
+            top.setAutoenablesItems(false);
+            let sub = match nested {
+                Some(nested) => {
+                    let sub = submenu(&top, nested, mtm);
+                    sub.setAutoenablesItems(false);
+                    sub
+                }
+                None => top.clone(),
+            };
             for (action, label, key, shift) in *entries {
                 if matches!(
                     action,
@@ -158,7 +177,7 @@ impl Menu {
                 sub.addItem(&menu.item(*action, label, key, *shift));
             }
             if *title == "Help" {
-                app.setHelpMenu(Some(&sub));
+                app.setHelpMenu(Some(&top));
             }
         }
         Some(menu)

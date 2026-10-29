@@ -371,7 +371,8 @@ fn known_tables() -> BTreeSet<&'static str> {
 }
 
 /// Deletes what no photo kept refers to: keywords (but a used one's parents),
-/// collections (but a used one's sets), stacks, import batches, the Lightroom
+/// collections (but a used one's sets), stacks, import batches (and every
+/// batch's bursts still to stack), the Lightroom
 /// catalog it was imported from (every other photo's too), and the journal of
 /// file operations, all finished.
 fn prune_unreferenced(w: &mut Write<'_>) -> Result<()> {
@@ -398,6 +399,8 @@ fn prune_unreferenced(w: &mut Write<'_>) -> Result<()> {
              DELETE FROM collections WHERE id NOT IN (SELECT id FROM used)"
         ),
         sql!("DELETE FROM stacks WHERE id NOT IN (SELECT stack FROM stack_photos)"),
+        // Bursts still to stack are this catalog's to stack, not the copy's.
+        sql!("DELETE FROM import_burst_stacks"),
         sql!("DELETE FROM import_batches WHERE id NOT IN (SELECT batch FROM photo_imports)"),
         sql!("DELETE FROM sources"),
         sql!("DELETE FROM file_operation_copies"),

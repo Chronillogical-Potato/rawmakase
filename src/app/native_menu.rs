@@ -30,6 +30,12 @@ impl Editor {
             Action::Export => workspace && selected,
             Action::Develop => workspace && selected,
             Action::SelectAll => workspace,
+            // As the thumbnail menu's: in the Library, where stacks show.
+            Action::AutoStack => {
+                workspace
+                    && self.module == Module::Library
+                    && self.library.as_ref().is_some_and(|l| l.shows_stacks())
+            }
             Action::Library | Action::Sidebar | Action::Inspector | Action::Filmstrip => workspace,
         };
         let checked = match action {
@@ -100,6 +106,11 @@ impl Editor {
                     }
                 }
             }
+            Action::AutoStack => {
+                if let Some(library) = &mut self.library {
+                    library.stack_action(super::library::StackAction::AutoStack, Vec::new());
+                }
+            }
             Action::Develop => {
                 if let Some(id) = self.library.as_ref().and_then(|l| l.selected()) {
                     self.develop_catalog_photo(id);
@@ -163,6 +174,7 @@ mod tests {
             Action::Copy,
             Action::Paste,
             Action::SelectAll,
+            Action::AutoStack,
             Action::Preferences,
             Action::Library,
             Action::Develop,
@@ -245,6 +257,24 @@ mod tests {
         assert!(editor.module == Module::Develop);
         assert!(!editor.flush());
         editor.library.as_mut().unwrap().discard_drafts();
+        Ok(())
+    }
+
+    #[test]
+    fn menu_auto_stack_opens_the_window_in_the_library_where_stacks_show() -> anyhow::Result<()> {
+        let (_dir, mut editor, _) = editor_with_catalog(&["one.ARW", "two.ARW"])?;
+        let ctx = editor.context.clone();
+        editor.onboarding.visible = false;
+        editor.module = Module::Develop;
+        assert!(!editor.menu_state(Action::AutoStack, &ctx).0);
+        editor.menu_action(Action::AutoStack, &ctx);
+        assert!(!editor.auto_stack_open());
+        editor.module = Module::Library;
+        assert!(editor.menu_state(Action::AutoStack, &ctx).0);
+        editor.menu_action(Action::AutoStack, &ctx);
+        assert!(editor.auto_stack_open());
+        // Open, the window is modal: the menu waits for it.
+        assert!(!editor.menu_state(Action::AutoStack, &ctx).0);
         Ok(())
     }
 

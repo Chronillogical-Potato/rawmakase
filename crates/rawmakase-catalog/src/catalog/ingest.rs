@@ -82,7 +82,64 @@ pub(in crate::catalog) fn new_batch(w: &mut Write<'_>, kind: ImportKind) -> Resu
         &[&kind.as_str()],
     )
 }
+/// The longest gap between two frames of a burst whose camera didn't number
+/// them (Canon's and Nikon's continuous drive), for Stack Camera Bursts when
+/// adding photos: kept with the batch, the input its stacking takes.
+pub const IMPORT_BURST_SECONDS: f64 = 2.;
+
+/// A batch added with Stack Camera Bursts whose bursts aren't stacked yet.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingBurstStacks {
+    pub batch: i64,
+    /// The longest gap between frames a camera didn't number.
+    pub seconds: f64,
+    /// The batch's photos still in the catalog.
+    pub photos: Vec<PhotoId>,
+}
+
 impl Catalog {
+    /// The batches added with Stack Camera Bursts whose bursts are still to
+    /// be stacked, oldest first: kept until stacked, across restarts.
+    pub fn pending_burst_stacks(&self) -> Result<Vec<PendingBurstStacks>> {
+        row! {
+            struct Pending {
+                batch: i64,
+                seconds: f64,
+            }
+        }
+        row! {
+            struct Member {
+                batch: i64,
+                photo: PhotoId,
+            }
+        }
+        self.db.snapshot(|s| {
+            let pending: Vec<Pending> = s.read(
+                sql!("SELECT batch, seconds FROM import_burst_stacks ORDER BY batch"),
+                &[],
+            )?;
+            let members: Vec<Member> = s.read(
+                sql!(
+                    "SELECT i.batch, i.photo FROM photo_imports i
+                     JOIN import_burst_stacks b ON b.batch = i.batch
+                     ORDER BY i.photo"
+                ),
+                &[],
+            )?;
+            let mut photos: HashMap<i64, Vec<PhotoId>> = HashMap::new();
+            for m in members {
+                photos.entry(m.batch).or_default().push(m.photo);
+            }
+            Ok(pending
+                .into_iter()
+                .map(|p| PendingBurstStacks {
+                    batch: p.batch,
+                    seconds: p.seconds,
+                    photos: photos.remove(&p.batch).unwrap_or_default(),
+                })
+                .collect())
+        })
+    }
     /// Lightroom's Previous Import: the photos the last Add Photo Folder or
     /// Synchronize added that are still in the catalog.
     pub fn previous_import(&self) -> Result<Vec<PhotoId>> {
@@ -338,6 +395,14 @@ impl Catalog {
                 if readable {
                     super::defaults::fill(w, id, &photo.defaults)?;
                 }
+            }
+            // Its bursts are stacked once their files are read; asked with
+            // the batch, so it is there with the photos or not at all.
+            if defaults.stack_bursts() && added > 0 {
+                w.execute(
+                    sql!("INSERT INTO import_burst_stacks(batch, seconds) VALUES(?, ?)"),
+                    &[&batch, &IMPORT_BURST_SECONDS],
+                )?;
             }
             Ok((added, report, edits))
         })?;

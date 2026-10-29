@@ -402,6 +402,84 @@ impl Catalog {
             Ok(StacksChanged { before, after })
         })
     }
+    /// Stack Camera Bursts for photos added: makes `stacks` (each top first)
+    /// and marks import `batches` done, in one transaction. Only what is still
+    /// to be done is: a batch already done (or gone) is left out, and so is
+    /// any photo that isn't a master of a batch still to be done, or is in a
+    /// stack by now (or an earlier one of `stacks`), or isn't in the folder
+    /// of its stack's first photo; a stack left with fewer than two photos
+    /// isn't made. `None` when no batch
+    /// was still to be done, and nothing changed.
+    pub fn stack_imported_bursts(
+        &mut self,
+        batches: &[i64],
+        stacks: &[Vec<PhotoId>],
+    ) -> Result<Option<StacksChanged>> {
+        row! {
+            struct Eligible {
+                folder: FolderId,
+                batch: i64,
+            }
+        }
+        self.db.write(|w| {
+            let mut pending = Vec::new();
+            for batch in batches {
+                let found: Option<i64> = w.read_optional(
+                    sql!("SELECT batch FROM import_burst_stacks WHERE batch=?"),
+                    &[batch],
+                )?;
+                pending.extend(found);
+            }
+            if pending.is_empty() {
+                return Ok(None);
+            }
+            let mut groups = Vec::new();
+            let mut taken: HashSet<PhotoId> = HashSet::new();
+            for stack in stacks {
+                let mut group: Vec<PhotoId> = Vec::new();
+                let mut folder = None;
+                for photo in stack {
+                    let found: Option<Eligible> = w.read_optional(
+                        sql!(
+                            "SELECT p.folder, i.batch FROM photos p
+                             JOIN photo_imports i ON i.photo = p.id
+                             WHERE p.id=? AND p.master_id IS NULL"
+                        ),
+                        &[photo],
+                    )?;
+                    let Some(Eligible { folder: at, batch }) = found else {
+                        continue;
+                    };
+                    // In a stack as stacks are read: a row left alone in its
+                    // folder is none (see `group_of`).
+                    if group_of(w, *photo)?.is_some() {
+                        continue;
+                    }
+                    if !pending.contains(&batch) || taken.contains(photo) || group.contains(photo) {
+                        continue;
+                    }
+                    if *folder.get_or_insert(at) == at {
+                        group.push(*photo);
+                    }
+                }
+                if group.len() >= 2 {
+                    taken.extend(group.iter().copied());
+                    groups.push(group);
+                }
+            }
+            let change = StackChange::Groups(groups);
+            let before = state(w, &change.photos())?;
+            apply(w, &change)?;
+            let after = state(w, &before.photos)?;
+            for batch in &pending {
+                w.execute(
+                    sql!("DELETE FROM import_burst_stacks WHERE batch=?"),
+                    &[batch],
+                )?;
+            }
+            Ok(Some(StacksChanged { before, after }))
+        })
+    }
     /// Collapses or expands stacks `ids`: a view of the catalog, saved with
     /// it, and no change Undo takes back.
     pub fn set_stacks_collapsed(&mut self, ids: &[StackId], collapsed: bool) -> Result<()> {

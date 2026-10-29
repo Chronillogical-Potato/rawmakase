@@ -251,6 +251,9 @@ pub(crate) struct Library {
     stack_done: Vec<StackCommand>,
     /// Auto-Stack by Capture Time's window, while it is open.
     auto_stack: Option<stacks::AutoStack>,
+    /// Stack Camera Bursts for photos added: what was read of batches still
+    /// to be stacked, until they can be.
+    import_bursts: Option<crate::catalog_session::BurstsRead>,
     /// The Loupe's Info overlay.
     loupe_info: photo_info::Overlay,
     /// Times photo info read from files was saved, so views know to refresh.
@@ -353,6 +356,7 @@ impl Library {
             descriptive_done: Vec::new(),
             stack_done: Vec::new(),
             auto_stack: None,
+            import_bursts: None,
             loupe,
             compare: Default::default(),
             survey: Default::default(),
@@ -983,8 +987,15 @@ impl Library {
     pub(in crate::app) fn suspend_background_reads(&mut self) {
         self.reads_suspended = true;
         self.cancel_reread();
-        self.session.stop_background_reads();
+        self.stop_background_reads();
         self.session.bump_generation();
+    }
+    /// Stops the session's background reads before a change that may give
+    /// removed photos' ids to new ones, and drops what was read of batches
+    /// whose bursts are to be stacked: read again after.
+    pub(in crate::app) fn stop_background_reads(&mut self) {
+        self.import_bursts = None;
+        self.session.stop_background_reads();
     }
     /// Background reads go on after a file operation let the catalog go:
     /// capture times, photo info and checksums, for what is still missing.
@@ -992,6 +1003,7 @@ impl Library {
         self.reads_suspended = false;
         self.start_capture_times();
         self.start_photo_info();
+        self.start_import_stacks();
         self.start_checksums();
     }
     /// A virtual copy command chosen from a thumbnail menu since last asked.
@@ -1142,7 +1154,9 @@ impl Library {
     ) -> Result<Committed<Vec<PhotoId>>> {
         // Forgotten first: once removed, their ids can be reused, so their
         // previews must go even if removing or reading the catalog again
-        // fails. Copies of these photos are kept with them.
+        // fails. Copies of these photos are kept with them. What was read of
+        // batches to stack too: read again once they are gone.
+        self.import_bursts = None;
         let going: Vec<PhotoId> = self
             .session
             .photos
@@ -1166,7 +1180,14 @@ impl Library {
             .flatten()
             .any(|f| folders.contains(&f));
         let ids: Vec<FolderId> = folders.iter().copied().collect();
-        let removed = self.session.remove_folders(&ids, exported)?;
+        let removed = match self.session.remove_folders(&ids, exported) {
+            Ok(removed) => removed,
+            Err(e) => {
+                // Nothing removed: the reads it stopped go on.
+                self.start_background_reads();
+                return Err(e);
+            }
+        };
         if shown_going {
             self.selected_folders.clear();
             self.filters.folder_scope = None;
@@ -1185,10 +1206,16 @@ impl Library {
             // what is shown follows them before anything reads those lists.
             self.reloaded();
         }
+        self.start_background_reads();
+        Ok(removed)
+    }
+    /// Starts the background reads again for what is still missing, unless
+    /// suspended: capture times, photo info, bursts to stack and checksums.
+    pub(in crate::app) fn start_background_reads(&mut self) {
         self.start_capture_times();
         self.start_photo_info();
+        self.start_import_stacks();
         self.start_checksums();
-        Ok(removed)
     }
     /// Removes virtual copy `id`; returns its master, which is selected. An
     /// error means the copy is still there.
@@ -1257,6 +1284,7 @@ impl Library {
         }
         self.poll_capture_times();
         self.poll_photo_info();
+        self.poll_import_stacks();
         self.poll_checksums();
         self.poll_reread();
         self.cache.poll(ctx);
@@ -1462,6 +1490,9 @@ mod filter;
 mod filter_bar;
 mod folder_selection;
 mod grid;
+mod import_stacks;
+#[cfg(test)]
+mod import_stacks_tests;
 mod info;
 mod kinetic;
 mod layout;

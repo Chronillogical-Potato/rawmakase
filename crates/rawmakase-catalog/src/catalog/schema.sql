@@ -175,6 +175,13 @@ CREATE TABLE IF NOT EXISTS photo_imports (
     photo INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
     batch INTEGER NOT NULL REFERENCES import_batches(id)
 );
+-- Batches added with Stack Camera Bursts on, whose bursts are not stacked
+-- yet: a row goes in the transaction that stacks them. `seconds` is the
+-- longest gap between frames a camera didn't number (continuous drive).
+CREATE TABLE IF NOT EXISTS import_burst_stacks (
+    batch INTEGER PRIMARY KEY REFERENCES import_batches(id) ON DELETE CASCADE,
+    seconds REAL NOT NULL
+);
 
 -- Facts about the catalog itself, by name.
 CREATE TABLE IF NOT EXISTS meta (
