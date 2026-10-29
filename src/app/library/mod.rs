@@ -1334,6 +1334,16 @@ impl Library {
         &mut self,
         defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
     ) {
+        self.set_defaults_preserving(defaults, None);
+    }
+
+    /// A manual import may leave the current Develop recipe unchanged. Its
+    /// existing render remains valid; other unedited photos still invalidate.
+    pub(in crate::app) fn set_defaults_preserving(
+        &mut self,
+        defaults: std::sync::Arc<crate::raw_defaults::DevelopDefaults>,
+        current: Option<PhotoId>,
+    ) {
         self.defaults = defaults;
         self.screen.clear();
         // Develop's renders of photos without an edit: back to the embedded
@@ -1341,7 +1351,7 @@ impl Library {
         let unedited: Vec<PhotoId> = self
             .cache
             .edited_ids()
-            .filter(|id| edit_source(&self.session.catalog, *id).is_none())
+            .filter(|id| Some(*id) != current && edit_source(&self.session.catalog, *id).is_none())
             .collect();
         for id in unedited {
             self.cache.forget(id);
