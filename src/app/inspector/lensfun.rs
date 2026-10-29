@@ -4,7 +4,7 @@
 //! and resolving or updating the lens an edit names. Choosing one is an edit like
 //! any other, one History step on the photo shown; the download only installs.
 use super::control_row;
-use crate::app::design::{Tone, space, text};
+use crate::app::design::{Tone, radius, space, text};
 use crate::app::lensfun::Job;
 use crate::app::theme;
 use crate::camera_data::Metadata;
@@ -400,7 +400,7 @@ fn frame(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
         egui::Frame::new()
             .fill(palette.tone(Tone::CARD))
             .stroke(egui::Stroke::new(1., palette.tone(Tone::RAISED)))
-            .corner_radius(6.)
+            .corner_radius(radius::CONTROL)
             .inner_margin(egui::Margin::same(space::S as i8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
