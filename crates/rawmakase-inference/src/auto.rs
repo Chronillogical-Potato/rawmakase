@@ -320,22 +320,51 @@ fn expand(grid: &[f32], width: usize, height: usize) -> Vec<f32> {
     resample(grid, SIDE, whole, width, height)
 }
 
-/// Keeps each column's sky from the top down to where it stops, bridging gaps of a few
-/// cells (a branch, a wire), so water or a window below the horizon is not sky.
+/// Keeps each column's first stretch of sky, bridging gaps of a few cells (a branch, a
+/// wire), so water or a window below the horizon is not sky. A stretch starting in the
+/// first rows is sky, as it always was; one starting lower (under leaves along the frame's
+/// edge) is sky only when it starts above the horizon, an estimate of where the sky ends:
+/// the lower quartile of the ends of the stretches reaching the top, or the middle of the
+/// frame when fewer than four columns reach it. That keeps out a lake
+/// under a tree that hides the sky when the lake starts below the estimate; it is a
+/// heuristic, and a lake starting above it (where most of the sky reaching the top runs
+/// far down, or little reaches it) is taken for sky.
 fn to_horizon(mask: &[bool]) -> Vec<bool> {
     const GAP: usize = 6;
-    let mut out = vec![false; SIDE * SIDE];
-    for x in 0..SIDE {
-        let mut last = None::<usize>;
-        for y in 0..SIDE {
-            if mask[y * SIDE + x] {
-                last = Some(y);
-                out[y * SIDE + x] = true;
-            } else if last.is_none_or(|l| y - l > GAP) {
-                // Before any sky only the first rows may be missing it.
-                if last.is_some() || y > GAP {
+    /// Columns of sky reaching the top needed to place the horizon.
+    const ANCHORS: usize = 4;
+    let runs: Vec<Option<(usize, usize)>> = (0..SIDE)
+        .map(|x| {
+            let start = (0..SIDE).find(|y| mask[y * SIDE + x])?;
+            let mut end = start;
+            for y in start..SIDE {
+                if mask[y * SIDE + x] {
+                    end = y;
+                } else if y - end > GAP {
                     break;
                 }
+            }
+            Some((start, end))
+        })
+        .collect();
+    let from_top = |start: usize| start <= GAP + 1;
+    let mut ends: Vec<usize> = runs
+        .iter()
+        .flatten()
+        .filter(|(start, _)| from_top(*start))
+        .map(|(_, end)| *end)
+        .collect();
+    let horizon = if ends.len() >= ANCHORS {
+        let quartile = ends.len() / 4;
+        *ends.select_nth_unstable(quartile).1
+    } else {
+        SIDE / 2
+    };
+    let mut out = vec![false; SIDE * SIDE];
+    for (x, run) in runs.iter().enumerate() {
+        if let Some((start, end)) = run.filter(|(start, _)| from_top(*start) || *start < horizon) {
+            for y in start..=end {
+                out[y * SIDE + x] = mask[y * SIDE + x];
             }
         }
     }
@@ -512,6 +541,185 @@ mod tests {
             .collect();
         let cov = sky(&img, &[], &label).unwrap();
         assert!(at(&cov, 0.5, 0.2) > 240 && at(&cov, 0.5, 0.7) < 10);
+    }
+
+    #[test]
+    fn sky_under_foliage_along_the_top_edge_is_still_sky() {
+        // Leaves hang across the top of the frame; the sky starts below them.
+        let img = photo(256, 256, |_, y| match y {
+            0..=29 => [20, 50, 25],
+            30..=139 => [120, 160, 230],
+            _ => [60, 45, 30],
+        });
+        let label: Vec<f32> = (0..SIDE * SIDE)
+            .map(|i| f32::from(u8::from((30..140).contains(&(i / SIDE)))))
+            .collect();
+        let outline = Proposal {
+            mask: rect(0, 30, 256, 140),
+            score: 0.9,
+        };
+        let cov = sky(&img, &[outline], &label).unwrap();
+        assert!(at(&cov, 0.5, 0.3) > 240, "{}", at(&cov, 0.5, 0.3));
+        assert!(at(&cov, 0.5, 0.05) < 10 && at(&cov, 0.5, 0.8) < 10);
+    }
+
+    #[test]
+    fn a_lake_under_a_tree_that_hides_the_sky_is_not_sky() {
+        // Sky down to row 100, except where a tree (columns 0..60) hides all of it; the
+        // lake below reflects the sky in every column.
+        let mut mask = rect(60, 0, 256, 100);
+        mask.iter_mut()
+            .skip(180 * SIDE)
+            .take(60 * SIDE)
+            .for_each(|m| *m = true);
+        let cut = to_horizon(&mask);
+        assert!(cut[50 * SIDE + 128] && !cut[200 * SIDE + 128]);
+        assert!(!cut[200 * SIDE + 30], "the lake below the tree is not sky");
+    }
+
+    #[test]
+    fn a_lake_does_not_set_the_horizon_by_outnumbering_the_sky() {
+        // A tree hides the sky over most of the width; the lake below shows in every
+        // column, so lake-only columns outnumber the sky's.
+        let mut mask = rect(180, 0, 256, 100);
+        for (m, l) in mask.iter_mut().zip(rect(0, 180, 256, 240)) {
+            *m |= l;
+        }
+        let cut = to_horizon(&mask);
+        assert!(cut[50 * SIDE + 200]);
+        assert!(!cut[200 * SIDE + 30] && !cut[200 * SIDE + 200]);
+    }
+
+    #[test]
+    fn a_speck_near_the_top_does_not_set_the_horizon() {
+        // A bright window high up in one column; the sky starts below the leaves.
+        let mut mask = rect(0, 30, 256, 140);
+        mask[2 * SIDE + 10] = true;
+        let cut = to_horizon(&mask);
+        assert!(cut[80 * SIDE + 128] && cut[80 * SIDE + 200]);
+    }
+
+    #[test]
+    fn a_lake_larger_than_the_sky_is_not_sky() {
+        let mut mask = rect(220, 0, 256, 60);
+        for (m, l) in mask.iter_mut().zip(rect(0, 180, 256, 240)) {
+            *m |= l;
+        }
+        let cut = to_horizon(&mask);
+        assert!(cut[30 * SIDE + 240] && !cut[200 * SIDE + 30]);
+    }
+
+    #[test]
+    fn a_column_bridging_sky_and_lake_does_not_let_the_lake_in() {
+        let mut mask = rect(180, 0, 256, 100);
+        for (m, l) in mask
+            .iter_mut()
+            .zip(rect(0, 180, 256, 240).iter().zip(rect(179, 90, 180, 200)))
+        {
+            *m |= *l.0 || l.1;
+        }
+        let cut = to_horizon(&mask);
+        assert!(cut[50 * SIDE + 200] && !cut[200 * SIDE + 30]);
+    }
+
+    #[test]
+    fn sky_running_further_down_in_some_columns_does_not_let_a_lake_in() {
+        // The sky ends at row 100 in some columns and runs down to 220 in nearly as many;
+        // a stray stretch in one more column must not tip the horizon down to the lake.
+        let mut mask = rect(180, 0, 219, 100);
+        for r in [
+            rect(219, 0, 256, 220),
+            rect(0, 180, 219, 240),
+            rect(180, 90, 181, 200),
+        ] {
+            for (m, l) in mask.iter_mut().zip(r) {
+                *m |= l;
+            }
+        }
+        let cut = to_horizon(&mask);
+        assert!(cut[50 * SIDE + 200] && cut[200 * SIDE + 240]);
+        assert!(!cut[200 * SIDE + 30], "the lake is not sky");
+    }
+
+    #[test]
+    fn sky_reaching_the_top_is_kept_as_before_beside_a_shallow_strip() {
+        // A thin strip of sky over a roof, and beside a trunk sky that starts just below
+        // the top rows: both reach the top, so both are sky.
+        let mut mask = rect(0, 0, 180, 6);
+        for (m, l) in mask.iter_mut().zip(rect(190, 7, 256, 60)) {
+            *m |= l;
+        }
+        let cut = to_horizon(&mask);
+        assert!(cut[3 * SIDE + 50] && cut[30 * SIDE + 220]);
+    }
+
+    #[test]
+    fn a_tree_the_outline_leaves_out_stays_out() {
+        // The label is a blob over the whole sky, tree included; the outline leaves the
+        // tree out.
+        let img = photo(256, 256, |x, y| {
+            if (100..156).contains(&x) && (20..120).contains(&y) {
+                [20, 60, 25]
+            } else if y < 120 {
+                [120, 160, 230]
+            } else {
+                [60, 45, 30]
+            }
+        });
+        let label: Vec<f32> = rect(0, 0, 256, 120)
+            .iter()
+            .map(|m| f32::from(u8::from(*m)))
+            .collect();
+        let tree = rect(100, 20, 156, 120);
+        let outline = Proposal {
+            mask: rect(0, 0, 256, 120)
+                .iter()
+                .zip(&tree)
+                .map(|(s, t)| *s && !*t)
+                .collect(),
+            score: 0.9,
+        };
+        let cov = sky(&img, &[outline], &label).unwrap();
+        assert!(
+            at(&cov, 0.5, 60. / 256.) < 10,
+            "{}",
+            at(&cov, 0.5, 60. / 256.)
+        );
+        assert!(at(&cov, 0.2, 60. / 256.) > 240);
+    }
+
+    #[test]
+    fn a_narrow_passage_of_sky_stays_sky() {
+        // Little of the label has an outline, so the label stands in, including a
+        // narrow passage of sky between buildings.
+        let img = photo(256, 256, |x, y| {
+            if y < 40
+                || ((170..256).contains(&x) && y < 120)
+                || ((100..104).contains(&x) && y < 200)
+            {
+                [120, 160, 230]
+            } else {
+                [70, 60, 55]
+            }
+        });
+        let mut labelled = rect(0, 0, 170, 40);
+        for (l, m) in labelled
+            .iter_mut()
+            .zip(rect(170, 0, 256, 120).iter().zip(rect(100, 40, 104, 200)))
+        {
+            *l |= *m.0 || m.1;
+        }
+        let label: Vec<f32> = labelled.iter().map(|m| f32::from(u8::from(*m))).collect();
+        let outline = Proposal {
+            mask: rect(0, 0, 170, 40),
+            score: 0.9,
+        };
+        let cov = sky(&img, &[outline], &label).unwrap();
+        assert!(
+            at(&cov, 102. / 256., 80. / 256.) > 128,
+            "{}",
+            at(&cov, 102. / 256., 80. / 256.)
+        );
     }
 
     #[test]
