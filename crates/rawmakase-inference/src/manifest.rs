@@ -126,7 +126,7 @@ pub const SUBJECT: ModelSpec = ModelSpec {
     mask_size: 256,
     mean: [0.485, 0.456, 0.406],
     std: [0.229, 0.224, 0.225],
-    processing_version: 3,
+    processing_version: 4,
     license: "Apache-2.0 (facebook/sam2.1-hiera-small, weights and code). The ONNX export is \
               the Hugging Face onnx-community's conversion of those weights.",
     attribution: "Segment Anything Model 2 (SAM 2), Ravi et al., Meta AI, 2024, \
