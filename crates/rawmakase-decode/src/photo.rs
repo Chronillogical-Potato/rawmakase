@@ -275,7 +275,8 @@ mod tests {
         (dir, path)
     }
 
-    /// A monochrome DNG develops as grey, its one sample every channel's, and
+    /// A monochrome DNG develops as grey, its one sample every channel's (a
+    /// sample below black as 0), and
     /// renders grey whatever the white balance: through the default profile
     /// and RAWmakase Color, with Temp and Tint changed (which leave its gains
     /// at 1, as it has no white balance), an eyedropper's pick, and gains an
@@ -283,7 +284,8 @@ mod tests {
     #[test]
     fn monochrome_dngs_develop_and_render_grey() {
         use rawmakase_model::model::recipe::Recipe;
-        let (_dir, path) = monochrome_dng(4, &[220, 2236, 8301, 16383, 1000, 4000, 12000, 300]);
+        // 120 lies below the black level: noise there develops as 0.
+        let (_dir, path) = monochrome_dng(4, &[220, 2236, 8301, 16383, 1000, 4000, 12000, 120]);
         let raw = super::open(&path).unwrap();
         let m = raw.metadata.clone();
         assert!(m.monochrome);
@@ -298,9 +300,9 @@ mod tests {
         for (p, v) in im
             .pixels
             .iter()
-            .zip([220, 2236, 8301, 16383, 1000, 4000, 12000, 300])
+            .zip([220, 2236, 8301, 16383, 1000, 4000, 12000, 120])
         {
-            let want = (v as f32 - 220.) / (16383. - 220.);
+            let want = ((v as f32 - 220.) / (16383. - 220.)).max(0.);
             assert_eq!(*p, [want; 3]);
         }
         let color = std::sync::Arc::new(crate::camera_profiles::open::color(&m).unwrap());

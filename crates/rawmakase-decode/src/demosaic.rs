@@ -83,7 +83,7 @@ pub(crate) fn half(cfa: &Cfa) -> (usize, usize, Vec<[f32; 3]>) {
                         sum[usize::from(cfa.color(x, y))] += cfa.data[y * cfa.width + x];
                     }
                 }
-                [sum[0], sum[1] / 2., sum[2]]
+                [sum[0].max(0.), (sum[1] / 2.).max(0.), sum[2].max(0.)]
             })
             .collect()
     } else {
@@ -112,9 +112,23 @@ pub(crate) fn half(cfa: &Cfa) -> (usize, usize, Vec<[f32; 3]>) {
 
 pub(crate) fn demosaic(cfa: &Cfa) -> Vec<[f32; 3]> {
     if cfa.is_bayer() {
-        colour_difference(cfa, &green_bayer(cfa))
+        // Samples below black stay negative through interpolation and are clipped
+        // here: an interpolated sample averages its neighbours' noise, so the
+        // mean of a dark noisy area rises less than clipping each sample would
+        // (Camera Raw's dark noisy patches sit at that lower bias).
+        let mut out = colour_difference(cfa, &green_bayer(cfa));
+        for px in &mut out {
+            for v in px {
+                *v = v.max(0.);
+            }
+        }
+        out
     } else {
-        xtrans::demosaic(cfa)
+        let data: Vec<f32> = cfa.data.iter().map(|v| v.max(0.)).collect();
+        xtrans::demosaic(&Cfa {
+            data: &data,
+            ..*cfa
+        })
     }
 }
 
@@ -144,7 +158,7 @@ fn green_bayer(cfa: &Cfa) -> Vec<f32> {
             // Keep the estimate within the neighbouring greens (no overshoot halos).
             let lo = l.min(r).min(u).min(d);
             let hi = l.max(r).max(u).max(d);
-            *out = est.clamp(lo, hi).max(0.);
+            *out = est.clamp(lo, hi);
         }
     });
     g
@@ -187,7 +201,7 @@ fn colour_difference(cfa: &Cfa, green: &[f32]) -> Vec<[f32; 3]> {
                         break;
                     }
                 }
-                px[c as usize] = (gc + if total > 0. { sum / total } else { 0. }).max(0.);
+                px[c as usize] = gc + if total > 0. { sum / total } else { 0. };
             }
         }
     });

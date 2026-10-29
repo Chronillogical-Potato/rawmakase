@@ -113,6 +113,39 @@ that: the spatial regime (tiny bright lights in dark scenes, scattered gaps agai
 strip), the dark-heavy conflict above, and the darkest band of some cameras whose
 default render already sits 0.3 to 0.4 EV too light (#471).
 
+### Noise clipped before demosaicing (2026-10-29)
+
+The worst Shadows +100 photos were not the rule's. Feeding Camera Raw's own
+per-level lift to the operator (an oracle curve fitted by iteration until the
+per-level difference was under 0.02 EV) left their median ΔE00 almost where it
+was: an OM-5 foliage frame 7.2 → 7.0, an iPhone XS 6.1 → 6.1, an a7 II night scene
+10.1 → 10.1, two X100F frames 4.8 → 3.3 and 4.9 → 3.0, a D7000 interior 4.2 → 3.6.
+Their error is detail (the OM-5 already differs by 4.9 at default) and colour in deep
+shadows: the night scene's near-black background rendered magenta where Camera Raw
+renders it warm neutral, with the sidecar's colour noise reduction at 0 and the
+reference's luminance matched within 0.1 EV at Exposure +4.
+
+The raw explains it: at ISO 6400 a third of that background's green samples lie
+below the black level, and clipping them at zero before demosaicing raises every
+channel by about 0.4 of its noise, scaled by its white-balance gain, so red and blue
+rise most. Camera Raw's bias on synthetic noisy patches is 0.5 to 0.7 of that, as
+if it clipped only after demosaicing ([demosaicing](demosaic.md)). Development now
+keeps samples negative through the Bayer passes and clips once after them. Dataset
+gate against the shipped engine (median ΔE00, no photo worse by more than 0.3 in any
+set):
+
+| Set | Default | Shadows +100 | Shadows +50 | Highlights +100 |
+| --- | --- | --- | --- | --- |
+| own | 0.77 → 0.77 | 1.67 → 1.56 | 1.14 → 0.91 | 1.16 → 0.93 |
+| own stress | 0.43 → 0.36 | 1.93 → 1.77 | 0.89 → 0.77 | 2.01 → 1.88 |
+| pixls, signature edits, their stress sets | unchanged | unchanged | unchanged | unchanged |
+
+The night scene itself goes 10.1 → 8.7 at Shadows +100 (3.9 → 3.1 at default), its
+cast gone; what remains there is luminance (our lift of its deepest two stops is 0.3
+to 0.7 EV short of Camera Raw's, which the oracle cannot close either) and the
+demosaic's own noise. Not changed: X-Trans, whose demosaic still clips each sample
+first; the D7000 interior and the OM-5, which are not noise cases.
+
 ### Shadows/Highlights research: what did not work (2026-10-16)
 
 **No candidate from this investigation passed the requirements for shipping.**
