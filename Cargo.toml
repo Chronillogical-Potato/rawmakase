@@ -59,8 +59,11 @@ memmap2 = "0.9"
 skrifa = "0.48"
 clap = { version = "4", features = ["derive"] }
 eframe = { version = "=0.36.2", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
-# eframe's windowing, to run its event loop (see app::run).
-winit = { version = "0.30", default-features = false }
+# eframe's windowing, to run its event loop (see app::run). Where a Wayland
+# compositor leaves decorations to the app (GNOME), winit draws an
+# Adwaita-style title bar instead of a bare grey frame (#754). Compositors
+# that draw their own, or none (KDE, Hyprland, Sway), are unaffected.
+winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 # eframe reports a failure to open the window through log (see app::run).
 log = "0.4"
 rfd = "0.17.2"
