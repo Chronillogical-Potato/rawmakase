@@ -1646,6 +1646,32 @@ fn lensfun_lenses_travel_by_identity() -> Result<()> {
             .source
             .starts_with("Lensfun")
     );
+    // Written as elements rather than attributes, it reads the same.
+    let elements = format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{}"><rdf:Description xmlns:crs="{}" xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/" crs:LensProfileEnable="1" crs:LensProfileSetup="Auto"><rawmakase:LensfunMaker>Canon</rawmakase:LensfunMaker><rawmakase:LensfunModel>Canon EF 70-200mm f/2.8L IS II USM</rawmakase:LensfunModel><rawmakase:LensfunMounts>Canon EF</rawmakase:LensfunMounts><rawmakase:LensfunCrop>1</rawmakase:LensfunCrop><rawmakase:LensfunAspect>1.5</rawmakase:LensfunAspect></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        crate::xml::ns::RDF,
+        crate::xml::ns::CRS
+    );
+    let from_elements =
+        parse(Path::new("e.xmp"), &elements)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(
+        from_elements
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
+    // The database is the one installed when the XMP is applied: removed since, the
+    // lens stays named.
+    let mut removed = m.clone();
+    removed.lensfun = crate::lens::lensfun::installed::Handle::Given(None);
+    assert!(
+        !read(&removed)?
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
     // A preset of the lens corrections carries it in the same way.
     let mut groups = crate::model::settings_groups::GroupSelection::none();
     groups.set(

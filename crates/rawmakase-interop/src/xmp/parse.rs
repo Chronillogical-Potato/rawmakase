@@ -64,7 +64,8 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         .filter(|a| a.namespace() == Some(CRS))
         .map(|a| (a.name().to_string(), a.value().to_string()))
         .collect();
-    // RAWmakase's own settings, under their prefix so no Camera Raw name meets them.
+    // RAWmakase's own settings, under their prefix so no Camera Raw name meets them,
+    // as attributes or as elements holding their value.
     settings.extend(
         description
             .attributes()
@@ -73,6 +74,18 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
                 (
                     format!("{}{}", super::RAWMAKASE_PREFIX, a.name()),
                     a.value().to_string(),
+                )
+            }),
+    );
+    settings.extend(
+        description
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().namespace() == Some(RAWMAKASE))
+            .filter(|n| !n.children().any(|c| c.is_element()))
+            .map(|n| {
+                (
+                    format!("{}{}", super::RAWMAKASE_PREFIX, n.tag_name().name()),
+                    n.text().unwrap_or("").trim().to_string(),
                 )
             }),
     );

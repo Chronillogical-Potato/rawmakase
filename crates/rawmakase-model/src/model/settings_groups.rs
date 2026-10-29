@@ -459,6 +459,10 @@ pub fn transfer(
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
+    // A Lensfun lens takes the target's camera, which its correction is scaled for.
+    if selection.contains(SettingGroup::LensProfileCorrections) {
+        recipe.lens_profile_choice.for_photo(m);
+    }
     // RAW and rendered files keep white balance in different terms (Kelvin against
     // relative) and have profiles of their own: between them, the target keeps its
     // white balance and profile, and everything else transfers.

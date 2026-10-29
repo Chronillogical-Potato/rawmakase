@@ -245,6 +245,34 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
 }
 
 impl LensfunChoice {
+    /// This choice taken to photo `m` (Copy Settings, Sync, a preset): the same lens,
+    /// calibration and provenance, with `m`'s camera, as Lensfun's database installed
+    /// now knows it, else as the photo's own EXIF tells. A photo of the camera it
+    /// was chosen for keeps it as it is.
+    pub fn for_photo(&self, m: &Metadata) -> Self {
+        let frame = frame_size(m);
+        let photo = photo_of(m, frame);
+        if self
+            .camera
+            .as_ref()
+            .is_some_and(|c| same_text(&c.make, photo.make) && same_text(&c.model, photo.model))
+        {
+            return self.clone();
+        }
+        let camera = match m.lensfun.get() {
+            Some(installed) => camera_for(&installed.db, m),
+            None => exif_crop(&photo).map(|crop| LensfunCamera {
+                make: photo.make.to_string(),
+                model: photo.model.to_string(),
+                crop,
+                aspect: None,
+            }),
+        };
+        Self {
+            camera,
+            ..self.clone()
+        }
+    }
     /// This choice with the calibration of the lens it names copied from `db`, for
     /// photo `m`; `None` when `db` doesn't have it.
     pub fn resolved(&self, db: &super::Database, m: &Metadata) -> Option<Self> {

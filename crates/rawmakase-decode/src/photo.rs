@@ -112,10 +112,6 @@ pub fn open(path: &Path) -> Result<Raw> {
         }
     }
     metadata.lens_profiles = LENS_PROFILES.current().for_photo(metadata);
-    // The installed Lensfun database, for choosing a lens while editing; rendering
-    // uses only the calibration an edit copied.
-    metadata.lensfun =
-        crate::lens::lensfun::installed::Handle(crate::lens::lensfun::installed::current());
     // Pentax bodies record no lens name, only the lens ID: name the lens as the
     // profile matched by that ID does. Matched first, as the ID only counts for a
     // file without a lens name.

@@ -702,3 +702,73 @@ fn lensfun_recipes_save_in_a_format_earlier_releases_refuse() {
     let back: Recipe = serde_json::from_value(read["recipe"].clone()).unwrap();
     assert_eq!(back, off);
 }
+
+/// Copy Settings and Sync take a Lensfun lens to another camera's photo with that
+/// camera's context, keeping the calibration and its provenance: a camera Lensfun
+/// knows renders even without a 35 mm equivalent focal length in the photo.
+#[test]
+fn a_transferred_lensfun_choice_takes_the_target_s_camera() {
+    use crate::lens::lensfun::fixture;
+    use crate::model::recipe::Recipe;
+    use crate::model::settings_groups::{GroupSelection, Source, Target, transfer};
+    let source_photo = fixture::photo();
+    let mut target_photo = fixture::other_camera();
+    target_photo.lensfun = fixture::installed(-0.02, 1_793_180_205);
+    let mut source = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    source.lens_profile_choice.choose_lensfun(fixture::choice());
+    let out = transfer(
+        Source {
+            recipe: &source,
+            metadata: &source_photo,
+        },
+        &Recipe::default(),
+        &GroupSelection::all(),
+        Target {
+            metadata: &target_photo,
+            profiles: &[],
+        },
+    );
+    let moved = out.recipe.lens_profile_choice.lensfun().unwrap();
+    assert_eq!(moved.camera.as_ref().unwrap().model, "Canon EOS 6D");
+    assert_eq!(moved.calibration, fixture::choice().calibration);
+    assert_eq!(moved.provenance, fixture::choice().provenance);
+    assert!(
+        out.recipe
+            .lens_correction(&target_photo)
+            .unwrap()
+            .source
+            .starts_with("Lensfun")
+    );
+    // Without a database, the copy keeps what the photo itself says: nothing here.
+    let mut alone = fixture::other_camera();
+    alone.lensfun = crate::lens::lensfun::installed::Handle::Given(None);
+    let out = transfer(
+        Source {
+            recipe: &source,
+            metadata: &source_photo,
+        },
+        &Recipe::default(),
+        &GroupSelection::all(),
+        Target {
+            metadata: &alone,
+            profiles: &[],
+        },
+    );
+    assert!(
+        out.recipe
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .camera
+            .is_none()
+    );
+    assert!(
+        out.recipe
+            .missing_lens_profile(&alone)
+            .unwrap()
+            .contains("crop factor")
+    );
+}

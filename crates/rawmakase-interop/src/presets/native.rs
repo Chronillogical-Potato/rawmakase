@@ -102,12 +102,39 @@ pub fn applied_to(preset: LoadedPreset, photo: &Recipe, m: &Metadata) -> Recipe 
     if rendered != m.is_rendered() {
         preset.keep_white_balance_and_profile(photo);
     }
+    // A Lensfun lens takes this photo's camera.
+    preset.lens_profile_choice.for_photo(m);
     preset
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A native preset's Lensfun lens takes the photo's camera it is applied to.
+    #[test]
+    fn a_preset_s_lensfun_lens_takes_the_photo_s_camera() {
+        use crate::lens::lensfun::fixture;
+        let mut r = Recipe::default();
+        r.lens_profile_choice.choose_lensfun(fixture::choice());
+        let mut m = fixture::other_camera();
+        m.lensfun = fixture::installed(-0.02, 1_793_180_205);
+        let applied = applied_to(
+            LoadedPreset {
+                recipe: r,
+                rendered: false,
+            },
+            &Recipe::default(),
+            &m,
+        );
+        let camera = applied
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .camera
+            .clone()
+            .unwrap();
+        assert_eq!(camera.model, "Canon EOS 6D");
+    }
     use crate::model::panels::{Panel, PanelState};
     use crate::model::red_eye::RedEyeOp;
     #[test]

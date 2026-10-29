@@ -418,6 +418,7 @@ pub mod fixture {
             r#"<lensdatabase version="2">
 <mount><name>Canon EF</name></mount>
 <camera><maker>Canon</maker><model>Canon EOS 5D Mark III</model><mount>Canon EF</mount><cropfactor>1</cropfactor></camera>
+<camera><maker>Canon</maker><model>Canon EOS 6D</model><mount>Canon EF</mount><cropfactor>1.005</cropfactor></camera>
 <lens><maker>Canon</maker><model>Canon EF 70-200mm f/2.8L IS II USM</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
 <calibration>
 <distortion model="poly3" focal="70" k1="{k1}"/><distortion model="poly3" focal="200" k1="0.01"/>
@@ -436,7 +437,7 @@ pub mod fixture {
     /// The database as if installed, for `Metadata::lensfun`.
     pub fn installed(k1: f32, timestamp: i64) -> installed::Handle {
         let db = database(k1, timestamp);
-        installed::Handle(Some(Arc::new(installed::Installed {
+        installed::Handle::Given(Some(Arc::new(installed::Installed {
             manifest: installed::Manifest {
                 version: timestamp,
                 url: super::choice::SOURCE_URL.into(),
@@ -449,7 +450,8 @@ pub mod fixture {
             db,
         })))
     }
-    /// A photo the lens fits, at 100 mm and f/4.
+    /// A photo the lens fits, at 100 mm and f/4, with no 35 mm equivalent focal
+    /// length and no database (never the one installed on the computer).
     pub fn photo() -> Metadata {
         Metadata {
             make: "Canon".into(),
@@ -461,7 +463,16 @@ pub mod fixture {
             aperture: 4.,
             width: 600,
             height: 400,
+            lensfun: installed::Handle::Given(None),
             ..Default::default()
+        }
+    }
+    /// The same lens on another body Lensfun knows.
+    pub fn other_camera() -> Metadata {
+        Metadata {
+            model: "EOS 6D".into(),
+            exif_model: "Canon EOS 6D".into(),
+            ..photo()
         }
     }
     /// The lens chosen for `photo`, from the first database.

@@ -186,6 +186,13 @@ impl LensProfileChoice {
         self.setup = LensProfileSetup::Custom;
         self.id = Some(LensProfileRef::Adobe(self.id_for(profile)));
     }
+    /// The choice taken to photo `m`: a Lensfun lens gets `m`'s camera
+    /// (`LensfunChoice::for_photo`); an Adobe one is the same.
+    pub fn for_photo(&mut self, m: &Metadata) {
+        if let Some(LensProfileRef::Lensfun(c)) = &mut self.id {
+            **c = c.for_photo(m);
+        }
+    }
     /// Picking a Lensfun lens: Custom, naming it.
     pub fn choose_lensfun(&mut self, choice: LensfunChoice) {
         self.setup = LensProfileSetup::Custom;

@@ -159,19 +159,29 @@ impl Cache {
     }
 }
 
-/// The database a photo was opened with, if any (`Metadata::lensfun`).
+/// The database editing a photo resolves Lensfun lenses against
+/// (`Metadata::lensfun`): the one installed when it is asked for, so an install,
+/// update or removal since the photo opened counts; or one given (tests).
 #[derive(Clone, Default)]
-pub struct Handle(pub Option<Arc<Installed>>);
+pub enum Handle {
+    #[default]
+    Installed,
+    Given(Option<Arc<Installed>>),
+}
 impl Handle {
-    pub fn get(&self) -> Option<&Installed> {
-        self.0.as_deref()
+    pub fn get(&self) -> Option<Arc<Installed>> {
+        match self {
+            Self::Installed => current(),
+            Self::Given(given) => given.clone(),
+        }
     }
 }
 impl std::fmt::Debug for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.0 {
-            Some(i) => write!(f, "Lensfun({})", i.manifest.version),
-            None => f.write_str("no Lensfun"),
+        match self {
+            Self::Installed => f.write_str("installed Lensfun"),
+            Self::Given(Some(i)) => write!(f, "Lensfun({})", i.manifest.version),
+            Self::Given(None) => f.write_str("no Lensfun"),
         }
     }
 }
