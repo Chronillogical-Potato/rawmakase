@@ -1,6 +1,6 @@
 use super::Preset;
 use crate::color::curve::ToneCurve;
-use crate::xml::ns::{CRS, PHOTOSHOP, RDF, XML};
+use crate::xml::ns::{CRS, PHOTOSHOP, RAWMAKASE, RDF, XML};
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};
 /// A preset's name and description, not settings.
@@ -64,6 +64,18 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         .filter(|a| a.namespace() == Some(CRS))
         .map(|a| (a.name().to_string(), a.value().to_string()))
         .collect();
+    // RAWmakase's own settings, under their prefix so no Camera Raw name meets them.
+    settings.extend(
+        description
+            .attributes()
+            .filter(|a| a.namespace() == Some(RAWMAKASE))
+            .map(|a| {
+                (
+                    format!("{}{}", super::RAWMAKASE_PREFIX, a.name()),
+                    a.value().to_string(),
+                )
+            }),
+    );
     let mut curves = BTreeMap::new();
     let mut blockers = Vec::new();
     let mut look = String::new();

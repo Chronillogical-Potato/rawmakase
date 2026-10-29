@@ -371,7 +371,7 @@ impl Weigher {
                         if g.outside(sx, sy) {
                             continue;
                         }
-                        let [sx, sy] = lens.map_or([sx, sy], |l| l.forward(sx, sy));
+                        let [sx, sy] = lens.as_ref().map_or([sx, sy], |l| l.forward(sx, sy));
                         let p = frame.to_image(sx, sy);
                         let i = row * w as usize + x as usize;
                         let lab = range.map(|im| range::oklab(im.pixels[i]));

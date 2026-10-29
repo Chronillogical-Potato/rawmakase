@@ -128,9 +128,17 @@ pub fn preset(r: &Recipe, shown: &Metadata, info: &PresetInfo, groups: &GroupSel
         .filter(|_| groups.contains(SettingGroup::TreatmentAndProfile));
     // Written once, after the settings, as Lightroom does.
     attributes.push(("HasSettings".into(), "True".into()));
-    let mut out = format!("  <rdf:Description rdf:about=\"\"\n    xmlns:crs=\"{CRS}\"");
+    let mut out = format!(
+        "  <rdf:Description rdf:about=\"\"\n    xmlns:crs=\"{CRS}\"{}",
+        super::rawmakase_namespace(attributes.iter().map(|(k, _)| k.as_str()))
+    );
     for (key, value) in &attributes {
-        let _ = write!(out, "\n   crs:{key}=\"{}\"", escape_text(value));
+        let _ = write!(
+            out,
+            "\n   {}=\"{}\"",
+            super::qualified(key),
+            escape_text(value)
+        );
     }
     out.push_str(">\n");
     for (element, text) in [
@@ -236,6 +244,8 @@ pub(crate) fn group_of_key(key: &str) -> Option<SettingGroup> {
         _ if starts("LuminanceNoiseReduction") => LuminanceNoiseReduction,
         _ if starts("ColorNoiseReduction") => ColorNoiseReduction,
         _ if starts("LensProfile") => LensProfileCorrections,
+        // The Lensfun lens an edit chose goes with the profile it stands for.
+        _ if starts("rawmakase:Lensfun") => LensProfileCorrections,
         _ if starts("Defringe") => ChromaticAberration,
         _ if starts("Upright") => UprightMode,
         _ if starts("Perspective") => TransformAdjustments,

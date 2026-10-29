@@ -150,6 +150,23 @@ impl Cache {
     }
 }
 
+/// The database a photo was opened with, if any (`Metadata::lensfun`).
+#[derive(Clone, Default)]
+pub struct Handle(pub Option<Arc<Installed>>);
+impl Handle {
+    pub fn get(&self) -> Option<&Installed> {
+        self.0.as_deref()
+    }
+}
+impl std::fmt::Debug for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(i) => write!(f, "Lensfun({})", i.manifest.version),
+            None => f.write_str("no Lensfun"),
+        }
+    }
+}
+
 static INSTALLED: Cache = Cache::new();
 
 /// The database installed in the data folder now, if any.

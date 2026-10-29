@@ -15,24 +15,38 @@ pub(crate) struct VignetteField<'a> {
     pub(super) amount: f32,
 }
 enum VignetteTable<'a> {
-    Lens(&'a crate::optics::Radial),
+    Lens(std::borrow::Cow<'a, crate::optics::Radial>),
     Combined(crate::optics::Radial),
+}
+/// A part of a lens correction, borrowed as long as the correction is the photo's
+/// own, else (a Lensfun lens's, made for the edit) copied.
+fn part<'a, T: Clone>(
+    correction: &std::borrow::Cow<'a, crate::optics::LensCorrection>,
+    get: impl Fn(&crate::optics::LensCorrection) -> Option<&T>,
+) -> Option<std::borrow::Cow<'a, T>> {
+    use std::borrow::Cow;
+    match correction {
+        Cow::Borrowed(c) => get(c).map(Cow::Borrowed),
+        Cow::Owned(c) => get(c).cloned().map(Cow::Owned),
+    }
 }
 impl<'a> VignetteField<'a> {
     pub(crate) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
         let correction = r.lens_correction(&im.metadata);
-        let lens = correction.and_then(|l| l.vignetting.as_ref());
+        let lens = correction
+            .as_ref()
+            .and_then(|c| part(c, |l| l.vignetting.as_ref()));
         let (w, h) = (im.width as f32, im.height as f32);
         let half = (w * w + h * h).sqrt() * 0.5;
         let [cx, cy] = crate::develop::image_space::LensMap::centre(im, r);
         let (table, amount) = match (lens, r.manual_vignette()) {
-            (_, Some(manual)) => {
+            (lens, Some(manual)) => {
                 // Manual Vignetting spans the photo frame, inside the camera's default crop.
                 let inset = crate::model::image_frame::ImageFrame::new(im).inset;
                 let frame = (w * inset[2]).hypot(h * inset[3]) * 0.5;
                 (
                     VignetteTable::Combined(crate::develop::effects::combined_table(
-                        lens,
+                        lens.as_deref(),
                         r.lens_amounts(&im.metadata)[1],
                         &manual,
                         half / frame,
@@ -76,14 +90,14 @@ pub(super) struct LensWarp<'a> {
 /// A DNG's OpcodeList3 GainMap over the camera image, at the lens profile's Vignetting
 /// amount like the radial vignetting table.
 pub(crate) struct GainField<'a> {
-    pub(super) grid: &'a crate::optics::GainGrid,
+    pub(super) grid: std::borrow::Cow<'a, crate::optics::GainGrid>,
     pub(super) size: [f32; 2],
     pub(super) amount: f32,
 }
 impl<'a> GainField<'a> {
     pub(super) fn new(im: &'a CameraImage, r: &Recipe) -> Option<Self> {
         Some(Self {
-            grid: r.lens_correction(&im.metadata)?.gain_map.as_ref()?,
+            grid: part(&r.lens_correction(&im.metadata)?, |l| l.gain_map.as_ref())?,
             size: [im.width as f32, im.height as f32],
             amount: r.lens_amounts(&im.metadata)[1],
         })

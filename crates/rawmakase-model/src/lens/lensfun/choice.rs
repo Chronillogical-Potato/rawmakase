@@ -183,14 +183,83 @@ impl LensfunChoice {
             aperture: m.aperture,
             distance: DISTANCE,
         };
-        let Evaluation {
-            correction,
-            shortfalls,
-        } = calibration.evaluate(&frame, &shot, &format!("Lensfun: {}", self.name()));
-        Applied {
-            correction,
-            notes: shortfalls.iter().map(Shortfall::describe).collect(),
+        let source = format!("Lensfun: {}", self.name());
+        evaluated(calibration, frame, shot, source)
+    }
+}
+
+/// Evaluations of the copies edits hold, newest last: a render asks for its edit's
+/// correction several times, as does every frame of the panel. Keyed by the copy
+/// itself (an edit's clones share it, and holding it here keeps its address from
+/// being reused) and what the evaluation reads of the photo.
+type Evaluated = (Arc<Calibration>, Frame, Shot, String, Applied);
+static EVALUATED: std::sync::Mutex<Vec<Evaluated>> = std::sync::Mutex::new(Vec::new());
+const EVALUATIONS_KEPT: usize = 8;
+
+fn evaluated(calibration: &Arc<Calibration>, frame: Frame, shot: Shot, source: String) -> Applied {
+    let lock = || EVALUATED.lock().unwrap_or_else(|e| e.into_inner());
+    let hit = |e: &Evaluated| {
+        Arc::ptr_eq(&e.0, calibration) && e.1 == frame && e.2 == shot && e.3 == source
+    };
+    if let Some(e) = lock().iter().find(|e| hit(e)) {
+        return e.4.clone();
+    }
+    let Evaluation {
+        correction,
+        shortfalls,
+    } = calibration.evaluate(&frame, &shot, &source);
+    let applied = Applied {
+        correction,
+        notes: shortfalls.iter().map(Shortfall::describe).collect(),
+    };
+    let mut kept = lock();
+    if !kept.iter().any(hit) {
+        if kept.len() >= EVALUATIONS_KEPT {
+            kept.remove(0);
         }
+        kept.push((
+            Arc::clone(calibration),
+            frame,
+            shot,
+            source,
+            applied.clone(),
+        ));
+    }
+    applied
+}
+
+/// The camera of photo `m` as a choice records it: Lensfun's entry for it, else its
+/// EXIF names with the crop factor its 35 mm equivalent focal length gives; `None`
+/// without either.
+pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
+    let frame = frame_size(m);
+    let photo = photo_of(m, frame);
+    let aspect =
+        (frame[0] > 0. && frame[1] > 0.).then(|| frame[0].max(frame[1]) / frame[0].min(frame[1]));
+    match super::matching::camera(db, photo.make, photo.model, frame) {
+        Some(c) => Some(LensfunCamera {
+            make: photo.make.to_string(),
+            model: photo.model.to_string(),
+            crop: c.crop,
+            aspect: c.aspect,
+        }),
+        None => exif_crop(&photo).map(|crop| LensfunCamera {
+            make: photo.make.to_string(),
+            model: photo.model.to_string(),
+            crop,
+            aspect,
+        }),
+    }
+}
+
+impl LensfunChoice {
+    /// This choice with the calibration of the lens it names copied from `db`, for
+    /// photo `m`; `None` when `db` doesn't have it.
+    pub fn resolved(&self, db: &super::Database, m: &Metadata) -> Option<Self> {
+        let lens = db.find(&self.lens)?;
+        lens.refusal()
+            .is_none()
+            .then(|| Self::of(lens, db, camera_for(db, m)))
     }
 }
 

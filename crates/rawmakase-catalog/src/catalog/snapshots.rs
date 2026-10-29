@@ -90,8 +90,9 @@ impl Catalog {
     pub fn add_snapshot(&mut self, photo: PhotoId, name: &str, recipe: &Recipe) -> Result<i64> {
         recipe.validate()?;
         let assets = self.assets_of(recipe.mask_asset_ids())?;
+        let stores = super::format_upgrade::Stores::of([recipe]);
         let (name, recipe) = (snapshot_name(name)?, serde_json::to_string(recipe)?);
-        let id = self.write_recipes(|w| {
+        let id = self.write_recipes(stores, |w| {
             assets.write(w)?;
             w.insert_returning_id(
                 sql!(
@@ -108,8 +109,9 @@ impl Catalog {
     pub fn update_snapshot(&mut self, id: i64, recipe: &Recipe) -> Result<()> {
         recipe.validate()?;
         let assets = self.assets_of(recipe.mask_asset_ids())?;
+        let stores = super::format_upgrade::Stores::of([recipe]);
         let recipe = serde_json::to_string(recipe)?;
-        self.write_recipes(|w| {
+        self.write_recipes(stores, |w| {
             assets.write(w)?;
             let n = w.execute(
                 sql!("UPDATE develop_snapshots SET recipe=?, lightroom=NULL WHERE id=?"),

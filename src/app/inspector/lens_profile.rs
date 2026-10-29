@@ -29,7 +29,7 @@ pub(super) fn profile_menus(ui: &mut egui::Ui, r: &mut Recipe, m: Option<&Metada
     // A profile that isn't imported, or the one the RAW carries, shown by name.
     let named = resolved
         .missing
-        .or(r.lens_profile_choice.id.as_ref().filter(|id| id.embedded))
+        .or(r.lens_profile_choice.adobe().filter(|id| id.embedded))
         .map(|id| id.label().to_string());
     let menus = ProfileMenus::new(&m.lens_profiles, m);
     let enabled = r.lens_profile;

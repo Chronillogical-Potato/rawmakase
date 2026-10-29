@@ -403,5 +403,74 @@ fn positive(v: f32) -> Result<f32> {
     }
 }
 
+/// A synthetic database and a photo it covers, made up for tests (never Lensfun's
+/// data).
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixture {
+    use super::{Database, LensfunChoice, installed};
+    use crate::camera_data::Metadata;
+    use std::sync::Arc;
+
+    /// A camera and two lenses: one with distortion, lateral CA and vignetting, and a
+    /// second calibration `k1` stronger, as a later database version might have it.
+    pub fn xml(k1: f32) -> String {
+        format!(
+            r#"<lensdatabase version="2">
+<mount><name>Canon EF</name></mount>
+<camera><maker>Canon</maker><model>Canon EOS 5D Mark III</model><mount>Canon EF</mount><cropfactor>1</cropfactor></camera>
+<lens><maker>Canon</maker><model>Canon EF 70-200mm f/2.8L IS II USM</model><mount>Canon EF</mount><cropfactor>1</cropfactor>
+<calibration>
+<distortion model="poly3" focal="70" k1="{k1}"/><distortion model="poly3" focal="200" k1="0.01"/>
+<tca model="linear" focal="70" kr="1.0004" kb="0.9997"/>
+<vignetting model="pa" focal="70" aperture="4" distance="1000" k1="-0.5" k2="0.1" k3="0"/>
+<vignetting model="pa" focal="200" aperture="4" distance="1000" k1="-0.3" k2="0" k3="0"/>
+</calibration></lens>
+</lensdatabase>"#
+        )
+    }
+    pub fn database(k1: f32, timestamp: i64) -> Database {
+        let mut db = Database::from_texts([("test.xml", xml(k1).as_str())]).unwrap();
+        db.timestamp = timestamp;
+        db
+    }
+    /// The database as if installed, for `Metadata::lensfun`.
+    pub fn installed(k1: f32, timestamp: i64) -> installed::Handle {
+        let db = database(k1, timestamp);
+        installed::Handle(Some(Arc::new(installed::Installed {
+            manifest: installed::Manifest {
+                version: timestamp,
+                url: super::choice::SOURCE_URL.into(),
+                bytes: 0,
+                sha256: String::new(),
+                downloaded: String::new(),
+                lenses: db.lenses.len(),
+                cameras: db.cameras.len(),
+            },
+            db,
+        })))
+    }
+    /// A photo the lens fits, at 100 mm and f/4.
+    pub fn photo() -> Metadata {
+        Metadata {
+            make: "Canon".into(),
+            model: "EOS 5D Mark III".into(),
+            exif_make: "Canon".into(),
+            exif_model: "Canon EOS 5D Mark III".into(),
+            lens_model: "EF70-200mm f/2.8L IS II USM".into(),
+            focal: 100.,
+            aperture: 4.,
+            width: 600,
+            height: 400,
+            ..Default::default()
+        }
+    }
+    /// The lens chosen for `photo`, from the first database.
+    pub fn choice() -> LensfunChoice {
+        let db = database(-0.02, 1_793_180_205);
+        let m = photo();
+        LensfunChoice::of(&db.lenses[0], &db, super::choice::camera_for(&db, &m))
+    }
+}
+
 #[cfg(test)]
 mod tests;

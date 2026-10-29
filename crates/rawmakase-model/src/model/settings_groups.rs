@@ -521,11 +521,12 @@ pub fn transfer(
     // sensor) is kept as the edit names it, and said, as on import.
     let embedded = recipe
         .lens_profile_choice
-        .id
-        .as_ref()
+        .adobe()
         .is_some_and(|id| id.embedded);
     if selection.contains(SettingGroup::LensProfileCorrections)
-        && (embedded || recipe.lens_profile_in_use(m).missing.is_some())
+        && (embedded
+            || recipe.lens_profile_in_use(m).missing.is_some()
+            || recipe.lensfun_in_use().is_some())
     {
         notes.extend(recipe.missing_lens_profile(m));
     }

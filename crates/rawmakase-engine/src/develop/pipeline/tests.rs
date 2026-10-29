@@ -1534,11 +1534,13 @@ fn profile_recipe(setup: crate::lens::choice::LensProfileSetup, filename: &str) 
         lens_profile: true,
         lens_profile_choice: crate::lens::choice::LensProfileChoice {
             setup,
-            id: (!filename.is_empty()).then(|| crate::lens::choice::LensProfileId {
-                name: String::new(),
-                filename: filename.into(),
-                digest: String::new(),
-                embedded: false,
+            id: (!filename.is_empty()).then(|| {
+                crate::lens::choice::LensProfileRef::Adobe(crate::lens::choice::LensProfileId {
+                    name: String::new(),
+                    filename: filename.into(),
+                    digest: String::new(),
+                    embedded: false,
+                })
             }),
         },
         ..Default::default()
@@ -1552,7 +1554,7 @@ fn lens_profile_choice_round_trips_and_is_omitted_by_default() {
     let json = serde_json::to_value(Recipe::default()).unwrap();
     assert!(json.get("lens_profile_choice").is_none());
     let mut r = profile_recipe(LensProfileSetup::Custom, "Mine 35mm F2.lcp");
-    r.lens_profile_choice.id.as_mut().unwrap().digest = "0123ABCD".into();
+    r.lens_profile_choice.adobe_mut().unwrap().digest = "0123ABCD".into();
     let back: Recipe = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
     assert_eq!(back.lens_profile_choice, r.lens_profile_choice);
     assert!(back.unknown.is_empty());
@@ -1672,7 +1674,7 @@ fn a_missing_named_lens_profile_is_reported() {
     let im = lens_photo();
     let m = &im.metadata;
     let mut custom = profile_recipe(LensProfileSetup::Custom, "Gone.lcp");
-    custom.lens_profile_choice.id.as_mut().unwrap().name = "Adobe (Gone)".into();
+    custom.lens_profile_choice.adobe_mut().unwrap().name = "Adobe (Gone)".into();
     assert_eq!(
         custom.missing_lens_profile(m).as_deref(),
         Some("Lens profile \"Adobe (Gone)\" isn't imported; no lens correction")
@@ -2276,4 +2278,42 @@ fn stripe_ca_guard_keeps_isolated_edges_resolved_colour_and_noise() {
         }
         assert!(changed < 44 * 172 / 20, "noise pixels changed: {changed}");
     }
+}
+
+/// A Lensfun lens the edit chose renders from its own copy of the calibration: the
+/// warp carries it, with lateral CA read at green's source radius, on the CPU and in
+/// the GPU's parameters, and with nothing installed.
+#[test]
+fn a_lensfun_choice_reaches_the_warp_and_the_gpu() {
+    use crate::lens::lensfun::fixture;
+    let metadata = fixture::photo();
+    assert!(metadata.lensfun.get().is_none());
+    let im = CameraImage {
+        width: metadata.width,
+        height: metadata.height,
+        pixels: vec![[0.2; 3]; (metadata.width * metadata.height) as usize],
+        metadata,
+        recovered: Default::default(),
+        fast: false,
+        scale_factor: 1.,
+        scale_clipped: 0,
+    };
+    let mut r = Recipe {
+        lens_profile: true,
+        lens_distortion: 2.,
+        ..Default::default()
+    };
+    r.lens_profile_choice.choose_lensfun(fixture::choice());
+    let warp = LensWarp::new(&im, &r).unwrap();
+    assert!(warp.map.lens.source.starts_with("Lensfun"));
+    assert!(warp.map.lens.chromatic_at_source);
+    assert_eq!(warp.map.amount, 2.);
+    assert!(warp.vignetting.is_some());
+    let mut tables = Vec::new();
+    let params = super::gpu_params::lens_gpu_params(&im, &r, 0, &mut tables);
+    assert_eq!(params[0], 2., "lateral CA at the source radius");
+    assert!(params[8] >= 0. && params[10] >= 0., "red and blue tables");
+    // Switched off, the edit renders no Lensfun correction.
+    r.lens_profile = false;
+    assert!(LensWarp::new(&im, &r).is_none_or(|w| !w.map.lens.source.starts_with("Lensfun")));
 }

@@ -337,7 +337,11 @@ impl Catalog {
             let Some(id) = value.pointer("/lens_profile_choice/id") else {
                 continue;
             };
-            if id.get("embedded").and_then(|v| v.as_bool()) == Some(true) {
+            // The camera's own profile, and a Lensfun lens, whose calibration the
+            // edit carries, need nothing imported.
+            if id.get("embedded").and_then(|v| v.as_bool()) == Some(true)
+                || id.get("lensfun").is_some()
+            {
                 continue;
             }
             let text = |key: &str| id.get(key).and_then(|v| v.as_str()).unwrap_or_default();

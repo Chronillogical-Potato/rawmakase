@@ -16,6 +16,9 @@ pub const EXIF: &str = "http://ns.adobe.com/exif/1.0/";
 pub const AUX: &str = "http://ns.adobe.com/exif/1.0/aux/";
 pub const LR: &str = "http://ns.adobe.com/lightroom/1.0/";
 pub const DIGIKAM: &str = "http://www.digikam.org/ns/1.0/";
+/// RAWmakase's own settings (`rawmakase:`), which Camera Raw doesn't read: the
+/// Lensfun lens an edit chose, by its identity only.
+pub const RAWMAKASE: &str = "https://rawmakase.com/ns/xmp/1.0/";
 /// Of an Adobe lens profile's camera models (`stCamera:`).
 pub const ST_CAMERA: &str = "http://ns.adobe.com/photoshop/1.0/camera-profile";
 

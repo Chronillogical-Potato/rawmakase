@@ -255,7 +255,17 @@ impl Catalog {
             .map(|(file, place)| self.read_new_photo(file, place, defaults))
             .collect();
         let edited_at = rawmakase_model::time::now_text();
-        let (added, report, edits) = self.db.write(|w| {
+        // An edit naming a Lensfun lens raises the catalog to the format for them,
+        // in this transaction.
+        let stores = if photos
+            .iter()
+            .any(|p| p.edit.as_ref().is_some_and(|e| e.lensfun))
+        {
+            super::format_upgrade::Stores::Lensfun
+        } else {
+            super::format_upgrade::Stores::Recipes
+        };
+        let write = |w: &mut super::db::Write<'_>| {
             // The newest batch is Previous Import, empty when nothing new
             // was found.
             let batch = new_batch(w, kind)?;
@@ -340,7 +350,11 @@ impl Catalog {
                 }
             }
             Ok((added, report, edits))
-        })?;
+        };
+        let (added, report, edits) = match stores {
+            super::format_upgrade::Stores::Lensfun => self.write_recipes(stores, write)?,
+            super::format_upgrade::Stores::Recipes => self.db.write(write)?,
+        };
         edits.iter().for_each(|change| change.committed());
         Ok((added, report))
     }
@@ -398,7 +412,11 @@ impl Catalog {
             .map(|bitmap| Ok((bitmap.hash(), bitmap.compress()?)))
             .collect::<Result<_>>()?;
         let checked = self.check_new_edit(file, &sidecar.recipe, &sidecar.export)?;
-        Ok(Some(LegacyEdit { bitmaps, checked }))
+        Ok(Some(LegacyEdit {
+            bitmaps,
+            checked,
+            lensfun: sidecar.recipe.uses_lensfun(),
+        }))
     }
 }
 
@@ -502,6 +520,8 @@ struct NewPhoto<'a> {
 struct LegacyEdit {
     bitmaps: Vec<(String, Vec<u8>)>,
     checked: super::edit_rows::CheckedNew,
+    /// It names a Lensfun lens (`format_upgrade::Stores`).
+    lensfun: bool,
 }
 
 /// This computer's locations, for matching folders found on disk.

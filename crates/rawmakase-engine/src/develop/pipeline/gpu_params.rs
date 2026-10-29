@@ -27,7 +27,7 @@ pub(crate) fn lens_gpu_params(
         out[15] = -1.;
         return out;
     };
-    let lens = warp.map.lens;
+    let lens = &*warp.map.lens;
     let distortion = push(lens.distortion.as_ref());
     let [red, blue] = match warp.map.chromatic.or(lens.chromatic.as_ref()) {
         Some([red, blue]) => [push(Some(red)), push(Some(blue))],
@@ -51,7 +51,7 @@ pub(crate) fn lens_gpu_params(
     out[14] = warp.vignetting.as_ref().map_or(0., |v| v.amount);
     out[15] = warp.gain_map.as_ref().map_or(-1., |g| {
         let at = base + tables.len();
-        let grid = g.grid;
+        let grid = &*g.grid;
         tables.extend([grid.points[0] as f32, grid.points[1] as f32]);
         tables.extend(grid.origin);
         tables.extend(grid.spacing);

@@ -2,7 +2,7 @@
 use crate::{
     camera_data::Metadata,
     model::recipe::Recipe,
-    model::saved_format::{SCHEMA, migrate_recipe},
+    model::saved_format::{migrate_recipe, schema_for},
     storage::atomic_json,
 };
 use anyhow::Result;
@@ -48,8 +48,8 @@ pub fn save_preset(path: &Path, r: &Recipe, m: &Metadata) -> Result<()> {
     atomic_json(
         path,
         &Preset {
-            schema: SCHEMA,
-            pipeline: SCHEMA,
+            schema: schema_for(&recipe),
+            pipeline: schema_for(&recipe),
             recipe,
             masks: local.masks,
             rendered: m.is_rendered(),
@@ -296,8 +296,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.json");
         let value = serde_json::json!({
-            "schema": SCHEMA,
-            "pipeline": SCHEMA,
+            "schema": crate::model::saved_format::SCHEMA,
+            "pipeline": crate::model::saved_format::SCHEMA,
             "recipe": recipe,
         });
         std::fs::write(&path, value.to_string()).unwrap();
