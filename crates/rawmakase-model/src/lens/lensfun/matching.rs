@@ -181,16 +181,18 @@ fn crop_for(camera: Option<&Camera>, photo: &Photo) -> Option<f32> {
 
 /// The crop factor of `photo`'s frame from a camera of `crop` with a sensor of
 /// `aspect` (`frame_crop`), in a crop mode the camera records (Canon's APS-C mode)
-/// that much larger; else, where the 35 mm equivalent focal length disagrees with it
-/// by more than rounding (10%), the crop factor that gives (Nikon's DX and Sony's
-/// APS-C modes write it so).
+/// that much larger; else, where the 35 mm equivalent focal length disagrees by more
+/// than rounding (10%) with both the frame's and the sensor's crop factors, the crop
+/// factor that gives (Nikon's DX and Sony's APS-C modes write it so).
 pub fn photo_crop(crop: f32, aspect: Option<f32>, photo: &Photo) -> f32 {
     let frame = frame_crop(crop, aspect, photo.frame);
     if let Some(k) = photo.sensor_crop.filter(|k| k.is_finite() && *k >= 1.) {
         return frame * k;
     }
+    // A 35 mm equivalent of the whole sensor (as many cameras record it for a
+    // readout) says nothing of a crop mode.
     match exif_crop(photo) {
-        Some(exif) if (exif / frame - 1.).abs() > 0.1 => exif,
+        Some(exif) if (exif / frame - 1.).abs() > 0.1 && (exif / crop - 1.).abs() > 0.1 => exif,
         _ => frame,
     }
 }

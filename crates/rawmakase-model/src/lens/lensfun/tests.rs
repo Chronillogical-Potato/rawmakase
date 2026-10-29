@@ -587,3 +587,21 @@ fn an_exif_crop_factor_already_counts_the_crop_mode() {
     let chosen = LensfunChoice::of(&db.lenses[0], &db, Some(camera));
     assert!((chosen.frame(&m).unwrap().crop - 1.6).abs() < 1e-6);
 }
+
+/// A 35 mm equivalent that only describes the whole sensor (a G7's 1:1 readout
+/// records 28 mm at 14 mm, crop 2) doesn't override the readout's own crop factor.
+#[test]
+fn a_35mm_equivalent_of_the_sensor_leaves_a_readout_s_crop() {
+    let db = db();
+    let square = Photo {
+        focal_35mm: 28.,
+        frame: [3440., 3440.],
+        ..photo("Panasonic", "DMC-G6", "", 14.)
+    };
+    let found = find(&db, &square);
+    assert!(
+        (found.crop.unwrap() - 2.357_022_6).abs() < 1e-4,
+        "{:?}",
+        found.crop
+    );
+}
