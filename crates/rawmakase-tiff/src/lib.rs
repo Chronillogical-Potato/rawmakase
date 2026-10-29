@@ -76,6 +76,30 @@ impl<R: Read + Seek> Tiff<R> {
             first: 0,
         }
     }
+    /// Headless directories in the `len` bytes at `offset` from this TIFF's
+    /// base (to its end when `None`), read through its source: a maker note
+    /// too large to read whole. Nothing outside them is read; `None` when
+    /// they run past this TIFF.
+    pub fn part(&mut self, offset: u64, len: Option<u64>, little: bool) -> Option<Tiff<&mut R>> {
+        let len = match (len, self.len) {
+            (Some(len), max) => {
+                let end = offset.checked_add(len)?;
+                if max.is_some_and(|max| end > max) {
+                    return None;
+                }
+                Some(len)
+            }
+            (None, Some(max)) => Some(max.checked_sub(offset)?),
+            (None, None) => None,
+        };
+        Some(Tiff {
+            f: &mut self.f,
+            base: self.base.checked_add(offset)?,
+            len,
+            little,
+            first: 0,
+        })
+    }
     fn start(f: R, base: u64, len: Option<u64>) -> Option<Self> {
         let mut t = Self {
             f,

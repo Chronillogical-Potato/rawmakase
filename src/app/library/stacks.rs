@@ -560,8 +560,10 @@ impl Library {
                 ui.label(
                     egui::RichText::new(
                         "Bursts and brackets stack as the camera numbered them, however long \
-                         they took; single shots are left alone. Read from Sony, Fujifilm and \
-                         Panasonic cameras and iPhones; other photos stack by time.",
+                         they took; single shots are left alone. Sony, Fujifilm, Panasonic, \
+                         Olympus and OM System cameras number frames and iPhones mark bursts; \
+                         Canon and Nikon say only that the drive was continuous, so those \
+                         photos stack by time, each camera apart. Other photos stack by time.",
                     )
                     .size(text::LABEL)
                     .color(palette.tone(Tone::MUTED)),

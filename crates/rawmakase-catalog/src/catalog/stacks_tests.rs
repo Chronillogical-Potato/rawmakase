@@ -476,6 +476,51 @@ mod bursts {
     }
 
     #[test]
+    fn frames_not_numbered_go_by_time_each_camera_apart() {
+        let c = |camera| Some(sequence(camera, Mark::Continuous));
+        let photos = [
+            (0.0, c("A")),
+            (0.3, c("A")),
+            (0.6, c("B")),
+            (0.9, c("A")),
+            (5.0, c("A")),
+            (5.2, c("A")),
+            (6.0, None),
+            (6.5, None),
+        ];
+        assert_eq!(plan(&photos, 1.), [vec![1, 2, 4], vec![5, 6], vec![7, 8]]);
+        // Less than the interval apart, as Auto-Stack by Capture Time has it.
+        let same_time = [(0.0, c("A")), (0.0, c("A"))];
+        assert!(plan(&same_time, 0.).is_empty());
+        assert_eq!(plan(&same_time, 0.001), [vec![1, 2]]);
+    }
+
+    #[test]
+    fn a_cameras_photo_of_another_kind_ends_its_runs() {
+        let c = |camera| Some(sequence(camera, Mark::Continuous));
+        let photos = [
+            (0.0, c("A")),
+            (0.2, Some(sequence("A", Mark::Single))),
+            (0.4, c("A")),
+            (1.0, Some(frame("A", 1))),
+            (1.1, c("A")),
+            (1.2, Some(frame("A", 2))),
+        ];
+        assert!(plan(&photos, 10.).is_empty());
+        // Another body's photos don't.
+        let photos = [
+            (0.0, c("A")),
+            (0.1, Some(sequence("B", Mark::Single))),
+            (0.2, Some(frame("B", 1))),
+            (0.3, c("A")),
+            (0.4, Some(frame("A", 1))),
+            (0.5, c("B")),
+            (0.6, Some(frame("A", 2))),
+        ];
+        assert_eq!(plan(&photos, 10.), [vec![1, 4], vec![5, 7]]);
+    }
+
+    #[test]
     fn a_raw_and_its_jpeg_make_two_runs_and_folders_stay_apart() {
         let (a1, a2) = (frame("A", 1), frame("A", 2));
         let times = ["2024-03-02T10:00:00.000", "2024-03-02T10:00:00.100"];
