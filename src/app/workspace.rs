@@ -186,6 +186,9 @@ impl Editor {
         if let Some(removal) = self.library.as_mut().and_then(|l| l.take_removal_request()) {
             self.modal = Some(super::Modal::RemoveFolder(removal));
         }
+        if let Some(request) = self.library.as_mut().and_then(|l| l.take_export_request()) {
+            self.export_as_catalog(request);
+        }
         if let Some(ids) = self.library.as_mut().and_then(|l| l.take_read_request()) {
             self.modal = Some(super::Modal::ReadMetadata(ids));
         }
@@ -233,6 +236,7 @@ impl Editor {
         }
         self.remove_copy_window(&ctx);
         self.remove_folder_window(&ctx);
+        self.catalog_exported_window(&ctx);
         self.folder_sync_window(&ctx);
         self.discard_for_find_window(&ctx);
         self.read_metadata_window(&ctx);

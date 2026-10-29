@@ -45,7 +45,7 @@ pub(super) const INFO_BACKFILLED: &str = "lightroom_info_backfilled";
 /// The PNGs whose files are read once more, because their info was stored
 /// before PNGs' EXIF was read: their ids, comma-separated, each removed once
 /// its file is read; empty when none is left.
-const PNG_INFO_REREAD: &str = "png_info_reread";
+pub(super) const PNG_INFO_REREAD: &str = "png_info_reread";
 
 impl Catalog {
     /// Each photo's width over height, as shown, where it is known; a

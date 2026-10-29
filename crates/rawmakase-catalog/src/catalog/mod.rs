@@ -28,6 +28,7 @@ mod develop_history;
 mod edit_records;
 mod edit_rows;
 mod edits;
+mod export_catalog;
 pub mod file_ops;
 pub mod folder_sync;
 mod format_upgrade;
@@ -55,6 +56,7 @@ pub use defaults::{CameraExifReader, MetadataDefaults, NewPhotoDefaults};
 pub use descriptive::MetadataSnapshot;
 pub use develop_history::{HistoryUpdate, SavedHistory, SavedStep};
 pub use edits::{EditChange, EditToSave};
+pub use export_catalog::{CatalogExport, ExportScope, ExportedFolders};
 pub use ingest::{Ambiguity, Choice, Conflict};
 pub use lightroom::HistoryStep;
 pub use location::CatalogLocation;
@@ -386,6 +388,8 @@ mod checksums_tests;
 mod descriptive_tests;
 #[cfg(test)]
 mod edit_rows_tests;
+#[cfg(test)]
+mod export_catalog_tests;
 #[cfg(test)]
 mod format_upgrade_tests;
 #[cfg(test)]

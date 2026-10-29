@@ -36,6 +36,20 @@ pub(crate) struct FolderRemoval {
     pub(crate) photos: usize,
     /// A root with no folder left in the catalog, removed on its own.
     pub(crate) empty_root: Option<RootId>,
+    /// The folders as Export as Catalog wrote them: removed only while they
+    /// are still that.
+    pub(crate) exported: Option<crate::catalog::ExportedFolders>,
+}
+/// Export as Catalog chosen in the Folders panel or a photo's menu, for the
+/// editor to run.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CatalogExportRequest {
+    /// What to name the new catalog, unless the user names it otherwise.
+    pub(crate) name: String,
+    pub(crate) scope: crate::catalog::ExportScope,
+    /// For a folder, removing it from the catalog, to offer once it is
+    /// exported.
+    pub(crate) removal: Option<FolderRemoval>,
 }
 /// Where the Library was: its source, filter bar and selection, for undo to
 /// return to.
@@ -207,6 +221,8 @@ pub(crate) struct Library {
     /// A folder chosen in the Folders panel to be removed, for the editor
     /// to confirm.
     removal_request: Option<FolderRemoval>,
+    /// Export as Catalog chosen in the Folders panel or a photo's menu.
+    export_request: Option<CatalogExportRequest>,
     /// Synchronize Folder chosen in the Folders panel, for the editor.
     sync_request: Option<(crate::catalog::folder_sync::SyncScope, String)>,
     /// Find on Disk… chosen in a photo's menu, for the editor.
@@ -326,6 +342,7 @@ impl Library {
             ctx,
             copy_request: None,
             removal_request: None,
+            export_request: None,
             sync_request: None,
             find_request: None,
             offer_previous_import: false,
@@ -1048,6 +1065,9 @@ impl Library {
     pub(in crate::app) fn take_removal_request(&mut self) -> Option<FolderRemoval> {
         self.removal_request.take()
     }
+    pub(in crate::app) fn take_export_request(&mut self) -> Option<CatalogExportRequest> {
+        self.export_request.take()
+    }
     /// Creates a virtual copy of `id` and selects it.
     pub(super) fn create_virtual_copy(&mut self, id: PhotoId) -> Result<Committed<PhotoId>> {
         let made = self.session.create_virtual_copy(id)?;
@@ -1112,11 +1132,13 @@ impl Library {
     }
     /// Removes `folders` and their photos from the catalog, leaving the files;
     /// returns the photos removed. The Library shows All Photographs if it
-    /// showed one of them. An error means nothing was removed.
+    /// showed one of them. An error means nothing was removed. Folders
+    /// `exported` are removed only while they are still what was exported.
     pub(in crate::app) fn remove_folders(
         &mut self,
         folders: &HashSet<FolderId>,
         name: &str,
+        exported: Option<&crate::catalog::ExportedFolders>,
     ) -> Result<Committed<Vec<PhotoId>>> {
         // Forgotten first: once removed, their ids can be reused, so their
         // previews must go even if removing or reading the catalog again
@@ -1144,7 +1166,7 @@ impl Library {
             .flatten()
             .any(|f| folders.contains(&f));
         let ids: Vec<FolderId> = folders.iter().copied().collect();
-        let removed = self.session.remove_folders(&ids)?;
+        let removed = self.session.remove_folders(&ids, exported)?;
         if shown_going {
             self.selected_folders.clear();
             self.filters.folder_scope = None;

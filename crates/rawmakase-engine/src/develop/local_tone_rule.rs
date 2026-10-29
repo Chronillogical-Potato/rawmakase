@@ -9,17 +9,17 @@
 //! the mosaics carry a faint texture. The slider scales the +100 / −100 gain linearly
 //! (measured exactly at ±50).
 //!
-//! The rule is a small network (`local_tone_rule_data.rs`; two hidden layers of
-//! [`HIDDEN`] units) evaluated once per photo at
+//! The rule is the mean of [`MEMBERS`] small networks fitted from different seeds
+//! (`local_tone_rule_data.rs`; two hidden layers of [`HIDDEN`] units), since one fit's
+//! gain at a level varies by 0.1 to 0.3 EV with the seed on real photos. It is
+//! evaluated once per photo at
 //! 48 base levels, which gives a [`Curve`] the per-pixel code and the GPU read like any
 //! other. With `RAWMAKASE_RULE_DUMP=<path>` set, each curve built appends its statistics
 //! and table to `<path>` as a JSON line and writes the map it read to `<path>.map`
 //! (diagnostics; `scene-tone-rule.py taps` trains on those maps).
 use super::local_tone::{Curve, blur};
-use super::local_tone_rule_data::{B1, B2, B3, MU, SD, W1, W2, W3};
+use super::local_tone_rule_data::{B1, B2, B3, FEATURES, HIDDEN, MEMBERS, MU, SD, W1, W2, W3};
 
-/// The network's width, from the generated weights.
-const HIDDEN: usize = W1.len();
 /// Radius (map pixels) of the mean whose residual measures texture.
 const TEXTURE_RADIUS: usize = 2;
 /// How far below the top (stops) texture is measured for `tex_top`.
@@ -29,6 +29,16 @@ const TOP_BAND: f32 = 2.;
 /// clamped rather than extrapolated (`pipeline.py`).
 const TEX_CLAMP: f32 = 0.6;
 const TEX_TOP_CLAMP: f32 = 0.05;
+/// Per-level texture: the median absolute fine (radius [`TEXTURE_RADIUS`]) and coarse
+/// ([`COARSE_RADIUS`]) residual of the pixels whose base lies within [`LEVEL_WINDOW`] of
+/// the level, clamped at [`TEX_AT_CLAMP`]. Camera Raw lifts a smooth dark region far
+/// less than a rough one at the same depth (1.95 against 3.21 EV seven stops down on
+/// the `ground` probes); a median ignores the few edge pixels whose residual spans
+/// stops. Levels with fewer than [`LEVEL_MIN`] pixels take the photo's median.
+const COARSE_RADIUS: usize = 12;
+const LEVEL_WINDOW: f32 = 0.5;
+const TEX_AT_CLAMP: f32 = 1.0;
+const LEVEL_MIN: usize = 50;
 
 /// Histogram statistics of a photo's base levels (its measurement copy).
 pub(super) struct RuleStats {
@@ -43,7 +53,21 @@ pub(super) struct RuleStats {
     q90: f32,
     tex: f32,
     tex_top: f32,
+    /// Absolute fine and coarse residuals of every map pixel, in order of its base level
+    /// (`sorted`), for the per-level medians.
+    fine_by_level: Vec<f32>,
+    coarse_by_level: Vec<f32>,
+    fine_median: f32,
+    coarse_median: f32,
+    /// The curves' extent and the ensemble's gains at [`LEVELS`] levels across it,
+    /// computed once per map: the per-level medians are the costly part, and both
+    /// controls' curves read the same table.
+    lo: f32,
+    hi: f32,
+    gains: [[f32; 2]; LEVELS],
 }
+/// Levels at which the curves sample the rule.
+const LEVELS: usize = 48;
 impl RuleStats {
     /// From the map's log2 luminance and base level (a · log + b), `w` × `h`.
     pub(super) fn new(logs: &[f32], base: &[f32], w: usize, h: usize) -> Self {
@@ -57,8 +81,9 @@ impl RuleStats {
             }
             let _ = std::fs::write(format!("{path}.map"), bytes);
         }
-        let mut sorted = base.to_vec();
-        sorted.sort_by(f32::total_cmp);
+        let mut order: Vec<u32> = (0..base.len() as u32).collect();
+        order.sort_by(|&a, &b| base[a as usize].total_cmp(&base[b as usize]));
+        let sorted: Vec<f32> = order.iter().map(|&i| base[i as usize]).collect();
         let n = sorted.len();
         let q = |p: f32| sorted[((p * (n - 1) as f32) as usize).min(n - 1)];
         let mean = (sorted.iter().map(|v| *v as f64).sum::<f64>() / n as f64) as f32;
@@ -81,7 +106,18 @@ impl RuleStats {
         } else {
             tex
         };
-        Self {
+        let coarse = blur(logs, w, h, COARSE_RADIUS);
+        let fine_by_level: Vec<f32> = order
+            .iter()
+            .map(|&i| (logs[i as usize] - smooth[i as usize]).abs())
+            .collect();
+        let coarse_by_level: Vec<f32> = order
+            .iter()
+            .map(|&i| (logs[i as usize] - coarse[i as usize]).abs())
+            .collect();
+        let fine_median = median(&fine_by_level);
+        let coarse_median = median(&coarse_by_level);
+        let mut stats = Self {
             top,
             bot: q(0.001),
             mean,
@@ -93,15 +129,43 @@ impl RuleStats {
             tex,
             tex_top,
             sorted,
+            fine_by_level,
+            coarse_by_level,
+            fine_median,
+            coarse_median,
+            lo: 0.,
+            hi: 0.,
+            gains: [[0.; 2]; LEVELS],
+        };
+        stats.lo = stats.bot - 1.;
+        stats.hi = stats.top + 1.;
+        let step = (stats.hi - stats.lo) / LEVELS as f32;
+        stats.gains = std::array::from_fn(|i| stats.gain(stats.lo + (i as f32 + 0.5) * step));
+        stats
+    }
+    /// Fine and coarse texture of the pixels within [`LEVEL_WINDOW`] of base level `x`.
+    fn texture_at(&self, x: f32) -> (f32, f32) {
+        let lo = self.sorted.partition_point(|v| *v < x - LEVEL_WINDOW);
+        let hi = self.sorted.partition_point(|v| *v <= x + LEVEL_WINDOW);
+        if hi - lo < LEVEL_MIN {
+            return (
+                self.fine_median.min(TEX_AT_CLAMP),
+                self.coarse_median.min(TEX_AT_CLAMP),
+            );
         }
+        (
+            median(&self.fine_by_level[lo..hi]).min(TEX_AT_CLAMP),
+            median(&self.coarse_by_level[lo..hi]).min(TEX_AT_CLAMP),
+        )
     }
     /// Fraction of base levels at or below `x`.
     fn cdf(&self, x: f32) -> f32 {
         self.sorted.partition_point(|v| *v <= x) as f32 / self.sorted.len() as f32
     }
-    /// The network's inputs for base level `x` (`pipeline.py`'s `FEAT`, in order).
-    fn features(&self, x: f32) -> [f32; 20] {
+    /// The network's inputs for base level `x` (`scene-tone-rule.py`'s `FEAT`, in order).
+    fn features(&self, x: f32) -> [f32; FEATURES] {
         let m = |lo: f32, hi: f32| self.cdf(x + hi) - self.cdf(x + lo);
+        let (fine, coarse) = self.texture_at(x);
         [
             self.top - x,
             x - self.bot,
@@ -123,34 +187,41 @@ impl RuleStats {
             m(-5., -3.),
             self.tex.min(TEX_CLAMP),
             self.tex_top.min(TEX_TOP_CLAMP) / TEX_TOP_CLAMP,
+            fine,
+            coarse,
         ]
     }
-    /// Log2 gain at base level `x`: Shadows +100, Highlights −100.
-    pub(super) fn gain(&self, x: f32) -> [f32; 2] {
+    /// Log2 gain at base level `x`: Shadows +100, Highlights −100 (the ensemble's mean).
+    fn gain(&self, x: f32) -> [f32; 2] {
         let f = self.features(x);
-        let mut h1 = [0f32; HIDDEN];
-        for (j, out) in h1.iter_mut().enumerate() {
-            let mut s = B1[j];
-            for (i, v) in f.iter().enumerate() {
-                s += W1[j][i] * (v - MU[i]) / SD[i];
+        let z: [f32; FEATURES] = std::array::from_fn(|i| (f[i] - MU[i]) / SD[i]);
+        let mut sum = [0f32; 2];
+        for m in 0..MEMBERS {
+            let mut h1 = [0f32; HIDDEN];
+            for (j, out) in h1.iter_mut().enumerate() {
+                let mut s = B1[m][j];
+                for (i, v) in z.iter().enumerate() {
+                    s += W1[m][j][i] * v;
+                }
+                *out = silu(s);
             }
-            *out = silu(s);
+            let mut h2 = [0f32; HIDDEN];
+            for (j, out) in h2.iter_mut().enumerate() {
+                let mut s = B2[m][j];
+                for (i, v) in h1.iter().enumerate() {
+                    s += W2[m][j][i] * v;
+                }
+                *out = silu(s);
+            }
+            for (k, out) in sum.iter_mut().enumerate() {
+                let mut s = B3[m][k];
+                for (i, v) in h2.iter().enumerate() {
+                    s += W3[m][k][i] * v;
+                }
+                *out += s;
+            }
         }
-        let mut h2 = [0f32; HIDDEN];
-        for (j, out) in h2.iter_mut().enumerate() {
-            let mut s = B2[j];
-            for (i, v) in h1.iter().enumerate() {
-                s += W2[j][i] * v;
-            }
-            *out = silu(s);
-        }
-        std::array::from_fn(|k| {
-            let mut s = B3[k];
-            for (i, v) in h2.iter().enumerate() {
-                s += W3[k][i] * v;
-            }
-            s
-        })
+        sum.map(|v| v / MEMBERS as f32)
     }
     /// The curve of one control at full strength (Shadows +100 when `shadows`, else
     /// Highlights −100) over the photo's base levels, as [`Curve`] reads it: absolute
@@ -158,10 +229,10 @@ impl RuleStats {
     /// outside. Shadows lifts nothing above the top and Highlights pulls nothing below
     /// the bottom, so holding the ends extends the rule as the mosaics measured it.
     pub(super) fn curve(&self, shadows: bool) -> Curve {
-        let (lo, hi) = (self.bot - 1., self.top + 1.);
-        let step = (hi - lo) / 48.;
-        let mut table: [f32; 48] = std::array::from_fn(|i| {
-            let g = self.gain(lo + (i as f32 + 0.5) * step);
+        let (lo, hi) = (self.lo, self.hi);
+        let step = (hi - lo) / LEVELS as f32;
+        let mut table: [f32; LEVELS] = std::array::from_fn(|i| {
+            let g = self.gains[i];
             if shadows { g[0].max(0.) } else { g[1].min(0.) }
         });
         monotone(&mut table, step);
@@ -229,6 +300,21 @@ fn monotone(table: &mut [f32; 48], step: f32) {
         }
     }
 }
+/// The median of `values`: the mean of the two middle values of an even count, as
+/// `numpy.median` computes the training inputs.
+fn median(values: &[f32]) -> f32 {
+    if values.is_empty() {
+        return 0.;
+    }
+    let mut v = values.to_vec();
+    let n = v.len();
+    let (lower, upper, _) = v.select_nth_unstable_by(n / 2, f32::total_cmp);
+    if n % 2 == 1 {
+        return *upper;
+    }
+    let below = lower.iter().copied().fold(f32::MIN, f32::max);
+    (below + *upper) / 2.
+}
 fn silu(x: f32) -> f32 {
     x / (1. + (-x).exp())
 }
@@ -246,6 +332,18 @@ pub(super) fn at(unit: &Curve, s: f32) -> Curve {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn median_averages_the_middle_pair_like_numpy() {
+        assert_eq!(median(&[]), 0.);
+        assert_eq!(median(&[3.]), 3.);
+        assert_eq!(median(&[0.875, 0.125, 0.5]), 0.5);
+        // An even count: the mean of the two middle values, not the lower one.
+        let mut v = vec![0.125; 25];
+        v.extend(std::iter::repeat_n(0.875, 25));
+        assert_eq!(median(&v), 0.5);
+        assert_eq!(median(&[4., 1., 3., 2.]), 2.5);
+    }
 
     #[test]
     fn monotone_never_lets_a_brighter_level_render_darker() {

@@ -67,6 +67,7 @@ impl Editor {
                 Event::FileOpResolved(catalog, operation, resolved) => {
                     self.file_op_resolved(catalog, operation, *resolved)
                 }
+                Event::CatalogExported(result) => self.catalog_exported(*result),
                 Event::FolderQuestion(question) => {
                     self.modal = Some(super::Modal::FolderQuestion(*question))
                 }

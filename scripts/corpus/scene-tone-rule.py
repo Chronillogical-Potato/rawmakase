@@ -28,7 +28,11 @@ ranges of 10.5 to 13.5 stops (the Shadows lift keeps growing to about 4.3 EV twe
 stops under the top), bimodal histograms with most of the frame 9 to 12 stops down
 and the rest 2 to 5 stops down (Camera Raw lifts the deep cluster 3 to 5 EV and the
 mid cluster only 0.1 to 0.3), and top patches clipped in every channel, in green
-only or just under white (Highlights pulls them all alike).
+only or just under white (Highlights pulls them all alike), smooth skies of varying
+cloud texture and extent over textured ground, dark regions of varying texture under a
+fixed sky (Camera Raw lifts a smooth dark region far less than a rough one at the same
+depth, which no histogram can see: hence the per-level texture inputs), and coloured
+patches of equal luminance (the pull is colour-blind).
 
 Targets count down to 13 stops under white (`targets`): with a 9-stop floor the
 network never saw the deepest tones and under-lifted them by 1.5 EV on interiors.
@@ -39,8 +43,9 @@ directions on the stress sets; this configuration had the lowest mean error ther
 
 Features (`Photo.features`, mirrored by `RuleStats::features`): top − x, x − bottom,
 mean − x, five quantiles − x, the CDF at x, the range, the mass within eight bands
-of stops around x, and two texture measures clamped so the network cannot
-extrapolate on amplitude. Requires numpy, scipy, tifffile, Pillow and mlx.
+of stops around x, two global texture measures clamped so the network cannot
+extrapolate on amplitude, and the fine and coarse texture of the pixels at the level
+itself (median absolute residuals, so edge pixels do not count). Requires numpy, scipy, tifffile, Pillow and mlx.
 """
 import argparse
 import json
@@ -67,11 +72,16 @@ N = 1024
 SETTINGS = {'default': {}, 'S+100': {'Shadows2012': '100'}, 'H-100': {'Highlights2012': '-100'}}
 PHOTO_WEIGHT = 1    # photo samples against mosaic samples in the fit
 HIDDEN = 64         # units in each of the two hidden layers
+MEMBERS = 4         # networks in the ensemble (seeds 0..MEMBERS-1), averaged by the engine
 # `local_tone.rs`: the measurement copy's long edge, the map's floor, the guided filter.
 MAP, FLOOR, EPS, RADIUS = 512, 2.0 ** -14, 0.5, 0.032
 TEX_CLAMP, TEX_TOP_CLAMP = 0.6, 0.05
+# Per-level texture (`RuleStats::texture_at`): the median absolute fine (radius 2) and
+# coarse (radius COARSE_RADIUS) residual of the pixels within LEVEL_WINDOW of the level.
+LEVEL_WINDOW, COARSE_RADIUS, TEX_AT_CLAMP, LEVEL_MIN = 0.5, 12, 1.0, 50
 FEAT = ['top-x', 'x-bot', 'mean-x', 'p50-x', 'p75-x', 'p90-x', 'p25-x', 'p10-x', 'cdf', 'range',
-        'm(0,1]', 'm(1,2]', 'm(2,3]', 'm(3,5]', 'm(-1,0]', 'm(-2,-1]', 'm(-3,-2]', 'm(-5,-3]', 'tex', 'tex_top']
+        'm(0,1]', 'm(1,2]', 'm(2,3]', 'm(3,5]', 'm(-1,0]', 'm(-2,-1]', 'm(-3,-2]', 'm(-5,-3]', 'tex', 'tex_top',
+        'tex_at', 'coarse_at']
 
 
 # --- the engine's measurement pipeline, in numpy -------------------------------------
@@ -119,19 +129,37 @@ class Photo:
         self.tex = float(np.sqrt(np.mean(d * d)))
         top = self.base > self.top - 2
         self.tex_top = float(np.sqrt(np.mean(d[top] ** 2))) if top.any() else self.tex
+        # The residuals in order of base level, for the per-level medians; a median
+        # ignores the few edge pixels whose residual spans stops.
+        order = np.argsort(self.base.ravel(), kind='stable')
+        self.fine_by_level = np.abs(d.ravel())[order]
+        self.coarse_by_level = np.abs((self.logs - box(self.logs, COARSE_RADIUS)).ravel())[order]
+        self.fine_median, self.coarse_median = float(np.median(self.fine_by_level)), float(np.median(self.coarse_by_level))
 
     def cdf(self, x):
         return np.searchsorted(self.sorted, x, side='right') / self.sorted.size
+
+    def texture_at(self, x):
+        """Fine and coarse texture of the pixels within LEVEL_WINDOW of each level in `x`."""
+        x = np.atleast_1d(np.asarray(x, dtype=np.float64))
+        lo, hi = np.searchsorted(self.sorted, x - LEVEL_WINDOW), np.searchsorted(self.sorted, x + LEVEL_WINDOW, side='right')
+        fine, coarse = np.full(x.size, self.fine_median), np.full(x.size, self.coarse_median)
+        for i, (l, h) in enumerate(zip(lo, hi)):
+            if h - l >= LEVEL_MIN:
+                fine[i], coarse[i] = np.median(self.fine_by_level[l:h]), np.median(self.coarse_by_level[l:h])
+        return np.minimum(fine, TEX_AT_CLAMP), np.minimum(coarse, TEX_AT_CLAMP)
 
     def features(self, x):
         x = np.asarray(x, dtype=np.float64)
         c = self.cdf
         m = lambda lo, hi: c(x + hi) - c(x + lo)
         const = lambda v: np.full_like(x, v)
+        fine, coarse = self.texture_at(x)
         return np.stack([self.top - x, x - self.bot, self.mean - x, self.q[0.5] - x, self.q[0.75] - x,
                          self.q[0.9] - x, self.q[0.25] - x, self.q[0.1] - x, c(x), const(self.top - self.bot),
                          m(0, 1), m(1, 2), m(2, 3), m(3, 5), m(-1, 0), m(-2, -1), m(-3, -2), m(-5, -3),
-                         const(min(self.tex, TEX_CLAMP)), const(min(self.tex_top, TEX_TOP_CLAMP) / TEX_TOP_CLAMP)], -1)
+                         const(min(self.tex, TEX_CLAMP)), const(min(self.tex_top, TEX_TOP_CLAMP) / TEX_TOP_CLAMP),
+                         fine, coarse], -1)
 
 
 def targets(default_lum, setting_lum, lo=2 ** -13, hi=0.6, size=None):
@@ -239,6 +267,48 @@ def clipped(rng, k):
     return img
 
 
+def sky_scene(a, f, d, seed):
+    """A smooth bright region (fraction `f` of the frame, cloud texture of amplitude `a`)
+    over dark textured ground `d` stops below it."""
+    rng = np.random.default_rng(seed)
+    top, h = rng.uniform(-0.8, -0.3), int(N * f)
+    log = np.empty((N, N))
+    log[:h] = top + a * blobs(32, seed + 1)[:h]
+    log[h:] = top - d - 1.0 + 0.45 * blobs(4, seed + 2)[h:] + 1.0 * np.clip(blobs(24, seed + 3)[h:], -1, 1)
+    return np.clip(log, -12, 0)
+
+
+def ground_scene(a, d, broad, seed):
+    """A fixed textured sky (30% of the frame) over a dark region `d` stops down whose fine
+    texture amplitude is `a`, with or without broad shapes."""
+    rng = np.random.default_rng(seed)
+    top, h = rng.uniform(-0.8, -0.3), int(N * 0.3)
+    log = np.empty((N, N))
+    log[:h] = top + 0.1 * blobs(32, seed + 1)[:h]
+    log[h:] = top - d + a * blobs(3, seed + 2)[h:] + broad * np.clip(blobs(24, seed + 3)[h:], -1, 1) * 0.7
+    return np.clip(log, -13, 0)
+
+
+CHROMA = {'neutral': (1, 1, 1.), 'blue': (0.55, 0.75, 1.6), 'blue2': (0.3, 0.6, 2.2), 'orange': (1.6, 0.9, 0.4),
+          'green': (0.6, 1.3, 0.5), 'cyan': (0.5, 1.1, 1.4)}
+
+
+def chroma_scene(k):
+    """64 patches over 6 stops, each coloured at equal luminance (the pull is colour-blind;
+    the family keeps the fit honest about that)."""
+    rng = np.random.default_rng(8000 + k)
+    top = rng.uniform(-1.0, -0.3)
+    lv = top - 6 * rng.uniform(0, 1, 64)
+    lv[0] = top
+    names = list(CHROMA)
+    log, where = mosaic_where(lv, 128, k, 0.05, blobs(4, 5))
+    img = rgb(log)
+    for i in range(64):
+        c = np.array(CHROMA[names[(i + k) % len(names)]])
+        img[where == i] *= c / (c @ YW) * (np.ones(3) @ YW)
+    return np.clip(img, 0, 0.98)
+
+
 def mosaic_where(levels, patch, seed, amp, tex):
     """`mosaic` and the patch index of every pixel."""
     n = N // patch
@@ -260,6 +330,22 @@ def probe_jobs(root, photos_dir=None):
         out.append((f'clip-{k:02d}', 128, clipped(np.random.default_rng(6000 + k), k)))
     for k in range(16):
         out.append((f'bimodal-{k:02d}', 128, rgb(mosaic(bimodal(np.random.default_rng(7000 + k)), 128, k, 0.05, blobs(4, 5)))))
+    k = 0
+    for amps, fracs, depths in (([0.0, 0.02, 0.05, 0.1, 0.2, 0.4], [0.25, 0.45, 0.65], [3.0, 5.0]),
+                                ([0.6, 0.9, 1.3], [0.15, 0.35, 0.55], [2.0, 4.0])):
+        for a in amps:
+            for f in fracs:
+                for d in depths:
+                    out.append((f'sky-{k:02d}', 0, rgb(sky_scene(a, f, d, 9000 + k))))
+                    k += 1
+    k = 0
+    for a in [0.02, 0.1, 0.3, 0.7]:
+        for d in [4.0, 7.0, 10.0]:
+            for broad in [0.0, 1.0]:
+                out.append((f'ground-{k:02d}', 0, rgb(ground_scene(a, d, broad, 9500 + k))))
+                k += 1
+    for k in range(6):
+        out.append((f'chroma-{k:02d}', 128, chroma_scene(k)))
     for k in range(60):
         rng = np.random.default_rng(2026 + k)
         patch = 256 if k % 2 == 0 else 128
@@ -442,29 +528,41 @@ def train(args):
             held = [pho[i] for i in f]
             predict, _ = fit(*stack(mos + [pho[i] for i in range(len(pho)) if i not in f] * PHOTO_WEIGHT), mu, sd, steps=4000)
             report(predict, held, 'held-out photos')
-    predict, weights = fit(*stack(mos + pho * PHOTO_WEIGHT), mu, sd)
-    report(predict, pho, 'photos (in-sample)')
-    report(predict, mos, 'mosaics (in-sample)')
-    rule = dict(features=FEAT, mu=mu.tolist(), sd=sd.tolist(), **weights)
+    members = [fit(*stack(mos + pho * PHOTO_WEIGHT), mu, sd, seed=seed) for seed in range(MEMBERS)]
+    predict = lambda Xn: np.mean([p(Xn) for p, _ in members], 0)
+    report(predict, pho, 'photos (in-sample, ensemble)')
+    report(predict, mos, 'mosaics (in-sample, ensemble)')
+    rule = dict(features=FEAT, mu=mu.tolist(), sd=sd.tolist(), members=[w for _, w in members])
     (args.out or args.root / 'global_rule.json').write_text(json.dumps(rule))
     DATA.write_text(rust(rule))
     print(f'-> {DATA.relative_to(ROOT)}')
 
 
 def rust(g):
-    def arr(name, v):
+    members, hidden, features = len(g['members']), len(g['members'][0]['l1.b']), len(g['mu'])
+    def arr(name, v, ty):
         v = np.array(v, dtype=np.float32)
+        row = lambda r: '[' + ', '.join(f'{x:.7}' for x in r) + ']'
         if v.ndim == 1:
-            return f'pub(super) const {name}: [f32; {v.size}] = [{", ".join(f"{x:.7}" for x in v)}];\n'
-        rows = ',\n    '.join('[' + ', '.join(f'{x:.7}' for x in r) + ']' for r in v)
-        return f'pub(super) const {name}: [[f32; {v.shape[1]}]; {v.shape[0]}] = [\n    {rows},\n];\n'
-    head = ('//! The global Shadows/Highlights rule: a small network from histogram descriptors of a\n'
-            '//! base level to the log2 gain at Shadows +100 and Highlights −100, fitted to Camera Raw\n'
-            '//! 18.7 on textured flat-patch mosaics and linear-profile training photos\n'
+            return f'pub(super) static {name}: {ty} = {row(v)};\n'
+        if v.ndim == 2:
+            return f'pub(super) static {name}: {ty} = [\n    ' + ',\n    '.join(row(r) for r in v) + ',\n];\n'
+        mats = ',\n    '.join('[\n        ' + ',\n        '.join(row(r) for r in m) + ',\n    ]' for m in v)
+        return f'pub(super) static {name}: {ty} = [\n    {mats},\n];\n'
+    head = ('//! The global Shadows/Highlights rule: an ensemble of small networks from histogram and\n'
+            '//! per-level texture descriptors of a base level to the log2 gain at Shadows +100 and\n'
+            '//! Highlights −100, fitted from different seeds to Camera Raw 18.7 on textured flat-patch\n'
+            "//! mosaics and linear-profile training photos, from the engine's own measurement maps\n"
             '//! (scripts/corpus/scene-tone-rule.py). Generated; do not edit.\n'
-            '#![allow(clippy::excessive_precision, clippy::approx_constant, clippy::unreadable_literal)]\n')
-    return head + ''.join(arr(n, g[k]) for n, k in [('MU', 'mu'), ('SD', 'sd'), ('W1', 'l1.w'), ('B1', 'l1.b'),
-                                                    ('W2', 'l2.w'), ('B2', 'l2.b'), ('W3', 'l3.w'), ('B3', 'l3.b')])
+            '#![allow(clippy::excessive_precision, clippy::approx_constant, clippy::unreadable_literal)]\n'
+            f'/// Networks in the ensemble.\npub(super) const MEMBERS: usize = {members};\n'
+            f'/// Units in each hidden layer.\npub(super) const HIDDEN: usize = {hidden};\n'
+            f'/// Inputs the networks read.\npub(super) const FEATURES: usize = {features};\n')
+    stack = lambda k: [m[k] for m in g['members']]
+    return head + arr('MU', g['mu'], '[f32; FEATURES]') + arr('SD', g['sd'], '[f32; FEATURES]') + \
+        arr('W1', stack('l1.w'), '[[[f32; FEATURES]; HIDDEN]; MEMBERS]') + arr('B1', stack('l1.b'), '[[f32; HIDDEN]; MEMBERS]') + \
+        arr('W2', stack('l2.w'), '[[[f32; HIDDEN]; HIDDEN]; MEMBERS]') + arr('B2', stack('l2.b'), '[[f32; HIDDEN]; MEMBERS]') + \
+        arr('W3', stack('l3.w'), '[[[f32; HIDDEN]; 2]; MEMBERS]') + arr('B3', stack('l3.b'), '[[f32; 2]; MEMBERS]')
 
 
 def main():

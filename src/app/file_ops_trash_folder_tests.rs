@@ -187,6 +187,7 @@ fn a_root_is_refused_and_an_emptied_root_can_be_removed() -> anyhow::Result<()> 
         folders: Default::default(),
         photos: 0,
         empty_root: Some(r),
+        exported: None,
     });
     assert!(e.library.as_ref().unwrap().session.roots.is_empty());
     assert!(d.path().join("photos").is_dir(), "its folder stays");

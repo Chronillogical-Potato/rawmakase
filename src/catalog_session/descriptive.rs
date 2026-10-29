@@ -158,13 +158,18 @@ impl CatalogSession {
     /// and reads the lists again; returns the photos removed. An error means
     /// nothing was removed; once this returns, their ids may be given to new
     /// photos, even when reading the lists failed. Reading capture times and
-    /// photo info stops; start it again for the photos left.
+    /// photo info stops; start it again for the photos left. Folders
+    /// `exported` are removed only while they are still what was exported.
     pub(crate) fn remove_folders(
         &mut self,
         folders: &[crate::catalog::FolderId],
+        exported: Option<&crate::catalog::ExportedFolders>,
     ) -> Result<Committed<Vec<PhotoId>>> {
         self.stop_backfill();
-        let removed = self.catalog.remove_folders(folders)?;
+        let removed = match exported {
+            Some(exported) => self.catalog.remove_exported_folders(exported)?,
+            None => self.catalog.remove_folders(folders)?,
+        };
         let listed = self.reload();
         if listed.is_err() {
             // The lists as they were, less what is gone from the catalog: the

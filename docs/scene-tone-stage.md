@@ -222,15 +222,27 @@ does nothing. Flat charts and two-valued probes therefore never predicted photos
 training mosaics carry a faint blob texture, and the rule's two texture inputs are
 clamped so it cannot extrapolate on amplitude.
 
-The rule is a small network (20 inputs, two hidden layers of 64, two outputs) from
-level-relative descriptors of the histogram: the level's distance below the top
-(the maximum of the base) and above the bottom (0.1th percentile), from the mean and
-five quantiles, the cumulative fraction at the level, the range, the mass in eight
-bands of stops around the level, and the two texture measures. It is trained on 354
-mosaics (random histograms at fixed and random texture, histograms sampled from the
-training photos' base levels, small bright and small dark minorities above or below a
-gap, a few tiny bright spots in a dark field, deep ranges, bimodal deep-and-mid
-histograms, and clipped top patches) and on 221 training photos of all three families
+The rule is an ensemble of four small networks (22 inputs, two hidden layers of 64,
+two outputs; fitted from different seeds and averaged, since one fit's gain at a level
+varies by 0.1 to 0.3 EV with the seed on real photos and the average lowers held-out
+error in every depth band) from level-relative descriptors of the histogram: the
+level's distance below the top (the maximum of the base) and above the bottom (0.1th
+percentile), from the mean and five quantiles, the cumulative fraction at the level,
+the range, the mass in eight bands of stops around the level, two global texture
+measures, and the fine and coarse texture of the pixels at the level itself. That last
+pair is what a histogram cannot see: Camera Raw lifts a smooth dark region far less
+than a rough one at the same depth (on dark regions under a fixed sky, 1.95 against
+3.21 EV seven stops down and 2.71 against 4.11 ten stops down; broad shapes count as
+texture too), and a rule without it over-lifted a dusk freeway's smooth sky and road
+by 0.4 EV. The measure is the median absolute residual of a 2-pixel and a 12-pixel
+box mean over the pixels within half a stop of the level, since an RMS is dominated by
+the few edge pixels whose residual spans stops. It is trained on 438 mosaics (random
+histograms at fixed and random texture, histograms sampled from the training photos'
+base levels, small bright and small dark minorities above or below a gap, a few tiny
+bright spots in a dark field, deep ranges, bimodal deep-and-mid histograms, clipped
+top patches, smooth skies of varying texture and extent over textured ground, dark
+regions of varying texture under a fixed sky, and coloured patches of equal
+luminance) and on 221 training photos of all three families
 rendered with the linear profile, with targets counted down to 13 stops under white:
 a first fit that stopped at 9 stops had never seen the deepest tones and lifted a
 sunlit cabin's floor 2 EV where Camera Raw lifts it 3.7. The inputs come from the engine's own
@@ -248,12 +260,19 @@ profile's name, or Camera Raw silently uses Adobe Color; with it, RAWmakase's sc
 output equals Camera Raw's on real photos to 0.00 EV at default and at Exposure −3.
 
 Scene gains against Camera Raw on the 221 training photos (per map pixel, EV root
-mean square, median over photos): held out by photo the rule sits at 0.18 (Shadows
+mean square, median over photos): held out by photo the ensemble sits at 0.17 (Shadows
 +100) and 0.12 (Highlights −100), where doing nothing is 0.78 and 0.41. Final renders
-on the train sets against current main, median ΔE00: Shadows +100 2.12 → 1.81 (7 of
-14 photos better, 1 worse), +50 1.19 → 1.08, Highlights −100 1.53 → 1.13 (8 better, 0
-worse), −50 1.12 → 0.94, Shadows +50 with Highlights −50 1.21 → 1.29. The validation
-gate's figures are in [parity gaps](parity-gaps.md#the-global-rule-2026-10-28).
+on the train sets against main before the rule, median ΔE00: Shadows +100 2.12 → 1.53
+(7 of 14 photos better, 0 worse), +50 1.19 → 0.97, Highlights −100 1.53 → 1.27 (6
+better, 0 worse), −50 1.12 → 1.01. The validation gate's figures are in [parity
+gaps](parity-gaps.md#per-level-texture-and-the-ensemble-2026-10-28).
+
+Measured and not in the rule: the pull and the lift are colour-blind (at equal
+luminance Camera Raw pulls neutral, blue, orange, green and cyan patches alike at
+Highlights −100 and keeps their saturation), a sky's pull grows only mildly with its
+cloud texture (0.3 EV from faint to strong, saturating) and strongly with how small
+its share of the frame is (−2.4 EV at a quarter of the frame five stops over the
+ground, −0.7 at two thirds), which the histogram already carries.
 
 Not in the rule: Camera Raw's spatial regime. Textured bright squares smaller than
 about 0.4% of the frame in a dark field are pulled by their size (an 8-pixel square

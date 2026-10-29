@@ -433,6 +433,8 @@ pub(in crate::app) enum PhotoAction {
     Rename,
     /// Move to Folder…: the photo's files to another catalog folder.
     MoveToFolder,
+    /// Export as Catalog…: the photos into a new catalog of their own.
+    ExportCatalog,
     /// Library › Previews: Build Standard-Sized Previews.
     BuildPreviews(crate::catalog::preview_cache::PreviewKind),
     /// Library › Previews: Discard 1:1 Previews, or Standard and 1:1.
@@ -636,6 +638,10 @@ pub(in crate::app) fn photo_menu(
         }
         if menu_item(ui, "Move to Folder…", "", true, false) {
             action = Some(PhotoAction::MoveToFolder);
+            ui.close();
+        }
+        if menu_item(ui, "Export as Catalog…", "", true, false) {
+            action = Some(PhotoAction::ExportCatalog);
             ui.close();
         }
         if menu_item(ui, "Remove from Catalog…", REMOVE_SHORTCUT, true, false) {
