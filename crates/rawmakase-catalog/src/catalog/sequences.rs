@@ -39,6 +39,7 @@ impl Catalog {
                         Mark::Burst(id) => (Some(camera), Some(id), None),
                         Mark::Frame(n) => (Some(camera), None, Some(*n)),
                         Mark::Single => (Some(camera), None, Some(0)),
+                        Mark::Continuous => (Some(camera), None, None),
                     },
                 };
                 let size = i64::try_from(saved.stamp.size)?;
@@ -104,6 +105,7 @@ fn stored(db: &impl Reads) -> Result<HashMap<PhotoId, SavedSequence>> {
                         (Some(id), None) => Mark::Burst(id),
                         (None, Some(0)) => Mark::Single,
                         (None, Some(n)) => Mark::Frame(n),
+                        (None, None) => Mark::Continuous,
                         _ => return None,
                     },
                 }),

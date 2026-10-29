@@ -471,10 +471,15 @@ const MOST_SECONDS_BETWEEN_FRAMES: f64 = 60.;
 /// [`MOST_SECONDS_BETWEEN_FRAMES`] after the one before; a number that
 /// doesn't rise starts the next press's run. Frame numbers are no burst's
 /// id: a burst whose first frames were deleted, shot within that time of
-/// the one before, joins it. A photo the camera says is a single shot is left alone. Photos it
-/// says nothing of are stacked by capture time as [`auto_stacks`] does,
-/// except that a photo that the camera says something of comes between
-/// them. Photos without a time that can be read are left alone.
+/// the one before, joins it. Photos a camera says it took in continuous drive
+/// without numbering them are stacked by capture time as [`auto_stacks`]
+/// does, each camera's and format's apart: two presses less than `seconds`
+/// apart make one stack. A camera's photo of another kind (a single shot,
+/// a numbered frame) ends its runs of the others. A photo the camera says is
+/// a single shot is left alone. Photos it says nothing of are stacked by
+/// capture time as [`auto_stacks`] does, except that a photo that the
+/// camera says something of comes between them. Photos without a time that
+/// can be read are left alone.
 pub fn auto_stacks_with_bursts(photos: &[BurstCandidate<'_>], seconds: f64) -> Vec<Vec<PhotoId>> {
     let mut timed: Vec<(f64, &BurstCandidate<'_>)> = photos
         .iter()
@@ -489,8 +494,12 @@ pub fn auto_stacks_with_bursts(photos: &[BurstCandidate<'_>], seconds: f64) -> V
     let mut stacks: Vec<Vec<PhotoId>> = Vec::new();
     for folder in timed.chunk_by(|(_, a), (_, b)| a.folder == b.folder) {
         let mut bursts: HashMap<(&str, &str), Vec<PhotoId>> = HashMap::new();
-        // Each camera's and format's run, with its last frame's number and time.
+        // Each camera's and format's run of numbered frames, with its last
+        // frame's number and time.
         let mut runs: HashMap<(&str, &str), (Vec<PhotoId>, u32, f64)> = HashMap::new();
+        // Each camera's and format's run of frames not numbered, with its
+        // last frame's time.
+        let mut continuous: HashMap<(&str, &str), (Vec<PhotoId>, f64)> = HashMap::new();
         let mut by_time: Vec<Vec<PhotoId>> = Vec::new();
         let mut ended: Vec<Vec<PhotoId>> = Vec::new();
         // The time of the last photo, when it was one the camera said nothing of.
@@ -506,6 +515,21 @@ pub fn auto_stacks_with_bursts(photos: &[BurstCandidate<'_>], seconds: f64) -> V
             };
             last_unknown = None;
             let camera = sequence.camera.as_str();
+            // This camera's runs of the other kind end here.
+            if !matches!(sequence.mark, Mark::Frame(_)) {
+                for ((cam, _), (photos, ..)) in &mut runs {
+                    if *cam == camera && !photos.is_empty() {
+                        ended.push(std::mem::take(photos));
+                    }
+                }
+            }
+            if sequence.mark != Mark::Continuous {
+                for ((cam, _), (photos, _)) in &mut continuous {
+                    if *cam == camera && !photos.is_empty() {
+                        ended.push(std::mem::take(photos));
+                    }
+                }
+            }
             match &sequence.mark {
                 Mark::Burst(id) => bursts.entry((camera, id)).or_default().push(c.id),
                 Mark::Frame(n) => {
@@ -519,13 +543,25 @@ pub fn auto_stacks_with_bursts(photos: &[BurstCandidate<'_>], seconds: f64) -> V
                     photos.push(c.id);
                     (*last, *t) = (*n, *at);
                 }
+                Mark::Continuous => {
+                    let (photos, t) = continuous
+                        .entry((camera, c.format))
+                        .or_insert((Vec::new(), *at));
+                    if photos.is_empty() || at - *t >= seconds {
+                        ended.push(std::mem::take(photos));
+                    }
+                    photos.push(c.id);
+                    *t = *at;
+                }
                 Mark::Single => {}
             }
         }
         // In the order their first photos were taken.
         let mut found: Vec<Vec<PhotoId>> = bursts.into_values().collect();
         found.extend(runs.into_values().map(|(photos, ..)| photos));
+        found.extend(continuous.into_values().map(|(photos, _)| photos));
         found.extend(ended.into_iter().chain(by_time));
+        found.retain(|stack| !stack.is_empty());
         let first: HashMap<PhotoId, usize> = folder
             .iter()
             .enumerate()

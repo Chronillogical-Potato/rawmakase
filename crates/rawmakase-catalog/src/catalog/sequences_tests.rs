@@ -7,7 +7,7 @@ fn catalog() -> Result<(tempfile::TempDir, Catalog, Vec<PhotoId>)> {
     let dir = tempfile::tempdir()?;
     let folder = dir.path().join("photos");
     std::fs::create_dir(&folder)?;
-    for name in ["a.arw", "b.arw", "c.arw", "d.arw"] {
+    for name in ["a.arw", "b.arw", "c.arw", "d.arw", "e.arw"] {
         std::fs::write(folder.join(name), b"synthetic raw")?;
     }
     let mut cat = Catalog::create(&dir.path().join("Photos.rawmakase"))?;
@@ -40,6 +40,7 @@ fn every_kind_of_mark_and_a_file_that_said_nothing_are_kept() -> Result<()> {
         (ids[1], saved(marked(Mark::Single))),
         (ids[2], saved(marked(Mark::Burst("ABC-123".into())))),
         (ids[3], saved(None)),
+        (ids[4], saved(marked(Mark::Continuous))),
     ];
     cat.save_sequences(&read)?;
     assert_eq!(cat.sequences()?, read.into_iter().collect());
