@@ -40,8 +40,10 @@ impl Library {
     /// Sets the rating, flag or label of `ids` in one transaction. A toggle
     /// takes its value from the active photo, so all of them end up alike.
     /// With `advance` (Shift), a single photo is followed by the next one
-    /// shown, which is returned. A photo the filter now hides leaves the
-    /// selection; when the active one goes, the next one shown is selected.
+    /// shown. A photo the filter now hides leaves the selection; when the
+    /// active one goes, the next one shown is selected. Returns the photo
+    /// Develop moves to: the next one with `advance`, else the one selected in
+    /// place of a hidden active photo.
     pub(in crate::app) fn edit_photos(
         &mut self,
         ids: &[PhotoId],
@@ -110,6 +112,8 @@ impl Library {
             .iter()
             .any(|i| self.session.photos[*i].id == lead);
         let advance = advance && changes.len() == 1;
+        // Without Shift, the photo the filter hid gives way to the one shown.
+        let mut moved = None;
         if was_active && (advance || !still_visible) {
             let to = next.or_else(|| {
                 if still_visible {
@@ -124,11 +128,12 @@ impl Library {
             } else if let Some(to) = to {
                 self.make_active(to);
             }
+            moved = to.filter(|to| *to != lead);
         }
         // A key that changed nothing (5 on a five-star photo) is no command:
         // it would only hide the real one before it and clear redo.
         if before == changes {
-            return Ok(if advance { next } else { None });
+            return Ok(if advance { next } else { moved });
         }
         self.done.push(MetadataCommand {
             sequence: crate::edit_session::sequence(),
@@ -138,7 +143,7 @@ impl Library {
             place_after: self.place(),
             summary: self.message.clone(),
         });
-        Ok(if advance { next } else { None })
+        Ok(if advance { next } else { moved })
     }
     /// The metadata changes made since the last call, for the shared undo log.
     pub(in crate::app) fn take_done(&mut self) -> Vec<MetadataCommand> {
