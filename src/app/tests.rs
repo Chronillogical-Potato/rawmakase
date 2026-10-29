@@ -7162,13 +7162,21 @@ fn unflagging_the_photo_open_in_develop_with_picked_shown_opens_one_still_shown(
     assert_eq!(editor.document.catalog_photo, Some(a));
     assert_eq!(editor.library.as_ref().unwrap().selected(), Some(a));
     assert_eq!(editor.module, Module::Develop);
-    // The Library moves its selection, but does not open Develop.
+    // The Library moves its selection to B, picked again, but does not
+    // open Develop.
     editor.module = Module::Library;
+    assert!(
+        editor
+            .command_metadata(Edit::Flag(1), Some(b), false)
+            .is_ok()
+    );
+    editor.library.as_mut().unwrap().make_active(a);
     assert!(
         editor
             .command_metadata(Edit::Flag(0), Some(a), false)
             .is_ok()
     );
+    assert_eq!(editor.library.as_ref().unwrap().selected(), Some(b));
     assert_eq!(editor.module, Module::Library);
     assert_eq!(editor.document.catalog_photo, Some(a));
     Ok(())
