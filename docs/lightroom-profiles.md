@@ -96,6 +96,26 @@ Camera Raw and Lightroom have no LUT stage: Photoshop's Camera Raw **Create Prof
 - **Profile menu.** Looks are listed by their group (`crs:Group`), one submenu per group, as in Lightroom's profile browser: imported LUTs under their folder's group, and other looks, such as Adobe's Artistic or Vintage ones, under theirs. Camera profiles, RAWmakase Standard and Color, looks without a group and Adobe's looks in Lightroom's "Profiles" group (Adobe Color, Vivid and the other Adobe Raw and Camera Matching looks) stay at the top level, by name. The group belongs to the library's file, not the profile embedded in an edit, so recipes are unchanged; a look whose library file is gone keeps rendering, but no longer appears in the menu.
 - **Lightroom.** The generated XMP is a standard look profile: installed in Lightroom or Camera Raw it renders there, and sidecars that name it resolve back in RAWmakase by name and UUID. The other way does not work: a profile Lightroom creates from the same cube has a UUID of Adobe's own and does not resolve to RAWmakase's import.
 
+### Film looks
+
+RAWmakase ships no film looks: modelled from datasheets alone, without film shot and scanned to check them, their tones were not right ([#404](https://github.com/pch/rawmakase/pull/404), closed). For a spectral film simulation, bake a cube with [spektrafilm](https://github.com/andreavolpato/spektrafilm) (GPL-3.0, its LUTs CC BY-SA 4.0; run separately, nothing of it is in RAWmakase) and import it like any other. The cube must take sRGB and give sRGB, and its exposure should leave the input's linear values as they are, so that mid gray stays mid gray: `stops_above_midgray = 2.47`, which puts sRGB's 1.0 at 0.18 × 2^2.47. Its default for sRGB is 4 stops, which renders sRGB 0.5 at about 0.76. The `--stops-above-gray` flag of spektrafilm 0.3.4 is ignored, so set it in a spec file:
+
+```toml
+# portra400.toml
+film_profile = "kodak_portra_400"
+print_profiles = ["kodak_portra_endura"]
+input_color_space = "sRGB"
+output_color_space = "sRGB"
+stops_above_midgray = 2.47
+```
+
+```bash
+spektrafilm-lut build --from portra400.toml --name "Portra 400 Endura" --out ./film-luts
+rawmakase import-profiles ./film-luts
+```
+
+The look is named after the cube's file (`lut_v034_portra400_portraendura`, so rename the `.cube` first for a shorter name) and grouped under the bundle's folder, **Portra 400 Endura**. Checked with spektrafilm 0.3.4 and Kodak Portra 400 on Portra Endura: the 33³ cube imports exact, and mid gray maps to itself within 0.01. The cube is the film printed on paper (`spektrafilm-lut list film` and `list print` name the stocks), and it applies where every look does, after the tone controls, so the print's own contrast adds to the photo's: in dark or contrasty photos the shadows block up. Lower Contrast or the Profile Amount under it, as with any strong look. Grain, halation and the film's exposure latitude are not in a cube.
+
 ### Camera Raw's Create Profile
 
 Measured with Camera Raw 18.7's **Create Profile** (Option-click Create Preset) in Photoshop on the synthetic cubes of `scripts/corpus/synthetic-cubes.py`, its profiles read back with `RgbTable::decode` (the space row from the table's bytes, as the decoder refuses primaries 3 and 4). Errors are against the cube's own tetrahedral lookup, in 8-bit levels, over 400,000 random inputs.
