@@ -41,6 +41,10 @@ pub struct LensfunCamera {
     pub crop: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aspect: Option<f32>,
+    /// The crop factor is the photo frame's own, from its 35 mm equivalent focal
+    /// length, a crop mode included, not the sensor's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_exif: bool,
 }
 
 /// Where a calibration was copied from, under which terms: kept with every copy, so
@@ -147,7 +151,11 @@ impl LensfunChoice {
         let photo = photo_of(m, [rect[2], rect[3]]);
         let crop = match &self.camera {
             Some(c) if same_text(&c.make, photo.make) && same_text(&c.model, photo.model) => {
-                Some(photo_crop(c.crop, c.aspect, &photo))
+                if c.from_exif {
+                    Some(exif_crop(&photo).unwrap_or(c.crop))
+                } else {
+                    Some(photo_crop(c.crop, c.aspect, &photo))
+                }
             }
             _ => exif_crop(&photo),
         }?;
@@ -233,6 +241,7 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
             model: photo.model.to_string(),
             crop: c.crop,
             aspect: super::matching::native_aspect(c),
+            from_exif: false,
         }),
         // The 35 mm equivalent describes the frame as recorded.
         None => exif_crop(&photo).map(|crop| LensfunCamera {
@@ -240,6 +249,7 @@ pub fn camera_for(db: &super::Database, m: &Metadata) -> Option<LensfunCamera> {
             model: photo.model.to_string(),
             crop,
             aspect,
+            from_exif: true,
         }),
     }
 }
@@ -252,20 +262,22 @@ impl LensfunChoice {
     pub fn for_photo(&self, m: &Metadata) -> Self {
         let frame = frame_size(m);
         let photo = photo_of(m, frame);
-        if self
-            .camera
-            .as_ref()
-            .is_some_and(|c| same_text(&c.make, photo.make) && same_text(&c.model, photo.model))
-        {
-            return self.clone();
-        }
+        // With a database, the entry for this photo's camera and frame (Lensfun's
+        // aspect variants differ in crop factor), even of the same body.
         let camera = match m.lensfun.get() {
             Some(installed) => camera_for(&installed.db, m),
+            None if self.camera.as_ref().is_some_and(|c| {
+                same_text(&c.make, photo.make) && same_text(&c.model, photo.model)
+            }) =>
+            {
+                return self.clone();
+            }
             None => exif_crop(&photo).map(|crop| LensfunCamera {
                 make: photo.make.to_string(),
                 model: photo.model.to_string(),
                 crop,
                 aspect: None,
+                from_exif: true,
             }),
         };
         Self {

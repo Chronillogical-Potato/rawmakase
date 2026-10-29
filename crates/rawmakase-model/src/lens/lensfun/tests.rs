@@ -525,3 +525,65 @@ fn crop_modes_take_their_crop_factor() {
     };
     assert_eq!(crop_of(&rounded), 1.);
 }
+
+fn installed(db: Database) -> installed::Handle {
+    installed::Handle::Given(Some(std::sync::Arc::new(installed::Installed {
+        manifest: installed::Manifest {
+            version: 1,
+            url: String::new(),
+            bytes: 0,
+            sha256: String::new(),
+            downloaded: String::new(),
+            lenses: db.lenses.len(),
+            cameras: db.cameras.len(),
+        },
+        db,
+    })))
+}
+
+/// A choice taken to another photo of the same body in another aspect mode gets
+/// that mode's entry and crop factor.
+#[test]
+fn a_transfer_between_aspect_modes_takes_the_target_s_variant() {
+    use crate::camera_data::Metadata;
+    let db = db();
+    let lx3 = |w: u32, h: u32| Metadata {
+        exif_make: "Panasonic".into(),
+        exif_model: "DMC-LX3".into(),
+        focal: 5.1,
+        width: w,
+        height: h,
+        lensfun: installed(db.clone()),
+        ..Default::default()
+    };
+    let from = lx3(3648, 2736);
+    let lens = &db.lenses[0];
+    let chosen = LensfunChoice::of(lens, &db, choice::camera_for(&db, &from));
+    assert_eq!(chosen.camera.as_ref().unwrap().crop, 4.7);
+    let wide = lx3(3968, 2232);
+    let moved = chosen.for_photo(&wide);
+    assert_eq!(moved.camera.as_ref().unwrap().crop, 4.45);
+    assert_eq!(moved.frame(&wide).unwrap().crop, 4.45);
+}
+
+/// A camera Lensfun doesn't know takes its frame's crop factor from the 35 mm
+/// equivalent, which already counts a crop mode: not applied twice.
+#[test]
+fn an_exif_crop_factor_already_counts_the_crop_mode() {
+    use crate::camera_data::Metadata;
+    let db = db();
+    let m = Metadata {
+        exif_make: "Unknown".into(),
+        exif_model: "Body".into(),
+        focal: 100.,
+        focal_35mm: 160.,
+        sensor_crop: Some(1.6),
+        width: 6000,
+        height: 4000,
+        ..Default::default()
+    };
+    let camera = choice::camera_for(&db, &m).unwrap();
+    assert!(camera.from_exif);
+    let chosen = LensfunChoice::of(&db.lenses[0], &db, Some(camera));
+    assert!((chosen.frame(&m).unwrap().crop - 1.6).abs() < 1e-6);
+}

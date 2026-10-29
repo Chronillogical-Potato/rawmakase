@@ -1661,6 +1661,22 @@ fn lensfun_lenses_travel_by_identity() -> Result<()> {
             .unwrap()
             .is_resolved()
     );
+    // Split into a description per namespace, as ExifTool rewrites a packet, it
+    // reads the same, and no Adobe profile stands in.
+    let split = format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{}"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:format>image/jpeg</dc:format></rdf:Description><rdf:Description rdf:about="" xmlns:crs="{}" crs:LensProfileEnable="1" crs:LensProfileSetup="Auto"/><rdf:Description rdf:about="" xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/" rawmakase:LensfunMaker="Canon" rawmakase:LensfunModel="Canon EF 70-200mm f/2.8L IS II USM" rawmakase:LensfunMounts="Canon EF" rawmakase:LensfunCrop="1" rawmakase:LensfunAspect="1.5"/></rdf:RDF></x:xmpmeta>"#,
+        crate::xml::ns::RDF,
+        crate::xml::ns::CRS
+    );
+    let from_split = parse(Path::new("s.xmp"), &split)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(
+        from_split
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
+    assert!(from_split.lens_profile_in_use(&m).used.is_none());
     // The database is the one installed when the XMP is applied: removed since, the
     // lens stays named.
     let mut removed = m.clone();
