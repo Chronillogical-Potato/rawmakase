@@ -104,7 +104,7 @@ pub(crate) fn volume_of(path: &Path) -> Volume {
 /// `\\?\UNC\nas\share\x` is `\\nas\share\x`), so a drive or share is
 /// one drive however its path is written: a root folder is kept canonical,
 /// a folder located in it as it was chosen. Any other path is as it is.
-fn plain(path: &Path) -> PathBuf {
+pub(super) fn plain(path: &Path) -> PathBuf {
     let mut parts = path.components();
     let start = match parts.next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {

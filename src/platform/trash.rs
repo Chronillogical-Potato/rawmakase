@@ -138,6 +138,24 @@ mod tests {
         std::fs::remove_file(&receipt.location).unwrap();
     }
 
+    /// The catalog keeps a root as canonicalised, which on Windows is a
+    /// verbatim path (`\\?\C:\...`), and its photos' paths below it (#744).
+    #[test]
+    fn a_file_named_by_its_canonical_path_goes_to_the_trash() {
+        if !real_trash() {
+            return;
+        }
+        let _one = one_at_a_time();
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let path = canonical.join("rawmakase-trash-test.jpg");
+        std::fs::write(&path, b"canonical").unwrap();
+        let receipt = SystemTrash.trash(&path).unwrap();
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(&receipt.location).unwrap(), b"canonical");
+        std::fs::remove_file(&receipt.location).unwrap();
+    }
+
     #[test]
     fn a_synthetic_folder_goes_to_the_trash_with_a_receipt() {
         if !real_trash() {

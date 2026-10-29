@@ -102,7 +102,15 @@ struct Seen {
 
 /// Deletes `path` to the Recycle Bin. An error is a step that didn't
 /// happen; what the shell did is in [`Seen`].
+///
+/// The shell is given `path` without the `\\?\` prefix a catalog root
+/// keeps (it is canonicalised), as it refuses those as an incorrect
+/// parameter (#744). It parses a plain path its own way: a name only the
+/// prefix kept literal (a trailing dot or space, on the file or a folder
+/// on the way) may name another file, so the item it made is checked to
+/// be `path`'s file before anything is deleted.
 fn recycle(path: &Path) -> windows::core::Result<Seen> {
+    let plain = crate::platform::volume::plain(path);
     let sink = ComObject::new(Sink::default());
     let progress: IFileOperationProgressSink = sink.to_interface();
     // SAFETY: COM is initialised on this thread (`Com`), every pointer the
@@ -113,7 +121,16 @@ fn recycle(path: &Path) -> windows::core::Result<Seen> {
         operation.SetOperationFlags(
             FOFX_RECYCLEONDELETE | FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT,
         )?;
-        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(path), None)?;
+        let item: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(plain.as_path()), None)?;
+        if !names(&item, path)? {
+            return Ok(Seen {
+                failed: Some(format!(
+                    "the Recycle Bin can't be given “{}” by another name",
+                    path.display()
+                )),
+                ..Seen::default()
+            });
+        }
         operation.DeleteItem(&item, &progress)?;
         let performed = operation.PerformOperations();
         (performed, operation.GetAnyOperationsAborted()?.as_bool())
@@ -300,6 +317,26 @@ fn said(e: &windows::core::Error) -> String {
     }
 }
 
+/// Whether the shell's `item` is the entry at `path`, each read without
+/// following a link it ends in: the same file object, under the same name
+/// in the same folder. A link or another hard link of the file, where the
+/// shell parsed the path otherwise, is a different entry: the shell would
+/// recycle it and leave `path`.
+fn names(item: &IShellItem, path: &Path) -> windows::core::Result<bool> {
+    let named = file_path(item)?;
+    let same = |a: &Path, b: &Path| match (fsops::entry(a), fsops::entry(b)) {
+        (Ok(a), Ok(b)) => a.id == b.id && a.kind == b.kind,
+        _ => false,
+    };
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    Ok(match (named.parent(), path.parent()) {
+        (Some(a), Some(b)) => {
+            same(&named, path) && same(a, b) && name(&named).is_some() && name(&named) == name(path)
+        }
+        _ => false,
+    })
+}
+
 /// Where `item` is on disk.
 fn file_path(item: &IShellItem) -> windows::core::Result<PathBuf> {
     // SAFETY: `GetDisplayName` returns a string this owns; it is copied,
@@ -320,6 +357,83 @@ mod tests {
         DRIVE_CDROM, DRIVE_FIXED, DRIVE_NO_ROOT_DIR, DRIVE_RAMDISK, DRIVE_REMOTE, DRIVE_REMOVABLE,
         DRIVE_UNKNOWN,
     };
+
+    /// A name only the `\\?\` prefix keeps (a trailing dot) is not given
+    /// to the shell without it, where it names another file: nothing goes.
+    #[test]
+    fn a_name_the_plain_path_would_change_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let dotted = canonical.join("a.jpg.");
+        let other = canonical.join("a.jpg");
+        std::fs::write(&dotted, b"dotted").unwrap();
+        std::fs::write(&other, b"other").unwrap();
+        let got = super::trash(&dotted);
+        assert!(
+            matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+            "{got:?}"
+        );
+        assert_eq!(std::fs::read(&dotted).unwrap(), b"dotted");
+        assert_eq!(std::fs::read(&other).unwrap(), b"other");
+    }
+
+    /// The same for a folder on the way: Windows' file calls keep the
+    /// trailing space of `album `, the shell drops it and names `album`.
+    #[test]
+    fn a_folder_the_shell_would_name_otherwise_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let canonical = dir.path().canonicalize().unwrap();
+        let (spaced, other) = (canonical.join("album "), canonical.join("album"));
+        std::fs::create_dir(&spaced).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        std::fs::write(spaced.join("a.jpg"), b"spaced").unwrap();
+        std::fs::write(other.join("a.jpg"), b"other").unwrap();
+        let got = super::trash(&spaced.join("a.jpg"));
+        assert!(
+            matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+            "{got:?}"
+        );
+        assert_eq!(std::fs::read(spaced.join("a.jpg")).unwrap(), b"spaced");
+        assert_eq!(std::fs::read(other.join("a.jpg")).unwrap(), b"other");
+    }
+
+    /// Where the shell names `album\a.jpg` for `album \a.jpg`, a link or a
+    /// hard link there to the photo is the same file once followed, but not
+    /// the same entry: the shell would recycle it and leave the photo.
+    #[test]
+    fn a_link_to_the_file_where_the_shell_would_look_is_refused() {
+        type Link = fn(&std::path::Path, &std::path::Path) -> std::io::Result<()>;
+        let links: [(&str, Link); 2] = [
+            ("symlink", |to, at| {
+                std::os::windows::fs::symlink_file(to, at)
+            }),
+            ("hard link", |to, at| std::fs::hard_link(to, at)),
+        ];
+        for (kind, link) in links {
+            let dir = tempfile::tempdir().unwrap();
+            let canonical = dir.path().canonicalize().unwrap();
+            let (spaced, other) = (canonical.join("album "), canonical.join("album"));
+            std::fs::create_dir(&spaced).unwrap();
+            std::fs::create_dir(&other).unwrap();
+            let photo = spaced.join("a.jpg");
+            std::fs::write(&photo, b"photo").unwrap();
+            // Making a symlink takes a privilege (or Developer Mode).
+            if let Err(e) = link(&photo, &other.join("a.jpg")) {
+                println!("no {kind}: {e}");
+                continue;
+            }
+            let got = super::trash(&photo);
+            assert!(
+                matches!(&got, Err(crate::catalog::file_ops::TrashError::Failed(m)) if m.contains("by another name")),
+                "{kind}: {got:?}"
+            );
+            assert_eq!(std::fs::read(&photo).unwrap(), b"photo", "{kind}");
+            assert!(
+                std::fs::symlink_metadata(other.join("a.jpg")).is_ok(),
+                "{kind}"
+            );
+        }
+    }
 
     #[test]
     fn drives_without_a_recycle_bin_say_no() {
