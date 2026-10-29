@@ -450,6 +450,7 @@ fn olympus(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         vignetting: None,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map: None,
         centre,
     })
@@ -602,6 +603,7 @@ fn panasonic(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         vignetting: None,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map: None,
         centre,
     })
@@ -738,6 +740,7 @@ fn nikon(t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         vignetting,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map: None,
         centre,
     })
@@ -922,6 +925,7 @@ fn samsung(path: &Path, t: &mut Tiff, m: &Metadata) -> Option<LensCorrection> {
         vignetting: None,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map: None,
         centre,
     })

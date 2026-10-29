@@ -1417,7 +1417,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         r.lens_profile_choice,
         LensProfileChoice {
             setup: LensProfileSetup::Custom,
-            id: Some(id),
+            id: Some(crate::lens::choice::LensProfileRef::Adobe(id)),
         }
     );
     assert!(r.lens_correction(&m).is_none());
@@ -1504,7 +1504,8 @@ fn lens_profile_identity_round_trips() -> Result<()> {
     assert_eq!(
         embedded_on
             .lens_correction(&with_builtin)
-            .map(|l| l.source.as_str()),
+            .map(|l| l.source.clone())
+            .as_deref(),
         Some("Testcam built-in")
     );
     let packet = crate::xmp::write::packet(&embedded, &m, &photo);
@@ -1536,7 +1537,7 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         r#"c:LensProfileSetup="LensDefaults" c:LensProfileName="Camera Settings" c:LensProfileIsEmbedded="1""#,
         &Recipe::default(),
     )?;
-    assert!(one.lens_profile_choice.id.unwrap().embedded);
+    assert!(one.lens_profile_choice.adobe().unwrap().embedded);
     // Under Auto, a named profile that isn't imported stays named.
     let gone = apply(
         r#"c:LensProfileEnable="1" c:LensProfileSetup="Auto" c:LensProfileName="Adobe (Gone 24mm)" c:LensProfileFilename="Gone (24mm) - RAW.lcp""#,
@@ -1547,6 +1548,179 @@ fn lens_profile_identity_round_trips() -> Result<()> {
         packet.contains(r#"crs:LensProfileFilename="Gone (24mm) - RAW.lcp""#),
         "{packet}"
     );
+    Ok(())
+}
+/// A Lensfun lens goes into XMP (sidecars, exports, presets) by its identity in
+/// RAWmakase's namespace, with Lightroom's Setup at Auto and no Adobe profile, never
+/// its calibration; reading it back resolves it against the installed database,
+/// else keeps it named and unresolved, never Auto and never an Adobe profile.
+#[test]
+fn lensfun_lenses_travel_by_identity() -> Result<()> {
+    use crate::lens::lensfun::fixture;
+    let mut m = fixture::photo();
+    m.wb = [1.; 3];
+    m.daylight_wb = [1.; 3];
+    m.matrix = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    let mut r = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    r.lens_profile_choice.choose_lensfun(fixture::choice());
+    let photo = crate::xmp::write::Photo {
+        raw_name: "IMG.CR2".into(),
+        settings: true,
+        format: "image/jpeg".into(),
+        ..Default::default()
+    };
+    let packet = crate::xmp::write::packet(&r, &m, &photo);
+    for key in [
+        r#"xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/""#,
+        r#"crs:LensProfileSetup="Auto""#,
+        r#"crs:LensProfileEnable="1""#,
+        r#"rawmakase:LensfunMaker="Canon""#,
+        r#"rawmakase:LensfunModel="Canon EF 70-200mm f/2.8L IS II USM""#,
+        r#"rawmakase:LensfunMounts="Canon EF""#,
+        r#"rawmakase:LensfunCrop="1""#,
+        r#"rawmakase:LensfunAspect="1.5""#,
+        r#"rawmakase:LensfunDatabase="1793180205""#,
+    ] {
+        assert!(packet.contains(key), "{key} {packet}");
+    }
+    for absent in [
+        "LensProfileName",
+        "LensProfileFilename",
+        "k1",
+        "vignetting",
+        "0.9997",
+    ] {
+        assert!(!packet.contains(absent), "{absent} {packet}");
+    }
+    // Without the database: the lens stays named, unresolved, even with Lightroom's
+    // Setup at Auto and an Adobe profile of the lens imported.
+    let adobe = crate::lens::lcp::test_profile(
+        "Canon",
+        "EF70-200mm f/2.8L IS II USM",
+        "Adobe (EF70-200)",
+        -0.05,
+        -0.5,
+    );
+    m.lens_profiles =
+        crate::lens::lcp::Library::from_texts([("a.lcp", adobe.as_str())]).for_photo(&m);
+    let read = |m: &Metadata| {
+        parse(Path::new("IMG.xmp"), &packet)?.apply(&Recipe::default(), m, &[], None)
+    };
+    let unresolved = read(&m)?;
+    let choice = unresolved.lens_profile_choice.lensfun().unwrap();
+    assert!(!choice.is_resolved());
+    assert_eq!(choice.lens, fixture::choice().lens);
+    assert_eq!(
+        unresolved.lens_profile_choice.setup,
+        crate::lens::choice::LensProfileSetup::Custom
+    );
+    assert!(unresolved.lens_profile_in_use(&m).used.is_none());
+    assert!(unresolved.lens_correction(&m).is_none());
+    assert!(
+        unresolved
+            .missing_lens_profile(&m)
+            .unwrap()
+            .contains("isn't resolved")
+    );
+    // Written again, it is the same identity.
+    let again = crate::xmp::write::packet(&unresolved, &m, &photo);
+    assert!(again.contains(r#"rawmakase:LensfunModel="Canon EF 70-200mm f/2.8L IS II USM""#));
+    // With the database: resolved now, from the version installed, which may be newer
+    // than the one the edit was written with.
+    m.lensfun = fixture::installed(-0.05, 1_900_000_000);
+    let resolved = read(&m)?;
+    let choice = resolved.lens_profile_choice.lensfun().unwrap();
+    assert!(choice.is_resolved());
+    assert_eq!(choice.provenance.database, 1_900_000_000);
+    assert_eq!(
+        choice.calibration.as_deref(),
+        Some(&m.lensfun.get().unwrap().db.lenses[0].calibration)
+    );
+    assert!(
+        resolved
+            .lens_correction(&m)
+            .unwrap()
+            .source
+            .starts_with("Lensfun")
+    );
+    // Written as elements rather than attributes, it reads the same.
+    let elements = format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{}"><rdf:Description xmlns:crs="{}" xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/" crs:LensProfileEnable="1" crs:LensProfileSetup="Auto"><rawmakase:LensfunMaker>Canon</rawmakase:LensfunMaker><rawmakase:LensfunModel>Canon EF 70-200mm f/2.8L IS II USM</rawmakase:LensfunModel><rawmakase:LensfunMounts>Canon EF</rawmakase:LensfunMounts><rawmakase:LensfunCrop>1</rawmakase:LensfunCrop><rawmakase:LensfunAspect>1.5</rawmakase:LensfunAspect></rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        crate::xml::ns::RDF,
+        crate::xml::ns::CRS
+    );
+    let from_elements =
+        parse(Path::new("e.xmp"), &elements)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(
+        from_elements
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
+    // Split into a description per namespace, as ExifTool rewrites a packet, it
+    // reads the same, and no Adobe profile stands in.
+    let split = format!(
+        r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="{}"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:format>image/jpeg</dc:format></rdf:Description><rdf:Description rdf:about="" xmlns:crs="{}" crs:LensProfileEnable="1" crs:LensProfileSetup="Auto"/><rdf:Description rdf:about="" xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/" rawmakase:LensfunMaker="Canon" rawmakase:LensfunModel="Canon EF 70-200mm f/2.8L IS II USM" rawmakase:LensfunMounts="Canon EF" rawmakase:LensfunCrop="1" rawmakase:LensfunAspect="1.5"/></rdf:RDF></x:xmpmeta>"#,
+        crate::xml::ns::RDF,
+        crate::xml::ns::CRS
+    );
+    let from_split = parse(Path::new("s.xmp"), &split)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(
+        from_split
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
+    assert!(from_split.lens_profile_in_use(&m).used.is_none());
+    // The database is the one installed when the XMP is applied: removed since, the
+    // lens stays named.
+    let mut removed = m.clone();
+    removed.lensfun = crate::lens::lensfun::installed::Handle::Given(None);
+    assert!(
+        !read(&removed)?
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .is_resolved()
+    );
+    // A preset of the lens corrections carries it in the same way.
+    let mut groups = crate::model::settings_groups::GroupSelection::none();
+    groups.set(
+        crate::model::settings_groups::SettingGroup::LensProfileCorrections,
+        crate::model::settings_groups::GroupInclusion::Included,
+    );
+    let preset = crate::xmp::preset_write::preset(
+        &r,
+        &m,
+        &crate::xmp::preset_write::PresetInfo::new("Lens", "Mine"),
+        &groups,
+    );
+    assert!(
+        preset.contains(r#"xmlns:rawmakase="https://rawmakase.com/ns/xmp/1.0/""#),
+        "{preset}"
+    );
+    assert!(preset.contains("rawmakase:LensfunModel="), "{preset}");
+    let applied =
+        parse(Path::new("Lens.xmp"), &preset)?.apply(&Recipe::default(), &m, &[], None)?;
+    assert!(applied.lens_profile_choice.lensfun().unwrap().is_resolved());
+    // A preset of other groups doesn't.
+    let mut other = crate::model::settings_groups::GroupSelection::none();
+    other.set(
+        crate::model::settings_groups::SettingGroup::Exposure,
+        crate::model::settings_groups::GroupInclusion::Included,
+    );
+    let preset = crate::xmp::preset_write::preset(
+        &r,
+        &m,
+        &crate::xmp::preset_write::PresetInfo::new("Bright", "Mine"),
+        &other,
+    );
+    assert!(!preset.contains("rawmakase"), "{preset}");
     Ok(())
 }
 #[test]

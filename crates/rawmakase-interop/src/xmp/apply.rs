@@ -951,6 +951,7 @@ impl Preset {
     }
 
     /// Straighten, lens corrections, Transform and crop.
+    #[allow(clippy::too_many_lines)]
     fn apply_geometry(
         &self,
         settings: &mut Settings<'_>,
@@ -986,6 +987,7 @@ impl Preset {
                 embedded,
             }
         });
+        let id = id.map(crate::lens::choice::LensProfileRef::Adobe);
         if let Some(setup) = v.get("LensProfileSetup") {
             // A Setup names its profile, or none (a preset's "Default").
             r.lens_profile_choice = crate::lens::choice::LensProfileChoice {
@@ -994,6 +996,20 @@ impl Preset {
             };
         } else if id.is_some() {
             r.lens_profile_choice.id = id;
+        }
+        // A Lensfun lens RAWmakase wrote, over the Setup it writes for Lightroom
+        // ("Auto"): resolved against the installed database now, which is the edit;
+        // without it, or without the lens, it stays named, unresolved.
+        for key in super::LENSFUN_KEYS {
+            settings.seen.insert(key.into());
+        }
+        if let Some(choice) = lensfun_choice(v)? {
+            let choice = m
+                .lensfun
+                .get()
+                .and_then(|installed| choice.resolved(&installed.db, m))
+                .unwrap_or(choice);
+            r.lens_profile_choice.choose_lensfun(choice);
         }
         settings.assign(
             "LensProfileDistortionScale",
@@ -1243,4 +1259,39 @@ impl Preset {
         );
         Ok(())
     }
+}
+
+/// The Lensfun lens RAWmakase's own settings name (`LENSFUN_KEYS`), unresolved.
+fn lensfun_choice(
+    v: &BTreeMap<String, String>,
+) -> Result<Option<crate::lens::lensfun::LensfunChoice>> {
+    let text = |key: &str| v.get(key).map(|s| s.trim().to_string()).unwrap_or_default();
+    let model = text("rawmakase:LensfunModel");
+    if model.is_empty() {
+        return Ok(None);
+    }
+    let number = |key: &str| -> Result<f32> {
+        let n: f32 = text(key)
+            .parse()
+            .with_context(|| format!("Invalid {key}"))?;
+        ensure!(n.is_finite() && n > 0., "Invalid {key}");
+        Ok(n)
+    };
+    let lens = crate::lens::lensfun::LensfunLens {
+        maker: text("rawmakase:LensfunMaker"),
+        model,
+        mounts: text("rawmakase:LensfunMounts")
+            .split(';')
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect(),
+        crop: number("rawmakase:LensfunCrop")?,
+        aspect: number("rawmakase:LensfunAspect")?.max(1.),
+    };
+    let database = text("rawmakase:LensfunDatabase").parse().unwrap_or(0);
+    Ok(Some(crate::lens::lensfun::LensfunChoice::unresolved(
+        lens,
+        text("rawmakase:LensfunName"),
+        database,
+    )))
 }

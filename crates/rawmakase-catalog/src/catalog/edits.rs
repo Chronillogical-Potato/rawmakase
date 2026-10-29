@@ -76,10 +76,28 @@ impl Catalog {
             }
             Ok(())
         };
-        // Saving a recipe upgrades an earlier catalog with the write; clearing
-        // stores none.
+        // Saving a recipe upgrades an earlier catalog with the write, to the format
+        // for Lensfun lenses when the edit or any state of its History names one;
+        // clearing stores none.
         if changes.iter().any(|c| matches!(c, EditChange::Save(_))) {
-            self.write_recipes(write)?;
+            let recipes = changes.iter().flat_map(|c| match c {
+                EditChange::Save(e) => {
+                    let history = match e.history {
+                        super::HistoryUpdate::Replace(h) => Some(h),
+                        super::HistoryUpdate::Keep => None,
+                    };
+                    std::iter::once(e.recipe)
+                        .chain(history.map(|h| &h.origin))
+                        .chain(
+                            history
+                                .into_iter()
+                                .flat_map(|h| h.steps.iter().map(|s| &s.recipe)),
+                        )
+                        .collect::<Vec<_>>()
+                }
+                EditChange::Clear { .. } => Vec::new(),
+            });
+            self.write_recipes(super::format_upgrade::Stores::of(recipes), write)?;
         } else {
             self.db.write(write)?;
         }

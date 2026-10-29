@@ -400,3 +400,217 @@ fn the_upgrade_leaves_a_damaged_edit_as_it_was() -> Result<()> {
     assert_eq!((after.snapshot.as_str(), after.history), (damaged, history));
     Ok(())
 }
+
+/// A recipe naming a Lensfun lens, as the edit chose it.
+fn with_lensfun(on: bool) -> Recipe {
+    let mut r = Recipe {
+        lens_profile: on,
+        ..Default::default()
+    };
+    r.lens_profile_choice
+        .choose_lensfun(rawmakase_model::lens::lensfun::fixture::choice());
+    r
+}
+/// A new catalog (format 3) with one photo; the catalog's path and the photo's.
+fn current_catalog() -> Result<(tempfile::TempDir, PathBuf, PathBuf, PhotoId)> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let file = photos.join("a.dng");
+    std::fs::write(&file, b"synthetic raw")?;
+    let path = dir.path().join("Current.rawmakase");
+    let mut cat = Catalog::create(&path)?;
+    cat.add_folder(&photos)?;
+    let id = cat.photos()?[0].id;
+    drop(cat);
+    assert_eq!(version(&path)?, VERSION);
+    Ok((dir, path, file, id))
+}
+
+/// Version 4 holds Lensfun lens choices: releases that open up to 3 refuse it.
+#[test]
+fn releases_before_lensfun_refuse_its_format() {
+    use super::db::{LENSFUN, NEWEST};
+    assert!(!opens(LENSFUN, VERSION));
+    assert!(opens(LENSFUN, NEWEST) && opens(VERSION, NEWEST));
+    assert!(!opens(LENSFUN + 1, NEWEST));
+}
+
+/// Only a write that stores a Lensfun choice raises the catalog to version 4, with a
+/// backup of it as it was, in that write's transaction; other edits leave it at 3.
+#[test]
+fn storing_a_lensfun_choice_raises_the_format_and_nothing_else_does() -> Result<()> {
+    let (dir, path, file, id) = current_catalog()?;
+    let mut cat = Catalog::open(&path)?;
+    let plain = Recipe {
+        exposure: 0.5,
+        ..Default::default()
+    };
+    cat.save_edit(
+        id,
+        &file,
+        &plain,
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    cat.add_snapshot(id, "Plain", &plain)?;
+    assert_eq!(cat.format_version()?, VERSION);
+    assert!(backups(dir.path())?.is_empty());
+    // Switched off still names it.
+    let off = with_lensfun(false);
+    cat.save_edit(
+        id,
+        &file,
+        &off,
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    assert_eq!(cat.format_version()?, super::db::LENSFUN);
+    let [backup] = backups(dir.path())?.try_into().unwrap();
+    assert_eq!(version(&backup)?, VERSION);
+    drop(cat);
+    // It reads back as saved: the lens, its calibration and where it came from.
+    let cat = Catalog::open(&path)?;
+    let edit = cat.load_edit(id, &file)?.unwrap();
+    assert_eq!(edit.recipe.lens_profile_choice, off.lens_profile_choice);
+    assert_eq!(
+        edit.recipe
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .provenance
+            .license_uri,
+        "https://creativecommons.org/licenses/by-sa/3.0/"
+    );
+    Ok(())
+}
+
+/// Every state of a saved History counts, a step that was undone too; and a snapshot.
+#[test]
+fn a_lensfun_choice_anywhere_in_history_or_a_snapshot_raises_the_format() -> Result<()> {
+    let (_dir, path, file, id) = current_catalog()?;
+    let mut cat = Catalog::open(&path)?;
+    // Chosen, then undone: the edit doesn't name it, a redo step does.
+    let history = SavedHistory {
+        origin: Recipe::default(),
+        steps: vec![SavedStep {
+            name: "Lens Profile".into(),
+            value: "Lensfun".into(),
+            recipe: with_lensfun(true),
+        }],
+        applied: 0,
+    };
+    cat.save_edit(
+        id,
+        &file,
+        &Recipe::default(),
+        &ExportOptions::default(),
+        HistoryUpdate::Replace(&history),
+    )?;
+    assert_eq!(cat.format_version()?, super::db::LENSFUN);
+    drop(cat);
+    let (_dir, path, _file, id) = current_catalog()?;
+    let mut cat = Catalog::open(&path)?;
+    cat.add_snapshot(id, "Lensfun", &with_lensfun(true))?;
+    assert_eq!(cat.format_version()?, super::db::LENSFUN);
+    Ok(())
+}
+
+/// A save that fails as it writes leaves the catalog at 3 and the edit unsaved, to
+/// be saved again; the backup stays beside it.
+#[test]
+fn a_failed_lensfun_save_leaves_the_format_and_the_edit() -> Result<()> {
+    let (dir, path, file, id) = current_catalog()?;
+    let mut cat = Catalog::open(&path)?;
+    cat.db_for_tests().execute_batch(
+        "CREATE TEMP TRIGGER fail_edit BEFORE UPDATE ON photos
+         BEGIN SELECT RAISE(ABORT, 'disk full'); END;",
+    )?;
+    let lensfun = with_lensfun(true);
+    let error = cat
+        .save_edit(
+            id,
+            &file,
+            &lensfun,
+            &ExportOptions::default(),
+            HistoryUpdate::Keep,
+        )
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("disk full"), "{error:#}");
+    assert_eq!(cat.format_version()?, VERSION);
+    assert!(cat.load_edit(id, &file)?.is_none());
+    drop(cat);
+    assert_eq!(version(&path)?, VERSION);
+    assert_eq!(backups(dir.path())?.len(), 1);
+    let mut cat = Catalog::open(&path)?;
+    cat.save_edit(
+        id,
+        &file,
+        &lensfun,
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    assert_eq!(cat.format_version()?, super::db::LENSFUN);
+    Ok(())
+}
+
+/// A photo added with an edit an earlier save left beside it, naming a Lensfun lens,
+/// raises the format in the same transaction.
+#[test]
+fn a_legacy_sidecar_naming_a_lensfun_lens_raises_the_format() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let photos = dir.path().join("photos");
+    std::fs::create_dir(&photos)?;
+    let file = photos.join("a.dng");
+    std::fs::write(&file, b"synthetic raw with a sidecar")?;
+    super::legacy_sidecar::save(&file, &with_lensfun(true), &ExportOptions::default())?;
+    let sidecar: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        super::legacy_sidecar::sidecar_path(&file),
+    )?)?;
+    assert_eq!(sidecar["schema"], 12);
+    let path = dir.path().join("Photos.rawmakase");
+    let mut cat = Catalog::create(&path)?;
+    cat.add_folder(&photos)?;
+    assert_eq!(cat.format_version()?, super::db::LENSFUN);
+    let id = cat.photos()?[0].id;
+    assert!(cat.load_edit(id, &file)?.unwrap().recipe.uses_lensfun());
+    Ok(())
+}
+
+/// Export as Catalog of a Lensfun edit is a catalog of version 4, whose edit carries
+/// the calibration with its source and license.
+#[test]
+fn an_exported_lensfun_edit_keeps_its_format_and_attribution() -> Result<()> {
+    let (dir, path, file, id) = current_catalog()?;
+    let mut cat = Catalog::open(&path)?;
+    cat.save_edit(
+        id,
+        &file,
+        &with_lensfun(true),
+        &ExportOptions::default(),
+        HistoryUpdate::Keep,
+    )?;
+    let destination = dir.path().join("Exported.rawmakase");
+    let export = cat.export_catalog(&super::ExportScope::Photos(vec![id]), &destination)?;
+    assert!(
+        export.lens_profiles.is_empty(),
+        "{:?}",
+        export.lens_profiles
+    );
+    assert_eq!(version(&destination)?, super::db::LENSFUN);
+    let exported = Catalog::open(&destination)?;
+    let edit = exported.load_edit(id, &file)?.unwrap();
+    let provenance = &edit
+        .recipe
+        .lens_profile_choice
+        .lensfun()
+        .unwrap()
+        .provenance;
+    assert_eq!(provenance.license, "CC BY-SA 3.0");
+    assert_eq!(provenance.attribution, "Lensfun contributors");
+    assert_eq!(
+        provenance.source,
+        "https://lensfun.github.io/db/version_2.tar.bz2"
+    );
+    Ok(())
+}

@@ -90,6 +90,11 @@ pub(crate) fn aspect(t: &TiffFile, ifd: &Ifd) -> Option<[u32; 4]> {
     Some([*a.get(3)?, *a.get(4)?, *a.get(1)?, *a.get(2)?])
 }
 
+/// The crop mode AspectInfo's ratio code names (`canon::crop_mode`).
+pub(crate) fn sensor_crop(t: &TiffFile, ifd: &Ifd) -> Option<f32> {
+    super::canon::crop_mode(*t.ints_upto(ifd, ASPECT_INFO, 1)?.first()?)
+}
+
 /// Highlight Tone Priority: 0 off, 1 on, 2 enhanced.
 pub(crate) fn highlight_tone_priority(t: &TiffFile, ifd: &Ifd) -> i32 {
     t.ints_upto(ifd, LIGHTING_OPT, 4)

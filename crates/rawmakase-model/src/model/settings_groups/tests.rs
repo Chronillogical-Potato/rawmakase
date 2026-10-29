@@ -29,10 +29,12 @@ fn everything_changed() -> Recipe {
         lens_profile: true,
         lens_profile_choice: crate::lens::choice::LensProfileChoice {
             setup: crate::lens::choice::LensProfileSetup::Custom,
-            id: Some(crate::lens::choice::LensProfileId {
-                name: "Adobe (Test 35mm)".into(),
-                ..Default::default()
-            }),
+            id: Some(crate::lens::choice::LensProfileRef::Adobe(
+                crate::lens::choice::LensProfileId {
+                    name: "Adobe (Test 35mm)".into(),
+                    ..Default::default()
+                },
+            )),
         },
         lens_distortion: 0.5,
         lens_vignetting: 1.5,
@@ -672,11 +674,13 @@ fn a_lens_profile_the_target_cannot_use_is_reported() {
     );
     // So is the camera's own profile on a photo whose RAW has none.
     let mut embedded = source.clone();
-    embedded.lens_profile_choice.id = Some(crate::lens::choice::LensProfileId {
-        name: "Camera Settings".into(),
-        embedded: true,
-        ..Default::default()
-    });
+    embedded.lens_profile_choice.id = Some(crate::lens::choice::LensProfileRef::Adobe(
+        crate::lens::choice::LensProfileId {
+            name: "Camera Settings".into(),
+            embedded: true,
+            ..Default::default()
+        },
+    ));
     let out = transfer(
         from(&embedded, &m),
         &Recipe::default(),

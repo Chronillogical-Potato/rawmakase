@@ -29,6 +29,7 @@ install:
 	install -Dm644 licenses/Adobe-DNG-SDK.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Adobe-DNG-SDK.txt
 	install -Dm644 licenses/Hack-MIT-BitstreamVera.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Hack-MIT-BitstreamVera.txt
 	install -Dm644 licenses/Inter-OFL.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Inter-OFL.txt
+	install -Dm644 licenses/Lensfun-database-CC-BY-SA-3.0.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Lensfun-database-CC-BY-SA-3.0.txt
 	install -Dm644 licenses/Lucide-ISC.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Lucide-ISC.txt
 	install -Dm644 licenses/NotoEmoji-OFL.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/NotoEmoji-OFL.txt
 	install -Dm644 licenses/Ubuntu-UFL.txt $(DESTDIR)$(PREFIX)/share/licenses/$(PKGNAME)/Ubuntu-UFL.txt

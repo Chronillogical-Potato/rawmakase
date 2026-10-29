@@ -90,6 +90,7 @@ impl Editor {
         ]);
         stopping.extend(self.stand_ins.stop());
         stopping.extend(self.selection.stop());
+        stopping.extend(self.lensfun.stop());
         stopping.extend(self.automation.stop_outputs());
         stopping.extend(self.controls.stop());
         stopping.extend(self.stop_folder_sync());

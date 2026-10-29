@@ -5,7 +5,7 @@
 //! with [`sidecars`](super::sidecars), the XMP metadata files beside a photo.
 use crate::export_settings::ExportOptions;
 use crate::model::recipe::{LocalEdits, Recipe};
-use crate::model::saved_format::{SCHEMA, migrate_recipe};
+use crate::model::saved_format::{migrate_recipe, schema_for};
 use crate::storage::{Identity, atomic_json, bitmaps, data_dir};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -175,8 +175,8 @@ fn save_at(raw: &Path, recipe: &Recipe, export: &ExportOptions, store: &Path) ->
     }
     let (saved, local) = recipe.split_local();
     let s = Sidecar {
-        schema: SCHEMA,
-        pipeline: SCHEMA,
+        schema: schema_for(&saved),
+        pipeline: schema_for(&saved),
         source: source.clone(),
         recipe: saved,
         export: export.clone(),

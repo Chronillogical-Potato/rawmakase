@@ -1,7 +1,9 @@
-//! Which Adobe lens profile a photo uses: Lightroom's Lens Corrections › Profile
-//! Setup, and the profile an edit names (`crs:LensProfileSetup`, `LensProfileName`,
-//! `LensProfileFilename`, `LensProfileDigest`).
+//! Which lens profile a photo uses: Lightroom's Lens Corrections › Profile Setup, and
+//! the profile an edit names, an Adobe one (`crs:LensProfileSetup`,
+//! `LensProfileName`, `LensProfileFilename`, `LensProfileDigest`) or a Lensfun lens
+//! the user chose ([`LensfunChoice`]), never both.
 use crate::camera_data::Metadata;
+use crate::lens::lensfun::LensfunChoice;
 use crate::optics::lcp::{Candidate, ImportedProfile, PhotoProfiles};
 use serde::{Deserialize, Serialize};
 
@@ -81,13 +83,75 @@ impl LensProfileId {
     }
 }
 
+/// The profile an edit names: an Adobe one, as Lightroom records it, or a Lensfun
+/// lens. Saved as the Adobe identity's own object, or as `{"lensfun": …}`; reading
+/// goes by that key, so a damaged Lensfun choice is refused rather than read as an
+/// Adobe profile without a name. Releases before Lensfun never read one: recipes with
+/// it are saved in a format they refuse (`saved_format`, the catalog's version 4).
+#[derive(Clone, Debug, PartialEq)]
+pub enum LensProfileRef {
+    Adobe(LensProfileId),
+    Lensfun(Box<LensfunChoice>),
+}
+/// The key a saved Lensfun choice is under.
+const LENSFUN_KEY: &str = "lensfun";
+impl Serialize for LensProfileRef {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Adobe(id) => id.serialize(s),
+            Self::Lensfun(choice) => {
+                use serde::ser::SerializeMap;
+                let mut map = s.serialize_map(Some(1))?;
+                map.serialize_entry(LENSFUN_KEY, choice)?;
+                map.end()
+            }
+        }
+    }
+}
+impl<'de> Deserialize<'de> for LensProfileRef {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let mut value = serde_json::Value::deserialize(d)?;
+        match value.as_object_mut().and_then(|o| o.remove(LENSFUN_KEY)) {
+            Some(lensfun) => {
+                let extra = value.as_object().map_or(0, serde_json::Map::len);
+                if extra > 0 {
+                    return Err(D::Error::custom(
+                        "a Lensfun lens profile with Adobe profile fields",
+                    ));
+                }
+                serde_json::from_value(lensfun)
+                    .map(|c| Self::Lensfun(Box::new(c)))
+                    .map_err(|e| D::Error::custom(format!("Lensfun lens profile: {e}")))
+            }
+            None => serde_json::from_value(value)
+                .map(Self::Adobe)
+                .map_err(D::Error::custom),
+        }
+    }
+}
+impl LensProfileRef {
+    pub fn adobe(&self) -> Option<&LensProfileId> {
+        match self {
+            Self::Adobe(id) => Some(id),
+            Self::Lensfun(_) => None,
+        }
+    }
+    pub fn lensfun(&self) -> Option<&LensfunChoice> {
+        match self {
+            Self::Lensfun(c) => Some(c),
+            Self::Adobe(_) => None,
+        }
+    }
+}
+
 /// The recipe's lens profile Setup and the profile it names.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LensProfileChoice {
     pub setup: LensProfileSetup,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<LensProfileId>,
+    pub id: Option<LensProfileRef>,
 }
 
 /// What a choice renders with on one photo.
@@ -103,16 +167,46 @@ impl LensProfileChoice {
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
+    /// The Adobe profile the edit names.
+    pub fn adobe(&self) -> Option<&LensProfileId> {
+        self.id.as_ref().and_then(LensProfileRef::adobe)
+    }
+    pub fn adobe_mut(&mut self) -> Option<&mut LensProfileId> {
+        match &mut self.id {
+            Some(LensProfileRef::Adobe(id)) => Some(id),
+            _ => None,
+        }
+    }
+    /// The Lensfun lens the edit chose.
+    pub fn lensfun(&self) -> Option<&LensfunChoice> {
+        self.id.as_ref().and_then(LensProfileRef::lensfun)
+    }
     /// Picking a profile in the Make, Model or Profile menu, which sets Custom.
     pub fn choose(&mut self, profile: &ImportedProfile) {
         self.setup = LensProfileSetup::Custom;
-        self.id = Some(self.id_for(profile));
+        self.id = Some(LensProfileRef::Adobe(self.id_for(profile)));
+    }
+    /// The choice taken to photo `m`: a Lensfun lens gets `m`'s camera
+    /// (`LensfunChoice::for_photo`); an Adobe one is the same.
+    pub fn for_photo(&mut self, m: &Metadata) {
+        if let Some(LensProfileRef::Lensfun(c)) = &mut self.id {
+            **c = c.for_photo(m);
+        }
+    }
+    /// Picking a Lensfun lens: Custom, naming it.
+    pub fn choose_lensfun(&mut self, choice: LensfunChoice) {
+        self.setup = LensProfileSetup::Custom;
+        self.id = Some(LensProfileRef::Lensfun(Box::new(choice)));
     }
     /// The identity to record for `profile`: the edit's own when it names the same
     /// file, which keeps Adobe's digest.
     fn id_for(&mut self, profile: &ImportedProfile) -> LensProfileId {
         self.id
             .take()
+            .and_then(|id| match id {
+                LensProfileRef::Adobe(id) => Some(id),
+                LensProfileRef::Lensfun(_) => None,
+            })
             // The camera's own profile is not an imported file, whatever its name.
             .filter(|id| !id.embedded && profile.is(&id.filename, &id.name))
             // A name alone may fit several files: record the one picked.
@@ -130,18 +224,22 @@ impl LensProfileChoice {
                 setup => setup,
             },
             // Adobe's digest names the same file; it does not change the render.
-            id: self.id.clone().map(|id| LensProfileId {
-                digest: String::new(),
-                ..id
+            id: self.id.clone().map(|id| match id {
+                LensProfileRef::Adobe(id) => LensProfileRef::Adobe(LensProfileId {
+                    digest: String::new(),
+                    ..id
+                }),
+                lensfun => lensfun,
             }),
         }
     }
-    /// Picking a Setup. Custom keeps the profile in use; Default and Auto match again.
+    /// Picking a Setup. Custom keeps the profile in use; Default and Auto match again,
+    /// forgetting a Lensfun lens, which they never choose.
     pub fn set_setup(&mut self, setup: LensProfileSetup, in_use: Option<&ImportedProfile>) {
         self.setup = setup;
         self.id = match setup {
             LensProfileSetup::Custom => match in_use {
-                Some(profile) => Some(self.id_for(profile)),
+                Some(profile) => Some(LensProfileRef::Adobe(self.id_for(profile))),
                 None => self.id.take(),
             },
             LensProfileSetup::Default | LensProfileSetup::Auto => None,
@@ -157,13 +255,14 @@ impl LensProfileChoice {
         profiles: &'p PhotoProfiles,
         m: &Metadata,
     ) -> Resolved<'c, 'p> {
-        if self.id.as_ref().is_some_and(|id| id.embedded) {
-            return Resolved::default();
-        }
-        let named = self
-            .id
-            .as_ref()
-            .map(|id| (id, profiles.find(&id.filename, &id.name)));
+        // The camera's own profile renders as built in; a Lensfun lens is never
+        // stood in for by an Adobe profile.
+        let named = match &self.id {
+            Some(LensProfileRef::Adobe(id)) if id.embedded => return Resolved::default(),
+            Some(LensProfileRef::Lensfun(_)) => return Resolved::default(),
+            Some(LensProfileRef::Adobe(id)) => Some((id, profiles.find(&id.filename, &id.name))),
+            None => None,
+        };
         match (self.setup, named) {
             // Found but unable to correct this photo, it is reported as not imported is.
             (LensProfileSetup::Custom, Some((id, Some(found)))) => match found.correction(m) {

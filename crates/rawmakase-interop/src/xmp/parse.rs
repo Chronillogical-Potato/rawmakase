@@ -1,6 +1,6 @@
 use super::Preset;
 use crate::color::curve::ToneCurve;
-use crate::xml::ns::{CRS, PHOTOSHOP, RDF, XML};
+use crate::xml::ns::{CRS, PHOTOSHOP, RAWMAKASE, RDF, XML};
 use anyhow::{Context, Result, ensure};
 use std::{collections::BTreeMap, path::Path};
 /// A preset's name and description, not settings.
@@ -64,6 +64,39 @@ pub fn parse(path: &Path, text: &str) -> Result<Preset> {
         .filter(|a| a.namespace() == Some(CRS))
         .map(|a| (a.name().to_string(), a.value().to_string()))
         .collect();
+    // RAWmakase's own settings, under their prefix so no Camera Raw name meets them,
+    // as attributes or as elements holding their value, in this description or
+    // another of the same subject (ExifTool writes each namespace in its own).
+    let about = description.attribute((RDF, "about")).unwrap_or("");
+    for d in description
+        .parent()
+        .into_iter()
+        .flat_map(|rdf| rdf.children())
+        .filter(|n| n.has_tag_name((RDF, "Description")))
+        .filter(|n| n.attribute((RDF, "about")).unwrap_or("") == about)
+    {
+        settings.extend(
+            d.attributes()
+                .filter(|a| a.namespace() == Some(RAWMAKASE))
+                .map(|a| {
+                    (
+                        format!("{}{}", super::RAWMAKASE_PREFIX, a.name()),
+                        a.value().to_string(),
+                    )
+                }),
+        );
+        settings.extend(
+            d.children()
+                .filter(|n| n.is_element() && n.tag_name().namespace() == Some(RAWMAKASE))
+                .filter(|n| !n.children().any(|c| c.is_element()))
+                .map(|n| {
+                    (
+                        format!("{}{}", super::RAWMAKASE_PREFIX, n.tag_name().name()),
+                        n.text().unwrap_or("").trim().to_string(),
+                    )
+                }),
+        );
+    }
     let mut curves = BTreeMap::new();
     let mut blockers = Vec::new();
     let mut look = String::new();

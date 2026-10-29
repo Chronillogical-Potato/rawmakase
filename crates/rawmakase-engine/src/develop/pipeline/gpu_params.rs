@@ -27,7 +27,7 @@ pub(crate) fn lens_gpu_params(
         out[15] = -1.;
         return out;
     };
-    let lens = warp.map.lens;
+    let lens = &*warp.map.lens;
     let distortion = push(lens.distortion.as_ref());
     let [red, blue] = match warp.map.chromatic.or(lens.chromatic.as_ref()) {
         Some([red, blue]) => [push(Some(red)), push(Some(blue))],
@@ -35,8 +35,13 @@ pub(crate) fn lens_gpu_params(
     };
     let vignetting = push(warp.vignetting.as_ref().map(VignetteField::table));
     let m = &warp.map;
-    // 2 marks a measured aberration, evaluated at the distorted radius.
-    let mode = if m.chromatic.is_some() { 2. } else { 1. };
+    // 2 marks an aberration evaluated at the distorted radius: a measured one, or lens
+    // data given as a function of it (Lensfun's).
+    let mode = if m.chromatic.is_some() || lens.chromatic_at_source {
+        2.
+    } else {
+        1.
+    };
     out[..5].copy_from_slice(&[mode, m.center[0], m.center[1], m.half, m.fill]);
     out[5] = m.amount;
     out[6..8].copy_from_slice(&distortion);
@@ -46,7 +51,7 @@ pub(crate) fn lens_gpu_params(
     out[14] = warp.vignetting.as_ref().map_or(0., |v| v.amount);
     out[15] = warp.gain_map.as_ref().map_or(-1., |g| {
         let at = base + tables.len();
-        let grid = g.grid;
+        let grid = &*g.grid;
         tables.extend([grid.points[0] as f32, grid.points[1] as f32]);
         tables.extend(grid.origin);
         tables.extend(grid.spacing);

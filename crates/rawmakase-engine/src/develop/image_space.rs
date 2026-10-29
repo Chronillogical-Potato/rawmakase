@@ -13,9 +13,10 @@ use crate::model::recipe::Recipe;
 
 /// Lens distortion as a map of positions: from a corrected position (what
 /// `Geometry::source` returns) to where it samples the decoded image, for green.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct LensMap<'a> {
-    pub(crate) lens: &'a crate::optics::LensCorrection,
+    /// The photo's own correction, or one made for this edit (a Lensfun lens's).
+    pub(crate) lens: std::borrow::Cow<'a, crate::optics::LensCorrection>,
     /// Measured lateral chromatic aberration replacing the lens data's own.
     pub(crate) chromatic: Option<&'a [crate::optics::Radial; 2]>,
     pub(crate) center: [f32; 2],
@@ -35,18 +36,18 @@ impl<'a> LensMap<'a> {
                 if chromatic.is_none() && r.manual_vignette().is_none() {
                     return None;
                 }
-                &crate::optics::NO_CORRECTION
+                std::borrow::Cow::Borrowed(&crate::optics::NO_CORRECTION)
             }
         };
         let (w, h) = (im.width as f32, im.height as f32);
         let amount = r.lens_amounts(&im.metadata)[0];
         let [cx, cy] = Self::centre(im, r);
         Some(Self {
-            lens,
             chromatic,
             center: [cx * w, cy * h],
             half: (w * w + h * h).sqrt() * 0.5,
-            fill: Self::fill(im, lens, amount),
+            fill: Self::fill(im, &lens, amount),
+            lens,
             amount,
         })
     }
@@ -137,13 +138,13 @@ impl<'a> ViewMapping<'a> {
     /// Image-space position shown at view position (`u`, `v`).
     pub fn to_image(&self, u: f32, v: f32) -> [f32; 2] {
         let [x, y] = self.geometry.source(u, v);
-        let [x, y] = self.lens.map_or([x, y], |l| l.forward(x, y));
+        let [x, y] = self.lens.as_ref().map_or([x, y], |l| l.forward(x, y));
         self.frame.to_image(x, y)
     }
     /// View position where image-space position `p` is shown.
     pub fn to_view(&self, p: [f32; 2]) -> [f32; 2] {
         let [x, y] = self.frame.to_source(p);
-        let [x, y] = self.lens.map_or([x, y], |l| l.inverse(x, y));
+        let [x, y] = self.lens.as_ref().map_or([x, y], |l| l.inverse(x, y));
         self.geometry.view(x, y)
     }
     /// View-space length of an image-space long-edge fraction `r` near `p`, as
@@ -244,7 +245,7 @@ mod tests {
             ..Default::default()
         };
         let map = LensMap {
-            lens: &lens,
+            lens: std::borrow::Cow::Borrowed(&lens),
             chromatic: None,
             center: [150., 100.],
             half: 180.,

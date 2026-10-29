@@ -45,13 +45,13 @@ pub fn photo() -> Metadata {
     m.lens_profiles = library().for_photo(&m);
     m
 }
-fn id(filename: &str) -> Option<LensProfileId> {
-    Some(LensProfileId {
+fn id(filename: &str) -> Option<LensProfileRef> {
+    Some(LensProfileRef::Adobe(LensProfileId {
         filename: filename.into(),
         ..Default::default()
-    })
+    }))
 }
-fn choice(setup: LensProfileSetup, id: Option<LensProfileId>) -> LensProfileChoice {
+fn choice(setup: LensProfileSetup, id: Option<LensProfileRef>) -> LensProfileChoice {
     LensProfileChoice { setup, id }
 }
 fn used(c: &LensProfileChoice, m: &Metadata) -> Option<String> {
@@ -187,7 +187,14 @@ fn an_edit_keeps_the_profile_it_names() {
         ..Default::default()
     };
     assert_eq!(
-        used(&choice(LensProfileSetup::Custom, Some(by_name)), &m).as_deref(),
+        used(
+            &choice(
+                LensProfileSetup::Custom,
+                Some(LensProfileRef::Adobe(by_name))
+            ),
+            &m
+        )
+        .as_deref(),
         Some(MINE)
     );
     // File names compare without case, as on macOS.
@@ -229,7 +236,7 @@ fn choosing_a_profile_sets_custom_and_setup_rematches() {
     c.choose(other);
     assert_eq!(c.setup, LensProfileSetup::Custom);
     assert_eq!(
-        c.id.as_ref().map(|i| i.name.as_str()),
+        c.adobe().map(|i| i.name.as_str()),
         Some("Adobe (Lensco 50mm F1.4)")
     );
     assert_eq!(used(&c, &m).as_deref(), Some(OTHER));
@@ -240,7 +247,7 @@ fn choosing_a_profile_sets_custom_and_setup_rematches() {
     // Custom keeps the profile in use.
     let adobe = &m.lens_profiles.auto(&m).unwrap().profile;
     c.set_setup(LensProfileSetup::Custom, Some(adobe));
-    assert_eq!(c.id.as_ref().map(|i| i.filename.as_str()), Some(ADOBE));
+    assert_eq!(c.adobe().map(|i| i.filename.as_str()), Some(ADOBE));
     // Custom with nothing in use keeps what the edit names.
     let mut named = choice(LensProfileSetup::Auto, id("Gone.lcp"));
     named.set_setup(LensProfileSetup::Custom, None);
@@ -300,12 +307,15 @@ fn switching_to_custom_keeps_the_digest_of_the_same_profile() {
         digest: "0123ABCD".into(),
         embedded: false,
     };
-    let mut c = choice(LensProfileSetup::Auto, Some(recorded.clone()));
+    let mut c = choice(
+        LensProfileSetup::Auto,
+        Some(LensProfileRef::Adobe(recorded.clone())),
+    );
     c.set_setup(LensProfileSetup::Custom, Some(adobe));
-    assert_eq!(c.id.as_ref(), Some(&recorded));
+    assert_eq!(c.adobe(), Some(&recorded));
     // Picking the profile already named keeps it too; another one does not.
     c.choose(adobe);
-    assert_eq!(c.id.as_ref(), Some(&recorded));
+    assert_eq!(c.adobe(), Some(&recorded));
     let mine = &m
         .lens_profiles
         .all()
@@ -314,7 +324,7 @@ fn switching_to_custom_keeps_the_digest_of_the_same_profile() {
         .unwrap()
         .profile;
     c.choose(mine);
-    assert!(c.id.as_ref().unwrap().digest.is_empty());
+    assert!(c.adobe().unwrap().digest.is_empty());
 }
 
 #[test]
@@ -327,8 +337,11 @@ fn default_and_auto_render_alike() {
         choice(LensProfileSetup::Default, id(MINE)).rendering(),
         choice(LensProfileSetup::Auto, id(MINE)).rendering()
     );
-    let mut digest = id(MINE);
-    digest.as_mut().unwrap().digest = "0123ABCD".into();
+    let digest = Some(LensProfileRef::Adobe(LensProfileId {
+        filename: MINE.into(),
+        digest: "0123ABCD".into(),
+        ..Default::default()
+    }));
     assert_eq!(
         choice(LensProfileSetup::Custom, digest).rendering(),
         choice(LensProfileSetup::Custom, id(MINE)).rendering()
@@ -359,15 +372,15 @@ fn choosing_an_imported_profile_replaces_the_cameras_own() {
     // An embedded identity with the same name as an imported profile.
     let mut c = choice(
         LensProfileSetup::Default,
-        Some(LensProfileId {
+        Some(LensProfileRef::Adobe(LensProfileId {
             name: adobe.name.clone(),
             embedded: true,
             ..Default::default()
-        }),
+        })),
     );
     assert!(c.resolve(&m.lens_profiles, &m).used.is_none());
     c.choose(adobe);
-    assert!(!c.id.as_ref().unwrap().embedded);
+    assert!(!c.adobe().unwrap().embedded);
     assert_eq!(used(&c, &m).as_deref(), Some(ADOBE));
 }
 
@@ -405,15 +418,15 @@ fn picking_one_of_two_files_with_the_same_name_records_its_file() {
     let b = &m.lens_profiles.all()[1].profile;
     let mut c = choice(
         LensProfileSetup::Auto,
-        Some(LensProfileId {
+        Some(LensProfileRef::Adobe(LensProfileId {
             name: b.name.clone(),
             digest: "0123ABCD".into(),
             ..Default::default()
-        }),
+        })),
     );
     c.choose(b);
     assert_eq!(used(&c, &m).as_deref(), Some("b.lcp"));
-    assert_eq!(c.id.as_ref().unwrap().digest, "0123ABCD");
+    assert_eq!(c.adobe().unwrap().digest, "0123ABCD");
 }
 
 #[test]
@@ -447,7 +460,10 @@ fn a_recorded_file_is_not_stood_in_for_by_another_of_the_same_name() {
         filename: "Testcam (35mm F2) - copy.lcp".into(),
         ..Default::default()
     };
-    let c = choice(LensProfileSetup::Custom, Some(other_file));
+    let c = choice(
+        LensProfileSetup::Custom,
+        Some(LensProfileRef::Adobe(other_file)),
+    );
     let r = c.resolve(&m.lens_profiles, &m);
     assert!(r.used.is_none() && r.missing.is_some());
 }
@@ -508,4 +524,251 @@ fn a_profile_leaving_distortion_to_the_camera_is_its_match() {
     // Only the camera's distortion, not its vignetting.
     assert_eq!(correction.distortion, m.lens.as_ref().unwrap().distortion);
     assert!(correction.vignetting.is_none());
+}
+
+/// Today's saved Adobe choices read as they did; a Lensfun choice reads as one; one
+/// that is damaged is refused, never read as an Adobe profile without a name.
+#[test]
+fn saved_profiles_read_as_the_source_they_name() {
+    let adobe: LensProfileChoice = serde_json::from_str(
+        r#"{"setup":"Custom","id":{"name":"Adobe (Sony FE 55mm F1.8 ZA)","filename":"a.lcp","digest":"AB","future":1}}"#,
+    )
+    .unwrap();
+    assert_eq!(adobe.adobe().unwrap().filename, "a.lcp");
+    assert!(adobe.lensfun().is_none());
+    // Exactly the JSON it was written as.
+    let embedded: LensProfileChoice =
+        serde_json::from_str(r#"{"setup":"Auto","id":{"name":"Camera Settings","embedded":true}}"#)
+            .unwrap();
+    assert_eq!(
+        serde_json::to_string(&embedded).unwrap(),
+        r#"{"setup":"Auto","id":{"name":"Camera Settings","embedded":true}}"#
+    );
+    let mut lensfun = LensProfileChoice::default();
+    lensfun.choose_lensfun(crate::lens::lensfun::fixture::choice());
+    let text = serde_json::to_string(&lensfun).unwrap();
+    assert!(text.contains(r#""id":{"lensfun":{"#), "{text}");
+    let back: LensProfileChoice = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, lensfun);
+    assert!(back.adobe().is_none());
+    for damaged in [
+        r#"{"setup":"Custom","id":{"lensfun":{"lens":3}}}"#,
+        r#"{"setup":"Custom","id":{"lensfun":null}}"#,
+        r#"{"setup":"Custom","id":{"lensfun":{"lens":{"maker":"A","model":"B","crop":1,"aspect":1.5}},"name":"Adobe (B)"}}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<LensProfileChoice>(damaged).is_err(),
+            "{damaged}"
+        );
+        assert!(
+            serde_json::from_str::<crate::model::recipe::Recipe>(&format!(
+                r#"{{"lens_profile_choice":{}}}"#,
+                &damaged[damaged.find(r#"{"setup"#).unwrap()..]
+            ))
+            .is_err()
+        );
+    }
+    // Picking Default or Auto forgets the Lensfun lens; picking an Adobe profile
+    // replaces it.
+    let mut c = lensfun.clone();
+    c.set_setup(LensProfileSetup::Auto, None);
+    assert_eq!(c.id, None);
+    let m = photo();
+    let adobe = &m.lens_profiles.auto(&m).unwrap().profile;
+    let mut c = lensfun.clone();
+    c.choose(adobe);
+    assert!(c.lensfun().is_none() && c.adobe().is_some());
+}
+
+/// A Lensfun choice renders from the calibration it copied, without the database,
+/// and is never stood in for by an imported Adobe profile, even one of this lens.
+#[test]
+fn lensfun_renders_from_its_copy_and_never_as_adobe() {
+    use crate::lens::lensfun::fixture;
+    use crate::model::recipe::Recipe;
+    let mut m = fixture::photo();
+    // An imported Adobe profile of the same lens.
+    let text = test_profile(
+        "Canon",
+        "EF70-200mm f/2.8L IS II USM",
+        "Adobe (EF70-200)",
+        -0.05,
+        -0.5,
+    );
+    m.lens_profiles = Library::from_texts([("adobe.lcp", text.as_str())]).for_photo(&m);
+    assert!(m.lens_profiles.auto(&m).is_some());
+    let mut r = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    r.lens_profile_choice.choose_lensfun(fixture::choice());
+    assert!(r.lens_profile_in_use(&m).used.is_none());
+    let c = r.lens_correction(&m).unwrap().into_owned();
+    assert!(c.source.starts_with("Lensfun: "), "{}", c.source);
+    assert!(c.distortion.is_some() && c.chromatic.is_some() && c.vignetting.is_some());
+    assert!(c.chromatic_at_source);
+    assert_eq!(r.missing_lens_profile(&m), None);
+    // The same with no database installed, or another version of it.
+    assert!(m.lensfun.get().is_none());
+    m.lensfun = fixture::installed(-0.2, 1_900_000_000);
+    assert_eq!(*r.lens_correction(&m).unwrap(), c);
+    // Switched off, nothing of it renders; Default never picks it.
+    r.lens_profile = false;
+    assert!(
+        r.lens_correction(&m)
+            .is_none_or(|c| !c.source.starts_with("Lensfun"))
+    );
+    let auto = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    assert!(
+        auto.lens_correction(&m)
+            .unwrap()
+            .source
+            .starts_with("Adobe profile")
+    );
+}
+
+/// An unresolved choice (read from XMP without the database) renders the built-in
+/// correction or none, never an Adobe profile, and says so.
+#[test]
+fn an_unresolved_lensfun_choice_falls_back_to_built_in_only() {
+    use crate::lens::lensfun::{LensfunChoice, fixture};
+    use crate::model::recipe::Recipe;
+    let mut m = fixture::photo();
+    let text = test_profile(
+        "Canon",
+        "EF70-200mm f/2.8L IS II USM",
+        "Adobe (EF70-200)",
+        -0.05,
+        -0.5,
+    );
+    m.lens_profiles = Library::from_texts([("adobe.lcp", text.as_str())]).for_photo(&m);
+    let named = fixture::choice();
+    let unresolved = LensfunChoice::unresolved(named.lens.clone(), named.label.clone(), 0);
+    let mut r = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    r.lens_profile_choice.choose_lensfun(unresolved);
+    assert!(r.uses_lensfun());
+    assert!(r.lens_correction(&m).is_none());
+    let note = r.missing_lens_profile(&m).unwrap();
+    assert!(
+        note.starts_with("Lensfun profile \"Canon EF 70-200mm f/2.8L IS II USM\" isn't resolved"),
+        "{note}"
+    );
+    assert!(note.ends_with("; no lens correction"), "{note}");
+    m.lens = Some(crate::optics::LensCorrection {
+        source: "Canon built-in".into(),
+        default_on: true,
+        distortion: crate::optics::Radial::new(vec![0., 1.], vec![1., 1.01]),
+        ..Default::default()
+    });
+    assert_eq!(r.lens_correction(&m).unwrap().source, "Canon built-in");
+    assert!(
+        r.missing_lens_profile(&m)
+            .unwrap()
+            .ends_with("; using Canon built-in")
+    );
+    // Resolving copies the installed calibration.
+    m.lensfun = fixture::installed(-0.02, 1_793_180_205);
+    let resolved = r
+        .lens_profile_choice
+        .lensfun()
+        .unwrap()
+        .resolved(&m.lensfun.get().unwrap().db, &m)
+        .unwrap();
+    assert_eq!(resolved.calibration, fixture::choice().calibration);
+}
+
+/// A recipe naming a Lensfun lens, used or not, is saved as version 12, which
+/// releases before Lensfun refuse; every other stays 11.
+#[test]
+fn lensfun_recipes_save_in_a_format_earlier_releases_refuse() {
+    use crate::model::{recipe::Recipe, saved_format};
+    let plain = Recipe::default();
+    assert_eq!(saved_format::schema_for(&plain), saved_format::SCHEMA);
+    let mut off = Recipe::default();
+    off.lens_profile_choice
+        .choose_lensfun(crate::lens::lensfun::fixture::choice());
+    assert!(!off.lens_profile);
+    assert_eq!(saved_format::schema_for(&off), saved_format::LENSFUN_SCHEMA);
+    let envelope = serde_json::json!({"schema": 12, "pipeline": 12, "recipe": off});
+    assert!(!saved_format::reads(&envelope, saved_format::SCHEMA));
+    let mut read = envelope.clone();
+    saved_format::migrate_recipe(&mut read).unwrap();
+    let back: Recipe = serde_json::from_value(read["recipe"].clone()).unwrap();
+    assert_eq!(back, off);
+}
+
+/// Copy Settings and Sync take a Lensfun lens to another camera's photo with that
+/// camera's context, keeping the calibration and its provenance: a camera Lensfun
+/// knows renders even without a 35 mm equivalent focal length in the photo.
+#[test]
+fn a_transferred_lensfun_choice_takes_the_target_s_camera() {
+    use crate::lens::lensfun::fixture;
+    use crate::model::recipe::Recipe;
+    use crate::model::settings_groups::{GroupSelection, Source, Target, transfer};
+    let source_photo = fixture::photo();
+    let mut target_photo = fixture::other_camera();
+    target_photo.lensfun = fixture::installed(-0.02, 1_793_180_205);
+    let mut source = Recipe {
+        lens_profile: true,
+        ..Default::default()
+    };
+    source.lens_profile_choice.choose_lensfun(fixture::choice());
+    let out = transfer(
+        Source {
+            recipe: &source,
+            metadata: &source_photo,
+        },
+        &Recipe::default(),
+        &GroupSelection::all(),
+        Target {
+            metadata: &target_photo,
+            profiles: &[],
+        },
+    );
+    let moved = out.recipe.lens_profile_choice.lensfun().unwrap();
+    assert_eq!(moved.camera.as_ref().unwrap().model, "Canon EOS 6D");
+    assert_eq!(moved.calibration, fixture::choice().calibration);
+    assert_eq!(moved.provenance, fixture::choice().provenance);
+    assert!(
+        out.recipe
+            .lens_correction(&target_photo)
+            .unwrap()
+            .source
+            .starts_with("Lensfun")
+    );
+    // Without a database, the copy keeps what the photo itself says: nothing here.
+    let mut alone = fixture::other_camera();
+    alone.lensfun = crate::lens::lensfun::installed::Handle::Given(None);
+    let out = transfer(
+        Source {
+            recipe: &source,
+            metadata: &source_photo,
+        },
+        &Recipe::default(),
+        &GroupSelection::all(),
+        Target {
+            metadata: &alone,
+            profiles: &[],
+        },
+    );
+    assert!(
+        out.recipe
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .camera
+            .is_none()
+    );
+    assert!(
+        out.recipe
+            .missing_lens_profile(&alone)
+            .unwrap()
+            .contains("crop factor")
+    );
 }

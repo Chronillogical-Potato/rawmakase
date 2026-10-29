@@ -459,6 +459,10 @@ pub fn transfer(
         group.copy(from, &mut recipe);
     }
     let m = target.metadata;
+    // A Lensfun lens takes the target's camera, which its correction is scaled for.
+    if selection.contains(SettingGroup::LensProfileCorrections) {
+        recipe.lens_profile_choice.for_photo(m);
+    }
     // RAW and rendered files keep white balance in different terms (Kelvin against
     // relative) and have profiles of their own: between them, the target keeps its
     // white balance and profile, and everything else transfers.
@@ -521,11 +525,12 @@ pub fn transfer(
     // sensor) is kept as the edit names it, and said, as on import.
     let embedded = recipe
         .lens_profile_choice
-        .id
-        .as_ref()
+        .adobe()
         .is_some_and(|id| id.embedded);
     if selection.contains(SettingGroup::LensProfileCorrections)
-        && (embedded || recipe.lens_profile_in_use(m).missing.is_some())
+        && (embedded
+            || recipe.lens_profile_in_use(m).missing.is_some()
+            || recipe.lensfun_in_use().is_some())
     {
         notes.extend(recipe.missing_lens_profile(m));
     }

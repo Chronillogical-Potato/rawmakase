@@ -156,6 +156,15 @@ impl Editor {
                         self.model_installed(result);
                     }
                 }
+                Event::Lensfun {
+                    generation,
+                    job,
+                    result,
+                } => {
+                    if let Some(said) = self.lensfun.finished(generation, job, result) {
+                        self.status = said;
+                    }
+                }
                 Event::ModelRemoved(result) => {
                     self.selection.models.removed(result.is_ok());
                     self.status = match result {

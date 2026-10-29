@@ -51,6 +51,7 @@ def main():
                            (root / "licenses/Adobe-DNG-SDK.txt", licenses / "Adobe-DNG-SDK.txt"),
                            (root / "licenses/Hack-MIT-BitstreamVera.txt", licenses / "Hack-MIT-BitstreamVera.txt"),
                            (root / "licenses/Inter-OFL.txt", licenses / "Inter-OFL.txt"),
+                           (root / "licenses/Lensfun-database-CC-BY-SA-3.0.txt", licenses / "Lensfun-database-CC-BY-SA-3.0.txt"),
                            (root / "licenses/Lucide-ISC.txt", licenses / "Lucide-ISC.txt"),
                            (root / "licenses/NotoEmoji-OFL.txt", licenses / "NotoEmoji-OFL.txt"),
                            (root / "licenses/Ubuntu-UFL.txt", licenses / "Ubuntu-UFL.txt"),

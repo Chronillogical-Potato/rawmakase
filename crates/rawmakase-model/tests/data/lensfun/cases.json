@@ -1,0 +1,121 @@
+[
+ {
+  "name": "full-frame zoom on full frame",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>1</cropfactor><calibration>\n<distortion model=\"ptlens\" focal=\"16\" a=\"0.021\" b=\"-0.069\" c=\"0.012\"/>\n<distortion model=\"ptlens\" focal=\"24\" a=\"0.006\" b=\"-0.021\" c=\"0.004\"/>\n<distortion model=\"ptlens\" focal=\"35\" a=\"0.002\" b=\"0.004\" c=\"-0.003\"/>\n<distortion model=\"ptlens\" focal=\"50\" a=\"-0.001\" b=\"0.011\" c=\"-0.004\"/>\n<tca model=\"poly3\" focal=\"16\" vr=\"1.0003\" vb=\"0.9996\" cr=\"0.00011\" cb=\"-0.00008\" br=\"-0.00009\" bb=\"0.00012\"/>\n<tca model=\"poly3\" focal=\"24\" vr=\"1.0002\" vb=\"0.9998\" cr=\"0.00005\" cb=\"-0.00004\" br=\"-0.00004\" bb=\"0.00006\"/>\n<tca model=\"poly3\" focal=\"50\" vr=\"1.0001\" vb=\"0.9999\" cr=\"0.00002\" cb=\"-0.00002\" br=\"-0.00001\" bb=\"0.00002\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"4\" distance=\"10\" k1=\"-0.62\" k2=\"0.31\" k3=\"-0.09\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"4\" distance=\"1000\" k1=\"-0.60\" k2=\"0.30\" k3=\"-0.08\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"8\" distance=\"1000\" k1=\"-0.31\" k2=\"0.05\" k3=\"0.01\"/>\n<vignetting model=\"pa\" focal=\"24\" aperture=\"4\" distance=\"1000\" k1=\"-0.45\" k2=\"0.17\" k3=\"-0.04\"/>\n<vignetting model=\"pa\" focal=\"24\" aperture=\"8\" distance=\"1000\" k1=\"-0.22\" k2=\"0.02\" k3=\"0.0\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"4\" distance=\"1000\" k1=\"-0.30\" k2=\"0.08\" k3=\"-0.01\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"8\" distance=\"1000\" k1=\"-0.12\" k2=\"-0.02\" k3=\"0.01\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 1.0,
+  "width": 6000,
+  "height": 4000,
+  "shots": [
+   {
+    "focal": 24,
+    "aperture": 4,
+    "distance": 1000
+   },
+   {
+    "focal": 30,
+    "aperture": 5.6,
+    "distance": 1000
+   },
+   {
+    "focal": 12,
+    "aperture": 4,
+    "distance": 1000
+   },
+   {
+    "focal": 70,
+    "aperture": 8,
+    "distance": 1000
+   },
+   {
+    "focal": 19.5,
+    "aperture": 4.5,
+    "distance": 1000
+   }
+  ]
+ },
+ {
+  "name": "full-frame zoom on APS-C",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>1</cropfactor><calibration>\n<distortion model=\"ptlens\" focal=\"16\" a=\"0.021\" b=\"-0.069\" c=\"0.012\"/>\n<distortion model=\"ptlens\" focal=\"24\" a=\"0.006\" b=\"-0.021\" c=\"0.004\"/>\n<distortion model=\"ptlens\" focal=\"35\" a=\"0.002\" b=\"0.004\" c=\"-0.003\"/>\n<distortion model=\"ptlens\" focal=\"50\" a=\"-0.001\" b=\"0.011\" c=\"-0.004\"/>\n<tca model=\"poly3\" focal=\"16\" vr=\"1.0003\" vb=\"0.9996\" cr=\"0.00011\" cb=\"-0.00008\" br=\"-0.00009\" bb=\"0.00012\"/>\n<tca model=\"poly3\" focal=\"24\" vr=\"1.0002\" vb=\"0.9998\" cr=\"0.00005\" cb=\"-0.00004\" br=\"-0.00004\" bb=\"0.00006\"/>\n<tca model=\"poly3\" focal=\"50\" vr=\"1.0001\" vb=\"0.9999\" cr=\"0.00002\" cb=\"-0.00002\" br=\"-0.00001\" bb=\"0.00002\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"4\" distance=\"10\" k1=\"-0.62\" k2=\"0.31\" k3=\"-0.09\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"4\" distance=\"1000\" k1=\"-0.60\" k2=\"0.30\" k3=\"-0.08\"/>\n<vignetting model=\"pa\" focal=\"16\" aperture=\"8\" distance=\"1000\" k1=\"-0.31\" k2=\"0.05\" k3=\"0.01\"/>\n<vignetting model=\"pa\" focal=\"24\" aperture=\"4\" distance=\"1000\" k1=\"-0.45\" k2=\"0.17\" k3=\"-0.04\"/>\n<vignetting model=\"pa\" focal=\"24\" aperture=\"8\" distance=\"1000\" k1=\"-0.22\" k2=\"0.02\" k3=\"0.0\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"4\" distance=\"1000\" k1=\"-0.30\" k2=\"0.08\" k3=\"-0.01\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"8\" distance=\"1000\" k1=\"-0.12\" k2=\"-0.02\" k3=\"0.01\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 1.534,
+  "width": 6000,
+  "height": 4000,
+  "shots": [
+   {
+    "focal": 24,
+    "aperture": 4,
+    "distance": 1000
+   },
+   {
+    "focal": 40,
+    "aperture": 8,
+    "distance": 1000
+   }
+  ]
+ },
+ {
+  "name": "APS-C poly3 on Micro Four Thirds",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>1.534</cropfactor><calibration>\n<distortion model=\"poly3\" focal=\"12\" k1=\"-0.0451\"/>\n<distortion model=\"poly3\" focal=\"25\" k1=\"-0.0102\"/>\n<distortion model=\"poly3\" focal=\"40\" k1=\"0.0038\"/>\n<tca model=\"poly3\" focal=\"12\" vr=\"1.00041\" vb=\"0.99971\" cr=\"0\" cb=\"0\" br=\"0.00003\" bb=\"-0.00002\"/>\n<vignetting model=\"pa\" focal=\"12\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.41\" k2=\"0.13\" k3=\"-0.02\"/>\n<vignetting model=\"pa\" focal=\"40\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.22\" k2=\"0.04\" k3=\"0\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 2.0,
+  "width": 5184,
+  "height": 3888,
+  "shots": [
+   {
+    "focal": 12,
+    "aperture": 2.8,
+    "distance": 1000
+   },
+   {
+    "focal": 18,
+    "aperture": 2.8,
+    "distance": 1000
+   }
+  ]
+ },
+ {
+  "name": "4:3 calibration, portrait sensor",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>2.0</cropfactor><aspect-ratio>4:3</aspect-ratio><calibration>\n<distortion model=\"poly3\" focal=\"12\" k1=\"-0.0451\"/>\n<distortion model=\"poly3\" focal=\"25\" k1=\"-0.0102\"/>\n<distortion model=\"poly3\" focal=\"40\" k1=\"0.0038\"/>\n<tca model=\"poly3\" focal=\"12\" vr=\"1.00041\" vb=\"0.99971\" cr=\"0\" cb=\"0\" br=\"0.00003\" bb=\"-0.00002\"/>\n<vignetting model=\"pa\" focal=\"12\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.41\" k2=\"0.13\" k3=\"-0.02\"/>\n<vignetting model=\"pa\" focal=\"40\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.22\" k2=\"0.04\" k3=\"0\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 2.0,
+  "width": 3888,
+  "height": 5184,
+  "shots": [
+   {
+    "focal": 25,
+    "aperture": 2.8,
+    "distance": 1000
+   }
+  ]
+ },
+ {
+  "name": "prime poly5, 16:9",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>1</cropfactor><calibration>\n<distortion model=\"poly5\" focal=\"50\" k1=\"-0.031\" k2=\"0.012\"/>\n<tca model=\"linear\" focal=\"50\" kr=\"1.00022\" kb=\"0.99981\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"1.8\" distance=\"1000\" k1=\"-0.92\" k2=\"0.55\" k3=\"-0.17\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.51\" k2=\"0.12\" k3=\"-0.02\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 1.06,
+  "width": 6000,
+  "height": 3376,
+  "shots": [
+   {
+    "focal": 50,
+    "aperture": 2,
+    "distance": 1000
+   },
+   {
+    "focal": 50,
+    "aperture": 2.8,
+    "distance": 1000
+   }
+  ]
+ },
+ {
+  "name": "decentred",
+  "xml": "<lensdatabase version=\"2\"><lens><maker>Synthetic</maker><model>Synthetic test lens</model><mount>Generic</mount><cropfactor>1</cropfactor><center x=\"0.03\" y=\"-0.02\"/><calibration>\n<distortion model=\"poly5\" focal=\"50\" k1=\"-0.031\" k2=\"0.012\"/>\n<tca model=\"linear\" focal=\"50\" kr=\"1.00022\" kb=\"0.99981\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"1.8\" distance=\"1000\" k1=\"-0.92\" k2=\"0.55\" k3=\"-0.17\"/>\n<vignetting model=\"pa\" focal=\"50\" aperture=\"2.8\" distance=\"1000\" k1=\"-0.51\" k2=\"0.12\" k3=\"-0.02\"/>\n</calibration></lens></lensdatabase>",
+  "crop": 1.0,
+  "width": 6000,
+  "height": 4000,
+  "shots": [
+   {
+    "focal": 50,
+    "aperture": 1.8,
+    "distance": 1000
+   }
+  ]
+ }
+]

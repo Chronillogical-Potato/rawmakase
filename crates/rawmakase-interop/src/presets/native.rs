@@ -2,7 +2,7 @@
 use crate::{
     camera_data::Metadata,
     model::recipe::Recipe,
-    model::saved_format::{SCHEMA, migrate_recipe},
+    model::saved_format::{migrate_recipe, schema_for},
     storage::atomic_json,
 };
 use anyhow::Result;
@@ -48,8 +48,8 @@ pub fn save_preset(path: &Path, r: &Recipe, m: &Metadata) -> Result<()> {
     atomic_json(
         path,
         &Preset {
-            schema: SCHEMA,
-            pipeline: SCHEMA,
+            schema: schema_for(&recipe),
+            pipeline: schema_for(&recipe),
             recipe,
             masks: local.masks,
             rendered: m.is_rendered(),
@@ -102,12 +102,39 @@ pub fn applied_to(preset: LoadedPreset, photo: &Recipe, m: &Metadata) -> Recipe 
     if rendered != m.is_rendered() {
         preset.keep_white_balance_and_profile(photo);
     }
+    // A Lensfun lens takes this photo's camera.
+    preset.lens_profile_choice.for_photo(m);
     preset
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A native preset's Lensfun lens takes the photo's camera it is applied to.
+    #[test]
+    fn a_preset_s_lensfun_lens_takes_the_photo_s_camera() {
+        use crate::lens::lensfun::fixture;
+        let mut r = Recipe::default();
+        r.lens_profile_choice.choose_lensfun(fixture::choice());
+        let mut m = fixture::other_camera();
+        m.lensfun = fixture::installed(-0.02, 1_793_180_205);
+        let applied = applied_to(
+            LoadedPreset {
+                recipe: r,
+                rendered: false,
+            },
+            &Recipe::default(),
+            &m,
+        );
+        let camera = applied
+            .lens_profile_choice
+            .lensfun()
+            .unwrap()
+            .camera
+            .clone()
+            .unwrap();
+        assert_eq!(camera.model, "Canon EOS 6D");
+    }
     use crate::model::panels::{Panel, PanelState};
     use crate::model::red_eye::RedEyeOp;
     #[test]
@@ -296,8 +323,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("p.json");
         let value = serde_json::json!({
-            "schema": SCHEMA,
-            "pipeline": SCHEMA,
+            "schema": crate::model::saved_format::SCHEMA,
+            "pipeline": crate::model::saved_format::SCHEMA,
             "recipe": recipe,
         });
         std::fs::write(&path, value.to_string()).unwrap();

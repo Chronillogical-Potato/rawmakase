@@ -393,11 +393,11 @@ fn point_color_shifts_scale_and_new_swatches_dont() {
 fn lens_profile_setup_changes_that_render_alike_keep_amount() {
     use crate::lens::choice::{LensProfileChoice, LensProfileId, LensProfileSetup};
     let id = |digest: &str| {
-        Some(LensProfileId {
+        Some(crate::lens::choice::LensProfileRef::Adobe(LensProfileId {
             name: "Adobe (Testcam 35mm F2)".into(),
             digest: digest.into(),
             ..Default::default()
-        })
+        }))
     };
     let at = |setup, digest| Recipe {
         lens_profile_choice: LensProfileChoice {

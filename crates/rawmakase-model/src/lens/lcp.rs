@@ -316,6 +316,7 @@ fn correction_from(entries: &[Entry], m: &Metadata, which: LensEntries) -> Optio
         vignetting,
         distortion,
         chromatic,
+        chromatic_at_source: false,
         gain_map: None,
         centre,
     };

@@ -79,6 +79,18 @@ impl WhiteBalancePresets {
 pub struct Metadata {
     pub make: String,
     pub model: String,
+    /// The make and model as the file itself writes them (EXIF Make and Model, e.g.
+    /// "NIKON CORPORATION", "NIKON D6"), for matching Lensfun's camera entries, which
+    /// use them; `make` and `model` are RAWmakase's names. Read again on open, not
+    /// saved; empty when not read.
+    #[serde(skip)]
+    pub exif_make: String,
+    #[serde(skip)]
+    pub exif_model: String,
+    /// The frame's crop factor over the sensor's when the camera recorded only part
+    /// of it in a crop mode (Canon's APS-C mode: 1.6); read again on open, not saved.
+    #[serde(skip)]
+    pub sensor_crop: Option<f32>,
     pub width: u32,
     pub height: u32,
     pub raw_width: u32,
@@ -184,6 +196,10 @@ pub struct Metadata {
     /// choices; rebuilt on open.
     #[serde(skip)]
     pub lens_profiles: crate::optics::lcp::PhotoProfiles,
+    /// The Lensfun database for choosing a Lensfun lens and resolving one an edit
+    /// names while editing: the one installed when asked for. Rendering never reads it.
+    #[serde(skip)]
+    pub lensfun: crate::lens::lensfun::installed::Handle,
     /// Lateral chromatic aberration measured from the decoded image, shared by every
     /// image made from it (see `crate::lens::auto_ca::prime`).
     #[serde(skip)]

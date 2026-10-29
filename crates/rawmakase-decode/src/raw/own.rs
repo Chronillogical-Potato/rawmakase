@@ -281,6 +281,8 @@ fn header(i: &RawInfo) -> Header {
         make: i.make.clone(),
         model: i.model.clone(),
         normalized: [i.normalized_make.clone(), i.normalized_model.clone()],
+        file_names: [i.file_make.clone(), i.file_model.clone()],
+        sensor_crop: i.sensor_crop,
         // A Super CCD's image is its stored rows turned by 45°.
         width: i.super_ccd.map_or(i.width, |s| s.size()[0]),
         height: i.super_ccd.map_or(i.height, |s| s.size()[1]),

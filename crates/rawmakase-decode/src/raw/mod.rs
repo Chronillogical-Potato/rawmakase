@@ -244,6 +244,11 @@ pub(crate) struct Header {
     pub make: String,
     pub model: String,
     pub normalized: [String; 2],
+    /// The make and model as the file writes them (`RawInfo::file_make`), which
+    /// Lensfun's camera entries use.
+    pub file_names: [String; 2],
+    /// The crop mode's crop factor over the sensor's (`RawInfo::sensor_crop`).
+    pub sensor_crop: Option<f32>,
     pub width: u32,
     pub height: u32,
     pub raw_width: u32,
@@ -303,6 +308,9 @@ impl Raw {
         };
         let ([crop_left, crop_top, crop_width, crop_height], camera_crop) = crops(&h);
         let mut metadata = Metadata {
+            exif_make: h.file_names[0].clone(),
+            exif_model: h.file_names[1].clone(),
+            sensor_crop: h.sensor_crop,
             width: h.width,
             height: h.height,
             raw_width: h.raw_width,
@@ -346,6 +354,7 @@ impl Raw {
             dng_matrix_profile_signature: None,
             source: Source::Raw,
             lens_profiles: Default::default(),
+            lensfun: Default::default(),
             lateral_ca: Default::default(),
             embedded_dcp: None,
             levels: h.levels,

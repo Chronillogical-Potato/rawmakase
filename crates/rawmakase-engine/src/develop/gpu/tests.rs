@@ -1591,9 +1591,68 @@ fn installed_zoom_profile_cpu_gpu_agree() -> Result<()> {
     Ok(())
 }
 
+/// A Lensfun-style correction (see `optics::lensfun`): tables of more knots than the
+/// 64 the GPU search once allowed, and lateral CA as a function of green's source
+/// radius, render alike on the CPU and the GPU at Distortion amounts 0, 100% and
+/// 200%.
+#[test]
+#[ignore = "Requires a hardware compute adapter; run explicitly on supported machines"]
+fn long_tables_and_source_radius_aberration_match_cpu() -> Result<()> {
+    use crate::{
+        camera_data::Metadata,
+        optics::{LensCorrection, Radial},
+    };
+    let n = crate::optics::Radial::MAX_KNOTS - 3;
+    let table = |f: &dyn Fn(f32) -> f32| {
+        // Uneven spacing, denser at the corners, as Lensfun's tables are sampled.
+        let knots: Vec<f32> = (0..n)
+            .map(|i| 1.3 * (i as f32 / (n - 1) as f32).sqrt())
+            .collect();
+        Radial {
+            values: knots.iter().map(|r| f(*r)).collect(),
+            knots,
+        }
+    };
+    let lens = LensCorrection {
+        source: "Lensfun: synthetic".into(),
+        distortion: Some(table(&|r| 1. - 0.06 * r * r + 0.02 * r.powi(3))),
+        chromatic: Some([
+            table(&|r| 1.0004 + 0.0008 * r * r),
+            table(&|r| 0.9996 - 0.0006 * r),
+        ]),
+        chromatic_at_source: true,
+        vignetting: Some(table(&|r| 1. / (1. - 0.4 * r * r + 0.1 * r.powi(4)))),
+        ..Default::default()
+    };
+    assert!(lens.validate());
+    for amount in [0., 1., 2.] {
+        let metadata = Metadata {
+            make: "Synthetic".into(),
+            width: 150,
+            height: 100,
+            lens: Some(lens.clone()),
+            ..Default::default()
+        };
+        check_lens_render(metadata, None, &|r: &mut Recipe| {
+            r.lens_builtin = true;
+            r.lens_profile = false;
+            r.lens_distortion = amount;
+        })?;
+    }
+    Ok(())
+}
+
 fn check_imported_profile_render(
+    metadata: crate::camera_data::Metadata,
+    oracle: Option<crate::optics::LensCorrection>,
+) -> Result<()> {
+    check_lens_render(metadata, oracle, &|_| {})
+}
+
+fn check_lens_render(
     mut metadata: crate::camera_data::Metadata,
     oracle: Option<crate::optics::LensCorrection>,
+    tweak: &dyn Fn(&mut Recipe),
 ) -> Result<()> {
     use crate::{
         camera_data::CameraImage,
@@ -1604,7 +1663,7 @@ fn check_imported_profile_render(
     metadata.daylight_wb = [1.; 3];
     metadata.cam_xyz = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
     let (w, h) = (metadata.width, metadata.height);
-    let recipe = Recipe {
+    let mut recipe = Recipe {
         profile: Some(std::sync::Arc::new(
             CameraProfile::camera_matrix_default(&metadata)
                 .unwrap()
@@ -1617,6 +1676,7 @@ fn check_imported_profile_render(
         },
         ..Default::default()
     };
+    tweak(&mut recipe);
     assert!(
         recipe.lens_correction(&metadata).is_some(),
         "profile must be active"

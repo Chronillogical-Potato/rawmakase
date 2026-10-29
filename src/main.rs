@@ -38,6 +38,10 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
     },
+    /// Lensfun's community lens profiles (CC BY-SA 3.0, from lensfun.github.io):
+    /// what is installed, installing, updating and removing them.
+    #[command(subcommand)]
+    Lensfun(LensfunCommand),
     ImportCatalog {
         source: PathBuf,
         output: PathBuf,
@@ -168,6 +172,22 @@ fn parse_reference(json: &str) -> Result<rawmakase::half_check::Reference, Strin
     serde_json::from_str(json).map_err(|e| e.to_string())
 }
 /// An `import-profiles --lut-space`.
+#[derive(Subcommand)]
+enum LensfunCommand {
+    /// The version installed, and where it came from.
+    Status,
+    /// Download and install Lensfun's database, or install an archive already
+    /// downloaded (Lensfun's version_2.tar.bz2).
+    Install {
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
+    /// Install Lensfun's newest database if it is newer than the one installed.
+    Update,
+    /// Remove the installed database; edits keep the corrections they use.
+    Remove,
+}
+
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum LutSpace {
     Srgb,
@@ -257,6 +277,7 @@ fn main() -> Result<()> {
             }
             anyhow::ensure!(!done.imported.is_empty(), "No lens profiles imported");
         }
+        Some(Command::Lensfun(command)) => lensfun(command)?,
         Some(Command::ImportProfiles { lut_space, files }) => {
             // Files and folders, imported as the app's Import does: a file that
             // can't be imported is reported and leaves the rest importing.
@@ -817,6 +838,80 @@ fn save_stage(
         std::io::Write::flush(&mut writer)?;
         Ok(())
     })
+}
+
+/// `rawmakase lensfun`.
+fn lensfun(command: LensfunCommand) -> Result<()> {
+    use rawmakase::lens::lensfun::{choice, installed};
+    use rawmakase::lensfun_install::{self as install, Installed, Progress, Source};
+    let dir = installed::dir();
+    let terms = || {
+        println!(
+            "Lensfun lens database by {}, {} ({}), from {}",
+            choice::ATTRIBUTION,
+            choice::LICENSE,
+            choice::LICENSE_URI,
+            install::ARCHIVE_URL
+        )
+    };
+    let progress = Progress::default();
+    match command {
+        LensfunCommand::Status => {
+            match install::current(&dir) {
+                Some(m) => println!(
+                    "Installed: version {} ({}), {} lenses, {} cameras, downloaded {} from {}, SHA-256 {}",
+                    m.version,
+                    m.date(),
+                    m.lenses,
+                    m.cameras,
+                    m.downloaded,
+                    m.url,
+                    m.sha256
+                ),
+                None => println!("Not installed"),
+            }
+            println!("Folder: {}", dir.display());
+            terms();
+        }
+        LensfunCommand::Install { from } => {
+            if from.is_none()
+                && let Some(m) = install::current(&dir)
+            {
+                println!(
+                    "Version {} ({}) is installed; `rawmakase lensfun update` installs a newer one",
+                    m.version,
+                    m.date()
+                );
+                return Ok(());
+            }
+            terms();
+            let source = from.map_or(Source::Lensfun, Source::File);
+            match install::install(&dir, &source, &progress)? {
+                Installed::New(m) => println!(
+                    "Installed version {} ({}): {} lenses, {} cameras",
+                    m.version,
+                    m.date(),
+                    m.lenses,
+                    m.cameras
+                ),
+                Installed::Current(m) => {
+                    println!("Version {} ({}) is already installed", m.version, m.date())
+                }
+            }
+        }
+        LensfunCommand::Update => match install::install(&dir, &Source::Lensfun, &progress)? {
+            Installed::New(m) => println!("Updated to version {} ({})", m.version, m.date()),
+            Installed::Current(m) => println!("Up to date: version {} ({})", m.version, m.date()),
+        },
+        LensfunCommand::Remove => {
+            if install::remove(&dir, &progress)? {
+                println!("Removed; edits keep the Lensfun corrections they use");
+            } else {
+                println!("Not installed");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

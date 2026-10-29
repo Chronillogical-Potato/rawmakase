@@ -17,6 +17,22 @@ pub const SCHEMA: u32 = 11;
 /// The newest version the releases before the one engine read. Look Amounts,
 /// RGB-table looks and matrix-profile signatures were written as 8, 9 and 10.
 pub const BEFORE_ONE_ENGINE: u32 = 10;
+/// The version a recipe holding a Lensfun lens choice is written as (chosen, switched
+/// off or unresolved alike): releases before Lensfun read up to [`SCHEMA`] and refuse
+/// it, keeping it "preserved without changes" rather than rendering or saving it
+/// without its lens. Every other recipe stays [`SCHEMA`], so they still read it.
+pub const LENSFUN_SCHEMA: u32 = 12;
+/// The newest version this release reads.
+pub const NEWEST: u32 = LENSFUN_SCHEMA;
+
+/// The version to save `recipe` as.
+pub fn schema_for(recipe: &super::recipe::Recipe) -> u32 {
+    if recipe.uses_lensfun() {
+        LENSFUN_SCHEMA
+    } else {
+        SCHEMA
+    }
+}
 
 /// Recipe settings of earlier releases that chose a rendering engine or an
 /// operator for a control: the process version, five opt-in flags and the
@@ -83,7 +99,8 @@ pub(crate) fn unknown_settings<'de, D: serde::Deserializer<'de>>(
 }
 
 /// Whether a reader of versions up to `newest` reads the envelope in `value`: this
-/// release with [`SCHEMA`], the releases before the one engine with
+/// release with [`NEWEST`], the releases before Lensfun with [`SCHEMA`], those before
+/// the one engine with
 /// [`BEFORE_ONE_ENGINE`] (their check, exactly).
 pub fn reads(value: &serde_json::Value, newest: u32) -> bool {
     let schema = value["schema"].as_u64();
@@ -97,7 +114,7 @@ pub fn reads(value: &serde_json::Value, newest: u32) -> bool {
 /// reads and brings its recipe up to date.
 pub fn migrate_recipe(value: &mut serde_json::Value) -> Result<()> {
     ensure!(
-        reads(value, SCHEMA),
+        reads(value, NEWEST),
         "Unsupported saved recipe version: preserved without changes"
     );
     let pipeline = value["pipeline"].as_u64();
@@ -128,6 +145,8 @@ mod tests {
             assert_eq!(v["recipe"]["exposure"], 0.5);
         }
         let mut v = serde_json::json!({"schema": 12, "pipeline": 12, "recipe": {}});
+        assert!(super::migrate_recipe(&mut v).is_ok());
+        let mut v = serde_json::json!({"schema": 13, "pipeline": 13, "recipe": {}});
         assert!(super::migrate_recipe(&mut v).is_err());
         let mut v = serde_json::json!({"schema": 5, "pipeline": 6, "recipe": {}});
         assert!(super::migrate_recipe(&mut v).is_err());

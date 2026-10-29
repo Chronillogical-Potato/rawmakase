@@ -35,6 +35,10 @@ pub struct RawInfo {
     /// size is known; all [`UNSET`] and zero sizes when there is none).
     pub frame: [u32; 4],
     pub aspect: [u32; 4],
+    /// How much smaller than the sensor's the frame's diagonal is, when the camera
+    /// recorded only part of its sensor in a crop mode (Canon's APS-C and APS-H
+    /// modes); `None` for the whole sensor or when not known.
+    pub sensor_crop: Option<f32>,
     /// Panasonic's sensor borders (RW2 tags 4 to 7), `[left, top, width,
     /// height]` in sensor coordinates, when the default crop is the camera's
     /// aspect ratio inside them.
@@ -176,6 +180,7 @@ pub(crate) fn base(variant: Variant) -> RawInfo {
         variant,
         make: String::new(),
         model: String::new(),
+        sensor_crop: None,
         file_make: String::new(),
         file_model: String::new(),
         normalized_make: String::new(),

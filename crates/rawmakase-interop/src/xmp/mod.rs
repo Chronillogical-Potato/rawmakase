@@ -9,6 +9,38 @@ pub mod preset_write;
 pub mod write;
 use crate::color::curve::ToneCurve;
 pub use parse::parse;
+/// RAWmakase's own settings (`xml::ns::RAWMAKASE`) are read and written under this
+/// prefix among the Camera Raw settings.
+pub(crate) const RAWMAKASE_PREFIX: &str = "rawmakase:";
+/// The Lensfun lens an edit chose, by its identity: maker and model as Lensfun
+/// identifies them, its mounts (`;`-separated), the crop factor and aspect ratio it was
+/// calibrated at, the name shown and the database's timestamp. Never its calibration.
+pub(crate) const LENSFUN_KEYS: [&str; 7] = [
+    "rawmakase:LensfunMaker",
+    "rawmakase:LensfunModel",
+    "rawmakase:LensfunMounts",
+    "rawmakase:LensfunCrop",
+    "rawmakase:LensfunAspect",
+    "rawmakase:LensfunName",
+    "rawmakase:LensfunDatabase",
+];
+/// A settings key as XMP writes it: Camera Raw's under `crs:`, RAWmakase's own as
+/// they are.
+pub(crate) fn qualified(key: &str) -> String {
+    if key.starts_with(RAWMAKASE_PREFIX) {
+        key.to_string()
+    } else {
+        format!("crs:{key}")
+    }
+}
+/// The namespace declaration RAWmakase's own settings need, when `keys` have any.
+pub(crate) fn rawmakase_namespace<'a>(mut keys: impl Iterator<Item = &'a str>) -> String {
+    if keys.any(|k| k.starts_with(RAWMAKASE_PREFIX)) {
+        format!("\n    xmlns:rawmakase=\"{}\"", crate::xml::ns::RAWMAKASE)
+    } else {
+        String::new()
+    }
+}
 
 /// What applying settings measures on the decoded photo when they ask for Auto:
 /// Lightroom's Auto Settings (tone), Auto white balance and Auto black & white mix.

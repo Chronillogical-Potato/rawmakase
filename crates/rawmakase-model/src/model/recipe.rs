@@ -436,6 +436,12 @@ impl Recipe {
     pub fn validate(&self) -> Result<()> {
         self.effects.validate()?;
         ensure!(
+            self.lens_profile_choice
+                .lensfun()
+                .is_none_or(|l| l.validate()),
+            "Invalid Lensfun lens profile"
+        );
+        ensure!(
             (0.5..=3.).contains(&self.sharpening_radius)
                 && (0. ..=1.).contains(&self.sharpening_detail)
                 && (0. ..=1.).contains(&self.sharpening_masking),
@@ -592,8 +598,20 @@ impl Recipe {
         }
         self.lens_profile_choice.resolve(&m.lens_profiles, m)
     }
-    /// Why Enable Profile Corrections cannot render with the Adobe profile it should
-    /// here, and what renders instead, when it is on.
+    /// Whether the edit names a Lensfun lens, in use or not, resolved or not: it is
+    /// saved in a format releases before Lensfun refuse (`saved_format::schema_for`,
+    /// the catalog's version 4).
+    pub fn uses_lensfun(&self) -> bool {
+        self.lens_profile_choice.lensfun().is_some()
+    }
+    /// The Lensfun lens Enable Profile Corrections uses, when the edit chose one.
+    pub fn lensfun_in_use(&self) -> Option<&crate::lens::lensfun::LensfunChoice> {
+        self.lens_profile
+            .then(|| self.lens_profile_choice.lensfun())
+            .flatten()
+    }
+    /// Why Enable Profile Corrections cannot render with the profile it should here,
+    /// and what renders instead, when it is on.
     pub fn missing_lens_profile(&self, m: &Metadata) -> Option<String> {
         // A Lens Corrections panel switched off renders no lens correction at all.
         let panel = self
@@ -602,14 +620,24 @@ impl Recipe {
         if panel == crate::model::panels::PanelState::Off || !self.lens_profile {
             return None;
         }
+        // A Lensfun lens renders from the calibration the edit copied, as far as it
+        // covers this photo; never from an Adobe profile.
+        if let Some(lensfun) = self.lensfun_in_use() {
+            let applied = lensfun.apply(m);
+            if applied.notes.is_empty() {
+                return None;
+            }
+            let why = applied.notes.join("; it ");
+            let profile = format!("Lensfun profile \"{}\" {why}", lensfun.name());
+            return Some(match (&applied.correction, self.builtin_correction(m)) {
+                (Some(_), _) => profile,
+                (None, Some(builtin)) => format!("{profile}; using {}", builtin.source),
+                (None, None) => format!("{profile}; no lens correction"),
+            });
+        }
         let resolved = self.lens_profile_in_use(m);
         // The profile the RAW carries renders as its built-in correction.
-        if let Some(id) = self
-            .lens_profile_choice
-            .id
-            .as_ref()
-            .filter(|id| id.embedded)
-        {
+        if let Some(id) = self.lens_profile_choice.adobe().filter(|id| id.embedded) {
             return self.builtin_correction(m).is_none().then(|| {
                 format!(
                     "Lens profile \"{}\" comes with the camera, but this file has none; no lens correction",
@@ -676,7 +704,11 @@ impl Recipe {
     /// distortion).
     pub fn lens_amounts(&self, m: &Metadata) -> [f32; 2] {
         let amounts = [self.lens_distortion, self.lens_vignetting];
-        if self.lens_profile_in_use(m).used.is_some() {
+        if self.lens_profile_in_use(m).used.is_some()
+            || self
+                .lensfun_in_use()
+                .is_some_and(|l| l.apply(m).correction.is_some())
+        {
             return amounts;
         }
         if !self.lens_profile {
@@ -700,16 +732,28 @@ impl Recipe {
             _ => [1., 1.],
         }
     }
-    /// The lens correction to apply: the Adobe profile in use, else the built-in
-    /// correction if enabled and present in the file.
+    /// The lens correction to apply: the Lensfun lens the edit chose or the Adobe
+    /// profile in use, else the built-in correction if enabled and present in the
+    /// file. A Lensfun lens renders from the edit's own copy of its calibration; when
+    /// it can't correct this photo (not resolved, or not covering it), the built-in
+    /// correction renders, never an Adobe profile.
     pub fn lens_correction<'a>(
         &self,
         m: &'a Metadata,
-    ) -> Option<&'a crate::optics::LensCorrection> {
+    ) -> Option<std::borrow::Cow<'a, crate::optics::LensCorrection>> {
+        use std::borrow::Cow;
+        if let Some(lensfun) = self.lensfun_in_use() {
+            return lensfun
+                .apply(m)
+                .correction
+                .map(Cow::Owned)
+                .or_else(|| self.builtin_correction(m).map(Cow::Borrowed));
+        }
         self.lens_profile_in_use(m)
             .used
             .and_then(|c| c.correction(m))
             .or_else(|| self.builtin_correction(m))
+            .map(Cow::Borrowed)
     }
     /// Recipe as rendered: switched-off panels bypassed, profile-internal adjustments
     /// and the default profile. A monochrome photo renders without white balance
