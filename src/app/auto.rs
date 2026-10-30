@@ -94,7 +94,7 @@ impl Editor {
         let auto = match result {
             Ok(auto) => auto,
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 return;
             }
         };

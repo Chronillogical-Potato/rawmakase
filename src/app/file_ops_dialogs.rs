@@ -116,7 +116,7 @@ impl Editor {
     /// way; says so when there is.
     fn idle_catalog(&mut self) -> Option<CatalogLocation> {
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             return None;
         }
         self.library
@@ -358,7 +358,9 @@ impl Editor {
         match unfinished {
             Some(Ok(true)) => {}
             Some(Err(e)) => {
-                self.status = format!("Unfinished file operations could not be checked: {e:#}");
+                self.messages.fail(format!(
+                    "Unfinished file operations could not be checked: {e:#}"
+                ));
                 return;
             }
             Some(Ok(false)) | None => return,
@@ -366,7 +368,7 @@ impl Editor {
         // Nothing is busy, so a save that fails won't go through next
         // frame either: given up once, not tried every frame.
         if !self.flush() {
-            self.status = "Unfinished file operations weren't checked: the open photo couldn't be saved. Open the catalog again to check them.".into();
+            self.messages.fail("Unfinished file operations weren't checked: the open photo couldn't be saved. Open the catalog again to check them.");
             return;
         }
         if !self.activity.begin_file_change() {
@@ -433,10 +435,10 @@ impl Editor {
                     .filter(|i| !matches!(i.result, ItemResult::Unchanged(_)))
                     .count();
                 if finished > 0 {
-                    self.status = format!(
+                    self.messages.done(format!(
                         "Finished {} a crash left",
                         widgets::plural(finished, "file operation", "file operations")
-                    );
+                    ));
                 }
                 self.apply_file_outcome(&Outcome {
                     items: recovery.finished,
@@ -452,7 +454,9 @@ impl Editor {
             }
             Ok(None) => self.release_files(),
             Err(e) => {
-                self.status = format!("Unfinished file operations could not be checked: {e}");
+                self.messages.fail(format!(
+                    "Unfinished file operations could not be checked: {e}"
+                ));
                 self.release_files();
             }
         }
@@ -591,7 +595,8 @@ impl Editor {
             Some(Decided::Later) => self.file_ops.state = State::Idle,
             Some(Decided::Reveal(path)) => {
                 if let Err(e) = crate::platform::reveal::reveal(&path) {
-                    self.status = format!("Could not show {}: {e}", path.display());
+                    self.messages
+                        .fail(format!("Could not show {}: {e}", path.display()));
                 }
             }
             Some(Decided::Resolve(operation, resolution)) => {
@@ -607,7 +612,7 @@ impl Editor {
             return;
         };
         if self.activity.is_busy() || !self.flush() || !self.activity.begin_file_change() {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             self.file_ops.state = State::Unfinished { catalog, items };
             return;
         }
@@ -677,14 +682,18 @@ impl Editor {
         }
         match resolved {
             Ok(outcome) => {
-                self.status = match &outcome.result {
-                    ItemResult::Unchanged(_) => "Put back where it was".into(),
-                    ItemResult::Kept => "Kept as it is".into(),
-                    ItemResult::Created { .. } => "Added the folder to the catalog".into(),
-                    ItemResult::Removed => "Removed from the catalog".into(),
-                    ItemResult::NeedsRecovery(why) => format!("Still unfinished: {why}"),
-                    _ => "Decided".into(),
-                };
+                match &outcome.result {
+                    ItemResult::Unchanged(_) => self.messages.done("Put back where it was"),
+                    ItemResult::Kept => self.messages.done("Kept as it is"),
+                    ItemResult::Created { .. } => {
+                        self.messages.done("Added the folder to the catalog")
+                    }
+                    ItemResult::Removed => self.messages.done("Removed from the catalog"),
+                    ItemResult::NeedsRecovery(why) => {
+                        self.messages.fail(format!("Still unfinished: {why}"))
+                    }
+                    _ => self.messages.done("Decided"),
+                }
                 match &outcome.result {
                     ItemResult::NeedsRecovery(why) => {
                         for u in items.iter_mut().filter(|u| u.operation == operation) {
@@ -698,7 +707,7 @@ impl Editor {
                     stopped: None,
                 });
             }
-            Err(e) => self.status = format!("Not decided: {e}"),
+            Err(e) => self.messages.fail(format!("Not decided: {e}")),
         }
         self.release_files();
         if !items.is_empty() {

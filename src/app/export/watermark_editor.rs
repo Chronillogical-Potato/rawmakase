@@ -245,7 +245,8 @@ impl Editor {
         {
             change(&mut previous);
             if let Err(e) = previous.save() {
-                self.status = format!("Export settings not saved: {e:#}");
+                self.messages
+                    .fail(format!("Export settings not saved: {e:#}"));
             }
         }
     }

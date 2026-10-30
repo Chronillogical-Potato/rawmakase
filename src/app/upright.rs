@@ -62,7 +62,7 @@ impl Editor {
                 && let Some(issue) =
                     crate::develop::guided::store(self.document.edit.analysed_mut(), &im.metadata)
             {
-                self.status = issue.message().into();
+                self.messages.warn(issue.message());
             }
             return;
         }
@@ -94,7 +94,7 @@ impl Editor {
         let corrections = match result {
             Ok(c) => c,
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 return;
             }
         };
@@ -117,14 +117,14 @@ impl Editor {
         {
             if fits(r) {
                 let solved = crate::develop::upright::store(r, &corrections, metadata.as_ref());
-                // Only the photo as shown speaks in the status line.
+                // Only the photo as shown speaks in the top bar.
                 if i == 0 {
                     issue = solved;
                 }
             }
         }
         if let Some(issue) = issue {
-            self.status = issue.message().into();
+            self.messages.warn(issue.message());
         }
         self.document.edit.save_state_mut().mark_changed();
         self.schedule();

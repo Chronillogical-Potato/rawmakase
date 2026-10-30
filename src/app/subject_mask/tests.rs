@@ -195,7 +195,7 @@ fn failures_and_cancellation_record_no_edit() {
         e.selection.failure.as_ref().map(|f| &f.1),
         Some(&Failure::NoSubject)
     );
-    assert_eq!(e.status, "No person or animal found");
+    assert_eq!(e.messages.line(), "No person or animal found");
     assert!(e.selection.running().is_none());
 
     e.selection.failure = None;
@@ -285,7 +285,7 @@ fn a_result_is_not_applied_over_masks_that_changed_meanwhile() {
         e.document.edit.recipe().masks[0].components[0].shape,
         MaskShape::Linear { .. }
     ));
-    assert!(e.status.contains("changed"));
+    assert!(e.messages.line().contains("changed"));
 
     // Sliders, names and visibility are not structure: they survive an accepted result.
     let g = begin(e, SUBJECT);
@@ -442,7 +442,10 @@ fn a_selection_needs_a_catalog_an_upgraded_one_and_the_model() {
     e.selection.prompt = None;
     e.request_selection(SUBJECT);
     assert!(e.selection.prompt.is_none());
-    assert_eq!(e.status, "Add this photo to a catalog to use AI masks");
+    assert_eq!(
+        e.messages.line(),
+        "Add this photo to a catalog to use AI masks"
+    );
 }
 
 #[test]
@@ -612,7 +615,12 @@ fn a_selection_runs_through_the_remote_worker_into_one_mask() {
     let done = next_selection(e);
     assert!(done.result.is_ok(), "{:?}", done.result);
     e.selection_done(*done);
-    assert_eq!(e.document.edit.recipe().masks.len(), 1, "{}", e.status);
+    assert_eq!(
+        e.document.edit.recipe().masks.len(),
+        1,
+        "{}",
+        e.messages.line()
+    );
     // The remote coverage is the mask's raster, saved like any other.
     let MaskShape::Bitmap(b) = &e.document.edit.recipe().masks[0].components[0].shape else {
         panic!("a selection made a bitmap mask");
@@ -667,7 +675,7 @@ fn a_cancelled_or_superseded_remote_answer_applies_nothing() {
     e.selection_done(*done);
     assert_eq!(e.document.edit.recipe().masks.len(), 0);
     assert!(e.selection.pending.is_none());
-    assert_eq!(e.status, "Selection cancelled");
+    assert_eq!(e.messages.line(), "Selection cancelled");
 }
 
 #[test]
@@ -766,7 +774,12 @@ fn the_real_model_selects_through_the_worker_and_the_mask_changes_the_render() {
             _ => assert!(std::time::Instant::now() < deadline, "no result"),
         }
     }
-    assert_eq!(e.document.edit.recipe().masks.len(), 1, "{}", e.status);
+    assert_eq!(
+        e.document.edit.recipe().masks.len(),
+        1,
+        "{}",
+        e.messages.line()
+    );
     // The mask selects part of the photo: lift it and compare the two regions.
     let mut recipe = e.document.edit.recipe().clone();
     recipe.masks[0].adjust.exposure = 2.;
@@ -870,7 +883,7 @@ fn sky_is_a_plain_mask_of_its_own_and_background_is_the_inverted_subject() {
     // A photo without sky says so and adds nothing.
     let g = begin(e, sky);
     finish(e, g, Err(Failure::NoSky));
-    assert_eq!(e.status, "No sky found");
+    assert_eq!(e.messages.line(), "No sky found");
     assert_eq!(e.document.edit.recipe().masks.len(), 1);
 }
 
@@ -947,7 +960,7 @@ fn after_installing_the_models_every_selection_runs_without_asking_again() {
     assert!(
         e.selection.running().is_some(),
         "the request went on: {}",
-        e.status
+        e.messages.line()
     );
     e.selection.cancel();
     // Sky then runs at once, asking nothing.

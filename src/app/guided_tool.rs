@@ -113,7 +113,7 @@ impl Editor {
         }
         let u = &self.document.edit.recipe().upright;
         if u.guides.is_empty() {
-            self.status = guided::Issue::TooFew.message().into();
+            self.messages.note(guided::Issue::TooFew.message());
         }
         if u.corrections.len() < UprightMode::Guided.code() && !self.document.upright.is_running() {
             self.start_upright();
@@ -139,8 +139,10 @@ impl Editor {
         };
         let issue = issue.or((count < 2).then_some(guided::Issue::TooFew));
         match issue {
-            Some(issue) => self.status = issue.message().into(),
-            None if self.status.starts_with("Guided Upright") => self.status.clear(),
+            Some(issue) => self.messages.note(issue.message()),
+            None if self.messages.line().starts_with("Guided Upright") => {
+                self.messages.clear_line()
+            }
             None => {}
         }
         let value = match count {
@@ -238,8 +240,8 @@ impl Editor {
                     })
                 }
                 _ if guides.len() >= crate::model::transform::MAX_GUIDES => {
-                    self.status =
-                        "Guided Upright takes four guides; delete one to draw another".into();
+                    self.messages
+                        .warn("Guided Upright takes four guides; delete one to draw another");
                     None
                 }
                 _ if rect.contains(origin) => Some(GuideDrag::New {

@@ -1,4 +1,5 @@
 //! Accept worker results at a single generation-checked boundary.
+use super::messages::Topic;
 use super::{
     Editor,
     worker::{self, Event, LoadedHeader, Pane, RenderStage, TaskKind},
@@ -9,7 +10,6 @@ use eframe::egui;
 
 impl Editor {
     pub(super) fn events(&mut self, ctx: &egui::Context) {
-        self.import_progress();
         // A Point Color sample stops as soon as its tab is no longer where the photo is
         // edited (the Library, Before, another tab), whichever way that happened.
         if self.document.point_color_pick.is_running() && !self.point_color_tab_shown() {
@@ -18,7 +18,6 @@ impl Editor {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 Event::CatalogWorking(message) => {
-                    self.status = message.clone();
                     self.catalog_work = Some(message);
                 }
                 Event::FoldersAdded { result, source } => {
@@ -105,7 +104,7 @@ impl Editor {
                             self.ensure_analysis();
                             self.commit_edit(old.clone(), None);
                         }
-                        Err(e) => self.status = e.to_string(),
+                        Err(e) => self.messages.fail(e.to_string()),
                     }
                 }
                 Event::Auto { id, kind, result } if id == self.load.id() => {
@@ -151,7 +150,7 @@ impl Editor {
                 Event::ModelInstalled(result) => {
                     self.selection.models.finished(&result);
                     if result.as_ref().err().is_some_and(|e| e == "Cancelled") {
-                        self.status = "Model download cancelled".into();
+                        self.messages.note("Model download cancelled");
                     } else {
                         self.model_installed(result);
                     }
@@ -161,16 +160,16 @@ impl Editor {
                     job,
                     result,
                 } => {
-                    if let Some(said) = self.lensfun.finished(generation, job, result) {
-                        self.status = said;
+                    if let Some((level, said)) = self.lensfun.finished(generation, job, result) {
+                        self.messages.say(level, said);
                     }
                 }
                 Event::ModelRemoved(result) => {
                     self.selection.models.removed(result.is_ok());
-                    self.status = match result {
-                        Ok(()) => "Selection model removed".into(),
-                        Err(e) => format!("Model not removed: {e}"),
-                    };
+                    match result {
+                        Ok(()) => self.messages.done("Selection model removed"),
+                        Err(e) => self.messages.fail(format!("Model not removed: {e}")),
+                    }
                 }
                 Event::CatalogUpgraded { generation, result } => {
                     self.catalog_upgraded(generation, result)
@@ -207,8 +206,8 @@ impl Editor {
                     self.activity.finish_dialog();
                     let m = self.document.metadata.clone().unwrap_or_default();
                     match crate::presets::save_preset(&p, self.document.edit.recipe(), &m) {
-                        Ok(()) => self.status = "Preset saved".into(),
-                        Err(e) => self.status = e.to_string(),
+                        Ok(()) => self.messages.done("Preset saved"),
+                        Err(e) => self.messages.fail(e.to_string()),
                     }
                 }
                 Event::Header(header) if header.id == self.load.id() => self.header_ready(*header),
@@ -256,10 +255,11 @@ impl Editor {
                     self.ensure_analysis();
                     if !self.document.edit.save_state().is_protected() {
                         // A raw default that could not be used stays explained.
-                        self.status = match self.defaults_note() {
+                        let text: String = match self.defaults_note() {
                             Some(note) => format!("{status} · {note}"),
                             None => status,
                         };
+                        self.messages.note(text);
                     }
                     self.schedule();
                 }
@@ -339,6 +339,7 @@ impl Editor {
                         }
                     }
                     self.preview.status = status;
+                    self.messages.settle(Topic::Render);
                 }
                 Event::Histogram { id, histogram } if self.preview.request(id).is_some() => {
                     self.preview.histogram = *histogram;
@@ -349,7 +350,7 @@ impl Editor {
                     error,
                 } if id == self.load.id() => {
                     self.document.failed = Some(error.clone());
-                    self.status = error;
+                    self.messages.fail_on(Topic::Load, error);
                     self.load.finish(id);
                     // No render is coming to take over from the stored preview.
                     self.preview.stand_in = None;
@@ -359,7 +360,7 @@ impl Editor {
                     task: TaskKind::Render(Pane::After),
                     error,
                 } if id == self.preview.task.id() => {
-                    self.status = error;
+                    self.messages.fail_on(Topic::Render, error);
                     self.preview.task.finish(id);
                     self.preview.stand_in = None;
                     // A failed render on the GPU retires Before's textures too: render
@@ -375,7 +376,7 @@ impl Editor {
                     task: TaskKind::Render(Pane::Before),
                     error,
                 } if id == self.preview.before.task.id() => {
-                    self.status = format!("Before: {error}");
+                    self.messages.warn(format!("Before: {error}"));
                     self.preview.before.task.finish(id);
                     // A failed render on the GPU retires the edit's textures too: render
                     // the edit again. Before keeps its failed job, so it is not retried.
@@ -388,7 +389,7 @@ impl Editor {
                     task: TaskKind::Render(Pane::Magnifier),
                     error,
                 } if id == self.preview.magnifier.task.id() => {
-                    self.status = format!("Magnifier: {error}");
+                    self.messages.warn(format!("Magnifier: {error}"));
                     self.preview.magnifier.task.finish(id);
                     // A failed render on the GPU retires the edit's textures too: render
                     // the edit again. The magnifier keeps its failed job, so it is not
@@ -438,9 +439,7 @@ impl Editor {
                     self.document.relink(path);
                 }
                 self.onboarding.catalog_error = None;
-                if !l.message.is_empty() {
-                    self.status = l.message.clone();
-                }
+                self.messages.absorb(&mut l.messages);
                 l.set_defaults(self.raw_defaults.clone());
                 let selected = self.document.catalog_photo;
                 self.library = Some(l);
@@ -458,18 +457,20 @@ impl Editor {
                 if let Some(settings) = self.current_settings() {
                     self.previous_settings = Some(settings);
                 }
+                self.messages.document_closed();
                 self.document.reset(None);
                 self.preview.clear_document();
                 self.presets.clear_document();
                 self.view.clear_document();
                 self.selection.clear_catalog();
-                self.status = if !l.message.is_empty() {
-                    l.message.clone()
+                if !l.messages.line().is_empty() {
+                    self.messages.absorb(&mut l.messages);
                 } else if l.session.photos.is_empty() {
-                    "Catalog ready. Add a folder of photos to begin.".into()
+                    self.messages
+                        .note("Catalog ready. Add a folder of photos to begin.");
                 } else {
-                    "Catalog ready. Offline photos remain in the library; locate their folders to develop them.".into()
-                };
+                    self.messages.note("Catalog ready. Offline photos remain in the library; locate their folders to develop them.");
+                }
                 // Commands never cross catalogs; reloading this one (after
                 // adding or relinking a folder) keeps them.
                 let reloaded = self.library.as_ref().is_some_and(|old| {
@@ -511,9 +512,6 @@ impl Editor {
                     && let Some(id) = place.photo.or_else(|| self.library.as_ref()?.selected())
                 {
                     self.develop_catalog_photo(id);
-                    // On launch, a photo gone offline leaves the Library shown
-                    // without a dialog; the status bar says why.
-                    self.not_editable = None;
                 }
                 self.open_pending_photo();
                 let _ = self.save_session();
@@ -522,7 +520,7 @@ impl Editor {
                 self.relink_open = None;
                 self.pending_photo = None;
                 self.onboarding.catalog_error = Some(e.clone());
-                self.status = format!("Catalog operation failed: {e}");
+                self.messages.fail(format!("Catalog operation failed: {e}"));
             }
         }
     }
@@ -541,7 +539,8 @@ impl Editor {
         self.document.edit.replace(r);
         self.document.export = ex;
         self.document.edit.save_state_mut().saved();
-        self.status = status;
+        self.messages.settle(Topic::Save);
+        self.messages.note(status);
         if let (Some(l), Some(photo)) = (&self.library, self.document.catalog_photo) {
             self.document.lightroom_history = l
                 .session

@@ -149,7 +149,7 @@ impl Library {
             1 => what.to_string(),
             n => format!("{n} photos · {what}"),
         };
-        self.message = summary.clone();
+        self.messages.note(summary.clone());
         self.descriptive_done.push(DescriptiveCommand::new(
             before,
             after,
@@ -201,15 +201,15 @@ impl Library {
             .map(|p| (p.id, p.path.clone()))
             .collect();
         if photos.is_empty() {
-            self.message = "Virtual copies are never read from files".into();
+            self.messages
+                .warn("Virtual copies are never read from files");
             return Ok(());
         }
         if self.reread.is_some() {
-            self.message = "Still reading metadata from files; try again when it's done".into();
+            self.messages
+                .warn("Still reading metadata from files; try again when it's done");
             return Ok(());
         }
-        let n = photos.len();
-        self.message = format!("Reading metadata from {}…", plural(n, "file", "files"));
         self.reread = Some(Reread {
             paths: photos.iter().cloned().collect(),
             reader: crate::catalog_session::background::Reader::start(
@@ -228,7 +228,8 @@ impl Library {
     /// change that may give photos' ids to others.
     pub(in crate::app) fn cancel_reread(&mut self) {
         if self.reread.take().is_some() {
-            self.message = "Read Metadata from Files stopped; nothing was read".into();
+            self.messages
+                .note("Read Metadata from Files stopped; nothing was read");
             self.reread_finished = true;
         }
     }
@@ -258,13 +259,14 @@ impl Library {
         }
         let reread = self.reread.take().unwrap();
         if let Err(e) = self.finish_reread(reread) {
-            self.message = format!("Metadata not read: {e:#}");
+            self.messages.fail(format!("Metadata not read: {e:#}"));
         }
         self.reread_finished = true;
     }
     fn finish_reread(&mut self, reread: Reread) -> Result<()> {
         if reread.generation != self.session.generation() {
-            self.message = "The catalog changed while its files were read; nothing was read".into();
+            self.messages
+                .warn("The catalog changed while its files were read; nothing was read");
             return Ok(());
         }
         // Photos removed, or made copies, while their files were read are
@@ -296,7 +298,13 @@ impl Library {
             summary.push_str(" · ");
             summary.push_str(&problems);
         }
-        self.set_message_with_detail(summary.clone(), report.details());
+        if report.summary().is_some() {
+            self.messages
+                .warn_with_detail(summary.clone(), report.details());
+        } else {
+            self.messages
+                .done_with_detail(summary.clone(), report.details());
+        }
         self.fields.reload();
         if before != after || ratings_before != ratings_after {
             self.descriptive_done.push(

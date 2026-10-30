@@ -1634,22 +1634,22 @@ impl Editor {
                     reasons.sort_unstable();
                     reasons.dedup();
                     let reasons = reasons.join("; ");
-                    self.status = match (done.imported.len(), done.skipped.len()) {
-                        (0, k) => format!(
+                    match (done.imported.len(), done.skipped.len()) {
+                        (0, k) => self.messages.warn(format!(
                             "No new Adobe profiles for {} {}; skipped {k} ({reasons}).",
                             m.make, m.model
-                        ),
-                        (n, 0) => format!(
+                        )),
+                        (n, 0) => self.messages.done(format!(
                             "Imported {n} Adobe profiles for {} {}. Choose one from the Profile menu.",
                             m.make, m.model
-                        ),
-                        (n, k) => format!(
+                        )),
+                        (n, k) => self.messages.warn(format!(
                             "Imported {n} Adobe profiles for {} {}, skipped {k} ({reasons}). Choose one from the Profile menu.",
                             m.make, m.model
-                        ),
-                    };
+                        )),
+                    }
                 }
-                Err(e) => self.status = format!("Profiles not imported: {e:#}"),
+                Err(e) => self.messages.fail(format!("Profiles not imported: {e:#}")),
             }
         }
     }

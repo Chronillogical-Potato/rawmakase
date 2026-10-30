@@ -270,7 +270,9 @@ impl Editor {
                 let m = masks.len() - 1;
                 self.view.masking.select(Some(m), Some(0));
             }
-            _ => self.status = format!("A photo holds up to {} masks", MAX_GROUPS),
+            _ => self
+                .messages
+                .warn(format!("A photo holds up to {} masks", MAX_GROUPS)),
         }
     }
     /// The Masking tool's keys: `[` `]` brush size (Shift: feather), O overlay, Delete

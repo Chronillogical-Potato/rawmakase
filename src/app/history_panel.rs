@@ -115,23 +115,27 @@ impl Editor {
             ) {
                 Ok((recipe, skipped)) if use_step == LightroomStep::ToBefore => {
                     if !skipped.is_empty() {
-                        self.status = format!("Before · not rendered: {}", skipped.join(", "));
+                        self.messages
+                            .note(format!("Before · not rendered: {}", skipped.join(", ")));
                     }
                     self.set_before(recipe);
                 }
                 Ok((recipe, skipped)) => {
                     let name = format!("Lightroom: {}", step.name);
-                    self.status = if skipped.is_empty() {
-                        name.clone()
+                    if skipped.is_empty() {
+                        self.messages.note(name.clone());
                     } else {
-                        format!("{name} · not rendered: {}", skipped.join(", "))
-                    };
+                        self.messages
+                            .warn(format!("{name} · not rendered: {}", skipped.join(", ")));
+                    }
                     self.document
                         .edit
                         .name_next_step(super::history::Step::new(name, ""));
                     self.document.edit.replace(recipe);
                 }
-                Err(e) => self.status = format!("History step not applied: {e:#}"),
+                Err(e) => self
+                    .messages
+                    .fail(format!("History step not applied: {e:#}")),
             }
         }
     }

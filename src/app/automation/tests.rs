@@ -590,7 +590,7 @@ mod integration_tests {
         assert_eq!(reply.state.open_failed, Some(photo));
         assert!(!reply.state.loaded);
         // The reason stays the failure's when the status line moves on.
-        e.status = "Previews built".into();
+        e.messages.note("Previews built");
         assert_eq!(
             e.command_state().open_error.as_deref(),
             Some("Could not read the AVIF file")

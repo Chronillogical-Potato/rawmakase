@@ -71,13 +71,14 @@ impl super::Editor {
             return;
         }
         if *sampled != *self.document.edit.recipe() {
-            self.status = "The photo changed while sampling; pick the color again".into();
+            self.messages
+                .warn("The photo changed while sampling; pick the color again");
             return;
         }
         let source = match result {
             Ok(source) => source,
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 return;
             }
         };
@@ -95,7 +96,7 @@ impl super::Editor {
                 let step = super::history::Step::new("Point Color", "Add Swatch");
                 self.change_edit(Some(step), |r| r.point_colors = swatches);
             }
-            Err(refusal) => self.status = refusal.message().into(),
+            Err(refusal) => self.messages.warn(refusal.message()),
         }
     }
 }

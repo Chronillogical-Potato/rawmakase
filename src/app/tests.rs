@@ -1348,7 +1348,7 @@ fn red_eye_tool_adds_moves_and_deletes_one_history_step_each() {
         (
             editor.document.edit.recipe().red_eye.clone(),
             names,
-            editor.status.to_string(),
+            editor.messages.line().to_string(),
         )
     };
     let button = |pos, pressed| egui::Event::PointerButton {
@@ -1490,7 +1490,7 @@ fn pet_eye_type_finds_a_glowing_pupil_and_adds_a_catchlight() {
     // Red Eye finds nothing red there.
     in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.15));
     assert!(editor.document.edit.recipe().red_eye.is_empty());
-    assert!(editor.status.contains("Unable to find red eye"));
+    assert!(editor.messages.line().contains("Unable to find red eye"));
     editor.view.red_eye.pet = red_eye_tool::PupilType::Pet;
     in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.15));
     let eyes = &editor.document.edit.recipe().red_eye;
@@ -1588,9 +1588,9 @@ fn red_eye_tool_refuses_a_red_area_too_large_to_be_a_pupil() {
     in_edit_frame(&ctx, &mut editor, |e| e.add_red_eye([0.5, 0.5], 0.48));
     assert!(editor.document.edit.recipe().red_eye.is_empty());
     assert!(
-        editor.status.contains("Unable to find red eye"),
+        editor.messages.line().contains("Unable to find red eye"),
         "{}",
-        editor.status
+        editor.messages.line()
     );
     editor.document.edit.recipe().validate().unwrap();
 }
@@ -2358,7 +2358,7 @@ fn dropping_a_relocated_folders_parent_does_not_select_its_logical_siblings() ->
         library.source_key(),
         library.session.roots,
         library.session.folders,
-        editor.status
+        editor.messages.line()
     );
     Ok(())
 }
@@ -2492,9 +2492,9 @@ fn a_dropped_folder_that_fails_leaves_the_others_added() -> anyhow::Result<()> {
     let names: Vec<_> = library.session.photos.iter().map(|p| &p.filename).collect();
     assert_eq!(names, ["g.ARW"]);
     assert!(
-        editor.status.contains("Not added: locked"),
+        editor.messages.line().contains("Not added: locked"),
         "{}",
-        editor.status
+        editor.messages.line()
     );
     Ok(())
 }
@@ -2548,9 +2548,9 @@ fn removing_a_folder_closes_its_photo_and_leaves_the_files() -> anyhow::Result<(
     editor.remove_folders(&removal(other));
     assert_eq!(editor.library.as_ref().unwrap().session.photos.len(), 2);
     assert!(
-        editor.status.contains("another catalog"),
+        editor.messages.line().contains("another catalog"),
         "{}",
-        editor.status
+        editor.messages.line()
     );
 
     editor.remove_folders(&removal(crate::catalog::CatalogLocation::File(path)));
@@ -2566,7 +2566,11 @@ fn removing_a_folder_closes_its_photo_and_leaves_the_files() -> anyhow::Result<(
     assert_eq!(names, ["home.ARW"]);
     assert_eq!(editor.document.catalog_photo, None);
     assert!(editor.module == Module::Library);
-    assert!(editor.status.contains("still on disk"), "{}", editor.status);
+    assert!(
+        editor.messages.line().contains("still on disk"),
+        "{}",
+        editor.messages.line()
+    );
     // The load's late results are no longer its.
     assert!(!editor.load.is_running());
     assert_ne!(editor.load.id(), loading);
@@ -3162,7 +3166,11 @@ fn auto_runs_again_when_it_failed_on_settings_changed_since() {
         worker::AutoKind::Settings,
         Err("Auto: no usable pixels".into()),
     );
-    assert!(!editor.status.contains("usable"), "{}", editor.status);
+    assert!(
+        !editor.messages.line().contains("usable"),
+        "{}",
+        editor.messages.line()
+    );
     assert!(
         editor.document.auto.is_running(),
         "Auto runs again for the crop"
@@ -3828,7 +3836,7 @@ fn undo_brings_back_a_range_rejected_under_the_unflagged_filter() -> anyhow::Res
     assert_eq!(library.selected(), Some(ids[3]));
     assert_eq!(library.selected_photos(), ids[1..4]);
     assert!(library.session.photos.iter().all(|p| p.flag == 0));
-    assert!(e.status.starts_with("Undo 3 photos"));
+    assert!(e.messages.line().starts_with("Undo 3 photos"));
     e.redo();
     let library = e.library.as_ref().unwrap();
     assert_eq!(library.shown().len(), 2);
@@ -5110,7 +5118,11 @@ fn guided_upright_gestures_are_one_history_step_each() {
     assert_eq!(applied, 4);
     // One guide corrects nothing, and says so.
     assert_eq!(e.document.edit.recipe().upright.correction(), None);
-    assert!(e.status.contains("two or more guides"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("two or more guides"),
+        "{}",
+        e.messages.line()
+    );
     e.undo();
     assert_eq!(e.document.edit.recipe().upright.guides.len(), 2);
     assert!(e.document.edit.recipe().upright.correction().is_some());
@@ -5955,7 +5967,10 @@ fn point_colors_dropper_adds_a_selected_swatch_as_one_step_and_visualizes_it() {
     // The same color again is refused, and changes nothing.
     editor.view.toggle(state::Tool::PointColor);
     sample(&mut editor);
-    assert_eq!(editor.status, SampleRefusal::AlreadySampled.message());
+    assert_eq!(
+        editor.messages.line(),
+        SampleRefusal::AlreadySampled.message()
+    );
     assert_eq!(editor.document.edit.recipe().point_colors.len(), 1);
     // A sample still being taken when the dropper is put away is dropped.
     assert_eq!(editor.view.tool, state::Tool::PointColor);
@@ -7058,7 +7073,7 @@ fn a_copy_removed_when_the_catalog_cannot_be_read_again_still_leaves_undo() -> a
         catalog.photos()?.iter().all(|p| p.id != copy),
         "the copy is removed"
     );
-    let status = editor.status.clone();
+    let status = editor.messages.line().to_string();
     editor
         .library
         .as_mut()
@@ -8042,7 +8057,7 @@ fn the_library_info_panel_stays_while_a_field_in_it_cannot_be_saved() -> anyhow:
     library.set_copy_name_draft(copy, "B&W");
     assert!(!e.change_panels(PanelChange::Toggle(WorkspacePanel::Right)));
     assert!(e.panel_shown(WorkspacePanel::Right));
-    assert!(e.status.starts_with("Not saved"));
+    assert!(e.messages.line().starts_with("Not saved"));
     // The left panel holds no field; it hides.
     assert!(e.change_panels(PanelChange::Toggle(WorkspacePanel::Left)));
     e.library.as_mut().unwrap().discard_drafts();
@@ -8773,7 +8788,7 @@ fn opening_a_jpeg_says_it_is_reading_the_photo() -> anyhow::Result<()> {
     let file = dir.path().join("photo.jpg");
     image::RgbImage::new(8, 8).save(&file)?;
     assert!(editor.load_raw(file, None));
-    assert_eq!(editor.status, "Reading photo…");
+    assert_eq!(editor.messages.line(), "Reading photo…");
     Ok(())
 }
 #[test]
@@ -9293,4 +9308,29 @@ fn lensfun_is_offered_downloaded_and_used_in_one_step() -> anyhow::Result<()> {
     assert_eq!(chosen.calibration, named.calibration);
     assert_eq!(editor.document.edit.history().steps().0.len(), steps + 1);
     Ok(())
+}
+
+/// A failure said while the Library's own message was showing used to be
+/// hidden by it, and either was gone with the next progress.
+#[test]
+fn a_failed_action_stays_on_screen_past_the_librarys_messages_and_progress() {
+    let ctx = egui::Context::default();
+    let mut e = Editor::with_context(&ctx, None, crate::app::session::Session::default(), None);
+    e.onboarding.visible = false;
+    e.messages
+        .fail("No camera look fitted: The preview does not line up");
+    e.messages.note("Reading RAW…");
+    for time in [0., 3600.] {
+        let input = egui::RawInput {
+            time: Some(time),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| e.draw(ui));
+        output.textures_delta.clear();
+    }
+    assert_eq!(e.messages.line(), "Reading RAW…");
+    assert!(
+        e.messages
+            .has_entry("No camera look fitted: The preview does not line up")
+    );
 }

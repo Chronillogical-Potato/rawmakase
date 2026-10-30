@@ -157,7 +157,7 @@ impl Editor {
     pub(super) fn open_preferences(&mut self, tab: Tab) {
         self.preferences.open = true;
         self.preferences.tab = tab;
-        self.preferences.status_at_open = self.status.clone();
+        self.preferences.status_at_open = self.messages.line().to_string();
         // Edits not saved yet are kept, not replaced by the file's.
         if !self.preferences.defaults_dirty {
             self.preferences.defaults = crate::catalog::MetadataDefaults::load();
@@ -208,7 +208,8 @@ impl Editor {
             Ok(()) => self.preferences.defaults_dirty = false,
             Err(e) => {
                 self.preferences.defaults_failed = true;
-                self.status = format!("Metadata defaults not saved: {e:#}");
+                self.messages
+                    .fail(format!("Metadata defaults not saved: {e:#}"));
             }
         }
     }
@@ -311,11 +312,12 @@ impl Editor {
                 bar.spacing_mut().button_padding = button::DIALOG;
                 let done = primary_button(&mut bar, "Done").clicked();
                 // Only what happened while the window was open, e.g. an import.
-                if self.status != self.preferences.status_at_open {
+                // The bar is behind this window, so a problem is said here too.
+                if self.messages.line() != self.preferences.status_at_open {
                     bar.add_space(space::XL);
                     bar.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.status)
+                            egui::RichText::new(self.messages.line())
                                 .size(text::LABEL)
                                 .color(palette.tone(Tone::SECONDARY)),
                         )
@@ -569,11 +571,12 @@ impl Editor {
         });
         if let Some(kind) = clear {
             self.clear_previews(kind);
-            self.status = match kind {
+            let text: String = match kind {
                 PreviewKind::Standard => "Standard previews cleared",
                 PreviewKind::OneToOne => "1:1 previews cleared",
             }
             .into();
+            self.messages.done(text);
             self.preferences.usage.preview_kinds = preview_kinds.map(|kinds| match kind {
                 PreviewKind::Standard => crate::catalog::preview_cache::PreviewUsage {
                     standard: 0,
@@ -656,7 +659,7 @@ impl Editor {
                 .changed()
                 && let Err(e) = import.save()
             {
-                self.status = format!("Preferences not saved: {e:#}");
+                self.messages.fail(format!("Preferences not saved: {e:#}"));
             }
         });
         form_row(ui, "", |ui| {
@@ -936,10 +939,10 @@ impl Editor {
         });
         if purge {
             let removed = self.decode_cache.purge();
-            self.status = format!(
+            self.messages.done(format!(
                 "Purged {} from the cache",
                 plural(removed, "photo", "photos")
-            );
+            ));
             self.measure_usage();
         }
         if choose {
@@ -956,11 +959,13 @@ impl Editor {
         let removed = match self.decode_cache.relocate(folder.as_deref()) {
             Ok(removed) => removed,
             Err(e) => {
-                self.status = format!("The cache can't be moved there: {e}");
+                self.messages
+                    .fail(format!("The cache can't be moved there: {e}"));
                 return;
             }
         };
-        self.status = match self.save_session() {
+        let saved = self.save_session();
+        let moved = match &saved {
             Ok(()) if removed > 0 => format!(
                 "Photos are now cached in {}; {} removed from the old location",
                 self.decode_cache.dir().display(),
@@ -972,6 +977,11 @@ impl Editor {
             ),
             Err(e) => format!("Cache folder not saved: {e:#}"),
         };
+        if saved.is_ok() {
+            self.messages.done(moved);
+        } else {
+            self.messages.fail(moved);
+        }
         self.measure_usage();
     }
 
@@ -1250,7 +1260,7 @@ mod tests {
         let chosen = dir.path().join("other drive");
         std::fs::create_dir(&chosen).unwrap();
         e.move_decode_cache(Some(chosen.clone()));
-        assert!(!entry.exists(), "{}", e.status);
+        assert!(!entry.exists(), "{}", e.messages.line());
         assert_eq!(
             worker.dir(),
             chosen.join(crate::decode_cache::CHOSEN_SUBFOLDER)
@@ -1288,7 +1298,11 @@ mod tests {
         e.decode_cache.set_folder(Some(&current));
         e.move_decode_cache(Some(dir.path().join("missing")));
         assert_eq!(e.decode_cache.folder(), Some(current));
-        assert!(e.status.contains("can't be moved"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("can't be moved"),
+            "{}",
+            e.messages.line()
+        );
     }
 
     #[test]

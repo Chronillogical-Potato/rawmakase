@@ -478,11 +478,12 @@ impl super::Editor {
         let angle = match result {
             Ok(Some(angle)) => angle,
             Ok(None) => {
-                self.status = "Auto straighten found no horizon or verticals to level".into();
+                self.messages
+                    .warn("Auto straighten found no horizon or verticals to level");
                 return;
             }
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 return;
             }
         };
@@ -524,10 +525,11 @@ impl super::Editor {
                 shown |= i == 0;
             }
         }
-        // Only the photo as shown speaks in the status line.
+        // Only the photo as shown speaks in the top bar.
         if shown && measured.is_none() {
-            self.status = failure
-                .unwrap_or_else(|| "Auto straighten found no horizon or verticals to level".into());
+            self.messages.warn(failure.unwrap_or_else(|| {
+                "Auto straighten found no horizon or verticals to level".into()
+            }));
         }
         self.document.edit.save_state_mut().mark_changed();
         self.schedule();

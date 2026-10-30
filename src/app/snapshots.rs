@@ -175,7 +175,7 @@ impl Editor {
             }
         };
         if let Err(e) = result {
-            self.status = format!("Snapshot not saved: {e:#}");
+            self.messages.fail(format!("Snapshot not saved: {e:#}"));
         }
         self.load_snapshots();
     }
@@ -207,7 +207,7 @@ impl Editor {
         self.ensure_analysis();
     }
     /// A snapshot's settings for this photo; one from Lightroom is converted, and
-    /// what it could not render is said in the status line.
+    /// what it could not render is said in the top bar.
     fn snapshot_settings(&mut self, id: i64) -> Option<crate::model::recipe::Recipe> {
         let snapshot = self.snapshot(id).cloned()?;
         let recipe = match snapshot.settings {
@@ -225,13 +225,13 @@ impl Editor {
                 ) {
                     Ok((recipe, skipped)) => {
                         if !skipped.is_empty() {
-                            self.status =
-                                format!("Snapshot · not rendered: {}", skipped.join(", "));
+                            self.messages
+                                .warn(format!("Snapshot · not rendered: {}", skipped.join(", ")));
                         }
                         recipe
                     }
                     Err(e) => {
-                        self.status = format!("Snapshot not applied: {e:#}");
+                        self.messages.fail(format!("Snapshot not applied: {e:#}"));
                         return None;
                     }
                 }

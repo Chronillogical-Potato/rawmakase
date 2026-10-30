@@ -247,7 +247,7 @@ impl Editor {
     }
     /// Changes the open module's panels. A panel being hidden first lets go of
     /// what it was doing: the Library's info panel saves a field still being
-    /// typed, and stays if that fails (the status line says why); Develop's
+    /// typed, and stays if that fails (the top bar says why); Develop's
     /// presets panel ends a hover preview and keeps a snapshot name being typed.
     /// Returns whether the panels changed.
     pub(super) fn change_panels(&mut self, change: PanelChange) -> bool {
@@ -315,7 +315,7 @@ impl Editor {
     }
     fn save_panels(&mut self) {
         if let Err(e) = self.save_session() {
-            self.status = format!("Panel layout not saved: {e:#}");
+            self.messages.warn(format!("Panel layout not saved: {e:#}"));
         }
     }
     /// Tab, Shift+Tab, F6–F8 and Shift+F8 (Develop's tab panel), unless a field or control has the keyboard

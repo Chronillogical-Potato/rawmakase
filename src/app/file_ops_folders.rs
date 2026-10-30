@@ -210,7 +210,7 @@ impl Editor {
     /// where it goes.
     pub(in crate::app) fn choose_parent_for(&mut self, root: RootId, from: String) {
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             return;
         }
         let Some((catalog, name)) = self.library.as_ref().map(|l| {

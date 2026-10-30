@@ -109,7 +109,7 @@ fn moving_asks_with_its_counts_and_the_files_rows_and_open_photo_follow() -> any
     assert!(!d.path().join("photos/a.RAF").exists());
     assert_eq!(at(&e, &d, a), "sub/a.RAF");
     assert_eq!(at(&e, &d, b), "sub/b.RAF");
-    assert_eq!(e.status, "Moved 2 photos to sub");
+    assert_eq!(e.messages.line(), "Moved 2 photos to sub");
     // The open photo stays open, at its file's new place.
     assert_eq!(e.document.catalog_photo, Some(a));
     let open = e.document.path.clone().unwrap();
@@ -192,7 +192,10 @@ fn new_folder_inside_takes_a_typed_name_and_moves_the_selection_into_it() -> any
     assert!(folder(&e, "Selects").is_some(), "the catalog has it");
     assert_eq!(at(&e, &d, a), "Selects/a.RAF");
     assert_eq!(at(&e, &d, b), "b.RAF");
-    assert_eq!(e.status, "Made folder Selects and moved 1 photo into it");
+    assert_eq!(
+        e.messages.line(),
+        "Made folder Selects and moved 1 photo into it"
+    );
     Ok(())
 }
 
@@ -210,7 +213,7 @@ fn a_new_folder_with_nothing_to_move_is_made_on_create() -> anyhow::Result<()> {
     assert!(!e.file_ops.confirming(), "Create was the confirmation");
     assert!(d.path().join("photos/2024/day2").is_dir());
     assert!(folder(&e, "2024/day2").is_some());
-    assert_eq!(e.status, "Made folder day2");
+    assert_eq!(e.messages.line(), "Made folder day2");
     // Its parent unfolds, so the folder shows in the tree.
     let library = e.library.as_ref().unwrap();
     assert!(library.is_unfolded(&format!("root:{r}/2024")));
@@ -282,7 +285,7 @@ fn what_a_crash_left_unfinished_is_asked_about_when_the_catalog_opens() -> anyho
     frame(&mut e, Vec::new());
     settle(&mut e);
     frame(&mut e, Vec::new());
-    assert!(e.file_ops.dialog_open(), "{}", e.status);
+    assert!(e.file_ops.dialog_open(), "{}", e.messages.line());
     let State::Unfinished { items, .. } = &e.file_ops.state else {
         panic!("not asking");
     };
@@ -307,7 +310,7 @@ fn what_a_crash_left_unfinished_is_asked_about_when_the_catalog_opens() -> anyho
     frame(&mut e, Vec::new());
     assert!(!e.file_ops.dialog_open());
     assert!(!e.activity.is_busy());
-    assert_eq!(e.status, "Kept as it is");
+    assert_eq!(e.messages.line(), "Kept as it is");
     assert!(made.is_dir(), "the folder stays");
     assert!(folder(&e, "Selects").is_none());
     Ok(())
@@ -339,10 +342,11 @@ fn an_open_edit_that_cant_be_saved_puts_off_the_check_once() -> anyhow::Result<(
     assert!(matches!(e.file_ops.state, State::Idle));
     assert!(!e.activity.is_busy());
     assert!(
-        e.status
+        e.messages
+            .line()
             .contains("Unfinished file operations weren't checked"),
         "{}",
-        e.status
+        e.messages.line()
     );
     Ok(())
 }
@@ -460,7 +464,7 @@ fn a_photo_shown_at_half_size_when_it_moves_is_opened_again_from_its_new_file() 
     })
     .unwrap();
     e.events(&ctx);
-    assert_ne!(e.status, "a.RAF: no such file");
+    assert_ne!(e.messages.line(), "a.RAF: no such file");
     assert_ne!(e.load.id(), opening, "opened again where it is now");
     assert_eq!(e.document.catalog_photo, Some(a));
     assert_ne!(e.document.path.as_deref(), Some(old.as_path()));
@@ -512,7 +516,7 @@ fn photos_dropped_on_a_folder_with_no_catalog_folder_move_into_it() -> anyhow::R
     assert!(d.path().join("photos/2024/a.RAF").is_file());
     assert_eq!(at(&e, &d, a), "2024/a.RAF");
     assert!(folder(&e, "2024").is_some(), "now a catalog folder");
-    assert_eq!(e.status, "Moved 1 photo to 2024");
+    assert_eq!(e.messages.line(), "Moved 1 photo to 2024");
     Ok(())
 }
 

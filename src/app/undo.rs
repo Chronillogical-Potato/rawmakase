@@ -318,11 +318,11 @@ impl Editor {
                     Ok(()) => {}
                     // Nothing to return to: the command is used up, not retried.
                     Err(e @ super::sync::SyncRestoreError::PhotoRemoved) => {
-                        self.status = format!("{verb} Sync Settings: {e}");
+                        self.messages.fail(format!("{verb} Sync Settings: {e}"));
                         return true;
                     }
                     Err(e) => {
-                        self.status = format!("{verb} failed: {e}");
+                        self.messages.fail(format!("{verb} failed: {e}"));
                         return false;
                     }
                 }
@@ -333,11 +333,11 @@ impl Editor {
                 self.refresh_previews(&changed);
                 // Written back, or with no edit at all.
                 self.reopen_synced(&changed);
-                self.status = format!(
+                self.messages.note(format!(
                     "{verb} {} ({})",
                     sync.change.name(),
                     super::widgets::plural(sync.edits.len(), "photo", "photos")
-                );
+                ));
                 true
             }
             Command::Develop {
@@ -368,12 +368,13 @@ impl Editor {
                     self.document.edit.save_state_mut().mark_changed();
                     self.ensure_analysis();
                     self.schedule();
-                    self.status = format!("{verb} in Develop");
+                    self.messages.note(format!("{verb} in Develop"));
                     return true;
                 }
                 // The photo was closed since: save the state and open it.
                 let Some(id) = *photo else {
-                    self.status = format!("{verb}: that photo is no longer open");
+                    self.messages
+                        .warn(format!("{verb}: that photo is no longer open"));
                     return true;
                 };
                 // The open photo is saved first, so a failure leaves both
@@ -385,7 +386,8 @@ impl Editor {
                     return false;
                 };
                 let Some(path) = library.photo(id).map(|p| p.path.clone()) else {
-                    self.status = format!("{verb}: that photo is no longer in the catalog");
+                    self.messages
+                        .warn(format!("{verb}: that photo is no longer in the catalog"));
                     return true;
                 };
                 let saved = library
@@ -403,7 +405,7 @@ impl Editor {
                         )
                     });
                 if let Err(e) = saved {
-                    self.status = format!("{verb} failed: {e}");
+                    self.messages.fail(format!("{verb} failed: {e}"));
                     return false;
                 }
                 self.develop_catalog_photo(id);
@@ -423,7 +425,7 @@ impl Editor {
         write: impl FnOnce(&mut Library) -> Result<()>,
     ) -> bool {
         // Leaving the open photo saves it first; if that fails, the command
-        // stays and the save error stays on the status line.
+        // stays and the save error stays on the top bar.
         if !self.flush() {
             return false;
         }
@@ -431,7 +433,7 @@ impl Editor {
             return false;
         };
         if let Err(e) = write(library) {
-            self.status = format!("{verb} failed: {e}");
+            self.messages.fail(format!("{verb} failed: {e}"));
             return false;
         }
         match develop {
@@ -443,11 +445,7 @@ impl Editor {
                 }
             }
         }
-        self.status = format!("{verb} {summary}");
-        // The Library's status line shows its own message first.
-        if let Some(library) = &mut self.library {
-            library.message = self.status.clone();
-        }
+        self.messages.note(format!("{verb} {summary}"));
         true
     }
     /// Shows `photo` in Develop, keeping its edit when it is already open.

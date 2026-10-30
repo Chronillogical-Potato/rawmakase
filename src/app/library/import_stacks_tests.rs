@@ -112,7 +112,11 @@ fn bursts_of_photos_added_are_stacked_once_in_one_undo_step() -> Result<()> {
     assert_eq!(pending(&library), 0);
     let done = library.take_stack_done();
     assert_eq!(done.len(), 1, "one undo step");
-    assert!(library.message.contains("1 stack"), "{}", library.message);
+    assert!(
+        library.messages.line().contains("1 stack"),
+        "{}",
+        library.messages.line()
+    );
     // What the files said is kept for Auto-Stack.
     assert_eq!(library.session.catalog.sequences()?.len(), ids.len());
     // Undone, it stays undone: nothing is to be done or read again.

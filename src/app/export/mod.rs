@@ -2,7 +2,7 @@
 //! rendering, file writing) in `crate::export`. Every export, of one photo or the
 //! whole selection, goes through the app's one export queue and runs while you keep
 //! editing; the top bar shows its progress, and what could not be exported stays
-//! there until it is read.
+//! there until it is dismissed.
 mod dialog;
 mod watermark_editor;
 
@@ -107,12 +107,25 @@ impl Summary {
         }
         line
     }
-    fn add(&mut self, other: Summary) {
-        self.exported += other.exported;
-        self.total += other.total;
-        self.noted += other.noted;
-        self.problems.extend(other.problems);
-        self.notes.extend(other.notes);
+    /// What it has to say photo by photo, one per line.
+    fn details(&self) -> String {
+        let mut lines = Vec::new();
+        for (title, rows) in [
+            ("Not exported", &self.problems),
+            ("Exported, with notes", &self.notes),
+        ] {
+            if !rows.is_empty() {
+                lines.push(title.to_string());
+                lines.extend(
+                    rows.iter()
+                        .map(|(name, reason)| format!("{name}: {reason}")),
+                );
+            }
+        }
+        lines.join(
+            "
+",
+        )
     }
 }
 
@@ -129,10 +142,6 @@ pub(super) struct Exports {
     pending: Option<Pending>,
     queue: Option<Queue>,
     queued: HashMap<u64, Queued>,
-    /// The last export's report, while it has something to say.
-    summary: Option<Summary>,
-    /// The Problem Exporting Files window is open.
-    report: bool,
     /// The Watermark Editor, over the dialog.
     watermark_editor: Option<watermark_editor::WatermarkEditor>,
     /// Saved watermarks, read when the dialog opens and after the editor
@@ -202,7 +211,6 @@ impl Editor {
             || self.exports.watermark_editor.is_some()
             || self.exports.name_editor.is_some()
             || self.exports.waiting.is_some()
-            || self.exports.report
     }
     /// An export is running or waiting.
     pub(super) fn exporting(&self) -> bool {
@@ -258,7 +266,8 @@ impl Editor {
             _ if shown && open.is_none() => {
                 let source = self.document.path.clone().unwrap_or_default();
                 if !source.is_file() {
-                    self.status = format!("{} can't be exported: Offline", source.display());
+                    self.messages
+                        .warn(format!("{} can't be exported: Offline", source.display()));
                     return None;
                 }
                 scope.chosen = 1;
@@ -280,22 +289,25 @@ impl Editor {
             _ => {}
         }
         if scope.photos.is_empty() {
-            self.status = match scope.left_out.as_slice() {
+            let text: String = match scope.left_out.as_slice() {
                 [] => "Select a photo to export".into(),
                 [(name, why)] => format!("{name} can't be exported: {why}"),
                 left_out => format!("None of the {} photos can be exported", left_out.len()),
             };
+            self.messages.warn(text);
             return None;
         }
         if scope.photos.iter().any(|p| p.open)
             && let Some(why) = self.open_photo_unready()
         {
-            self.status = format!("Export waits for the open photo: {why}");
+            self.messages
+                .warn(format!("Export waits for the open photo: {why}"));
             return None;
         }
         // Metadata typed in the Library goes in the names and the files.
         if !self.commit_library_drafts() {
-            self.status = format!("Export stopped: {}", self.status);
+            self.messages
+                .fail(format!("Export stopped: {}", self.messages.line()));
             return None;
         }
         // What the names are made from, as the catalog has it now, in one
@@ -312,7 +324,9 @@ impl Editor {
                     }
                 }
                 Err(e) => {
-                    self.status = format!("Export stopped: the catalog could not be read: {e:#}");
+                    self.messages.fail(format!(
+                        "Export stopped: the catalog could not be read: {e:#}"
+                    ));
                     return None;
                 }
             }
@@ -394,7 +408,9 @@ impl Editor {
         match failed {
             None => self.export(settings),
             Some(why) => {
-                self.status = format!("Photo info could not be read for the file names: {why}");
+                self.messages.warn(format!(
+                    "Photo info could not be read for the file names: {why}"
+                ));
                 self.exports.draft = settings;
                 self.exports.watermarks = crate::watermark::presets();
                 self.exports.dialog = true;
@@ -483,7 +499,7 @@ impl Editor {
             self.exports.read.cancel();
             self.exports.waiting = None;
             self.exports.scope = Scope::default();
-            self.status = "Export cancelled".into();
+            self.messages.note("Export cancelled");
         }
     }
 
@@ -544,7 +560,7 @@ impl Editor {
         let values = match values {
             Ok(values) => values,
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 return None;
             }
         };
@@ -565,7 +581,8 @@ impl Editor {
         if !self.exports.unsaved_settings
             && let Err(e) = settings.save()
         {
-            self.status = format!("Export settings not saved: {e:#}");
+            self.messages
+                .fail(format!("Export settings not saved: {e:#}"));
         }
         let scope = std::mem::take(&mut self.exports.scope);
         // Its names are made from what the scope has now.
@@ -574,7 +591,8 @@ impl Editor {
             match watermark_for(&settings.watermark_name) {
                 Some(w) => Some(w),
                 None => {
-                    self.status = format!("Watermark not found: {}", settings.watermark_name);
+                    self.messages
+                        .fail(format!("Watermark not found: {}", settings.watermark_name));
                     return;
                 }
             }
@@ -589,7 +607,9 @@ impl Editor {
         let batch = match self.batch_photos(&scope, unsaved) {
             Ok(batch) => batch,
             Err(e) => {
-                self.status = format!("Export stopped: the catalog could not be read: {e:#}");
+                self.messages.fail(format!(
+                    "Export stopped: the catalog could not be read: {e:#}"
+                ));
                 return;
             }
         };
@@ -651,7 +671,6 @@ impl Editor {
         match batch::plan(&pending.batch, &pending.settings, answer) {
             Ok(plan) => {
                 let names = pending.batch.iter().map(|p| p.name.clone()).collect();
-                let total = pending.batch.len();
                 let after = pending.settings.after_export;
                 let batch = batch::Batch {
                     photos: pending.batch,
@@ -671,9 +690,8 @@ impl Editor {
                         after,
                     },
                 );
-                self.status = format!("Exporting {}…", plural(total, "photo", "photos"));
             }
-            Err(Unplanned::NoFolder) => self.status = "Choose a folder to export to".into(),
+            Err(Unplanned::NoFolder) => self.messages.warn("Choose a folder to export to"),
             Err(Unplanned::Conflicts(conflicts)) => {
                 pending.conflicts = conflicts;
                 self.exports.pending = Some(pending);
@@ -702,45 +720,49 @@ impl Editor {
         let folders = folders(exported);
         for path in &shown {
             if let Err(e) = crate::platform::reveal::reveal(path) {
-                self.status = format!("{} · exported files not shown: {e:#}", self.status);
+                self.messages
+                    .warn(format!("Exported files not shown: {e:#}"));
                 return;
             }
         }
         if folders > shown.len() {
-            self.status = format!(
+            let line = format!(
                 "{} · showing {} of the {folders} folders exported to",
-                self.status,
+                self.messages.line(),
                 shown.len()
             );
+            self.messages.note(line);
         }
     }
 
-    /// A finished batch: the status line says how it went, and what could not be
+    /// A finished batch: the top bar says how it went, and what could not be
     /// exported stays in the top bar until it is read.
     pub(super) fn batch_exported(&mut self, ticket: u64, outcomes: Vec<Outcome>) {
         let Some(queued) = self.exports.queued.remove(&ticket) else {
             return;
         };
         let (summary, exported) = summarize(&queued, &outcomes);
-        // One photo exported with nothing to say is named in the status line.
+        // One photo exported with nothing to say is named in the top bar.
         let single = (summary.total == 1 && summary.noted == 0)
             .then(|| exported.first().cloned())
             .flatten();
-        self.status = match single {
-            Some(path) => format!("Exported {}", path.display()),
-            None => summary.line(),
+        match single {
+            Some(path) => {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                self.messages
+                    .done_with_detail(format!("Exported {name}"), path.display().to_string());
+            }
+            None if !summary.problems.is_empty() => self
+                .messages
+                .fail_with_detail(summary.line(), summary.details()),
+            None if !summary.notes.is_empty() => self
+                .messages
+                .warn_with_detail(summary.line(), summary.details()),
+            None => self.messages.done(summary.line()),
         };
         // After the summary, so a file manager that can't be opened is said.
         if queued.after == crate::export_settings::AfterExport::Show {
             self.show_exported(&exported);
-        }
-        // Unread reports add up until they are dismissed: a later export that went
-        // well never hides an earlier one that did not.
-        if !summary.problems.is_empty() || !summary.notes.is_empty() {
-            match &mut self.exports.summary {
-                Some(unread) => unread.add(summary),
-                None => self.exports.summary = Some(summary),
-            }
         }
     }
 
@@ -752,7 +774,6 @@ impl Editor {
         let palette = theme::palette(ui.ctx());
         let status = self.exports.queue.as_ref().map(Queue::status);
         let Some((ticket, progress)) = status.as_ref().and_then(|s| s.running) else {
-            self.export_summary(ui);
             return;
         };
         let waiting = status.map(|s| s.waiting).unwrap_or_default();
@@ -819,96 +840,6 @@ impl Editor {
             && let Some(queue) = &self.exports.queue
         {
             queue.cancel(ticket);
-        }
-    }
-
-    /// The last export's report line, which opens Problem Exporting Files.
-    fn export_summary(&mut self, ui: &mut egui::Ui) {
-        let Some(summary) = &self.exports.summary else {
-            return;
-        };
-        let line = egui::RichText::new(summary.line())
-            .size(text::SMALL)
-            .color(Color32::from_rgb(230, 170, 100));
-        if ui
-            .add(egui::Button::new(line).frame(false))
-            .on_hover_text("Show what was not exported")
-            .clicked()
-        {
-            self.exports.report = true;
-        }
-    }
-
-    /// Lightroom's Problem Exporting Files: the photos not exported, by reason, and
-    /// the notes on those that were.
-    pub(super) fn export_report(&mut self, ctx: &egui::Context) {
-        let palette = theme::palette(ctx);
-        if !self.exports.report {
-            return;
-        }
-        let Some(summary) = self.exports.summary.clone() else {
-            self.exports.report = false;
-            return;
-        };
-        let mut close = false;
-        let mut dismiss = false;
-        let response = egui::Modal::new(egui::Id::new("export-report"))
-            .frame(
-                super::widgets::modal_frame(&palette)
-                    .inner_margin(design::margin_same(inset::DIALOG)),
-            )
-            .show(ctx, |ui| {
-                ui.set_width(520.);
-                ui.label(
-                    egui::RichText::new("Problem Exporting Files")
-                        .size(text::TITLE)
-                        .color(palette.tone(Tone::STRONG)),
-                );
-                ui.add_space(space::S);
-                if !summary.problems.is_empty() {
-                    ui.label(
-                        egui::RichText::new("Some export operations were not performed.")
-                            .size(text::LABEL)
-                            .color(palette.tone(Tone::LABEL)),
-                    );
-                }
-                ui.add_space(space::M);
-                egui::ScrollArea::vertical()
-                    .max_height(320.)
-                    .show(ui, |ui| {
-                        for (title, rows) in [
-                            ("Not exported", &summary.problems),
-                            ("Exported, with notes", &summary.notes),
-                        ] {
-                            if rows.is_empty() {
-                                continue;
-                            }
-                            ui.label(
-                                egui::RichText::new(title)
-                                    .size(text::LABEL)
-                                    .color(palette.tone(Tone::TEXT)),
-                            );
-                            for (name, reason) in rows {
-                                ui.label(
-                                    egui::RichText::new(format!("{name}: {reason}"))
-                                        .size(text::LABEL)
-                                        .color(palette.tone(Tone::SECONDARY)),
-                                );
-                            }
-                            ui.add_space(space::M);
-                        }
-                    });
-                ui.add_space(space::L);
-                ui.horizontal(|ui| {
-                    dismiss = ui.button("Dismiss").clicked();
-                    close = super::widgets::primary_button(ui, "OK").clicked();
-                });
-            });
-        if dismiss {
-            self.exports.summary = None;
-        }
-        if close || dismiss || response.should_close() {
-            self.exports.report = false;
         }
     }
 }

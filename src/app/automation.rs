@@ -183,7 +183,8 @@ impl Editor {
                 }
                 message => {
                     if let Err(error) = self.control_messages(vec![message], ctx) {
-                        self.status = format!("Control surface: {}", error.message);
+                        self.messages
+                            .warn(format!("Control surface: {}", error.message));
                     }
                 }
             }

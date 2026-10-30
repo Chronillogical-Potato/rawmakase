@@ -17,7 +17,8 @@ impl Library {
         let polled = self.session.poll_checksums();
         if let Some(e) = polled.error {
             // Read again after the next online check.
-            self.message = format!("Checksums could not be saved: {e}");
+            self.messages
+                .warn(format!("Checksums could not be saved: {e}"));
         }
         if polled.start_again {
             self.start_checksums();

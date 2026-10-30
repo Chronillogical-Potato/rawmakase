@@ -210,7 +210,8 @@ impl Library {
                     .clicked()
                         && let Err(e) = self.show_quick()
                     {
-                        self.message = format!("Quick Collection unavailable: {e}");
+                        self.messages
+                            .warn(format!("Quick Collection unavailable: {e}"));
                     }
                     let imported = self.session.previous_import.len();
                     if imported > 0
@@ -340,8 +341,10 @@ impl Library {
                                 }
                                 Some(TreeAction::Reveal(path)) => {
                                     if let Err(e) = crate::platform::reveal::reveal(&path) {
-                                        self.message =
-                                            format!("Could not show {}: {e}", path.display());
+                                        self.messages.fail(format!(
+                                            "Could not show {}: {e}",
+                                            path.display()
+                                        ));
                                     }
                                 }
                                 Some(TreeAction::Drop {

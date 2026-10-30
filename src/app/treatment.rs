@@ -70,7 +70,8 @@ impl Editor {
                 treatment,
                 recipe: self.document.edit.recipe().clone(),
             });
-            self.status = "Converting to Black & White once the photo is decoded".into();
+            self.messages
+                .note("Converting to Black & White once the photo is decoded");
             return;
         }
         let first = colors.as_ref().map(PhotoColors::auto_mix);

@@ -299,6 +299,7 @@ above rather than implementing SQL, file formats or pixel processing.
 
 | File | Responsibility |
 | --- | --- |
+| [messages.rs](../src/app/messages.rs) | What the app says to the user, by level: `note` (status line), `done`, `warn` and `fail` (top bar, a failure until dismissed), and `running_work`, the running work shown beside them, read each frame from what owns it. |
 | [workspace.rs](../src/app/workspace.rs) | Frame composition, workspace switching, shortcuts, filmstrip, status, pending work, autosave and close handling. |
 | [toolbar.rs](../src/app/toolbar.rs) | Develop toolbar and menus. |
 | [settings_transfer.rs](../src/app/settings_transfer.rs) | Copy Settings and its dialog, Paste Settings and Paste from Previous, through `model::settings_groups`. |

@@ -720,7 +720,7 @@ impl Editor {
                 let status = self
                     .catalog_work
                     .clone()
-                    .unwrap_or_else(|| self.status.clone());
+                    .unwrap_or_else(|| self.messages.line().to_string());
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.), egui::Sense::hover());
                     super::widgets::paint_spinner(ui, rect, Some(palette.tone(Tone::LABEL)));

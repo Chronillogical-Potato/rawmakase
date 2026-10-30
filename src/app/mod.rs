@@ -98,7 +98,8 @@ pub(crate) struct Editor {
     /// How the Library showed its photos, as last written to the session;
     /// returned to whenever the catalog is loaded.
     saved_layout: crate::app::session::LibraryLayout,
-    status: String,
+    /// What the status line and the top bar say.
+    messages: messages::Messages,
     /// What a running catalog import or open is doing.
     catalog_work: Option<String>,
     /// Progress of a running profile or preset import.
@@ -116,10 +117,6 @@ pub(crate) struct Editor {
     close_anyway: bool,
     /// The dialog blocking the editor, if one is open.
     modal: Option<Modal>,
-    /// A photo Develop could not open and why, until the user dismisses it.
-    /// Its own field: a photo dropped on the window can be refused while
-    /// a `modal` is open.
-    not_editable: Option<(String, String)>,
     /// Cmd+Z across Library and Develop.
     undo_log: undo::UndoLog,
     /// Select Subject and Select Background: the running selection, the selection
@@ -184,7 +181,7 @@ impl Editor {
         editor.controls = automation::Hub::start(&cc.egui_ctx);
         // 1:1 previews left unused past the chosen time go, as in Lightroom.
         editor.expire_previews();
-        editor.updates.launched(launch, &mut editor.status);
+        editor.updates.launched(launch, &mut editor.messages);
         cc.egui_ctx
             .all_styles_mut(|style| text.apply_to_visuals(&mut style.visuals));
         editor.themes.text = text;
@@ -343,7 +340,7 @@ impl Editor {
             last_path: session.last_path.clone(),
             prefetch_cancel: Default::default(),
             demosaic: session.demosaic,
-            status: "Pick a photo in the Library to begin".into(),
+            messages: messages::Messages::starting_with("Pick a photo in the Library to begin"),
             catalog_work: None,
             importing: None,
             close_confirm: false,
@@ -351,7 +348,6 @@ impl Editor {
             quit_by: None,
             close_anyway: false,
             modal: None,
-            not_editable: None,
             undo_log: Default::default(),
             selection: Default::default(),
             lensfun: lensfun::Lensfun::suggesting(!session.no_lensfun_suggestions),
@@ -913,6 +909,7 @@ pub(crate) mod library;
 mod lut_import;
 mod magnifier;
 mod mask_tool;
+mod messages;
 mod minimap;
 mod monitor;
 mod naming;

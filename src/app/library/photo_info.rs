@@ -91,7 +91,8 @@ impl Library {
             self.start_photo_info();
         }
         if let Some(e) = polled.error {
-            self.message = format!("Photo info could not be saved: {e}");
+            self.messages
+                .warn(format!("Photo info could not be saved: {e}"));
         }
         if polled.saved > 0 {
             self.info_saves += 1;

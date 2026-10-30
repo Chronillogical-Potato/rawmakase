@@ -730,7 +730,7 @@ impl Editor {
         {
             return Err(format!(
                 "the open photo's edit could not be saved: {}",
-                self.status
+                self.messages.line()
             ));
         }
         let (items, skipped) = self.build_items(ids, kind, Files::Check)?;
@@ -869,10 +869,10 @@ impl Editor {
 
     /// The thumbnail menu's Build Standard-Sized Previews.
     pub(super) fn build_previews_from_menu(&mut self, ids: &[PhotoId], kind: PreviewKind) {
-        self.status = match self.build_previews(ids, kind) {
-            Ok(queued) => queued_message(queued),
-            Err(e) => format!("Previews not built: {e}"),
-        };
+        match self.build_previews(ids, kind) {
+            Ok(queued) => self.messages.note(queued_message(queued)),
+            Err(e) => self.messages.fail(format!("Previews not built: {e}")),
+        }
     }
 
     /// Discard 1:1 Previews, or Standard and 1:1: the files' built previews of
@@ -898,10 +898,10 @@ impl Editor {
         } else {
             "previews"
         };
-        self.status = format!(
+        self.messages.note(format!(
             "Discarded the {which} of {}",
             plural(ids.len(), "photo", "photos")
-        );
+        ));
     }
 
     /// A photo leaving the catalog takes its requests along, so a later photo
@@ -985,7 +985,7 @@ impl Editor {
                     // The worker is gone: nothing more will finish.
                     builds.builder = None;
                     builds.catalog = None;
-                    self.status = "Previews stopped being built".into();
+                    self.messages.fail("Previews stopped being built");
                     break;
                 }
             }

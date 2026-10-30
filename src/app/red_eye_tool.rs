@@ -232,7 +232,8 @@ impl Editor {
     /// fraction) of image position `center`, or says none was found.
     pub(super) fn add_red_eye(&mut self, center: [f32; 2], size: f32) {
         if self.document.edit.recipe().red_eye.len() >= crate::model::red_eye::MAX_OPS {
-            self.status = "Too many red eye corrections on this photo".into();
+            self.messages
+                .warn("Too many red eye corrections on this photo");
             return;
         }
         let Some(im) = self.document.full() else {
@@ -275,7 +276,7 @@ impl Editor {
                 };
                 op.fit_catchlight();
                 if let Err(e) = op.validate() {
-                    self.status = e.to_string();
+                    self.messages.fail(e.to_string());
                     return;
                 }
                 self.document.edit.recipe_mut().red_eye.push(op);
@@ -283,12 +284,10 @@ impl Editor {
                 self.select_red_eye(Some(self.document.edit.recipe().red_eye.len() - 1));
             }
             // Lightroom's warning.
-            Err(_) => {
-                self.status = format!(
-                    "Unable to find {}. Be sure to use an area that includes the entire eye.",
-                    kind.name().to_lowercase()
-                )
-            }
+            Err(_) => self.messages.warn(format!(
+                "Unable to find {}. Be sure to use an area that includes the entire eye.",
+                kind.name().to_lowercase()
+            )),
         }
     }
     /// Selects correction `i`; its type becomes the one new corrections get, as the
