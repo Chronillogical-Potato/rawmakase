@@ -54,16 +54,20 @@ fn an_export_ends_its_activity_and_offers_the_folders_removal() -> anyhow::Resul
     };
     assert_eq!(exported.removal.as_ref(), Some(&removal));
     assert!(
-        editor.status.contains("Exported 1 photo"),
+        editor.messages.line().contains("Exported 1 photo"),
         "{}",
-        editor.status
+        editor.messages.line()
     );
 
     // A failure, or a panic, ends it too.
     assert!(editor.activity.begin_dialog());
     editor.catalog_exported(Err("Stopped unexpectedly: boom".into()));
     assert!(!editor.activity.is_busy());
-    assert!(editor.status.contains("boom"), "{}", editor.status);
+    assert!(
+        editor.messages.line().contains("boom"),
+        "{}",
+        editor.messages.line()
+    );
     Ok(())
 }
 
@@ -88,9 +92,12 @@ fn an_exported_folder_changed_since_is_not_removed() -> anyhow::Result<()> {
     let session = &editor.library.as_ref().unwrap().session;
     assert_eq!(session.photos.len(), 2);
     assert!(
-        editor.status.contains("changed since it was exported"),
+        editor
+            .messages
+            .line()
+            .contains("changed since it was exported"),
         "{}",
-        editor.status
+        editor.messages.line()
     );
 
     let library = editor.library.as_mut().unwrap();

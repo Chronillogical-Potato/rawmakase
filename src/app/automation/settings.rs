@@ -571,13 +571,17 @@ impl Editor {
         if settings != self.controls.settings && !ctx.text_edit_focused() {
             match settings.save() {
                 Ok(()) => self.controls.apply(settings),
-                Err(e) => self.status = format!("Automation settings not saved: {e:#}"),
+                Err(e) => self
+                    .messages
+                    .fail(format!("Automation settings not saved: {e:#}")),
             }
         } else if settings != self.controls.settings {
             // Persist text edits on every change; defer listener replacement until focus leaves.
             match settings.save() {
                 Ok(()) => self.controls.settings = settings,
-                Err(e) => self.status = format!("Automation settings not saved: {e:#}"),
+                Err(e) => self
+                    .messages
+                    .fail(format!("Automation settings not saved: {e:#}")),
             }
         }
         if !ctx.text_edit_focused()

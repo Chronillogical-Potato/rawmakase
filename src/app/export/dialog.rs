@@ -40,7 +40,6 @@ impl Editor {
         self.watermark_editor(ctx);
         self.name_editor_window(ctx);
         self.export_waiting(ctx);
-        self.export_report(ctx);
     }
 
     fn export_dialog(&mut self, ctx: &egui::Context) {
@@ -208,7 +207,7 @@ impl Editor {
             // Return too waits for the names' files.
             Some(true) if reading => {}
             Some(true) if self.exports.draft.target(&source).is_none() => {
-                self.status = "Choose a folder to export to".into();
+                self.messages.warn("Choose a folder to export to");
             }
             Some(true) => {
                 self.exports.dialog = false;
@@ -589,7 +588,7 @@ impl Editor {
         };
         match choice {
             Some(answer) => self.plan_export(pending, Some(answer)),
-            None => self.status = "Export cancelled".into(),
+            None => self.messages.note("Export cancelled"),
         }
     }
 }

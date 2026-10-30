@@ -250,7 +250,7 @@ impl Editor {
             return;
         }
         if let Err(e) = library.session.catalog.rename_computer(&view.computer) {
-            self.status = format!("Computer not renamed: {e:#}");
+            self.messages.fail(format!("Computer not renamed: {e:#}"));
         }
     }
     /// Clears a location, then opens the catalog again as relinking does,
@@ -551,15 +551,17 @@ pub(super) fn reopened(
                 if relinked {
                     l.wait_for_availability();
                     let available = l.available_count();
-                    l.message = format!(
+                    let said = format!(
                         "Folder location changed. {available} of {} photos are available.",
                         l.session.photos.len()
                     );
                     if available == 0 {
-                        l.message.push_str(
-                            " No files matched this location; check that the selected \
-                             folder contains the expected subfolders.",
-                        );
+                        l.messages.warn(format!(
+                            "{said} No files matched this location; check that the selected \
+                             folder contains the expected subfolders."
+                        ));
+                    } else {
+                        l.messages.done(said);
                     }
                 }
                 folder_added(&mut l, report, conflicts);
@@ -594,6 +596,8 @@ pub(super) fn folder_added(
         }
     }
     if !summary.is_empty() {
-        library.set_message_with_detail(format!("Folder added · {}", summary.join(" · ")), detail);
+        library
+            .messages
+            .warn_with_detail(format!("Folder added · {}", summary.join(" · ")), detail);
     }
 }

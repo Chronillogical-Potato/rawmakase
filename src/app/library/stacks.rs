@@ -211,14 +211,15 @@ impl Library {
         if self.filters.shows_stacks() {
             self.stack_action(action, ids);
         } else {
-            self.message = "Stacks show in folders and All Photographs, not here.".into();
+            self.messages
+                .warn("Stacks show in folders and All Photographs, not here.");
         }
     }
     /// Carries out a stack command on `ids`, the photos it was chosen for
-    /// in display order; a failure is said on the status line.
+    /// in display order; a failure is said on the top bar.
     pub(in crate::app) fn stack_action(&mut self, action: StackAction, ids: Vec<PhotoId>) {
         if let Err(e) = self.try_stack_action(action, ids) {
-            self.message = format!("Stacks not changed: {e:#}");
+            self.messages.fail(format!("Stacks not changed: {e:#}"));
         }
     }
     fn try_stack_action(&mut self, action: StackAction, ids: Vec<PhotoId>) -> Result<()> {
@@ -324,7 +325,7 @@ impl Library {
         let place_before = self.place();
         let committed = self.session.change_stacks(&change)?;
         if self.stacks_changed(committed.listed) {
-            self.message = summary.clone();
+            self.messages.note(summary.clone());
         }
         let StacksChanged { before, after } = committed.value;
         self.stack_done.push(StackCommand {
@@ -359,17 +360,20 @@ impl Library {
         if place.collapsed
             && let Err(e) = self.set_stacks_collapsed(&[place.id], false)
         {
-            self.message = format!("The stack could not be expanded: {e:#}");
+            self.messages
+                .fail(format!("The stack could not be expanded: {e:#}"));
         }
     }
     /// Shows stacks as they are now. A photo of a stack that was active
     /// and is hidden now hands over to the photo its stack shows. False,
-    /// with the status line saying so, when the stacks saved could not be
+    /// with the top bar saying so, when the stacks saved could not be
     /// read again.
     pub(super) fn stacks_changed(&mut self, listed: Result<()>) -> bool {
         let read = listed.is_ok();
         if let Err(e) = listed {
-            self.message = format!("Stacks were saved but could not be read again: {e:#}");
+            self.messages.fail(format!(
+                "Stacks were saved but could not be read again: {e:#}"
+            ));
         }
         let active = self.selection.active.and_then(|id| {
             let photo = self.photo(id)?;
@@ -462,7 +466,8 @@ impl Library {
             let mut stored = match self.session.catalog.sequences() {
                 Ok(stored) => stored,
                 Err(e) => {
-                    self.message = format!("Camera bursts could not be read: {e:#}");
+                    self.messages
+                        .fail(format!("Camera bursts could not be read: {e:#}"));
                     Default::default()
                 }
             };
@@ -516,7 +521,8 @@ impl Library {
             && let Err(e) = self.session.catalog.save_sequences(&save)
         {
             // Still used while the window is open; read again next time.
-            self.message = format!("Camera bursts could not be saved: {e:#}");
+            self.messages
+                .fail(format!("Camera bursts could not be saved: {e:#}"));
         }
         sequences.reader.is_some()
     }
@@ -613,7 +619,7 @@ impl Library {
             return;
         }
         if let Err(e) = self.auto_stack_now(stacks) {
-            self.message = format!("Stacks not changed: {e:#}");
+            self.messages.fail(format!("Stacks not changed: {e:#}"));
         }
     }
     /// Auto-Stack's Stack: the stacks the window showed, as one command.

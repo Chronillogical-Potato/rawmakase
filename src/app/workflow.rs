@@ -1,3 +1,4 @@
+use super::messages::Topic;
 use super::worker::{LoadJob, RenderJob};
 use super::{Editor, state::Picture};
 use crate::model::recipe::Recipe;
@@ -13,7 +14,7 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Flushed {
     Saved,
-    /// Not saved: the error is on the status line.
+    /// Not saved: the error is on the top bar.
     Failed,
     /// Still being saved when time ran out.
     Late,
@@ -35,9 +36,9 @@ impl Editor {
         if path.extension().is_some_and(|e| e == "rawmakase") {
             self.load_catalog(path, &self.context.clone());
         } else if path.extension().is_some_and(|e| e == "lrcat") {
-            self.status =
-                "Use Library → Import Lightroom catalog to select a new RAWmakase catalog destination"
-                    .into();
+            self.messages.warn(
+                "Use Library → Import Lightroom catalog to select a new RAWmakase catalog destination",
+            );
             self.module = Module::Library;
         }
     }
@@ -97,12 +98,16 @@ impl Editor {
         if let Some(photo) = photo {
             self.request_stand_ins(id, photo, neighbour);
         }
-        self.status = if crate::storage::is_raw(&path) {
+        // What failed for the photo left says nothing of this one.
+        self.messages.settle(Topic::Load);
+        self.messages.settle(Topic::Render);
+        let text: String = if crate::storage::is_raw(&path) {
             "Reading RAW…"
         } else {
             "Reading photo…"
         }
         .into();
+        self.messages.note(text);
         self.loader.submit(LoadJob {
             id,
             path,
@@ -131,12 +136,12 @@ impl Editor {
         library.navigate(id, step).filter(|n| *n != id)
     }
     /// Saves a Copy Name or metadata field still being typed in the Library;
-    /// false, with the error on the status line, if it could not be saved.
+    /// false, with the error on the top bar, if it could not be saved.
     pub(super) fn commit_library_drafts(&mut self) -> bool {
         if let Some(library) = &mut self.library
             && let Err(e) = library.commit_drafts()
         {
-            self.status = format!("Not saved: {e}");
+            self.messages.fail(format!("Not saved: {e}"));
             return false;
         }
         true
@@ -195,7 +200,8 @@ impl Editor {
                 }
                 Err(e) => {
                     self.document.edit.save_state_mut().failed(e.to_string());
-                    self.status = format!("Edits not saved: {e}");
+                    self.messages
+                        .fail_on(Topic::Save, format!("Edits not saved: {e}"));
                     return false;
                 }
             }
@@ -286,7 +292,8 @@ impl Editor {
             if submitted.is_err() {
                 let error = "the autosave thread could not start".to_string();
                 self.document.edit.save_state_mut().failed(error.clone());
-                self.status = format!("Edits not saved: {error}");
+                self.messages
+                    .fail_on(Topic::Save, format!("Edits not saved: {error}"));
                 return Flushed::Failed;
             }
             self.document.edit.save_state_mut().saving();
@@ -312,15 +319,18 @@ impl Editor {
         }
         match saved {
             Ok(p) => self.saved_to(&p),
-            Err(e) => self.status = format!("Edits not saved: {e}"),
+            Err(e) => self
+                .messages
+                .fail_on(Topic::Save, format!("Edits not saved: {e}")),
         }
     }
     fn saved_to(&mut self, location: &CatalogLocation) {
+        self.messages.settle(Topic::Save);
         let CatalogLocation::File(path) = location;
-        self.status = format!(
+        self.messages.note(format!(
             "Saved {}",
             path.file_name().unwrap_or_default().to_string_lossy()
-        );
+        ));
     }
     pub(super) fn effective_recipe(&self) -> Recipe {
         let mut r = if self.view.compare.before_only() {

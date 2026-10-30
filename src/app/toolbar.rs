@@ -345,7 +345,7 @@ impl Editor {
             return;
         };
         if let Some(note) = defaults.note {
-            self.status = note;
+            self.messages.note(note);
         }
         self.document.edit.replace(defaults.recipe);
     }

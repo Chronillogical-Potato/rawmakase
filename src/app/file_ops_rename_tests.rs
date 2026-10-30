@@ -51,7 +51,7 @@ fn f2_renames_one_photo_and_its_sidecar_and_the_open_photo_follows() -> anyhow::
     assert!(d.path().join("photos/Keeper.xmp").is_file());
     assert!(!d.path().join("photos/a.RAF").exists());
     assert_eq!(at(&e, &d, a), "Keeper.RAF");
-    assert_eq!(e.status, "Renamed a.RAF to Keeper.RAF");
+    assert_eq!(e.messages.line(), "Renamed a.RAF to Keeper.RAF");
     let open = e.document.path.clone().unwrap();
     assert!(open.ends_with("photos/Keeper.RAF"), "{}", open.display());
     Ok(())
@@ -121,7 +121,7 @@ fn several_photos_are_renamed_in_the_order_they_were_taken() -> anyhow::Result<(
     assert_eq!(at(&e, &d, ids[1]), "Trip-1.RAF");
     assert_eq!(at(&e, &d, ids[2]), "Trip-2.RAF");
     assert_eq!(at(&e, &d, ids[0]), "Trip-3.RAF");
-    assert_eq!(e.status, "Renamed 3 photos");
+    assert_eq!(e.messages.line(), "Renamed 3 photos");
     Ok(())
 }
 
@@ -165,7 +165,7 @@ fn rename_folder_renames_it_on_disk_and_in_the_catalog() -> anyhow::Result<()> {
     assert_eq!(at(&e, &d, a), "Iceland/a.RAF");
     assert_eq!(at(&e, &d, b), "Iceland/day1/b.RAF");
     assert_eq!(folder(&e, "Iceland"), Some(trip), "the same folder");
-    assert_eq!(e.status, "Renamed folder trip to Iceland");
+    assert_eq!(e.messages.line(), "Renamed folder trip to Iceland");
     Ok(())
 }
 
@@ -180,7 +180,11 @@ fn a_folder_name_taken_there_renames_nothing_and_says_why() -> anyhow::Result<()
     settle(&mut e);
     assert!(!e.activity.is_busy());
     assert!(d.path().join("photos/trip/a.RAF").is_file());
-    assert!(e.status.contains("already there"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("already there"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 

@@ -634,11 +634,6 @@ impl Editor {
             },
         );
     }
-    pub(super) fn import_progress(&mut self) {
-        if let Some(progress) = &self.importing {
-            self.status = progress.text();
-        }
-    }
     pub(super) fn imported(&mut self, summary: Summary, ctx: &egui::Context) {
         self.importing = None;
         if summary.imported > 0 {
@@ -669,10 +664,17 @@ impl Editor {
                 ImportKind::Presets => self.reload_presets(ctx),
             }
         }
-        self.status = summary.message();
+        let mut said = summary.message();
         if summary.has_details() {
-            self.status.push_str(": ");
-            self.status.push_str(&summary.details(1));
+            said.push_str(": ");
+            said.push_str(&summary.details(1));
+        }
+        if summary.failures() > 0 && summary.done() == 0 {
+            self.messages.fail(said);
+        } else if summary.failures() > 0 || summary.done() == 0 {
+            self.messages.warn(said);
+        } else {
+            self.messages.done(said);
         }
         self.onboarding.imported(summary);
     }

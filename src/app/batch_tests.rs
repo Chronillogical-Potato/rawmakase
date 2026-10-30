@@ -187,9 +187,11 @@ fn library_auto_settings_key_applies_to_the_whole_selection() -> anyhow::Result<
     assert!(saved(&e, &photos[0]).is_some() && saved(&e, &photos[1]).is_some());
     assert!(saved(&e, &photos[2]).is_none());
     assert!(
-        e.status.starts_with("Auto Settings: 2 photos changed"),
+        e.messages
+            .line()
+            .starts_with("Auto Settings: 2 photos changed"),
         "{}",
-        e.status
+        e.messages.line()
     );
     // Plain U unflags the selection, as before.
     select(&mut e, &ids[2..]);
@@ -200,7 +202,12 @@ fn library_auto_settings_key_applies_to_the_whole_selection() -> anyhow::Result<
     press(&mut e, egui::Key::U, egui::Modifiers::NONE);
     assert!(!e.activity.is_busy());
     let library = e.library.as_ref().unwrap();
-    assert_eq!(library.photo(ids[2]).unwrap().flag, 0, "{}", e.status);
+    assert_eq!(
+        library.photo(ids[2]).unwrap().flag,
+        0,
+        "{}",
+        e.messages.line()
+    );
     // Behind a dialog, the key does nothing.
     e.modal = Some(Modal::RemoveCopy(ids[2]));
     press(&mut e, egui::Key::U, auto);
@@ -248,7 +255,11 @@ fn quick_develop_requests_apply_to_the_selection() -> anyhow::Result<()> {
     // One Undo reverts both.
     e.undo();
     assert!(photos.iter().all(|p| saved(&e, p).is_none()));
-    assert!(e.status.contains("Apply Preset: Bright"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("Apply Preset: Bright"),
+        "{}",
+        e.messages.line()
+    );
     e.quick_develop_request(super::QuickRequest::AutoSettings);
     assert_eq!(e.activity.batch().unwrap().name(), "Auto Settings");
     finish_batch(&mut e);
@@ -350,7 +361,7 @@ fn batch_preset_matches_the_preset_clicked_in_develop() -> anyhow::Result<()> {
             develop,
             "{}: {}",
             presets[i].name,
-            e.status
+            e.messages.line()
         );
     }
     Ok(())
@@ -376,7 +387,11 @@ fn the_open_photo_is_saved_first_and_opens_again() -> anyhow::Result<()> {
     assert_eq!(saved(&e, &photos[0]).unwrap().effects.clarity, 0.4);
     assert!(e.activity.batch().unwrap().cancel());
     finish_batch(&mut e);
-    assert!(e.status.contains("cancelled"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("cancelled"),
+        "{}",
+        e.messages.line()
+    );
     assert_eq!(saved(&e, &photos[0]).unwrap().exposure, 0.);
     assert!(saved(&e, &photos[1]).is_none());
     assert!(!e.load.is_running());

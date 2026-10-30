@@ -92,7 +92,9 @@ impl Library {
                         Some(p) => match self.copy_names.row(ui, p, &mut self.session) {
                             Ok(true) => self.filter(),
                             Ok(false) => {}
-                            Err(e) => self.message = format!("Copy name could not be saved: {e}"),
+                            Err(e) => self
+                                .messages
+                                .fail(format!("Copy name could not be saved: {e}")),
                         },
                         None => {
                             metadata_row(ui, "Copy Name", "");
@@ -156,7 +158,8 @@ impl Library {
                 self.edit_photos(&ids, edit, false).map(|_| ())
             };
             if let Err(e) = done {
-                self.message = format!("Metadata could not be saved: {e}");
+                self.messages
+                    .fail(format!("Metadata could not be saved: {e}"));
             }
             return true;
         }

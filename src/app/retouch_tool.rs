@@ -288,7 +288,7 @@ impl Editor {
     }
     fn push_op(&mut self, mut op: RetouchOp) {
         if self.document.edit.recipe().retouch.len() >= crate::model::retouch::MAX_OPS {
-            self.status = "Too many spots on this photo".into();
+            self.messages.warn("Too many spots on this photo");
             return;
         }
         if op.offset[0].is_nan() {

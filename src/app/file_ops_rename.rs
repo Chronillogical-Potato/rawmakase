@@ -378,7 +378,7 @@ impl Editor {
             return;
         }
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             return;
         }
         let Some(location) = self
@@ -389,7 +389,8 @@ impl Editor {
             return;
         };
         if !self.flush() {
-            self.status = "The open photo's edit could not be saved; nothing was renamed".into();
+            self.messages
+                .fail("The open photo's edit could not be saved; nothing was renamed");
             return;
         }
         if !self.activity.begin_file_change() {
@@ -455,12 +456,12 @@ impl Editor {
         let order = match ordered {
             Ok(order) if !order.photos().is_empty() => order,
             Ok(_) => {
-                self.status = "Nothing to rename".into();
+                self.messages.warn("Nothing to rename");
                 self.release_files();
                 return;
             }
             Err(e) => {
-                self.status = format!("Photos not renamed: {e}");
+                self.messages.fail(format!("Photos not renamed: {e}"));
                 self.release_files();
                 return;
             }
@@ -687,7 +688,9 @@ impl Editor {
             return;
         };
         if several && let Err(e) = self.remember_rename(&r.settings) {
-            self.status = format!("Rename Photos' choices not kept for next time: {e}");
+            self.messages.warn(format!(
+                "Rename Photos' choices not kept for next time: {e}"
+            ));
         }
         let verb = Verb::Rename {
             one: match rows.as_slice() {
@@ -996,7 +999,7 @@ impl Editor {
     /// asks its new name.
     pub(in crate::app) fn rename_folder(&mut self, root: RootId, logical: String) {
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             return;
         }
         let Some(catalog) = self

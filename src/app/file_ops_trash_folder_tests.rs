@@ -104,7 +104,10 @@ fn confirmed_the_folder_goes_and_the_library_leaves_it() -> anyhow::Result<()> {
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
     assert!(!e.activity.is_busy());
-    assert_eq!(e.status, "Moved folder trip to the Trash with 2 photos");
+    assert_eq!(
+        e.messages.line(),
+        "Moved folder trip to the Trash with 2 photos"
+    );
     assert!(trash.join("trip/sub/b.RAF").is_file());
     assert!(!d.path().join("photos/trip").exists());
     let library = e.library.as_ref().unwrap();
@@ -144,7 +147,7 @@ fn an_empty_folder_and_a_changed_one_say_so() -> anyhow::Result<()> {
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
     assert_eq!(
-        e.status,
+        e.messages.line(),
         "Folder trip not moved to the Trash: late.RAF was added to it since you were asked."
     );
     assert!(d.path().join("photos/trip/a.RAF").is_file());
@@ -159,10 +162,11 @@ fn a_root_is_refused_and_an_emptied_root_can_be_removed() -> anyhow::Result<()> 
     settle(&mut e);
     assert!(!e.file_ops.confirming());
     assert!(
-        e.status
+        e.messages
+            .line()
             .contains("A root folder can't be moved to the Trash"),
         "{}",
-        e.status
+        e.messages.line()
     );
     if !ids_proven(&d) {
         return Ok(());
@@ -192,9 +196,11 @@ fn a_root_is_refused_and_an_emptied_root_can_be_removed() -> anyhow::Result<()> 
     assert!(e.library.as_ref().unwrap().session.roots.is_empty());
     assert!(d.path().join("photos").is_dir(), "its folder stays");
     assert!(
-        e.status.contains("Removed photos from the catalog"),
+        e.messages
+            .line()
+            .contains("Removed photos from the catalog"),
         "{}",
-        e.status
+        e.messages.line()
     );
     Ok(())
 }
@@ -241,7 +247,7 @@ fn a_folder_with_no_photos_leaves_the_panel_and_says_so() -> anyhow::Result<()> 
     tap(&mut e, Key::Tab, Modifiers::NONE);
     tap(&mut e, Key::Enter, Modifiers::NONE);
     settle(&mut e);
-    assert_eq!(e.status, "Moved folder trip to the Trash");
+    assert_eq!(e.messages.line(), "Moved folder trip to the Trash");
     assert!(trash.join("trip/a.RAF").is_file());
     assert_eq!(folder(&e, "trip"), None, "read again");
     Ok(())

@@ -23,7 +23,7 @@ impl Library {
     /// Says once, after the catalog opens, how many folders with photos have
     /// none of them on this computer, unless something else is being said.
     fn note_missing_folders(&mut self) {
-        if std::mem::replace(&mut self.missing_noted, true) || !self.message.is_empty() {
+        if std::mem::replace(&mut self.missing_noted, true) || !self.messages.line().is_empty() {
             return;
         }
         // One pass over the photos: whether each folder has one online.
@@ -38,11 +38,11 @@ impl Library {
             .filter(|f| online.get(&f.id) == Some(&false))
             .count();
         if missing > 0 {
-            self.message = format!(
+            self.messages.warn(format!(
                 "{} found on this computer. Locate them in Preferences › Catalog › \
                  Folder locations, or right-click a folder.",
                 super::super::widgets::plural(missing, "folder isn't", "folders aren't")
-            );
+            ));
         }
     }
     pub(super) fn start_capture_times(&mut self) {
@@ -59,7 +59,8 @@ impl Library {
         if let Some(e) = polled.error {
             // Read again after the next online check, which clears the
             // photos tried.
-            self.message = format!("Capture times could not be saved: {e}");
+            self.messages
+                .fail(format!("Capture times could not be saved: {e}"));
         }
         if !polled.saved.is_empty() {
             self.resort_by_capture_time();

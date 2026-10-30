@@ -43,7 +43,7 @@ fn a_folder_moves_into_another_with_its_photos_once_confirmed() -> anyhow::Resul
     assert_eq!(at(&e, &d, a), "2025/day1/a.RAF");
     assert_eq!(at(&e, &d, b), "2025/day1/sub/b.RAF");
     assert_eq!(folder(&e, "2025/day1"), Some(day1), "the same folder");
-    assert_eq!(e.status, "Moved folder day1 into 2025");
+    assert_eq!(e.messages.line(), "Moved folder day1 into 2025");
     Ok(())
 }
 
@@ -72,7 +72,11 @@ fn a_folder_into_itself_is_refused_and_says_why() -> anyhow::Result<()> {
     settle(&mut e);
     assert!(!e.file_ops.confirming());
     assert!(!e.activity.is_busy());
-    assert!(e.status.contains("into itself"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("into itself"),
+        "{}",
+        e.messages.line()
+    );
     assert!(d.path().join("photos/2024/day1/sub/b.RAF").is_file());
     Ok(())
 }
@@ -139,7 +143,7 @@ fn a_folder_with_no_catalog_folder_of_its_own_moves_with_those_below() -> anyhow
     assert!(d.path().join("photos/2025/2024/day2/b.RAF").is_file());
     assert_eq!(at(&e, &d, a), "2025/2024/day1/a.RAF");
     assert_eq!(folder(&e, "2025/2024/day1"), Some(day1), "the same folder");
-    assert_eq!(e.status, "Moved folder 2024 into 2025");
+    assert_eq!(e.messages.line(), "Moved folder 2024 into 2025");
     Ok(())
 }
 
@@ -205,7 +209,7 @@ fn a_folder_moves_into_another_roots_folder_once_confirmed() -> anyhow::Result<(
         d.path().join("elsewhere/trips/day1/a.RAF").canonicalize()?
     );
     assert_eq!(folder(&e, "trips/day1"), Some(day1), "the same folder");
-    assert_eq!(e.status, "Moved folder day1 into trips");
+    assert_eq!(e.messages.line(), "Moved folder day1 into trips");
     Ok(())
 }
 
@@ -310,7 +314,7 @@ fn a_root_moves_into_another_roots_folder_once_confirmed() -> anyhow::Result<()>
         .map(|r| r.0)
         .collect();
     assert_eq!(roots, [other], "the root left");
-    assert_eq!(e.status, "Moved folder photos into trips");
+    assert_eq!(e.messages.line(), "Moved folder photos into trips");
     Ok(())
 }
 
@@ -321,7 +325,11 @@ fn a_root_into_itself_is_refused_and_says_why() -> anyhow::Result<()> {
     settle(&mut e);
     assert!(!e.file_ops.confirming());
     assert!(!e.activity.is_busy());
-    assert!(e.status.contains("into itself"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("into itself"),
+        "{}",
+        e.messages.line()
+    );
     assert!(d.path().join("photos/2024/day1/a.RAF").is_file());
     Ok(())
 }
@@ -367,6 +375,6 @@ fn a_root_located_again_under_a_new_name_is_followed_by_that_name() -> anyhow::R
         e.library.as_ref().unwrap().source_key(),
         format!("root:{other}/trips/renamed/2024/day1")
     );
-    assert_eq!(e.status, "Moved folder renamed into trips");
+    assert_eq!(e.messages.line(), "Moved folder renamed into trips");
     Ok(())
 }

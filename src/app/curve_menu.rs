@@ -48,7 +48,7 @@ impl Editor {
     fn reload_saved_curves(&mut self, store: &SavedCurves) {
         let list = store.list();
         if let Some(error) = list.errors.first() {
-            self.status = format!("Point curve not read: {error}");
+            self.messages.fail(format!("Point curve not read: {error}"));
         }
         self.curves.saved = Some(list.curves);
     }
@@ -160,16 +160,18 @@ impl Editor {
         match store.save(name, &curve) {
             Ok(_) => {
                 let saved = format!("Point curve {} saved", name.trim());
-                self.status.clear();
+                self.messages.clear_line();
                 self.reload_saved_curves(store);
                 // A curve the reload could not read is said too.
-                self.status = if self.status.is_empty() {
-                    saved
+                if self.messages.line().is_empty() {
+                    self.messages.done(saved);
                 } else {
-                    format!("{saved}. {}", self.status)
-                };
+                    // The curve not read has its own card.
+                    let line = format!("{saved}. {}", self.messages.line());
+                    self.messages.note(line);
+                }
             }
-            Err(e) => self.status = format!("Point curve not saved: {e:#}"),
+            Err(e) => self.messages.fail(format!("Point curve not saved: {e:#}")),
         }
     }
 }
@@ -246,7 +248,7 @@ mod tests {
             vec![[0., 0.], [128. / 255., 153. / 255.], [1., 1.]];
         let saved_recipe = e.document.edit.recipe().clone();
         e.save_point_curve(&store, "Green Lift");
-        assert_eq!(e.status, "Point curve Green Lift saved");
+        assert_eq!(e.messages.line(), "Point curve Green Lift saved");
         let saved = e.saved_curves();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].name, "Green Lift");
@@ -254,15 +256,23 @@ mod tests {
         std::fs::write(store.dir.join("Broken.xmp"), "<not xmp").unwrap();
         e.save_point_curve(&store, "Other");
         assert!(
-            e.status.starts_with("Point curve Other saved"),
+            e.messages.line().starts_with("Point curve Other saved"),
             "{}",
-            e.status
+            e.messages.line()
         );
-        assert!(e.status.contains("Broken.xmp"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("Broken.xmp"),
+            "{}",
+            e.messages.line()
+        );
         std::fs::remove_file(store.dir.join("Broken.xmp")).unwrap();
         // Saving again under the same name keeps the first.
         e.save_point_curve(&store, "Green Lift");
-        assert!(e.status.contains("already saved"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("already saved"),
+            "{}",
+            e.messages.line()
+        );
 
         e.document
             .edit

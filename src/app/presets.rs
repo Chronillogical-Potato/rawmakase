@@ -35,7 +35,7 @@ impl Editor {
     pub(super) fn preset_scan_failed(&mut self, scan: u64, error: String) {
         if self.presets.is_latest(scan) {
             self.presets.scanned = true;
-            self.status = format!("Presets not read: {error}");
+            self.messages.fail(format!("Presets not read: {error}"));
         }
     }
     /// A finished library scan, unless a later one has started since: scans run in
@@ -46,7 +46,7 @@ impl Editor {
             self.presets.scanned = true;
             // A preset named as a raw default may have been imported or changed.
             if let Err(e) = self.set_raw_defaults(self.raw_defaults.settings().clone()) {
-                self.status = format!("Raw defaults not saved: {e:#}");
+                self.messages.fail(format!("Raw defaults not saved: {e:#}"));
             }
             self.refresh_preset_support();
         }
@@ -286,7 +286,7 @@ impl Editor {
                                 if let Err(e) =
                                     crate::presets::save_favorites(&self.presets.favorites)
                                 {
-                                    self.status = e.to_string();
+                                    self.messages.fail(e.to_string());
                                 }
                                 continue;
                             }
@@ -329,7 +329,7 @@ impl Editor {
             self.preset_action(action);
         }
         if let Some(i) = clicked {
-            // The status bar reports a preset that could not be applied.
+            // The top bar reports a preset that could not be applied.
             let _ = self.apply_preset(i);
         } else if let Some(i) = hovered {
             if self.presets.hover.as_ref().is_none_or(|(old, _)| *old != i) {
@@ -440,13 +440,13 @@ impl AmountSession {
 
 impl Editor {
     /// Applies preset `i` of the library to the open photo, as a click does, and
-    /// says so in the status bar either way.
+    /// says so in the top bar either way.
     pub(super) fn apply_preset(&mut self, i: usize) -> anyhow::Result<AppliedPreset> {
         let applied = self.apply_library_preset(i);
-        self.status = match &applied {
-            Ok(applied) => applied.to_string(),
-            Err(e) => format!("Preset not applied: {e:#}"),
-        };
+        match &applied {
+            Ok(applied) => self.messages.note(applied.to_string()),
+            Err(e) => self.messages.fail(format!("Preset not applied: {e:#}")),
+        }
         applied
     }
     fn apply_library_preset(&mut self, i: usize) -> anyhow::Result<AppliedPreset> {

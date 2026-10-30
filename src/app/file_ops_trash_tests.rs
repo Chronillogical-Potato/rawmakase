@@ -94,7 +94,7 @@ fn delete_offers_the_trash_and_the_catalog_and_tab_twice_trashes() -> anyhow::Re
     );
     assert!(d.path().join("photos/c.RAF").is_file());
     assert_eq!(ids_left(&e), vec![id(&e, "c.RAF")]);
-    assert_eq!(e.status, "Moved 2 photos to the Trash");
+    assert_eq!(e.messages.line(), "Moved 2 photos to the Trash");
     Ok(())
 }
 
@@ -116,7 +116,7 @@ fn delete_then_tab_once_only_removes_from_the_catalog() -> anyhow::Result<()> {
     assert!(d.path().join("photos/a.RAF").is_file(), "the file stays");
     assert!(!trash.join("a.RAF").exists());
     assert_eq!(ids_left(&e), vec![id(&e, "b.RAF")]);
-    assert_eq!(e.status, "Removed 1 photo from the catalog");
+    assert_eq!(e.messages.line(), "Removed 1 photo from the catalog");
     Ok(())
 }
 
@@ -219,7 +219,7 @@ fn delete_rejected_with_none_rejected_says_so() -> anyhow::Result<()> {
     tap(&mut e, Key::Delete, Modifiers::COMMAND);
     settle(&mut e);
     assert!(!e.file_ops.confirming());
-    assert_eq!(e.status, "No rejected photos here");
+    assert_eq!(e.messages.line(), "No rejected photos here");
     Ok(())
 }
 
@@ -238,13 +238,13 @@ fn a_volume_with_no_trash_keeps_the_file_and_the_photo() -> anyhow::Result<()> {
     assert!(d.path().join("photos/a.RAF").is_file());
     assert_eq!(ids_left(&e).len(), 2);
     assert!(
-        e.status.contains("has no Trash")
-            && e.status.contains(&format!(
+        e.messages.line().contains("has no Trash")
+            && e.messages.line().contains(&format!(
                 "Delete it in {} if you're sure",
                 crate::platform::reveal::MANAGER
             )),
         "{}",
-        e.status
+        e.messages.line()
     );
     Ok(())
 }

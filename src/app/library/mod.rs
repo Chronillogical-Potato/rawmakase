@@ -274,10 +274,7 @@ pub(crate) struct Library {
     /// External volumes attached at the last check, to notice one returning;
     /// None before the first check.
     attached: Option<HashSet<std::path::PathBuf>>,
-    pub message: String,
-    /// What a message sums up, one item per line, shown on hover while that
-    /// message is: (message, detail).
-    message_detail: (String, String),
+    pub(in crate::app) messages: crate::app::messages::Messages,
     /// Photos to Read Metadata from Files for, once confirmed.
     read_request: Option<Vec<PhotoId>>,
     /// A file operation asked for (Delete, the thumbnail menu), for the
@@ -373,8 +370,7 @@ impl Library {
             grid_kinetic: Default::default(),
             grid_shown: 0..usize::MAX,
             attached: None,
-            message: String::new(),
-            message_detail: Default::default(),
+            messages: Default::default(),
             read_request: None,
             file_request: None,
             reads_suspended: false,
@@ -387,10 +383,10 @@ impl Library {
         s.reloaded();
         s.check_files();
         if let Some(e) = keyword_export {
-            s.message = format!(
+            s.messages.warn(format!(
                 "Lightroom's keyword export options could not be read: {e:#}. \
                  Exports include every keyword's parents until they are."
-            );
+            ));
         }
         // Start with a selection, as Lightroom does, so the side panels are filled.
         s.select(s.visible.first().map(|i| s.session.photos[*i].id));
@@ -736,7 +732,7 @@ impl Library {
         self.scroll_to_active = true;
     }
     /// Whether Read Metadata from Files finished since the last call, for
-    /// the status line to show its outcome.
+    /// the top bar to show its outcome.
     /// Read Metadata from Files is still applying what it read.
     pub(in crate::app) fn rereading(&self) -> bool {
         self.reread.is_some()
@@ -770,10 +766,11 @@ impl Library {
                 plural(ids.len(), "photo", "photos")
             );
             if let Err(e) = self.record_collection(quick, Vec::new(), ids, summary) {
-                self.message = format!("Quick Collection not changed: {e}");
+                self.messages
+                    .fail(format!("Quick Collection not changed: {e}"));
             }
         } else if self.filters.collection.is_some() {
-            self.message = "Imported collections can't be changed".into();
+            self.messages.warn("Imported collections can't be changed");
         } else {
             self.file_request = Some(FileRequest::Delete(ids));
         }
@@ -1086,7 +1083,8 @@ impl Library {
         if self.listed_after(&made.listed, "Copy made") {
             self.show(made.value);
             if let Some(p) = self.photo(made.value) {
-                self.message = format!("Created {} of {}", p.copy_name, p.filename);
+                self.messages
+                    .done(format!("Created {} of {}", p.copy_name, p.filename));
             }
         }
         Ok(made)
@@ -1096,7 +1094,8 @@ impl Library {
         if self.listed_after(&made.listed, "Master changed") {
             self.show(id);
             if let Some(p) = self.photo(id) {
-                self.message = format!("This copy is now the master of {}", p.filename);
+                self.messages
+                    .done(format!("This copy is now the master of {}", p.filename));
             }
         }
         Ok(made)
@@ -1111,7 +1110,9 @@ impl Library {
                 true
             }
             Err(e) => {
-                self.message = format!("{done}, but the catalog could not be read again: {e:#}");
+                self.messages.fail(format!(
+                    "{done}, but the catalog could not be read again: {e:#}"
+                ));
                 false
             }
         }
@@ -1135,10 +1136,14 @@ impl Library {
             self.filters.folder_scope = None;
         }
         if self.listed_after(&removed.listed, "Root removed") {
-            self.message = match removed.value {
-                true => format!("Removed {name} from the catalog. Its folder is still on disk."),
-                false => format!("{name} was not removed: it has folders in the catalog again."),
-            };
+            match removed.value {
+                true => self.messages.done(format!(
+                    "Removed {name} from the catalog. Its folder is still on disk."
+                )),
+                false => self.messages.warn(format!(
+                    "{name} was not removed: it has folders in the catalog again."
+                )),
+            }
         }
         Ok(())
     }
@@ -1197,10 +1202,10 @@ impl Library {
         }
         if self.listed_after(&removed.listed, "Folder removed") {
             let n = removed.value.len();
-            self.message = format!(
+            self.messages.done(format!(
                 "Removed {name} and its {n} photo{} from the catalog. The files are still on disk.",
                 if n == 1 { "" } else { "s" }
-            );
+            ));
         } else {
             // The session dropped the removed photos from its lists anyway;
             // what is shown follows them before anything reads those lists.
@@ -1235,7 +1240,8 @@ impl Library {
                 self.show(master);
             }
             if let Some(p) = photo {
-                self.message = format!("Removed {} of {}", p.copy_name, p.filename);
+                self.messages
+                    .done(format!("Removed {} of {}", p.copy_name, p.filename));
             }
         }
         Ok(Committed {
@@ -1521,18 +1527,7 @@ use thumbnails::thumbnail;
 #[cfg(test)]
 mod tests;
 
-impl Library {
-    /// Shows `message`, with `detail` on hover while it is shown.
-    pub(in crate::app) fn set_message_with_detail(&mut self, message: String, detail: String) {
-        self.message = message.clone();
-        self.message_detail = (message, detail);
-    }
-    /// What the message shown sums up, if it does.
-    pub(in crate::app) fn message_detail(&self) -> Option<&str> {
-        let (message, detail) = &self.message_detail;
-        (*message == self.message && !detail.is_empty()).then_some(detail.as_str())
-    }
-}
+impl Library {}
 
 /// Asks `ctx` for a repaint, for a background read with something to show.
 fn wake(ctx: &egui::Context) -> crate::catalog_session::Wake {

@@ -109,7 +109,8 @@ impl Library {
             (false, true) => Ok(()),
         };
         if let Err(e) = done {
-            self.message = format!("Quick Collection not changed: {e}");
+            self.messages
+                .fail(format!("Quick Collection not changed: {e}"));
         }
     }
     /// Makes a change and hands it to the undo log once it is saved.
@@ -122,7 +123,7 @@ impl Library {
     ) -> Result<()> {
         let place_before = self.place();
         self.change_collection(collection, &added, &removed)?;
-        self.message = summary.clone();
+        self.messages.note(summary.clone());
         self.collection_done.push(CollectionCommand {
             sequence: crate::edit_session::sequence(),
             collection,

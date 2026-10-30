@@ -161,7 +161,11 @@ fn a_held_key_does_nothing_until_released_and_tab_then_return_removes() -> anyho
     assert!(!e.activity.is_busy());
     assert_eq!(ids_left(&e), [ids[1]]);
     assert!(d.path().join("photos/a.RAF").is_file(), "the file stays");
-    assert!(e.status.contains("Removed"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("Removed"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 
@@ -227,10 +231,11 @@ fn delete_in_an_imported_collection_changes_nothing_and_says_so() -> anyhow::Res
         e.library
             .as_ref()
             .unwrap()
-            .message
+            .messages
+            .line()
             .contains("can't be changed"),
         "{}",
-        e.library.as_ref().unwrap().message
+        e.library.as_ref().unwrap().messages.line()
     );
     Ok(())
 }
@@ -319,7 +324,11 @@ fn the_outcome_is_read_from_the_journal_even_when_the_worker_stopped() -> anyhow
     e.file_op_done(batch, Err("Stopped unexpectedly".into()));
     assert!(!e.activity.is_busy());
     assert_eq!(ids_left(&e), [ids[1]]);
-    assert!(e.status.contains("Removed"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("Removed"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 
@@ -388,9 +397,14 @@ fn a_file_operation_stops_read_metadata_from_files() -> anyhow::Result<()> {
         .read_metadata_from_files(&[ids[0]])?;
     e.request_photo_removal(vec![ids[1]]);
     assert!(
-        e.library.as_ref().unwrap().message.contains("stopped"),
+        e.library
+            .as_ref()
+            .unwrap()
+            .messages
+            .line()
+            .contains("stopped"),
         "{}",
-        e.library.as_ref().unwrap().message
+        e.library.as_ref().unwrap().messages.line()
     );
     settle(&mut e);
     e.confirm_file_op();
@@ -417,7 +431,11 @@ fn what_files_said_before_the_catalog_was_read_again_is_dropped() -> anyhow::Res
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(library.photo(ids[0]).unwrap().rating, 0);
-    assert!(library.message.contains("changed"), "{}", library.message);
+    assert!(
+        library.messages.line().contains("changed"),
+        "{}",
+        library.messages.line()
+    );
     Ok(())
 }
 
@@ -485,7 +503,11 @@ fn an_unreadable_outcome_forgets_every_photo_that_may_be_gone() -> anyhow::Resul
     assert!(!e.activity.is_busy());
     assert_eq!(e.document.catalog_photo, None, "it may be gone");
     assert_eq!(ids_left(&e), [ids[1]], "the lists are read again");
-    assert!(!e.status.contains("not removed"), "{}", e.status);
+    assert!(
+        !e.messages.line().contains("not removed"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 

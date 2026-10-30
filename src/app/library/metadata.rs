@@ -87,7 +87,7 @@ impl Library {
         });
         let before = ratings_of(changes.iter().filter_map(|(id, ..)| self.photo(*id)));
         self.write_ratings(&changes)?;
-        self.message = match self.photo(lead) {
+        let text: String = match self.photo(lead) {
             Some(p) if changes.len() == 1 => format!(
                 "{} · {} stars · {} · {}",
                 p.filename,
@@ -97,6 +97,7 @@ impl Library {
             ),
             _ => format!("{} photos · {}", changes.len(), summary(&edit, &changes[0])),
         };
+        self.messages.note(text);
         self.filter();
         // Sorted by what changed, the photo may have moved: keep it in view.
         if self.filters.sort != super::sort::Sort::CaptureTime {
@@ -141,7 +142,7 @@ impl Library {
             after: changes,
             place_before,
             place_after: self.place(),
-            summary: self.message.clone(),
+            summary: self.messages.line().to_string(),
         });
         Ok(if advance { next } else { moved })
     }

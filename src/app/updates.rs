@@ -87,10 +87,10 @@ impl Updates {
     }
     /// Takes what the update helper left for this launch: a receipt to
     /// acknowledge, or why it restored the previous version.
-    pub(super) fn launched(&mut self, launch: Launch, status: &mut String) {
+    pub(super) fn launched(&mut self, launch: Launch, messages: &mut super::messages::Messages) {
         self.receipt = launch.receipt;
         if let Some(error) = launch.error {
-            *status = error;
+            messages.fail(error);
         }
     }
     /// Drops the update checker's channels at exit. It ends after the request it is
@@ -284,15 +284,17 @@ impl Editor {
 
     fn install_update(&mut self) {
         if self.exporting() {
-            self.status = "Finish exporting before updating".into();
+            self.messages.warn("Finish exporting before updating");
             return;
         }
         if self.activity.is_syncing() {
-            self.status = "Wait for Sync Settings to finish before updating".into();
+            self.messages
+                .warn("Wait for Sync Settings to finish before updating");
             return;
         }
         if self.activity.is_changing_files() {
-            self.status = "Wait for the file operation to finish before updating".into();
+            self.messages
+                .warn("Wait for the file operation to finish before updating");
             return;
         }
         // Edits are saved before the app quits for the helper.

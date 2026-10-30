@@ -104,11 +104,12 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
     export(&mut e, scope.clone(), settings(&out))?;
     wait(&mut e, &ctx);
     assert_eq!(listing(&out), ["a.tif", "c.tif"]);
-    assert_eq!(e.status, "Exported 2 of 3 · 1 not exported");
-    // Kept in the top bar until read: the offline RAW, and why.
-    let summary = e.exports.summary.clone().expect("a report");
-    assert_eq!(summary.problems.len(), 1);
-    assert!(summary.problems[0].1.contains("can't be exported"));
+    assert_eq!(e.messages.line(), "Exported 2 of 3 · 1 not exported");
+    // Kept in the top bar until dismissed: the offline RAW, and why.
+    let failed = "Exported 2 of 3 · 1 not exported";
+    let detail = e.messages.entry_detail(failed).expect("the failure");
+    assert!(detail.contains("b.dng: "), "{detail}");
+    assert!(detail.contains("can't be exported"), "{detail}");
 
     // Again into the same folder: Ask asks once for both files.
     export(&mut e, scope, settings(&out))?;
@@ -117,11 +118,8 @@ fn export_acts_on_the_selection_and_reports_what_it_left_out() -> anyhow::Result
     e.plan_export(pending, Some(Existing::Unique));
     wait(&mut e, &ctx);
     assert_eq!(listing(&out), ["a-2.tif", "a.tif", "c-2.tif", "c.tif"]);
-    // That export went well, but the first one's report is unread: it stays, and
-    // the two add up until it is dismissed.
-    let summary = e.exports.summary.clone().expect("the unread report");
-    // The offline RAW was left out of both.
-    assert_eq!(summary.line(), "Exported 4 of 6 · 2 not exported");
+    // A later export never hides an earlier failure: it stays until dismissed.
+    assert!(e.messages.has_entry(failed));
     Ok(())
 }
 
@@ -157,9 +155,11 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
     library.select(Some(ids[0]));
     assert!(e.export_scope().is_none());
     assert!(
-        e.status.starts_with("Export waits for the open photo"),
+        e.messages
+            .line()
+            .starts_with("Export waits for the open photo"),
         "{}",
-        e.status
+        e.messages.line()
     );
     // A Library selection without it goes ahead.
     e.module = Module::Library;
@@ -179,7 +179,11 @@ fn an_open_photo_whose_edit_isnt_final_holds_back_only_its_own_export() -> anyho
     // decoded again from the file.
     std::fs::remove_file(e.document.path.clone().unwrap())?;
     assert!(e.export_scope().is_none());
-    assert!(e.status.contains("can't be exported"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("can't be exported"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 
@@ -212,7 +216,11 @@ fn a_photo_opened_without_a_catalog_is_exported_only_while_its_file_is_there() -
     assert!(scope.photos[0].open && scope.photos[0].id.is_none());
     std::fs::remove_file(&path)?;
     assert!(e.export_scope().is_none());
-    assert!(e.status.contains("Offline"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("Offline"),
+        "{}",
+        e.messages.line()
+    );
     Ok(())
 }
 
@@ -253,13 +261,13 @@ fn a_cmyk_jpeg_is_exported_and_fails_with_why() -> anyhow::Result<()> {
     export(&mut e, scope, settings(&out))?;
     wait(&mut e, &ctx);
     assert!(listing(&out).is_empty());
-    let summary = e.exports.summary.clone().expect("a report");
-    assert_eq!(summary.problems.len(), 1);
-    assert_eq!(summary.problems[0].0, "c.jpg");
+    let detail = e
+        .messages
+        .entry_detail("Exported 0 of 1 · 1 not exported")
+        .expect("the failure");
     assert!(
-        summary.problems[0].1.contains("CMYK"),
-        "{:?}",
-        summary.problems
+        detail.contains("c.jpg: ") && detail.contains("CMYK"),
+        "{detail}"
     );
     Ok(())
 }
@@ -298,7 +306,7 @@ fn return_exports_from_the_dialog() -> anyhow::Result<()> {
             ..Default::default()
         };
         e.exports.dialog = true;
-        e.status.clear();
+        e.messages.clear_line();
     };
     open(&mut e);
     e.exports.watermark_editor = Some(super::watermark_editor::WatermarkEditor::new(
@@ -306,12 +314,12 @@ fn return_exports_from_the_dialog() -> anyhow::Result<()> {
         &ctx,
     ));
     return_key(&mut e);
-    assert_eq!(e.status, "");
+    assert_eq!(e.messages.line(), "");
     assert!(e.exports.dialog);
     e.exports.watermark_editor = None;
     open(&mut e);
     return_key(&mut e);
-    assert_eq!(e.status, "Choose a folder to export to");
+    assert_eq!(e.messages.line(), "Choose a folder to export to");
     assert!(e.exports.dialog);
     Ok(())
 }
@@ -537,18 +545,22 @@ fn a_failed_read_is_said_and_exports_without_it() -> anyhow::Result<()> {
         Status::Failed(why) => assert!(why.contains("disk gone"), "{why}"),
         other => panic!("{other:?}"),
     }
-    assert!(e.status.contains("could not be read"), "{}", e.status);
+    assert!(
+        e.messages.line().contains("could not be read"),
+        "{}",
+        e.messages.line()
+    );
     press_return(&mut e, &ctx);
     wait(&mut e, &ctx);
     // As Lightroom: the text around a value it lacks stays.
     assert_eq!(listing(&out), ["-a.tif"]);
-    let summary = e.exports.summary.clone().expect("the notes");
-    assert_eq!(
-        summary.notes,
-        [(
-            "a.dng".to_string(),
-            "the camera's make and model were not read".to_string()
-        )]
+    let detail = e
+        .messages
+        .entry_detail("Exported 1 of 1 · 1 with notes")
+        .expect("the notes");
+    assert!(
+        detail.contains("a.dng: the camera's make and model were not read"),
+        "{detail}"
     );
     Ok(())
 }
@@ -579,7 +591,7 @@ fn export_with_previous_waits_for_what_its_names_need() -> anyhow::Result<()> {
     };
     frame(&mut e, &ctx, vec![escape(true), escape(false)]);
     assert!(e.exports.waiting.is_none() && !e.export_modal());
-    assert_eq!(e.status, "Export cancelled");
+    assert_eq!(e.messages.line(), "Export cancelled");
     open.send(())?;
     // Again, to the end.
     e.export_previous(Some(s));

@@ -2,6 +2,7 @@
 //! Corrections, or Preferences), checking for and installing a newer one, and removing
 //! it (Preferences). The work is `lensfun_install`'s, on a thread of its own, one job
 //! at a time; this keeps its progress and outcome for the panels.
+use super::messages::Level;
 use super::task::Stopping;
 use super::worker::Event;
 use crate::lens::lensfun::installed::{self, Manifest};
@@ -54,6 +55,17 @@ pub(crate) struct Lensfun {
     source: Option<Source>,
     /// Lens Corrections suggests Lensfun profiles (a preference, on by default).
     pub(crate) suggest: bool,
+}
+
+impl Job {
+    /// What the app is doing, while it does.
+    pub(crate) fn running_text(self) -> &'static str {
+        match self {
+            Job::Install => "Installing Lensfun profiles…",
+            Job::Check => "Checking for Lensfun updates…",
+            Job::Remove => "Removing Lensfun profiles…",
+        }
+    }
 }
 
 impl Lensfun {
@@ -187,7 +199,7 @@ impl Lensfun {
         generation: u64,
         job: Job,
         result: Result<Done, Failure>,
-    ) -> Option<String> {
+    ) -> Option<(Level, String)> {
         if self
             .running
             .as_ref()
@@ -200,21 +212,33 @@ impl Lensfun {
         Some(match result {
             Ok(Done::Installed(Installed::New(m))) => {
                 self.latest = Some(self.latest.unwrap_or(m.version).max(m.version));
-                format!("Lensfun profiles installed ({})", m.date())
+                (
+                    Level::Done,
+                    format!("Lensfun profiles installed ({})", m.date()),
+                )
             }
             Ok(Done::Installed(Installed::Current(m))) => {
                 self.latest = Some(m.version);
-                format!("Lensfun profiles are up to date ({})", m.date())
+                (
+                    Level::Done,
+                    format!("Lensfun profiles are up to date ({})", m.date()),
+                )
             }
             Ok(Done::Checked(latest)) => {
                 self.latest = Some(latest);
-                match self.newer() {
-                    Some(_) => "A newer Lensfun database is available".into(),
-                    None => "Lensfun profiles are up to date".into(),
-                }
+                (
+                    Level::Note,
+                    match self.newer() {
+                        Some(_) => "A newer Lensfun database is available".into(),
+                        None => "Lensfun profiles are up to date".into(),
+                    },
+                )
             }
-            Ok(Done::Removed(_)) => "Lensfun profiles removed; edits keep their corrections".into(),
-            Err(Failure::Cancelled) => "Cancelled".into(),
+            Ok(Done::Removed(_)) => (
+                Level::Done,
+                "Lensfun profiles removed; edits keep their corrections".into(),
+            ),
+            Err(Failure::Cancelled) => (Level::Note, "Cancelled".into()),
             Err(Failure::Error(e)) => {
                 let said = match job {
                     Job::Install => format!("Lensfun profiles not installed: {e}"),
@@ -222,7 +246,7 @@ impl Lensfun {
                     Job::Remove => format!("Lensfun profiles not removed: {e}"),
                 };
                 self.failed = Some((job, e));
-                said
+                (Level::Failure, said)
             }
         })
     }
@@ -276,7 +300,8 @@ mod tests {
         let mut l = Lensfun::in_folder(dir.path().to_path_buf(), archive("good.tar.bz2"));
         assert!(l.installed().is_none());
         let (g, job, result) = run(&mut l, Job::Install);
-        let said = l.finished(g, job, result).unwrap();
+        let (level, said) = l.finished(g, job, result).unwrap();
+        assert_eq!(level, Level::Done);
         assert!(said.starts_with("Lensfun profiles installed"), "{said}");
         assert_eq!(l.running(), None);
         assert_eq!(l.installed().unwrap().version, 1_793_180_205);
@@ -284,16 +309,14 @@ mod tests {
         // A bad archive fails and leaves the version installed.
         l.source = Some(Source::File(archive("symlink.tar.bz2")));
         let (g, job, result) = run(&mut l, Job::Install);
-        assert!(
-            l.finished(g, job, result)
-                .unwrap()
-                .contains("not installed")
-        );
+        let (level, said) = l.finished(g, job, result).unwrap();
+        assert_eq!(level, Level::Failure, "{said}");
+        assert!(said.contains("not installed"), "{said}");
         assert_eq!(l.running(), None);
         assert!(l.failure(Job::Install).is_some());
         assert_eq!(l.installed().unwrap().version, 1_793_180_205);
         let (g, job, result) = run(&mut l, Job::Remove);
-        assert!(l.finished(g, job, result).unwrap().contains("removed"));
+        assert!(l.finished(g, job, result).unwrap().1.contains("removed"));
         assert!(l.installed().is_none() && l.failure(Job::Install).is_none());
     }
 

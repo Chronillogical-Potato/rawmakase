@@ -21,6 +21,7 @@
 //! The dialogs that come before a plan (Move to Folder…, New Folder
 //! Inside…) and the one for what a crash left unfinished, recovered when a
 //! catalog opens, are in `file_ops_dialogs.rs`.
+use super::messages::Level;
 use super::{Editor, widgets};
 use crate::app::design::{Tone, text};
 #[cfg(test)]
@@ -559,7 +560,7 @@ fn size(bytes: u64) -> String {
 }
 
 /// The originals a move to another drive left beside their copies, as the
-/// status line ends: the first, and why.
+/// top bar ends: the first, and why.
 fn kept_line(kept: &[file_ops::KeptOriginal]) -> Option<String> {
     let first = kept.first()?;
     let name = first.path.file_name().unwrap_or_default().to_string_lossy();
@@ -875,8 +876,23 @@ fn shared_line(lines: &mut Vec<String>, s: &file_ops::Summary) {
     }
 }
 
-/// The status line after a run: "Removed 3 photos from the catalog", with
+/// The top bar after a run: "Removed 3 photos from the catalog", with
 /// what was left and why.
+/// How a finished operation is reported: stopped or left unfinished is a
+/// failure, items it left as they were a warning.
+fn outcome_level(outcome: &Outcome) -> Level {
+    let unfinished =
+        |r: &ItemResult| matches!(r, ItemResult::NeedsRecovery(_) | ItemResult::Interrupted);
+    let left = |r: &ItemResult| matches!(r, ItemResult::Unchanged(_) | ItemResult::Kept);
+    if outcome.stopped.is_some() || outcome.items.iter().any(|i| unfinished(&i.result)) {
+        Level::Failure
+    } else if outcome.items.iter().any(|i| left(&i.result)) {
+        Level::Warning
+    } else {
+        Level::Done
+    }
+}
+
 fn summary_of(outcome: &Outcome, verb: &Verb) -> String {
     let count = |f: fn(&ItemResult) -> bool| -> usize {
         outcome.items.iter().filter(|i| f(&i.result)).count()
@@ -1066,7 +1082,7 @@ impl Editor {
         };
         let rejected = library.rejected_in_source();
         if rejected.is_empty() {
-            self.status = "No rejected photos here".into();
+            self.messages.warn("No rejected photos here");
         } else {
             self.request_photo_delete(rejected, true);
         }
@@ -1105,7 +1121,7 @@ impl Editor {
             self.file_ops.state = State::Idle;
         }
         if self.activity.is_busy() || !matches!(self.file_ops.state, State::Idle) {
-            self.status = "Finish what is running first".into();
+            self.messages.warn("Finish what is running first");
             return;
         }
         let Some(location) = self
@@ -1118,10 +1134,10 @@ impl Editor {
         // Saved first, with nothing processed in between: a failed save
         // stops here.
         if !self.flush() {
-            self.status = format!(
+            self.messages.fail(format!(
                 "The open photo's edit could not be saved; {}",
                 verb.nothing()
-            );
+            ));
             return;
         }
         if !self.activity.begin_file_change() {
@@ -1211,10 +1227,11 @@ impl Editor {
         }
         match planned {
             Ok((plan, _)) if plan.is_empty() => {
-                self.status = match plan.skipped().first() {
+                let text: String = match plan.skipped().first() {
                     Some(s) => format!("{}: {}", verb.nothing_to(), s.reason),
                     None => verb.nothing_to().into(),
                 };
+                self.messages.warn(text);
                 self.release_files();
             }
             Ok((plan, trash)) => {
@@ -1237,7 +1254,7 @@ impl Editor {
                 }
             }
             Err(e) => {
-                self.status = format!("{}: {e}", verb.failed());
+                self.messages.fail(format!("{}: {e}", verb.failed()));
                 self.release_files();
             }
         }
@@ -1310,7 +1327,10 @@ impl Editor {
         // Still the catalog it was planned for, not read again since.
         let current = self.library.as_ref().map(|l| l.session.generation());
         if !self.showing_catalog(&catalog) || current != Some(generation) {
-            self.status = format!("The catalog changed; {}. Try again.", verb.nothing());
+            self.messages.warn(format!(
+                "The catalog changed; {}. Try again.",
+                verb.nothing()
+            ));
             self.release_files();
             return;
         }
@@ -1401,15 +1421,21 @@ impl Editor {
             // the photos may be gone or moved, so all are forgotten as if
             // they were, and the catalog's own lists say where they are.
             (_, Err(e)) => {
-                self.status =
-                    format!("The file operation stopped ({e}); the catalog was read again");
+                self.messages.fail(format!(
+                    "The file operation stopped ({e}); the catalog was read again"
+                ));
                 self.forget_removed_photos(&photos);
                 self.reread_after_files(&photos, &[]);
                 self.release_files();
                 return;
             }
         };
-        self.status = summary_of(&outcome, &verb);
+        let summary = summary_of(&outcome, &verb);
+        match outcome_level(&outcome) {
+            Level::Failure => self.messages.fail(summary),
+            Level::Warning => self.messages.warn(summary),
+            _ => self.messages.done(summary),
+        }
         // The tree's selection and unfolded folders follow a folder renamed
         // or moved.
         let followed = match &verb {
@@ -1530,7 +1556,9 @@ impl Editor {
         };
         let changed: Vec<PhotoId> = removed.iter().chain(moved).copied().collect();
         if let Err(e) = library.reread_after(&changed) {
-            self.status = format!("Done, but the catalog could not be read again: {e:#}");
+            self.messages.fail(format!(
+                "Done, but the catalog could not be read again: {e:#}"
+            ));
             return;
         }
         // Each moved photo, its copies included, at its file now.
@@ -1672,10 +1700,10 @@ impl Editor {
         if let Some((id, path)) = self.file_ops.reopen.take()
             && self.document.catalog_photo == Some(id)
         {
-            // What the operation did stays on the status line.
-            let status = std::mem::take(&mut self.status);
+            // What the operation did stays on the top bar.
+            let line = self.messages.saved_line();
             self.load_raw(path, Some(id));
-            self.status = status;
+            self.messages.restore_line(line);
         }
     }
 }

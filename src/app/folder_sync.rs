@@ -109,7 +109,7 @@ impl Editor {
     /// Starts synchronizing `scope`, named `name`, in the background.
     pub(super) fn start_folder_sync(&mut self, scope: SyncScope, name: String) {
         if self.folder_sync.scan.is_some() {
-            self.status = "A synchronization is already running.".into();
+            self.messages.warn("A synchronization is already running.");
             return;
         }
         let Some(library) = &self.library else {
@@ -118,7 +118,8 @@ impl Editor {
         let inputs = match library.session.catalog.sync_inputs(scope) {
             Ok(inputs) => inputs,
             Err(e) => {
-                self.status = format!("Synchronize Folder failed: {e:#}");
+                self.messages
+                    .fail(format!("Synchronize Folder failed: {e:#}"));
                 return;
             }
         };
@@ -155,7 +156,7 @@ impl Editor {
             return;
         };
         if self.folder_sync.scan.is_some() {
-            self.status = "A synchronization is already running.".into();
+            self.messages.warn("A synchronization is already running.");
             return;
         }
         if !self.activity.begin_dialog() {
@@ -187,7 +188,7 @@ impl Editor {
     /// synchronization's scan: one runs at a time.
     pub(super) fn start_find_on_disk(&mut self, photo: PhotoId, file: PathBuf) {
         if self.folder_sync.scan.is_some() {
-            self.status = "A synchronization is already running.".into();
+            self.messages.warn("A synchronization is already running.");
             return;
         }
         let Some(library) = &self.library else {
@@ -196,7 +197,7 @@ impl Editor {
         let inputs = match library.session.catalog.find_inputs(photo, &file) {
             Ok(inputs) => inputs,
             Err(e) => {
-                self.status = format!("Find on Disk: {e:#}");
+                self.messages.fail(format!("Find on Disk: {e:#}"));
                 return;
             }
         };
@@ -255,11 +256,12 @@ impl Editor {
             })
             .ok();
         if thread.is_none() {
-            self.status = if finding {
+            let text: String = if finding {
                 "Find on Disk could not start".into()
             } else {
                 "Synchronize Folder could not start".into()
             };
+            self.messages.fail(text);
             return;
         }
         self.folder_sync.scan = Some(Scan {
@@ -287,12 +289,12 @@ impl Editor {
         if scan.finding {
             match scanned.result {
                 Err(_) if scan.cancel.load(Ordering::Relaxed) => {
-                    self.status = "Find on Disk stopped".into();
+                    self.messages.note("Find on Disk stopped");
                 }
-                Err(e) => self.status = format!("Find on Disk: {e}"),
+                Err(e) => self.messages.fail(format!("Find on Disk: {e}")),
                 Ok(_) if !current => {
-                    self.status =
-                        "The catalog changed during the search; Find on Disk again".into();
+                    self.messages
+                        .warn("The catalog changed during the search; Find on Disk again");
                 }
                 Ok(plan) => self.found_on_disk(scan, plan),
             }
@@ -301,18 +303,23 @@ impl Editor {
         match scanned.result {
             Err(e) if scan.cancel.load(Ordering::Relaxed) => {
                 let _ = e;
-                self.status = "Synchronization stopped".into();
+                self.messages.note("Synchronization stopped");
             }
-            Err(e) => self.status = format!("Synchronize Folder failed: {e}"),
+            Err(e) => self
+                .messages
+                .fail(format!("Synchronize Folder failed: {e}")),
             Ok(_) if !current => {
-                self.status = "The catalog changed during the scan; synchronize again".into();
+                self.messages
+                    .warn("The catalog changed during the scan; synchronize again");
             }
             Ok(plan) => {
                 if nothing_to_do(&plan) {
-                    self.status = format!("\"{}\" is in sync", scan.name);
-                    if !plan.not_checked.is_empty() {
-                        self.status
-                            .push_str(&format!(" · {} not checked", plan.not_checked.len()));
+                    let mut said = format!("\"{}\" is in sync", scan.name);
+                    if plan.not_checked.is_empty() {
+                        self.messages.done(said);
+                    } else {
+                        said.push_str(&format!(" · {} not checked", plan.not_checked.len()));
+                        self.messages.warn(said);
                     }
                     return;
                 }
@@ -331,7 +338,8 @@ impl Editor {
     /// relinked at once; anything else is reviewed.
     fn found_on_disk(&mut self, scan: Scan, plan: SyncPlan) {
         let Some(picked) = plan.picked().cloned() else {
-            self.status = "Find on Disk: the file picked was not found".into();
+            self.messages
+                .warn("Find on Disk: the file picked was not found");
             return;
         };
         if self.open_master() == Some(picked.photo) && !picked.verified {
@@ -343,10 +351,10 @@ impl Editor {
                 ))));
                 return;
             }
-            self.status = format!(
+            self.messages.warn(format!(
                 "{} is open in Develop. Open another photo in Develop, then Find on Disk again",
                 file_name(&picked.from)
-            );
+            ));
             return;
         }
         let alone = plan.moves.len() == 1 && plan.choices.is_empty();
@@ -400,9 +408,9 @@ impl Editor {
             return;
         };
         if !discard {
-            self.status = format!(
+            self.messages.warn(format!(
                 "{name} keeps its unsaved change. Save it as a preset or put the file back, then Find on Disk again"
-            );
+            ));
             return;
         }
         let current = self
@@ -410,16 +418,17 @@ impl Editor {
             .as_ref()
             .is_some_and(|l| *l.session.catalog.location() == review.catalog);
         if !current {
-            self.status = "The catalog changed during the search; Find on Disk again".into();
+            self.messages
+                .warn("The catalog changed during the search; Find on Disk again");
             return;
         }
         // Asked about once more as things are now: a change that can be
         // saved again (its file back) is never discarded.
         if self.open_master() == Some(picked) {
             if !self.unsaved_on_missing_file() {
-                self.status = format!(
+                self.messages.warn(format!(
                     "{name} is open in Develop. Open another photo in Develop, then Find on Disk again"
-                );
+                ));
                 return;
             }
             self.close_removed_document();
@@ -450,11 +459,12 @@ impl Editor {
         });
         if lost {
             let finding = self.folder_sync.scan.take().is_some_and(|s| s.finding);
-            self.status = if finding {
+            let text: String = if finding {
                 "Find on Disk stopped unexpectedly".into()
             } else {
                 "Synchronize Folder stopped unexpectedly".into()
             };
+            self.messages.fail(text);
         }
         // The review opens on its own in either mode once nothing else
         // is asked.
@@ -803,7 +813,8 @@ impl Editor {
                 && l.session.generation() == review.generation
         });
         if !current {
-            self.status = "The catalog changed since the scan; synchronize again".into();
+            self.messages
+                .warn("The catalog changed since the scan; synchronize again");
             return;
         }
         let accepted = review.accepted();
@@ -832,7 +843,8 @@ impl Editor {
         // moved: then only a verified move of it lets synchronizing go on,
         // keeping the edit pending, saved on the new path afterwards.
         if self.activity.is_busy() {
-            self.status = "Finish what is running first, then synchronize.".into();
+            self.messages
+                .warn("Finish what is running first, then synchronize.");
             self.folder_sync.review = Some(review);
             return;
         }
@@ -934,11 +946,12 @@ impl Editor {
                 if let Some(library) = &mut self.library {
                     library.start_background_reads();
                 }
-                self.status = if self.folder_sync.applying_find {
+                let text: String = if self.folder_sync.applying_find {
                     format!("Find on Disk failed: {e}")
                 } else {
                     format!("Synchronize Folder failed: {e}")
                 };
+                self.messages.fail(text);
                 return;
             }
         };
@@ -967,17 +980,17 @@ impl Editor {
                     .as_mut()
                     .map(|l| l.reread_after(&applied.removed));
                 if let Some(Err(again)) = reread {
-                    self.status = format!(
+                    self.messages.fail(format!(
                         "Synchronized, but the catalog could not be read again: {again:#}. Open it again."
-                    );
+                    ));
                 } else {
                     let library = self.library.as_ref().expect("read again");
                     let moved = moved_files(&library.session.photos, &applied);
                     let catalog = library.session.catalog.location().clone();
                     self.move_preview_intents(&catalog, &moved);
-                    self.status = format!(
+                    self.messages.fail(format!(
                         "Synchronized, but the catalog could not be opened again: {e}. It was read again."
-                    );
+                    ));
                 }
                 return;
             }
@@ -1019,7 +1032,7 @@ fn nothing_to_do(plan: &SyncPlan) -> bool {
         && plan.ambiguous.is_empty()
 }
 
-/// The status line after applying: "Synchronized · 14 updated · 32 added ·
+/// The top bar after applying: "Synchronized · 14 updated · 32 added ·
 /// 5 still missing", or Find on Disk's "Relinked 9 photos", with every
 /// detail on hover.
 fn synced_message(library: &mut super::library::Library, plan: &SyncPlan, applied: &Applied) {
@@ -1042,7 +1055,13 @@ fn synced_message(library: &mut super::library::Library, plan: &SyncPlan, applie
                 super::widgets::plural(applied.protected.len(), "photo", "photos")
             ));
         }
-        library.set_message_with_detail(summary, detail.join("\n"));
+        if detail.is_empty() {
+            library.messages.done(summary);
+        } else {
+            library
+                .messages
+                .warn_with_detail(summary, detail.join("\n"));
+        }
         library.offer_previous_import = false;
         return;
     }
@@ -1089,10 +1108,20 @@ fn synced_message(library: &mut super::library::Library, plan: &SyncPlan, applie
                 .into(),
         );
     }
-    library.set_message_with_detail(
-        format!("Synchronized · {}", summary.join(" · ")),
-        detail.join("\n"),
-    );
+    let said = format!("Synchronized · {}", summary.join(" · "));
+    let nothing_done = applied.moved.is_empty() && applied.added == 0 && applied.removed.is_empty();
+    if applied.add_error.is_some() && nothing_done {
+        library.messages.fail_with_detail(said, detail.join("\n"));
+    } else if applied.add_error.is_some()
+        || !applied.skipped.is_empty()
+        || !applied.protected.is_empty()
+        || !applied.report.details().is_empty()
+        || !plan.not_checked.is_empty()
+    {
+        library.messages.warn_with_detail(said, detail.join("\n"));
+    } else {
+        library.messages.done_with_detail(said, detail.join("\n"));
+    }
     library.offer_previous_import = applied.added > 0;
 }
 
@@ -2132,6 +2161,7 @@ mod tests {
     use super::*;
     use crate::app::Modal;
     use crate::app::library::Module;
+    use crate::app::messages::Level;
     use crate::catalog::ReadChecksum;
     use crate::storage::{ChecksumRead, FileChecksum};
     use std::time::{Duration, Instant};
@@ -2236,13 +2266,38 @@ mod tests {
             (trip.join("renamed.dng"), 4)
         );
         assert!(
-            e.status.starts_with("Synchronized · 1 updated · 1 added"),
+            e.messages
+                .line()
+                .starts_with("Synchronized · 1 updated · 1 added"),
             "{}",
-            e.status
+            e.messages.line()
         );
         // The photo added is Previous Import.
         assert_eq!(library.session.previous_import.len(), 1);
         assert!(library.offer_previous_import);
+        Ok(())
+    }
+
+    #[test]
+    fn a_folder_the_scan_could_not_read_makes_the_result_a_warning() -> anyhow::Result<()> {
+        let (_dir, mut e, trip) = editor()?;
+        std::fs::write(trip.join("new.dng"), bytes(3))?;
+        e.start_folder_sync(SyncScope::All, "trip".into());
+        scanned(&mut e);
+        e.poll_folder_sync();
+        let review = e.folder_sync.review.as_mut().expect("a review");
+        review
+            .plan
+            .not_checked
+            .push(crate::catalog::folder_sync::NotChecked {
+                path: trip.join("locked"),
+                reason: "permission denied".into(),
+            });
+        let ctx = e.context.clone();
+        e.apply_folder_sync(&ctx);
+        applied(&mut e);
+        e.take_library_messages();
+        assert_eq!(e.messages.level(), Level::Warning, "{}", e.messages.line());
         Ok(())
     }
 
@@ -2255,7 +2310,11 @@ mod tests {
         e.library.as_mut().unwrap().session.reload()?;
         scanned(&mut e);
         assert!(e.folder_sync.review.is_none());
-        assert!(e.status.contains("changed during the scan"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("changed during the scan"),
+            "{}",
+            e.messages.line()
+        );
         Ok(())
     }
 
@@ -2307,7 +2366,7 @@ mod tests {
         });
         e.poll_folder_sync();
         assert!(!e.folder_sync.is_scanning());
-        assert!(e.status.contains("stopped unexpectedly"));
+        assert!(e.messages.line().contains("stopped unexpectedly"));
         Ok(())
     }
 
@@ -2551,7 +2610,11 @@ mod tests {
         assert!(e.folder_sync.review.is_none());
         let library = e.library.as_ref().unwrap();
         assert_eq!(library.photo(a).unwrap().path, to);
-        assert!(e.status.starts_with("Relinked 1 photo"), "{}", e.status);
+        assert!(
+            e.messages.line().starts_with("Relinked 1 photo"),
+            "{}",
+            e.messages.line()
+        );
         assert_eq!(library.session.previous_import, previous);
         assert!(!library.offer_previous_import);
         Ok(())
@@ -2576,7 +2639,11 @@ mod tests {
         let library = e.library.as_ref().unwrap();
         assert_eq!(library.photo(a).unwrap().path, to);
         assert_eq!(library.photo(b).unwrap().path, other);
-        assert!(e.status.starts_with("Relinked 2 photos"), "{}", e.status);
+        assert!(
+            e.messages.line().starts_with("Relinked 2 photos"),
+            "{}",
+            e.messages.line()
+        );
         Ok(())
     }
 
@@ -2592,7 +2659,7 @@ mod tests {
         scanned(&mut e);
         e.poll_folder_sync();
         assert!(!e.activity.is_busy());
-        assert!(e.folder_sync.showing, "{}", e.status);
+        assert!(e.folder_sync.showing, "{}", e.messages.line());
         let review = e.folder_sync.review.as_ref().unwrap();
         assert!(review.plan.moves.iter().all(|m| m.offline && m.verified));
         Ok(())
@@ -2611,9 +2678,9 @@ mod tests {
         assert!(e.folder_sync.review.is_none() && !e.folder_sync.is_scanning());
         assert!(!e.activity.is_busy());
         assert!(
-            e.status.contains("a different photo than a.dng"),
+            e.messages.line().contains("a different photo than a.dng"),
             "{}",
-            e.status
+            e.messages.line()
         );
         Ok(())
     }
@@ -2624,7 +2691,11 @@ mod tests {
         // Panicked.
         e.spawn_scan("a.dng".into(), None, true, |_, _| panic!("synthetic"));
         scanned(&mut e);
-        assert!(e.status.contains("Stopped unexpectedly"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("Stopped unexpectedly"),
+            "{}",
+            e.messages.line()
+        );
         // Stopped.
         e.spawn_scan("a.dng".into(), None, true, |stopped, _| {
             while !stopped.load(Ordering::Relaxed) {
@@ -2639,7 +2710,7 @@ mod tests {
             .cancel
             .store(true, Ordering::Relaxed);
         scanned(&mut e);
-        assert_eq!(e.status, "Find on Disk stopped");
+        assert_eq!(e.messages.line(), "Find on Disk stopped");
         // Lost without a result.
         let thread = std::thread::spawn(|| {});
         while !thread.is_finished() {
@@ -2666,7 +2737,11 @@ mod tests {
         });
         e.poll_folder_sync();
         assert!(!e.folder_sync.is_scanning());
-        assert!(e.status.contains("Find on Disk stopped unexpectedly"));
+        assert!(
+            e.messages
+                .line()
+                .contains("Find on Disk stopped unexpectedly")
+        );
         assert!(!e.activity.is_busy());
         Ok(())
     }
@@ -2726,7 +2801,11 @@ mod tests {
                 scanned(e);
                 assert!(e.folder_sync.review.is_none());
                 assert!(!e.activity.is_busy());
-                assert!(e.status.contains("is open in Develop"), "{}", e.status);
+                assert!(
+                    e.messages.line().contains("is open in Develop"),
+                    "{}",
+                    e.messages.line()
+                );
                 let library = e.library.as_ref().unwrap();
                 assert_eq!(library.photo(a).unwrap().path, trip.join("a.dng"));
             };
@@ -2739,9 +2818,9 @@ mod tests {
             assert!(e.modal.is_none());
             assert!(e.folder_sync.review.is_none());
             assert!(
-                e.status.contains("keeps its unsaved change"),
+                e.messages.line().contains("keeps its unsaved change"),
                 "{}",
-                e.status
+                e.messages.line()
             );
             assert_eq!(e.document.edit.recipe().exposure, 0.4);
             assert!(e.document.edit.save_state().needs_save());
@@ -2764,7 +2843,7 @@ mod tests {
             // Not verified: reviewed, never applied at once.
             assert!(!e.activity.is_busy());
             e.poll_folder_sync();
-            assert!(e.folder_sync.showing, "{}", e.status);
+            assert!(e.folder_sync.showing, "{}", e.messages.line());
             let ctx = e.context.clone();
             e.apply_folder_sync(&ctx);
             applied(&mut e);
@@ -2773,7 +2852,7 @@ mod tests {
                 library.photo(a).unwrap().path,
                 to,
                 "{:?}",
-                library.message_detail()
+                library.messages.detail()
             );
         }
         Ok(())
@@ -2802,14 +2881,22 @@ mod tests {
         assert_eq!(e.document.edit.recipe().exposure, 0.4);
         assert!(e.document.edit.save_state().needs_save());
         assert!(e.folder_sync.review.is_none());
-        assert!(e.status.contains("is open in Develop"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("is open in Develop"),
+            "{}",
+            e.messages.line()
+        );
         std::fs::remove_file(trip.join("a.dng"))?;
         // Asked over no other dialog: the status says why instead.
         e.modal = Some(Modal::RemoveCopy(a));
         e.start_find_on_disk(a, to.clone());
         scanned(&mut e);
         assert!(matches!(e.modal, Some(Modal::RemoveCopy(_))));
-        assert!(e.status.contains("is open in Develop"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("is open in Develop"),
+            "{}",
+            e.messages.line()
+        );
         e.modal = None;
         e.start_find_on_disk(a, to.clone());
         scanned(&mut e);
@@ -2824,7 +2911,7 @@ mod tests {
         assert!(!e.document.edit.save_state().needs_save());
         assert!(e.module == Module::Library);
         e.poll_folder_sync();
-        assert!(e.folder_sync.showing, "{}", e.status);
+        assert!(e.folder_sync.showing, "{}", e.messages.line());
         let ctx = e.context.clone();
         e.apply_folder_sync(&ctx);
         applied(&mut e);

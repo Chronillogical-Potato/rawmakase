@@ -233,13 +233,15 @@ impl Library {
             PhotoAction::SetReference => {}
             PhotoAction::Reveal => {
                 if let Err(e) = crate::platform::reveal::reveal(&photo.path) {
-                    self.message = format!("Could not show {}: {e}", photo.filename);
+                    self.messages
+                        .fail(format!("Could not show {}: {e}", photo.filename));
                 }
             }
             PhotoAction::FindOnDisk => self.find_request = Some(photo.id),
             PhotoAction::CopyPath => {
                 ctx.copy_text(photo.path.display().to_string());
-                self.message = format!("Copied {}", photo.path.display());
+                self.messages
+                    .note(format!("Copied {}", photo.path.display()));
             }
             PhotoAction::Edit(edit) => {
                 let ids = if whole_selection && self.selection.selected.contains(&photo.id) {
@@ -248,7 +250,8 @@ impl Library {
                     vec![photo.id]
                 };
                 if let Err(e) = self.edit_photos(&ids, edit, false) {
-                    self.message = format!("Metadata could not be saved: {e}");
+                    self.messages
+                        .fail(format!("Metadata could not be saved: {e}"));
                 }
             }
             PhotoAction::Copy(copy) => self.copy_request = Some(copy),

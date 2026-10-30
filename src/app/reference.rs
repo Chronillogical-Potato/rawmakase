@@ -119,7 +119,10 @@ impl Editor {
             return;
         };
         if let Err(refusal) = source {
-            self.status = format!("Can't be the reference photo: {}", refusal.detail());
+            self.messages.warn(format!(
+                "Can't be the reference photo: {}",
+                refusal.detail()
+            ));
             return;
         }
         if self.reference.photo != Some(id) {
@@ -223,7 +226,7 @@ impl Editor {
             Err(error) => {
                 self.reference.load.finish(ticket);
                 self.reference.pending = None;
-                self.status = format!("Reference photo: {error}");
+                self.messages.fail(format!("Reference photo: {error}"));
                 self.reference.error = Some(error);
             }
         }
@@ -690,7 +693,7 @@ mod tests {
         editor.set_reference(other);
         assert_eq!(editor.reference.photo, None);
         assert_eq!(editor.view.compare, Compare::Off);
-        assert!(editor.status.contains("reference"));
+        assert!(editor.messages.line().contains("reference"));
         Ok(())
     }
 

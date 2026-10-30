@@ -50,10 +50,11 @@ impl Editor {
     /// sliders it moves.
     pub(super) fn toggle_targeted(&mut self, target: Target) {
         if !self.targeted_available(target) {
-            self.status = match target {
+            let text: String = match target {
                 Target::BlackWhite => "The B&W mix adjusts black & white photos".into(),
                 _ => "The Color Mixer adjusts color photos; this one is black & white".into(),
             };
+            self.messages.warn(text);
             return;
         }
         self.view.toggle(Tool::Targeted(target));
@@ -261,14 +262,15 @@ impl Editor {
         let sample = match result {
             Ok(sample) => sample,
             Err(e) => {
-                self.status = e;
+                self.messages.fail(e);
                 self.view.targeted = None;
                 return;
             }
         };
         let weights = TargetWeights::new(drag.target, &sample, sampled);
         if weights.is_empty() {
-            self.status = "Nothing to adjust there: drag over a colored area".into();
+            self.messages
+                .warn("Nothing to adjust there: drag over a colored area");
         }
         drag.weights = Some(weights);
         if drag.pointer == Pointer::Released {
@@ -576,7 +578,11 @@ mod tests {
         wait_for_sample(&ctx, &mut e);
         crate::app::tests::in_edit_frame(&ctx, &mut e, |e| e.drag_targeted(40.));
         assert_eq!(*e.document.edit.recipe(), before);
-        assert!(e.status.contains("Nothing to adjust"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("Nothing to adjust"),
+            "{}",
+            e.messages.line()
+        );
         // B&W's tool is for black & white photos only; converting puts the Color
         // Mixer's away.
         e.toggle_targeted(Target::BlackWhite);

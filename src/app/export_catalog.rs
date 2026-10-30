@@ -36,7 +36,8 @@ impl Editor {
     /// Saves the open edit, asks where to write the catalog and writes it.
     pub(super) fn export_as_catalog(&mut self, request: CatalogExportRequest) {
         if !self.ready_for_catalog() || !self.activity.begin_dialog() {
-            self.status = "Export as Catalog waits for the work in progress".into();
+            self.messages
+                .warn("Export as Catalog waits for the work in progress");
             return;
         }
         let Some(library) = &self.library else {
@@ -85,15 +86,15 @@ impl Editor {
         self.activity.finish_dialog();
         match result {
             Ok(Some(exported)) => {
-                self.status = format!(
+                self.messages.note(format!(
                     "Exported {} to {}",
                     photos(exported.export.photos),
                     exported.export.path.display()
-                );
+                ));
                 self.modal = Some(super::Modal::CatalogExported(Box::new(exported)));
             }
             Ok(None) => {}
-            Err(e) => self.status = format!("Export as Catalog failed: {e}"),
+            Err(e) => self.messages.fail(format!("Export as Catalog failed: {e}")),
         }
     }
 

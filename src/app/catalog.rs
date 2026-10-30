@@ -92,7 +92,7 @@ impl Editor {
         if !self.activity.begin_dialog() {
             return;
         }
-        self.status = "Opening catalog…".into();
+        self.messages.note("Opening catalog…");
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         super::task::spawn(
@@ -312,14 +312,15 @@ impl Editor {
             .as_ref()
             .map(|l| l.session.catalog.location().clone())
         else {
-            self.status = "Open or create a catalog to add photos".into();
+            self.messages.warn("Open or create a catalog to add photos");
             return;
         };
         // A folder change: closing the window waits for it.
         if folders.is_empty() || !self.ready_for_catalog() || !self.activity.begin_folder_change() {
             return;
         }
-        self.status = format!("Adding {} folders to the Library…", folders.len());
+        self.messages
+            .note(format!("Adding {} folders to the Library…", folders.len()));
         let tx = self.tx.clone();
         let ctx = self.context.clone();
         super::task::spawn(
@@ -372,7 +373,7 @@ impl Editor {
                         ));
                     }
                     if !not_added.is_empty() {
-                        library.message = not_added.join(". ");
+                        library.messages.warn(not_added.join(". "));
                     }
                     Ok(library)
                 })()
@@ -417,7 +418,8 @@ impl Editor {
                     folder_added: false,
                 });
             } else {
-                self.status = format!("Open or create a catalog to edit {name}");
+                self.messages
+                    .warn(format!("Open or create a catalog to edit {name}"));
             }
             return;
         };
@@ -433,13 +435,14 @@ impl Editor {
             return;
         }
         if is_folder {
-            self.status = format!("Adding {name} to the Library…");
+            self.messages.note(format!("Adding {name} to the Library…"));
         } else {
             self.pending_photo = Some(super::PendingPhoto {
                 path,
                 folder_added: true,
             });
-            self.status = format!("Adding {name}'s folder to the Library…");
+            self.messages
+                .note(format!("Adding {name}'s folder to the Library…"));
         }
         let tx = self.tx.clone();
         let ctx = self.context.clone();
@@ -515,12 +518,13 @@ impl Editor {
         } else {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             // Adding its folder may have said why (linked elsewhere).
-            self.status = match self.library.as_ref().map(|l| l.message.as_str()) {
+            let text: String = match self.library.as_ref().map(|l| l.messages.line()) {
                 Some(why) if !why.is_empty() => {
                     format!("{name} could not be added to the Library · {why}")
                 }
                 _ => format!("{name} could not be added to the Library"),
             };
+            self.messages.fail(text);
         }
     }
     pub(super) fn develop_catalog_photo(&mut self, id: PhotoId) {
@@ -532,12 +536,13 @@ impl Editor {
             l.found(&p.path);
         }
         if let Some(refusal) = crate::app::library::develop_refusal(&p, exists) {
-            // Said in a dialog: in the status bar alone, it looks as if the
-            // click did nothing.
-            let reason = refusal.detail();
-            self.status = reason.clone();
-            self.not_editable =
-                Some((format!("{} can't be opened in Develop", p.filename), reason));
+            // In the top bar, so the click is seen to have been answered, and the
+            // right-click it may ask for can be made at once.
+            self.messages.warn(format!(
+                "{} can't be opened: {}",
+                p.filename,
+                refusal.detail()
+            ));
             return;
         }
         // Already open, e.g. in the Loupe: Develop shows it as it is.
@@ -616,12 +621,12 @@ impl Editor {
                 .as_mut()
                 .map(|l| l.set_copy_as_master(id).map(|_| None)),
         };
-        let (Some(result), Some(library)) = (result, &self.library) else {
+        let (Some(result), Some(library)) = (result, &mut self.library) else {
             return;
         };
         match result {
             Ok(open) => {
-                self.status = library.message.clone();
+                self.messages.absorb(&mut library.messages);
                 // A copy the Library could not list yet is not opened.
                 if let Some(id) = open
                     && self.module == Module::Develop
@@ -629,7 +634,7 @@ impl Editor {
                     self.develop_catalog_photo(id);
                 }
             }
-            Err(e) => self.status = format!("Virtual copy failed: {e:#}"),
+            Err(e) => self.messages.fail(format!("Virtual copy failed: {e:#}")),
         }
     }
     /// Asks before removing a virtual copy, as Lightroom does; a copy shown
@@ -714,24 +719,24 @@ impl Editor {
         };
         // Confirmed after another catalog opened: its ids are not these.
         if library.session.catalog.location() != &removal.catalog {
-            self.status = format!(
+            self.messages.warn(format!(
                 "{} was not removed: another catalog is open now",
                 removal.name
-            );
+            ));
             return;
         }
         if let Some(root) = removal.empty_root {
-            self.status = match library.remove_empty_root(root, &removal.name) {
-                Ok(()) => library.message.clone(),
-                Err(e) => format!("Root not removed: {e:#}"),
-            };
+            match library.remove_empty_root(root, &removal.name) {
+                Ok(()) => self.messages.absorb(&mut library.messages),
+                Err(e) => self.messages.fail(format!("Root not removed: {e:#}")),
+            }
             return;
         }
         match library.remove_folders(&removal.folders, &removal.name, removal.exported.as_ref()) {
             // Removed, even if the catalog could not be read again: their ids
             // may be given to new photos, so nothing may keep them.
             Ok(removed) => {
-                self.status = library.message.clone();
+                self.messages.absorb(&mut library.messages);
                 for &id in &removed.value {
                     self.forget_preview_intent(id);
                     self.undo_log.forget_photo(id);
@@ -753,13 +758,14 @@ impl Editor {
                     self.close_removed_document();
                 }
             }
-            Err(e) => self.status = format!("Folder not removed: {e:#}"),
+            Err(e) => self.messages.fail(format!("Folder not removed: {e:#}")),
         }
     }
     /// Closes the open photo, removed from the catalog or its unsaved change
     /// discarded: nothing may save into it, nor a load still under way bring
     /// it back.
     pub(super) fn close_removed_document(&mut self) {
+        self.messages.document_closed();
         self.load.invalidate();
         self.selection.clear_document();
         self.document.reset(None);
@@ -767,15 +773,6 @@ impl Editor {
         self.presets.clear_document();
         self.view.clear_document();
         self.module = Module::Library;
-    }
-    /// Says why Develop could not open a photo.
-    pub(super) fn not_editable_window(&mut self, ctx: &egui::Context) {
-        let Some((title, reason)) = &self.not_editable else {
-            return;
-        };
-        if confirm_modal(ctx, "not-editable", title, reason, false, &[("OK", ())], ()).is_some() {
-            self.not_editable = None;
-        }
     }
     /// Asks before Read Metadata from Files, as Lightroom does: it replaces
     /// the catalog's values, edits included.
@@ -811,7 +808,7 @@ impl Editor {
             return;
         };
         library.read_metadata_from_files(&ids).ok();
-        self.status = library.message.clone();
+        self.messages.absorb(&mut library.messages);
     }
     /// Removes virtual copy `id` once confirmed.
     pub(super) fn remove_virtual_copy(&mut self, id: PhotoId) {
@@ -826,7 +823,7 @@ impl Editor {
             // be given to the next new photo, so nothing may keep it.
             Ok(removed) => {
                 let master = removed.value;
-                self.status = library.message.clone();
+                self.messages.absorb(&mut library.messages);
                 self.forget_preview_intent(id);
                 self.undo_log.forget_photo(id);
                 // The reference, when it was this copy, goes with it.
@@ -840,13 +837,16 @@ impl Editor {
                     }
                     // Nothing may save into the removed copy.
                     if self.document.catalog_photo == Some(id) {
+                        self.messages.document_closed();
                         self.document.reset(None);
                         self.preview.clear_document();
                         self.module = Module::Library;
                     }
                 }
             }
-            Err(e) => self.status = format!("Virtual copy not removed: {e:#}"),
+            Err(e) => self
+                .messages
+                .fail(format!("Virtual copy not removed: {e:#}")),
         }
     }
 }

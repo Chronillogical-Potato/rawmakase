@@ -71,16 +71,17 @@ impl Editor {
     fn create_preset_in(&mut self, user: &UserPresets, form: &PresetForm, groups: &GroupSelection) {
         let shown = self.document.full().map(|im| im.metadata.clone());
         let (true, Some(shown)) = (self.settings_ready(), shown) else {
-            self.status = "Preset not created: no photo is open".into();
+            self.messages.warn("Preset not created: no photo is open");
             return;
         };
         let info = PresetInfo::new(&form.name, &form.group);
         match user.create(self.document.edit.recipe(), &shown, &info, groups) {
             Ok(_) => {
-                self.status = format!("Preset {} created in {}", info.name, info.group);
+                self.messages
+                    .done(format!("Preset {} created in {}", info.name, info.group));
                 self.reload_presets(&self.context.clone());
             }
-            Err(e) => self.status = format!("Preset not created: {e:#}"),
+            Err(e) => self.messages.fail(format!("Preset not created: {e:#}")),
         }
     }
     /// Carries out a preset menu's choice.
@@ -89,7 +90,7 @@ impl Editor {
         let user = UserPresets::default();
         let result = match action {
             PresetAction::Update(_) if !self.settings_ready() => {
-                self.status = "Preset not updated: no photo is open".into();
+                self.messages.warn("Preset not updated: no photo is open");
                 return;
             }
             PresetAction::Update(i) => {
@@ -125,7 +126,8 @@ impl Editor {
                     .get(i)
                     .map(|p| crate::platform::reveal::reveal(&p.path))
                 {
-                    self.status = format!("Couldn't show the preset: {e:#}");
+                    self.messages
+                        .fail(format!("Couldn't show the preset: {e:#}"));
                 }
                 return;
             }
@@ -141,10 +143,10 @@ impl Editor {
         };
         match result {
             Some(Ok(status)) => {
-                self.status = status;
+                self.messages.done(status);
                 self.reload_presets(&self.context.clone());
             }
-            Some(Err(e)) => self.status = format!("Preset not changed: {e:#}"),
+            Some(Err(e)) => self.messages.fail(format!("Preset not changed: {e:#}")),
             None => {}
         }
     }
@@ -214,13 +216,17 @@ impl Editor {
                 // So does a raw default.
                 let mut defaults = self.raw_defaults.settings().clone();
                 defaults.rename_preset(&old, &path.to_string_lossy(), rename.name.trim());
-                self.status = match self.set_raw_defaults(defaults) {
-                    Ok(()) => format!("Preset renamed to {}", rename.name.trim()),
-                    Err(e) => format!("Preset renamed; raw defaults not saved: {e:#}"),
-                };
+                match self.set_raw_defaults(defaults) {
+                    Ok(()) => self
+                        .messages
+                        .done(format!("Preset renamed to {}", rename.name.trim())),
+                    Err(e) => self
+                        .messages
+                        .fail(format!("Preset renamed; raw defaults not saved: {e:#}")),
+                }
                 self.reload_presets(ctx);
             }
-            Err(e) => self.status = format!("Preset not renamed: {e:#}"),
+            Err(e) => self.messages.fail(format!("Preset not renamed: {e:#}")),
         }
     }
 }
@@ -246,7 +252,11 @@ mod tests {
             group: "Mine".into(),
         };
         e.create_preset_in(&user, &form, &GroupSelection::all());
-        assert!(e.status.contains("no photo"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("no photo"),
+            "{}",
+            e.messages.line()
+        );
         e.document
             .set_image(std::sync::Arc::new(crate::camera_data::CameraImage {
                 recovered: Default::default(),
@@ -265,10 +275,18 @@ mod tests {
         let path = user.dir.join("Mine/Bright.xmp");
         let preset = crate::xmp::parse(&path, &std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(preset.settings["Exposure2012"], "+0.70");
-        assert!(e.status.contains("created"), "{}", e.status);
+        assert!(
+            e.messages.line().contains("created"),
+            "{}",
+            e.messages.line()
+        );
         // A second one with the same name says why it wasn't made.
         e.create_preset_in(&user, &form, &groups);
-        assert!(e.status.starts_with("Preset not created"), "{}", e.status);
+        assert!(
+            e.messages.line().starts_with("Preset not created"),
+            "{}",
+            e.messages.line()
+        );
     }
 
     #[test]

@@ -72,7 +72,8 @@ impl Library {
             && let Err(e) = self.session.catalog.save_sequences(&save)
         {
             // Used anyway; read again when Auto-Stack wants them.
-            self.message = format!("Camera bursts could not be saved: {e:#}");
+            self.messages
+                .fail(format!("Camera bursts could not be saved: {e:#}"));
         }
         let (batches, stacks) = plan(&read, &self.session.photos);
         if batches.is_empty() {
@@ -83,7 +84,8 @@ impl Library {
             Ok(committed) => committed,
             Err(e) => {
                 // Still to be done: made on the next read.
-                self.message = format!("Camera bursts were not stacked: {e:#}");
+                self.messages
+                    .fail(format!("Camera bursts were not stacked: {e:#}"));
                 return;
             }
         };
@@ -99,7 +101,7 @@ impl Library {
             plural(after.stacks.len(), "stack", "stacks")
         );
         if listed {
-            self.message = summary.clone();
+            self.messages.note(summary.clone());
         }
         self.stack_done.push(StackCommand {
             sequence: crate::edit_session::sequence(),

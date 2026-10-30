@@ -101,7 +101,7 @@ impl Editor {
             return;
         };
         self.clipboard = Some(Clipboard { settings, groups });
-        self.status = "Settings copied".into();
+        self.messages.note("Settings copied");
     }
     /// Opens Copy Settings, or Synchronize Settings, with the groups chosen last time.
     pub(super) fn open_copy_dialog(&mut self, purpose: Transfer) {
@@ -250,11 +250,12 @@ impl Editor {
             .name_next_step(super::history::Step::new(step, ""));
         self.document.edit.replace(out.recipe);
         self.ensure_analysis();
-        self.status = if out.notes.is_empty() {
-            "Settings pasted".into()
+        if out.notes.is_empty() {
+            self.messages.note("Settings pasted");
         } else {
-            format!("Settings pasted · {}", out.notes.join(" · "))
-        };
+            self.messages
+                .warn(format!("Settings pasted · {}", out.notes.join(" · ")));
+        }
     }
 }
 
