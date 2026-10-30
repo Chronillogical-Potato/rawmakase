@@ -6721,6 +6721,22 @@ fn eframes_reason_for_giving_up_is_kept() {
         Some("No suitable GPU adapter")
     );
     assert_eq!(EframeErrors::take(), None);
+
+    // wgpu only logs the driver call behind "Parent device is lost" (#768).
+    record(
+        "wgpu_hal::dx12",
+        log::Level::Error,
+        "Queue creation failed: E_INVALIDARG",
+    );
+    record(
+        "eframe::native::run",
+        log::Level::Error,
+        "Exiting because of error: WGPU error: Parent device is lost",
+    );
+    assert_eq!(
+        EframeErrors::take().as_deref(),
+        Some("WGPU error: Parent device is lost\n\nQueue creation failed: E_INVALIDARG")
+    );
 }
 #[test]
 fn an_imported_value_outside_the_slider_survives_being_shown_and_nudged() {

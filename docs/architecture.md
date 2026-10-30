@@ -336,9 +336,11 @@ RAW development and exports use the existing CPU implementation.
 
 `develop::gpu` uses portable WGSL compute through wgpu: Metal on macOS, Vulkan
 on supported Linux drivers, including NVIDIA and AMD, and DirectX 12 on Windows.
-Windows leaves Vulkan out unless `WGPU_BACKEND` asks for it, because an Intel
-Vulkan driver crashed the app at launch where DirectX 12 worked (#623); the UI
-and a standalone processor share that choice (`gpu::backends`). On the desktop it shares the
+Windows leaves Vulkan out while a DirectX 12 device can be created, because an
+Intel Vulkan driver crashed the app at launch where DirectX 12 worked (#623). If
+that device fails, it tries Vulkan and then OpenGL before opening the window
+(#768); `WGPU_BACKEND` overrides all of this. The UI and a standalone processor
+share that choice (`gpu::backends`). On the desktop it shares the
 UI's wgpu device (eframe's), which the app creates with the storage limits previews
 need (`gpu::required_limits`) and a high-performance adapter. On Linux the window's
 adapter is the first GPU the system lists instead: the display's GPU, or the discrete
