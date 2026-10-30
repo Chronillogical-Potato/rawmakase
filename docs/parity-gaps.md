@@ -189,6 +189,39 @@ improve. Next: refit the rule on measurement maps from this decode. Still open: 
 X-T30 II plateau that is darker than Camera Raw's already at default (white level or
 X-Trans clipping), and the demosaic's red/blue noise above Camera Raw's.
 
+### Moving the rule's histogram top: what did not work (2026-10-30)
+
+The two luminance regressions above (a DC-S1 field at Shadows +100, a Rebel T7i at
+Highlights −100) come from the Shadows/Highlights rule reading the reconstructed
+overshoot: a clipped spot of 0.05% of the frame raises the top the rule reads by 0.44
+stops. A probe settles what Camera Raw does with such a top (mosaics under an As Shot
+neutral, with a square of 0.05, 0.5, 3 or 12% of the frame either clipped in every
+channel, so that it reconstructs a stop above the white, or just below the white):
+the clipped square adds only 0.05 to 0.09 EV to Camera Raw's Shadows +100 lift of the
+dark patches beside it, against the unclipped square of the same size, so Camera Raw
+counts clipped pixels close to the white. Every way of giving the rule that behaviour
+failed on the photos, each retrained from the engine's own maps with four seeds:
+
+| Variant | Small-clip photos | Heavy-overshoot photos | Decision |
+| --- | --- | --- | --- |
+| Map clamped at the white, retrained | DC-S1 5.48 → 1.39, T7i 1.61 → 0.63, signature Shadows +100 2.11 → 1.38 | RX100 VII at 6400 K + Shadows +100 2.67 → 9.54; a beach with a quarter of the frame above the white 1.37 → 7.75 at Highlights −100 (the curve pulls the mid-tones, the whole frame 8 L* dark) | Rejected: 34 rows better, 33 worse, two catastrophic |
+| Overshoot compressed to a quarter or a half instead of clamped | Same wins | RX100 5.37 / 3.74, beach 8.44 / 6.97 | Rejected |
+| Clamp plus 34 training mosaics with 10 to 35% of the frame clipped under white-balance gains | Smaller wins | RX100 6.87, beach 4.57 | Rejected: the shape is not learnt from mosaics |
+| Shipped weights, top at the 99.9th or 99.95th percentile instead of the maximum | T7i 2.70 → 2.28, DC-S1 unchanged (its spot is 0.16%) | beach 1.50 → 2.21, a FZ1000 1.64 → 3.01 | Rejected |
+| Eight seeds instead of four | Identical to four | Identical | The losses are not seed variance |
+
+A retrain of the shipped configuration on the new decode's maps without any clamp
+reproduces the shipped rule on these photos (RX100 2.54, beach 1.55) and leaves the
+DC-S1 and T7i as they are. The rule as fitted therefore depends on the overshoot in a
+way that the flat-patch probe does not show, and the photos with a large reconstructed
+area are matched by that dependence; the small-spot photos are not. What is left to
+try is a feature that tells the rule how much of the frame is clipped, so that it can
+learn both regimes, and training photos chosen for small clipped spots.
+
+A second gap surfaced by the same probe: with a bright area of 12% of the frame, clipped
+or not, Camera Raw lifts the mid-tones at Shadows +100 by 0.4 EV and the rule by 0.7 to
+1.2 EV. The sky and ground mosaics do not cover it.
+
 ### Shadows/Highlights research: what did not work (2026-10-16)
 
 **No candidate from this investigation passed the requirements for shipping.**
