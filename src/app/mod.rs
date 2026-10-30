@@ -677,26 +677,43 @@ fn run_window(path: Option<PathBuf>, launch: crate::updates::Launch) -> anyhow::
     }
 }
 /// Why eframe gave up, e.g. on a GPU it could not start. `run_native` returned
-/// that error; on our own event loop eframe only logs it.
+/// that error; on our own event loop eframe only logs it. wgpu calls most driver
+/// failures "Parent device is lost" and only logs the call that failed (#768).
 struct EframeErrors;
 static EFRAME_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static DRIVER_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 impl EframeErrors {
     fn take() -> Option<String> {
-        EFRAME_ERROR
+        let error = EFRAME_ERROR
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
+            .take()?;
+        let driver = DRIVER_ERROR
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        Some(match driver {
+            Some(driver) => format!("{error}\n\n{driver}"),
+            None => error,
+        })
     }
 }
 impl log::Log for EframeErrors {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Error && metadata.target().starts_with("eframe")
+        metadata.level() <= log::Level::Error
+            && (metadata.target().starts_with("eframe")
+                || metadata.target().starts_with("wgpu_hal"))
     }
     fn log(&self, record: &log::Record) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        if let Some(error) = record
+        if record.target().starts_with("wgpu_hal") {
+            *DRIVER_ERROR
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some(record.args().to_string());
+        } else if let Some(error) = record
             .args()
             .to_string()
             .strip_prefix("Exiting because of error: ")

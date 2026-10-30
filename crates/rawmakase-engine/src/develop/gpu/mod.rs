@@ -100,19 +100,73 @@ struct Buffers {
     staging: wgpu::Buffer,
 }
 /// The wgpu backends the UI and previews may use, unless `WGPU_BACKEND` names
-/// others. Windows uses DirectX 12, with OpenGL as the fallback, and leaves Vulkan
-/// out. wgpu prefers Vulkan when both are available, and Intel's Vulkan driver for
-/// HD Graphics 530 (igvk64.dll 31.0.101.2125) crashes the process at most launches,
-/// while DirectX 12 and OpenGL start reliably on the same machine (#623).
+/// others. Windows uses DirectX 12 with OpenGL as the fallback and leaves Vulkan out
+/// while DirectX 12 works: wgpu prefers Vulkan when both are available, and Intel's
+/// Vulkan driver for HD Graphics 530 (igvk64.dll 31.0.101.2125) crashes the process
+/// at most launches, while DirectX 12 and OpenGL start reliably there (#623).
 pub fn backends() -> wgpu::Backends {
-    wgpu::Backends::from_env().unwrap_or(default_backends(cfg!(windows)))
+    static DEFAULT: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
+    wgpu::Backends::from_env()
+        .unwrap_or_else(|| *DEFAULT.get_or_init(|| default_backends(cfg!(windows), device_starts)))
 }
-fn default_backends(windows: bool) -> wgpu::Backends {
-    if windows {
-        wgpu::Backends::DX12 | wgpu::Backends::GL
+/// wgpu commits to one adapter and gives up if its device fails, so on Windows each
+/// backend is tried here first (#768). Vulkan comes before OpenGL because previews
+/// don't use OpenGL for compute. With nothing working, the usual choice reports why.
+fn default_backends(
+    windows: bool,
+    mut starts: impl FnMut(wgpu::Backends) -> bool,
+) -> wgpu::Backends {
+    use wgpu::Backends;
+    if !windows {
+        Backends::PRIMARY | Backends::GL
+    } else if starts(Backends::DX12) {
+        Backends::DX12 | Backends::GL
+    } else if starts(Backends::VULKAN) {
+        Backends::VULKAN | Backends::GL
+    } else if starts(Backends::GL) {
+        Backends::GL
     } else {
-        wgpu::Backends::PRIMARY | wgpu::Backends::GL
+        Backends::DX12 | Backends::GL
     }
+}
+/// Whether `backends` has an adapter whose device can be created, chosen and limited
+/// as the window's will be (egui's defaults and [`required_limits`]). DirectX 12 and
+/// Vulkan need real hardware: their software adapters must not hide a usable OpenGL
+/// driver.
+fn device_starts(backends: wgpu::Backends) -> bool {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends,
+        flags: wgpu::InstanceFlags::from_build_config().with_env(),
+        backend_options: wgpu::BackendOptions::from_env_or_default(),
+        ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference:
+            wgpu::PowerPreference::from_env().unwrap_or(wgpu::PowerPreference::HighPerformance),
+        force_fallback_adapter: false,
+        compatible_surface: None,
+        ..Default::default()
+    })) else {
+        return false;
+    };
+    let gl = backends == wgpu::Backends::GL;
+    if !gl && adapter.get_info().device_type == wgpu::DeviceType::Cpu {
+        return false;
+    }
+    let required_limits = if gl {
+        wgpu::Limits {
+            max_texture_dimension_2d: 8192,
+            ..wgpu::Limits::downlevel_webgl2_defaults()
+        }
+    } else {
+        required_limits(&adapter)
+    };
+    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("RAWmakase backend check"),
+        required_limits,
+        ..Default::default()
+    }))
+    .is_ok()
 }
 /// Device limits previews need: storage buffers for a whole photo kept on the device
 /// (735 MB for 61 megapixels), up to 2 GB where the adapter allows.

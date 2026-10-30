@@ -2,12 +2,33 @@ use super::*;
 use crate::develop::masks::local::LocalDeltas;
 
 #[test]
-fn windows_leaves_vulkan_out_by_default() {
+fn windows_leaves_vulkan_out_while_directx_works() {
     // Intel's Vulkan driver crashed the app at launch where DirectX 12 worked (#623).
-    let windows = default_backends(true);
-    assert!(windows.contains(wgpu::Backends::DX12 | wgpu::Backends::GL));
-    assert!(!windows.contains(wgpu::Backends::VULKAN));
-    let elsewhere = default_backends(false);
+    let mut tried = Vec::new();
+    let windows = default_backends(true, |backends| {
+        tried.push(backends);
+        true
+    });
+    assert_eq!(windows, wgpu::Backends::DX12 | wgpu::Backends::GL);
+    assert_eq!(tried, [wgpu::Backends::DX12]);
+}
+
+#[test]
+fn windows_moves_on_from_a_backend_whose_device_fails() {
+    // A driver refusing DirectX 12's device ended the app at launch (#768).
+    use wgpu::Backends;
+    let chosen = |working: Backends| default_backends(true, |backends| working.contains(backends));
+    assert_eq!(
+        chosen(Backends::VULKAN | Backends::GL),
+        Backends::VULKAN | Backends::GL
+    );
+    assert_eq!(chosen(Backends::GL), Backends::GL);
+    assert_eq!(chosen(Backends::empty()), Backends::DX12 | Backends::GL);
+}
+
+#[test]
+fn other_systems_keep_their_backends_without_trying_them() {
+    let elsewhere = default_backends(false, |_| panic!("tried a device"));
     assert!(elsewhere.contains(wgpu::Backends::VULKAN | wgpu::Backends::METAL));
 }
 
