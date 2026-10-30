@@ -38,6 +38,105 @@ fn develop_workspace_drains_library_preview_results() -> Result<()> {
 }
 
 #[test]
+fn manual_profile_import_keeps_only_the_unchanged_current_thumbnail() -> Result<()> {
+    use crate::app::bulk_import::{ImportKind, Summary};
+    for (new_defaults, missing_metadata, wrong_path, dirty) in [
+        (false, false, false, false),
+        (true, false, false, false),
+        (false, true, false, false),
+        (false, false, true, false),
+        (false, false, false, true),
+        (true, false, false, true),
+    ] {
+        let (_directory, mut library) = library_of(&["a.RAF", "b.RAF", "saved.RAF"])?;
+        let ctx = library.ctx.clone();
+        let photos = library.session.photos.clone();
+        let mut editor = crate::app::Editor::with_context(&ctx, None, Default::default(), None);
+        editor.presets.next_scan();
+        let metadata = crate::camera_data::Metadata {
+            make: "Test".into(),
+            model: "Import refresh".into(),
+            cam_xyz: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+            ..Default::default()
+        };
+        editor.document.profiles = crate::camera_profiles::listed(&metadata).profiles;
+        editor.document.metadata = Some(metadata);
+        editor.refresh_photo_defaults();
+        if dirty {
+            editor.document.edit.setup_mut().exposure = 1.25;
+            editor.document.edit.save_state_mut().mark_changed();
+        }
+        let recipe = editor.document.edit.recipe().clone();
+        library.session.catalog.save_edit(
+            photos[2].id,
+            &photos[2].path,
+            &recipe,
+            &Default::default(),
+            crate::catalog::HistoryUpdate::Keep,
+        )?;
+        for photo in &photos {
+            library.update_edited(
+                &ctx,
+                photo.id,
+                image::RgbImage::from_pixel(4, 4, image::Rgb([30, 140, 250])),
+                serde_json::to_string(&recipe)?,
+            );
+        }
+        let current = photos[0].id;
+        let original = library.thumbnail(current).unwrap().id();
+        let saved = library.thumbnail(photos[2].id).unwrap().id();
+        assert!(!library.cache.thumbs.contains_key(&photos[0].path));
+        editor.document.catalog_photo = Some(current);
+        editor.document.path = Some(if wrong_path {
+            PathBuf::from("a-replaced-photo.RAF")
+        } else {
+            photos[0].path.clone()
+        });
+        editor.library = Some(Box::new(library));
+        if new_defaults {
+            editor.raw_defaults = std::sync::Arc::new(crate::raw_defaults::brighter_defaults());
+        }
+        if missing_metadata {
+            editor.document.metadata = None;
+            editor.document.defaults = None;
+        }
+        editor.imported(
+            Summary {
+                kind: ImportKind::CameraProfiles,
+                imported: 1,
+                already: 0,
+                without_base: 0,
+                failed: Vec::new(),
+                cubes: Vec::new(),
+            },
+            &ctx,
+        );
+        let library = editor.library.as_ref().unwrap();
+        assert_eq!(
+            library.thumbnail(current).map(egui::TextureHandle::id),
+            ((!new_defaults || dirty) && !missing_metadata && !wrong_path).then_some(original),
+            "only the unchanged, identified open photo keeps its render"
+        );
+        assert!(library.thumbnail(photos[1].id).is_none());
+        assert_eq!(
+            library.thumbnail(photos[2].id).map(egui::TextureHandle::id),
+            Some(saved)
+        );
+        assert_eq!(
+            editor.document.edit.recipe().exposure,
+            if new_defaults && !dirty {
+                0.7
+            } else {
+                recipe.exposure
+            }
+        );
+        assert!(editor.document.edit.history().steps().0.is_empty());
+        assert_eq!(editor.document.edit.save_state().needs_save(), dirty);
+    }
+    Ok(())
+}
+
+#[test]
 fn find_on_disk_is_offered_for_one_offline_photo() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let folder = directory.path().join("photos");
@@ -1307,6 +1406,9 @@ fn an_edited_preview_from_develop_outranks_renders_in_flight() -> Result<()> {
     ));
     let newest = library.cache.edited_requested[&id];
     assert!(newest > first);
+    // Keeping the current render through an import must also keep its ticket:
+    // an older skipped completion still cannot remove it.
+    library.set_defaults_preserving(Default::default(), Some(id));
     library.cache.edits_pending = 1;
     result_tx.send(previews::EditResult::Skipped(id, first))?;
     library.poll_previews(&ctx);

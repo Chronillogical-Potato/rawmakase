@@ -99,8 +99,15 @@ impl Editor {
     /// Renders the Library's previews of photos without an edit again, e.g. as
     /// imported camera profiles change what the defaults resolve to.
     pub(super) fn refresh_library_defaults(&mut self) {
+        self.refresh_library_defaults_preserving(None);
+    }
+
+    pub(super) fn refresh_library_defaults_preserving(
+        &mut self,
+        current: Option<crate::catalog::PhotoId>,
+    ) {
         if let Some(library) = &mut self.library {
-            library.set_defaults(self.raw_defaults.clone());
+            library.set_defaults_preserving(self.raw_defaults.clone(), current);
         }
         // An unedited reference photo follows them too, profiles imported included.
         self.reload_reference();
